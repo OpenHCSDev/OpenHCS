@@ -591,13 +591,25 @@ class ConfigWindow(TreeFormFlashMixin, BaseFormDialog):
             QMessageBox.critical(self, "Code Edit Error", f"Failed to apply edited code:\n{e}")
 
     def _on_global_config_field_changed(self, param_name: str, value: Any):
-        """Keep thread-local global config context in sync with live edits."""
+        """Handle live edits to GlobalPipelineConfig fields.
+
+        IMPORTANT:
+        - Do NOT update thread-local GlobalPipelineConfig here.
+        - Thread-local global config represents the last *saved* state.
+        - Unsaved edits are propagated via ParameterFormManager live context
+          and cross-window signals, which already drive previews/placeholders.
+
+        This handler exists only to track that there are unsaved global edits,
+        not to change the global baseline used for \"saved\" comparisons.
+        """
         if self._saving:
             return
         if self._suppress_global_context_sync:
             self._needs_global_context_resync = True
             return
-        self._sync_global_context_with_current_values(param_name)
+        # Mark context as dirty so callers that care (e.g., save/cancel logic)
+        # know there are unsaved global edits, but don't touch thread-local global.
+        self._global_context_dirty = True
 
     def _sync_global_context_with_current_values(self, source_param: str = None):
         """Rebuild global context from current form values once."""

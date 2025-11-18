@@ -1398,23 +1398,18 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         # CRITICAL: Use saved "after" snapshot if available (from window close)
         # This snapshot was collected AFTER the form manager was unregistered
         # If not available, collect a new snapshot (for reset events)
-        live_context_after = getattr(self, '_window_close_after_snapshot', None)
+        live_context_after = getattr(self, '_pending_window_close_after_snapshot', None)
         if live_context_after is None:
             live_context_after = ParameterFormManager.collect_live_context(scope_filter=self.current_plate)
 
         # Use saved "before" snapshot if available (from window close), otherwise use last snapshot
-        live_context_before = getattr(self, '_window_close_before_snapshot', None) or self._last_live_context_snapshot
+        live_context_before = getattr(self, '_pending_window_close_before_snapshot', None) or self._last_live_context_snapshot
+        logger.info(f"🔍 _handle_full_preview_refresh: live_context_before token={getattr(live_context_before, 'token', None) if live_context_before else None}")
+        logger.info(f"🔍 _handle_full_preview_refresh: live_context_after token={getattr(live_context_after, 'token', None) if live_context_after else None}")
 
         # Get the user-modified fields from the closed window (if available)
-        modified_fields = getattr(self, '_window_close_modified_fields', None)
-
-        # Clear the saved snapshots and modified fields after using them
-        if hasattr(self, '_window_close_before_snapshot'):
-            delattr(self, '_window_close_before_snapshot')
-        if hasattr(self, '_window_close_after_snapshot'):
-            delattr(self, '_window_close_after_snapshot')
-        if hasattr(self, '_window_close_modified_fields'):
-            delattr(self, '_window_close_modified_fields')
+        modified_fields = getattr(self, '_pending_window_close_changed_fields', None)
+        logger.info(f"🔍 _handle_full_preview_refresh: modified_fields={modified_fields}")
 
         # Update last snapshot for next comparison
         self._last_live_context_snapshot = live_context_after
@@ -1423,16 +1418,19 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         # The "before" snapshot only contains values for the step being edited, not all steps
         # EXCEPTION: If the scope_id is a plate scope (PipelineConfig), check ALL steps
         indices_to_check = list(range(len(self.pipeline_steps)))
+        logger.info(f"🔍 _handle_full_preview_refresh: Initial indices_to_check (ALL steps): {indices_to_check}")
 
         if live_context_before:
             # Check if this is a window close event by looking for scope_ids in the before snapshot
             scoped_values_before = getattr(live_context_before, 'scoped_values', {})
+            logger.info(f"🔍 _handle_full_preview_refresh: scoped_values_before keys: {list(scoped_values_before.keys()) if scoped_values_before else 'None'}")
             if scoped_values_before:
                 # The before snapshot should have exactly one scope_id (the step being edited)
                 # Find which step index matches that scope_id
                 scope_ids = list(scoped_values_before.keys())
                 if len(scope_ids) == 1:
                     window_close_scope_id = scope_ids[0]
+                    logger.info(f"🔍 _handle_full_preview_refresh: window_close_scope_id={window_close_scope_id}")
 
                     # Check if this is a step scope (contains '::') or a plate scope (no '::')
                     if '::' in window_close_scope_id:
@@ -1441,8 +1439,14 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
                             step_scope_id = self._build_step_scope_id(step)
                             if step_scope_id == window_close_scope_id:
                                 indices_to_check = [idx]
+                                logger.info(f"🔍 _handle_full_preview_refresh: Found matching step at index {idx}, only checking that step")
                                 break
+                    else:
+                        logger.info(f"🔍 _handle_full_preview_refresh: Plate scope detected, checking ALL steps")
+            else:
+                logger.info(f"🔍 _handle_full_preview_refresh: No scoped_values_before, checking ALL steps")
 
+        logger.info(f"🔍 _handle_full_preview_refresh: Final indices_to_check: {indices_to_check}")
         self._refresh_step_items_by_index(
             indices_to_check,
             live_context_after,
@@ -1450,6 +1454,16 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
             live_context_before=live_context_before,
             label_indices=set(indices_to_check),  # Update labels for checked steps
         )
+
+        # Clear the saved snapshots and modified fields after ALL refresh logic is complete
+        # CRITICAL: Must be done AFTER _refresh_step_items_by_index because that calls
+        # _check_resolved_values_changed_batch which needs these attributes
+        if hasattr(self, '_pending_window_close_before_snapshot'):
+            delattr(self, '_pending_window_close_before_snapshot')
+        if hasattr(self, '_pending_window_close_after_snapshot'):
+            delattr(self, '_pending_window_close_after_snapshot')
+        if hasattr(self, '_pending_window_close_changed_fields'):
+            delattr(self, '_pending_window_close_changed_fields')
 
 
 

@@ -375,6 +375,54 @@ class ParameterFormManager(QWidget):
 
         return snapshot
 
+    def _create_snapshot_for_this_manager(self) -> LiveContextSnapshot:
+        """Create a snapshot containing ONLY this form manager's values.
+
+        This is used when a window closes to create a "before" snapshot that only
+        contains the values from the closing window, not all active form managers.
+
+        Returns:
+            LiveContextSnapshot with only this manager's values
+        """
+        from openhcs.config_framework.lazy_factory import get_base_type_for_lazy
+        from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
+
+        logger.info(f"🔍 _create_snapshot_for_this_manager: Creating snapshot for {self.field_id} (scope={self.scope_id})")
+
+        live_context = {}
+        scoped_live_context: Dict[str, Dict[type, Dict[str, Any]]] = {}
+        alias_context = {}
+
+        # Collect values from THIS manager only
+        live_values = self.get_user_modified_values()
+        obj_type = type(self.object_instance)
+
+        # Map by the actual type
+        live_context[obj_type] = live_values
+
+        # Track scope-specific mappings (for step-level overlays)
+        if self.scope_id:
+            scoped_live_context.setdefault(self.scope_id, {})[obj_type] = live_values
+
+        # Also map by the base/lazy equivalent type for flexible matching
+        base_type = get_base_type_for_lazy(obj_type)
+        if base_type and base_type != obj_type:
+            alias_context.setdefault(base_type, live_values)
+
+        lazy_type = LazyDefaultPlaceholderService._get_lazy_type_for_base(obj_type)
+        if lazy_type and lazy_type != obj_type:
+            alias_context.setdefault(lazy_type, live_values)
+
+        # Apply alias mappings only where no direct mapping exists
+        for alias_type, values in alias_context.items():
+            if alias_type not in live_context:
+                live_context[alias_type] = values
+
+        # Create snapshot with current token
+        token = type(self)._live_context_token_counter
+        logger.info(f"🔍 _create_snapshot_for_this_manager: Created snapshot with scoped_values keys: {list(scoped_live_context.keys())}")
+        return LiveContextSnapshot(token=token, values=live_context, scoped_values=scoped_live_context)
+
     @staticmethod
     def _is_scope_visible_static(manager_scope: str, filter_scope) -> bool:
         """
@@ -3627,8 +3675,13 @@ class ParameterFormManager(QWidget):
             logger.info(f"🚫 _emit_cross_window_change BLOCKED for {self.field_id}.{param_name} (in reset/batch operation)")
             return
 
-        if param_name in self._last_emitted_values:
-            last_value = self._last_emitted_values[param_name]
+        # CRITICAL: Use full field path as key, not just param_name!
+        # This ensures nested field changes (e.g., step_materialization_config.well_filter)
+        # are properly tracked with their full path, not just the leaf field name.
+        field_path = f"{self.field_id}.{param_name}"
+
+        if field_path in self._last_emitted_values:
+            last_value = self._last_emitted_values[field_path]
             try:
                 if last_value == value:
                     return
@@ -3636,12 +3689,11 @@ class ParameterFormManager(QWidget):
                 # If equality check fails, fall back to emitting
                 pass
 
-        self._last_emitted_values[param_name] = value
+        self._last_emitted_values[field_path] = value
 
         # Invalidate live context cache by incrementing token
         type(self)._live_context_token_counter += 1
 
-        field_path = f"{self.field_id}.{param_name}"
         logger.info(f"📡 _emit_cross_window_change: {field_path} = {value}")
         self.context_value_changed.emit(field_path, value,
                                        self.object_instance, self.context_obj)
@@ -3671,7 +3723,10 @@ class ParameterFormManager(QWidget):
                             pass  # Signal already disconnected or object destroyed
 
                 # CRITICAL: Capture "before" snapshot BEFORE unregistering
-                # This snapshot has the form manager's live values
+                # This snapshot must include ALL active form managers (not just this one) so that
+                # when creating preview instances for flash detection, they have all live values
+                # (e.g., if PipelineConfig closes but a step window is open, the step preview
+                # instance needs the step's override values to resolve correctly)
                 before_snapshot = type(self).collect_live_context()
 
                 # Remove from registry
@@ -3681,6 +3736,13 @@ class ParameterFormManager(QWidget):
                 obj_id = id(self.object_instance)
                 if obj_id in type(self)._object_to_manager:
                     del type(self)._object_to_manager[obj_id]
+
+                # CRITICAL: Clear _last_emitted_values so fast-path checks don't find stale values
+                # This ensures that after the window closes, other windows don't think there are
+                # unsaved changes just because this window's field paths are still in the dict
+                logger.info(f"🔍 Clearing _last_emitted_values for {self.field_id} (had {len(self._last_emitted_values)} entries)")
+                self._last_emitted_values.clear()
+                logger.info(f"🔍 After clear: _last_emitted_values has {len(self._last_emitted_values)} entries")
 
                 # Invalidate live context caches so external listeners drop stale data
                 type(self)._live_context_token_counter += 1

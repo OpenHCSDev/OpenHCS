@@ -664,12 +664,17 @@ class CrossWindowPreviewMixin:
         # This ensures we compare the right snapshots:
         # before = with form manager (unsaved edits)
         # after = without form manager (reverted to saved)
-        if self._pending_window_close_before_snapshot is not None and self._pending_window_close_after_snapshot is not None:
+        if (hasattr(self, '_pending_window_close_before_snapshot') and
+            hasattr(self, '_pending_window_close_after_snapshot') and
+            self._pending_window_close_before_snapshot is not None and
+            self._pending_window_close_after_snapshot is not None):
             logger.debug(f"🔍 {self.__class__.__name__}._check_resolved_values_changed_batch: Using window_close snapshots: before={self._pending_window_close_before_snapshot.token}, after={self._pending_window_close_after_snapshot.token}")
+            logger.debug(f"🔍 {self.__class__.__name__}._check_resolved_values_changed_batch: before scoped_values keys: {list(self._pending_window_close_before_snapshot.scoped_values.keys()) if hasattr(self._pending_window_close_before_snapshot, 'scoped_values') else 'N/A'}")
+            logger.debug(f"🔍 {self.__class__.__name__}._check_resolved_values_changed_batch: after scoped_values keys: {list(self._pending_window_close_after_snapshot.scoped_values.keys()) if hasattr(self._pending_window_close_after_snapshot, 'scoped_values') else 'N/A'}")
             live_context_before = self._pending_window_close_before_snapshot
             live_context_after = self._pending_window_close_after_snapshot
             # Use window close changed fields if provided
-            if self._pending_window_close_changed_fields is not None:
+            if hasattr(self, '_pending_window_close_changed_fields') and self._pending_window_close_changed_fields is not None:
                 changed_fields = self._pending_window_close_changed_fields
             # Clear the snapshots after use
             self._pending_window_close_before_snapshot = None
@@ -704,7 +709,11 @@ class CrossWindowPreviewMixin:
 
         # Batch resolve all objects
         results = []
-        for obj_before, obj_after in obj_pairs:
+        for idx, (obj_before, obj_after) in enumerate(obj_pairs):
+            # Log which object we're checking
+            obj_name = getattr(obj_after, 'name', f'object_{idx}')
+            logger.debug(f"🔍 _check_resolved_values_changed_batch: Checking object '{obj_name}' (index {idx})")
+
             # Use batch resolution for this object
             changed = self._check_single_object_with_batch_resolution(
                 obj_before,
@@ -713,6 +722,7 @@ class CrossWindowPreviewMixin:
                 live_context_before,
                 live_context_after
             )
+            logger.debug(f"🔍 _check_resolved_values_changed_batch: Object '{obj_name}' changed={changed}")
             results.append(changed)
 
         logger.debug(f"🔍 _check_resolved_values_changed_batch: Results: {sum(results)}/{len(results)} changed")

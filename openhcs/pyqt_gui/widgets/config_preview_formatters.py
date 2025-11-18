@@ -182,18 +182,18 @@ def check_config_has_unsaved_changes(
         return False
 
     # PERFORMANCE: Fast path - check if there's a form manager that has emitted changes
-    # for a field whose TYPE matches (or is related to) this config's type.
+    # for a field whose PATH or TYPE matches (or is related to) this config's type.
     #
-    # CRITICAL: Use TYPE-BASED matching, not name-based patterns!
+    # CRITICAL: Use PATH-BASED and TYPE-BASED matching, not name-based patterns!
     # This avoids hardcoding "step_" prefix or specific type names.
     #
     # Algorithm:
-    # 1. Direct field match: Check if config_attr is in _last_emitted_values
+    # 1. Direct path match: Check if field path contains config_attr
+    #    (e.g., "GlobalPipelineConfig.step_materialization_config.well_filter" matches "step_materialization_config")
     # 2. Type-based match: Check if any emitted value's type matches this config's type
     #    (handles inheritance: step_well_filter_config inherits from well_filter_config)
     #
-    # This works because _last_emitted_values contains actual config objects, so we can
-    # check their types using isinstance() and MRO.
+    # This works because _last_emitted_values is now keyed by full field paths.
     parent_type_name = type(parent_obj).__name__
     config_type = type(config)
 
@@ -203,33 +203,42 @@ def check_config_has_unsaved_changes(
         if not hasattr(manager, '_last_emitted_values') or not manager._last_emitted_values:
             continue
 
-        # Direct field match: manager is editing this exact config field
-        if config_attr in manager._last_emitted_values:
-            has_form_manager_with_changes = True
-            logger.debug(
-                f"🔍 check_config_has_unsaved_changes: Found direct field match for "
-                f"{config_attr} in manager {manager.field_id}"
-            )
-            break
+        # Check each emitted field path
+        # field_path format: "GlobalPipelineConfig.step_materialization_config.well_filter"
+        for field_path, field_value in manager._last_emitted_values.items():
+            # Direct path match: check if this field path references this config
+            # Examples:
+            #   config_attr="step_materialization_config"
+            #   field_path="GlobalPipelineConfig.step_materialization_config.well_filter" → MATCH
+            #   field_path="GlobalPipelineConfig.step_materialization_config" → MATCH
+            #   field_path="PipelineConfig.step_well_filter_config" → NO MATCH
+            path_parts = field_path.split('.')
+            if len(path_parts) >= 2:
+                # Second part is the config attribute (first part is the root object type)
+                config_attr_from_path = path_parts[1]
+                if config_attr_from_path == config_attr:
+                    has_form_manager_with_changes = True
+                    logger.debug(
+                        f"🔍 check_config_has_unsaved_changes: Found path match for "
+                        f"{config_attr} in field path {field_path}"
+                    )
+                    break
 
-        # Type-based match: check if any emitted value's type is related to this config's type
-        # This handles inheritance without hardcoding field names
-        for field_name, field_value in manager._last_emitted_values.items():
-            if field_value is None:
-                continue
+            # Type-based match: check if any emitted value's type is related to this config's type
+            # This handles inheritance without hardcoding field names
+            if field_value is not None:
+                field_type = type(field_value)
 
-            field_type = type(field_value)
-
-            # Check if types are related via isinstance (handles MRO inheritance)
-            # Example: LazyStepWellFilterConfig inherits from LazyWellFilterConfig
-            if isinstance(config, field_type) or isinstance(field_value, config_type):
-                has_form_manager_with_changes = True
-                logger.debug(
-                    f"🔍 check_config_has_unsaved_changes: Found type match for "
-                    f"{config_attr} (config type={config_type.__name__}, "
-                    f"emitted field={field_name}, field type={field_type.__name__})"
-                )
-                break
+                # Check if types are related via isinstance (handles MRO inheritance)
+                # Example: LazyStepWellFilterConfig inherits from LazyWellFilterConfig
+                if isinstance(config, field_type) or isinstance(field_value, config_type):
+                    has_form_manager_with_changes = True
+                    logger.debug(
+                        f"🔍 check_config_has_unsaved_changes: Found type match for "
+                        f"{config_attr} (config type={config_type.__name__}, "
+                        f"emitted field={field_path}, field type={field_type.__name__})"
+                    )
+                    break
 
         if has_form_manager_with_changes:
             break
@@ -312,7 +321,14 @@ def check_step_has_unsaved_changes(
 
     logger = logging.getLogger(__name__)
 
-    logger.info(f"🔍 check_step_has_unsaved_changes: Checking step '{getattr(step, 'name', 'unknown')}', live_context_snapshot={live_context_snapshot is not None}")
+    step_token = getattr(step, '_pipeline_scope_token', None)
+    logger.info(f"🔍 check_step_has_unsaved_changes: Checking step '{getattr(step, 'name', 'unknown')}', step_token={step_token}, scope_filter={scope_filter}, live_context_snapshot={live_context_snapshot is not None}")
+
+    # Build expected step scope for this step (used for scope matching)
+    expected_step_scope = None
+    if scope_filter and step_token:
+        expected_step_scope = f"{scope_filter}::{step_token}"
+        logger.info(f"🔍 check_step_has_unsaved_changes: Expected step scope: {expected_step_scope}")
 
     # PERFORMANCE: Cache result by (step_id, token) to avoid redundant checks
     # Use id(step) as unique identifier for this step instance
@@ -394,12 +410,37 @@ def check_step_has_unsaved_changes(
         if not hasattr(manager, '_last_emitted_values') or not manager._last_emitted_values:
             continue
 
-        # Check if any emitted field matches any of this step's configs (by name or type)
-        for field_name, field_value in manager._last_emitted_values.items():
-            # Direct field match
-            if field_name in step_configs:
+        logger.info(f"🔍 check_step_has_unsaved_changes: Checking manager {manager.field_id} (scope={manager.scope_id}) with {len(manager._last_emitted_values)} emitted values")
+
+        # CRITICAL: If manager has a step-specific scope (contains ::step_), only consider it
+        # relevant if it matches the current step's expected scope
+        # This prevents a step window from affecting OTHER steps' unsaved change detection
+        if manager.scope_id and '::step_' in manager.scope_id:
+            # Step-specific manager - only relevant if scope matches THIS step
+            if expected_step_scope and manager.scope_id != expected_step_scope:
+                # Different step - skip this manager
+                logger.info(f"🔍 check_step_has_unsaved_changes: Skipping manager {manager.field_id} - scope mismatch (manager={manager.scope_id}, expected={expected_step_scope})")
+                continue
+
+        # Check if any emitted field matches any of this step's configs (by path or type)
+        # field_path format: "GlobalPipelineConfig.step_materialization_config.well_filter"
+        for field_path, field_value in manager._last_emitted_values.items():
+            # Extract config attribute from field path
+            # Examples:
+            #   "GlobalPipelineConfig.step_materialization_config.well_filter" → "step_materialization_config"
+            #   "PipelineConfig.step_well_filter_config" → "step_well_filter_config"
+            #   "FunctionStep.napari_streaming_config.enabled" → "napari_streaming_config"
+            path_parts = field_path.split('.')
+            if len(path_parts) < 2:
+                continue  # Invalid path
+
+            # Second part is the config attribute (first part is the root object type)
+            config_attr_from_path = path_parts[1]
+
+            # Direct field match: check if this config attribute exists on the step
+            if config_attr_from_path in step_configs:
                 has_any_relevant_changes = True
-                logger.debug(f"🔍 check_step_has_unsaved_changes: Found direct field match for {field_name}")
+                logger.debug(f"🔍 check_step_has_unsaved_changes: Found path match for {field_path} → {config_attr_from_path}")
                 break
 
             # Type-based match using isinstance()
@@ -410,7 +451,7 @@ def check_step_has_unsaved_changes(
                         has_any_relevant_changes = True
                         logger.debug(
                             f"🔍 check_step_has_unsaved_changes: Found type match for {config_attr} "
-                            f"(config type={type(config).__name__}, emitted field={field_name}, field type={type(field_value).__name__})"
+                            f"(config type={type(config).__name__}, emitted field={field_path}, field type={type(field_value).__name__})"
                         )
                         break
 
@@ -421,10 +462,12 @@ def check_step_has_unsaved_changes(
             break
 
     if not has_any_relevant_changes:
-        logger.debug(f"🔍 check_step_has_unsaved_changes: No relevant changes for step '{getattr(step, 'name', 'unknown')}' - skipping")
+        logger.info(f"🔍 check_step_has_unsaved_changes: No relevant changes for step '{getattr(step, 'name', 'unknown')}' - skipping (fast-path)")
         if live_context_snapshot is not None:
             check_step_has_unsaved_changes._cache[cache_key] = False
         return False
+    else:
+        logger.info(f"🔍 check_step_has_unsaved_changes: Found relevant changes for step '{getattr(step, 'name', 'unknown')}' - proceeding to full check")
 
     # Check each config for unsaved changes (exits early on first change)
     for config_attr in all_config_attrs:
@@ -443,12 +486,13 @@ def check_step_has_unsaved_changes(
         )
 
         if has_changes:
-            logger.debug(f"✅ UNSAVED CHANGES DETECTED in step '{getattr(step, 'name', 'unknown')}' config '{config_attr}'")
+            logger.info(f"✅ UNSAVED CHANGES DETECTED in step '{getattr(step, 'name', 'unknown')}' config '{config_attr}'")
             if live_context_snapshot is not None:
                 check_step_has_unsaved_changes._cache[cache_key] = True
             return True
 
     # No changes found - cache the result
+    logger.info(f"🔍 check_step_has_unsaved_changes: No unsaved changes found for step '{getattr(step, 'name', 'unknown')}'")
     if live_context_snapshot is not None:
         check_step_has_unsaved_changes._cache[cache_key] = False
     return False
