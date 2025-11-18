@@ -122,7 +122,7 @@ Dynamic code generation and parser systems.
 User Interface Systems
 ======================
 
-TUI architecture, UI development patterns, and form management systems.
+TUI architecture, UI development patterns, form management systems, and visual feedback.
 
 .. toctree::
    :maxdepth: 1
@@ -131,6 +131,9 @@ TUI architecture, UI development patterns, and form management systems.
    parameter_form_lifecycle
    code_ui_interconversion
    service-layer-architecture
+   gui_performance_patterns
+   cross_window_update_optimization
+   scope_visual_feedback_system
 
 Development Tools
 =================
@@ -155,7 +158,7 @@ Quick Start Paths
 
 **External Integrations?** Start with :doc:`external_integrations_overview` → :doc:`napari_integration_architecture` → :doc:`fiji_streaming_system` → :doc:`omero_backend_system`
 
-**UI Development?** Start with :doc:`parameter_form_lifecycle` → :doc:`service-layer-architecture` → :doc:`tui_system` → :doc:`code_ui_interconversion`
+**UI Development?** Start with :doc:`parameter_form_lifecycle` → :doc:`gui_performance_patterns` → :doc:`scope_visual_feedback_system` → :doc:`service-layer-architecture` → :doc:`tui_system` → :doc:`code_ui_interconversion`
 
 **System Integration?** Jump to :doc:`system_integration` → :doc:`special_io_system` → :doc:`microscope_handler_integration`
 

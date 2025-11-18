@@ -27,6 +27,7 @@ Practical guides for specific development tasks.
    :maxdepth: 1
 
    ui-patterns
+   visual_feedback_integration
    pipeline_debugging_guide
    placeholder_inheritance_debugging
    parameter_analysis_audit

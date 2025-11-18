@@ -29,6 +29,7 @@ The user guide is currently being rewritten to reflect the latest OpenHCS archit
    analysis_consolidation
    experimental_layouts
    real_time_visualization
+   visual_feedback
    log_viewer
    llm_pipeline_generation
 
@@ -37,6 +38,7 @@ The user guide is currently being rewritten to reflect the latest OpenHCS archit
 - :doc:`custom_functions` - Creating custom processing functions in the GUI
 - :doc:`custom_function_management` - End-to-end custom function management flow
 - :doc:`real_time_visualization` - Real-time visualization with napari streaming
+- :doc:`visual_feedback` - Visual feedback and flash animations in the GUI
 - :doc:`code_ui_editing` - Bidirectional editing between TUI and Python code
 - :doc:`dtype_conversion` - Automatic data type conversion for GPU libraries
 - :doc:`cpu_only_mode` - CPU-only mode for CI testing and deployment

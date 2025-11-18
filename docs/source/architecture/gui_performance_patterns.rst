@@ -265,9 +265,18 @@ Hierarchical scope identifiers enable targeted updates:
 
    # Format: "plate_path::step_token"
    scope_id = f"{orchestrator.plate_path}::{step._pipeline_scope_token}"
-   
+
    # Example: "/path/to/plate::step_001"
    # Enables routing changes to specific step in specific plate
+
+**Flash Animations**
+
+The cross-window preview system includes visual feedback via flash animations. See :doc:`scope_visual_feedback_system` for complete documentation on:
+
+- Dual tracking system (flash detection vs label updates)
+- Resolved value comparison for flash detection
+- Scope-based coloring and layered borders
+- WCAG-compliant color generation
 
 **Scope Mapping**
 
