@@ -112,7 +112,7 @@ class LiveContextResolver:
         if is_dataclass(obj):
             # Dataclass: use fields() to get all field names
             attr_names = [f.name for f in fields(obj)]
-            logger.info(f"🔍 resolve_all_lazy_attrs: obj is dataclass {type(obj).__name__}, found {len(attr_names)} fields: {attr_names}")
+            logger.debug(f"🔍 resolve_all_lazy_attrs: obj is dataclass {type(obj).__name__}, found {len(attr_names)} fields: {attr_names}")
         else:
             # Non-dataclass: introspect object to find dataclass attributes
             # Get all attributes from the object's __dict__ and class
@@ -127,10 +127,10 @@ class LiveContextResolver:
                         attr_names.append(attr_name)
                 except (AttributeError, TypeError):
                     continue
-            logger.info(f"🔍 resolve_all_lazy_attrs: obj is non-dataclass {type(obj).__name__}, found {len(attr_names)} dataclass attrs: {attr_names}")
+            logger.debug(f"🔍 resolve_all_lazy_attrs: obj is non-dataclass {type(obj).__name__}, found {len(attr_names)} dataclass attrs: {attr_names}")
 
         if not attr_names:
-            logger.info(f"🔍 resolve_all_lazy_attrs: No attributes found for {type(obj).__name__}, returning empty dict")
+            logger.debug(f"🔍 resolve_all_lazy_attrs: No attributes found for {type(obj).__name__}, returning empty dict")
             return {}
 
         # Use existing resolve_all_config_attrs method

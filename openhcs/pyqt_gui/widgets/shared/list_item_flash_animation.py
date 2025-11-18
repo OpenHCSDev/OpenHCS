@@ -45,11 +45,8 @@ class ListItemFlashAnimator:
 
     def flash_update(self) -> None:
         """Trigger flash animation on item background by increasing opacity."""
-        logger.info(f"🔥 flash_update called for row {self.row}")
-
         item = self.list_widget.item(self.row)
         if item is None:  # Item was destroyed
-            logger.info(f"🔥 Flash skipped - item at row {self.row} no longer exists")
             return
 
         # Get the correct background color from scope
@@ -57,24 +54,19 @@ class ListItemFlashAnimator:
         color_scheme = get_scope_color_scheme(self.scope_id)
         correct_color = self.item_type.get_background_color(color_scheme)
 
-        logger.info(f"🔥 correct_color={correct_color}, item_type={self.item_type}")
-
         if correct_color is not None:
             # Flash by increasing opacity to 100% (same color, just full opacity)
             flash_color = QColor(correct_color)
             flash_color.setAlpha(127)  # Full opacity
-            logger.info(f"🔥 Setting flash color: {flash_color.name()} alpha={flash_color.alpha()}")
             item.setBackground(flash_color)
 
         if self._is_flashing:
             # Already flashing - restart timer (flash color already re-applied above)
-            logger.info(f"🔥 Already flashing - restarting timer")
             if self._flash_timer:
                 self._flash_timer.stop()
                 self._flash_timer.start(self.config.FLASH_DURATION_MS)
             return
 
-        logger.info(f"🔥 Starting NEW flash animation")
         self._is_flashing = True
 
         # Setup timer to restore correct background
@@ -82,7 +74,6 @@ class ListItemFlashAnimator:
         self._flash_timer.setSingleShot(True)
         self._flash_timer.timeout.connect(self._restore_background)
         self._flash_timer.start(self.config.FLASH_DURATION_MS)
-        logger.info(f"🔥 Flash timer started for {self.config.FLASH_DURATION_MS}ms")
 
     def _restore_background(self) -> None:
         """Restore correct background color by recomputing from scope."""
@@ -127,37 +118,37 @@ def flash_list_item(
         scope_id: Scope identifier for color recomputation
         item_type: Type of list item (orchestrator or step)
     """
-    logger.info(f"🔥 flash_list_item called: row={row}, scope_id={scope_id}, item_type={item_type}")
+    logger.debug(f"🔥 flash_list_item called: row={row}, scope_id={scope_id}, item_type={item_type}")
 
     config = ScopeVisualConfig()
     if not config.LIST_ITEM_FLASH_ENABLED:
-        logger.info(f"🔥 Flash DISABLED in config")
+        logger.debug(f"🔥 Flash DISABLED in config")
         return
 
     item = list_widget.item(row)
     if item is None:
-        logger.info(f"🔥 Item at row {row} is None")
+        logger.debug(f"🔥 Item at row {row} is None")
         return
 
-    logger.info(f"🔥 Creating/getting animator for row {row}")
+    logger.debug(f"🔥 Creating/getting animator for row {row}")
 
     key = (id(list_widget), row)
 
     # Get or create animator
     if key not in _list_item_animators:
-        logger.info(f"🔥 Creating NEW animator for row {row}")
+        logger.debug(f"🔥 Creating NEW animator for row {row}")
         _list_item_animators[key] = ListItemFlashAnimator(
             list_widget, row, scope_id, item_type
         )
     else:
-        logger.info(f"🔥 Reusing existing animator for row {row}")
+        logger.debug(f"🔥 Reusing existing animator for row {row}")
         # Update scope_id and item_type in case item was recreated
         animator = _list_item_animators[key]
         animator.scope_id = scope_id
         animator.item_type = item_type
 
     animator = _list_item_animators[key]
-    logger.info(f"🔥 Calling animator.flash_update() for row {row}")
+    logger.debug(f"🔥 Calling animator.flash_update() for row {row}")
     animator.flash_update()
 
 

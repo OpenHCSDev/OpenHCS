@@ -384,7 +384,13 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         step_name = getattr(step_for_display, 'name', 'Unknown Step')
         return display_text, step_name
 
-    def _format_resolved_step_for_display(self, step_for_display: FunctionStep, original_step: FunctionStep, live_context_snapshot=None) -> str:
+    def _format_resolved_step_for_display(
+        self,
+        step_for_display: FunctionStep,
+        original_step: FunctionStep,
+        live_context_snapshot=None,
+        saved_context_snapshot=None
+    ) -> str:
         """
         Format ALREADY RESOLVED step for display.
 
@@ -394,6 +400,7 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
             step_for_display: Already resolved step preview instance
             original_step: Original step (with saved values, not merged with live)
             live_context_snapshot: Live context snapshot (for config resolution)
+            saved_context_snapshot: Optional pre-collected saved context snapshot (for batch processing)
 
         Returns:
             Display text string
@@ -503,7 +510,8 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
             self.STEP_CONFIG_INDICATORS,
             resolve_attr,
             live_context_snapshot,
-            scope_filter=self.current_plate  # CRITICAL: Pass scope filter
+            scope_filter=self.current_plate,  # CRITICAL: Pass scope filter
+            saved_context_snapshot=saved_context_snapshot  # PERFORMANCE: Reuse saved snapshot
         )
 
         # Add unsaved changes marker to step name if needed
@@ -1286,10 +1294,10 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         return scope_map
 
     def _process_pending_preview_updates(self) -> None:
-        logger.info(f"🔥 _process_pending_preview_updates called: _pending_preview_keys={self._pending_preview_keys}")
+        logger.debug(f"🔥 _process_pending_preview_updates called: _pending_preview_keys={self._pending_preview_keys}")
 
         if not self._pending_preview_keys:
-            logger.info(f"🔥 No pending preview keys - returning early")
+            logger.debug(f"🔥 No pending preview keys - returning early")
             return
 
         if not self.current_plate:
@@ -1326,7 +1334,7 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         self._pending_label_keys.clear()
         self._pending_changed_fields.clear()
 
-        logger.info(f"🔥 Calling _refresh_step_items_by_index with {len(indices)} indices")
+        logger.debug(f"🔥 Calling _refresh_step_items_by_index with {len(indices)} indices")
 
         # Refresh with changed fields for flash logic
         self._refresh_step_items_by_index(
@@ -1481,12 +1489,33 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         # Do this BEFORE triggering flashes so all flashes start simultaneously
         steps_to_flash = []
 
+        # PERFORMANCE: Collect saved context snapshot ONCE for ALL steps
+        # This avoids collecting it separately for each step (7x collection -> 1x collection)
+        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+
+        saved_managers = ParameterFormManager._active_form_managers.copy()
+        saved_token = ParameterFormManager._live_context_token_counter
+
+        try:
+            ParameterFormManager._active_form_managers.clear()
+            ParameterFormManager._live_context_token_counter += 1
+            saved_context_snapshot = ParameterFormManager.collect_live_context(scope_filter=self.current_plate)
+        finally:
+            ParameterFormManager._active_form_managers[:] = saved_managers
+            ParameterFormManager._live_context_token_counter = saved_token
+
         for idx, (step_index, item, step, should_update_labels) in enumerate(step_items):
             # Reuse the step_after instance we already created
             step_after = step_after_instances[idx]
 
             # Format display text (this is what actually resolves through hierarchy)
-            display_text = self._format_resolved_step_for_display(step_after, step, live_context_snapshot)
+            # Pass saved_context_snapshot to avoid re-collecting it for each step
+            display_text = self._format_resolved_step_for_display(
+                step_after,
+                step,
+                live_context_snapshot,
+                saved_context_snapshot=saved_context_snapshot
+            )
 
             # Reapply scope-based styling BEFORE flash (so flash color isn't overwritten)
             if should_update_labels:
@@ -1561,7 +1590,7 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         from openhcs.pyqt_gui.widgets.shared.list_item_flash_animation import flash_list_item
         from openhcs.pyqt_gui.widgets.shared.scope_visual_config import ListItemType
 
-        logger.info(f"🔥 _flash_step_item called for step {step_index}")
+        logger.debug(f"🔥 _flash_step_item called for step {step_index}")
 
         if 0 <= step_index < self.step_list.count():
             # Build scope_id for this step INCLUDING position for per-orchestrator indexing
@@ -1570,7 +1599,7 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
             # Format: "plate_path::step_token@position" where position is the step's index in THIS pipeline
             scope_id = f"{self.current_plate}::{step_token}@{step_index}"
 
-            logger.info(f"🔥 Calling flash_list_item with scope_id={scope_id}")
+            logger.debug(f"🔥 Calling flash_list_item with scope_id={scope_id}")
 
             flash_list_item(
                 self.step_list,

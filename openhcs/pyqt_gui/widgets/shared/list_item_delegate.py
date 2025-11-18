@@ -57,7 +57,7 @@ class MultilinePreviewItemDelegate(QStyledItemDelegate):
             logger = logging.getLogger(__name__)
             if isinstance(background_brush, QBrush):
                 color = background_brush.color()
-                logger.info(f"🎨 Painting background: row={index.row()}, color={color.name()}, alpha={color.alpha()}")
+                logger.debug(f"🎨 Painting background: row={index.row()}, color={color.name()}, alpha={color.alpha()}")
             painter.save()
             painter.fillRect(option.rect, background_brush)
             painter.restore()

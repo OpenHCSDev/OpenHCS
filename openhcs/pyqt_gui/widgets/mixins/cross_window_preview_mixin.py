@@ -351,7 +351,7 @@ class CrossWindowPreviewMixin:
         import logging
         logger = logging.getLogger(__name__)
 
-        logger.info(f"🔍 {self.__class__.__name__}.handle_window_close: {len(changed_fields)} changed fields")
+        logger.debug(f"🔍 {self.__class__.__name__}.handle_window_close: {len(changed_fields)} changed fields")
 
         scope_id = self._extract_scope_id_for_preview(editing_object, context_object)
         target_keys, requires_full_refresh = self._resolve_scope_targets(scope_id)
@@ -386,13 +386,13 @@ class CrossWindowPreviewMixin:
         import logging
         logger = logging.getLogger(__name__)
 
-        logger.info(f"🔥 handle_cross_window_preview_refresh: editing_object={type(editing_object).__name__}, context_object={type(context_object).__name__ if context_object else None}")
+        logger.debug(f"🔥 handle_cross_window_preview_refresh: editing_object={type(editing_object).__name__}, context_object={type(context_object).__name__ if context_object else None}")
 
         # Extract scope ID to determine which item needs refresh
         scope_id = self._extract_scope_id_for_preview(editing_object, context_object)
-        logger.info(f"🔥 handle_cross_window_preview_refresh: scope_id={scope_id}")
+        logger.debug(f"🔥 handle_cross_window_preview_refresh: scope_id={scope_id}")
         target_keys, requires_full_refresh = self._resolve_scope_targets(scope_id)
-        logger.info(f"🔥 handle_cross_window_preview_refresh: target_keys={target_keys}, requires_full_refresh={requires_full_refresh}")
+        logger.debug(f"🔥 handle_cross_window_preview_refresh: target_keys={target_keys}, requires_full_refresh={requires_full_refresh}")
 
         if requires_full_refresh:
             self._pending_preview_keys.clear()
@@ -432,18 +432,18 @@ class CrossWindowPreviewMixin:
         """
         from PyQt6.QtCore import QTimer
 
-        logger.info(f"🔥 _schedule_preview_update called: full_refresh={full_refresh}, delay={self.PREVIEW_UPDATE_DEBOUNCE_MS}ms")
+        logger.debug(f"🔥 _schedule_preview_update called: full_refresh={full_refresh}, delay={self.PREVIEW_UPDATE_DEBOUNCE_MS}ms")
 
         # Store window close snapshots if provided (for timer callback)
         if before_snapshot is not None and after_snapshot is not None:
             self._pending_window_close_before_snapshot = before_snapshot
             self._pending_window_close_after_snapshot = after_snapshot
             self._pending_window_close_changed_fields = changed_fields
-            logger.info(f"🔥 Stored window close snapshots: before={before_snapshot.token}, after={after_snapshot.token}")
+            logger.debug(f"🔥 Stored window close snapshots: before={before_snapshot.token}, after={after_snapshot.token}")
 
         # Cancel existing timer if any (trailing debounce - restart on each change)
         if self._preview_update_timer is not None:
-            logger.info(f"🔥 Stopping existing timer")
+            logger.debug(f"🔥 Stopping existing timer")
             self._preview_update_timer.stop()
 
         # Schedule new update after configured delay
@@ -451,15 +451,15 @@ class CrossWindowPreviewMixin:
         self._preview_update_timer.setSingleShot(True)
 
         if full_refresh:
-            logger.info(f"🔥 Connecting to _handle_full_preview_refresh")
+            logger.debug(f"🔥 Connecting to _handle_full_preview_refresh")
             self._preview_update_timer.timeout.connect(self._handle_full_preview_refresh)
         else:
-            logger.info(f"🔥 Connecting to _process_pending_preview_updates")
+            logger.debug(f"🔥 Connecting to _process_pending_preview_updates")
             self._preview_update_timer.timeout.connect(self._process_pending_preview_updates)
 
         delay = max(0, self.PREVIEW_UPDATE_DEBOUNCE_MS)
         self._preview_update_timer.start(delay)
-        logger.info(f"🔥 Timer started with {delay}ms delay")
+        logger.debug(f"🔥 Timer started with {delay}ms delay")
 
     # --- Preview instance with live values (shared pattern) -------------------
     def _get_preview_instance(self, obj: Any, live_context_snapshot, scope_id: str, obj_type: Type) -> Any:
@@ -624,7 +624,7 @@ class CrossWindowPreviewMixin:
         # before = with form manager (unsaved edits)
         # after = without form manager (reverted to saved)
         if self._pending_window_close_before_snapshot is not None and self._pending_window_close_after_snapshot is not None:
-            logger.info(f"🔍 {self.__class__.__name__}._check_resolved_values_changed_batch: Using window_close snapshots: before={self._pending_window_close_before_snapshot.token}, after={self._pending_window_close_after_snapshot.token}")
+            logger.debug(f"🔍 {self.__class__.__name__}._check_resolved_values_changed_batch: Using window_close snapshots: before={self._pending_window_close_before_snapshot.token}, after={self._pending_window_close_after_snapshot.token}")
             live_context_before = self._pending_window_close_before_snapshot
             live_context_after = self._pending_window_close_after_snapshot
             # Use window close changed fields if provided
@@ -637,16 +637,16 @@ class CrossWindowPreviewMixin:
 
         # If changed_fields is None, check ALL enabled preview fields (full refresh case)
         if changed_fields is None:
-            logger.info(f"🔍 {self.__class__.__name__}._check_resolved_values_changed_batch: changed_fields=None, checking ALL enabled preview fields")
+            logger.debug(f"🔍 {self.__class__.__name__}._check_resolved_values_changed_batch: changed_fields=None, checking ALL enabled preview fields")
             changed_fields = self.get_enabled_preview_fields()
             if not changed_fields:
-                logger.info(f"🔍 {self.__class__.__name__}._check_resolved_values_changed_batch: No enabled preview fields, returning all False")
+                logger.debug(f"🔍 {self.__class__.__name__}._check_resolved_values_changed_batch: No enabled preview fields, returning all False")
                 return [False] * len(obj_pairs)
         elif not changed_fields:
-            logger.info(f"🔍 {self.__class__.__name__}._check_resolved_values_changed_batch: Empty changed_fields, returning all False")
+            logger.debug(f"🔍 {self.__class__.__name__}._check_resolved_values_changed_batch: Empty changed_fields, returning all False")
             return [False] * len(obj_pairs)
 
-        logger.info(f"🔍 {self.__class__.__name__}._check_resolved_values_changed_batch: Checking {len(obj_pairs)} objects with {len(changed_fields)} identifiers")
+        logger.debug(f"🔍 {self.__class__.__name__}._check_resolved_values_changed_batch: Checking {len(obj_pairs)} objects with {len(changed_fields)} identifiers")
 
         # Use the first object to expand identifiers (they should all be the same type)
         # CRITICAL: Use live_context_before for expansion because it has the form manager's values
@@ -659,7 +659,7 @@ class CrossWindowPreviewMixin:
         else:
             expanded_identifiers = changed_fields
 
-        logger.info(f"🔍 _check_resolved_values_changed_batch: Expanded to {len(expanded_identifiers)} identifiers: {expanded_identifiers}")
+        logger.debug(f"🔍 _check_resolved_values_changed_batch: Expanded to {len(expanded_identifiers)} identifiers: {expanded_identifiers}")
 
         # Batch resolve all objects
         results = []
@@ -674,7 +674,7 @@ class CrossWindowPreviewMixin:
             )
             results.append(changed)
 
-        logger.info(f"🔍 _check_resolved_values_changed_batch: Results: {sum(results)}/{len(results)} changed")
+        logger.debug(f"🔍 _check_resolved_values_changed_batch: Results: {sum(results)}/{len(results)} changed")
         return results
 
     def _check_single_object_with_batch_resolution(
@@ -792,10 +792,10 @@ class CrossWindowPreviewMixin:
         if scope_id and live_context_before:
             scoped_before = getattr(live_context_before, 'scoped_values', {})
             live_ctx_before = scoped_before.get(scope_id, {})
-            logger.info(f"🔍 _check_with_batch_resolution: Using SCOPED values for scope_id={scope_id}")
+            logger.debug(f"🔍 _check_with_batch_resolution: Using SCOPED values for scope_id={scope_id}")
         else:
             live_ctx_before = getattr(live_context_before, 'values', {}) if live_context_before else {}
-            logger.info(f"🔍 _check_with_batch_resolution: Using GLOBAL values (no scope)")
+            logger.debug(f"🔍 _check_with_batch_resolution: Using GLOBAL values (no scope)")
 
         if scope_id and live_context_after:
             scoped_after = getattr(live_context_after, 'scoped_values', {})
@@ -804,17 +804,17 @@ class CrossWindowPreviewMixin:
             live_ctx_after = getattr(live_context_after, 'values', {}) if live_context_after else {}
 
         # DEBUG: Log what's in the live context values
-        logger.info(f"🔍 _check_with_batch_resolution: live_ctx_before types: {list(live_ctx_before.keys())}")
-        logger.info(f"🔍 _check_with_batch_resolution: live_ctx_after types: {list(live_ctx_after.keys())}")
+        logger.debug(f"🔍 _check_with_batch_resolution: live_ctx_before types: {list(live_ctx_before.keys())}")
+        logger.debug(f"🔍 _check_with_batch_resolution: live_ctx_after types: {list(live_ctx_after.keys())}")
         from openhcs.core.config import PipelineConfig
 
         # DEBUG: Log PipelineConfig values if present
         if PipelineConfig in live_ctx_before:
             pc_before = live_ctx_before[PipelineConfig]
-            logger.info(f"🔍 _check_with_batch_resolution: live_ctx_before[PipelineConfig]['well_filter_config'] = {pc_before.get('well_filter_config', 'NOT FOUND')}")
+            logger.debug(f"🔍 _check_with_batch_resolution: live_ctx_before[PipelineConfig]['well_filter_config'] = {pc_before.get('well_filter_config', 'NOT FOUND')}")
         if PipelineConfig in live_ctx_after:
             pc_after = live_ctx_after[PipelineConfig]
-            logger.info(f"🔍 _check_with_batch_resolution: live_ctx_after[PipelineConfig]['well_filter_config'] = {pc_after.get('well_filter_config', 'NOT FOUND')}")
+            logger.debug(f"🔍 _check_with_batch_resolution: live_ctx_after[PipelineConfig]['well_filter_config'] = {pc_after.get('well_filter_config', 'NOT FOUND')}")
 
 
 
@@ -839,8 +839,8 @@ class CrossWindowPreviewMixin:
                     parent_to_attrs[parent_path] = []
                 parent_to_attrs[parent_path].append(attr_name)
 
-        logger.info(f"🔍 _check_with_batch_resolution: simple_attrs={simple_attrs}")
-        logger.info(f"🔍 _check_with_batch_resolution: parent_to_attrs={parent_to_attrs}")
+        logger.debug(f"🔍 _check_with_batch_resolution: simple_attrs={simple_attrs}")
+        logger.debug(f"🔍 _check_with_batch_resolution: parent_to_attrs={parent_to_attrs}")
 
         # Batch resolve simple attributes on root object
         # Use resolve_all_config_attrs() instead of resolve_all_lazy_attrs() to handle
@@ -854,23 +854,23 @@ class CrossWindowPreviewMixin:
             )
 
             # DEBUG: Log resolved values
-            logger.info(f"🔍 _check_with_batch_resolution: Resolved {len(before_attrs)} before attrs, {len(after_attrs)} after attrs")
+            logger.debug(f"🔍 _check_with_batch_resolution: Resolved {len(before_attrs)} before attrs, {len(after_attrs)} after attrs")
             # Only log well_filter_config to reduce noise
             if 'well_filter_config' in simple_attrs:
                 if 'well_filter_config' in before_attrs:
-                    logger.info(f"🔍 _check_with_batch_resolution: before[well_filter_config] = {before_attrs['well_filter_config']}")
+                    logger.debug(f"🔍 _check_with_batch_resolution: before[well_filter_config] = {before_attrs['well_filter_config']}")
                 if 'well_filter_config' in after_attrs:
-                    logger.info(f"🔍 _check_with_batch_resolution: after[well_filter_config] = {after_attrs['well_filter_config']}")
+                    logger.debug(f"🔍 _check_with_batch_resolution: after[well_filter_config] = {after_attrs['well_filter_config']}")
 
             for attr_name in simple_attrs:
                 if attr_name in before_attrs and attr_name in after_attrs:
                     if before_attrs[attr_name] != after_attrs[attr_name]:
-                        logger.info(f"🔍 _check_with_batch_resolution: CHANGED: {attr_name}")
+                        logger.debug(f"🔍 _check_with_batch_resolution: CHANGED: {attr_name}")
                         return True
 
         # Batch resolve nested attributes grouped by parent
         for parent_path, attr_names in parent_to_attrs.items():
-            logger.info(f"🔍 _check_with_batch_resolution: Processing parent_path={parent_path}, attr_names={attr_names}")
+            logger.debug(f"🔍 _check_with_batch_resolution: Processing parent_path={parent_path}, attr_names={attr_names}")
             # Walk to parent object
             parent_before = obj_before
             parent_after = obj_after
@@ -880,7 +880,7 @@ class CrossWindowPreviewMixin:
                 parent_after = getattr(parent_after, part, None) if parent_after else None
 
             if parent_before is None or parent_after is None:
-                logger.info(f"🔍 _check_with_batch_resolution: Skipping parent_path={parent_path} (parent is None)")
+                logger.debug(f"🔍 _check_with_batch_resolution: Skipping parent_path={parent_path} (parent is None)")
                 continue
 
             # Batch resolve all attributes on this parent object
@@ -891,19 +891,19 @@ class CrossWindowPreviewMixin:
                 parent_after, context_stack_after, live_ctx_after, token_after
             )
 
-            logger.info(f"🔍 _check_with_batch_resolution: Resolved {len(before_attrs)} before attrs, {len(after_attrs)} after attrs for parent_path={parent_path}")
+            logger.debug(f"🔍 _check_with_batch_resolution: Resolved {len(before_attrs)} before attrs, {len(after_attrs)} after attrs for parent_path={parent_path}")
 
             # Only log well_filter_config to reduce noise
             if 'well_filter_config' in attr_names:
                 if 'well_filter_config' in before_attrs:
-                    logger.info(f"🔍 _check_with_batch_resolution: parent before[well_filter_config] = {before_attrs['well_filter_config']}")
+                    logger.debug(f"🔍 _check_with_batch_resolution: parent before[well_filter_config] = {before_attrs['well_filter_config']}")
                 if 'well_filter_config' in after_attrs:
-                    logger.info(f"🔍 _check_with_batch_resolution: parent after[well_filter_config] = {after_attrs['well_filter_config']}")
+                    logger.debug(f"🔍 _check_with_batch_resolution: parent after[well_filter_config] = {after_attrs['well_filter_config']}")
 
             for attr_name in attr_names:
                 if attr_name in before_attrs and attr_name in after_attrs:
                     if before_attrs[attr_name] != after_attrs[attr_name]:
-                        logger.info(f"🔍 _check_with_batch_resolution: CHANGED (parent): {parent_path}.{attr_name}")
+                        logger.debug(f"🔍 _check_with_batch_resolution: CHANGED (parent): {parent_path}.{attr_name}")
                         return True
 
         return False
@@ -936,8 +936,8 @@ class CrossWindowPreviewMixin:
 
         expanded = set()
 
-        logger.info(f"🔍 _expand_identifiers_for_inheritance: obj type={type(obj).__name__}")
-        logger.info(f"🔍 _expand_identifiers_for_inheritance: changed_fields={changed_fields}")
+        logger.debug(f"🔍 _expand_identifiers_for_inheritance: obj type={type(obj).__name__}")
+        logger.debug(f"🔍 _expand_identifiers_for_inheritance: changed_fields={changed_fields}")
 
         # For each changed field, check if it's a nested dataclass field
         for identifier in changed_fields:
@@ -975,7 +975,7 @@ class CrossWindowPreviewMixin:
                         expanded_identifier = f"{attr_name}.{identifier}"
                         if expanded_identifier not in expanded:
                             expanded.add(expanded_identifier)
-                            logger.info(f"🔍 Expanded '{identifier}' to include '{expanded_identifier}' (dataclass has field '{identifier}')")
+                            logger.debug(f"🔍 Expanded '{identifier}' to include '{expanded_identifier}' (dataclass has field '{identifier}')")
 
                 # NOTE: We do NOT add the simple field name to expanded if it's not a direct attribute
                 # Simple field names like "well_filter" should only appear as nested fields like "well_filter_config.well_filter"
@@ -1011,7 +1011,7 @@ class CrossWindowPreviewMixin:
                     # We need to find attributes on obj whose TYPE matches the field type
                     # For example: PipelineConfig.well_filter_config -> find step_well_filter_config (StepWellFilterConfig inherits from WellFilterConfig)
 
-                    logger.info(f"🔍 Processing ParentType.field format: {identifier}")
+                    logger.debug(f"🔍 Processing ParentType.field format: {identifier}")
 
                     # Get the type and value of the field from live context
                     field_type = None
@@ -1020,8 +1020,8 @@ class CrossWindowPreviewMixin:
                         live_values = getattr(live_context_snapshot, 'values', {})
                         scoped_values = getattr(live_context_snapshot, 'scoped_values', {})
 
-                        logger.info(f"🔍   live_values types: {[t.__name__ for t in live_values.keys()]}")
-                        logger.info(f"🔍   scoped_values keys: {list(scoped_values.keys())}")
+                        logger.debug(f"🔍   live_values types: {[t.__name__ for t in live_values.keys()]}")
+                        logger.debug(f"🔍   scoped_values keys: {list(scoped_values.keys())}")
 
                         # Check both global and scoped values
                         all_values = dict(live_values)
@@ -1032,10 +1032,10 @@ class CrossWindowPreviewMixin:
                             if second_part in values_dict:
                                 # Get the type of this field's value
                                 field_value = values_dict[second_part]
-                                logger.info(f"🔍   Found field '{second_part}' in type {type_key.__name__}: {field_value}")
+                                logger.debug(f"🔍   Found field '{second_part}' in type {type_key.__name__}: {field_value}")
                                 if field_value is not None and is_dataclass(field_value):
                                     field_type = type(field_value)
-                                    logger.info(f"🔍   field_type = {field_type.__name__}")
+                                    logger.debug(f"🔍   field_type = {field_type.__name__}")
                                     break
 
                     # Find all dataclass attributes on obj whose TYPE inherits from field_type
@@ -1048,9 +1048,9 @@ class CrossWindowPreviewMixin:
                         if field_value is not None:
                             try:
                                 nested_field_names = [f.name for f in dataclass_fields(field_value)]
-                                logger.info(f"🔍   nested_field_names = {nested_field_names}")
+                                logger.debug(f"🔍   nested_field_names = {nested_field_names}")
                             except Exception as e:
-                                logger.info(f"🔍   Failed to get nested fields: {e}")
+                                logger.debug(f"🔍   Failed to get nested fields: {e}")
 
                         for attr_name in dir(obj):
                             if attr_name.startswith('_'):
@@ -1072,12 +1072,12 @@ class CrossWindowPreviewMixin:
                                         nested_identifier = f"{attr_name}.{nested_field}"
                                         if nested_identifier not in expanded:
                                             expanded.add(nested_identifier)
-                                            logger.info(f"🔍 Expanded '{identifier}' to include '{nested_identifier}' ({attr_type.__name__} inherits from {field_type.__name__})")
+                                            logger.debug(f"🔍 Expanded '{identifier}' to include '{nested_identifier}' ({attr_type.__name__} inherits from {field_type.__name__})")
                             except TypeError:
                                 # issubclass can raise TypeError if types are not classes
                                 pass
                     else:
-                        logger.info(f"🔍   field_type is None, skipping expansion")
+                        logger.debug(f"🔍   field_type is None, skipping expansion")
                     continue
                 else:
                     # This is "dataclass.field" format (e.g., "well_filter_config.well_filter")
@@ -1116,9 +1116,9 @@ class CrossWindowPreviewMixin:
                             if expanded_identifier not in expanded:
                                 expanded.add(expanded_identifier)
                                 if config_type:
-                                    logger.info(f"🔍 Expanded '{identifier}' to include '{expanded_identifier}' ({attr_type.__name__} inherits from {config_type.__name__})")
+                                    logger.debug(f"🔍 Expanded '{identifier}' to include '{expanded_identifier}' ({attr_type.__name__} inherits from {config_type.__name__})")
                                 else:
-                                    logger.info(f"🔍 Expanded '{identifier}' to include '{expanded_identifier}' (has field '{nested_attr}')")
+                                    logger.debug(f"🔍 Expanded '{identifier}' to include '{expanded_identifier}' (has field '{nested_attr}')")
             else:
                 # 3+ parts - just keep the original identifier
                 expanded.add(identifier)

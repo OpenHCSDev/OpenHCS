@@ -220,7 +220,8 @@ def check_step_has_unsaved_changes(
     config_indicators: dict,
     resolve_attr: Callable,
     live_context_snapshot: Any,
-    scope_filter: Optional[str] = None
+    scope_filter: Optional[str] = None,
+    saved_context_snapshot: Any = None
 ) -> bool:
     """Check if a step has ANY unsaved changes in any of its configs.
 
@@ -233,6 +234,7 @@ def check_step_has_unsaved_changes(
         resolve_attr: Function to resolve lazy config attributes
         live_context_snapshot: Current live context snapshot
         scope_filter: Optional scope filter to use when collecting saved context (e.g., plate_path)
+        saved_context_snapshot: Optional pre-collected saved context snapshot (for batch processing)
 
     Returns:
         True if step has any unsaved changes, False otherwise
@@ -244,16 +246,18 @@ def check_step_has_unsaved_changes(
 
     # PERFORMANCE: Collect saved context snapshot ONCE for all configs
     # This avoids collecting it separately for each config (3x per step)
-    saved_managers = ParameterFormManager._active_form_managers.copy()
-    saved_token = ParameterFormManager._live_context_token_counter
+    # If saved_context_snapshot is provided, reuse it (for batch processing of multiple steps)
+    if saved_context_snapshot is None:
+        saved_managers = ParameterFormManager._active_form_managers.copy()
+        saved_token = ParameterFormManager._live_context_token_counter
 
-    try:
-        ParameterFormManager._active_form_managers.clear()
-        ParameterFormManager._live_context_token_counter += 1
-        saved_context_snapshot = ParameterFormManager.collect_live_context(scope_filter=scope_filter)
-    finally:
-        ParameterFormManager._active_form_managers[:] = saved_managers
-        ParameterFormManager._live_context_token_counter = saved_token
+        try:
+            ParameterFormManager._active_form_managers.clear()
+            ParameterFormManager._live_context_token_counter += 1
+            saved_context_snapshot = ParameterFormManager.collect_live_context(scope_filter=scope_filter)
+        finally:
+            ParameterFormManager._active_form_managers[:] = saved_managers
+            ParameterFormManager._live_context_token_counter = saved_token
 
     # Check each config for unsaved changes (exits early on first change)
     for config_attr in config_indicators.keys():

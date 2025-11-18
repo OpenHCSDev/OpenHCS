@@ -213,11 +213,14 @@ def hsv_to_rgb(hue: int, saturation: int, value: int) -> tuple[int, int, int]:
     return (int(r * 255), int(g * 255), int(b * 255))
 
 
+@lru_cache(maxsize=512)
 def get_scope_color_scheme(scope_id: Optional[str]) -> ScopeColorScheme:
     """Generate complete color scheme for scope using perceptually distinct colors.
 
     Uses distinctipy to generate visually distinct colors for orchestrators.
     For steps, applies tinting based on step index and adds borders every 3 steps.
+
+    PERFORMANCE: Cached with LRU cache to avoid repeated color calculations for the same scope.
 
     Args:
         scope_id: Scope identifier (can be orchestrator or step scope)
