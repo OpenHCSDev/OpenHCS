@@ -203,6 +203,12 @@ def check_config_has_unsaved_changes(
         if not hasattr(manager, '_last_emitted_values') or not manager._last_emitted_values:
             continue
 
+        # CRITICAL: Apply scope filter to prevent cross-plate contamination
+        # If scope_filter is provided (e.g., plate path), only check managers in that scope
+        if scope_filter is not None and manager.scope_id is not None:
+            if not ParameterFormManager._is_scope_visible_static(manager.scope_id, scope_filter):
+                continue
+
         # Check each emitted field path
         # field_path format: "GlobalPipelineConfig.step_materialization_config.well_filter"
         for field_path, field_value in manager._last_emitted_values.items():
@@ -425,6 +431,12 @@ def check_step_has_unsaved_changes(
         for manager in ParameterFormManager._active_form_managers:
             if not hasattr(manager, '_last_emitted_values') or not manager._last_emitted_values:
                 continue
+
+            # CRITICAL: Apply plate-level scope filter to prevent cross-plate contamination
+            # If scope_filter is provided (e.g., plate path), only check managers in that scope
+            if scope_filter is not None and manager.scope_id is not None:
+                if not ParameterFormManager._is_scope_visible_static(manager.scope_id, scope_filter):
+                    continue
 
             # If manager has step-specific scope, it must match
             if manager.scope_id and '::step_' in manager.scope_id:
