@@ -9,7 +9,7 @@ import dataclasses
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Type, Optional, Tuple, Union, List
+from typing import Any, Dict, Type, Optional, Tuple, Union, List, Set
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QLabel, QPushButton,
     QLineEdit, QCheckBox, QComboBox, QGroupBox, QSpinBox, QDoubleSpinBox
@@ -278,6 +278,88 @@ class ParameterFormManager(QWidget):
 
     # Class-level token cache for live context collection
     _live_context_cache: Optional['TokenCache'] = None  # Initialized on first use
+
+    # PERFORMANCE: Type-based cache for unsaved changes detection (Phase 1-ALT)
+    # Map: config type → set of changed field names
+    # Example: LazyWellFilterConfig → {'well_filter', 'well_filter_mode'}
+    _configs_with_unsaved_changes: Dict[Type, Set[str]] = {}
+    MAX_CONFIG_TYPE_CACHE_ENTRIES = 50  # Monitor cache size (log warning if exceeded)
+
+    # PERFORMANCE: MRO inheritance cache - maps (parent_type, field_name) → set of child types
+    # This enables O(1) lookup of which config types can inherit a field from a parent type
+    # Example: (PathPlanningConfig, 'output_dir_suffix') → {StepMaterializationConfig, ...}
+    # Built once at startup via _build_mro_inheritance_cache()
+    _mro_inheritance_cache: Dict[Tuple[Type, str], Set[Type]] = {}
+
+    # PERFORMANCE: MRO inheritance cache - maps (parent_type, field_name) → set of child types
+    # This enables O(1) lookup of which config types can inherit a field from a parent type
+    # Example: (PathPlanningConfig, 'output_dir_suffix') → {StepMaterializationConfig, ...}
+    _mro_inheritance_cache: Dict[Tuple[Type, str], Set[Type]] = {}
+
+    @classmethod
+    def _build_mro_inheritance_cache(cls):
+        """Build cache of which config types can inherit from which other types via MRO.
+
+        This is called once at startup and enables O(1) lookup of affected types when
+        marking unsaved changes. Uses introspection to discover all config types generically.
+
+        Example cache entry:
+            (PathPlanningConfig, 'output_dir_suffix') → {StepMaterializationConfig, LazyStepMaterializationConfig}
+
+        This means when PathPlanningConfig.output_dir_suffix changes, we also mark
+        StepMaterializationConfig as having unsaved changes (because it inherits via MRO).
+        """
+        from openhcs.config_framework.cache_warming import _extract_all_dataclass_types
+        from openhcs.core.config import GlobalPipelineConfig
+        import dataclasses
+
+        logger.info("🔧 Building MRO inheritance cache for unsaved changes detection...")
+
+        # Introspect all config types in the hierarchy (generic, no hardcoding)
+        all_config_types = _extract_all_dataclass_types(GlobalPipelineConfig)
+        logger.info(f"🔧 Found {len(all_config_types)} config types to analyze")
+
+        # For each config type, build reverse mapping: (parent_type, field_name) → child_types
+        for child_type in all_config_types:
+            if not dataclasses.is_dataclass(child_type):
+                continue
+
+            # Get all fields on this child type
+            for field in dataclasses.fields(child_type):
+                field_name = field.name
+
+                # Check which types in the MRO have this field
+                # If a parent type has this field, the child can inherit from it
+                for mro_class in child_type.__mro__:
+                    if not dataclasses.is_dataclass(mro_class):
+                        continue
+
+                    # Skip the child type itself (we only care about inheritance)
+                    if mro_class == child_type:
+                        continue
+
+                    # Check if mro_class has this field
+                    try:
+                        mro_fields = dataclasses.fields(mro_class)
+                        if any(f.name == field_name for f in mro_fields):
+                            cache_key = (mro_class, field_name)
+                            if cache_key not in cls._mro_inheritance_cache:
+                                cls._mro_inheritance_cache[cache_key] = set()
+                            cls._mro_inheritance_cache[cache_key].add(child_type)
+                    except TypeError:
+                        # Not a dataclass or fields() failed
+                        continue
+
+        logger.info(f"🔧 Built MRO inheritance cache with {len(cls._mro_inheritance_cache)} entries")
+
+        # Log a few examples for debugging
+        if cls._mro_inheritance_cache:
+            for i, (cache_key, child_types) in enumerate(cls._mro_inheritance_cache.items()):
+                if i >= 3:  # Only log first 3 examples
+                    break
+                parent_type, field_name = cache_key
+                child_names = [t.__name__ for t in child_types]
+                logger.debug(f"🔧   Example: ({parent_type.__name__}, '{field_name}') → {child_names}")
 
     @classmethod
     def should_use_async(cls, param_count: int) -> bool:
@@ -741,7 +823,18 @@ class ParameterFormManager(QWidget):
                 self._initial_values_on_open = self.get_user_modified_values() if hasattr(self.config, '_resolve_field_value') else self.get_current_values()
 
                 # Connect parameter_changed to emit cross-window context changes
+                # This triggers _emit_cross_window_change which emits context_value_changed
                 self.parameter_changed.connect(self._emit_cross_window_change)
+
+                # ALSO connect context_value_changed to mark config types (uses full field paths)
+                # CRITICAL: context_value_changed has the full field path (e.g., "PipelineConfig.well_filter_config.well_filter")
+                # instead of just the parent config name (e.g., "well_filter_config")
+                # This allows us to extract the actual changed field name for MRO cache lookup
+                self.context_value_changed.connect(
+                    lambda field_path, value, obj, ctx: self._mark_config_type_with_unsaved_changes(
+                        '.'.join(field_path.split('.')[1:]), value  # Remove type name from path
+                    )
+                )
 
                 # Connect this instance's signal to all existing instances
                 for existing_manager in self._active_form_managers:
@@ -3661,6 +3754,79 @@ class ParameterFormManager(QWidget):
 
     # ==================== CROSS-WINDOW CONTEXT UPDATE METHODS ====================
 
+    def _mark_config_type_with_unsaved_changes(self, param_name: str, value: Any):
+        """Mark config TYPE and all types that inherit from it via MRO.
+
+        This enables O(1) unsaved changes detection without O(n_steps) iteration.
+        Uses cached MRO inheritance map to find all affected types.
+
+        Example:
+            When PathPlanningConfig.output_dir_suffix changes:
+            1. Marks PathPlanningConfig
+            2. Looks up (PathPlanningConfig, 'output_dir_suffix') in cache
+            3. Finds {StepMaterializationConfig, ...}
+            4. Marks all those types too
+
+        This ensures flash detection works when parent configs change while
+        child config editors are open.
+
+        Args:
+            param_name: Name of the parameter that changed
+            value: New value
+        """
+        import dataclasses
+
+        # Extract config attribute from param_name
+        config_attr = param_name.split('.')[0] if '.' in param_name else param_name
+
+        # Get config type from context_obj or object_instance
+        config = getattr(self.object_instance, config_attr, None)
+        if config is None:
+            config = getattr(self.context_obj, config_attr, None)
+
+        # Determine the config type to mark
+        # If config is a dataclass (nested config object), use its type
+        # If config is a primitive (int, str, etc.), use the parent config type
+        if config is not None and dataclasses.is_dataclass(config):
+            config_type = type(config)
+        elif dataclasses.is_dataclass(self.object_instance):
+            # Primitive field on a dataclass - use the parent config type
+            config_type = type(self.object_instance)
+        else:
+            # Not a dataclass at all - skip cache marking
+            return
+
+        # PERFORMANCE: Monitor cache size to prevent unbounded growth
+        if len(type(self)._configs_with_unsaved_changes) > type(self).MAX_CONFIG_TYPE_CACHE_ENTRIES:
+            logger.info(
+                f"ℹ️ Config type cache has {len(type(self)._configs_with_unsaved_changes)} entries "
+                f"(threshold: {type(self).MAX_CONFIG_TYPE_CACHE_ENTRIES})"
+            )
+
+        # Extract field name from param_name
+        field_name = param_name.split('.')[-1] if '.' in param_name else param_name
+
+        # Mark the directly edited type
+        if config_type not in type(self)._configs_with_unsaved_changes:
+            type(self)._configs_with_unsaved_changes[config_type] = set()
+        type(self)._configs_with_unsaved_changes[config_type].add(field_name)
+
+        # CRITICAL: Also mark all types that can inherit this field via MRO
+        # This ensures flash detection works when parent configs change
+        cache_key = (config_type, field_name)
+        affected_types = type(self)._mro_inheritance_cache.get(cache_key, set())
+
+        if affected_types:
+            logger.debug(
+                f"🔍 Marking {len(affected_types)} child types that inherit "
+                f"{config_type.__name__}.{field_name}: {[t.__name__ for t in affected_types]}"
+            )
+
+        for affected_type in affected_types:
+            if affected_type not in type(self)._configs_with_unsaved_changes:
+                type(self)._configs_with_unsaved_changes[affected_type] = set()
+            type(self)._configs_with_unsaved_changes[affected_type].add(field_name)
+
     def _emit_cross_window_change(self, param_name: str, value: object):
         """Emit cross-window context change signal.
 
@@ -3674,6 +3840,10 @@ class ParameterFormManager(QWidget):
         if getattr(self, '_block_cross_window_updates', False):
             logger.info(f"🚫 _emit_cross_window_change BLOCKED for {self.field_id}.{param_name} (in reset/batch operation)")
             return
+
+        # PERFORMANCE: Mark config type with unsaved changes (Phase 1-ALT)
+        # This enables O(1) unsaved changes detection without O(n_steps) iteration
+        self._mark_config_type_with_unsaved_changes(param_name, value)
 
         # CRITICAL: Use full field path as key, not just param_name!
         # This ensures nested field changes (e.g., step_materialization_config.well_filter)
@@ -3810,6 +3980,9 @@ class ParameterFormManager(QWidget):
                 for manager in self._active_form_managers:
                     # Refresh immediately (not deferred) since we're in a controlled close event
                     manager._refresh_with_live_context()
+
+                # PERFORMANCE: Clear type-based cache on form close (Phase 1-ALT)
+                type(self)._configs_with_unsaved_changes.clear()
 
         except (ValueError, AttributeError):
             pass  # Already removed or list doesn't exist

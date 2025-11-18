@@ -151,3 +151,13 @@ def prewarm_config_analysis_cache(base_config_type: Type) -> None:
 
     logger.debug(f"Pre-warmed analysis cache for {len(config_types)} config types")
 
+    # PERFORMANCE: Build MRO inheritance cache for unsaved changes detection
+    # This enables O(1) lookup of which config types can inherit from which other types
+    # Must be done after config types are discovered but before any UI opens
+    try:
+        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+        ParameterFormManager._build_mro_inheritance_cache()
+    except ImportError:
+        # GUI not installed, skip MRO cache building
+        logger.debug("Skipping MRO inheritance cache (GUI not installed)")
+

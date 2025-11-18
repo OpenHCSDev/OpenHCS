@@ -95,6 +95,16 @@ def _sync_load_config(cache_file: Path) -> Optional[GlobalPipelineConfig]:
             ensure_global_config_context(GlobalPipelineConfig, migrated_config)
             logger.debug("Established global config context for loaded cached config")
 
+            # PERFORMANCE: Pre-warm config analysis cache and build MRO inheritance cache
+            # This eliminates first-load penalties and enables O(1) unsaved changes detection
+            try:
+                from openhcs.config_framework import prewarm_config_analysis_cache
+                prewarm_config_analysis_cache(GlobalPipelineConfig)
+                logger.debug("Pre-warmed config analysis cache and built MRO inheritance cache")
+            except ImportError:
+                # Config framework not available (shouldn't happen, but be defensive)
+                logger.debug("Skipping cache warming (config framework not available)")
+
             return migrated_config
         else:
             logger.warning(f"Invalid config type in cache: {type(cached_config)}")
@@ -236,5 +246,15 @@ def load_cached_global_config_sync() -> GlobalPipelineConfig:
     # CRITICAL FIX: Also establish context for default config
     from openhcs.config_framework.lazy_factory import ensure_global_config_context
     ensure_global_config_context(GlobalPipelineConfig, default_config)
+
+    # PERFORMANCE: Pre-warm config analysis cache and build MRO inheritance cache
+    # This eliminates first-load penalties and enables O(1) unsaved changes detection
+    try:
+        from openhcs.config_framework import prewarm_config_analysis_cache
+        prewarm_config_analysis_cache(GlobalPipelineConfig)
+        logger.info("Pre-warmed config analysis cache and built MRO inheritance cache")
+    except ImportError:
+        # Config framework not available (shouldn't happen, but be defensive)
+        logger.debug("Skipping cache warming (config framework not available)")
 
     return default_config

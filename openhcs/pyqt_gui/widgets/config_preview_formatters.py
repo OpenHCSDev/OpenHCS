@@ -344,8 +344,7 @@ def check_step_has_unsaved_changes(
 
         logger.info(f"🔍 check_step_has_unsaved_changes: Cache miss for step '{getattr(step, 'name', 'unknown')}', proceeding with check")
     else:
-        logger.info(f"🔍 check_step_has_unsaved_changes: No live_context_snapshot provided, returning False")
-        return False
+        logger.info(f"🔍 check_step_has_unsaved_changes: No live_context_snapshot provided, cache disabled")
 
     # PERFORMANCE: Collect saved context snapshot ONCE for all configs
     # This avoids collecting it separately for each config (3x per step)
@@ -404,62 +403,43 @@ def check_step_has_unsaved_changes(
         if config is not None:
             step_configs[config_attr] = config
 
+    # PERFORMANCE: Phase 1-ALT - O(1) type-based cache lookup
+    # Instead of iterating through all managers and their emitted values,
+    # check if any of this step's config TYPES have been marked as changed
     has_any_relevant_changes = False
 
-    for manager in ParameterFormManager._active_form_managers:
-        if not hasattr(manager, '_last_emitted_values') or not manager._last_emitted_values:
-            continue
+    for config_attr, config in step_configs.items():
+        config_type = type(config)
+        if config_type in ParameterFormManager._configs_with_unsaved_changes:
+            has_any_relevant_changes = True
+            logger.debug(
+                f"🔍 check_step_has_unsaved_changes: Type-based cache hit for {config_attr} "
+                f"(type={config_type.__name__}, changed_fields={ParameterFormManager._configs_with_unsaved_changes[config_type]})"
+            )
+            break
 
-        logger.info(f"🔍 check_step_has_unsaved_changes: Checking manager {manager.field_id} (scope={manager.scope_id}) with {len(manager._last_emitted_values)} emitted values")
-
-        # CRITICAL: If manager has a step-specific scope (contains ::step_), only consider it
-        # relevant if it matches the current step's expected scope
-        # This prevents a step window from affecting OTHER steps' unsaved change detection
-        if manager.scope_id and '::step_' in manager.scope_id:
-            # Step-specific manager - only relevant if scope matches THIS step
-            if expected_step_scope and manager.scope_id != expected_step_scope:
-                # Different step - skip this manager
-                logger.info(f"🔍 check_step_has_unsaved_changes: Skipping manager {manager.field_id} - scope mismatch (manager={manager.scope_id}, expected={expected_step_scope})")
+    # Additional scope-based filtering for step-specific changes
+    # If a step-specific scope is expected, verify at least one manager with matching scope has changes
+    if has_any_relevant_changes and expected_step_scope:
+        scope_matched = False
+        for manager in ParameterFormManager._active_form_managers:
+            if not hasattr(manager, '_last_emitted_values') or not manager._last_emitted_values:
                 continue
 
-        # Check if any emitted field matches any of this step's configs (by path or type)
-        # field_path format: "GlobalPipelineConfig.step_materialization_config.well_filter"
-        for field_path, field_value in manager._last_emitted_values.items():
-            # Extract config attribute from field path
-            # Examples:
-            #   "GlobalPipelineConfig.step_materialization_config.well_filter" → "step_materialization_config"
-            #   "PipelineConfig.step_well_filter_config" → "step_well_filter_config"
-            #   "FunctionStep.napari_streaming_config.enabled" → "napari_streaming_config"
-            path_parts = field_path.split('.')
-            if len(path_parts) < 2:
-                continue  # Invalid path
-
-            # Second part is the config attribute (first part is the root object type)
-            config_attr_from_path = path_parts[1]
-
-            # Direct field match: check if this config attribute exists on the step
-            if config_attr_from_path in step_configs:
-                has_any_relevant_changes = True
-                logger.debug(f"🔍 check_step_has_unsaved_changes: Found path match for {field_path} → {config_attr_from_path}")
+            # If manager has step-specific scope, it must match
+            if manager.scope_id and '::step_' in manager.scope_id:
+                if manager.scope_id == expected_step_scope:
+                    scope_matched = True
+                    logger.debug(f"🔍 check_step_has_unsaved_changes: Scope match found for {manager.field_id}")
+                    break
+            else:
+                # Non-step-specific manager (plate/global) affects all steps
+                scope_matched = True
                 break
 
-            # Type-based match using isinstance()
-            if field_value is not None:
-                for config_attr, config in step_configs.items():
-                    # Check if types are related via isinstance (handles MRO inheritance)
-                    if isinstance(config, type(field_value)) or isinstance(field_value, type(config)):
-                        has_any_relevant_changes = True
-                        logger.debug(
-                            f"🔍 check_step_has_unsaved_changes: Found type match for {config_attr} "
-                            f"(config type={type(config).__name__}, emitted field={field_path}, field type={type(field_value).__name__})"
-                        )
-                        break
-
-            if has_any_relevant_changes:
-                break
-
-        if has_any_relevant_changes:
-            break
+        if not scope_matched:
+            has_any_relevant_changes = False
+            logger.debug(f"🔍 check_step_has_unsaved_changes: Type-based cache hit, but no scope match for {expected_step_scope}")
 
     if not has_any_relevant_changes:
         logger.info(f"🔍 check_step_has_unsaved_changes: No relevant changes for step '{getattr(step, 'name', 'unknown')}' - skipping (fast-path)")
