@@ -19,13 +19,18 @@ logger = logging.getLogger(__name__)
 class LazyDefaultPlaceholderService:
     """
     Simplified placeholder service using new contextvars system.
-    
+
     Provides consistent placeholder pattern for lazy configuration classes
     using the same resolution mechanism as the compiler.
     """
-    
+
     PLACEHOLDER_PREFIX = "Default"
     NONE_VALUE_TEXT = "(none)"
+
+    # PERFORMANCE: Cache resolved placeholder text
+    # Key: (dataclass_type, field_name, context_token) → resolved_text
+    # Invalidated when context_token changes (any value changes)
+    _placeholder_text_cache: dict = {}
 
     @staticmethod
     def has_lazy_resolution(dataclass_type: type) -> bool:
@@ -77,6 +82,20 @@ class LazyDefaultPlaceholderService:
                 )
                 return result
 
+        # PERFORMANCE: Cache placeholder text by (type, field, token)
+        # Get current context token to use as cache key
+        try:
+            from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+            context_token = ParameterFormManager._live_context_token_counter
+        except:
+            context_token = 0  # Fallback if manager not available
+
+        cache_key = (dataclass_type, field_name, context_token)
+
+        # Check cache first
+        if cache_key in LazyDefaultPlaceholderService._placeholder_text_cache:
+            return LazyDefaultPlaceholderService._placeholder_text_cache[cache_key]
+
         # Simple approach: Create new instance and let lazy system handle context resolution
         # The context_obj parameter is unused since context should be set externally via config_context()
         try:
@@ -89,6 +108,9 @@ class LazyDefaultPlaceholderService:
             # Fallback to class default
             class_default = LazyDefaultPlaceholderService._get_class_default_value(dataclass_type, field_name)
             result = LazyDefaultPlaceholderService._format_placeholder_text(class_default, prefix)
+
+        # Cache the result
+        LazyDefaultPlaceholderService._placeholder_text_cache[cache_key] = result
 
         return result
 
