@@ -381,13 +381,13 @@ def check_step_has_unsaved_changes(
     logger = logging.getLogger(__name__)
 
     step_token = getattr(step, '_pipeline_scope_token', None)
-    logger.info(f"🔍 check_step_has_unsaved_changes: Checking step '{getattr(step, 'name', 'unknown')}', step_token={step_token}, scope_filter={scope_filter}, live_context_snapshot={live_context_snapshot is not None}")
+    logger.debug(f"🔍 check_step_has_unsaved_changes: Checking step '{getattr(step, 'name', 'unknown')}', step_token={step_token}, scope_filter={scope_filter}, live_context_snapshot={live_context_snapshot is not None}")
 
     # Build expected step scope for this step (used for scope matching)
     expected_step_scope = None
     if scope_filter and step_token:
         expected_step_scope = f"{scope_filter}::{step_token}"
-        logger.info(f"🔍 check_step_has_unsaved_changes: Expected step scope: {expected_step_scope}")
+        logger.debug(f"🔍 check_step_has_unsaved_changes: Expected step scope: {expected_step_scope}")
 
     # PERFORMANCE: Cache result by (step_id, token) to avoid redundant checks
     # Use id(step) as unique identifier for this step instance
@@ -398,12 +398,12 @@ def check_step_has_unsaved_changes(
 
         if cache_key in check_step_has_unsaved_changes._cache:
             cached_result = check_step_has_unsaved_changes._cache[cache_key]
-            logger.info(f"🔍 check_step_has_unsaved_changes: Using cached result for step '{getattr(step, 'name', 'unknown')}': {cached_result}")
+            logger.debug(f"🔍 check_step_has_unsaved_changes: Using cached result for step '{getattr(step, 'name', 'unknown')}': {cached_result}")
             return cached_result
 
-        logger.info(f"🔍 check_step_has_unsaved_changes: Cache miss for step '{getattr(step, 'name', 'unknown')}', proceeding with check")
+        logger.debug(f"🔍 check_step_has_unsaved_changes: Cache miss for step '{getattr(step, 'name', 'unknown')}', proceeding with check")
     else:
-        logger.info(f"🔍 check_step_has_unsaved_changes: No live_context_snapshot provided, cache disabled")
+        logger.debug(f"🔍 check_step_has_unsaved_changes: No live_context_snapshot provided, cache disabled")
 
     # PERFORMANCE: Collect saved context snapshot ONCE for all configs
     # This avoids collecting it separately for each config (3x per step)
@@ -428,7 +428,7 @@ def check_step_has_unsaved_changes(
     if dataclasses.is_dataclass(step):
         # Dataclass: use fields() to get all field names
         all_field_names = [f.name for f in dataclasses.fields(step)]
-        logger.info(f"🔍 check_step_has_unsaved_changes: Step is dataclass, found {len(all_field_names)} fields")
+        logger.debug(f"🔍 check_step_has_unsaved_changes: Step is dataclass, found {len(all_field_names)} fields")
     else:
         # Non-dataclass: introspect object to find dataclass attributes
         # Get all attributes from the object's __dict__ and class
@@ -443,7 +443,7 @@ def check_step_has_unsaved_changes(
                     all_field_names.append(attr_name)
             except (AttributeError, TypeError):
                 continue
-        logger.info(f"🔍 check_step_has_unsaved_changes: Step is non-dataclass, found {len(all_field_names)} dataclass attrs")
+        logger.debug(f"🔍 check_step_has_unsaved_changes: Step is non-dataclass, found {len(all_field_names)} dataclass attrs")
 
     # Filter to only dataclass attributes
     all_config_attrs = []
@@ -452,7 +452,7 @@ def check_step_has_unsaved_changes(
         if field_value is not None and dataclasses.is_dataclass(field_value):
             all_config_attrs.append(field_name)
 
-    logger.info(f"🔍 check_step_has_unsaved_changes: Found {len(all_config_attrs)} dataclass configs: {all_config_attrs}")
+    logger.debug(f"🔍 check_step_has_unsaved_changes: Found {len(all_config_attrs)} dataclass configs: {all_config_attrs}")
 
     # PERFORMANCE: Fast path - check if ANY form manager has changes that could affect this step
     # Collect all config objects ONCE to avoid repeated getattr() calls
@@ -512,12 +512,12 @@ def check_step_has_unsaved_changes(
             logger.debug(f"🔍 check_step_has_unsaved_changes: Type-based cache hit, but no scope match for {expected_step_scope}")
 
     if not has_any_relevant_changes:
-        logger.info(f"🔍 check_step_has_unsaved_changes: No relevant changes for step '{getattr(step, 'name', 'unknown')}' - skipping (fast-path)")
+        logger.debug(f"🔍 check_step_has_unsaved_changes: No relevant changes for step '{getattr(step, 'name', 'unknown')}' - skipping (fast-path)")
         if live_context_snapshot is not None:
             check_step_has_unsaved_changes._cache[cache_key] = False
         return False
     else:
-        logger.info(f"🔍 check_step_has_unsaved_changes: Found relevant changes for step '{getattr(step, 'name', 'unknown')}' - proceeding to full check")
+        logger.debug(f"🔍 check_step_has_unsaved_changes: Found relevant changes for step '{getattr(step, 'name', 'unknown')}' - proceeding to full check")
 
     # Check each config for unsaved changes (exits early on first change)
     for config_attr in all_config_attrs:
@@ -542,7 +542,7 @@ def check_step_has_unsaved_changes(
             return True
 
     # No changes found - cache the result
-    logger.info(f"🔍 check_step_has_unsaved_changes: No unsaved changes found for step '{getattr(step, 'name', 'unknown')}'")
+    logger.debug(f"🔍 check_step_has_unsaved_changes: No unsaved changes found for step '{getattr(step, 'name', 'unknown')}'")
     if live_context_snapshot is not None:
         check_step_has_unsaved_changes._cache[cache_key] = False
     return False

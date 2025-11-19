@@ -3971,7 +3971,7 @@ class ParameterFormManager(QWidget):
 
         # PERFORMANCE: Phase 3 - Batch changes for performance
         # Store manager reference to avoid fragile string matching later
-        logger.info(f"📦 Batching cross-window change: {field_path} = {value}")
+        logger.debug(f"📦 Batching cross-window change: {field_path} = {value}")
         type(self)._pending_cross_window_changes.append(
             (self, param_name, value, self.object_instance, self.context_obj)
         )
@@ -3999,7 +3999,7 @@ class ParameterFormManager(QWidget):
         if not cls._pending_cross_window_changes:
             return
 
-        logger.info(f"📦 Processing {len(cls._pending_cross_window_changes)} batched cross-window changes")
+        logger.debug(f"📦 Processing {len(cls._pending_cross_window_changes)} batched cross-window changes")
 
         # Deduplicate: Keep only the latest value for each (manager, param_name) pair
         # This handles rapid typing where same field changes multiple times
@@ -4008,7 +4008,7 @@ class ParameterFormManager(QWidget):
             key = (id(manager), param_name)
             latest_changes[key] = (manager, param_name, value, obj_instance, context_obj)
 
-        logger.info(f"📦 After deduplication: {len(latest_changes)} unique changes")
+        logger.debug(f"📦 After deduplication: {len(latest_changes)} unique changes")
 
         # PERFORMANCE: O(N) field parsing + O(M) listener updates = O(N+M) instead of O(N×M)
         # Parse field paths ONCE, then copy to all listeners
@@ -4028,7 +4028,7 @@ class ParameterFormManager(QWidget):
                         if final_part:
                             all_identifiers.add(final_part)
 
-        logger.info(f"📦 Parsed {len(latest_changes)} changes into {len(all_identifiers)} identifiers (O(N))")
+        logger.debug(f"📦 Parsed {len(latest_changes)} changes into {len(all_identifiers)} identifiers (O(N))")
 
         # PERFORMANCE: Store changed fields for placeholder refresh filtering
         cls._current_batch_changed_fields = all_identifiers
