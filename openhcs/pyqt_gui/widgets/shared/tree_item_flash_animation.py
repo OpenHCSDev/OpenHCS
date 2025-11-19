@@ -135,35 +135,35 @@ def flash_tree_item(
         item: Tree item to flash
         flash_color: Color to flash with
     """
-    logger.info(f"🔥 flash_tree_item called for item: {item.text(0)}")
+    logger.debug(f"🔥 flash_tree_item called for item: {item.text(0)}")
 
     config = ScopeVisualConfig()
     if not config.LIST_ITEM_FLASH_ENABLED:  # Reuse list item flash config
-        logger.info(f"🔥 Flash DISABLED in config")
+        logger.debug(f"🔥 Flash DISABLED in config")
         return
 
     if item is None:
-        logger.info(f"🔥 Item is None")
+        logger.debug(f"🔥 Item is None")
         return
 
-    logger.info(f"🔥 Creating/getting animator for tree item")
+    logger.debug(f"🔥 Creating/getting animator for tree item")
 
     key = (id(tree_widget), id(item))
 
     # Get or create animator
     if key not in _tree_item_animators:
-        logger.info(f"🔥 Creating NEW animator for tree item")
+        logger.debug(f"🔥 Creating NEW animator for tree item")
         _tree_item_animators[key] = TreeItemFlashAnimator(
             tree_widget, item, flash_color
         )
     else:
-        logger.info(f"🔥 Reusing existing animator for tree item")
+        logger.debug(f"🔥 Reusing existing animator for tree item")
         # Update flash color in case it changed
         animator = _tree_item_animators[key]
         animator.flash_color = flash_color
 
     animator = _tree_item_animators[key]
-    logger.info(f"🔥 Calling animator.flash_update() for tree item")
+    logger.debug(f"🔥 Calling animator.flash_update() for tree item")
     animator.flash_update()
 
 

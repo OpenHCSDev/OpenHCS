@@ -62,7 +62,7 @@ class TreeFormFlashMixin:
         
         # Use global registry to prevent overlapping flashes
         flash_widget(group_box, flash_color=flash_color)
-        logger.info(f"✅ Flashed GroupBox for {field_name}")
+        logger.debug(f"✅ Flashed GroupBox for {field_name}")
     
     def _flash_tree_item(self, config_name: str) -> None:
         """Flash tree item for a config when its placeholder changes.
@@ -77,7 +77,7 @@ class TreeFormFlashMixin:
             # No tree in this widget
             return
         
-        logger.info(f"🌳 _flash_tree_item called for: {config_name}")
+        logger.debug(f"🌳 _flash_tree_item called for: {config_name}")
         
         # Find the tree item with this field_name
         item = self._find_tree_item_by_field_name(config_name, tree_widget)
@@ -85,7 +85,7 @@ class TreeFormFlashMixin:
             logger.warning(f"Could not find tree item for config: {config_name}")
             return
         
-        logger.info(f"🔥 Flashing tree item: {config_name}")
+        logger.debug(f"🔥 Flashing tree item: {config_name}")
         
         # Flash the tree item using global registry
         from PyQt6.QtGui import QColor
@@ -102,7 +102,7 @@ class TreeFormFlashMixin:
         # Use global registry to prevent overlapping flashes
         flash_tree_item(tree_widget, item, flash_color)
         
-        logger.info(f"✅ Flashed tree item for {config_name}")
+        logger.debug(f"✅ Flashed tree item for {config_name}")
     
     def _find_tree_item_by_field_name(self, field_name: str, tree_widget: QTreeWidget, parent_item: Optional[QTreeWidgetItem] = None):
         """Recursively find tree item by field_name.
@@ -117,12 +117,12 @@ class TreeFormFlashMixin:
         """
         if parent_item is None:
             # Search all top-level items
-            logger.info(f"   Searching tree for field_name: {field_name}")
-            logger.info(f"   Tree has {tree_widget.topLevelItemCount()} top-level items")
+            logger.debug(f"   Searching tree for field_name: {field_name}")
+            logger.debug(f"   Tree has {tree_widget.topLevelItemCount()} top-level items")
             for i in range(tree_widget.topLevelItemCount()):
                 item = tree_widget.topLevelItem(i)
                 data = item.data(0, Qt.ItemDataRole.UserRole)
-                logger.info(f"     Top-level item {i}: field_name={data.get('field_name') if data else 'None'}, text={item.text(0)}")
+                logger.debug(f"     Top-level item {i}: field_name={data.get('field_name') if data else 'None'}, text={item.text(0)}")
                 result = self._find_tree_item_by_field_name(field_name, tree_widget, item)
                 if result:
                     return result
@@ -132,7 +132,7 @@ class TreeFormFlashMixin:
         # Check if this item matches
         data = parent_item.data(0, Qt.ItemDataRole.UserRole)
         if data and data.get('field_name') == field_name:
-            logger.info(f"   Found matching tree item: {field_name}")
+            logger.debug(f"   Found matching tree item: {field_name}")
             return parent_item
         
         # Recursively search children

@@ -191,7 +191,8 @@ class LazyMethodBindings:
                     # Check class-level cache
                     cache_key = (self.__class__.__name__, name, current_token)
                     if cache_key in _lazy_resolution_cache:
-                        logger.info(f"🎯 CACHE HIT: {self.__class__.__name__}.{name} (token={current_token})")
+                        # PERFORMANCE: Don't log cache hits - creates massive I/O bottleneck
+                        # (414 log writes per keystroke was slower than the resolution itself!)
                         return _lazy_resolution_cache[cache_key]
                 except ImportError:
                     # No ParameterFormManager available - skip caching
@@ -217,7 +218,7 @@ class LazyMethodBindings:
                                 del _lazy_resolution_cache[key]
                             logger.info(f"🗑️ Evicted {num_to_evict} cache entries (max size={_LAZY_CACHE_MAX_SIZE})")
 
-                        logger.info(f"💾 CACHED: {self.__class__.__name__}.{name} (token={current_token})")
+                        # PERFORMANCE: Don't log cache stores - creates I/O bottleneck
                     except ImportError:
                         # No ParameterFormManager available - skip caching
                         pass

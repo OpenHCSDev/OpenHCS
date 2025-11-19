@@ -49,7 +49,7 @@ class WidgetFlashAnimator:
             return
 
         self._is_flashing = True
-        logger.info(f"🎨 Starting flash animation for {type(self.widget).__name__}")
+        logger.debug(f"🎨 Starting flash animation for {type(self.widget).__name__}")
 
         # Use different approaches depending on widget type
         # GroupBox: Use stylesheet (stylesheets override palettes)
@@ -59,19 +59,19 @@ class WidgetFlashAnimator:
             self._use_stylesheet = True
             # Store original stylesheet
             self._original_stylesheet = self.widget.styleSheet()
-            logger.info(f"   Is GroupBox, using stylesheet approach")
-            logger.info(f"   Original stylesheet: '{self._original_stylesheet}'")
+            logger.debug(f"   Is GroupBox, using stylesheet approach")
+            logger.debug(f"   Original stylesheet: '{self._original_stylesheet}'")
 
             # Apply flash color via stylesheet (overrides parent stylesheet)
             r, g, b, a = self.flash_color.red(), self.flash_color.green(), self.flash_color.blue(), self.flash_color.alpha()
             flash_style = f"QGroupBox {{ background-color: rgba({r}, {g}, {b}, {a}); }}"
-            logger.info(f"   Applying flash style: '{flash_style}'")
+            logger.debug(f"   Applying flash style: '{flash_style}'")
             self.widget.setStyleSheet(flash_style)
         else:
             self._use_stylesheet = False
             # Store original palette
             self._original_palette = self.widget.palette()
-            logger.info(f"   Not GroupBox, using palette approach")
+            logger.debug(f"   Not GroupBox, using palette approach")
 
             # Apply flash color via palette
             flash_palette = self.widget.palette()
@@ -81,30 +81,30 @@ class WidgetFlashAnimator:
         # Setup timer to restore original state
         # CRITICAL: Use widget as parent to prevent garbage collection
         if self._flash_timer is None:
-            logger.info(f"   Creating new timer")
+            logger.debug(f"   Creating new timer")
             self._flash_timer = QTimer(self.widget)
             self._flash_timer.setSingleShot(True)
             self._flash_timer.timeout.connect(self._restore_original)
 
-        logger.info(f"   Starting timer for {self.config.FLASH_DURATION_MS}ms")
+        logger.debug(f"   Starting timer for {self.config.FLASH_DURATION_MS}ms")
         self._flash_timer.start(self.config.FLASH_DURATION_MS)
 
     def _restore_original(self) -> None:
         """Restore original stylesheet or palette."""
         logger.info(f"🔄 _restore_original called for {type(self.widget).__name__}")
         if not self.widget:
-            logger.info(f"   Widget is None, aborting")
+            logger.debug(f"   Widget is None, aborting")
             self._is_flashing = False
             return
 
         # Use the flag to determine which method to restore
         if self._use_stylesheet:
             # Restore original stylesheet
-            logger.info(f"   Restoring stylesheet: '{self._original_stylesheet}'")
+            logger.debug(f"   Restoring stylesheet: '{self._original_stylesheet}'")
             self.widget.setStyleSheet(self._original_stylesheet)
         else:
             # Restore original palette
-            logger.info(f"   Restoring palette")
+            logger.debug(f"   Restoring palette")
             if self._original_palette:
                 self.widget.setPalette(self._original_palette)
 

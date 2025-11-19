@@ -3484,10 +3484,10 @@ class ParameterFormManager(QWidget):
 
         # If placeholder changed, trigger flash
         if last_text is not None and last_text != placeholder_text:
-            logger.info(f"💥 Placeholder changed for {self.field_id}.{param_name}: '{last_text}' -> '{placeholder_text}'")
+            logger.debug(f"💥 Placeholder changed for {self.field_id}.{param_name}: '{last_text}' -> '{placeholder_text}'")
             # If this is a NESTED manager, notify parent to flash the GroupBox
             if self._parent_manager is not None:
-                logger.info(f"🔥 Nested manager {self.field_id} had placeholder change, notifying parent")
+                logger.debug(f"🔥 Nested manager {self.field_id} had placeholder change, notifying parent")
                 self._notify_parent_to_flash_groupbox()
 
         # Update last applied text
@@ -3558,7 +3558,7 @@ class ParameterFormManager(QWidget):
             logger.warning(f"Could not find param_name for nested manager {self.field_id}")
             return
 
-        logger.info(f"🔥 Flashing GroupBox for nested config: {param_name}")
+        logger.debug(f"🔥 Flashing GroupBox for nested config: {param_name}")
 
         # Get the GroupBox widget from parent
         group_box = self._parent_manager.widgets.get(param_name)
@@ -3581,16 +3581,16 @@ class ParameterFormManager(QWidget):
 
         # Use global registry to prevent overlapping flashes
         flash_widget(group_box, flash_color=flash_color)
-        logger.info(f"✅ Flashed GroupBox for {param_name}")
+        logger.debug(f"✅ Flashed GroupBox for {param_name}")
 
         # Notify root manager to flash tree item (if this is a top-level config in ConfigWindow)
-        logger.info(f"🌲 Checking if should flash tree: parent._parent_manager is None? {self._parent_manager._parent_manager is None}")
+        logger.debug(f"🌲 Checking if should flash tree: parent._parent_manager is None? {self._parent_manager._parent_manager is None}")
         if self._parent_manager._parent_manager is None:
             # Parent is root manager - notify it to flash tree
-            logger.info(f"🌲 Notifying root manager to flash tree for {param_name}")
+            logger.debug(f"🌲 Notifying root manager to flash tree for {param_name}")
             self._parent_manager._notify_tree_flash(param_name)
         else:
-            logger.info(f"🌲 NOT notifying tree flash - parent is not root (parent.field_id={self._parent_manager.field_id})")
+            logger.debug(f"🌲 NOT notifying tree flash - parent is not root (parent.field_id={self._parent_manager.field_id})")
 
     def _notify_tree_flash(self, config_name: str) -> None:
         """Notify parent window to flash tree item for a config.

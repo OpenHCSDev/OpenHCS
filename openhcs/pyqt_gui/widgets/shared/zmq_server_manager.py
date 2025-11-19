@@ -694,7 +694,7 @@ class ZMQServerManagerWidget(QWidget):
 
             for port in ports_to_kill:
                 try:
-                    logger.info(f"🔥 FORCE KILL: Force killing server on port {port} (kills workers AND server)")
+                    logger.debug(f"🔥 FORCE KILL: Force killing server on port {port} (kills workers AND server)")
                     # Use kill_server_on_port with graceful=False
                     # This handles both IPC and TCP modes correctly
                     success = ZMQClient.kill_server_on_port(port, graceful=False)
