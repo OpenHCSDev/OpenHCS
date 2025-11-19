@@ -34,18 +34,29 @@ class WidgetFlashAnimator:
         self._is_flashing: bool = False
         self._use_stylesheet: bool = False  # Track which method we used
 
-    def flash_update(self) -> None:
-        """Trigger flash animation on widget background."""
+    def flash_update(self, use_coordinator: bool = True) -> None:
+        """Trigger flash animation on widget background.
+
+        Args:
+            use_coordinator: If True, schedule restoration via coordinator instead of local timer.
+                           This batches all flash restorations to prevent event loop blocking.
+        """
         if not self.widget or not self.widget.isVisible():
             logger.info(f"⚠️ Widget not visible or None")
             return
 
         if self._is_flashing:
-            # Already flashing - restart timer
-            logger.info(f"⚠️ Already flashing, restarting timer")
-            if self._flash_timer:
-                self._flash_timer.stop()
-                self._flash_timer.start(self.config.FLASH_DURATION_MS)
+            # Already flashing - cancel old timer if using coordinator
+            logger.info(f"⚠️ Already flashing, restarting")
+            if use_coordinator:
+                # Cancel local timer, coordinator will handle restoration
+                if self._flash_timer:
+                    self._flash_timer.stop()
+            else:
+                # Using local timer, just restart it
+                if self._flash_timer:
+                    self._flash_timer.stop()
+                    self._flash_timer.start(self.config.FLASH_DURATION_MS)
             return
 
         self._is_flashing = True
@@ -78,16 +89,27 @@ class WidgetFlashAnimator:
             flash_palette.setColor(QPalette.ColorRole.Base, self.flash_color)
             self.widget.setPalette(flash_palette)
 
-        # Setup timer to restore original state
-        # CRITICAL: Use widget as parent to prevent garbage collection
-        if self._flash_timer is None:
-            logger.debug(f"   Creating new timer")
-            self._flash_timer = QTimer(self.widget)
-            self._flash_timer.setSingleShot(True)
-            self._flash_timer.timeout.connect(self._restore_original)
+        # PERFORMANCE: Schedule restoration via coordinator instead of local timer
+        if use_coordinator:
+            # Register with coordinator for batched restoration
+            try:
+                from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+                ParameterFormManager.schedule_flash_restoration(self, self.config.FLASH_DURATION_MS)
+                logger.debug(f"   Scheduled restoration via coordinator ({self.config.FLASH_DURATION_MS}ms)")
+            except ImportError:
+                # Fallback to local timer if coordinator not available
+                use_coordinator = False
 
-        logger.debug(f"   Starting timer for {self.config.FLASH_DURATION_MS}ms")
-        self._flash_timer.start(self.config.FLASH_DURATION_MS)
+        if not use_coordinator:
+            # Setup local timer to restore original state (fallback)
+            if self._flash_timer is None:
+                logger.debug(f"   Creating new timer")
+                self._flash_timer = QTimer(self.widget)
+                self._flash_timer.setSingleShot(True)
+                self._flash_timer.timeout.connect(self._restore_original)
+
+            logger.debug(f"   Starting timer for {self.config.FLASH_DURATION_MS}ms")
+            self._flash_timer.start(self.config.FLASH_DURATION_MS)
 
     def _restore_original(self) -> None:
         """Restore original stylesheet or palette."""

@@ -296,6 +296,8 @@ class ParameterFormManager(QWidget):
     _pending_listener_updates: Set[Any] = set()  # External listeners (PlateManager, etc.)
     _pending_placeholder_refreshes: Set['ParameterFormManager'] = set()  # Form managers needing refresh
     _pending_flash_widgets: Set[Tuple[Any, Any]] = set()  # (widget/item, color) tuples
+    _pending_flash_restorations: List[Any] = []  # Flash animators awaiting restoration (batched to prevent event loop blocking)
+    _flash_restoration_timer: Optional['QTimer'] = None  # Single timer for ALL flash restorations
     _current_batch_changed_fields: Set[str] = set()  # Field identifiers that changed in current batch
     _coordinator_timer: Optional['QTimer'] = None
 
@@ -4087,6 +4089,55 @@ class ParameterFormManager(QWidget):
         logger.debug(f"📝 Scheduled flash for {type(target).__name__}")
         # Start coordinator immediately (flashes should be instant)
         cls._start_coordinated_update_timer()
+
+    @classmethod
+    def schedule_flash_restoration(cls, animator: Any, duration_ms: int):
+        """Schedule flash restoration via coordinator to prevent event loop blocking.
+
+        PERFORMANCE: Batches ALL flash restorations together instead of using individual
+        QTimer callbacks that block the event loop sequentially.
+
+        Args:
+            animator: WidgetFlashAnimator instance awaiting restoration
+            duration_ms: How long until restoration (typically 300ms)
+        """
+        # Add to pending restorations
+        cls._pending_flash_restorations.append(animator)
+        logger.debug(f"📝 Scheduled flash restoration for {type(animator.widget).__name__ if animator.widget else 'None'}")
+
+        # Start/restart single restoration timer for ALL flashes
+        from PyQt6.QtCore import QTimer
+        if cls._flash_restoration_timer is not None:
+            # Don't restart - let existing timer handle all restorations
+            pass
+        else:
+            # Create new timer for batch restoration
+            cls._flash_restoration_timer = QTimer()
+            cls._flash_restoration_timer.setSingleShot(True)
+            cls._flash_restoration_timer.timeout.connect(cls._execute_flash_restorations)
+            cls._flash_restoration_timer.start(duration_ms)
+            logger.debug(f"⏱️  Started flash restoration timer ({duration_ms}ms) for {len(cls._pending_flash_restorations)} flashes")
+
+    @classmethod
+    def _execute_flash_restorations(cls):
+        """Batch restore ALL pending flash animations to prevent event loop blocking."""
+        if not cls._pending_flash_restorations:
+            return
+
+        logger.debug(f"🔄 Batch restoring {len(cls._pending_flash_restorations)} flashes")
+
+        # Restore all flashes in single pass
+        for animator in cls._pending_flash_restorations:
+            try:
+                animator._restore_original()
+            except Exception as e:
+                logger.warning(f"Failed to restore flash: {e}")
+
+        # Clear pending restorations
+        cls._pending_flash_restorations.clear()
+        cls._flash_restoration_timer = None
+
+        logger.debug(f"✅ Batch flash restoration complete")
 
     @classmethod
     def _start_coordinated_update_timer(cls):
