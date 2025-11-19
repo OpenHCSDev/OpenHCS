@@ -268,7 +268,7 @@ class ParameterFormManager(QWidget):
     # Trailing debounce delays (ms) - timer restarts on each change, only executes after changes stop
     # This prevents expensive placeholder refreshes on every keystroke during rapid typing
     PARAMETER_CHANGE_DEBOUNCE_MS = 100  # Debounce for same-window placeholder refreshes
-    CROSS_WINDOW_REFRESH_DELAY_MS = 100  # Debounce for cross-window placeholder refreshes
+    CROSS_WINDOW_REFRESH_DELAY_MS = 0  # INSTANT: No debounce for cross-window updates (batching handles it)
 
     _live_context_token_counter = 0
 
@@ -3983,17 +3983,36 @@ class ParameterFormManager(QWidget):
 
         logger.info(f"📦 After deduplication: {len(latest_changes)} unique changes")
 
-        # PERFORMANCE: Emit signals synchronously for immediate listener collection
-        # Listeners will add themselves to _pending_listener_updates instead of starting timers
+        # PERFORMANCE: O(N) field parsing + O(M) listener updates = O(N+M) instead of O(N×M)
+        # Parse field paths ONCE, then copy to all listeners
+
+        # Extract and parse all field identifiers ONCE (O(N))
+        all_identifiers = set()
         for manager, param_name, value, obj_instance, context_obj in latest_changes.values():
             field_path = f"{manager.field_id}.{param_name}"
-            logger.info(f"📡 Emitting batched change: {field_path} = {value}")
-            manager.context_value_changed.emit(field_path, value, obj_instance, context_obj)
+            # Parse field path to extract identifiers (same logic as handle_cross_window_preview_change)
+            if '.' in field_path:
+                parts = field_path.split('.', 1)
+                if len(parts) == 2:
+                    root_token, attr_path = parts
+                    all_identifiers.add(attr_path)
+                    if '.' in attr_path:
+                        final_part = attr_path.split('.')[-1]
+                        if final_part:
+                            all_identifiers.add(final_part)
 
-        # PERFORMANCE: Coordinate all listener updates to happen simultaneously
-        # Start single shared timer that updates all collected listeners at once
+        logger.info(f"📦 Parsed {len(latest_changes)} changes into {len(all_identifiers)} identifiers (O(N))")
+
+        # Copy parsed identifiers to each listener (O(M))
+        for listener, value_changed_handler, refresh_handler in cls._external_listeners:
+            if hasattr(listener, '_pending_changed_fields'):
+                listener._pending_changed_fields.update(all_identifiers)  # O(1) set union
+            cls._pending_listener_updates.add(listener)
+            logger.info(f"📝 Added {listener.__class__.__name__} to coordinator queue")
+
+        # PERFORMANCE: Start coordinator - O(1) regardless of change count
         if cls._pending_listener_updates:
-            logger.info(f"🎯 Coordinating updates for {len(cls._pending_listener_updates)} listeners")
+            logger.info(f"🚀 Starting coordinated update for {len(cls._pending_listener_updates)} listeners")
             cls._start_coordinated_update_timer()
 
         # Clear pending changes

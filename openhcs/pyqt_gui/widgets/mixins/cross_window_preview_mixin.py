@@ -33,8 +33,8 @@ class CrossWindowPreviewMixin:
     """
 
     # Debounce delay for preview updates (ms)
-    # Trailing debounce: timer restarts on each change, only executes after typing stops
-    PREVIEW_UPDATE_DEBOUNCE_MS = 100
+    # Set to 0 for instant updates - coordinator handles batching
+    PREVIEW_UPDATE_DEBOUNCE_MS = 0  # INSTANT: No lag
 
     # Scope resolver sentinels
     ALL_ITEMS_SCOPE = "__ALL_ITEMS_SCOPE__"
