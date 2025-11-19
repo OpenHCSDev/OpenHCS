@@ -746,11 +746,48 @@ Scope Precedence in Resolution
 
 The scope hierarchy determines which value wins during resolution:
 
-1. **Step scope** (``/plate_001::step_6``) - highest precedence
-2. **Plate scope** (``/plate_001``) - middle precedence
-3. **Global scope** (``None``) - lowest precedence
+1. **Step scope** (``/plate_001::step_6``) - highest precedence (specificity=2)
+2. **Plate scope** (``/plate_001``) - middle precedence (specificity=1)
+3. **Global scope** (``None``) - lowest precedence (specificity=0)
 
 When a step has its own override at step scope, it takes precedence over plate scope and global scope values. This is why the before_snapshot must include step overrides - otherwise resolution incorrectly uses lower-precedence values.
+
+**Scope-Aware Priority Resolution** (Added in commit cf4f06b0):
+
+The configuration resolution system now tracks scope information through the context stack and uses scope specificity to prioritize configs when multiple configs match during field resolution.
+
+.. code-block:: python
+
+    # From dual_axis_resolver.py
+    def get_scope_specificity(scope_id: Optional[str]) -> int:
+        """Calculate scope specificity for priority ordering.
+
+        More specific scopes have higher values:
+        - None (global): 0
+        - "plate_path": 1
+        - "plate_path::step": 2
+        - "plate_path::step::nested": 3
+        """
+        if scope_id is None:
+            return 0
+        return scope_id.count('::') + 1
+
+When multiple configs match during MRO traversal, the resolver sorts them by scope specificity and returns the value from the most specific scope. This ensures plate-scoped configs override global configs, and step-scoped configs override both.
+
+**Context Manager Scope Tracking**:
+
+The ``config_context()`` manager now accepts ``scope_id`` and ``config_scopes`` parameters to track scope information through the context stack:
+
+.. code-block:: python
+
+    # From context_manager.py
+    current_config_scopes: contextvars.ContextVar[Dict[str, Optional[str]]] = ...
+    current_scope_id: contextvars.ContextVar[Optional[str]] = ...
+
+    with config_context(pipeline_config, scope_id=str(plate_path), config_scopes={...}):
+        # Scope information is now available during resolution
+        # resolve_field_inheritance() can prioritize by scope specificity
+        pass
 
 Implementation Pattern
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -888,6 +925,82 @@ Caches check if their cached token matches the current token:
         return result
 
 **Key Insight**: Token-based invalidation is global and immediate. Any parameter change anywhere invalidates all caches, ensuring consistency.
+
+Scoped Unsaved Changes Cache
+=============================
+
+**Added in commit cf4f06b0**
+
+The unsaved changes cache is now scoped to prevent cross-step contamination. Previously, the cache was unscoped (``Dict[Type, Set[str]]``), causing step 6's unsaved changes to incorrectly mark all steps as having unsaved changes.
+
+Cache Structure
+---------------
+
+.. code-block:: python
+
+    # From parameter_form_manager.py
+    # OLD (unscoped): Dict[Type, Set[str]]
+    # NEW (scoped): Dict[Tuple[Type, Optional[str]], Set[str]]
+    _configs_with_unsaved_changes: Dict[Tuple[Type, Optional[str]], Set[str]] = {}
+
+    # Example cache entries:
+    # (LazyWellFilterConfig, None) → {'well_filter'}  # Global scope
+    # (LazyWellFilterConfig, "/plate") → {'well_filter_mode'}  # Plate scope
+    # (LazyWellFilterConfig, "/plate::step_6") → {'well_filter'}  # Step scope
+
+Multi-Level Cache Lookup
+-------------------------
+
+The fast-path now checks cache at multiple scope levels (step-specific, plate-level, global) using MRO chain traversal:
+
+.. code-block:: python
+
+    def check_step_has_unsaved_changes(step, ...):
+        expected_step_scope = f"{plate_path}::step_token"
+
+        for config_attr, config in step_configs.items():
+            config_type = type(config)
+
+            # Check the entire MRO chain (including parent classes)
+            for mro_class in config_type.__mro__:
+                # Try step-specific scope first
+                step_cache_key = (mro_class, expected_step_scope)
+                if step_cache_key in ParameterFormManager._configs_with_unsaved_changes:
+                    has_any_relevant_changes = True
+                    break
+
+                # Try plate-level scope
+                plate_scope = expected_step_scope.split('::')[0]
+                plate_cache_key = (mro_class, plate_scope)
+                if plate_cache_key in ParameterFormManager._configs_with_unsaved_changes:
+                    has_any_relevant_changes = True
+                    break
+
+                # Try global scope (None)
+                global_cache_key = (mro_class, None)
+                if global_cache_key in ParameterFormManager._configs_with_unsaved_changes:
+                    has_any_relevant_changes = True
+                    break
+
+**Cross-Step Isolation**: The scoped cache prevents step 6's unsaved changes from incorrectly marking step 0 as having unsaved changes.
+
+**MRO Chain Traversal**: Checking the entire MRO chain ensures that changes to parent config types (e.g., ``WellFilterConfig``) are detected in child configs (e.g., ``StepWellFilterConfig``).
+
+Cache Invalidation
+------------------
+
+The cache is invalidated when the live context token changes:
+
+.. code-block:: python
+
+    # From parameter_form_manager.py
+    _configs_with_unsaved_changes_token: int = -1  # Token when cache was last populated
+
+    # On value change:
+    type(self)._live_context_token_counter += 1  # Invalidates cache
+
+    # On reset:
+    type(self)._clear_unsaved_changes_cache("reset_all")
 
 Field Path Format and Fast-Path Optimization
 =============================================
