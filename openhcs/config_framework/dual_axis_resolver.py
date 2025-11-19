@@ -62,20 +62,30 @@ def resolve_field_inheritance_old(
     """
     obj_type = type(obj)
 
+    if field_name == 'well_filter_mode':
+        logger.info(f"🔍 RESOLVER START: {obj_type.__name__}.{field_name}")
+        logger.info(f"🔍 RESOLVER: available_configs has {len(available_configs)} items")
+
     # Step 1: Check concrete value in merged context for obj's type (HIGHEST PRIORITY)
     # CRITICAL: Context values take absolute precedence over inheritance blocking
     # The config_context() manager merges concrete values into available_configs
     for config_name, config_instance in available_configs.items():
         if type(config_instance) == obj_type:
+            if field_name == 'well_filter_mode':
+                logger.info(f"🔍 STEP 1: Found exact type match: {config_name}")
             try:
                 # Use object.__getattribute__ to avoid triggering lazy __getattribute__ recursion
                 value = object.__getattribute__(config_instance, field_name)
+                if field_name == 'well_filter_mode':
+                    logger.info(f"🔍 STEP 1: {config_name}.{field_name} = {value}")
                 if value is not None:
-                    if field_name == 'well_filter':
-                        logger.debug(f"🔍 CONTEXT: Found concrete value in merged context {obj_type.__name__}.{field_name}: {value}")
+                    if field_name in ['well_filter', 'well_filter_mode']:
+                        logger.info(f"🔍 CONTEXT: Found concrete value in merged context {obj_type.__name__}.{field_name}: {value}")
                     return value
             except AttributeError:
                 # Field doesn't exist on this config type
+                if field_name == 'well_filter_mode':
+                    logger.info(f"🔍 STEP 1: {config_name} has no field {field_name}")
                 continue
 
     # Step 1b: Check concrete value on obj instance itself (fallback)
@@ -95,32 +105,48 @@ def resolve_field_inheritance_old(
     # Only block inheritance if the EXACT same type has a non-None value
     for config_name, config_instance in available_configs.items():
         if type(config_instance) == obj_type:
+            if field_name == 'well_filter_mode':
+                logger.info(f"🔍 STEP 2: Found exact type match: {config_name} (type={type(config_instance).__name__})")
             try:
                 field_value = object.__getattribute__(config_instance, field_name)
+                if field_name == 'well_filter_mode':
+                    logger.info(f"🔍 STEP 2: {config_name}.{field_name} = {field_value}")
                 if field_value is not None:
                     # This exact type has a concrete value - use it, don't inherit
-                    if field_name == 'well_filter':
-                        logger.debug(f"🔍 FIELD-SPECIFIC BLOCKING: {obj_type.__name__}.{field_name} = {field_value} (concrete) - blocking inheritance")
+                    if field_name in ['well_filter', 'well_filter_mode']:
+                        logger.info(f"🔍 FIELD-SPECIFIC BLOCKING: {obj_type.__name__}.{field_name} = {field_value} (concrete) - blocking inheritance")
                     return field_value
             except AttributeError:
+                if field_name == 'well_filter_mode':
+                    logger.info(f"🔍 STEP 2: {config_name} has no field {field_name}")
                 continue
 
     # DEBUG: Log what we're trying to resolve
-    if field_name in ['output_dir_suffix', 'sub_dir', 'well_filter']:
-        logger.debug(f"🔍 RESOLVING {obj_type.__name__}.{field_name} - checking context and inheritance")
-        logger.debug(f"🔍 AVAILABLE CONFIGS: {list(available_configs.keys())}")
+    if field_name in ['output_dir_suffix', 'sub_dir', 'well_filter', 'well_filter_mode']:
+        logger.info(f"🔍 RESOLVING {obj_type.__name__}.{field_name} - checking context and inheritance")
+        logger.info(f"🔍 AVAILABLE CONFIGS: {list(available_configs.keys())}")
+        logger.info(f"🔍 AVAILABLE CONFIG TYPES: {[type(v).__name__ for v in available_configs.values()]}")
+        logger.info(f"🔍 MRO: {[cls.__name__ for cls in obj_type.__mro__ if is_dataclass(cls)]}")
 
     # Step 3: Y-axis inheritance within obj's MRO
     blocking_class = _find_blocking_class_in_mro(obj_type, field_name)
-    
+
+    if field_name == 'well_filter_mode':
+        logger.info(f"🔍 Y-AXIS: Blocking class = {blocking_class.__name__ if blocking_class else 'None'}")
+
     for parent_type in obj_type.__mro__[1:]:
         if not is_dataclass(parent_type):
             continue
-            
+
+        if field_name == 'well_filter_mode':
+            logger.info(f"🔍 Y-AXIS: Checking parent {parent_type.__name__}")
+
         # Check blocking logic
         if blocking_class and parent_type != blocking_class:
+            if field_name == 'well_filter_mode':
+                logger.info(f"🔍 Y-AXIS: Skipping {parent_type.__name__} (not blocking class)")
             continue
-            
+
         if blocking_class and parent_type == blocking_class:
             # Check if blocking class has concrete value in available configs
             for config_name, config_instance in available_configs.items():
@@ -128,8 +154,12 @@ def resolve_field_inheritance_old(
                     try:
                         # Use object.__getattribute__ to avoid triggering lazy __getattribute__ recursion
                         value = object.__getattribute__(config_instance, field_name)
+                        if field_name == 'well_filter_mode':
+                            logger.info(f"🔍 Y-AXIS: Blocking class {parent_type.__name__} has value {value}")
                         if value is None:
                             # Blocking class has None - inheritance blocked
+                            if field_name == 'well_filter_mode':
+                                logger.info(f"🔍 Y-AXIS: Blocking class has None - inheritance blocked")
                             break
                         else:
                             logger.debug(f"Inherited from blocking class {parent_type.__name__}: {value}")
@@ -145,15 +175,17 @@ def resolve_field_inheritance_old(
                 try:
                     # Use object.__getattribute__ to avoid triggering lazy __getattribute__ recursion
                     value = object.__getattribute__(config_instance, field_name)
-                    if field_name in ['output_dir_suffix', 'sub_dir', 'well_filter']:
-                        logger.debug(f"🔍 Y-AXIS INHERITANCE: {parent_type.__name__}.{field_name} = {value}")
+                    if field_name in ['output_dir_suffix', 'sub_dir', 'well_filter', 'well_filter_mode']:
+                        logger.info(f"🔍 Y-AXIS INHERITANCE: {parent_type.__name__}.{field_name} = {value}")
                     if value is not None:
-                        if field_name in ['output_dir_suffix', 'sub_dir', 'well_filter']:
-                            logger.debug(f"🔍 Y-AXIS INHERITANCE: FOUND {parent_type.__name__}.{field_name}: {value} (returning)")
+                        if field_name in ['output_dir_suffix', 'sub_dir', 'well_filter', 'well_filter_mode']:
+                            logger.info(f"🔍 Y-AXIS INHERITANCE: FOUND {parent_type.__name__}.{field_name}: {value} (returning)")
                         logger.debug(f"Inherited from {parent_type.__name__}: {value}")
                         return value
                 except AttributeError:
                     # Field doesn't exist on this config type
+                    if field_name == 'well_filter_mode':
+                        logger.info(f"🔍 Y-AXIS: {parent_type.__name__} has no field {field_name}")
                     continue
 
     # Step 4: Cross-dataclass inheritance from related config types (MRO-based)
@@ -261,6 +293,10 @@ def resolve_field_inheritance(
     """
     obj_type = type(obj)
 
+    if field_name in ['well_filter_mode', 'output_dir_suffix']:
+        logger.info(f"🔍 RESOLVER: {obj_type.__name__}.{field_name}")
+        logger.info(f"🔍 RESOLVER: MRO = {[cls.__name__ for cls in obj_type.__mro__ if is_dataclass(cls)]}")
+
     # Step 1: Check if exact same type has concrete value in context
     for config_name, config_instance in available_configs.items():
         if type(config_instance) == obj_type:
@@ -268,6 +304,8 @@ def resolve_field_inheritance(
                 # CRITICAL: Always use object.__getattribute__() to avoid infinite recursion
                 # Lazy configs store their raw values as instance attributes
                 field_value = object.__getattribute__(config_instance, field_name)
+                if field_name in ['well_filter_mode', 'output_dir_suffix']:
+                    logger.info(f"🔍 STEP 1: {config_name}.{field_name} = {field_value}")
                 if field_value is not None:
                     return field_value
             except AttributeError:
@@ -276,6 +314,8 @@ def resolve_field_inheritance(
     # Step 2: MRO-based inheritance - traverse MRO from most to least specific
     # For each class in the MRO, check if there's a config instance in context with concrete value
     for mro_class in obj_type.__mro__:
+        if field_name in ['well_filter_mode', 'output_dir_suffix']:
+            logger.info(f"🔍 STEP 2: Checking MRO class {mro_class.__name__}")
         if not is_dataclass(mro_class):
             continue
 
@@ -294,27 +334,66 @@ def resolve_field_inheritance(
             if instance_type == mro_class:
                 # Prioritize lazy types over base types
                 if instance_type.__name__.startswith('Lazy'):
+                    if field_name == 'well_filter_mode' and mro_class.__name__ == 'WellFilterConfig':
+                        logger.info(f"🔍 MATCHING: Exact match - {config_name} is lazy, setting lazy_match")
                     lazy_match = config_instance
                 else:
+                    if field_name == 'well_filter_mode' and mro_class.__name__ == 'WellFilterConfig':
+                        logger.info(f"🔍 MATCHING: Exact match - {config_name} is base, setting base_match")
                     base_match = config_instance
             # Check if instance is base type of lazy MRO class (e.g., StepWellFilterConfig matches LazyStepWellFilterConfig)
             elif mro_class.__name__.startswith('Lazy') and instance_type.__name__ == mro_class.__name__[4:]:
+                if field_name == 'well_filter_mode' and mro_class.__name__ == 'WellFilterConfig':
+                    logger.info(f"🔍 MATCHING: Base type of lazy MRO - {config_name}, setting base_match")
                 base_match = config_instance
             # Check if instance is lazy type of non-lazy MRO class (e.g., LazyStepWellFilterConfig matches StepWellFilterConfig)
             elif instance_type.__name__.startswith('Lazy') and mro_class.__name__ == instance_type.__name__[4:]:
+                if field_name == 'well_filter_mode' and mro_class.__name__ == 'WellFilterConfig':
+                    logger.info(f"🔍 MATCHING: Lazy type of non-lazy MRO - {config_name}, setting lazy_match")
                 lazy_match = config_instance
 
-        # Prioritize lazy match over base match
-        matched_instance = lazy_match if lazy_match is not None else base_match
+        # Prioritization logic:
+        # CRITICAL: Always check BOTH lazy and base instances, prioritizing non-None values
+        # This ensures we get class defaults from base instances even when MRO contains lazy types
+        #
+        # Example: LazyStepMaterializationConfig.output_dir_suffix
+        # - MRO contains LazyPathPlanningConfig (lazy type)
+        # - available_configs has LazyPathPlanningConfig (value=None) AND PathPlanningConfig (value="_openhcs")
+        # - We should use PathPlanningConfig's "_openhcs" class default, not LazyPathPlanningConfig's None
+        #
+        # Strategy: Try lazy first (for context values), then base (for class defaults)
+        matched_instance = None
+        if lazy_match is not None:
+            try:
+                value = object.__getattribute__(lazy_match, field_name)
+                if value is not None:
+                    matched_instance = lazy_match
+            except AttributeError:
+                pass
+
+        if matched_instance is None and base_match is not None:
+            matched_instance = base_match
+
+        if field_name in ['well_filter_mode', 'output_dir_suffix']:
+            if matched_instance is not None:
+                logger.info(f"🔍 STEP 2: Found match for {mro_class.__name__}: {type(matched_instance).__name__}")
+            else:
+                logger.info(f"🔍 STEP 2: No match for {mro_class.__name__}")
 
         if matched_instance is not None:
             try:
                 # CRITICAL: Always use object.__getattribute__() to avoid infinite recursion
                 # Lazy configs store their raw values as instance attributes
                 value = object.__getattribute__(matched_instance, field_name)
+                if field_name in ['well_filter_mode', 'output_dir_suffix']:
+                    logger.info(f"🔍 STEP 2: {type(matched_instance).__name__}.{field_name} = {value}")
                 if value is not None:
+                    if field_name in ['well_filter_mode', 'output_dir_suffix']:
+                        logger.info(f"✅ RETURNING {value} from {type(matched_instance).__name__}")
                     return value
             except AttributeError:
+                if field_name in ['well_filter_mode', 'output_dir_suffix']:
+                    logger.info(f"🔍 STEP 2: {type(matched_instance).__name__} has no field {field_name}")
                 continue
 
     # Step 3: Class defaults as final fallback
