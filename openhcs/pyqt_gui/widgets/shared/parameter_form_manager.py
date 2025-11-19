@@ -352,14 +352,13 @@ class ParameterFormManager(QWidget):
 
         logger.info(f"🔧 Built MRO inheritance cache with {len(cls._mro_inheritance_cache)} entries")
 
-        # Log a few examples for debugging
+        # Log all WellFilterConfig-related entries for debugging
         if cls._mro_inheritance_cache:
-            for i, (cache_key, child_types) in enumerate(cls._mro_inheritance_cache.items()):
-                if i >= 3:  # Only log first 3 examples
-                    break
+            for cache_key, child_types in cls._mro_inheritance_cache.items():
                 parent_type, field_name = cache_key
-                child_names = [t.__name__ for t in child_types]
-                logger.debug(f"🔧   Example: ({parent_type.__name__}, '{field_name}') → {child_names}")
+                if 'WellFilter' in parent_type.__name__:
+                    child_names = [t.__name__ for t in child_types]
+                    logger.info(f"🔧   WellFilter cache: ({parent_type.__name__}, '{field_name}') → {child_names}")
 
     @classmethod
     def should_use_async(cls, param_count: int) -> bool:
@@ -416,14 +415,39 @@ class ParameterFormManager(QWidget):
                 # Apply scope filter if provided
                 if scope_filter is not None and manager.scope_id is not None:
                     if not cls._is_scope_visible_static(manager.scope_id, scope_filter):
+                        logger.info(
+                            f"🔍 collect_live_context: Skipping manager {manager.field_id} "
+                            f"(scope_id={manager.scope_id}) - not visible in scope_filter={scope_filter}"
+                        )
                         continue
 
                 # Collect values
                 live_values = manager.get_user_modified_values()
                 obj_type = type(manager.object_instance)
 
-                # Map by the actual type
-                live_context[obj_type] = live_values
+                # CRITICAL: Only add GLOBAL managers (scope_id=None) to live_context
+                # Scoped managers should ONLY go into scoped_live_context, never live_context
+                #
+                # This prevents cross-plate contamination where:
+                # - collect_live_context() is called for P1 with scope_filter=P1
+                # - It adds GlobalPipelineConfig to live_context (correct)
+                # - Later, collect_live_context() is called for P2 with scope_filter=P2
+                # - It adds P2's PipelineConfig to live_context, OVERWRITING GlobalPipelineConfig
+                # - P1's resolution then picks up P2's values instead of GlobalPipelineConfig
+                #
+                # Fix: NEVER add scoped managers to live_context, only to scoped_live_context
+                if manager.scope_id is None:
+                    # Global manager - affects all scopes
+                    logger.info(
+                        f"🔍 collect_live_context: Adding GLOBAL manager {manager.field_id} "
+                        f"(type={obj_type.__name__}) to live_context"
+                    )
+                    live_context[obj_type] = live_values
+                else:
+                    logger.info(
+                        f"🔍 collect_live_context: NOT adding SCOPED manager {manager.field_id} "
+                        f"(scope_id={manager.scope_id}, type={obj_type.__name__}) to live_context (scoped managers only go in scoped_live_context)"
+                    )
 
                 # Track scope-specific mappings (for step-level overlays)
                 if manager.scope_id:
@@ -3776,6 +3800,8 @@ class ParameterFormManager(QWidget):
         """
         import dataclasses
 
+        logger.info(f"🔍 MARK-UNSAVED: param_name={param_name}, value_type={type(value).__name__}, field_id={self.field_id}")
+
         # Extract config attribute from param_name
         config_attr = param_name.split('.')[0] if '.' in param_name else param_name
 
@@ -3783,6 +3809,8 @@ class ParameterFormManager(QWidget):
         config = getattr(self.object_instance, config_attr, None)
         if config is None:
             config = getattr(self.context_obj, config_attr, None)
+
+        logger.info(f"🔍 MARK-UNSAVED: config_attr={config_attr}, config_type={type(config).__name__ if config else None}, is_dataclass={dataclasses.is_dataclass(config) if config else False}")
 
         # Determine the config type to mark
         # If config is a dataclass (nested config object), use its type
@@ -3794,6 +3822,7 @@ class ParameterFormManager(QWidget):
             config_type = type(self.object_instance)
         else:
             # Not a dataclass at all - skip cache marking
+            logger.info(f"🔍 MARK-UNSAVED: Skipping - not a dataclass")
             return
 
         # PERFORMANCE: Monitor cache size to prevent unbounded growth
@@ -3806,26 +3835,64 @@ class ParameterFormManager(QWidget):
         # Extract field name from param_name
         field_name = param_name.split('.')[-1] if '.' in param_name else param_name
 
-        # Mark the directly edited type
-        if config_type not in type(self)._configs_with_unsaved_changes:
-            type(self)._configs_with_unsaved_changes[config_type] = set()
-        type(self)._configs_with_unsaved_changes[config_type].add(field_name)
+        # CRITICAL: If the value is a dataclass (nested config), mark ALL fields within it
+        # This ensures MRO inheritance cache lookups work correctly
+        # Example: when well_filter_config changes, mark both 'well_filter' and 'well_filter_mode'
+        fields_to_mark = []
+        if config is not None and dataclasses.is_dataclass(config):
+            # Get all fields from the config dataclass
+            for field in dataclasses.fields(config):
+                fields_to_mark.append(field.name)
+            logger.info(f"🔍 MARK-UNSAVED: Nested config - marking {len(fields_to_mark)} fields: {fields_to_mark}")
+        else:
+            # Primitive field - just mark the field name itself
+            fields_to_mark.append(field_name)
+            logger.info(f"🔍 MARK-UNSAVED: Primitive field - marking: {field_name}")
 
-        # CRITICAL: Also mark all types that can inherit this field via MRO
-        # This ensures flash detection works when parent configs change
-        cache_key = (config_type, field_name)
-        affected_types = type(self)._mro_inheritance_cache.get(cache_key, set())
+        # Mark the directly edited type for each field
+        for field_to_mark in fields_to_mark:
+            if config_type not in type(self)._configs_with_unsaved_changes:
+                type(self)._configs_with_unsaved_changes[config_type] = set()
+            type(self)._configs_with_unsaved_changes[config_type].add(field_to_mark)
 
-        if affected_types:
-            logger.debug(
-                f"🔍 Marking {len(affected_types)} child types that inherit "
-                f"{config_type.__name__}.{field_name}: {[t.__name__ for t in affected_types]}"
+            # CRITICAL: Also mark all types that can inherit this field via MRO
+            # This ensures flash detection works when parent configs change
+            # IMPORTANT: MRO cache uses base types, not lazy types - convert if needed
+            from openhcs.config_framework.lazy_factory import get_base_type_for_lazy
+            cache_lookup_type = get_base_type_for_lazy(config_type)
+            cache_key = (cache_lookup_type, field_to_mark)
+            affected_types = type(self)._mro_inheritance_cache.get(cache_key, set())
+
+            logger.info(
+                f"🔍 MARK-UNSAVED: MRO cache lookup for ({cache_lookup_type.__name__}, '{field_to_mark}') -> "
+                f"{len(affected_types)} child types: {[t.__name__ for t in affected_types] if affected_types else 'NONE'}"
             )
 
-        for affected_type in affected_types:
-            if affected_type not in type(self)._configs_with_unsaved_changes:
-                type(self)._configs_with_unsaved_changes[affected_type] = set()
-            type(self)._configs_with_unsaved_changes[affected_type].add(field_name)
+            if affected_types:
+                logger.info(
+                    f"🔍 MARK-UNSAVED: MRO inheritance - marking {len(affected_types)} child types for "
+                    f"{config_type.__name__}.{field_to_mark}: {[t.__name__ for t in affected_types]}"
+                )
+
+            # CRITICAL: Mark BOTH base types AND lazy types
+            # The MRO cache returns base types, but steps use lazy types
+            # We need to mark both so the fast-path check works
+            from openhcs.config_framework.lazy_factory import get_lazy_type_for_base
+            for affected_type in affected_types:
+                # Mark the base type
+                if affected_type not in type(self)._configs_with_unsaved_changes:
+                    type(self)._configs_with_unsaved_changes[affected_type] = set()
+                type(self)._configs_with_unsaved_changes[affected_type].add(field_to_mark)
+
+                # Also mark the lazy version of this type (O(1) reverse lookup)
+                lazy_type = get_lazy_type_for_base(affected_type)
+                if lazy_type is not None:
+                    if lazy_type not in type(self)._configs_with_unsaved_changes:
+                        type(self)._configs_with_unsaved_changes[lazy_type] = set()
+                    type(self)._configs_with_unsaved_changes[lazy_type].add(field_to_mark)
+                    logger.info(f"🔍 MARK-UNSAVED: Also marked lazy type {lazy_type.__name__}")
+
+        logger.info(f"🔍 MARK-UNSAVED: Complete - marked {config_type.__name__} with {len(fields_to_mark)} fields")
 
     def _emit_cross_window_change(self, param_name: str, value: object):
         """Emit cross-window context change signal.

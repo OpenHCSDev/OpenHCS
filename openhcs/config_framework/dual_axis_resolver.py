@@ -265,66 +265,66 @@ def resolve_field_inheritance(
     for config_name, config_instance in available_configs.items():
         if type(config_instance) == obj_type:
             try:
+                # CRITICAL: Always use object.__getattribute__() to avoid infinite recursion
+                # Lazy configs store their raw values as instance attributes
                 field_value = object.__getattribute__(config_instance, field_name)
                 if field_value is not None:
-                    if field_name == 'well_filter':
-                        logger.debug(f"🔍 CONCRETE VALUE: {obj_type.__name__}.{field_name} = {field_value}")
                     return field_value
             except AttributeError:
                 continue
 
     # Step 2: MRO-based inheritance - traverse MRO from most to least specific
     # For each class in the MRO, check if there's a config instance in context with concrete value
-    if field_name in ['output_dir_suffix', 'sub_dir', 'well_filter']:
-        logger.debug(f"🔍 MRO-INHERITANCE: Resolving {obj_type.__name__}.{field_name}")
-        logger.debug(f"🔍 MRO-INHERITANCE: MRO = {[cls.__name__ for cls in obj_type.__mro__]}")
-        logger.debug(f"🔍 MRO-INHERITANCE: available_configs = {list(available_configs.keys())}")
-
     for mro_class in obj_type.__mro__:
         if not is_dataclass(mro_class):
             continue
 
         # Look for a config instance of this MRO class type in the available configs
-        # CRITICAL: Check both exact type match AND base type equivalents (lazy vs non-lazy)
+        # CRITICAL: Prioritize lazy types over base types when both are present
+        # This ensures PipelineConfig's LazyWellFilterConfig takes precedence over GlobalPipelineConfig's WellFilterConfig
+
+        # First pass: Look for exact type match OR lazy type match (prioritize lazy)
+        lazy_match = None
+        base_match = None
+
         for config_name, config_instance in available_configs.items():
             instance_type = type(config_instance)
 
             # Check exact type match
             if instance_type == mro_class:
-                matches = True
+                # Prioritize lazy types over base types
+                if instance_type.__name__.startswith('Lazy'):
+                    lazy_match = config_instance
+                else:
+                    base_match = config_instance
             # Check if instance is base type of lazy MRO class (e.g., StepWellFilterConfig matches LazyStepWellFilterConfig)
             elif mro_class.__name__.startswith('Lazy') and instance_type.__name__ == mro_class.__name__[4:]:
-                matches = True
+                base_match = config_instance
             # Check if instance is lazy type of non-lazy MRO class (e.g., LazyStepWellFilterConfig matches StepWellFilterConfig)
             elif instance_type.__name__.startswith('Lazy') and mro_class.__name__ == instance_type.__name__[4:]:
-                matches = True
-            else:
-                matches = False
+                lazy_match = config_instance
 
-            if matches:
-                try:
-                    value = object.__getattribute__(config_instance, field_name)
-                    if field_name in ['output_dir_suffix', 'sub_dir', 'well_filter']:
-                        logger.debug(f"🔍 MRO-INHERITANCE: {mro_class.__name__}.{field_name} = {value}")
-                    if value is not None:
-                        if field_name in ['output_dir_suffix', 'sub_dir', 'well_filter']:
-                            logger.debug(f"🔍 MRO-INHERITANCE: FOUND {mro_class.__name__}.{field_name}: {value} (returning)")
-                        return value
-                except AttributeError:
-                    continue
+        # Prioritize lazy match over base match
+        matched_instance = lazy_match if lazy_match is not None else base_match
+
+        if matched_instance is not None:
+            try:
+                # CRITICAL: Always use object.__getattribute__() to avoid infinite recursion
+                # Lazy configs store their raw values as instance attributes
+                value = object.__getattribute__(matched_instance, field_name)
+                if value is not None:
+                    return value
+            except AttributeError:
+                continue
 
     # Step 3: Class defaults as final fallback
     try:
         class_default = object.__getattribute__(obj_type, field_name)
         if class_default is not None:
-            if field_name in ['output_dir_suffix', 'sub_dir', 'well_filter']:
-                logger.debug(f"🔍 CLASS-DEFAULT: {obj_type.__name__}.{field_name} = {class_default}")
             return class_default
     except AttributeError:
         pass
 
-    if field_name in ['output_dir_suffix', 'sub_dir', 'well_filter']:
-        logger.debug(f"🔍 NO-RESOLUTION: {obj_type.__name__}.{field_name} = None")
     return None
 
 

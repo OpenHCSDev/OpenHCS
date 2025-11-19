@@ -35,6 +35,10 @@ current_temp_global = contextvars.ContextVar('current_temp_global')
 # This avoids re-extracting configs on every attribute access
 current_extracted_configs: contextvars.ContextVar[Dict[str, Any]] = contextvars.ContextVar('current_extracted_configs', default={})
 
+# Stack of original (unmerged) context objects
+# This preserves lazy type information that gets lost during merging
+current_context_stack: contextvars.ContextVar[list] = contextvars.ContextVar('current_context_stack', default=[])
+
 
 def _merge_nested_dataclass(base, override, mask_with_none: bool = False):
     """
@@ -116,6 +120,14 @@ def config_context(obj, mask_with_none: bool = False):
     current_context = get_current_temp_global()
     base_config = current_context if current_context is not None else get_base_global_config()
 
+    # CRITICAL: Extract configs from ORIGINAL object FIRST (before to_base_config() conversion)
+    # This preserves lazy type information that gets lost during merging
+    # Use bypass_lazy_resolution=True to get raw values without triggering resolution
+    # This is important for unsaved changes detection
+    original_extracted = {}
+    if obj is not None:
+        original_extracted = extract_all_configs(obj, bypass_lazy_resolution=True)
+
     # Find matching fields between obj and base config type
     overrides = {}
     if obj is not None:
@@ -186,17 +198,40 @@ def config_context(obj, mask_with_none: bool = False):
         merged_config = base_config
         logger.debug(f"Creating config context with no overrides from {type(obj).__name__}")
 
-    # Extract configs ONCE when setting context
+    # Extract configs from merged config
     extracted = extract_all_configs(merged_config)
 
-    # Set both context and extracted configs atomically
+    # CRITICAL: Original configs ALWAYS override merged configs to preserve lazy types
+    # This ensures LazyWellFilterConfig from PipelineConfig takes precedence over
+    # WellFilterConfig from the merged GlobalPipelineConfig
+    for config_name, config_instance in original_extracted.items():
+        extracted[config_name] = config_instance
+
+    # CRITICAL: Merge with parent context's extracted configs instead of replacing
+    # When contexts are nested (GlobalPipelineConfig → PipelineConfig), we need to preserve
+    # configs from outer contexts while allowing inner contexts to override
+    parent_extracted = current_extracted_configs.get()
+    if parent_extracted:
+        # Start with parent's configs
+        merged_extracted = dict(parent_extracted)
+        # Override with current context's configs (inner context takes precedence)
+        merged_extracted.update(extracted)
+        extracted = merged_extracted
+
+    # Push original object onto context stack
+    current_stack = current_context_stack.get()
+    new_stack = current_stack + [obj] if obj is not None else current_stack
+
+    # Set context, extracted configs, and context stack atomically
     token = current_temp_global.set(merged_config)
     extracted_token = current_extracted_configs.set(extracted)
+    stack_token = current_context_stack.set(new_stack)
     try:
         yield
     finally:
         current_temp_global.reset(token)
         current_extracted_configs.reset(extracted_token)
+        current_context_stack.reset(stack_token)
 
 
 # Removed: extract_config_overrides - no longer needed with field matching approach
@@ -468,7 +503,7 @@ def _make_cache_key_for_dataclass(obj) -> Tuple:
 
     return (type_name, tuple(field_values))
 
-def extract_all_configs(context_obj) -> Dict[str, Any]:
+def extract_all_configs(context_obj, bypass_lazy_resolution: bool = False) -> Dict[str, Any]:
     """
     Extract all config instances from a context object using type-driven approach.
 
@@ -480,6 +515,9 @@ def extract_all_configs(context_obj) -> Dict[str, Any]:
 
     Args:
         context_obj: Object to extract configs from (orchestrator, merged config, etc.)
+        bypass_lazy_resolution: If True, use object.__getattribute__() to get raw values
+                               without triggering lazy resolution. This preserves the
+                               original lazy config values before context merging.
 
     Returns:
         Dict mapping config type names to config instances
@@ -487,15 +525,15 @@ def extract_all_configs(context_obj) -> Dict[str, Any]:
     if context_obj is None:
         return {}
 
-    # Build content-based cache key
-    cache_key = _make_cache_key_for_dataclass(context_obj)
+    # Build content-based cache key (include bypass flag in key)
+    cache_key = (_make_cache_key_for_dataclass(context_obj), bypass_lazy_resolution)
 
     # Check cache first
     if cache_key in _extract_configs_cache:
-        logger.debug(f"🔍 CACHE HIT: extract_all_configs for {type(context_obj).__name__}")
+        logger.debug(f"🔍 CACHE HIT: extract_all_configs for {type(context_obj).__name__} (bypass={bypass_lazy_resolution})")
         return _extract_configs_cache[cache_key]
 
-    logger.debug(f"🔍 CACHE MISS: extract_all_configs for {type(context_obj).__name__}, cache size={len(_extract_configs_cache)}")
+    logger.debug(f"🔍 CACHE MISS: extract_all_configs for {type(context_obj).__name__} (bypass={bypass_lazy_resolution}), cache size={len(_extract_configs_cache)}")
     configs = {}
 
     # Include the context object itself if it's a dataclass
@@ -514,14 +552,19 @@ def extract_all_configs(context_obj) -> Dict[str, Any]:
             # Only process fields that are dataclass types (config objects)
             if is_dataclass(actual_type):
                 try:
-                    field_value = getattr(context_obj, field_name)
+                    # CRITICAL: Use object.__getattribute__() to bypass lazy resolution if requested
+                    if bypass_lazy_resolution:
+                        field_value = object.__getattribute__(context_obj, field_name)
+                    else:
+                        field_value = getattr(context_obj, field_name)
+
                     if field_value is not None:
                         # Use the actual instance type, not the annotation type
                         # This handles cases where field is annotated as base class but contains subclass
                         instance_type = type(field_value)
                         configs[instance_type.__name__] = field_value
 
-                        logger.debug(f"Extracted config {instance_type.__name__} from field {field_name} on {type(context_obj).__name__}")
+                        logger.debug(f"Extracted config {instance_type.__name__} from field {field_name} on {type(context_obj).__name__} (bypass={bypass_lazy_resolution})")
 
                 except AttributeError:
                     # Field doesn't exist on instance (shouldn't happen with dataclasses)

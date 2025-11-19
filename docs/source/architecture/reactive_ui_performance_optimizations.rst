@@ -218,31 +218,169 @@ The cache is built once at GUI startup via ``prewarm_config_analysis_cache()`` i
 
 **Using the Cache**
 
-When marking config types, we look up affected child types:
+When marking config types, we look up affected child types and mark BOTH base types AND lazy types:
 
 .. code-block:: python
 
    def _mark_config_type_with_unsaved_changes(self, param_name: str, value: Any):
        # ... extract config_type and field_name ...
 
-       # Mark the directly edited type
-       type(self)._configs_with_unsaved_changes[config_type].add(field_name)
+       # CRITICAL: If value is a nested config, mark ALL fields within it
+       # This ensures MRO cache lookups work correctly
+       fields_to_mark = []
+       if dataclasses.is_dataclass(config):
+           for field in dataclasses.fields(config):
+               fields_to_mark.append(field.name)
+       else:
+           fields_to_mark.append(field_name)
 
-       # CRITICAL: Also mark all types that can inherit this field via MRO
-       cache_key = (config_type, field_name)
-       affected_types = type(self)._mro_inheritance_cache.get(cache_key, set())
+       for field_to_mark in fields_to_mark:
+           # Mark the directly edited type
+           type(self)._configs_with_unsaved_changes[config_type].add(field_to_mark)
 
-       for affected_type in affected_types:
-           if affected_type not in type(self)._configs_with_unsaved_changes:
-               type(self)._configs_with_unsaved_changes[affected_type] = set()
-           type(self)._configs_with_unsaved_changes[affected_type].add(field_name)
+           # CRITICAL: MRO cache uses base types, not lazy types - convert if needed
+           from openhcs.config_framework.lazy_factory import get_base_type_for_lazy
+           cache_lookup_type = get_base_type_for_lazy(config_type)
+           cache_key = (cache_lookup_type, field_to_mark)
+           affected_types = type(self)._mro_inheritance_cache.get(cache_key, set())
+
+           # CRITICAL: Mark BOTH base types AND lazy types
+           # The MRO cache returns base types, but steps use lazy types
+           from openhcs.config_framework.lazy_factory import get_lazy_type_for_base
+           for affected_type in affected_types:
+               # Mark the base type
+               type(self)._configs_with_unsaved_changes[affected_type].add(field_to_mark)
+
+               # Also mark the lazy version (O(1) reverse lookup)
+               lazy_type = get_lazy_type_for_base(affected_type)
+               if lazy_type is not None:
+                   type(self)._configs_with_unsaved_changes[lazy_type].add(field_to_mark)
+
+**Lazy Type Registry**
+
+The lazy type registry provides bidirectional mapping between base types and lazy types:
+
+.. code-block:: python
+
+   # In openhcs/config_framework/lazy_factory.py
+   _lazy_type_registry: Dict[Type, Type] = {}  # lazy → base
+   _base_to_lazy_registry: Dict[Type, Type] = {}  # base → lazy (reverse)
+
+   def register_lazy_type_mapping(lazy_type: Type, base_type: Type):
+       _lazy_type_registry[lazy_type] = base_type
+       _base_to_lazy_registry[base_type] = lazy_type
+
+   def get_base_type_for_lazy(lazy_type: Type) -> Optional[Type]:
+       return _lazy_type_registry.get(lazy_type)
+
+   def get_lazy_type_for_base(base_type: Type) -> Optional[Type]:
+       return _base_to_lazy_registry.get(base_type)
+
+This enables O(1) reverse lookup when marking lazy types, avoiding O(n) linear search through the registry.
 
 Performance Impact
 ------------------
 
 - **Cache building**: O(n_types × n_fields × n_mro_depth) at startup (typically <10ms)
 - **Cache lookup**: O(1) dict access
-- **Memory overhead**: Minimal (typically <100 cache entries)
+- **Lazy type reverse lookup**: O(1) dict access (was O(n) linear search)
+- **Memory overhead**: Minimal (typically <100 cache entries + reverse registry)
+
+Context Manager Fixes
+=====================
+
+Problem
+-------
+
+The context manager had several critical bugs that broke unsaved changes detection and MRO inheritance:
+
+1. **Lazy type information lost during merging**: When merging ``PipelineConfig`` into ``GlobalPipelineConfig``, lazy types (e.g., ``LazyWellFilterConfig``) were converted to base types (e.g., ``WellFilterConfig``), breaking type-based cache lookups
+2. **Outer context configs lost during nesting**: When contexts were nested (``GlobalPipelineConfig`` → ``PipelineConfig``), configs from the outer context were lost, breaking MRO inheritance
+3. **Infinite recursion in MRO resolution**: Using ``getattr()`` in MRO resolution triggered lazy resolution, causing infinite recursion
+
+Solution
+--------
+
+**Preserve Lazy Types**
+
+Extract configs from the ORIGINAL object BEFORE merging to preserve lazy type information:
+
+.. code-block:: python
+
+   def config_context(obj, mask_with_none: bool = False):
+       # CRITICAL: Extract configs from ORIGINAL object FIRST (before merging)
+       # Use bypass_lazy_resolution=True to get raw values
+       original_extracted = {}
+       if obj is not None:
+           original_extracted = extract_all_configs(obj, bypass_lazy_resolution=True)
+
+       # ... perform merging ...
+
+       # Extract configs from merged config
+       extracted = extract_all_configs(merged_config)
+
+       # CRITICAL: Original configs ALWAYS override merged configs to preserve lazy types
+       for config_name, config_instance in original_extracted.items():
+           extracted[config_name] = config_instance
+
+**Merge with Parent Context**
+
+Preserve configs from outer contexts while allowing inner contexts to override:
+
+.. code-block:: python
+
+   # CRITICAL: Merge with parent context's extracted configs instead of replacing
+   parent_extracted = current_extracted_configs.get()
+   if parent_extracted:
+       # Start with parent's configs
+       merged_extracted = dict(parent_extracted)
+       # Override with current context's configs (inner context takes precedence)
+       merged_extracted.update(extracted)
+       extracted = merged_extracted
+
+**Avoid Infinite Recursion**
+
+Always use ``object.__getattribute__()`` in MRO resolution to bypass lazy resolution:
+
+.. code-block:: python
+
+   def resolve_field_inheritance(obj, field_name, available_configs):
+       # ... MRO traversal ...
+       for mro_class in obj_type.__mro__:
+           for config_name, config_instance in available_configs.items():
+               if type(config_instance) == mro_class:
+                   # CRITICAL: Use object.__getattribute__() to avoid infinite recursion
+                   field_value = object.__getattribute__(config_instance, field_name)
+                   if field_value is not None:
+                       return field_value
+
+**Prioritize Lazy Types in MRO Resolution**
+
+When both lazy and base types are available, prioritize lazy types:
+
+.. code-block:: python
+
+   # First pass: Look for exact type match OR lazy type match (prioritize lazy)
+   lazy_match = None
+   base_match = None
+
+   for config_name, config_instance in available_configs.items():
+       instance_type = type(config_instance)
+       if instance_type == mro_class:
+           if instance_type.__name__.startswith('Lazy'):
+               lazy_match = config_instance
+           else:
+               base_match = config_instance
+
+   # Prioritize lazy match over base match
+   matched_instance = lazy_match if lazy_match is not None else base_match
+
+Performance Impact
+------------------
+
+- **Lazy type preservation**: Ensures type-based cache lookups work correctly
+- **Context merging**: O(n_configs) merge operation per context nesting level
+- **MRO resolution**: No performance impact (same O(n_mro) traversal, just using ``object.__getattribute__()``)
 
 Signal Architecture Fix
 =======================
@@ -305,12 +443,111 @@ The optimizations achieve the target performance:
 - **Memory overhead**: Minimal (<100 cache entries)
 - **Correctness**: All cross-window reactivity scenarios work correctly
 
+Scoped Override Fix
+===================
+
+Problem
+-------
+
+The scoped override logic in ``check_config_has_unsaved_changes()`` was incorrectly returning ``False`` when it detected a scoped manager with changes. This prevented unsaved changes detection from working when editing ``PipelineConfig`` or step configs.
+
+The original logic was:
+
+.. code-block:: python
+
+   # WRONG: Returns False when scoped override detected
+   if has_scoped_override:
+       return False  # This breaks unsaved changes detection!
+
+   if not has_form_manager_with_changes:
+       return False
+
+This was designed to prevent global changes from triggering flash when a scoped override exists, but it also prevented scoped changes from being detected.
+
+Solution
+--------
+
+The fix is to proceed to full field resolution when EITHER scoped override OR global changes are detected:
+
+.. code-block:: python
+
+   # CORRECT: Only skip if there are NO changes at all
+   if not has_form_manager_with_changes and not has_scoped_override:
+       return False  # No changes at all - skip
+
+   # Proceed to full check for either scoped or global changes
+
+This ensures that:
+
+1. **Scoped changes are detected**: When editing ``PipelineConfig.well_filter_config``, the scoped manager is detected and we proceed to full check
+2. **Global changes are detected**: When editing ``GlobalPipelineConfig.well_filter_config`` with no scoped override, we proceed to full check
+3. **No false positives**: When there are no changes at all, we skip the expensive field resolution
+
+Performance Impact
+------------------
+
+- **Correctness**: Fixes regression where scoped changes weren't detected
+- **Performance**: No impact (same full check is performed, just with correct logic)
+
 Bugs Fixed
 ----------
 
 1. **Editing GlobalPipelineConfig.well_filter_config.well_filter while step editor open**: Step now flashes correctly
 2. **Editing GlobalPipelineConfig while PipelineConfig editor open**: Plate list items now flash correctly
 3. **Early return bug**: Removed early return when ``live_context_snapshot=None`` that was breaking flash detection
+4. **Scoped override regression**: Fixed scoped override logic to detect scoped changes correctly
+5. **Lazy type cache misses**: Fixed MRO cache lookups to convert lazy types to base types before lookup
+6. **Missing lazy type marking**: Fixed to mark both base types AND lazy types when marking unsaved changes
+7. **Context merging losing outer configs**: Fixed to merge with parent context instead of replacing
+8. **Infinite recursion in MRO resolution**: Fixed to use ``object.__getattribute__()`` instead of ``getattr()``
+
+File Locations
+==============
+
+Key implementation files:
+
+**Type-Based Caching and MRO Inheritance**
+
+- ``openhcs/pyqt_gui/widgets/shared/parameter_form_manager.py``:
+
+  - Signal connections (lines 824-837)
+  - ``_mark_config_type_with_unsaved_changes()`` (lines 3800-3860)
+  - ``_build_mro_inheritance_cache()`` (lines 299-365)
+  - ``collect_live_context()`` scoped manager filtering (lines 415-450)
+
+- ``openhcs/pyqt_gui/widgets/config_preview_formatters.py``:
+
+  - ``check_config_has_unsaved_changes()`` type-based cache check (lines 183-198)
+  - ``check_config_has_unsaved_changes()`` scoped override fix (lines 294-310)
+  - ``check_step_has_unsaved_changes()`` fast-path type-based cache check (lines 450-520)
+
+**Lazy Type Registry**
+
+- ``openhcs/config_framework/lazy_factory.py``:
+
+  - Lazy type registries (lines 18-46)
+  - ``register_lazy_type_mapping()`` (lines 33-35)
+  - ``get_base_type_for_lazy()`` (lines 38-40)
+  - ``get_lazy_type_for_base()`` (lines 43-45)
+
+**Context Manager Fixes**
+
+- ``openhcs/config_framework/context_manager.py``:
+
+  - Context stack tracking (lines 38-40)
+  - ``config_context()`` lazy type preservation (lines 123-132)
+  - ``config_context()`` parent context merging (lines 201-219)
+  - ``extract_all_configs()`` bypass lazy resolution (lines 506-570)
+
+- ``openhcs/config_framework/dual_axis_resolver.py``:
+
+  - ``resolve_field_inheritance()`` infinite recursion fix (lines 268-273)
+  - ``resolve_field_inheritance()`` lazy type prioritization (lines 278-318)
+
+**Cache Warming**
+
+- ``openhcs/config_framework/cache_warming.py``: MRO cache building call (lines 154-162)
+- ``openhcs/core/config_cache.py``: Cache warming at startup (lines 98-107, 239-248)
 
 Future Optimizations
 ====================

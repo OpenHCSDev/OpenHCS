@@ -314,6 +314,15 @@ class LiveContextResolver:
         def resolve_in_context(contexts_remaining):
             if not contexts_remaining:
                 # Innermost level - get the attribute
+                if attr_name == 'well_filter':
+                    from openhcs.config_framework.context_manager import extract_all_configs_from_context
+                    available_configs = extract_all_configs_from_context()
+                    logger.info(f"🔍 INNERMOST CONTEXT: Resolving {type(config_obj).__name__}.{attr_name}")
+                    logger.info(f"🔍 INNERMOST CONTEXT: available_configs = {list(available_configs.keys())}")
+                    for config_name, config_instance in available_configs.items():
+                        if 'WellFilterConfig' in config_name:
+                            wf_value = getattr(config_instance, 'well_filter', 'N/A')
+                            logger.info(f"🔍 INNERMOST CONTEXT: {config_name}.well_filter = {wf_value}")
                 return getattr(config_obj, attr_name)
 
             # Enter context and recurse

@@ -181,6 +181,22 @@ def check_config_has_unsaved_changes(
     if not field_names:
         return False
 
+    # PERFORMANCE: Phase 1-ALT - O(1) type-based cache lookup
+    # Check if this config's type has been marked as changed
+    config_type = type(config)
+    if config_type in ParameterFormManager._configs_with_unsaved_changes:
+        logger.info(
+            f"🔍 check_config_has_unsaved_changes: Type-based cache HIT for {config_attr} "
+            f"(type={config_type.__name__}, changed_fields={ParameterFormManager._configs_with_unsaved_changes[config_type]})"
+        )
+        # Type has unsaved changes, proceed to full check
+    else:
+        logger.info(
+            f"🔍 check_config_has_unsaved_changes: Type-based cache MISS for {config_attr} "
+            f"(type={config_type.__name__}) - no unsaved changes"
+        )
+        return False
+
     # PERFORMANCE: Fast path - check if there's a form manager that has emitted changes
     # for a field whose PATH or TYPE matches (or is related to) this config's type.
     #
@@ -195,9 +211,9 @@ def check_config_has_unsaved_changes(
     #
     # This works because _last_emitted_values is now keyed by full field paths.
     parent_type_name = type(parent_obj).__name__
-    config_type = type(config)
 
     has_form_manager_with_changes = False
+    has_scoped_override = False  # Track if there's a scoped manager with changes to this field
 
     for manager in ParameterFormManager._active_form_managers:
         if not hasattr(manager, '_last_emitted_values') or not manager._last_emitted_values:
@@ -233,11 +249,22 @@ def check_config_has_unsaved_changes(
                 # Second part is the config attribute (first part is the root object type)
                 config_attr_from_path = path_parts[1]
                 if config_attr_from_path == config_attr:
-                    has_form_manager_with_changes = True
-                    logger.info(
-                        f"🔍 check_config_has_unsaved_changes: Found path match for "
-                        f"{config_attr} in field path {field_path}"
-                    )
+                    # CRITICAL: Track whether this is a scoped override or global change
+                    # If a scoped manager (e.g., PipelineConfig) has changes to this field,
+                    # then global manager (GlobalPipelineConfig) changes should NOT trigger flash
+                    # because the scoped override shadows the global value.
+                    if manager.scope_id is not None:
+                        has_scoped_override = True
+                        logger.info(
+                            f"🔍 check_config_has_unsaved_changes: Found SCOPED override for "
+                            f"{config_attr} in field path {field_path} (manager scope_id={manager.scope_id})"
+                        )
+                    else:
+                        has_form_manager_with_changes = True
+                        logger.info(
+                            f"🔍 check_config_has_unsaved_changes: Found GLOBAL change for "
+                            f"{config_attr} in field path {field_path}"
+                        )
                     break
 
             # Type-based match: check if any emitted value's type is related to this config's type
@@ -248,23 +275,39 @@ def check_config_has_unsaved_changes(
                 # Check if types are related via isinstance (handles MRO inheritance)
                 # Example: LazyStepWellFilterConfig inherits from LazyWellFilterConfig
                 if isinstance(config, field_type) or isinstance(field_value, config_type):
-                    has_form_manager_with_changes = True
-                    logger.info(
-                        f"🔍 check_config_has_unsaved_changes: Found type match for "
-                        f"{config_attr} (config type={config_type.__name__}, "
-                        f"emitted field={field_path}, field type={field_type.__name__})"
-                    )
+                    if manager.scope_id is not None:
+                        has_scoped_override = True
+                        logger.info(
+                            f"🔍 check_config_has_unsaved_changes: Found SCOPED override (type match) for "
+                            f"{config_attr} (config type={config_type.__name__}, "
+                            f"emitted field={field_path}, field type={field_type.__name__}, manager scope_id={manager.scope_id})"
+                        )
+                    else:
+                        has_form_manager_with_changes = True
+                        logger.info(
+                            f"🔍 check_config_has_unsaved_changes: Found GLOBAL change (type match) for "
+                            f"{config_attr} (config type={config_type.__name__}, "
+                            f"emitted field={field_path}, field type={field_type.__name__})"
+                        )
                     break
 
-        if has_form_manager_with_changes:
+        if has_form_manager_with_changes or has_scoped_override:
             break
 
-    if not has_form_manager_with_changes:
+    # CRITICAL: If there's a scoped override, we SHOULD proceed to full check!
+    # The scoped override means there ARE unsaved changes in the scoped editor.
+    # We should only skip if there are NO changes at all (neither scoped nor global).
+    if not has_form_manager_with_changes and not has_scoped_override:
         logger.info(
             "🔍 check_config_has_unsaved_changes: No form managers with changes for "
             f"{parent_type_name}.{config_attr} (config type={config_type.__name__}) - skipping field resolution"
         )
         return False
+
+    logger.info(
+        f"🔍 check_config_has_unsaved_changes: Found changes for {config_attr} - "
+        f"has_scoped_override={has_scoped_override}, has_form_manager_with_changes={has_form_manager_with_changes}"
+    )
 
 
 

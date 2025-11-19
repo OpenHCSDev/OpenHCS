@@ -18,6 +18,9 @@ from openhcs.core.auto_register_meta import AutoRegisterMeta, RegistryConfig
 # Type registry for lazy dataclass to base class mapping
 _lazy_type_registry: Dict[Type, Type] = {}
 
+# Reverse registry for base class to lazy dataclass mapping (for O(1) lookup)
+_base_to_lazy_registry: Dict[Type, Type] = {}
+
 # Cache for lazy classes to prevent duplicate creation
 _lazy_class_cache: Dict[str, Type] = {}
 
@@ -30,11 +33,17 @@ _lazy_class_cache: Dict[str, Type] = {}
 def register_lazy_type_mapping(lazy_type: Type, base_type: Type) -> None:
     """Register mapping between lazy dataclass type and its base type."""
     _lazy_type_registry[lazy_type] = base_type
+    _base_to_lazy_registry[base_type] = lazy_type
 
 
 def get_base_type_for_lazy(lazy_type: Type) -> Optional[Type]:
     """Get the base type for a lazy dataclass type."""
     return _lazy_type_registry.get(lazy_type)
+
+
+def get_lazy_type_for_base(base_type: Type) -> Optional[Type]:
+    """Get the lazy type for a base dataclass type."""
+    return _base_to_lazy_registry.get(base_type)
 
 # Optional imports (handled gracefully)
 try:
@@ -182,6 +191,7 @@ class LazyMethodBindings:
                 current_context = current_temp_global.get()
                 # Get cached extracted configs (already extracted when context was set)
                 available_configs = current_extracted_configs.get()
+
                 resolved_value = resolve_field_inheritance(self, name, available_configs)
 
                 if resolved_value is not None:

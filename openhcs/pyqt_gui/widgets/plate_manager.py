@@ -844,6 +844,23 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         # Create new instance with merged values
         return type(obj)(**merged_values)
 
+    def _get_global_config_preview_instance(self, live_context_snapshot):
+        """Return global config merged with live overrides.
+
+        Uses CrossWindowPreviewMixin._get_preview_instance_generic for global values.
+        """
+        from openhcs.core.config import GlobalPipelineConfig
+        from openhcs.config_framework.global_config import get_current_global_config
+
+        # Use mixin's generic helper (global values)
+        return self._get_preview_instance_generic(
+            obj=get_current_global_config(GlobalPipelineConfig),
+            obj_type=GlobalPipelineConfig,
+            scope_id=None,
+            live_context_snapshot=live_context_snapshot,
+            use_global_values=True
+        )
+
     def _build_flash_context_stack(self, obj: Any, live_context_snapshot) -> Optional[list]:
         """Build context stack for flash resolution.
 
@@ -856,13 +873,12 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         Returns:
             Context stack for resolution
         """
-        from openhcs.config_framework.global_config import get_current_global_config
-
         try:
-            # Build context stack: GlobalPipelineConfig → PipelineConfig
+            # Build context stack: GlobalPipelineConfig (with live values) → PipelineConfig (with live values)
+            # CRITICAL: Use preview instance for GlobalPipelineConfig to include live edits
             # obj is already the pipeline_config_for_display (with live values merged)
             return [
-                get_current_global_config(GlobalPipelineConfig),
+                self._get_global_config_preview_instance(live_context_snapshot),
                 obj  # The pipeline config (preview instance)
             ]
         except Exception:
@@ -884,16 +900,22 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         Returns:
             Resolved attribute value (type depends on attribute)
         """
-        from openhcs.config_framework.global_config import get_current_global_config
-
         try:
-            # Build context stack: GlobalPipelineConfig → PipelineConfig (with live values merged)
-            # CRITICAL: Use pipeline_config_for_display (with live values merged), not raw pipeline_config
-            # This matches PipelineEditor pattern where context_stack includes step_for_display
+            # Build context stack: GlobalPipelineConfig (with live values) → PipelineConfig (with live values)
+            # CRITICAL: Use preview instances for BOTH GlobalPipelineConfig and PipelineConfig
+            # This ensures that live edits in GlobalPipelineConfig editor are visible in plate manager labels
+            global_config_preview = self._get_global_config_preview_instance(live_context_snapshot)
             context_stack = [
-                get_current_global_config(GlobalPipelineConfig),
+                global_config_preview,
                 pipeline_config_for_display
             ]
+
+            logger.info(f"🔍 _resolve_config_attr: Resolving {type(config).__name__}.{attr_name}")
+            global_wfc = getattr(global_config_preview, 'well_filter_config', None)
+            pipeline_wfc = getattr(pipeline_config_for_display, 'well_filter_config', None)
+            logger.info(f"🔍 _resolve_config_attr: GlobalPipelineConfig.well_filter_config = {global_wfc} (type={type(global_wfc).__name__ if global_wfc else 'None'})")
+            logger.info(f"🔍 _resolve_config_attr: PipelineConfig.well_filter_config = {pipeline_wfc} (type={type(pipeline_wfc).__name__ if pipeline_wfc else 'None'})")
+            logger.info(f"🔍 _resolve_config_attr: isinstance check: {isinstance(global_wfc, type(pipeline_wfc)) if global_wfc and pipeline_wfc else 'N/A'}")
 
             # Skip resolver when dataclass does not actually expose the attribute
             dataclass_fields = getattr(type(config), "__dataclass_fields__", {})
@@ -941,27 +963,44 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         live_context_snapshot=None,
         fallback_context: Optional[Dict[str, Any]] = None,
     ):
-        """Resolve a preview field path using the live context resolver."""
+        """Resolve a preview field path using the live context resolver.
+
+        CRITICAL: For nested paths like 'path_planning_config.well_filter':
+        1. Resolve each part through context stack to enable MRO inheritance
+        2. This allows PathPlanningConfig.well_filter to inherit from WellFilterConfig.well_filter
+
+        The context stack contains [GlobalPipelineConfig, PipelineConfig], and when we
+        resolve path_planning_config.well_filter, the resolver walks up the MRO to find
+        WellFilterConfig and looks for well_filter_config in the context stack.
+        """
         parts = field_path.split('.')
         current_obj = pipeline_config_for_display
         resolved_value = None
 
-        for part in parts:
+        logger.info(f"🔍 _resolve_preview_field_value: field_path={field_path}, parts={parts}")
+
+        for i, part in enumerate(parts):
             if current_obj is None:
                 resolved_value = None
                 break
 
+            logger.info(f"🔍 _resolve_preview_field_value: Resolving part {i}: {part}, current_obj type={type(current_obj).__name__}")
+
+            # Resolve each part through context stack (enables MRO inheritance)
             resolved_value = self._resolve_config_attr(
                 pipeline_config_for_display,
                 current_obj,
                 part,
                 live_context_snapshot
             )
+
+            logger.info(f"🔍 _resolve_preview_field_value: Resolved {part} = {resolved_value} (type={type(resolved_value).__name__ if resolved_value is not None else 'None'})")
             current_obj = resolved_value
 
         if resolved_value is None:
             return self._apply_preview_field_fallback(field_path, fallback_context)
 
+        logger.info(f"🔍 _resolve_preview_field_value: Final resolved value for {field_path} = {resolved_value}")
         return resolved_value
 
     def _build_effective_config_fallback(self, field_path: str) -> Callable:
