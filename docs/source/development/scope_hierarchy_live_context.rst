@@ -825,6 +825,7 @@ Structure
         token: int  # Cache invalidation token
         values: Dict[type, Dict[str, Any]]  # Global context (for GlobalPipelineConfig)
         scoped_values: Dict[str, Dict[type, Dict[str, Any]]]  # Scoped context (for PipelineConfig, FunctionStep)
+        scopes: Dict[str, Optional[str]]  # Added in cf4f06b0: Maps config type names to scope IDs
 
 **Key Differences**:
 
@@ -838,6 +839,12 @@ Structure
   - Format: ``{scope_id: {obj_type: {field_name: value, ...}}}``
   - Example: ``{"/plate_001": {PipelineConfig: {well_filter: 2}}}``
   - Example: ``{"/plate_001::step_6": {FunctionStep: {well_filter: 3}}}``
+
+- ``scopes``: **Added in commit cf4f06b0**. Maps config type names to their scope IDs for scope-aware resolution.
+
+  - Format: ``{config_type_name: scope_id}``
+  - Example: ``{"GlobalPipelineConfig": None, "PipelineConfig": "/plate_001", "FunctionStep": "/plate_001::step_6"}``
+  - Used by ``_build_context_stack()`` to pass scope information to ``config_context()`` for scope-aware priority resolution
 
 Usage in Preview Instance Creation
 -----------------------------------
@@ -1001,6 +1008,123 @@ The cache is invalidated when the live context token changes:
 
     # On reset:
     type(self)._clear_unsaved_changes_cache("reset_all")
+
+Token-Based Instance Selection Pattern
+=======================================
+
+**Added in commit cf4f06b0**
+
+When resolving config attributes for display (unsaved changes, preview labels), the system must choose between the preview instance (with live values) and the original instance (saved values) based on the context token.
+
+Why This Matters
+-----------------
+
+The ``resolve_attr`` callback is used during resolution to fetch config attributes. When comparing live vs saved values, we need to ensure:
+
+- **Live context**: Use preview instance (with live values merged)
+- **Saved context**: Use original instance (saved values only)
+
+The context token determines which instance to use.
+
+Implementation Pattern
+----------------------
+
+.. code-block:: python
+
+    # From pipeline_editor.py and plate_manager.py
+    def _format_resolved_step_for_display(self, step_index, live_context_snapshot):
+        original_step = self.pipeline_steps[step_index]
+        step_preview = self._get_step_preview_instance(original_step, live_context_snapshot)
+
+        def resolve_attr(parent_obj, config_obj, attr_name, context):
+            # CRITICAL: Token-based instance selection
+            # If context token matches live token, use preview instance
+            # If context token is different (saved snapshot), use original instance
+            is_live_context = (context.token == live_context_snapshot.token)
+            step_to_use = step_preview if is_live_context else original_step
+
+            return self._resolve_config_attr(step_to_use, config_obj, attr_name, context)
+
+        # Pass resolve_attr callback to unsaved changes checker
+        has_unsaved = check_step_has_unsaved_changes(
+            original_step,
+            config_indicators,
+            resolve_attr,  # Callback uses token-based selection
+            live_context_snapshot
+        )
+
+**Key Insight**: The ``context`` parameter in ``resolve_attr`` contains a token. When the checker creates a saved snapshot for comparison, it has a different token than the live snapshot. This allows the callback to automatically select the correct instance.
+
+Window Close Scope Detection
+=============================
+
+**Added in commit cf4f06b0**
+
+When a config window closes with unsaved changes, the system must detect whether the change affects all steps (global/plate-level) or only specific steps (step-level).
+
+The Problem with '::' Separator
+--------------------------------
+
+**CRITICAL BUG**: The original logic assumed that ``::`` separator in ``scope_id`` means step scope, but plate paths can also contain ``::`` (e.g., ``/path/to/plate::with::colons``).
+
+.. code-block:: python
+
+    # WRONG: Can't rely on '::' separator
+    if '::' in scope_id:
+        # This is a step-specific change
+        check_only_this_step = True
+    else:
+        # This is a global/plate-level change
+        check_all_steps = True
+
+**Counterexample**: Plate path ``/home/user/plate::experiment`` contains ``::`` but is NOT a step scope.
+
+Correct Detection Pattern
+--------------------------
+
+Use ``_pending_preview_keys`` to detect global/plate-level changes:
+
+.. code-block:: python
+
+    # From pipeline_editor.py
+    def _handle_full_preview_refresh(self, live_context_before, live_context_after):
+        # If _pending_preview_keys contains all step indices, this is a global/plate-level change
+        all_step_indices = set(range(len(self.pipeline_steps)))
+
+        if self._pending_preview_keys == all_step_indices:
+            logger.info("Global/plate-level change - checking ALL steps for unsaved changes")
+            # Check all steps for unsaved changes
+            for step_index in all_step_indices:
+                has_unsaved = check_step_has_unsaved_changes(...)
+                self._update_step_unsaved_marker(step_index, has_unsaved)
+        else:
+            # Step-specific change - only check steps in _pending_preview_keys
+            for step_index in self._pending_preview_keys:
+                has_unsaved = check_step_has_unsaved_changes(...)
+                self._update_step_unsaved_marker(step_index, has_unsaved)
+
+**How _pending_preview_keys is Set**:
+
+The ``_resolve_scope_targets()`` method determines which steps should be updated:
+
+.. code-block:: python
+
+    # From pipeline_editor.py
+    def _resolve_scope_targets(self, manager_scope_id, emitted_values):
+        # If this is a GlobalPipelineConfig or PipelineConfig change, return ALL_ITEMS_SCOPE
+        if manager_scope_id == self.ALL_ITEMS_SCOPE:
+            # Return all step indices for incremental update
+            return set(range(len(self.pipeline_steps)))
+
+        # Otherwise, extract step index from scope_id
+        if '::' in manager_scope_id:
+            step_token = manager_scope_id.split('::')[-1]
+            step_index = self._extract_step_index_from_token(step_token)
+            return {step_index}
+
+        return set()
+
+**Key Insight**: ``_resolve_scope_targets()`` returns the set of step indices that should be updated. When it returns all step indices, ``_pending_preview_keys`` is set to all indices, signaling a global/plate-level change.
 
 Field Path Format and Fast-Path Optimization
 =============================================
