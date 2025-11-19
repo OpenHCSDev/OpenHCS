@@ -91,7 +91,7 @@ class WidgetFlashAnimator:
 
     def _restore_original(self) -> None:
         """Restore original stylesheet or palette."""
-        logger.info(f"🔄 _restore_original called for {type(self.widget).__name__}")
+        logger.debug(f"🔄 _restore_original called for {type(self.widget).__name__}")
         if not self.widget:
             logger.debug(f"   Widget is None, aborting")
             self._is_flashing = False
@@ -108,7 +108,7 @@ class WidgetFlashAnimator:
             if self._original_palette:
                 self.widget.setPalette(self._original_palette)
 
-        logger.info(f"✅ Restored original state")
+        logger.debug(f"✅ Restored original state")
         self._is_flashing = False
 
 

@@ -4038,7 +4038,7 @@ class ParameterFormManager(QWidget):
             if hasattr(listener, '_pending_changed_fields'):
                 listener._pending_changed_fields.update(all_identifiers)  # O(1) set union
             cls._pending_listener_updates.add(listener)
-            logger.info(f"📝 Added {listener.__class__.__name__} to coordinator queue")
+            logger.debug(f"📝 Added {listener.__class__.__name__} to coordinator queue")
 
         # PERFORMANCE: Start coordinator - O(1) regardless of change count
         if cls._pending_listener_updates:
@@ -4059,7 +4059,7 @@ class ParameterFormManager(QWidget):
             listener: The listener object that needs updating
         """
         cls._pending_listener_updates.add(listener)
-        logger.info(f"📝 Scheduled coordinated update for {listener.__class__.__name__}")
+        logger.debug(f"📝 Scheduled coordinated update for {listener.__class__.__name__}")
 
     @classmethod
     def schedule_placeholder_refresh(cls, form_manager: 'ParameterFormManager'):
@@ -4104,7 +4104,7 @@ class ParameterFormManager(QWidget):
 
         # Use same delay as cross-window refresh for consistency
         cls._coordinator_timer.start(cls.CROSS_WINDOW_REFRESH_DELAY_MS)
-        logger.info(f"⏱️  Started coordinator timer ({cls.CROSS_WINDOW_REFRESH_DELAY_MS}ms)")
+        logger.debug(f"⏱️  Started coordinator timer ({cls.CROSS_WINDOW_REFRESH_DELAY_MS}ms)")
 
     @classmethod
     def _execute_coordinated_updates(cls):
@@ -4167,7 +4167,7 @@ class ParameterFormManager(QWidget):
         cls._pending_flash_widgets.clear()
         cls._current_batch_changed_fields.clear()
 
-        logger.info(f"✅ Batch execution complete: {total_updates} updates in single pass")
+        logger.debug(f"✅ Batch execution complete: {total_updates} updates in single pass")
 
     def unregister_from_cross_window_updates(self):
         """Manually unregister this form manager from cross-window updates.
