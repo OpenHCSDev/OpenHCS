@@ -185,16 +185,16 @@ def check_config_has_unsaved_changes(
     # Check if this config's type has been marked as changed
     config_type = type(config)
     if config_type in ParameterFormManager._configs_with_unsaved_changes:
-        logger.info(
-            f"🔍 check_config_has_unsaved_changes: Type-based cache HIT for {config_attr} "
-            f"(type={config_type.__name__}, changed_fields={ParameterFormManager._configs_with_unsaved_changes[config_type]})"
+        logger.debug(
+            f"✅ CACHE HIT: {config_attr} has changes - skipping expensive checks"
         )
-        # Type has unsaved changes, proceed to full check
+        # Cache hit = TRUE, skip ALL expensive manager iteration/resolution
+        return True
     else:
-        logger.info(
-            f"🔍 check_config_has_unsaved_changes: Type-based cache MISS for {config_attr} "
-            f"(type={config_type.__name__}) - no unsaved changes"
+        logger.debug(
+            f"✅ CACHE MISS: {config_attr} no changes"
         )
+        # Cache miss = FALSE
         return False
 
     # PERFORMANCE: Fast path - check if there's a form manager that has emitted changes
@@ -584,3 +584,53 @@ def format_config_indicator(
         result = format_generic_config(config_attr, config, resolve_attr)
 
     return result
+
+
+def check_all_steps_unsaved_changes_batch(
+    steps: list,
+    config_indicators: Dict[str, str],
+    resolve_attr_factory: Callable,
+    live_context_snapshot: Any = None,
+    scope_filter: Optional[str] = None,
+    saved_context_snapshot: Any = None
+) -> list[bool]:
+    """Batch check unsaved changes for ALL steps in ONE pass.
+
+    John Carmack style: compute once, reuse everywhere.
+
+    Args:
+        steps: List of step objects to check
+        config_indicators: Dict mapping config attrs to display names
+        resolve_attr_factory: Factory function that creates resolve_attr for a step
+        live_context_snapshot: Live context snapshot (optional)
+        scope_filter: Scope filter string (optional)
+        saved_context_snapshot: Saved context snapshot (optional)
+
+    Returns:
+        List of booleans, one per step (True = has unsaved changes)
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    if not steps:
+        return []
+
+    # PERFORMANCE: Collect live context ONCE for all steps (already done outside)
+    # PERFORMANCE: Collect saved context ONCE for all steps (already done outside)
+
+    # Check all steps in single pass
+    results = []
+    for step in steps:
+        resolve_attr = resolve_attr_factory(step)
+        has_unsaved = check_step_has_unsaved_changes(
+            step,
+            config_indicators,
+            resolve_attr,
+            live_context_snapshot,
+            scope_filter=scope_filter,
+            saved_context_snapshot=saved_context_snapshot
+        )
+        results.append(has_unsaved)
+
+    logger.info(f"✅ Batch checked {len(steps)} steps: {sum(results)} have unsaved changes")
+    return results
