@@ -335,36 +335,37 @@ class ParameterFormManager(QWidget):
         all_config_types = _extract_all_dataclass_types(GlobalPipelineConfig)
         logger.info(f"🔧 Found {len(all_config_types)} config types to analyze")
 
+        # PERFORMANCE: Cache fields() results to avoid repeated introspection
+        fields_cache = {}
+        for config_type in all_config_types:
+            if dataclasses.is_dataclass(config_type):
+                try:
+                    fields_cache[config_type] = {f.name for f in dataclasses.fields(config_type)}
+                except TypeError:
+                    fields_cache[config_type] = set()
+
         # For each config type, build reverse mapping: (parent_type, field_name) → child_types
         for child_type in all_config_types:
-            if not dataclasses.is_dataclass(child_type):
+            if child_type not in fields_cache:
                 continue
 
             # Get all fields on this child type
-            for field in dataclasses.fields(child_type):
-                field_name = field.name
+            child_field_names = fields_cache[child_type]
 
-                # Check which types in the MRO have this field
-                # If a parent type has this field, the child can inherit from it
-                for mro_class in child_type.__mro__:
-                    if not dataclasses.is_dataclass(mro_class):
-                        continue
+            # Filter MRO to only dataclasses once
+            dataclass_mro = [c for c in child_type.__mro__
+                           if c != child_type and c in fields_cache]
 
-                    # Skip the child type itself (we only care about inheritance)
-                    if mro_class == child_type:
-                        continue
-
-                    # Check if mro_class has this field
-                    try:
-                        mro_fields = dataclasses.fields(mro_class)
-                        if any(f.name == field_name for f in mro_fields):
-                            cache_key = (mro_class, field_name)
-                            if cache_key not in cls._mro_inheritance_cache:
-                                cls._mro_inheritance_cache[cache_key] = set()
-                            cls._mro_inheritance_cache[cache_key].add(child_type)
-                    except TypeError:
-                        # Not a dataclass or fields() failed
-                        continue
+            # Check which types in the MRO have this field
+            # If a parent type has this field, the child can inherit from it
+            for field_name in child_field_names:
+                for mro_class in dataclass_mro:
+                    # Check if mro_class has this field (O(1) set lookup)
+                    if field_name in fields_cache[mro_class]:
+                        cache_key = (mro_class, field_name)
+                        if cache_key not in cls._mro_inheritance_cache:
+                            cls._mro_inheritance_cache[cache_key] = set()
+                        cls._mro_inheritance_cache[cache_key].add(child_type)
 
         logger.info(f"🔧 Built MRO inheritance cache with {len(cls._mro_inheritance_cache)} entries")
 

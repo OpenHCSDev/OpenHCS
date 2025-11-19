@@ -32,6 +32,11 @@ class LazyDefaultPlaceholderService:
     # Invalidated when context_token changes (any value changes)
     _placeholder_text_cache: dict = {}
 
+    # PERFORMANCE: Singleton instance cache to avoid repeated allocations
+    # Key: (dataclass_type, context_token) -> instance
+    # Reuse the same instance for all field resolutions within the same context
+    _instance_cache: dict = {}
+
     @staticmethod
     def has_lazy_resolution(dataclass_type: type) -> bool:
         """Check if dataclass has lazy resolution methods (created by factory)."""
@@ -96,10 +101,14 @@ class LazyDefaultPlaceholderService:
         if cache_key in LazyDefaultPlaceholderService._placeholder_text_cache:
             return LazyDefaultPlaceholderService._placeholder_text_cache[cache_key]
 
-        # Simple approach: Create new instance and let lazy system handle context resolution
-        # The context_obj parameter is unused since context should be set externally via config_context()
+        # PERFORMANCE: Reuse singleton instance per (type, token) to avoid repeated allocations
+        # Creating a new instance for every field is wasteful - reuse the same instance
         try:
-            instance = dataclass_type()
+            instance_cache_key = (dataclass_type, context_token)
+            if instance_cache_key not in LazyDefaultPlaceholderService._instance_cache:
+                LazyDefaultPlaceholderService._instance_cache[instance_cache_key] = dataclass_type()
+            instance = LazyDefaultPlaceholderService._instance_cache[instance_cache_key]
+
             resolved_value = getattr(instance, field_name)
 
             result = LazyDefaultPlaceholderService._format_placeholder_text(resolved_value, prefix)
@@ -117,12 +126,9 @@ class LazyDefaultPlaceholderService:
     @staticmethod
     def _get_lazy_type_for_base(base_type: type) -> Optional[type]:
         """Get the lazy type for a base dataclass type (reverse lookup)."""
-        from openhcs.config_framework.lazy_factory import _lazy_type_registry
-
-        for lazy_type, registered_base_type in _lazy_type_registry.items():
-            if registered_base_type == base_type:
-                return lazy_type
-        return None
+        # PERFORMANCE: Use O(1) reverse registry instead of O(N) linear search
+        from openhcs.config_framework.lazy_factory import get_lazy_type_for_base
+        return get_lazy_type_for_base(base_type)
 
 
 

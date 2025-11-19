@@ -61,6 +61,11 @@ logger = logging.getLogger(__name__)
 _lazy_resolution_cache: Dict[Tuple[str, str, int], Any] = {}
 _LAZY_CACHE_MAX_SIZE = 10000  # Prevent unbounded growth
 
+# PERFORMANCE: Cache field names per class to avoid repeated fields() introspection
+# fields() is expensive - it introspects the class every time
+# This cache maps class -> frozenset of field names for O(1) membership testing
+_class_field_names_cache: Dict[Type, frozenset] = {}
+
 # CRITICAL: Contextvar to disable cache during LiveContextResolver operations
 # Flash detection uses LiveContextResolver with historical snapshots (before/after tokens)
 # The class-level cache uses current token, which breaks flash detection
@@ -187,7 +192,14 @@ class LazyMethodBindings:
             """
             # Stage 0: Check class-level cache first (PERFORMANCE OPTIMIZATION)
             # Skip cache for special attributes, private attributes, and non-field attributes
-            is_dataclass_field = name in {f.name for f in fields(self.__class__)} if not name.startswith('_') else False
+            # PERFORMANCE: Cache field names to avoid repeated fields() introspection
+            if not name.startswith('_'):
+                cls = self.__class__
+                if cls not in _class_field_names_cache:
+                    _class_field_names_cache[cls] = frozenset(f.name for f in fields(cls))
+                is_dataclass_field = name in _class_field_names_cache[cls]
+            else:
+                is_dataclass_field = False
 
             # CRITICAL: Skip cache if disabled (e.g., during LiveContextResolver flash detection)
             # Flash detection needs to resolve with historical tokens, not current token
