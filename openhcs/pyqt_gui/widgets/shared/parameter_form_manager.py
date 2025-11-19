@@ -3427,14 +3427,21 @@ class ParameterFormManager(QWidget):
         self._placeholder_thread_pool.start(task)
 
     def _capture_placeholder_plan(self, exclude_param: Optional[str]) -> Dict[str, bool]:
-        """Capture UI state needed by the background placeholder resolver."""
+        """Capture UI state needed by the background placeholder resolver.
+
+        PERFORMANCE: Only include fields that are actually in placeholder state.
+        Skip fields with user-entered values - they don't need placeholder resolution.
+        """
         plan = {}
         for param_name, widget in self.widgets.items():
             if exclude_param and param_name == exclude_param:
                 continue
             if not widget:
                 continue
-            plan[param_name] = bool(widget.property("is_placeholder_state"))
+            # PERFORMANCE: Only resolve if widget is in placeholder state
+            # If user has entered a value, skip placeholder resolution entirely
+            if widget.property("is_placeholder_state"):
+                plan[param_name] = True
         return plan
 
     def _unwrap_live_context(self, live_context: Optional[Any]) -> Tuple[Optional[int], Optional[dict]]:
