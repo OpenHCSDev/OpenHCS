@@ -291,9 +291,11 @@ class ParameterFormManager(QWidget):
     _pending_cross_window_changes: List[Tuple['ParameterFormManager', str, Any, Any, Any]] = []
     _cross_window_batch_timer: Optional['QTimer'] = None
 
-    # PERFORMANCE: Central update coordinator - synchronizes all listener updates
-    # Collects all listeners that need updating in current batch cycle
-    _pending_listener_updates: Set[Any] = set()  # Set of listeners to update
+    # PERFORMANCE: Universal reactive update coordinator - synchronizes EVERYTHING
+    # Batches ALL reactive updates in single pass: listeners, placeholders, flashes
+    _pending_listener_updates: Set[Any] = set()  # External listeners (PlateManager, etc.)
+    _pending_placeholder_refreshes: Set['ParameterFormManager'] = set()  # Form managers needing refresh
+    _pending_flash_widgets: Set[Tuple[Any, Any]] = set()  # (widget/item, color) tuples
     _coordinator_timer: Optional['QTimer'] = None
 
     # PERFORMANCE: MRO inheritance cache - maps (parent_type, field_name) → set of child types
@@ -3617,10 +3619,10 @@ class ParameterFormManager(QWidget):
         else:
             # Preserve the most recent field to exclude
             self._pending_debounced_exclude_param = param_name
-        if self._parameter_change_timer is None:
-            self._run_debounced_placeholder_refresh()
-        else:
-            self._parameter_change_timer.start(self.PARAMETER_CHANGE_DEBOUNCE_MS)
+
+        # PERFORMANCE: Use universal coordinator instead of individual timer
+        type(self).schedule_placeholder_refresh(self)
+        type(self)._start_coordinated_update_timer()
 
     def _on_parameter_changed_nested(self, param_name: str, value: Any) -> None:
         """Bubble refresh requests from nested managers up to the root with debounce.
@@ -4032,6 +4034,33 @@ class ParameterFormManager(QWidget):
         logger.info(f"📝 Scheduled coordinated update for {listener.__class__.__name__}")
 
     @classmethod
+    def schedule_placeholder_refresh(cls, form_manager: 'ParameterFormManager'):
+        """Schedule a form manager for placeholder refresh.
+
+        Replaces individual per-manager timers with batched execution.
+
+        Args:
+            form_manager: The form manager that needs placeholder refresh
+        """
+        cls._pending_placeholder_refreshes.add(form_manager)
+        logger.debug(f"📝 Scheduled placeholder refresh for {form_manager.field_id}")
+
+    @classmethod
+    def schedule_flash_animation(cls, target: Any, color: Any):
+        """Schedule a flash animation.
+
+        Replaces individual per-widget/item timers with batched execution.
+
+        Args:
+            target: The widget or tree item to flash
+            color: The flash color
+        """
+        cls._pending_flash_widgets.add((target, color))
+        logger.debug(f"📝 Scheduled flash for {type(target).__name__}")
+        # Start coordinator immediately (flashes should be instant)
+        cls._start_coordinated_update_timer()
+
+    @classmethod
     def _start_coordinated_update_timer(cls):
         """Start single shared timer for coordinated listener updates."""
         from PyQt6.QtCore import QTimer
@@ -4051,26 +4080,65 @@ class ParameterFormManager(QWidget):
 
     @classmethod
     def _execute_coordinated_updates(cls):
-        """Execute all pending listener updates simultaneously."""
-        if not cls._pending_listener_updates:
+        """Execute ALL pending reactive updates simultaneously in single pass.
+
+        John Carmack style: batch everything, execute once, minimize overhead.
+        """
+        total_updates = (
+            len(cls._pending_listener_updates) +
+            len(cls._pending_placeholder_refreshes) +
+            len(cls._pending_flash_widgets)
+        )
+
+        if total_updates == 0:
             return
 
-        listeners = list(cls._pending_listener_updates)
-        logger.info(f"🚀 Executing coordinated updates for {len(listeners)} listeners simultaneously")
+        logger.info(f"🚀 BATCH EXECUTION: {len(cls._pending_listener_updates)} listeners, "
+                   f"{len(cls._pending_placeholder_refreshes)} placeholders, "
+                   f"{len(cls._pending_flash_widgets)} flashes")
 
-        # Update all listeners synchronously (no delays between them)
-        for listener in listeners:
+        # 1. Update all external listeners (PlateManager, PipelineEditor)
+        for listener in cls._pending_listener_updates:
             try:
-                # Each listener should have a method to process pending updates
                 if hasattr(listener, '_process_pending_preview_updates'):
                     listener._process_pending_preview_updates()
-                    logger.info(f"✅ Updated {listener.__class__.__name__}")
             except Exception as e:
                 logger.error(f"❌ Error updating {listener.__class__.__name__}: {e}")
 
-        # Clear pending listeners
+        # 2. Refresh all placeholders
+        for form_manager in cls._pending_placeholder_refreshes:
+            try:
+                form_manager._refresh_all_placeholders()
+            except Exception as e:
+                logger.error(f"❌ Error refreshing placeholders for {form_manager.field_id}: {e}")
+
+        # 3. Execute all flash animations
+        for target, color in cls._pending_flash_widgets:
+            try:
+                # Apply flash styling immediately
+                from PyQt6.QtWidgets import QTreeWidgetItem
+                from PyQt6.QtGui import QBrush, QFont, QColor
+
+                if isinstance(target, QTreeWidgetItem):
+                    # Tree item flash
+                    target.setBackground(0, QBrush(color))
+                    font = target.font(0)
+                    font.setBold(True)
+                    target.setFont(0, font)
+                else:
+                    # Widget flash (use flash animation helper)
+                    from openhcs.pyqt_gui.widgets.shared.widget_flash_animation import WidgetFlashAnimator
+                    animator = WidgetFlashAnimator.get_or_create_animator(target, color)
+                    animator.flash_update()
+            except Exception as e:
+                logger.error(f"❌ Error flashing {type(target).__name__}: {e}")
+
+        # Clear all pending updates
         cls._pending_listener_updates.clear()
-        logger.info("🎯 Coordinated update complete")
+        cls._pending_placeholder_refreshes.clear()
+        cls._pending_flash_widgets.clear()
+
+        logger.info(f"✅ Batch execution complete: {total_updates} updates in single pass")
 
     def unregister_from_cross_window_updates(self):
         """Manually unregister this form manager from cross-window updates.
