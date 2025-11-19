@@ -45,8 +45,12 @@ class TreeItemFlashAnimator:
         self.original_background = item.background(0)
         self.original_font = item.font(0)
 
-    def flash_update(self) -> None:
-        """Trigger flash animation on item background and font."""
+    def flash_update(self, use_coordinator: bool = True) -> None:
+        """Trigger flash animation on item background and font.
+
+        Args:
+            use_coordinator: If True, schedule restoration via coordinator to prevent event loop blocking.
+        """
         # Find item by searching tree (item might have been recreated)
         item = self._find_item()
         if item is None:  # Item was destroyed
@@ -58,24 +62,39 @@ class TreeItemFlashAnimator:
         flash_font = QFont(self.original_font)
         flash_font.setBold(True)
         item.setFont(0, flash_font)
-        
+
         # Force tree widget to repaint
         self.tree_widget.viewport().update()
 
         if self._is_flashing:
-            # Already flashing - restart timer (flash already re-applied above)
-            if self._flash_timer:
-                self._flash_timer.stop()
-                self._flash_timer.start(self.config.FLASH_DURATION_MS)
+            # Already flashing - cancel old timer if using coordinator
+            if use_coordinator:
+                if self._flash_timer:
+                    self._flash_timer.stop()
+            else:
+                # Using local timer, just restart it
+                if self._flash_timer:
+                    self._flash_timer.stop()
+                    self._flash_timer.start(self.config.FLASH_DURATION_MS)
             return
 
         self._is_flashing = True
 
-        # Setup timer to restore original state
-        self._flash_timer = QTimer(self.tree_widget)
-        self._flash_timer.setSingleShot(True)
-        self._flash_timer.timeout.connect(self._restore_original)
-        self._flash_timer.start(self.config.FLASH_DURATION_MS)
+        # PERFORMANCE: Schedule restoration via coordinator instead of local timer
+        if use_coordinator:
+            try:
+                from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+                ParameterFormManager.schedule_flash_restoration(self, self.config.FLASH_DURATION_MS)
+                logger.debug(f"   Scheduled tree item restoration via coordinator ({self.config.FLASH_DURATION_MS}ms)")
+            except ImportError:
+                use_coordinator = False
+
+        if not use_coordinator:
+            # Fallback to local timer
+            self._flash_timer = QTimer(self.tree_widget)
+            self._flash_timer.setSingleShot(True)
+            self._flash_timer.timeout.connect(self._restore_original)
+            self._flash_timer.start(self.config.FLASH_DURATION_MS)
 
     def _find_item(self) -> Optional[QTreeWidgetItem]:
         """Find tree item by ID (handles item recreation)."""

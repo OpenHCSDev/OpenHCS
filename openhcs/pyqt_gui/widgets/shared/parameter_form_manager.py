@@ -4103,7 +4103,9 @@ class ParameterFormManager(QWidget):
         """
         # Add to pending restorations
         cls._pending_flash_restorations.append(animator)
-        logger.debug(f"📝 Scheduled flash restoration for {type(animator.widget).__name__ if animator.widget else 'None'}")
+        # Get animator type (WidgetFlashAnimator has 'widget', TreeItemFlashAnimator has 'tree_widget')
+        animator_type = type(animator).__name__
+        logger.debug(f"📝 Scheduled flash restoration for {animator_type}")
 
         # Start/restart single restoration timer for ALL flashes
         from PyQt6.QtCore import QTimer
