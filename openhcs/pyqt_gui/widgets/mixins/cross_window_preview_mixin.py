@@ -418,6 +418,7 @@ class CrossWindowPreviewMixin:
         before_snapshot: Any = None,
         after_snapshot: Any = None,
         changed_fields: Set[str] = None,
+        use_coordinator: bool = True,
     ) -> None:
         """Schedule a debounced preview update.
 
@@ -429,10 +430,9 @@ class CrossWindowPreviewMixin:
             before_snapshot: Optional before snapshot for window close events
             after_snapshot: Optional after snapshot for window close events
             changed_fields: Optional changed fields for window close events
+            use_coordinator: If True, use central coordinator for synchronized updates (default)
         """
-        from PyQt6.QtCore import QTimer
-
-        logger.debug(f"🔥 _schedule_preview_update called: full_refresh={full_refresh}, delay={self.PREVIEW_UPDATE_DEBOUNCE_MS}ms")
+        logger.debug(f"🔥 _schedule_preview_update called: full_refresh={full_refresh}, use_coordinator={use_coordinator}")
 
         # Store window close snapshots if provided (for timer callback)
         if before_snapshot is not None and after_snapshot is not None:
@@ -440,6 +440,24 @@ class CrossWindowPreviewMixin:
             self._pending_window_close_after_snapshot = after_snapshot
             self._pending_window_close_changed_fields = changed_fields
             logger.debug(f"🔥 Stored window close snapshots: before={before_snapshot.token}, after={after_snapshot.token}")
+
+        # PERFORMANCE: Use central coordinator for cross-window updates
+        # This makes all listeners update simultaneously instead of sequentially
+        if use_coordinator and not full_refresh:
+            from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+
+            # Cancel any existing local timer
+            if self._preview_update_timer is not None:
+                logger.debug(f"🔥 Stopping existing timer (using coordinator)")
+                self._preview_update_timer.stop()
+                self._preview_update_timer = None
+
+            # Register with coordinator for synchronized update
+            ParameterFormManager.schedule_coordinated_update(self)
+            return
+
+        # Fallback to individual timer for full refreshes or when coordinator disabled
+        from PyQt6.QtCore import QTimer
 
         # Cancel existing timer if any (trailing debounce - restart on each change)
         if self._preview_update_timer is not None:

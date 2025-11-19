@@ -291,6 +291,11 @@ class ParameterFormManager(QWidget):
     _pending_cross_window_changes: List[Tuple['ParameterFormManager', str, Any, Any, Any]] = []
     _cross_window_batch_timer: Optional['QTimer'] = None
 
+    # PERFORMANCE: Central update coordinator - synchronizes all listener updates
+    # Collects all listeners that need updating in current batch cycle
+    _pending_listener_updates: Set[Any] = set()  # Set of listeners to update
+    _coordinator_timer: Optional['QTimer'] = None
+
     # PERFORMANCE: MRO inheritance cache - maps (parent_type, field_name) → set of child types
     # This enables O(1) lookup of which config types can inherit a field from a parent type
     # Example: (PathPlanningConfig, 'output_dir_suffix') → {StepMaterializationConfig, ...}
@@ -3958,15 +3963,16 @@ class ParameterFormManager(QWidget):
 
     @classmethod
     def _emit_batched_cross_window_changes(cls):
-        """Emit all pending changes as individual signals after batching period.
+        """Emit all pending changes and coordinate listener updates synchronously.
 
         Uses stored manager references instead of fragile string matching.
         Deduplicates rapid changes to same field (keeps only latest value).
+        Coordinates all listener updates to happen simultaneously (no per-listener debounce).
         """
         if not cls._pending_cross_window_changes:
             return
 
-        logger.info(f"📦 Emitting {len(cls._pending_cross_window_changes)} batched cross-window changes")
+        logger.info(f"📦 Processing {len(cls._pending_cross_window_changes)} batched cross-window changes")
 
         # Deduplicate: Keep only the latest value for each (manager, param_name) pair
         # This handles rapid typing where same field changes multiple times
@@ -3977,14 +3983,75 @@ class ParameterFormManager(QWidget):
 
         logger.info(f"📦 After deduplication: {len(latest_changes)} unique changes")
 
-        # Emit each change using stored manager reference (type-safe, no string matching)
+        # PERFORMANCE: Emit signals synchronously for immediate listener collection
+        # Listeners will add themselves to _pending_listener_updates instead of starting timers
         for manager, param_name, value, obj_instance, context_obj in latest_changes.values():
             field_path = f"{manager.field_id}.{param_name}"
             logger.info(f"📡 Emitting batched change: {field_path} = {value}")
             manager.context_value_changed.emit(field_path, value, obj_instance, context_obj)
 
+        # PERFORMANCE: Coordinate all listener updates to happen simultaneously
+        # Start single shared timer that updates all collected listeners at once
+        if cls._pending_listener_updates:
+            logger.info(f"🎯 Coordinating updates for {len(cls._pending_listener_updates)} listeners")
+            cls._start_coordinated_update_timer()
+
         # Clear pending changes
         cls._pending_cross_window_changes.clear()
+
+    @classmethod
+    def schedule_coordinated_update(cls, listener: Any):
+        """Schedule a listener for coordinated update.
+
+        Instead of each listener starting its own debounce timer, they register
+        here and get updated all at once by the coordinator.
+
+        Args:
+            listener: The listener object that needs updating
+        """
+        cls._pending_listener_updates.add(listener)
+        logger.info(f"📝 Scheduled coordinated update for {listener.__class__.__name__}")
+
+    @classmethod
+    def _start_coordinated_update_timer(cls):
+        """Start single shared timer for coordinated listener updates."""
+        from PyQt6.QtCore import QTimer
+
+        # Cancel existing timer if any
+        if cls._coordinator_timer is not None:
+            cls._coordinator_timer.stop()
+
+        # Create and start new timer
+        cls._coordinator_timer = QTimer()
+        cls._coordinator_timer.setSingleShot(True)
+        cls._coordinator_timer.timeout.connect(cls._execute_coordinated_updates)
+
+        # Use same delay as cross-window refresh for consistency
+        cls._coordinator_timer.start(cls.CROSS_WINDOW_REFRESH_DELAY_MS)
+        logger.info(f"⏱️  Started coordinator timer ({cls.CROSS_WINDOW_REFRESH_DELAY_MS}ms)")
+
+    @classmethod
+    def _execute_coordinated_updates(cls):
+        """Execute all pending listener updates simultaneously."""
+        if not cls._pending_listener_updates:
+            return
+
+        listeners = list(cls._pending_listener_updates)
+        logger.info(f"🚀 Executing coordinated updates for {len(listeners)} listeners simultaneously")
+
+        # Update all listeners synchronously (no delays between them)
+        for listener in listeners:
+            try:
+                # Each listener should have a method to process pending updates
+                if hasattr(listener, '_process_pending_preview_updates'):
+                    listener._process_pending_preview_updates()
+                    logger.info(f"✅ Updated {listener.__class__.__name__}")
+            except Exception as e:
+                logger.error(f"❌ Error updating {listener.__class__.__name__}: {e}")
+
+        # Clear pending listeners
+        cls._pending_listener_updates.clear()
+        logger.info("🎯 Coordinated update complete")
 
     def unregister_from_cross_window_updates(self):
         """Manually unregister this form manager from cross-window updates.
@@ -4104,6 +4171,9 @@ class ParameterFormManager(QWidget):
 
                 # PERFORMANCE: Clear pending batched changes on form close (Phase 3)
                 type(self)._pending_cross_window_changes.clear()
+
+                # PERFORMANCE: Clear coordinator pending updates (Phase 3 coordinator)
+                type(self)._pending_listener_updates.clear()
 
         except (ValueError, AttributeError):
             pass  # Already removed or list doesn't exist
