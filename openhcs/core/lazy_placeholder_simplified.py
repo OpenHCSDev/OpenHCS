@@ -104,6 +104,16 @@ class LazyDefaultPlaceholderService:
         # PERFORMANCE: Reuse singleton instance per (type, token) to avoid repeated allocations
         # Creating a new instance for every field is wasteful - reuse the same instance
         try:
+            # Log context for debugging
+            if field_name == 'well_filter_mode':
+                from openhcs.config_framework.context_manager import current_context_stack, current_extracted_configs, get_current_temp_global
+                context_list = current_context_stack.get()
+                extracted_configs = current_extracted_configs.get()
+                current_global = get_current_temp_global()
+                logger.info(f"🔍 Context stack has {len(context_list)} items: {[type(c).__name__ for c in context_list]}")
+                logger.info(f"🔍 Extracted configs: {list(extracted_configs.keys())}")
+                logger.info(f"🔍 Current temp global: {type(current_global).__name__ if current_global else 'None'}")
+
             instance_cache_key = (dataclass_type, context_token)
             if instance_cache_key not in LazyDefaultPlaceholderService._instance_cache:
                 LazyDefaultPlaceholderService._instance_cache[instance_cache_key] = dataclass_type()
@@ -111,11 +121,20 @@ class LazyDefaultPlaceholderService:
 
             resolved_value = getattr(instance, field_name)
 
+            if field_name == 'well_filter_mode':
+                logger.info(f"✅ Resolved {dataclass_type.__name__}.{field_name} = {resolved_value}")
+
             result = LazyDefaultPlaceholderService._format_placeholder_text(resolved_value, prefix)
         except Exception as e:
+            if field_name == 'well_filter_mode':
+                logger.info(f"❌ Failed to resolve {dataclass_type.__name__}.{field_name}: {e}")
+                import traceback
+                logger.info(f"Traceback: {traceback.format_exc()}")
             logger.debug(f"Failed to resolve {dataclass_type.__name__}.{field_name}: {e}")
             # Fallback to class default
             class_default = LazyDefaultPlaceholderService._get_class_default_value(dataclass_type, field_name)
+            if field_name == 'well_filter_mode':
+                logger.info(f"📋 Using class default for {dataclass_type.__name__}.{field_name} = {class_default}")
             result = LazyDefaultPlaceholderService._format_placeholder_text(class_default, prefix)
 
         # Cache the result

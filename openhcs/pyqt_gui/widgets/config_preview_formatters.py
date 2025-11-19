@@ -171,31 +171,21 @@ def check_config_has_unsaved_changes(
 
     # If no resolver or parent, can't detect changes
     if not resolve_attr or parent_obj is None or live_context_snapshot is None:
+        logger.info(f"🔍 check_config_has_unsaved_changes: Early return - resolve_attr={resolve_attr is not None}, parent_obj={parent_obj is not None}, live_context_snapshot={live_context_snapshot is not None}")
         return False
 
     # Get all dataclass fields to compare
     if not dataclasses.is_dataclass(config):
         return False
 
+    logger.info(f"🔍 check_config_has_unsaved_changes: CALLED for config_attr={config_attr}, parent_obj={type(parent_obj).__name__}, scope_filter={scope_filter}")
+
     field_names = [f.name for f in dataclasses.fields(config)]
     if not field_names:
+        logger.info(f"🔍 check_config_has_unsaved_changes: No fields in config - returning False")
         return False
 
-    # PERFORMANCE: Phase 1-ALT - O(1) type-based cache lookup
-    # Check if this config's type has been marked as changed
     config_type = type(config)
-    if config_type in ParameterFormManager._configs_with_unsaved_changes:
-        logger.debug(
-            f"✅ CACHE HIT: {config_attr} has changes - skipping expensive checks"
-        )
-        # Cache hit = TRUE, skip ALL expensive manager iteration/resolution
-        return True
-    else:
-        logger.debug(
-            f"✅ CACHE MISS: {config_attr} no changes"
-        )
-        # Cache miss = FALSE
-        return False
 
     # PERFORMANCE: Fast path - check if there's a form manager that has emitted changes
     # for a field whose PATH or TYPE matches (or is related to) this config's type.
@@ -294,20 +284,19 @@ def check_config_has_unsaved_changes(
         if has_form_manager_with_changes or has_scoped_override:
             break
 
-    # CRITICAL: If there's a scoped override, we SHOULD proceed to full check!
-    # The scoped override means there ARE unsaved changes in the scoped editor.
-    # We should only skip if there are NO changes at all (neither scoped nor global).
-    if not has_form_manager_with_changes and not has_scoped_override:
+    # PERFORMANCE: If we found form managers with changes, we can proceed to full comparison
+    # If we didn't find any, we still need to do the full comparison to be sure
+    # (the form manager might not have emitted values yet, or the check might have missed it)
+    if has_form_manager_with_changes or has_scoped_override:
         logger.info(
-            "🔍 check_config_has_unsaved_changes: No form managers with changes for "
-            f"{parent_type_name}.{config_attr} (config type={config_type.__name__}) - skipping field resolution"
+            f"🔍 check_config_has_unsaved_changes: Found form managers with changes for {config_attr} - "
+            f"has_scoped_override={has_scoped_override}, has_form_manager_with_changes={has_form_manager_with_changes}"
         )
-        return False
-
-    logger.info(
-        f"🔍 check_config_has_unsaved_changes: Found changes for {config_attr} - "
-        f"has_scoped_override={has_scoped_override}, has_form_manager_with_changes={has_form_manager_with_changes}"
-    )
+    else:
+        logger.info(
+            f"🔍 check_config_has_unsaved_changes: No form managers with emitted changes for {config_attr} - "
+            f"proceeding to full comparison to be safe"
+        )
 
 
 
@@ -337,8 +326,39 @@ def check_config_has_unsaved_changes(
         # Resolve in SAVED context (without form managers = saved values)
         saved_value = resolve_attr(parent_obj, config, field_name, saved_context_snapshot)
 
+        logger.info(f"🔍 check_config_has_unsaved_changes: Comparing {config_attr}.{field_name}: live={live_value}, saved={saved_value}")
+
         # Compare values - exit early on first difference
         if live_value != saved_value:
+            # CRITICAL: Populate SCOPED cache when we find changes
+            # Extract scope_id from parent_obj (step or pipeline config)
+            cache_scope_id = getattr(parent_obj, '_pipeline_scope_token', None)
+            cache_key = (config_type, cache_scope_id)
+
+            if cache_key not in ParameterFormManager._configs_with_unsaved_changes:
+                ParameterFormManager._configs_with_unsaved_changes[cache_key] = set()
+            ParameterFormManager._configs_with_unsaved_changes[cache_key].add(field_name)
+            logger.info(f"✅ FOUND CHANGES: {config_attr}.{field_name} - populating cache for {config_type.__name__} (scope={cache_scope_id})")
+
+            # CRITICAL: Also mark corresponding step config type as changed
+            # When WellFilterConfig changes in PipelineConfig, steps inherit those changes
+            # through StepWellFilterConfig, so we need to mark both types as changed
+            config_type_name = config_type.__name__
+            if not config_type_name.startswith('Step'):
+                # Try to find the corresponding Step config type
+                step_config_type_name = f"Step{config_type_name}"
+                try:
+                    # Import the config module to get the Step config type
+                    import openhcs.core.config as config_module
+                    step_config_type = getattr(config_module, step_config_type_name, None)
+                    if step_config_type is not None:
+                        if step_config_type not in ParameterFormManager._configs_with_unsaved_changes:
+                            ParameterFormManager._configs_with_unsaved_changes[step_config_type] = set()
+                        ParameterFormManager._configs_with_unsaved_changes[step_config_type].add(field_name)
+                        logger.info(f"✅ FOUND CHANGES: Also marking {step_config_type_name} as changed (inherits from {config_type_name})")
+                except (ImportError, AttributeError):
+                    pass  # Step config type doesn't exist, that's OK
+
             return True
 
     return False
@@ -464,27 +484,68 @@ def check_step_has_unsaved_changes(
 
     # PERFORMANCE: Phase 1-ALT - O(1) type-based cache lookup
     # Instead of iterating through all managers and their emitted values,
-    # check if any of this step's config TYPES have been marked as changed
+    # check if any of this step's config TYPES (or their MRO parents) have been marked as changed
+    # CRITICAL: Check entire MRO chain because configs inherit from @global_pipeline_config decorated classes
+    # Example: StepWellFilterConfig inherits from WellFilterConfig, so changes to WellFilterConfig affect steps
     has_any_relevant_changes = False
+
+    logger.info(f"🔍 check_step_has_unsaved_changes: Checking {len(step_configs)} configs, cache has {len(ParameterFormManager._configs_with_unsaved_changes)} entries")
+    logger.info(f"🔍 check_step_has_unsaved_changes: Cache keys: {[(t.__name__, scope) for t, scope in ParameterFormManager._configs_with_unsaved_changes.keys()]}")
 
     for config_attr, config in step_configs.items():
         config_type = type(config)
-        if config_type in ParameterFormManager._configs_with_unsaved_changes:
-            has_any_relevant_changes = True
-            logger.debug(
-                f"🔍 check_step_has_unsaved_changes: Type-based cache hit for {config_attr} "
-                f"(type={config_type.__name__}, changed_fields={ParameterFormManager._configs_with_unsaved_changes[config_type]})"
-            )
+        logger.info(f"🔍 check_step_has_unsaved_changes: Checking config_attr={config_attr}, type={config_type.__name__}, MRO={[c.__name__ for c in config_type.__mro__[:5]]}")
+        # Check the entire MRO chain (including parent classes)
+        # CRITICAL: Check cache with SCOPED key (config_type, scope_id)
+        # Try multiple scope levels: step-specific, plate-level, global
+        for mro_class in config_type.__mro__:
+            # Try step-specific scope first
+            step_cache_key = (mro_class, expected_step_scope)
+            if step_cache_key in ParameterFormManager._configs_with_unsaved_changes:
+                has_any_relevant_changes = True
+                logger.info(
+                    f"🔍 check_step_has_unsaved_changes: Type-based cache hit for {config_attr} "
+                    f"(type={config_type.__name__}, mro_class={mro_class.__name__}, scope={expected_step_scope}, "
+                    f"changed_fields={ParameterFormManager._configs_with_unsaved_changes[step_cache_key]})"
+                )
+                break
+
+            # Try plate-level scope (extract plate path from step scope)
+            if expected_step_scope and '::' in expected_step_scope:
+                plate_scope = expected_step_scope.split('::')[0]
+                plate_cache_key = (mro_class, plate_scope)
+                if plate_cache_key in ParameterFormManager._configs_with_unsaved_changes:
+                    has_any_relevant_changes = True
+                    logger.info(
+                        f"🔍 check_step_has_unsaved_changes: Type-based cache hit for {config_attr} "
+                        f"(type={config_type.__name__}, mro_class={mro_class.__name__}, plate_scope={plate_scope}, "
+                        f"changed_fields={ParameterFormManager._configs_with_unsaved_changes[plate_cache_key]})"
+                    )
+                    break
+
+            # Try global scope (None)
+            global_cache_key = (mro_class, None)
+            if global_cache_key in ParameterFormManager._configs_with_unsaved_changes:
+                has_any_relevant_changes = True
+                logger.info(
+                    f"🔍 check_step_has_unsaved_changes: Type-based cache hit for {config_attr} "
+                    f"(type={config_type.__name__}, mro_class={mro_class.__name__}, scope=GLOBAL, "
+                    f"changed_fields={ParameterFormManager._configs_with_unsaved_changes[global_cache_key]})"
+                )
+                break
+
+        if has_any_relevant_changes:
             break
 
     # Additional scope-based filtering for step-specific changes
     # If a step-specific scope is expected, verify at least one manager with matching scope has changes
-    if has_any_relevant_changes and expected_step_scope:
-        scope_matched = False
-        for manager in ParameterFormManager._active_form_managers:
-            if not hasattr(manager, '_last_emitted_values') or not manager._last_emitted_values:
-                continue
+    # ALSO: If there's an active form manager for this step's scope, always proceed to full check
+    # (even if cache is empty) because the step editor might be open and have unsaved changes
+    if expected_step_scope:
+        scope_matched_in_cache = False
+        has_active_step_manager = False
 
+        for manager in ParameterFormManager._active_form_managers:
             # CRITICAL: Apply plate-level scope filter to prevent cross-plate contamination
             # If scope_filter is provided (e.g., plate path), only check managers in that scope
             # IMPORTANT: Managers with scope_id=None (global) should affect ALL scopes
@@ -496,20 +557,36 @@ def check_step_has_unsaved_changes(
                     )
                     continue
 
-            # If manager has step-specific scope, it must match
-            if manager.scope_id and '::step_' in manager.scope_id:
-                if manager.scope_id == expected_step_scope:
-                    scope_matched = True
-                    logger.debug(f"🔍 check_step_has_unsaved_changes: Scope match found for {manager.field_id}")
-                    break
-            else:
-                # Non-step-specific manager (plate/global) affects all steps
-                scope_matched = True
+            # Check if this manager matches the expected step scope
+            if manager.scope_id == expected_step_scope:
+                has_active_step_manager = True
+                logger.info(f"🔍 check_step_has_unsaved_changes: Found active manager for step scope: {manager.field_id}")
+                # If this manager has emitted values, it has changes
+                # CRITICAL: Set has_any_relevant_changes to trigger full check (cache might not be populated yet)
+                if hasattr(manager, '_last_emitted_values') and manager._last_emitted_values:
+                    scope_matched_in_cache = True
+                    has_any_relevant_changes = True
+                    logger.info(f"🔍 check_step_has_unsaved_changes: Manager has emitted values")
+                break
+            # If manager has step-specific scope but doesn't match, skip it
+            elif manager.scope_id and '::step_' in manager.scope_id:
+                continue
+            # Non-step-specific manager (plate/global) affects all steps
+            # CRITICAL: Set has_any_relevant_changes to trigger full check (cache might not be populated yet)
+            elif hasattr(manager, '_last_emitted_values') and manager._last_emitted_values:
+                scope_matched_in_cache = True
+                has_any_relevant_changes = True
+                logger.info(f"🔍 check_step_has_unsaved_changes: Non-step-specific manager affects all steps: {manager.field_id}")
                 break
 
-        if not scope_matched:
+        # If we have an active step manager, always proceed to full check (even if cache is empty)
+        # This handles the case where the step editor is open but hasn't populated the cache yet
+        if has_active_step_manager:
+            has_any_relevant_changes = True
+            logger.info(f"🔍 check_step_has_unsaved_changes: Active step manager found - proceeding to full check")
+        elif has_any_relevant_changes and not scope_matched_in_cache:
             has_any_relevant_changes = False
-            logger.debug(f"🔍 check_step_has_unsaved_changes: Type-based cache hit, but no scope match for {expected_step_scope}")
+            logger.info(f"🔍 check_step_has_unsaved_changes: Type-based cache hit, but no scope match for {expected_step_scope}")
 
     if not has_any_relevant_changes:
         logger.debug(f"🔍 check_step_has_unsaved_changes: No relevant changes for step '{getattr(step, 'name', 'unknown')}' - skipping (fast-path)")

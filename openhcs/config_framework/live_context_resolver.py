@@ -11,7 +11,7 @@ This service is completely generic and UI-agnostic:
 - Caller is responsible for providing live context data
 """
 
-from typing import Any, Dict, Type, Optional, Tuple
+from typing import Any, Dict, Type, Optional, Tuple, List
 from dataclasses import is_dataclass, replace as dataclass_replace
 from openhcs.config_framework.context_manager import config_context
 import logging
@@ -48,7 +48,8 @@ class LiveContextResolver:
         attr_name: str,
         context_stack: list,
         live_context: Dict[Type, Dict[str, Any]],
-        cache_token: int
+        cache_token: int,
+        context_scopes: Optional[List[Optional[str]]] = None
     ) -> Any:
         """
         Resolve config attribute through context hierarchy with caching.
@@ -61,6 +62,7 @@ class LiveContextResolver:
             context_stack: List of context objects to resolve through (e.g., [global_config, pipeline_config, step])
             live_context: Live values from form managers, keyed by type
             cache_token: Current cache token for invalidation
+            context_scopes: Optional list of scope IDs corresponding to context_stack (None for global, string for scoped)
 
         Returns:
             Resolved attribute value
@@ -80,7 +82,7 @@ class LiveContextResolver:
 
             # Cache miss - resolve
             resolved_value = self._resolve_uncached(
-                config_obj, attr_name, context_stack, live_context
+                config_obj, attr_name, context_stack, live_context, context_scopes
             )
 
             # Store in cache
@@ -280,7 +282,8 @@ class LiveContextResolver:
         config_obj: object,
         attr_name: str,
         context_stack: list,
-        live_context: Dict[Type, Dict[str, Any]]
+        live_context: Dict[Type, Dict[str, Any]],
+        context_scopes: Optional[List[Optional[str]]] = None
     ) -> Any:
         """Resolve config attribute through context hierarchy (uncached)."""
         # CRITICAL OPTIMIZATION: Cache merged contexts to avoid creating new dataclass instances
@@ -321,36 +324,62 @@ class LiveContextResolver:
             self._merged_context_cache[merged_cache_key] = merged_contexts
 
         # Resolve through nested context stack
-        return self._resolve_through_contexts(merged_contexts, config_obj, attr_name)
+        return self._resolve_through_contexts(merged_contexts, config_obj, attr_name, context_scopes)
 
-    def _resolve_through_contexts(self, merged_contexts: list, config_obj: object, attr_name: str) -> Any:
+    def _resolve_through_contexts(self, merged_contexts: list, config_obj: object, attr_name: str, context_scopes: Optional[List[Optional[str]]] = None) -> Any:
         """Resolve through nested context stack using config_context()."""
         # Build nested context managers
         if not merged_contexts:
             # No context - just get attribute directly
             return getattr(config_obj, attr_name)
 
+        # Build cumulative config_scopes dict mapping ALL context types to their scopes
+        # This is passed to EVERY config_context() call so nested configs inherit the full scope map
+        cumulative_config_scopes = {}
+        if context_scopes:
+            for i, (ctx, scope_id) in enumerate(zip(merged_contexts, context_scopes)):
+                cumulative_config_scopes[type(ctx).__name__] = scope_id
+
         # Nest contexts from outermost to innermost
-        def resolve_in_context(contexts_remaining):
+        def resolve_in_context(contexts_remaining, scopes_remaining):
             if not contexts_remaining:
                 # Innermost level - get the attribute
-                if attr_name == 'well_filter':
-                    from openhcs.config_framework.context_manager import extract_all_configs_from_context
+                if attr_name in ['well_filter', 'well_filter_mode']:
+                    from openhcs.config_framework.context_manager import extract_all_configs_from_context, current_config_scopes
                     available_configs = extract_all_configs_from_context()
+                    scopes_dict = current_config_scopes.get()
                     logger.info(f"🔍 INNERMOST CONTEXT: Resolving {type(config_obj).__name__}.{attr_name}")
                     logger.info(f"🔍 INNERMOST CONTEXT: available_configs = {list(available_configs.keys())}")
+                    logger.info(f"🔍 INNERMOST CONTEXT: scopes_dict = {scopes_dict}")
                     for config_name, config_instance in available_configs.items():
-                        if 'WellFilterConfig' in config_name:
-                            wf_value = getattr(config_instance, 'well_filter', 'N/A')
-                            logger.info(f"🔍 INNERMOST CONTEXT: {config_name}.well_filter = {wf_value}")
+                        if 'WellFilterConfig' in config_name or 'PathPlanningConfig' in config_name:
+                            # Get RAW value (without resolution) using object.__getattribute__()
+                            try:
+                                raw_value = object.__getattribute__(config_instance, attr_name)
+                            except AttributeError:
+                                raw_value = 'N/A'
+                            # Get RESOLVED value (with resolution) using getattr()
+                            resolved_value = getattr(config_instance, attr_name, 'N/A')
+                            # Normalize config name for scope lookup (LazyWellFilterConfig -> WellFilterConfig)
+                            normalized_name = config_name.replace('Lazy', '') if config_name.startswith('Lazy') else config_name
+                            scope = scopes_dict.get(normalized_name, 'N/A')
+                            logger.info(f"🔍 INNERMOST CONTEXT: {config_name}.{attr_name} RAW={raw_value}, RESOLVED={resolved_value}, scope={scope}")
                 return getattr(config_obj, attr_name)
 
             # Enter context and recurse
             ctx = contexts_remaining[0]
-            with config_context(ctx):
-                return resolve_in_context(contexts_remaining[1:])
+            scope_id = scopes_remaining[0] if scopes_remaining else None
 
-        return resolve_in_context(merged_contexts)
+            # CRITICAL: Pass the CUMULATIVE config_scopes dict to every config_context() call
+            # This ensures that nested configs extracted from this context get the full scope map
+            # Example: When entering PipelineConfig, we pass {'GlobalPipelineConfig': None, 'PipelineConfig': plate_path}
+            # so that LazyWellFilterConfig extracted from PipelineConfig gets scope=plate_path
+            with config_context(ctx, scope_id=scope_id, config_scopes=cumulative_config_scopes if cumulative_config_scopes else None):
+                next_scopes = scopes_remaining[1:] if scopes_remaining else None
+                return resolve_in_context(contexts_remaining[1:], next_scopes)
+
+        scopes_list = context_scopes if context_scopes else None
+        return resolve_in_context(merged_contexts, scopes_list)
 
     def _merge_live_values(self, base_obj: object, live_values: Optional[Dict[str, Any]]) -> object:
         """Merge live values into base object.

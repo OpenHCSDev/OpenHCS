@@ -22,7 +22,7 @@ import dataclasses
 import inspect
 import logging
 from contextlib import contextmanager
-from typing import Any, Dict, Union, Tuple
+from typing import Any, Dict, Union, Tuple, Optional
 from dataclasses import fields, is_dataclass
 
 logger = logging.getLogger(__name__)
@@ -38,6 +38,13 @@ current_extracted_configs: contextvars.ContextVar[Dict[str, Any]] = contextvars.
 # Stack of original (unmerged) context objects
 # This preserves lazy type information that gets lost during merging
 current_context_stack: contextvars.ContextVar[list] = contextvars.ContextVar('current_context_stack', default=[])
+
+# Scope information for the current context
+# Maps config type names to their scope IDs (None for global, string for scoped)
+current_config_scopes: contextvars.ContextVar[Dict[str, Optional[str]]] = contextvars.ContextVar('current_config_scopes', default={})
+
+# Current scope ID for resolution context
+current_scope_id: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar('current_scope_id', default=None)
 
 
 def _merge_nested_dataclass(base, override, mask_with_none: bool = False):
@@ -92,7 +99,7 @@ def _merge_nested_dataclass(base, override, mask_with_none: bool = False):
 
 
 @contextmanager
-def config_context(obj, mask_with_none: bool = False):
+def config_context(obj, mask_with_none: bool = False, scope_id: Optional[str] = None, config_scopes: Optional[Dict[str, Optional[str]]] = None):
     """
     Create new context scope with obj's matching fields merged into base config.
 
@@ -107,6 +114,8 @@ def config_context(obj, mask_with_none: bool = False):
                        If False (default), None values are ignored (normal inheritance).
                        Use True when editing GlobalPipelineConfig to mask thread-local
                        loaded instance with static class defaults.
+        scope_id: Optional scope ID for this context (None for global, string for scoped)
+        config_scopes: Optional dict mapping config type names to their scope IDs
 
     Usage:
         with config_context(orchestrator.pipeline_config):  # Pipeline-level context
@@ -127,6 +136,9 @@ def config_context(obj, mask_with_none: bool = False):
     original_extracted = {}
     if obj is not None:
         original_extracted = extract_all_configs(obj, bypass_lazy_resolution=True)
+        if 'LazyWellFilterConfig' in original_extracted or 'WellFilterConfig' in original_extracted:
+            logger.info(f"🔍 CONTEXT MANAGER: original_extracted from {type(obj).__name__} has LazyWellFilterConfig={('LazyWellFilterConfig' in original_extracted)}, WellFilterConfig={('WellFilterConfig' in original_extracted)}")
+        logger.info(f"🔍 CONTEXT MANAGER: original_extracted from {type(obj).__name__} = {set(original_extracted.keys())}")
 
     # Find matching fields between obj and base config type
     overrides = {}
@@ -200,6 +212,7 @@ def config_context(obj, mask_with_none: bool = False):
 
     # Extract configs from merged config
     extracted = extract_all_configs(merged_config)
+    logger.info(f"🔍 CONTEXT MANAGER: extracted from merged = {set(extracted.keys())}")
 
     # CRITICAL: Original configs ALWAYS override merged configs to preserve lazy types
     # This ensures LazyWellFilterConfig from PipelineConfig takes precedence over
@@ -211,6 +224,16 @@ def config_context(obj, mask_with_none: bool = False):
     # When contexts are nested (GlobalPipelineConfig → PipelineConfig), we need to preserve
     # configs from outer contexts while allowing inner contexts to override
     parent_extracted = current_extracted_configs.get()
+    # Track which configs were extracted from the CURRENT context object itself (original_extracted)
+    # NOT from the merged base - this is critical for scope assignment
+    # CRITICAL: Normalize config names by removing "Lazy" prefix for scope tracking
+    # LazyWellFilterConfig and WellFilterConfig should be treated as the same config type
+    current_context_configs = set()
+    for config_name in original_extracted.keys():
+        # Normalize: LazyWellFilterConfig -> WellFilterConfig
+        normalized_name = config_name.replace('Lazy', '') if config_name.startswith('Lazy') else config_name
+        current_context_configs.add(normalized_name)
+    logger.info(f"🔍 CONTEXT MANAGER: Built current_context_configs from original_extracted.keys() = {current_context_configs}")
     if parent_extracted:
         # Start with parent's configs
         merged_extracted = dict(parent_extracted)
@@ -222,16 +245,69 @@ def config_context(obj, mask_with_none: bool = False):
     current_stack = current_context_stack.get()
     new_stack = current_stack + [obj] if obj is not None else current_stack
 
-    # Set context, extracted configs, and context stack atomically
+    # Update scope information if provided
+    if config_scopes is not None:
+        # Merge with parent scopes
+        parent_scopes = current_config_scopes.get()
+        logger.info(f"🔍 CONTEXT MANAGER: Entering {type(obj).__name__}, parent_scopes = {parent_scopes}")
+        logger.info(f"🔍 CONTEXT MANAGER: config_scopes parameter = {config_scopes}")
+        merged_scopes = dict(parent_scopes) if parent_scopes else {}
+        merged_scopes.update(config_scopes)
+        logger.info(f"🔍 CONTEXT MANAGER: After merging config_scopes, merged_scopes = {merged_scopes}")
+
+        # CRITICAL: Propagate scope to all extracted nested configs
+        # If PipelineConfig has scope_id=plate_path, then all its nested configs
+        # (LazyWellFilterConfig, LazyZarrConfig, etc.) should also have scope_id=plate_path
+        # This ensures the resolver can prioritize based on scope specificity
+        #
+        # IMPORTANT: Only apply scope to configs that were NEWLY extracted from this context,
+        # not configs that already exist in parent scopes (which should keep their parent scope)
+        #
+        # CRITICAL: We ALWAYS set scopes for nested configs, even when scope_id=None
+        # This is because GlobalPipelineConfig has scope_id=None, and we need to track
+        # that its nested configs (WellFilterConfig, etc.) also have scope=None
+        # Apply scope to ONLY newly extracted configs from this context
+        # Use current_context_configs to identify configs that were extracted from the current
+        # context object (before merging with parent), not inherited from parent contexts
+        logger.info(f"🔍 CONTEXT MANAGER: current_context_configs = {current_context_configs}")
+        logger.info(f"🔍 CONTEXT MANAGER: parent_scopes = {parent_scopes}")
+        logger.info(f"🔍 CONTEXT MANAGER: About to loop over current_context_configs, len={len(current_context_configs)}")
+        for config_name in current_context_configs:
+            logger.info(f"🔍 CONTEXT MANAGER: Loop iteration for config_name={config_name}, scope_id={scope_id}")
+            # CRITICAL: Configs extracted from the CURRENT context object should ALWAYS get the current scope_id
+            # Even if a normalized equivalent exists in parent_scopes, the current context's version
+            # should use the current scope_id, not the parent's scope
+            #
+            # Example: PipelineConfig (scope=plate_path) extracts LazyWellFilterConfig
+            # Even though WellFilterConfig exists in parent with scope=None,
+            # LazyWellFilterConfig should get scope=plate_path (not None)
+            merged_scopes[config_name] = scope_id
+            logger.info(f"🔍 CONTEXT MANAGER: Set scope for {config_name} from context scope_id: {scope_id}")
+
+        logger.info(f"🔍 CONTEXT MANAGER: Setting scopes: {merged_scopes}, scope_id: {scope_id}")
+    else:
+        merged_scopes = current_config_scopes.get()
+
+    # Set context, extracted configs, context stack, and scope information atomically
+    logger.info(
+        f"🔍 CONTEXT MANAGER: SET SCOPES FINAL for {type(obj).__name__}: "
+        f"{merged_scopes}, scope_id={scope_id}"
+    )
+    logger.info(f"🔍 CONTEXT MANAGER: About to set current_config_scopes.set(merged_scopes) where merged_scopes = {merged_scopes}")
     token = current_temp_global.set(merged_config)
     extracted_token = current_extracted_configs.set(extracted)
     stack_token = current_context_stack.set(new_stack)
+    scopes_token = current_config_scopes.set(merged_scopes)
+    scope_id_token = current_scope_id.set(scope_id) if scope_id is not None else None
     try:
         yield
     finally:
         current_temp_global.reset(token)
         current_extracted_configs.reset(extracted_token)
         current_context_stack.reset(stack_token)
+        current_config_scopes.reset(scopes_token)
+        if scope_id_token is not None:
+            current_scope_id.reset(scope_id_token)
 
 
 # Removed: extract_config_overrides - no longer needed with field matching approach
@@ -475,23 +551,32 @@ def extract_all_configs_from_context() -> Dict[str, Any]:
 _extract_configs_cache: Dict[Tuple, Dict[str, Any]] = {}
 
 def _make_cache_key_for_dataclass(obj) -> Tuple:
-    """Create content-based cache key for frozen dataclass."""
+    """Create content-based cache key for frozen dataclass.
+
+    CRITICAL: The cache key must include the ACTUAL TYPE of nested dataclasses,
+    not just their content. This is because LazyWellFilterConfig and WellFilterConfig
+    can have the same field values but are different types, and extract_all_configs()
+    needs to return different results for them.
+    """
     if not is_dataclass(obj):
         return (id(obj),)  # Fallback to identity for non-dataclasses
 
     # Build tuple of (type_name, field_values)
-    type_name = type(obj).__name__
+    # CRITICAL: Use the ACTUAL type, not just __name__, to distinguish Lazy vs BASE
+    type_key = type(obj)  # Use the actual type object, not just the name
     field_values = []
     for field_info in fields(obj):
         try:
             value = object.__getattribute__(obj, field_info.name)
             # Recursively handle nested dataclasses
             if is_dataclass(value):
-                value = _make_cache_key_for_dataclass(value)
+                # CRITICAL: Include the TYPE of the nested dataclass in the cache key
+                # This ensures LazyWellFilterConfig and WellFilterConfig have different keys
+                value = (type(value), _make_cache_key_for_dataclass(value))
             elif isinstance(value, (list, tuple)):
                 # Convert lists to tuples for hashability
                 value = tuple(
-                    _make_cache_key_for_dataclass(item) if is_dataclass(item) else item
+                    (type(item), _make_cache_key_for_dataclass(item)) if is_dataclass(item) else item
                     for item in value
                 )
             elif isinstance(value, dict):
@@ -501,7 +586,7 @@ def _make_cache_key_for_dataclass(obj) -> Tuple:
         except AttributeError:
             field_values.append((field_info.name, None))
 
-    return (type_name, tuple(field_values))
+    return (type_key, tuple(field_values))
 
 def extract_all_configs(context_obj, bypass_lazy_resolution: bool = False) -> Dict[str, Any]:
     """
@@ -531,7 +616,8 @@ def extract_all_configs(context_obj, bypass_lazy_resolution: bool = False) -> Di
     # Check cache first
     if cache_key in _extract_configs_cache:
         logger.debug(f"🔍 CACHE HIT: extract_all_configs for {type(context_obj).__name__} (bypass={bypass_lazy_resolution})")
-        return _extract_configs_cache[cache_key]
+        # CRITICAL: Return a COPY of the cached dict to prevent mutations from affecting the cache
+        return dict(_extract_configs_cache[cache_key])
 
     logger.debug(f"🔍 CACHE MISS: extract_all_configs for {type(context_obj).__name__} (bypass={bypass_lazy_resolution}), cache size={len(_extract_configs_cache)}")
     configs = {}
@@ -552,16 +638,31 @@ def extract_all_configs(context_obj, bypass_lazy_resolution: bool = False) -> Di
             # Only process fields that are dataclass types (config objects)
             if is_dataclass(actual_type):
                 try:
-                    # CRITICAL: Use object.__getattribute__() to bypass lazy resolution if requested
-                    if bypass_lazy_resolution:
-                        field_value = object.__getattribute__(context_obj, field_name)
-                    else:
-                        field_value = getattr(context_obj, field_name)
+                    # CRITICAL: ALWAYS use object.__getattribute__() to get RAW nested configs
+                    # We want to extract the actual config instances stored in this object,
+                    # not resolved values from parent contexts
+                    # The bypass_lazy_resolution flag controls whether we convert Lazy to BASE,
+                    # not whether we use getattr vs object.__getattribute__
+                    field_value = object.__getattribute__(context_obj, field_name)
 
                     if field_value is not None:
                         # Use the actual instance type, not the annotation type
                         # This handles cases where field is annotated as base class but contains subclass
                         instance_type = type(field_value)
+
+                        # Log extraction of WellFilterConfig for debugging
+                        if 'WellFilterConfig' in instance_type.__name__:
+                            logger.info(f"🔍 EXTRACT: Extracting {instance_type.__name__} from {type(context_obj).__name__}.{field_name} (bypass={bypass_lazy_resolution})")
+                            logger.info(f"🔍 EXTRACT: Instance ID: {id(field_value)}")
+                            if hasattr(field_value, 'well_filter'):
+                                try:
+                                    raw_wf = object.__getattribute__(field_value, 'well_filter')
+                                    logger.info(f"🔍 EXTRACT: {instance_type.__name__}.well_filter RAW={raw_wf}")
+                                except AttributeError:
+                                    logger.info(f"🔍 EXTRACT: {instance_type.__name__}.well_filter RAW=<no attribute>")
+
+                        if 'WellFilterConfig' in instance_type.__name__ or 'PipelineConfig' in instance_type.__name__:
+                            logger.info(f"🔍 EXTRACT: field_name={field_name}, instance_type={instance_type.__name__}, context_obj={type(context_obj).__name__}, bypass={bypass_lazy_resolution}")
                         configs[instance_type.__name__] = field_value
 
                         logger.debug(f"Extracted config {instance_type.__name__} from field {field_name} on {type(context_obj).__name__} (bypass={bypass_lazy_resolution})")

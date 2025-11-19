@@ -471,6 +471,9 @@ class ConfigWindow(TreeFormFlashMixin, BaseFormDialog):
                 self._global_context_dirty = False
 
             if close_window:
+                # CRITICAL: Clear unsaved changes cache after save
+                # Save changes the comparison basis (saved values change)
+                ParameterFormManager._clear_unsaved_changes_cache("save_config (close)")
                 self.accept()
             else:
                 # CRITICAL: If keeping window open after save, update the form manager's object_instance
@@ -478,8 +481,11 @@ class ConfigWindow(TreeFormFlashMixin, BaseFormDialog):
                 self.form_manager.object_instance = new_config
 
                 # Increment token to invalidate caches
-                from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
                 ParameterFormManager._live_context_token_counter += 1
+
+                # CRITICAL: Clear unsaved changes cache after save
+                # Save changes the comparison basis (saved values change)
+                ParameterFormManager._clear_unsaved_changes_cache("save_config")
 
                 # Refresh this window's placeholders with new saved values as base
                 self.form_manager._refresh_with_live_context()

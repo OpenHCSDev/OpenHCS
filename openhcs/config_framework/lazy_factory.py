@@ -120,7 +120,7 @@ class LazyMethodBindings:
     def create_resolver() -> Callable[[Any, str], Any]:
         """Create field resolver method using new pure function interface."""
         from openhcs.config_framework.dual_axis_resolver import resolve_field_inheritance
-        from openhcs.config_framework.context_manager import current_temp_global, current_extracted_configs
+        from openhcs.config_framework.context_manager import current_temp_global, current_extracted_configs, current_scope_id, current_config_scopes
 
         def _resolve_field_value(self, field_name: str) -> Any:
             # Get current context from contextvars
@@ -128,11 +128,16 @@ class LazyMethodBindings:
                 current_context = current_temp_global.get()
                 # Get cached extracted configs (already extracted when context was set)
                 available_configs = current_extracted_configs.get()
+                # Get scope information
+                scope_id = current_scope_id.get()
+                config_scopes = current_config_scopes.get()
 
-                # Use pure function for resolution
-                return resolve_field_inheritance(self, field_name, available_configs)
+                # Use pure function for resolution with scope information
+                return resolve_field_inheritance(self, field_name, available_configs, scope_id, config_scopes)
             except LookupError:
                 # No context available - return None (fail-loud approach)
+                if field_name == 'well_filter_mode':
+                    logger.info(f"❌ No context available for resolving {type(self).__name__}.{field_name}")
                 logger.debug(f"No context available for resolving {type(self).__name__}.{field_name}")
                 return None
 
@@ -156,12 +161,16 @@ class LazyMethodBindings:
 
             # Get current context from contextvars
             try:
+                from openhcs.config_framework.context_manager import current_scope_id, current_config_scopes
                 current_context = current_temp_global.get()
                 # Get cached extracted configs (already extracted when context was set)
                 available_configs = current_extracted_configs.get()
+                # Get scope information
+                scope_id = current_scope_id.get()
+                config_scopes = current_config_scopes.get()
 
-                # Use pure function for resolution
-                resolved_value = resolve_field_inheritance(self, name, available_configs)
+                # Use pure function for resolution with scope information
+                resolved_value = resolve_field_inheritance(self, name, available_configs, scope_id, config_scopes)
                 if resolved_value is not None:
                     return resolved_value
             except LookupError:
@@ -216,6 +225,8 @@ class LazyMethodBindings:
                     if cache_key in _lazy_resolution_cache:
                         # PERFORMANCE: Don't log cache hits - creates massive I/O bottleneck
                         # (414 log writes per keystroke was slower than the resolution itself!)
+                        if name == 'well_filter_mode':
+                            logger.info(f"🔍 CACHE HIT: {self.__class__.__name__}.{name} = {_lazy_resolution_cache[cache_key]}")
                         return _lazy_resolution_cache[cache_key]
                 except ImportError:
                     # No ParameterFormManager available - skip caching
@@ -275,11 +286,22 @@ class LazyMethodBindings:
 
             # Stage 3: Inheritance resolution using same merged context
             try:
+                from openhcs.config_framework.context_manager import current_scope_id, current_config_scopes
                 current_context = current_temp_global.get()
                 # Get cached extracted configs (already extracted when context was set)
                 available_configs = current_extracted_configs.get()
+                # Get scope information
+                scope_id = current_scope_id.get()
+                config_scopes = current_config_scopes.get()
 
-                resolved_value = resolve_field_inheritance(self, name, available_configs)
+                if name == 'well_filter_mode':
+                    logger.info(f"🔍 LAZY __getattribute__: {self.__class__.__name__}.{name} - calling resolve_field_inheritance")
+                    logger.info(f"🔍 LAZY __getattribute__: available_configs = {list(available_configs.keys())}")
+
+                resolved_value = resolve_field_inheritance(self, name, available_configs, scope_id, config_scopes)
+
+                if name == 'well_filter_mode':
+                    logger.info(f"🔍 LAZY __getattribute__: resolve_field_inheritance returned {resolved_value}")
 
                 if resolved_value is not None:
                     cache_value(resolved_value)

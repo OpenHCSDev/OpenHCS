@@ -79,13 +79,29 @@ class LazyDefaultPlaceholderService:
         # Simple approach: Create new instance and let lazy system handle context resolution
         # The context_obj parameter is unused since context should be set externally via config_context()
         try:
+            from openhcs.config_framework.context_manager import current_context_stack, current_extracted_configs, get_current_temp_global
+            context_list = current_context_stack.get()
+            extracted_configs = current_extracted_configs.get()
+            current_global = get_current_temp_global()
+            if field_name == 'well_filter_mode':
+                logger.info(f"🔍 Context stack has {len(context_list)} items: {[type(c).__name__ for c in context_list]}")
+                logger.info(f"🔍 Extracted configs: {list(extracted_configs.keys())}")
+                logger.info(f"🔍 Current temp global: {type(current_global).__name__ if current_global else 'None'}")
+
             instance = dataclass_type()
             resolved_value = getattr(instance, field_name)
+            if field_name == 'well_filter_mode':
+                logger.info(f"✅ Resolved {dataclass_type.__name__}.{field_name} = {resolved_value}")
             return LazyDefaultPlaceholderService._format_placeholder_text(resolved_value, prefix)
         except Exception as e:
-            logger.debug(f"Failed to resolve {dataclass_type.__name__}.{field_name}: {e}")
+            if field_name == 'well_filter_mode':
+                logger.info(f"❌ Failed to resolve {dataclass_type.__name__}.{field_name}: {e}")
+                import traceback
+                logger.info(f"Traceback: {traceback.format_exc()}")
             # Fallback to class default
             class_default = LazyDefaultPlaceholderService._get_class_default_value(dataclass_type, field_name)
+            if field_name == 'well_filter_mode':
+                logger.info(f"📋 Using class default for {dataclass_type.__name__}.{field_name} = {class_default}")
             return LazyDefaultPlaceholderService._format_placeholder_text(class_default, prefix)
 
     @staticmethod

@@ -499,20 +499,33 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
             preview_parts.append(f"configs=[{','.join(config_indicators)}]")
 
         # Check if step has any unsaved changes
-        # IMPORTANT: Check the ORIGINAL step, not step_for_display (which has live values merged)
+        # CRITICAL: We need TWO step instances:
+        # 1. PREVIEW instance (with live values merged) for LIVE comparison
+        # 2. ORIGINAL instance (saved values) for SAVED comparison
         from openhcs.pyqt_gui.widgets.config_preview_formatters import check_step_has_unsaved_changes
+        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+
+        # step_for_display is already the preview instance with live values merged
+        step_preview = step_for_display
 
         def resolve_attr(parent_obj, config_obj, attr_name, context):
-            return self._resolve_config_attr(original_step, config_obj, attr_name, context)
+            # If context token matches live token, use preview instance
+            # If context token is different (saved snapshot), use original instance
+            is_live_context = (context.token == live_context_snapshot.token)
+            step_to_use = step_preview if is_live_context else original_step
+
+            return self._resolve_config_attr(step_to_use, config_obj, attr_name, context)
 
         has_unsaved = check_step_has_unsaved_changes(
-            original_step,  # Use ORIGINAL step, not merged
+            original_step,  # Use ORIGINAL step as parent_obj (for field extraction)
             self.STEP_CONFIG_INDICATORS,
             resolve_attr,
             live_context_snapshot,
             scope_filter=self.current_plate,  # CRITICAL: Pass scope filter
             saved_context_snapshot=saved_context_snapshot  # PERFORMANCE: Reuse saved snapshot
         )
+
+        logger.info(f"🔍 _format_resolved_step_for_display: step_name={step_name}, has_unsaved={has_unsaved}")
 
         # Add unsaved changes marker to step name if needed
         display_step_name = f"{step_name}†" if has_unsaved else step_name
@@ -1332,11 +1345,42 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
                 scope_map[scope_id] = idx
         return scope_map
 
+    def _resolve_scope_targets(self, scope_id: Optional[str]):
+        """Override to handle PipelineConfig and GlobalPipelineConfig changes affecting all steps.
+
+        When PipelineConfig or GlobalPipelineConfig changes, all steps need to be updated because they
+        inherit from these configs. Return all step indices for incremental update.
+
+        Returns:
+            (target_keys, requires_full_refresh)
+        """
+        from openhcs.core.config import PipelineConfig
+
+        # If scope_id is ALL_ITEMS_SCOPE (GlobalPipelineConfig or PipelineConfig), return all step indices
+        if scope_id == self.ALL_ITEMS_SCOPE:
+            all_step_indices = set(range(len(self.pipeline_steps)))
+            logger.info(f"🔍 PipelineEditor._resolve_scope_targets: scope_id=ALL_ITEMS_SCOPE, returning all_step_indices={all_step_indices}")
+            return all_step_indices, False
+
+        # If scope_id is None, check if this is a PipelineConfig change
+        # by checking if the current plate is set (PipelineConfig is plate-scoped)
+        if scope_id is None and self.current_plate:
+            # This is likely a PipelineConfig change - update all steps incrementally
+            # Return all step indices as target keys
+            all_step_indices = set(range(len(self.pipeline_steps)))
+            logger.info(f"🔍 PipelineEditor._resolve_scope_targets: scope_id=None, returning all_step_indices={all_step_indices}")
+            return all_step_indices, False
+
+        # Otherwise use parent implementation
+        result = super()._resolve_scope_targets(scope_id)
+        logger.info(f"🔍 PipelineEditor._resolve_scope_targets: scope_id={scope_id}, result={result}, _preview_scope_map size={len(self._preview_scope_map)}")
+        return result
+
     def _process_pending_preview_updates(self) -> None:
-        logger.debug(f"🔥 _process_pending_preview_updates called: _pending_preview_keys={self._pending_preview_keys}")
+        logger.info(f"🔥 PipelineEditor._process_pending_preview_updates called: _pending_preview_keys={self._pending_preview_keys}")
 
         if not self._pending_preview_keys:
-            logger.debug(f"🔥 No pending preview keys - returning early")
+            logger.info(f"🔥 PipelineEditor: No pending preview keys - returning early")
             return
 
         if not self.current_plate:
@@ -1414,14 +1458,23 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         # Update last snapshot for next comparison
         self._last_live_context_snapshot = live_context_after
 
-        # CRITICAL: For window close events, only check the step that was actually closed
-        # The "before" snapshot only contains values for the step being edited, not all steps
-        # EXCEPTION: If the scope_id is a plate scope (PipelineConfig), check ALL steps
+        # CRITICAL: Determine which steps to refresh based on what was closed
+        # - If GlobalPipelineConfig or PipelineConfig closed: refresh ALL steps (they inherit from these)
+        # - If step editor closed: refresh only that specific step
+        #
+        # We can't rely on '::' to distinguish step vs plate scope because plate paths can contain '::'
+        # Instead, check if _pending_preview_keys contains all steps (set by _resolve_scope_targets)
         indices_to_check = list(range(len(self.pipeline_steps)))
         logger.info(f"🔍 _handle_full_preview_refresh: Initial indices_to_check (ALL steps): {indices_to_check}")
+        logger.info(f"🔍 _handle_full_preview_refresh: _pending_preview_keys={self._pending_preview_keys}")
 
-        if live_context_before:
-            # Check if this is a window close event by looking for scope_ids in the before snapshot
+        # If _pending_preview_keys contains all step indices, this is a global/plate-level change
+        # (GlobalPipelineConfig or PipelineConfig closed) - refresh all steps
+        all_step_indices = set(range(len(self.pipeline_steps)))
+        if self._pending_preview_keys == all_step_indices:
+            logger.info(f"🔍 _handle_full_preview_refresh: _pending_preview_keys matches all steps - global/plate-level change, checking ALL steps")
+        elif live_context_before:
+            # Otherwise, check if this is a step-specific change by looking at scoped_values
             scoped_values_before = getattr(live_context_before, 'scoped_values', {})
             logger.info(f"🔍 _handle_full_preview_refresh: scoped_values_before keys: {list(scoped_values_before.keys()) if scoped_values_before else 'None'}")
             if scoped_values_before:
@@ -1432,17 +1485,13 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
                     window_close_scope_id = scope_ids[0]
                     logger.info(f"🔍 _handle_full_preview_refresh: window_close_scope_id={window_close_scope_id}")
 
-                    # Check if this is a step scope (contains '::') or a plate scope (no '::')
-                    if '::' in window_close_scope_id:
-                        # Step scope - only check the specific step
-                        for idx, step in enumerate(self.pipeline_steps):
-                            step_scope_id = self._build_step_scope_id(step)
-                            if step_scope_id == window_close_scope_id:
-                                indices_to_check = [idx]
-                                logger.info(f"🔍 _handle_full_preview_refresh: Found matching step at index {idx}, only checking that step")
-                                break
-                    else:
-                        logger.info(f"🔍 _handle_full_preview_refresh: Plate scope detected, checking ALL steps")
+                    # Find the step that matches this scope_id
+                    for idx, step in enumerate(self.pipeline_steps):
+                        step_scope_id = self._build_step_scope_id(step)
+                        if step_scope_id == window_close_scope_id:
+                            indices_to_check = [idx]
+                            logger.info(f"🔍 _handle_full_preview_refresh: Found matching step at index {idx}, only checking that step")
+                            break
             else:
                 logger.info(f"🔍 _handle_full_preview_refresh: No scoped_values_before, checking ALL steps")
 
@@ -1485,6 +1534,8 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
             live_context_before: Live context snapshot before changes (for flash logic)
             label_indices: Optional subset of indices that require label updates
         """
+        logger.info(f"🔥 _refresh_step_items_by_index called: indices={indices}, label_indices={label_indices}")
+
         if not indices:
             return
 

@@ -269,24 +269,49 @@ def _is_related_config_type(obj_type: Type, config_type: Type) -> bool:
     return False
 
 
+def get_scope_specificity(scope_id: Optional[str]) -> int:
+    """Calculate scope specificity for priority ordering.
+
+    More specific scopes have higher values:
+    - None (global): 0
+    - "plate_path": 1
+    - "plate_path::step": 2
+    - "plate_path::step::nested": 3
+
+    Args:
+        scope_id: Scope identifier (None for global, string for scoped)
+
+    Returns:
+        Specificity level (higher = more specific)
+    """
+    if scope_id is None:
+        return 0
+    return scope_id.count('::') + 1
+
+
 def resolve_field_inheritance(
     obj,
     field_name: str,
-    available_configs: Dict[str, Any]
+    available_configs: Dict[str, Any],
+    current_scope_id: Optional[str] = None,
+    config_scopes: Optional[Dict[str, Optional[str]]] = None
 ) -> Any:
     """
-    Simplified MRO-based inheritance resolution.
+    Simplified MRO-based inheritance resolution with scope-aware priority.
 
     ALGORITHM:
     1. Check if obj has concrete value for field_name in context
     2. Traverse obj's MRO from most to least specific
     3. For each MRO class, check if there's a config instance in context with concrete (non-None) value
-    4. Return first concrete value found
+    4. When multiple configs match, prioritize by scope specificity (plate > global)
+    5. Return first concrete value found
 
     Args:
         obj: The object requesting field resolution
         field_name: Name of the field to resolve
         available_configs: Dict mapping config type names to config instances
+        current_scope_id: Scope ID of the context requesting resolution (e.g., "/plate" or "/plate::step")
+        config_scopes: Optional dict mapping config type names to their scope IDs
 
     Returns:
         Resolved field value or None if not found
@@ -296,6 +321,9 @@ def resolve_field_inheritance(
     if field_name in ['well_filter_mode', 'output_dir_suffix']:
         logger.info(f"🔍 RESOLVER: {obj_type.__name__}.{field_name}")
         logger.info(f"🔍 RESOLVER: MRO = {[cls.__name__ for cls in obj_type.__mro__ if is_dataclass(cls)]}")
+        logger.info(f"🔍 RESOLVER: available_configs keys = {list(available_configs.keys())}")
+        logger.info(f"🔍 RESOLVER: current_scope_id = {current_scope_id}")
+        logger.info(f"🔍 RESOLVER: config_scopes = {config_scopes}")
 
     # Step 1: Check if exact same type has concrete value in context
     for config_name, config_instance in available_configs.items():
@@ -305,8 +333,10 @@ def resolve_field_inheritance(
                 # Lazy configs store their raw values as instance attributes
                 field_value = object.__getattribute__(config_instance, field_name)
                 if field_name in ['well_filter_mode', 'output_dir_suffix']:
-                    logger.info(f"🔍 STEP 1: {config_name}.{field_name} = {field_value}")
+                    logger.info(f"🔍 STEP 1: {config_name}.{field_name} = {field_value} (type match: {type(config_instance).__name__})")
                 if field_value is not None:
+                    if field_name in ['well_filter_mode', 'output_dir_suffix']:
+                        logger.info(f"🔍 STEP 1: RETURNING {field_value} from {config_name}")
                     return field_value
             except AttributeError:
                 continue
@@ -323,34 +353,54 @@ def resolve_field_inheritance(
         # CRITICAL: Prioritize lazy types over base types when both are present
         # This ensures PipelineConfig's LazyWellFilterConfig takes precedence over GlobalPipelineConfig's WellFilterConfig
 
-        # First pass: Look for exact type match OR lazy type match (prioritize lazy)
-        lazy_match = None
-        base_match = None
+        # First pass: Look for exact type match OR lazy type match
+        # Collect ALL matches with their scope specificity for priority sorting
+        lazy_matches = []  # List of (config_name, config_instance, scope_specificity)
+        base_matches = []
 
         for config_name, config_instance in available_configs.items():
             instance_type = type(config_instance)
 
+            # Get scope specificity for this config
+            # Normalize config name for scope lookup (LazyWellFilterConfig -> WellFilterConfig)
+            normalized_name = config_name.replace('Lazy', '') if config_name.startswith('Lazy') else config_name
+            config_scope = config_scopes.get(normalized_name) if config_scopes else None
+            scope_specificity = get_scope_specificity(config_scope)
+
             # Check exact type match
             if instance_type == mro_class:
-                # Prioritize lazy types over base types
+                # Separate lazy and base types
                 if instance_type.__name__.startswith('Lazy'):
                     if field_name == 'well_filter_mode' and mro_class.__name__ == 'WellFilterConfig':
-                        logger.info(f"🔍 MATCHING: Exact match - {config_name} is lazy, setting lazy_match")
-                    lazy_match = config_instance
+                        logger.info(f"🔍 MATCHING: Exact match - {config_name} is lazy (scope={config_scope}, specificity={scope_specificity})")
+                    lazy_matches.append((config_name, config_instance, scope_specificity))
                 else:
                     if field_name == 'well_filter_mode' and mro_class.__name__ == 'WellFilterConfig':
-                        logger.info(f"🔍 MATCHING: Exact match - {config_name} is base, setting base_match")
-                    base_match = config_instance
+                        logger.info(f"🔍 MATCHING: Exact match - {config_name} is base (scope={config_scope}, specificity={scope_specificity})")
+                    base_matches.append((config_name, config_instance, scope_specificity))
             # Check if instance is base type of lazy MRO class (e.g., StepWellFilterConfig matches LazyStepWellFilterConfig)
             elif mro_class.__name__.startswith('Lazy') and instance_type.__name__ == mro_class.__name__[4:]:
                 if field_name == 'well_filter_mode' and mro_class.__name__ == 'WellFilterConfig':
-                    logger.info(f"🔍 MATCHING: Base type of lazy MRO - {config_name}, setting base_match")
-                base_match = config_instance
+                    logger.info(f"🔍 MATCHING: Base type of lazy MRO - {config_name} (scope={config_scope}, specificity={scope_specificity})")
+                base_matches.append((config_name, config_instance, scope_specificity))
             # Check if instance is lazy type of non-lazy MRO class (e.g., LazyStepWellFilterConfig matches StepWellFilterConfig)
             elif instance_type.__name__.startswith('Lazy') and mro_class.__name__ == instance_type.__name__[4:]:
                 if field_name == 'well_filter_mode' and mro_class.__name__ == 'WellFilterConfig':
-                    logger.info(f"🔍 MATCHING: Lazy type of non-lazy MRO - {config_name}, setting lazy_match")
-                lazy_match = config_instance
+                    logger.info(f"🔍 MATCHING: Lazy type of non-lazy MRO - {config_name} (scope={config_scope}, specificity={scope_specificity})")
+                lazy_matches.append((config_name, config_instance, scope_specificity))
+
+        # Sort matches by scope specificity (highest first = most specific scope)
+        lazy_matches.sort(key=lambda x: x[2], reverse=True)
+        base_matches.sort(key=lambda x: x[2], reverse=True)
+
+        if field_name == 'well_filter_mode' and mro_class.__name__ in ['WellFilterConfig', 'LazyWellFilterConfig']:
+            logger.info(f"🔍 SORTED MATCHES for {mro_class.__name__}:")
+            logger.info(f"🔍   Lazy matches (sorted by specificity): {[(name, spec) for name, _, spec in lazy_matches]}")
+            logger.info(f"🔍   Base matches (sorted by specificity): {[(name, spec) for name, _, spec in base_matches]}")
+
+        # Get the highest-priority matches
+        lazy_match = lazy_matches[0][1] if lazy_matches else None
+        base_match = base_matches[0][1] if base_matches else None
 
         # Prioritization logic:
         # CRITICAL: Always check BOTH lazy and base instances, prioritizing non-None values

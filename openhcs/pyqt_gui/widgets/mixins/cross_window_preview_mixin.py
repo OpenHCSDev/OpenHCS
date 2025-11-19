@@ -312,10 +312,13 @@ class CrossWindowPreviewMixin:
             field_path, new_value, editing_object, context_object
         )
 
+        logger.info(f"🔍 handle_cross_window_preview_change: target_keys={target_keys}, requires_full_refresh={requires_full_refresh}, should_update_labels={should_update_labels}")
+
         if requires_full_refresh:
             self._pending_preview_keys.clear()
             self._pending_label_keys.clear()
             self._pending_changed_fields.clear()
+            logger.info(f"🔍 handle_cross_window_preview_change: Calling _schedule_preview_update(full_refresh=True)")
             self._schedule_preview_update(full_refresh=True)
             return
 
@@ -324,6 +327,7 @@ class CrossWindowPreviewMixin:
             if should_update_labels:
                 self._pending_label_keys.update(target_keys)
 
+        logger.info(f"🔍 handle_cross_window_preview_change: Calling _schedule_preview_update(full_refresh=False), _pending_preview_keys={self._pending_preview_keys}")
         # Schedule debounced update (always schedule to handle flash, even if no label updates)
         self._schedule_preview_update(full_refresh=False)
 

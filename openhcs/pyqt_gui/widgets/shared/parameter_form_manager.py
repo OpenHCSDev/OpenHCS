@@ -208,6 +208,7 @@ class LiveContextSnapshot:
     token: int
     values: Dict[type, Dict[str, Any]]
     scoped_values: Dict[str, Dict[type, Dict[str, Any]]] = field(default_factory=dict)
+    scopes: Dict[str, Optional[str]] = field(default_factory=dict)  # Maps config type name to scope ID
 
 
 class ParameterFormManager(QWidget):
@@ -280,9 +281,15 @@ class ParameterFormManager(QWidget):
     _live_context_cache: Optional['TokenCache'] = None  # Initialized on first use
 
     # PERFORMANCE: Type-based cache for unsaved changes detection (Phase 1-ALT)
-    # Map: config type → set of changed field names
-    # Example: LazyWellFilterConfig → {'well_filter', 'well_filter_mode'}
-    _configs_with_unsaved_changes: Dict[Type, Set[str]] = {}
+    # Map: (config_type, scope_id) → set of changed field names
+    # Example: (LazyWellFilterConfig, "plate::step_6") → {'well_filter', 'well_filter_mode'}
+    # CRITICAL: This cache is SCOPED to prevent cross-step contamination
+    # When step 6's editor has unsaved changes, it should NOT affect step 0's unsaved changes check
+    # CRITICAL: This cache is invalidated when the live context token changes
+    # The token changes when: form values change, windows open/close, resets happen
+    # When the token changes, the cache is stale and must be cleared
+    _configs_with_unsaved_changes: Dict[Tuple[Type, Optional[str]], Set[str]] = {}
+    _configs_with_unsaved_changes_token: int = -1  # Token when cache was last populated
     MAX_CONFIG_TYPE_CACHE_ENTRIES = 50  # Monitor cache size (log warning if exceeded)
 
     # PERFORMANCE: Phase 3 - Batch cross-window updates
@@ -378,6 +385,29 @@ class ParameterFormManager(QWidget):
                     logger.info(f"🔧   WellFilter cache: ({parent_type.__name__}, '{field_name}') → {child_names}")
 
     @classmethod
+    def _clear_unsaved_changes_cache(cls, reason: str):
+        """Clear the entire unsaved changes cache.
+
+        This should be called when the comparison basis changes:
+        - Save happens (saved values change)
+        - Reset happens (live values revert to saved)
+        - Window closes (live context changes)
+        """
+        cls._configs_with_unsaved_changes.clear()
+        logger.info(f"🔍 Cleared unsaved changes cache: {reason}")
+
+    @classmethod
+    def _invalidate_config_in_cache(cls, config_type: Type):
+        """Invalidate a specific config type in the unsaved changes cache.
+
+        This should be called when a value changes - we need to re-check if there
+        are still unsaved changes (user might have typed the value back to saved state).
+        """
+        if config_type in cls._configs_with_unsaved_changes:
+            del cls._configs_with_unsaved_changes[config_type]
+            logger.info(f"🔍 Invalidated cache for {config_type.__name__}")
+
+    @classmethod
     def should_use_async(cls, param_count: int) -> bool:
         """Determine if async widget creation should be used based on parameter count.
 
@@ -457,30 +487,50 @@ class ParameterFormManager(QWidget):
                     # Global manager - affects all scopes
                     logger.info(
                         f"🔍 collect_live_context: Adding GLOBAL manager {manager.field_id} "
-                        f"(type={obj_type.__name__}) to live_context"
+                        f"(scope_id={manager.scope_id}, type={obj_type.__name__}) to live_context "
+                        f"with {len(live_values)} values: {list(live_values.keys())[:5]}"
                     )
                     live_context[obj_type] = live_values
                 else:
                     logger.info(
                         f"🔍 collect_live_context: NOT adding SCOPED manager {manager.field_id} "
-                        f"(scope_id={manager.scope_id}, type={obj_type.__name__}) to live_context (scoped managers only go in scoped_live_context)"
+                        f"(scope_id={manager.scope_id}, type={obj_type.__name__}) to live_context (scoped managers only go in scoped_live_context) "
+                        f"with {len(live_values)} values: {list(live_values.keys())[:5]}"
                     )
 
                 # Track scope-specific mappings (for step-level overlays)
                 if manager.scope_id:
                     scoped_live_context.setdefault(manager.scope_id, {})[obj_type] = live_values
+                    logger.info(
+                        f"🔍 collect_live_context: Added to scoped_live_context[{manager.scope_id}][{obj_type.__name__}] "
+                        f"with {len(live_values)} values"
+                    )
 
-                # Also map by the base/lazy equivalent type for flexible matching
-                base_type = get_base_type_for_lazy(obj_type)
-                if base_type and base_type != obj_type:
-                    alias_context.setdefault(base_type, live_values)
+                # CRITICAL: Only add alias mappings for GLOBAL managers (scope_id=None)
+                # Scoped managers should NOT pollute the global live_context via aliases
+                if manager.scope_id is None:
+                    # Also map by the base/lazy equivalent type for flexible matching
+                    base_type = get_base_type_for_lazy(obj_type)
+                    if base_type and base_type != obj_type:
+                        alias_context.setdefault(base_type, live_values)
 
-                lazy_type = LazyDefaultPlaceholderService._get_lazy_type_for_base(obj_type)
-                if lazy_type and lazy_type != obj_type:
-                    alias_context.setdefault(lazy_type, live_values)
+                    lazy_type = LazyDefaultPlaceholderService._get_lazy_type_for_base(obj_type)
+                    if lazy_type and lazy_type != obj_type:
+                        alias_context.setdefault(lazy_type, live_values)
 
             # Apply alias mappings only where no direct mapping exists
+            # CRITICAL: Do NOT alias GlobalPipelineConfig → PipelineConfig into live_context.
+            # PipelineConfig is plate-scoped and should only appear in scoped_values.
+            # Global live_context must only contain truly global configs; otherwise
+            # PipelineConfig in values[...] will incorrectly show global values.
+            from openhcs.core.config import PipelineConfig
             for alias_type, values in alias_context.items():
+                if alias_type is PipelineConfig:
+                    logger.info(
+                        "🔍 collect_live_context: Skipping alias PipelineConfig in live_context "
+                        "(PipelineConfig is scoped-only and must not appear in global values)."
+                    )
+                    continue
                 if alias_type not in live_context:
                     live_context[alias_type] = values
 
@@ -867,16 +917,6 @@ class ParameterFormManager(QWidget):
                 # This triggers _emit_cross_window_change which emits context_value_changed
                 self.parameter_changed.connect(self._emit_cross_window_change)
 
-                # ALSO connect context_value_changed to mark config types (uses full field paths)
-                # CRITICAL: context_value_changed has the full field path (e.g., "PipelineConfig.well_filter_config.well_filter")
-                # instead of just the parent config name (e.g., "well_filter_config")
-                # This allows us to extract the actual changed field name for MRO cache lookup
-                self.context_value_changed.connect(
-                    lambda field_path, value, obj, ctx: self._mark_config_type_with_unsaved_changes(
-                        '.'.join(field_path.split('.')[1:]), value  # Remove type name from path
-                    )
-                )
-
                 # Connect this instance's signal to all existing instances
                 for existing_manager in self._active_form_managers:
                     # Connect this instance to existing instances
@@ -1025,6 +1065,30 @@ class ParameterFormManager(QWidget):
             from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
             return LazyDefaultPlaceholderService.has_lazy_resolution(self.dataclass_type)
         return False
+
+    def _get_resolution_type_for_field(self, param_name: str) -> Type:
+        """Get the type to use for placeholder resolution.
+
+        For dataclass types, returns the dataclass type itself.
+        For non-dataclass types (like FunctionStep), returns the field's type.
+        This allows step editor to resolve lazy dataclass fields through context.
+        """
+        import dataclasses
+
+        # If dataclass_type is a dataclass, use it directly
+        if dataclasses.is_dataclass(self.dataclass_type):
+            return self.dataclass_type
+
+        # Otherwise, get the field's type from parameter_types
+        field_type = self.parameter_types.get(param_name)
+        if field_type:
+            from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
+            if ParameterTypeUtils.is_optional(field_type):
+                field_type = ParameterTypeUtils.get_optional_inner_type(field_type)
+            return field_type
+
+        # Fallback to dataclass_type
+        return self.dataclass_type
 
     def create_widget(self, param_name: str, param_type: Type, current_value: Any,
                      widget_id: str, parameter_info: Any = None) -> Any:
@@ -1849,7 +1913,8 @@ class ParameterFormManager(QWidget):
 
             # Build context stack: parent context + overlay
             with self._build_context_stack(overlay):
-                placeholder_text = self.service.get_placeholder_text(param_name, self.dataclass_type)
+                resolution_type = self._get_resolution_type_for_field(param_name)
+                placeholder_text = self.service.get_placeholder_text(param_name, resolution_type)
                 if placeholder_text:
                     self._apply_placeholder_text_with_flash_detection(param_name, widget, placeholder_text)
         elif value is not None:
@@ -1903,6 +1968,10 @@ class ParameterFormManager(QWidget):
             # CRITICAL: Increment global token after reset to invalidate caches
             # Reset changes values, so other windows need to know their cached context is stale
             type(self)._live_context_token_counter += 1
+
+            # CRITICAL: Clear unsaved changes cache after reset
+            # Reset changes the comparison basis (live values revert to saved)
+            type(self)._clear_unsaved_changes_cache("reset_all")
 
             # CRITICAL: Emit cross-window signals for all reset fields
             # The _block_cross_window_updates flag blocked normal parameter_changed handlers,
@@ -1964,6 +2033,10 @@ class ParameterFormManager(QWidget):
                 self.context_refreshed.emit(self.object_instance, self.context_obj)
                 # CRITICAL: Also notify external listeners directly (e.g., PipelineEditor)
                 self._notify_external_listeners_refreshed()
+                # CRITICAL: Clear unsaved changes cache after reset
+                # When all fields are reset to defaults, there are no unsaved changes
+                # This ensures the plate item shows "no unsaved changes" after reset
+                type(self)._configs_with_unsaved_changes.clear()
             else:
                 # Nested manager: trigger refresh on root manager
                 logger.info(f"🔍 reset_all_parameters: NESTED manager {self.field_id}, finding root and notifying external listeners")
@@ -1979,6 +2052,8 @@ class ParameterFormManager(QWidget):
                 # CRITICAL: Also notify external listeners directly (e.g., PipelineEditor)
                 logger.info(f"🔍 reset_all_parameters: About to call root._notify_external_listeners_refreshed()")
                 root._notify_external_listeners_refreshed()
+                # CRITICAL: Clear unsaved changes cache after reset (from root manager)
+                type(root)._configs_with_unsaved_changes.clear()
 
 
 
@@ -2047,6 +2122,10 @@ class ParameterFormManager(QWidget):
             # CRITICAL: Increment global token after reset to invalidate caches
             # Reset changes values, so other windows need to know their cached context is stale
             type(self)._live_context_token_counter += 1
+
+            # CRITICAL: Clear unsaved changes cache after reset
+            # Reset changes the comparison basis (live values revert to saved)
+            type(self)._clear_unsaved_changes_cache(f"reset_parameter: {param_name}")
 
             # CRITICAL: Emit cross-window signal for reset
             # The _in_reset flag blocks normal parameter_changed handlers, so we must emit manually
@@ -2199,6 +2278,11 @@ class ParameterFormManager(QWidget):
             field_path = f"{self.field_id}.{param_name}"
             self.shared_reset_fields.discard(field_path)
 
+        # CRITICAL: Clear unsaved changes cache after individual field reset
+        # This ensures the plate item updates immediately when fields are reset
+        # The cache will rebuild on next check if there are still unsaved changes
+        type(self)._configs_with_unsaved_changes.clear()
+
         # Update widget with reset value
         if param_name in self.widgets:
             widget = self.widgets[param_name]
@@ -2214,9 +2298,9 @@ class ParameterFormManager(QWidget):
                 live_context = self._collect_live_context_from_other_windows() if self._parent_manager is None else None
 
                 # Build context stack (handles static defaults for global config editing + live context)
-                token, live_context_values = self._unwrap_live_context(live_context)
-                with self._build_context_stack(overlay, live_context=live_context_values, live_context_token=token):
-                    placeholder_text = self.service.get_placeholder_text(param_name, self.dataclass_type)
+                with self._build_context_stack(overlay, live_context=live_context):
+                    resolution_type = self._get_resolution_type_for_field(param_name)
+                    placeholder_text = self.service.get_placeholder_text(param_name, resolution_type)
                     if placeholder_text:
                         self._apply_placeholder_text_with_flash_detection(param_name, widget, placeholder_text)
 
@@ -2381,7 +2465,7 @@ class ParameterFormManager(QWidget):
             from types import SimpleNamespace
             return SimpleNamespace(**values_dict)
 
-    def _build_context_stack(self, overlay, skip_parent_overlay: bool = False, live_context: dict = None, live_context_token: Optional[int] = None):
+    def _build_context_stack(self, overlay, skip_parent_overlay: bool = False, live_context = None, live_context_token: Optional[int] = None, live_context_scopes: Optional[Dict[str, Optional[str]]] = None):
         """Build nested config_context() calls for placeholder resolution.
 
         Context stack order for PipelineConfig (lazy):
@@ -2399,7 +2483,9 @@ class ParameterFormManager(QWidget):
             overlay: Current form values (from get_current_values()) - dict or dataclass instance
             skip_parent_overlay: If True, skip applying parent's user-modified values.
                                 Used during reset to prevent parent from re-introducing old values.
-            live_context: Optional dict mapping object instances to their live values from other open windows
+            live_context: Either a LiveContextSnapshot or a dict mapping object instances to their live values from other open windows
+            live_context_token: Optional cache invalidation token (extracted from LiveContextSnapshot if not provided)
+            live_context_scopes: Optional dict mapping config type names to their scope IDs (extracted from LiveContextSnapshot if not provided)
 
         Returns:
             ExitStack with nested contexts
@@ -2408,6 +2494,13 @@ class ParameterFormManager(QWidget):
         from openhcs.config_framework.context_manager import config_context
 
         stack = ExitStack()
+
+        # Extract token and scopes from LiveContextSnapshot if not provided
+        if isinstance(live_context, LiveContextSnapshot):
+            if live_context_token is None:
+                live_context_token = live_context.token
+            if live_context_scopes is None:
+                live_context_scopes = live_context.scopes
 
         # CRITICAL: For GlobalPipelineConfig editing (root form only), apply static defaults as base context
         # This masks the thread-local loaded instance with class defaults
@@ -2418,20 +2511,29 @@ class ParameterFormManager(QWidget):
 
         if is_root_global_config:
             static_defaults = self.global_config_type()
-            stack.enter_context(config_context(static_defaults, mask_with_none=True))
+            # Add GlobalPipelineConfig scope (None) to the scopes dict
+            global_scopes = dict(live_context_scopes) if live_context_scopes else {}
+            global_scopes['GlobalPipelineConfig'] = None
+            stack.enter_context(config_context(static_defaults, mask_with_none=True, config_scopes=global_scopes))
         else:
             # CRITICAL: Always add global context layer, either from live editor or thread-local
             # This ensures placeholders show correct values even when GlobalPipelineConfig editor is closed
             global_layer = self._get_cached_global_context(live_context_token, live_context)
             if global_layer is not None:
                 # Use live values from open GlobalPipelineConfig editor
-                stack.enter_context(config_context(global_layer))
+                # Add GlobalPipelineConfig scope (None) to the scopes dict
+                global_scopes = dict(live_context_scopes) if live_context_scopes else {}
+                global_scopes['GlobalPipelineConfig'] = None
+                stack.enter_context(config_context(global_layer, config_scopes=global_scopes))
             else:
                 # No live editor - use thread-local global config (saved values)
                 from openhcs.config_framework.context_manager import get_base_global_config
                 thread_local_global = get_base_global_config()
                 if thread_local_global is not None:
-                    stack.enter_context(config_context(thread_local_global))
+                    # Add GlobalPipelineConfig scope (None) to the scopes dict
+                    global_scopes = dict(live_context_scopes) if live_context_scopes else {}
+                    global_scopes['GlobalPipelineConfig'] = None
+                    stack.enter_context(config_context(thread_local_global, config_scopes=global_scopes))
                 else:
                     logger.warning(f"🔍 No global context available (neither live nor thread-local)")
 
@@ -2448,7 +2550,13 @@ class ParameterFormManager(QWidget):
                     # Create PipelineConfig instance from live values
                     import dataclasses
                     pipeline_config_instance = PipelineConfig(**pipeline_config_live)
-                    stack.enter_context(config_context(pipeline_config_instance))
+                    # Add PipelineConfig scope from live_context_scopes if available
+                    pipeline_scopes = dict(live_context_scopes) if live_context_scopes else {}
+                    if 'PipelineConfig' in pipeline_scopes:
+                        pipeline_scope_id = pipeline_scopes['PipelineConfig']
+                        stack.enter_context(config_context(pipeline_config_instance, scope_id=pipeline_scope_id, config_scopes=pipeline_scopes))
+                    else:
+                        stack.enter_context(config_context(pipeline_config_instance, config_scopes=pipeline_scopes))
                     logger.debug(f"Added PipelineConfig layer from live context for {self.field_id}")
                 except Exception as e:
                     logger.warning(f"Failed to add PipelineConfig layer from live context: {e}")
@@ -2488,6 +2596,15 @@ class ParameterFormManager(QWidget):
                     # No live values from other windows - use context_obj directly
                     # This happens when the parent config window is closed after saving
                     stack.enter_context(config_context(self.context_obj))
+
+                # CRITICAL: For nested managers, also add the parent's nested config value to context
+                # This allows nested fields to inherit from the parent's nested config
+                # Example: step_materialization_config.sub_dir inherits from pipeline_config.step_materialization_config.sub_dir
+                if self._parent_manager is not None and hasattr(self.context_obj, self.field_id):
+                    parent_nested_value = getattr(self.context_obj, self.field_id)
+                    if parent_nested_value is not None:
+                        logger.info(f"🔍 Adding parent's nested config to context: {type(parent_nested_value).__name__}")
+                        stack.enter_context(config_context(parent_nested_value))
 
         # CRITICAL: For nested forms, include parent's USER-MODIFIED values for sibling inheritance
         # This allows live placeholder updates when sibling fields change
@@ -2576,11 +2693,28 @@ class ParameterFormManager(QWidget):
 
         # Always apply overlay with current form values (the object being edited)
         # config_context() will filter None values and merge onto parent context
-        stack.enter_context(config_context(overlay_instance))
+        # CRITICAL: Pass scope_id for the current form to enable scope-aware priority
+        current_scope_id = getattr(self, 'scope_id', None)
+        logger.info(f"🔍 FINAL OVERLAY: current_scope_id={current_scope_id}, dataclass_type={self.dataclass_type.__name__ if self.dataclass_type else None}, live_context_scopes={live_context_scopes}")
+        if current_scope_id is not None or live_context_scopes:
+            # Build scopes dict for current overlay
+            overlay_scopes = dict(live_context_scopes) if live_context_scopes else {}
+            if current_scope_id is not None and self.dataclass_type:
+                overlay_scopes[self.dataclass_type.__name__] = current_scope_id
+            logger.info(f"🔍 FINAL OVERLAY: overlay_scopes={overlay_scopes}")
+            stack.enter_context(config_context(overlay_instance, scope_id=current_scope_id, config_scopes=overlay_scopes))
+        else:
+            stack.enter_context(config_context(overlay_instance))
 
         return stack
 
-    def _get_cached_global_context(self, token: Optional[int], live_context: Optional[dict]):
+    def _get_cached_global_context(self, token: Optional[int], live_context):
+        """Get cached GlobalPipelineConfig instance with live values merged.
+
+        Args:
+            token: Cache invalidation token
+            live_context: Either a LiveContextSnapshot or a dict mapping types to their live values
+        """
         if not self.global_config_type or not live_context:
             self._cached_global_context_token = None
             self._cached_global_context_instance = None
@@ -2591,7 +2725,12 @@ class ParameterFormManager(QWidget):
             self._cached_global_context_token = token
         return self._cached_global_context_instance
 
-    def _build_global_context_instance(self, live_context: dict):
+    def _build_global_context_instance(self, live_context):
+        """Build GlobalPipelineConfig instance with live values merged.
+
+        Args:
+            live_context: Either a LiveContextSnapshot or a dict mapping types to their live values
+        """
         from openhcs.config_framework.context_manager import get_base_global_config
         import dataclasses
 
@@ -2611,7 +2750,14 @@ class ParameterFormManager(QWidget):
             logger.warning(f"Failed to cache global context: {e}")
             return None
 
-    def _get_cached_parent_context(self, ctx_obj, token: Optional[int], live_context: Optional[dict]):
+    def _get_cached_parent_context(self, ctx_obj, token: Optional[int], live_context):
+        """Get cached parent context instance with live values merged.
+
+        Args:
+            ctx_obj: The parent context object
+            token: Cache invalidation token
+            live_context: Either a LiveContextSnapshot or a dict mapping types to their live values
+        """
         if ctx_obj is None:
             return None
         if token is None or not live_context:
@@ -2627,7 +2773,13 @@ class ParameterFormManager(QWidget):
             self._cached_parent_contexts[ctx_id] = (token, instance)
         return instance
 
-    def _build_parent_context_instance(self, ctx_obj, live_context: Optional[dict]):
+    def _build_parent_context_instance(self, ctx_obj, live_context):
+        """Build parent context instance with live values merged.
+
+        Args:
+            ctx_obj: The parent context object
+            live_context: Either a LiveContextSnapshot or a dict mapping types to their live values
+        """
         import dataclasses
 
         try:
@@ -3126,8 +3278,8 @@ class ParameterFormManager(QWidget):
             exclude_param: Optional parameter name to exclude from refresh (e.g., the param that just changed)
             changed_fields: Optional set of field paths that changed (e.g., {'well_filter', 'well_filter_mode'})
         """
-        # Extract token and live context values
-        token, live_context_values = self._unwrap_live_context(live_context)
+        # Extract token, live context values, and scopes
+        token, live_context_values, live_context_scopes = self._unwrap_live_context(live_context)
 
         # CRITICAL: Use token-based cache key, not value-based
         # The token increments whenever ANY value changes, which is correct behavior
@@ -3178,8 +3330,7 @@ class ParameterFormManager(QWidget):
                 if not candidate_names:
                     return
 
-                token_inner, live_context_values = self._unwrap_live_context(live_context)
-                with self._build_context_stack(overlay, live_context=live_context_values, live_context_token=token_inner):
+                with self._build_context_stack(overlay, live_context=live_context):
                     monitor = get_monitor("Placeholder resolution per field")
 
                     for param_name in candidate_names:
@@ -3194,7 +3345,10 @@ class ParameterFormManager(QWidget):
 
                         with monitor.measure():
                             # CRITICAL: Resolve placeholder text and detect changes for flash animation
-                            placeholder_text = self.service.get_placeholder_text(param_name, self.dataclass_type)
+                            resolution_type = self._get_resolution_type_for_field(param_name)
+                            logger.info(f"🔍 Resolving placeholder for {param_name} using type {resolution_type.__name__}")
+                            placeholder_text = self.service.get_placeholder_text(param_name, resolution_type)
+                            logger.info(f"🔍 Got placeholder text for {param_name}: {placeholder_text}")
                             if placeholder_text:
                                 self._apply_placeholder_text_with_flash_detection(param_name, widget, placeholder_text)
 
@@ -3291,7 +3445,7 @@ class ParameterFormManager(QWidget):
         changed_field_type = None
 
         # Try to get the changed field type from live context values
-        token, live_context_values = self._unwrap_live_context(live_context)
+        token, live_context_values, live_context_scopes = self._unwrap_live_context(live_context)
         if live_context_values:
             for ctx_type, ctx_values in live_context_values.items():
                 if changed_field_name in ctx_values:
@@ -3363,10 +3517,10 @@ class ParameterFormManager(QWidget):
             return
 
         # Build context stack and resolve placeholder
-        token, live_context_values = self._unwrap_live_context(live_context)
         overlay = self.parameters
-        with self._build_context_stack(overlay, live_context=live_context_values, live_context_token=token):
-            placeholder_text = self.service.get_placeholder_text(field_name, self.dataclass_type)
+        with self._build_context_stack(overlay, live_context=live_context):
+            resolution_type = self._get_resolution_type_for_field(field_name)
+            placeholder_text = self.service.get_placeholder_text(field_name, resolution_type)
             if placeholder_text:
                 self._apply_placeholder_text_with_flash_detection(field_name, widget, placeholder_text)
 
@@ -3444,11 +3598,11 @@ class ParameterFormManager(QWidget):
                 plan[param_name] = True
         return plan
 
-    def _unwrap_live_context(self, live_context: Optional[Any]) -> Tuple[Optional[int], Optional[dict]]:
-        """Return (token, values) for a live context snapshot or raw dict."""
+    def _unwrap_live_context(self, live_context: Optional[Any]) -> Tuple[Optional[int], Optional[dict], Optional[Dict[str, Optional[str]]]]:
+        """Return (token, values, scopes) for a live context snapshot or raw dict."""
         if isinstance(live_context, LiveContextSnapshot):
-            return live_context.token, live_context.values
-        return None, live_context
+            return live_context.token, live_context.values, live_context.scopes
+        return None, live_context, None
 
     def _compute_placeholder_map_async(
         self,
@@ -3461,14 +3615,14 @@ class ParameterFormManager(QWidget):
             return {}
 
         placeholder_map: Dict[str, str] = {}
-        token, live_context_values = self._unwrap_live_context(live_context_snapshot)
-        with self._build_context_stack(parameters_snapshot, live_context=live_context_values, live_context_token=token):
+        with self._build_context_stack(parameters_snapshot, live_context=live_context_snapshot):
             for param_name, was_placeholder in placeholder_plan.items():
                 current_value = parameters_snapshot.get(param_name)
                 should_apply_placeholder = current_value is None or was_placeholder
                 if not should_apply_placeholder:
                     continue
-                placeholder_text = self.service.get_placeholder_text(param_name, self.dataclass_type)
+                resolution_type = self._get_resolution_type_for_field(param_name)
+                placeholder_text = self.service.get_placeholder_text(param_name, resolution_type)
                 if placeholder_text:
                     placeholder_map[param_name] = placeholder_text
         return placeholder_map
@@ -3826,124 +3980,7 @@ class ParameterFormManager(QWidget):
 
     # ==================== CROSS-WINDOW CONTEXT UPDATE METHODS ====================
 
-    def _mark_config_type_with_unsaved_changes(self, param_name: str, value: Any):
-        """Mark config TYPE and all types that inherit from it via MRO.
 
-        This enables O(1) unsaved changes detection without O(n_steps) iteration.
-        Uses cached MRO inheritance map to find all affected types.
-
-        Example:
-            When PathPlanningConfig.output_dir_suffix changes:
-            1. Marks PathPlanningConfig
-            2. Looks up (PathPlanningConfig, 'output_dir_suffix') in cache
-            3. Finds {StepMaterializationConfig, ...}
-            4. Marks all those types too
-
-        This ensures flash detection works when parent configs change while
-        child config editors are open.
-
-        Args:
-            param_name: Name of the parameter that changed
-            value: New value
-        """
-        import dataclasses
-
-        logger.info(f"🔍 MARK-UNSAVED: param_name={param_name}, value_type={type(value).__name__}, field_id={self.field_id}")
-
-        # Extract config attribute from param_name
-        config_attr = param_name.split('.')[0] if '.' in param_name else param_name
-
-        # Get config type from context_obj or object_instance
-        config = getattr(self.object_instance, config_attr, None)
-        if config is None:
-            config = getattr(self.context_obj, config_attr, None)
-
-        logger.info(f"🔍 MARK-UNSAVED: config_attr={config_attr}, config_type={type(config).__name__ if config else None}, is_dataclass={dataclasses.is_dataclass(config) if config else False}")
-
-        # Determine the config type to mark
-        # If config is a dataclass (nested config object), use its type
-        # If config is a primitive (int, str, etc.), use the parent config type
-        if config is not None and dataclasses.is_dataclass(config):
-            config_type = type(config)
-        elif dataclasses.is_dataclass(self.object_instance):
-            # Primitive field on a dataclass - use the parent config type
-            config_type = type(self.object_instance)
-        else:
-            # Not a dataclass at all - skip cache marking
-            logger.info(f"🔍 MARK-UNSAVED: Skipping - not a dataclass")
-            return
-
-        # PERFORMANCE: Monitor cache size to prevent unbounded growth
-        if len(type(self)._configs_with_unsaved_changes) > type(self).MAX_CONFIG_TYPE_CACHE_ENTRIES:
-            logger.info(
-                f"ℹ️ Config type cache has {len(type(self)._configs_with_unsaved_changes)} entries "
-                f"(threshold: {type(self).MAX_CONFIG_TYPE_CACHE_ENTRIES})"
-            )
-
-        # Extract field name from param_name
-        field_name = param_name.split('.')[-1] if '.' in param_name else param_name
-
-        # CRITICAL: If the value is a dataclass (nested config), mark ALL fields within it
-        # This ensures MRO inheritance cache lookups work correctly
-        # Example: when well_filter_config changes, mark both 'well_filter' and 'well_filter_mode'
-        fields_to_mark = []
-        if config is not None and dataclasses.is_dataclass(config):
-            # Get all fields from the config dataclass
-            for field in dataclasses.fields(config):
-                fields_to_mark.append(field.name)
-            logger.info(f"🔍 MARK-UNSAVED: Nested config - marking {len(fields_to_mark)} fields: {fields_to_mark}")
-        else:
-            # Primitive field - just mark the field name itself
-            fields_to_mark.append(field_name)
-            logger.info(f"🔍 MARK-UNSAVED: Primitive field - marking: {field_name}")
-
-        # Mark the directly edited type for each field
-        for field_to_mark in fields_to_mark:
-            if config_type not in type(self)._configs_with_unsaved_changes:
-                type(self)._configs_with_unsaved_changes[config_type] = set()
-            type(self)._configs_with_unsaved_changes[config_type].add(field_to_mark)
-
-            # CRITICAL: Also mark all types that can inherit this field via MRO
-            # This ensures flash detection works when parent configs change
-            # IMPORTANT: MRO cache uses base types, not lazy types - convert if needed
-            from openhcs.config_framework.lazy_factory import get_base_type_for_lazy
-            cache_lookup_type = get_base_type_for_lazy(config_type)
-            # If config_type is already a base type (not lazy), use it directly
-            if cache_lookup_type is None:
-                cache_lookup_type = config_type
-            cache_key = (cache_lookup_type, field_to_mark)
-            affected_types = type(self)._mro_inheritance_cache.get(cache_key, set())
-
-            logger.info(
-                f"🔍 MARK-UNSAVED: MRO cache lookup for ({cache_lookup_type.__name__}, '{field_to_mark}') -> "
-                f"{len(affected_types)} child types: {[t.__name__ for t in affected_types] if affected_types else 'NONE'}"
-            )
-
-            if affected_types:
-                logger.info(
-                    f"🔍 MARK-UNSAVED: MRO inheritance - marking {len(affected_types)} child types for "
-                    f"{config_type.__name__}.{field_to_mark}: {[t.__name__ for t in affected_types]}"
-                )
-
-            # CRITICAL: Mark BOTH base types AND lazy types
-            # The MRO cache returns base types, but steps use lazy types
-            # We need to mark both so the fast-path check works
-            from openhcs.config_framework.lazy_factory import get_lazy_type_for_base
-            for affected_type in affected_types:
-                # Mark the base type
-                if affected_type not in type(self)._configs_with_unsaved_changes:
-                    type(self)._configs_with_unsaved_changes[affected_type] = set()
-                type(self)._configs_with_unsaved_changes[affected_type].add(field_to_mark)
-
-                # Also mark the lazy version of this type (O(1) reverse lookup)
-                lazy_type = get_lazy_type_for_base(affected_type)
-                if lazy_type is not None:
-                    if lazy_type not in type(self)._configs_with_unsaved_changes:
-                        type(self)._configs_with_unsaved_changes[lazy_type] = set()
-                    type(self)._configs_with_unsaved_changes[lazy_type].add(field_to_mark)
-                    logger.info(f"🔍 MARK-UNSAVED: Also marked lazy type {lazy_type.__name__}")
-
-        logger.info(f"🔍 MARK-UNSAVED: Complete - marked {config_type.__name__} with {len(fields_to_mark)} fields")
 
     def _emit_cross_window_change(self, param_name: str, value: object):
         """Batch cross-window context change signals for performance.
@@ -3954,14 +3991,12 @@ class ParameterFormManager(QWidget):
             param_name: Name of the parameter that changed
             value: New value
         """
+        logger.info(f"🔔 _emit_cross_window_change: {self.field_id}.{param_name} = {value} (scope_id={self.scope_id})")
+
         # OPTIMIZATION: Skip cross-window updates during batch operations (e.g., reset_all)
         if getattr(self, '_block_cross_window_updates', False):
             logger.info(f"🚫 _emit_cross_window_change BLOCKED for {self.field_id}.{param_name} (in reset/batch operation)")
             return
-
-        # PERFORMANCE: Mark config type with unsaved changes (Phase 1-ALT)
-        # This enables O(1) unsaved changes detection without O(n_steps) iteration
-        self._mark_config_type_with_unsaved_changes(param_name, value)
 
         # CRITICAL: Use full field path as key, not just param_name!
         # This ensures nested field changes (e.g., step_materialization_config.well_filter)
@@ -4073,6 +4108,8 @@ class ParameterFormManager(QWidget):
         """
         cls._pending_listener_updates.add(listener)
         logger.debug(f"📝 Scheduled coordinated update for {listener.__class__.__name__}")
+        # CRITICAL: Start the coordinator timer to actually execute the updates
+        cls._start_coordinated_update_timer()
 
     @classmethod
     def schedule_placeholder_refresh(cls, form_manager: 'ParameterFormManager'):
@@ -4282,6 +4319,10 @@ class ParameterFormManager(QWidget):
                 # Invalidate live context caches so external listeners drop stale data
                 type(self)._live_context_token_counter += 1
 
+                # CRITICAL: Clear unsaved changes cache when window closes
+                # Window closing changes the comparison basis (live context changes)
+                type(self)._clear_unsaved_changes_cache(f"window_close: {self.field_id}")
+
                 # CRITICAL: Notify external listeners AFTER removing from registry
                 # Use QTimer to defer notification until after current call stack completes
                 # This ensures the form manager is fully unregistered before listeners process the changes
@@ -4346,8 +4387,13 @@ class ParameterFormManager(QWidget):
                     # Refresh immediately (not deferred) since we're in a controlled close event
                     manager._refresh_with_live_context()
 
-                # PERFORMANCE: Clear type-based cache on form close (Phase 1-ALT)
-                type(self)._configs_with_unsaved_changes.clear()
+                # CRITICAL: DO NOT clear _configs_with_unsaved_changes cache here!
+                # Other windows may still have unsaved changes that need to be preserved.
+                # Example: If GlobalPipelineConfig closes with unsaved changes in field X,
+                # and a Step editor also has unsaved changes in field X (overriding global),
+                # the step's unsaved changes marker should remain because the step's resolved
+                # state didn't change (it was already using its own override, not the global value).
+                # The cache will be naturally updated as windows continue to edit values.
 
                 # PERFORMANCE: Clear pending batched changes on form close (Phase 3)
                 type(self)._pending_cross_window_changes.clear()
@@ -4374,9 +4420,11 @@ class ParameterFormManager(QWidget):
             editing_object: The object being edited in the other window
             context_object: The context object used by the other window
         """
+        logger.info(f"🔔 [{self.field_id}] _on_cross_window_context_changed: {field_path} = {new_value} (from {type(editing_object).__name__})")
+
         # Don't refresh if this is the window that made the change
         if editing_object is self.object_instance:
-            logger.debug(f"[{self.field_id}] Skipping cross-window update - same instance")
+            logger.info(f"[{self.field_id}] Skipping cross-window update - same instance")
             return
 
         # Check if the change affects this form based on context hierarchy
@@ -4513,12 +4561,12 @@ class ParameterFormManager(QWidget):
         delay = max(0, self.CROSS_WINDOW_REFRESH_DELAY_MS)
         self._cross_window_refresh_timer.start(delay)
 
-    def _find_live_values_for_type(self, ctx_type: type, live_context: dict) -> dict:
+    def _find_live_values_for_type(self, ctx_type: type, live_context) -> dict:
         """Find live values for a context type, checking both exact type and lazy/base equivalents.
 
         Args:
             ctx_type: The type to find live values for
-            live_context: Dict mapping types to their live values
+            live_context: Either a LiveContextSnapshot or a dict mapping types to their live values
 
         Returns:
             Live values dict if found, None otherwise
@@ -4526,6 +4574,53 @@ class ParameterFormManager(QWidget):
         if not live_context:
             return None
 
+        # Handle LiveContextSnapshot - search in both values and scoped_values
+        if isinstance(live_context, LiveContextSnapshot):
+            logger.info(f"🔍 _find_live_values_for_type: Looking for {ctx_type.__name__} in LiveContextSnapshot (scope_id={self.scope_id})")
+            logger.info(f"🔍   values keys: {[t.__name__ for t in live_context.values.keys()]}")
+            logger.info(f"🔍   scoped_values keys: {list(live_context.scoped_values.keys())}")
+
+            # First check global values
+            if ctx_type in live_context.values:
+                logger.info(f"🔍   Found {ctx_type.__name__} in global values")
+                return live_context.values[ctx_type]
+
+            # Then check scoped_values for this manager's scope
+            if self.scope_id and self.scope_id in live_context.scoped_values:
+                scoped_dict = live_context.scoped_values[self.scope_id]
+                logger.info(f"🔍   Checking scoped_values[{self.scope_id}]: {[t.__name__ for t in scoped_dict.keys()]}")
+                if ctx_type in scoped_dict:
+                    logger.info(f"🔍   Found {ctx_type.__name__} in scoped_values[{self.scope_id}]")
+                    return scoped_dict[ctx_type]
+
+            # Also check parent scopes (e.g., plate scope when we're in step scope)
+            if self.scope_id and "::" in self.scope_id:
+                parent_scope = self.scope_id.rsplit("::", 1)[0]
+                if parent_scope in live_context.scoped_values:
+                    scoped_dict = live_context.scoped_values[parent_scope]
+                    logger.info(f"🔍   Checking parent scoped_values[{parent_scope}]: {[t.__name__ for t in scoped_dict.keys()]}")
+                    if ctx_type in scoped_dict:
+                        logger.info(f"🔍   Found {ctx_type.__name__} in parent scoped_values[{parent_scope}]")
+                        return scoped_dict[ctx_type]
+
+            # Check lazy/base equivalents in global values
+            from openhcs.config_framework.lazy_factory import get_base_type_for_lazy
+            from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
+
+            base_type = get_base_type_for_lazy(ctx_type)
+            if base_type and base_type in live_context.values:
+                logger.info(f"🔍   Found base type {base_type.__name__} in global values")
+                return live_context.values[base_type]
+
+            lazy_type = LazyDefaultPlaceholderService._get_lazy_type_for_base(ctx_type)
+            if lazy_type and lazy_type in live_context.values:
+                logger.info(f"🔍   Found lazy type {lazy_type.__name__} in global values")
+                return live_context.values[lazy_type]
+
+            logger.info(f"🔍   NOT FOUND: {ctx_type.__name__}")
+            return None
+
+        # Handle plain dict (legacy path)
         # Check exact type match first
         if ctx_type in live_context:
             return live_context[ctx_type]
@@ -4585,70 +4680,14 @@ class ParameterFormManager(QWidget):
     def _collect_live_context_from_other_windows(self) -> LiveContextSnapshot:
         """Collect live values from other open form managers for context resolution.
 
-        Returns a dict mapping object types to their current live values.
-        This allows matching by type rather than instance identity.
-        Maps both the actual type AND its lazy/non-lazy equivalent for flexible matching.
+        REFACTORED: Now uses the main collect_live_context() class method instead of duplicating logic.
 
-        CRITICAL: Only collects context from PARENT types in the hierarchy, not from the same type.
-        E.g., PipelineConfig editor collects GlobalPipelineConfig but not other PipelineConfig instances.
-        This prevents a window from using its own live values for placeholder resolution.
-
-        CRITICAL: Uses get_user_modified_values() to only collect concrete (non-None) values.
-        This ensures proper inheritance: if PipelineConfig has None for a field, it won't
-        override GlobalPipelineConfig's concrete value in the Step editor's context.
-
-        CRITICAL: Only collects from managers with the SAME scope_id (same orchestrator/plate).
-        This prevents cross-contamination between different orchestrators.
-        GlobalPipelineConfig (scope_id=None) is shared across all scopes.
+        Returns:
+            LiveContextSnapshot with values (global) and scoped_values (scoped) properly separated
         """
-        from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
-        from openhcs.config_framework.lazy_factory import get_base_type_for_lazy
-
-        live_context = {}
-        alias_context = {}
-        my_type = type(self.object_instance)
-
-
-        for manager in self._active_form_managers:
-            if manager is self:
-                continue
-
-            # CRITICAL: Only collect from managers in the same scope hierarchy OR from global scope (None)
-            # Hierarchical scope matching:
-            # - None (global) is visible to everyone
-            # - "plate1" is visible to "plate1::step1" (parent scope)
-            # - "plate1::step1" is NOT visible to "plate1::step2" (sibling scope)
-            if not self._is_scope_visible(manager.scope_id, self.scope_id):
-                continue  # Different scope - skip
-
-            # CRITICAL: Get only user-modified (concrete, non-None) values
-            live_values = manager.get_user_modified_values()
-            obj_type = type(manager.object_instance)
-
-            # CRITICAL: Only skip if this is EXACTLY the same type as us
-            if obj_type == my_type:
-                continue
-
-            # Map by the actual type
-            live_context[obj_type] = live_values
-
-            # Also map by the base/lazy equivalent type for flexible matching
-            base_type = get_base_type_for_lazy(obj_type)
-            if base_type and base_type != obj_type:
-                alias_context.setdefault(base_type, live_values)
-
-            lazy_type = LazyDefaultPlaceholderService._get_lazy_type_for_base(obj_type)
-            if lazy_type and lazy_type != obj_type:
-                alias_context.setdefault(lazy_type, live_values)
-
-        # Apply alias mappings only where no direct mapping exists
-        for alias_type, values in alias_context.items():
-            if alias_type not in live_context:
-                live_context[alias_type] = values
-
-        type(self)._live_context_token_counter += 1
-        token = type(self)._live_context_token_counter
-        return LiveContextSnapshot(token=token, values=live_context)
+        # Use the main class method with scope filter
+        # This ensures we get the same structure as plate manager and other consumers
+        return self.collect_live_context(scope_filter=self.scope_id)
 
     def _do_cross_window_refresh(self, emit_signal: bool = True, changed_field_path: str = None):
         """Actually perform the cross-window placeholder refresh using live values from other windows.
