@@ -285,6 +285,12 @@ class ParameterFormManager(QWidget):
     _configs_with_unsaved_changes: Dict[Type, Set[str]] = {}
     MAX_CONFIG_TYPE_CACHE_ENTRIES = 50  # Monitor cache size (log warning if exceeded)
 
+    # PERFORMANCE: Phase 3 - Batch cross-window updates
+    # Store manager reference to avoid fragile string matching
+    # Format: List[(manager, param_name, value, obj_instance, context_obj)]
+    _pending_cross_window_changes: List[Tuple['ParameterFormManager', str, Any, Any, Any]] = []
+    _cross_window_batch_timer: Optional['QTimer'] = None
+
     # PERFORMANCE: MRO inheritance cache - maps (parent_type, field_name) → set of child types
     # This enables O(1) lookup of which config types can inherit a field from a parent type
     # Example: (PathPlanningConfig, 'output_dir_suffix') → {StepMaterializationConfig, ...}
@@ -3895,7 +3901,7 @@ class ParameterFormManager(QWidget):
         logger.info(f"🔍 MARK-UNSAVED: Complete - marked {config_type.__name__} with {len(fields_to_mark)} fields")
 
     def _emit_cross_window_change(self, param_name: str, value: object):
-        """Emit cross-window context change signal.
+        """Batch cross-window context change signals for performance.
 
         This is connected to parameter_changed signal for root managers.
 
@@ -3931,9 +3937,54 @@ class ParameterFormManager(QWidget):
         # Invalidate live context cache by incrementing token
         type(self)._live_context_token_counter += 1
 
-        logger.info(f"📡 _emit_cross_window_change: {field_path} = {value}")
-        self.context_value_changed.emit(field_path, value,
-                                       self.object_instance, self.context_obj)
+        # PERFORMANCE: Phase 3 - Batch changes for performance
+        # Store manager reference to avoid fragile string matching later
+        logger.info(f"📦 Batching cross-window change: {field_path} = {value}")
+        type(self)._pending_cross_window_changes.append(
+            (self, param_name, value, self.object_instance, self.context_obj)
+        )
+
+        # Schedule batched emission
+        if type(self)._cross_window_batch_timer is None:
+            from PyQt6.QtCore import QTimer
+            type(self)._cross_window_batch_timer = QTimer()
+            type(self)._cross_window_batch_timer.setSingleShot(True)
+            type(self)._cross_window_batch_timer.timeout.connect(
+                lambda: type(self)._emit_batched_cross_window_changes()
+            )
+
+        # Restart timer (trailing debounce)
+        type(self)._cross_window_batch_timer.start(self.CROSS_WINDOW_REFRESH_DELAY_MS)
+
+    @classmethod
+    def _emit_batched_cross_window_changes(cls):
+        """Emit all pending changes as individual signals after batching period.
+
+        Uses stored manager references instead of fragile string matching.
+        Deduplicates rapid changes to same field (keeps only latest value).
+        """
+        if not cls._pending_cross_window_changes:
+            return
+
+        logger.info(f"📦 Emitting {len(cls._pending_cross_window_changes)} batched cross-window changes")
+
+        # Deduplicate: Keep only the latest value for each (manager, param_name) pair
+        # This handles rapid typing where same field changes multiple times
+        latest_changes = {}  # (manager_id, param_name) → (manager, value, obj_instance, context_obj)
+        for manager, param_name, value, obj_instance, context_obj in cls._pending_cross_window_changes:
+            key = (id(manager), param_name)
+            latest_changes[key] = (manager, param_name, value, obj_instance, context_obj)
+
+        logger.info(f"📦 After deduplication: {len(latest_changes)} unique changes")
+
+        # Emit each change using stored manager reference (type-safe, no string matching)
+        for manager, param_name, value, obj_instance, context_obj in latest_changes.values():
+            field_path = f"{manager.field_id}.{param_name}"
+            logger.info(f"📡 Emitting batched change: {field_path} = {value}")
+            manager.context_value_changed.emit(field_path, value, obj_instance, context_obj)
+
+        # Clear pending changes
+        cls._pending_cross_window_changes.clear()
 
     def unregister_from_cross_window_updates(self):
         """Manually unregister this form manager from cross-window updates.
@@ -4050,6 +4101,9 @@ class ParameterFormManager(QWidget):
 
                 # PERFORMANCE: Clear type-based cache on form close (Phase 1-ALT)
                 type(self)._configs_with_unsaved_changes.clear()
+
+                # PERFORMANCE: Clear pending batched changes on form close (Phase 3)
+                type(self)._pending_cross_window_changes.clear()
 
         except (ValueError, AttributeError):
             pass  # Already removed or list doesn't exist
