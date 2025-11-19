@@ -296,6 +296,7 @@ class ParameterFormManager(QWidget):
     _pending_listener_updates: Set[Any] = set()  # External listeners (PlateManager, etc.)
     _pending_placeholder_refreshes: Set['ParameterFormManager'] = set()  # Form managers needing refresh
     _pending_flash_widgets: Set[Tuple[Any, Any]] = set()  # (widget/item, color) tuples
+    _current_batch_changed_fields: Set[str] = set()  # Field identifiers that changed in current batch
     _coordinator_timer: Optional['QTimer'] = None
 
     # PERFORMANCE: MRO inheritance cache - maps (parent_type, field_name) → set of child types
@@ -3112,12 +3113,15 @@ class ParameterFormManager(QWidget):
         else:
             self._perform_placeholder_refresh_sync(live_context, exclude_param)
 
-    def _refresh_all_placeholders(self, live_context: dict = None, exclude_param: str = None) -> None:
-        """Refresh placeholder text for all widgets in this form.
+    def _refresh_all_placeholders(self, live_context: dict = None, exclude_param: str = None, changed_fields: set = None) -> None:
+        """Refresh placeholder text for widgets that could be affected by field changes.
+
+        PERFORMANCE: Only refreshes placeholders that could inherit from changed fields.
 
         Args:
             live_context: Optional dict mapping object instances to their live values from other open windows
             exclude_param: Optional parameter name to exclude from refresh (e.g., the param that just changed)
+            changed_fields: Optional set of field paths that changed (e.g., {'well_filter', 'well_filter_mode'})
         """
         # Extract token and live context values
         token, live_context_values = self._unwrap_live_context(live_context)
@@ -3127,7 +3131,7 @@ class ParameterFormManager(QWidget):
         # The individual placeholder text cache is value-based to prevent redundant resolution
         # But the refresh operation itself should run when the token changes
         from openhcs.config_framework import CacheKey
-        cache_key = CacheKey.from_args(exclude_param, token)
+        cache_key = CacheKey.from_args(exclude_param, token, frozenset(changed_fields) if changed_fields else None)
 
         def perform_refresh():
             """Actually perform the placeholder refresh."""
@@ -3147,6 +3151,27 @@ class ParameterFormManager(QWidget):
                 candidate_names = set(self._placeholder_candidates)
                 if exclude_param:
                     candidate_names.discard(exclude_param)
+
+                # PERFORMANCE: Filter to only fields that could be affected by changes
+                if changed_fields:
+                    # Keep placeholders that match any changed field
+                    # Match by field name or by nested path (e.g., 'well_filter' affects 'step_well_filter_config')
+                    filtered_candidates = set()
+                    for candidate in candidate_names:
+                        for changed in changed_fields:
+                            # Match if candidate contains the changed field name
+                            # E.g., changed='well_filter' matches candidate='well_filter' or 'step_well_filter_config.well_filter'
+                            if changed in candidate or candidate in changed:
+                                filtered_candidates.add(candidate)
+                                break
+                    if filtered_candidates:
+                        logger.debug(f"🔍 Filtered placeholders: {len(candidate_names)} → {len(filtered_candidates)} (changed_fields={changed_fields})")
+                        candidate_names = filtered_candidates
+                    else:
+                        # No candidates match - skip entire refresh
+                        logger.debug(f"🔍 No placeholders affected by changes={changed_fields}, skipping refresh")
+                        return
+
                 if not candidate_names:
                     return
 
@@ -4005,6 +4030,9 @@ class ParameterFormManager(QWidget):
 
         logger.info(f"📦 Parsed {len(latest_changes)} changes into {len(all_identifiers)} identifiers (O(N))")
 
+        # PERFORMANCE: Store changed fields for placeholder refresh filtering
+        cls._current_batch_changed_fields = all_identifiers
+
         # Copy parsed identifiers to each listener (O(M))
         for listener, value_changed_handler, refresh_handler in cls._external_listeners:
             if hasattr(listener, '_pending_changed_fields'):
@@ -4105,10 +4133,10 @@ class ParameterFormManager(QWidget):
             except Exception as e:
                 logger.error(f"❌ Error updating {listener.__class__.__name__}: {e}")
 
-        # 2. Refresh all placeholders
+        # 2. Refresh all placeholders (PERFORMANCE: filtered by changed fields)
         for form_manager in cls._pending_placeholder_refreshes:
             try:
-                form_manager._refresh_all_placeholders()
+                form_manager._refresh_all_placeholders(changed_fields=cls._current_batch_changed_fields)
             except Exception as e:
                 logger.error(f"❌ Error refreshing placeholders for {form_manager.field_id}: {e}")
 
@@ -4137,6 +4165,7 @@ class ParameterFormManager(QWidget):
         cls._pending_listener_updates.clear()
         cls._pending_placeholder_refreshes.clear()
         cls._pending_flash_widgets.clear()
+        cls._current_batch_changed_fields.clear()
 
         logger.info(f"✅ Batch execution complete: {total_updates} updates in single pass")
 
