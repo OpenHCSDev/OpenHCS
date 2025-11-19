@@ -61,6 +61,13 @@ logger = logging.getLogger(__name__)
 _lazy_resolution_cache: Dict[Tuple[str, str, int], Any] = {}
 _LAZY_CACHE_MAX_SIZE = 10000  # Prevent unbounded growth
 
+# CRITICAL: Contextvar to disable cache during LiveContextResolver operations
+# Flash detection uses LiveContextResolver with historical snapshots (before/after tokens)
+# The class-level cache uses current token, which breaks flash detection
+# When this is True, skip the cache and let LiveContextResolver handle caching
+import contextvars
+_disable_lazy_cache: contextvars.ContextVar[bool] = contextvars.ContextVar('_disable_lazy_cache', default=False)
+
 
 # Constants for lazy configuration system - simplified from class to module-level
 MATERIALIZATION_DEFAULTS_PATH = "materialization_defaults"
@@ -182,7 +189,11 @@ class LazyMethodBindings:
             # Skip cache for special attributes, private attributes, and non-field attributes
             is_dataclass_field = name in {f.name for f in fields(self.__class__)} if not name.startswith('_') else False
 
-            if is_dataclass_field:
+            # CRITICAL: Skip cache if disabled (e.g., during LiveContextResolver flash detection)
+            # Flash detection needs to resolve with historical tokens, not current token
+            cache_disabled = _disable_lazy_cache.get(False)
+
+            if is_dataclass_field and not cache_disabled:
                 try:
                     # Get current token from ParameterFormManager
                     from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
@@ -201,7 +212,8 @@ class LazyMethodBindings:
             # Helper function to cache resolved value
             def cache_value(value):
                 """Cache resolved value with current token in class-level cache."""
-                if is_dataclass_field:
+                # Skip caching if disabled (e.g., during LiveContextResolver flash detection)
+                if is_dataclass_field and not cache_disabled:
                     try:
                         from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
                         current_token = ParameterFormManager._live_context_token_counter

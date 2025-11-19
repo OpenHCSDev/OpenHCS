@@ -3900,6 +3900,9 @@ class ParameterFormManager(QWidget):
             # IMPORTANT: MRO cache uses base types, not lazy types - convert if needed
             from openhcs.config_framework.lazy_factory import get_base_type_for_lazy
             cache_lookup_type = get_base_type_for_lazy(config_type)
+            # If config_type is already a base type (not lazy), use it directly
+            if cache_lookup_type is None:
+                cache_lookup_type = config_type
             cache_key = (cache_lookup_type, field_to_mark)
             affected_types = type(self)._mro_inheritance_cache.get(cache_key, set())
 
