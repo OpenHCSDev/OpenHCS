@@ -910,12 +910,12 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
                 pipeline_config_for_display
             ]
 
-            logger.info(f"🔍 _resolve_config_attr: Resolving {type(config).__name__}.{attr_name}")
+            logger.debug(f"🔍 _resolve_config_attr: Resolving {type(config).__name__}.{attr_name}")
             global_wfc = getattr(global_config_preview, 'well_filter_config', None)
             pipeline_wfc = getattr(pipeline_config_for_display, 'well_filter_config', None)
-            logger.info(f"🔍 _resolve_config_attr: GlobalPipelineConfig.well_filter_config = {global_wfc} (type={type(global_wfc).__name__ if global_wfc else 'None'})")
-            logger.info(f"🔍 _resolve_config_attr: PipelineConfig.well_filter_config = {pipeline_wfc} (type={type(pipeline_wfc).__name__ if pipeline_wfc else 'None'})")
-            logger.info(f"🔍 _resolve_config_attr: isinstance check: {isinstance(global_wfc, type(pipeline_wfc)) if global_wfc and pipeline_wfc else 'N/A'}")
+            logger.debug(f"🔍 _resolve_config_attr: GlobalPipelineConfig.well_filter_config = {global_wfc} (type={type(global_wfc).__name__ if global_wfc else 'None'})")
+            logger.debug(f"🔍 _resolve_config_attr: PipelineConfig.well_filter_config = {pipeline_wfc} (type={type(pipeline_wfc).__name__ if pipeline_wfc else 'None'})")
+            logger.debug(f"🔍 _resolve_config_attr: isinstance check: {isinstance(global_wfc, type(pipeline_wfc)) if global_wfc and pipeline_wfc else 'N/A'}")
 
             # Skip resolver when dataclass does not actually expose the attribute
             dataclass_fields = getattr(type(config), "__dataclass_fields__", {})
@@ -977,14 +977,14 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         current_obj = pipeline_config_for_display
         resolved_value = None
 
-        logger.info(f"🔍 _resolve_preview_field_value: field_path={field_path}, parts={parts}")
+        logger.debug(f"🔍 _resolve_preview_field_value: field_path={field_path}, parts={parts}")
 
         for i, part in enumerate(parts):
             if current_obj is None:
                 resolved_value = None
                 break
 
-            logger.info(f"🔍 _resolve_preview_field_value: Resolving part {i}: {part}, current_obj type={type(current_obj).__name__}")
+            logger.debug(f"🔍 _resolve_preview_field_value: Resolving part {i}: {part}, current_obj type={type(current_obj).__name__}")
 
             # Resolve each part through context stack (enables MRO inheritance)
             resolved_value = self._resolve_config_attr(
@@ -994,13 +994,13 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
                 live_context_snapshot
             )
 
-            logger.info(f"🔍 _resolve_preview_field_value: Resolved {part} = {resolved_value} (type={type(resolved_value).__name__ if resolved_value is not None else 'None'})")
+            logger.debug(f"🔍 _resolve_preview_field_value: Resolved {part} = {resolved_value} (type={type(resolved_value).__name__ if resolved_value is not None else 'None'})")
             current_obj = resolved_value
 
         if resolved_value is None:
             return self._apply_preview_field_fallback(field_path, fallback_context)
 
-        logger.info(f"🔍 _resolve_preview_field_value: Final resolved value for {field_path} = {resolved_value}")
+        logger.debug(f"🔍 _resolve_preview_field_value: Final resolved value for {field_path} = {resolved_value}")
         return resolved_value
 
     def _build_effective_config_fallback(self, field_path: str) -> Callable:

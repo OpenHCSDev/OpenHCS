@@ -55,6 +55,12 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# PERFORMANCE: Class-level cache for lazy dataclass field resolution
+# Shared across all instances to survive instance recreation (e.g., in pipeline editor)
+# Cache key: (lazy_class_name, field_name, context_token) -> resolved_value
+_lazy_resolution_cache: Dict[Tuple[str, str, int], Any] = {}
+_LAZY_CACHE_MAX_SIZE = 10000  # Prevent unbounded growth
+
 
 # Constants for lazy configuration system - simplified from class to module-level
 MATERIALIZATION_DEFAULTS_PATH = "materialization_defaults"
@@ -155,15 +161,70 @@ class LazyMethodBindings:
 
         def __getattribute__(self: Any, name: str) -> Any:
             """
-            Three-stage resolution using new context system.
+            Three-stage resolution with class-level caching.
 
+            PERFORMANCE: Cache resolved values in shared class-level dict to survive instance recreation.
+            Pipeline editor creates new step instances on every keystroke (token change), so instance-level
+            cache wouldn't work. Class-level cache survives across instance recreation.
+
+            Cache Strategy:
+            - Use global _lazy_resolution_cache dict shared across all instances
+            - Cache key: (class_name, field_name, context_token)
+            - Invalidate when context token changes (automatic via key mismatch)
+            - Skip cache for private attributes and special methods
+
+            Stage 0: Check class-level cache (PERFORMANCE OPTIMIZATION)
             Stage 1: Check instance value
             Stage 2: Simple field path lookup in current scope's merged config
             Stage 3: Inheritance resolution using same merged context
             """
+            # Stage 0: Check class-level cache first (PERFORMANCE OPTIMIZATION)
+            # Skip cache for special attributes, private attributes, and non-field attributes
+            is_dataclass_field = name in {f.name for f in fields(self.__class__)} if not name.startswith('_') else False
+
+            if is_dataclass_field:
+                try:
+                    # Get current token from ParameterFormManager
+                    from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+                    current_token = ParameterFormManager._live_context_token_counter
+
+                    # Check class-level cache
+                    cache_key = (self.__class__.__name__, name, current_token)
+                    if cache_key in _lazy_resolution_cache:
+                        logger.info(f"🎯 CACHE HIT: {self.__class__.__name__}.{name} (token={current_token})")
+                        return _lazy_resolution_cache[cache_key]
+                except ImportError:
+                    # No ParameterFormManager available - skip caching
+                    pass
+
+            # Helper function to cache resolved value
+            def cache_value(value):
+                """Cache resolved value with current token in class-level cache."""
+                if is_dataclass_field:
+                    try:
+                        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+                        current_token = ParameterFormManager._live_context_token_counter
+
+                        cache_key = (self.__class__.__name__, name, current_token)
+                        _lazy_resolution_cache[cache_key] = value
+
+                        # Prevent unbounded growth by evicting oldest entries
+                        if len(_lazy_resolution_cache) > _LAZY_CACHE_MAX_SIZE:
+                            # Evict first 20% of entries (FIFO approximation using dict ordering)
+                            num_to_evict = _LAZY_CACHE_MAX_SIZE // 5
+                            keys_to_remove = list(_lazy_resolution_cache.keys())[:num_to_evict]
+                            for key in keys_to_remove:
+                                del _lazy_resolution_cache[key]
+                            logger.info(f"🗑️ Evicted {num_to_evict} cache entries (max size={_LAZY_CACHE_MAX_SIZE})")
+
+                        logger.info(f"💾 CACHED: {self.__class__.__name__}.{name} (token={current_token})")
+                    except ImportError:
+                        # No ParameterFormManager available - skip caching
+                        pass
+
             # Stage 1: Get instance value
             value = object.__getattribute__(self, name)
-            if value is not None or name not in {f.name for f in fields(self.__class__)}:
+            if value is not None or not is_dataclass_field:
                 return value
 
             # Stage 2: Simple field path lookup in current scope's merged global
@@ -178,6 +239,7 @@ class LazyMethodBindings:
                             if config_instance is not None:
                                 resolved_value = getattr(config_instance, name)
                                 if resolved_value is not None:
+                                    cache_value(resolved_value)
                                     return resolved_value
                         except AttributeError:
                             # Field doesn't exist in merged config, continue to inheritance
@@ -195,18 +257,24 @@ class LazyMethodBindings:
                 resolved_value = resolve_field_inheritance(self, name, available_configs)
 
                 if resolved_value is not None:
+                    cache_value(resolved_value)
                     return resolved_value
 
                 # For nested dataclass fields, return lazy instance
                 field_obj = next((f for f in fields(self.__class__) if f.name == name), None)
                 if field_obj and is_dataclass(field_obj.type):
-                    return field_obj.type()
+                    lazy_instance = field_obj.type()
+                    cache_value(lazy_instance)
+                    return lazy_instance
 
                 return None
 
             except LookupError:
                 # No context available - fallback to MRO concrete values
-                return _find_mro_concrete_value(get_base_type_for_lazy(self.__class__), name)
+                fallback_value = _find_mro_concrete_value(get_base_type_for_lazy(self.__class__), name)
+                if fallback_value is not None:
+                    cache_value(fallback_value)
+                return fallback_value
         return __getattribute__
 
     @staticmethod
