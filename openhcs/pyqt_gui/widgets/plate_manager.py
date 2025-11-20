@@ -310,7 +310,10 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
 
     def _process_pending_preview_updates(self) -> None:
         """Apply incremental updates for pending plate keys using BATCH processing."""
-        logger.info(f"🔍 _process_pending_preview_updates CALLED: {len(self._pending_cross_window_changes_for_scope_resolution)} stored changes")
+        logger.info(f"🔍 PlateManager._process_pending_preview_updates CALLED (debounce triggered):")
+        logger.info(f"  - Stored changes: {len(self._pending_cross_window_changes_for_scope_resolution)}")
+        logger.info(f"  - Pending preview keys: {self._pending_preview_keys}")
+        logger.info(f"  - Pending changed fields: {self._pending_changed_fields}")
 
         # CRITICAL: Populate _pending_preview_keys from stored cross-window changes
         # This is necessary because the coordinated update system doesn't call handle_cross_window_preview_change
@@ -358,10 +361,13 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         # Use last snapshot as "before" for comparison
         live_context_before = self._last_live_context_snapshot
 
-        # Update last snapshot for next comparison
-        self._last_live_context_snapshot = live_context_snapshot
+        logger.info(f"🔍 PlateManager._process_pending_preview_updates START:")
+        logger.info(f"  - _last_live_context_snapshot is None: {live_context_before is None}")
+        logger.info(f"  - _last_live_context_snapshot token: {getattr(live_context_before, 'token', None)}")
+        logger.info(f"  - live_context_snapshot token: {getattr(live_context_snapshot, 'token', None)}")
+        logger.info(f"  - Pending plates: {len(self._pending_preview_keys)}")
+        logger.info(f"  - Changed fields: {changed_fields}")
 
-        logger.info(f"🔍 _process_pending_preview_updates: Calling _update_plate_items_batch with {len(self._pending_preview_keys)} plates")
         # Use BATCH update for all pending plates
         self._update_plate_items_batch(
             plate_paths=list(self._pending_preview_keys),
@@ -369,6 +375,11 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
             live_context_before=live_context_before,
             live_context_after=live_context_snapshot
         )
+
+        # CRITICAL: Update last snapshot AFTER comparison for next comparison
+        # This ensures the first edit has a proper "before" snapshot (None initially, which triggers saved snapshot creation)
+        logger.info(f"🔍 PlateManager._process_pending_preview_updates: Updating _last_live_context_snapshot from token={getattr(live_context_before, 'token', None)} to token={getattr(live_context_snapshot, 'token', None)}")
+        self._last_live_context_snapshot = live_context_snapshot
 
         logger.info(f"🔍 _process_pending_preview_updates: DONE, clearing pending updates")
         # Clear pending updates
@@ -517,8 +528,12 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
             plate_indices.append(i)
 
         # Batch check which plates should flash
-        logger.info(f"🔍 _update_plate_items_batch: Calling _check_resolved_values_changed_batch with {len(config_pairs)} pairs, changed_fields={changed_fields}")
-        logger.info(f"🔍 _update_plate_items_batch: live_context_before token={getattr(live_context_before, 'token', None)}, live_context_after token={getattr(live_context_after, 'token', None)}")
+        logger.info(f"🔍 PlateManager._update_plate_items_batch START:")
+        logger.info(f"  - Config pairs: {len(config_pairs)}")
+        logger.info(f"  - Changed fields: {changed_fields}")
+        logger.info(f"  - live_context_before is None: {live_context_before is None}")
+        logger.info(f"  - live_context_before token: {getattr(live_context_before, 'token', None)}")
+        logger.info(f"  - live_context_after token: {getattr(live_context_after, 'token', None)}")
 
         # DEBUG: Log the actual num_workers values in the snapshots
         if live_context_before and hasattr(live_context_before, 'scoped_values'):
@@ -526,13 +541,13 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
                 from openhcs.core.config import PipelineConfig
                 if PipelineConfig in scoped_vals:
                     num_workers_before = scoped_vals[PipelineConfig].get('num_workers', 'NOT FOUND')
-                    logger.info(f"🔍 _update_plate_items_batch: live_context_before[{scope_id}][PipelineConfig]['num_workers'] = {num_workers_before}")
+                    logger.info(f"  - live_context_before[{scope_id}][PipelineConfig]['num_workers'] = {num_workers_before}")
         if live_context_after and hasattr(live_context_after, 'scoped_values'):
             for scope_id, scoped_vals in live_context_after.scoped_values.items():
                 from openhcs.core.config import PipelineConfig
                 if PipelineConfig in scoped_vals:
                     num_workers_after = scoped_vals[PipelineConfig].get('num_workers', 'NOT FOUND')
-                    logger.info(f"🔍 _update_plate_items_batch: live_context_after[{scope_id}][PipelineConfig]['num_workers'] = {num_workers_after}")
+                    logger.info(f"  - live_context_after[{scope_id}][PipelineConfig]['num_workers'] = {num_workers_after}")
 
         should_flash_list = self._check_resolved_values_changed_batch(
             config_pairs,
@@ -540,13 +555,17 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
             live_context_before=live_context_before,
             live_context_after=live_context_after
         )
-        logger.info(f"🔍 _update_plate_items_batch: should_flash_list={should_flash_list}")
+        logger.info(f"🔍 PlateManager._update_plate_items_batch: Flash results = {should_flash_list}")
 
         # PHASE 1: Update all labels and styling (do this BEFORE flashing)
         # This ensures all flashes start simultaneously
         plates_to_flash = []
 
+        logger.info(f"🔍 PlateManager._update_plate_items_batch PHASE 1: Updating {len(plate_items)} plate items")
+
         for idx, (i, item, plate_data, plate_path, orchestrator) in enumerate(plate_items):
+            logger.info(f"  - Processing plate {idx}: {plate_path}, should_flash={should_flash_list[idx]}")
+
             # Update display text
             # PERFORMANCE: Pass changed_fields to optimize unsaved changes check
             # CRITICAL: Pass live_context_after to avoid stale data during coordinated updates
@@ -562,14 +581,22 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
             item.setText(display_text)
             # Height is automatically calculated by MultilinePreviewItemDelegate.sizeHint()
 
+            # CRITICAL: Reapply flash color if item is currently flashing
+            # This prevents styling updates from killing an active flash animation
+            from openhcs.pyqt_gui.widgets.shared.list_item_flash_animation import reapply_flash_if_active
+            reapply_flash_if_active(self.plate_list, i)
+
             # Collect plates that need to flash (but don't flash yet!)
             if should_flash_list[idx]:
                 plates_to_flash.append(plate_path)
+                logger.info(f"    ✓ Added to flash list")
 
         # PHASE 2: Trigger ALL flashes at once (simultaneously, not sequentially)
+        logger.info(f"🔍 PlateManager._update_plate_items_batch PHASE 2: Flashing {len(plates_to_flash)} plates")
         if plates_to_flash:
             logger.info(f"✨ FLASHING {len(plates_to_flash)} plates simultaneously: {plates_to_flash}")
             for plate_path in plates_to_flash:
+                logger.info(f"  - Calling _flash_plate_item({plate_path})")
                 self._flash_plate_item(plate_path)
 
     def _format_plate_item_with_preview(
@@ -1068,11 +1095,15 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         from openhcs.pyqt_gui.widgets.shared.list_item_flash_animation import flash_list_item
         from openhcs.pyqt_gui.widgets.shared.scope_visual_config import ListItemType
 
+        logger.info(f"🔥 _flash_plate_item called for plate_path={plate_path}")
+        logger.info(f"🔥 _flash_plate_item: plate_list.count()={self.plate_list.count()}")
+
         # Find item row for this plate
         for row in range(self.plate_list.count()):
             item = self.plate_list.item(row)
             plate_data = item.data(Qt.ItemDataRole.UserRole)
             if plate_data and plate_data.get('path') == plate_path:
+                logger.info(f"🔥 _flash_plate_item: Found plate at row {row}, calling flash_list_item")
                 scope_id = str(plate_path)
                 flash_list_item(
                     self.plate_list,
@@ -1080,7 +1111,10 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
                     scope_id,
                     ListItemType.ORCHESTRATOR
                 )
+                logger.info(f"🔥 _flash_plate_item: flash_list_item returned")
                 break
+        else:
+            logger.info(f"🔥 _flash_plate_item: Plate NOT FOUND in list!")
 
     def handle_cross_window_preview_change(
         self,

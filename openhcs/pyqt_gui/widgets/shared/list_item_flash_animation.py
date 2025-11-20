@@ -45,28 +45,34 @@ class ListItemFlashAnimator:
 
     def flash_update(self) -> None:
         """Trigger flash animation on item background by increasing opacity."""
+        logger.info(f"🔥 flash_update called for row {self.row}")
         item = self.list_widget.item(self.row)
         if item is None:  # Item was destroyed
+            logger.info(f"🔥 flash_update: item is None, returning")
             return
 
         # Get the correct background color from scope
         from .scope_color_utils import get_scope_color_scheme
         color_scheme = get_scope_color_scheme(self.scope_id)
         correct_color = self.item_type.get_background_color(color_scheme)
+        logger.info(f"🔥 flash_update: correct_color={correct_color}, alpha={correct_color.alpha() if correct_color else None}")
 
         if correct_color is not None:
             # Flash by increasing opacity to 100% (same color, just full opacity)
             flash_color = QColor(correct_color)
             flash_color.setAlpha(95)  # Full opacity
+            logger.info(f"🔥 flash_update: Setting background to flash_color={flash_color.name()} alpha={flash_color.alpha()}")
             item.setBackground(flash_color)
 
         if self._is_flashing:
             # Already flashing - restart timer (flash color already re-applied above)
+            logger.info(f"🔥 flash_update: Already flashing, restarting timer")
             if self._flash_timer:
                 self._flash_timer.stop()
                 self._flash_timer.start(self.config.FLASH_DURATION_MS)
             return
 
+        logger.info(f"🔥 flash_update: Starting NEW flash, duration={self.config.FLASH_DURATION_MS}ms")
         self._is_flashing = True
 
         # Setup timer to restore correct background
@@ -77,9 +83,10 @@ class ListItemFlashAnimator:
 
     def _restore_background(self) -> None:
         """Restore correct background color by recomputing from scope."""
+        logger.info(f"🔥 _restore_background called for row {self.row}")
         item = self.list_widget.item(self.row)
         if item is None:  # Item was destroyed during flash
-            logger.debug(f"Flash restore skipped - item at row {self.row} was destroyed")
+            logger.info(f"Flash restore skipped - item at row {self.row} was destroyed")
             self._is_flashing = False
             return
 
@@ -90,14 +97,18 @@ class ListItemFlashAnimator:
 
         # Use enum-based polymorphic dispatch to get correct color
         correct_color = self.item_type.get_background_color(color_scheme)
+        logger.info(f"🔥 _restore_background: correct_color={correct_color}, alpha={correct_color.alpha() if correct_color else None}")
 
         # Handle None (transparent) background
         if correct_color is None:
+            logger.info(f"🔥 _restore_background: Setting transparent background")
             item.setBackground(QBrush())  # Empty brush = transparent
         else:
+            logger.info(f"🔥 _restore_background: Restoring to color={correct_color.name() if hasattr(correct_color, 'name') else correct_color}, alpha={correct_color.alpha()}")
             item.setBackground(correct_color)
 
         self._is_flashing = False
+        logger.info(f"🔥 _restore_background: Flash complete for row {self.row}")
 
 
 # Global registry of animators (keyed by (list_widget_id, item_row))
@@ -118,38 +129,88 @@ def flash_list_item(
         scope_id: Scope identifier for color recomputation
         item_type: Type of list item (orchestrator or step)
     """
-    logger.debug(f"🔥 flash_list_item called: row={row}, scope_id={scope_id}, item_type={item_type}")
+    logger.info(f"🔥 flash_list_item called: row={row}, scope_id={scope_id}, item_type={item_type}")
 
     config = ScopeVisualConfig()
     if not config.LIST_ITEM_FLASH_ENABLED:
-        logger.debug(f"🔥 Flash DISABLED in config")
+        logger.info(f"🔥 Flash DISABLED in config")
         return
 
     item = list_widget.item(row)
     if item is None:
-        logger.debug(f"🔥 Item at row {row} is None")
+        logger.info(f"🔥 Item at row {row} is None")
         return
 
-    logger.debug(f"🔥 Creating/getting animator for row {row}")
+    logger.info(f"🔥 Creating/getting animator for row {row}")
 
     key = (id(list_widget), row)
 
     # Get or create animator
     if key not in _list_item_animators:
-        logger.debug(f"🔥 Creating NEW animator for row {row}")
+        logger.info(f"🔥 Creating NEW animator for row {row}")
         _list_item_animators[key] = ListItemFlashAnimator(
             list_widget, row, scope_id, item_type
         )
     else:
-        logger.debug(f"🔥 Reusing existing animator for row {row}")
+        logger.info(f"🔥 Reusing existing animator for row {row}")
         # Update scope_id and item_type in case item was recreated
         animator = _list_item_animators[key]
         animator.scope_id = scope_id
         animator.item_type = item_type
 
     animator = _list_item_animators[key]
-    logger.debug(f"🔥 Calling animator.flash_update() for row {row}")
+    logger.info(f"🔥 Calling animator.flash_update() for row {row}")
     animator.flash_update()
+
+
+def is_item_flashing(list_widget: QListWidget, row: int) -> bool:
+    """Check if a list item is currently flashing.
+
+    Args:
+        list_widget: List widget containing the item
+        row: Row index of item to check
+
+    Returns:
+        True if item is currently flashing, False otherwise
+    """
+    key = (id(list_widget), row)
+    if key in _list_item_animators:
+        return _list_item_animators[key]._is_flashing
+    return False
+
+
+def reapply_flash_if_active(list_widget: QListWidget, row: int) -> None:
+    """Reapply flash color if item is currently flashing.
+
+    This should be called after operations that might overwrite the background color
+    (like setText or setBackground) to ensure the flash remains visible.
+
+    Args:
+        list_widget: List widget containing the item
+        row: Row index of item
+    """
+    key = (id(list_widget), row)
+    if key in _list_item_animators:
+        animator = _list_item_animators[key]
+        if animator._is_flashing:
+            logger.info(f"🔥 reapply_flash_if_active: Reapplying flash for row {row}")
+            item = list_widget.item(row)
+            if item is not None:
+                # Reapply flash color
+                from .scope_color_utils import get_scope_color_scheme
+                color_scheme = get_scope_color_scheme(animator.scope_id)
+                correct_color = animator.item_type.get_background_color(color_scheme)
+                if correct_color is not None:
+                    flash_color = QColor(correct_color)
+                    flash_color.setAlpha(95)  # Full opacity
+                    item.setBackground(flash_color)
+
+                    # CRITICAL: Restart the timer to extend the flash duration
+                    # This prevents the flash from ending too soon after reapplying
+                    if animator._flash_timer:
+                        logger.info(f"🔥 reapply_flash_if_active: Restarting flash timer for row {row}")
+                        animator._flash_timer.stop()
+                        animator._flash_timer.start(animator.config.FLASH_DURATION_MS)
 
 
 def clear_all_animators(list_widget: QListWidget) -> None:

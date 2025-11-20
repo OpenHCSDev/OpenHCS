@@ -679,7 +679,16 @@ class CrossWindowPreviewMixin:
         Returns:
             List of boolean values indicating whether each object pair changed
         """
+        logger.info(f"🔍 {self.__class__.__name__}._check_resolved_values_changed_batch START:")
+        logger.info(f"  - Object pairs: {len(obj_pairs)}")
+        logger.info(f"  - Changed fields: {changed_fields}")
+        logger.info(f"  - live_context_before is None: {live_context_before is None}")
+        logger.info(f"  - live_context_before token: {getattr(live_context_before, 'token', None)}")
+        logger.info(f"  - live_context_after is None: {live_context_after is None}")
+        logger.info(f"  - live_context_after token: {getattr(live_context_after, 'token', None)}")
+
         if not obj_pairs:
+            logger.info(f"  - No object pairs, returning empty list")
             return []
 
         # CRITICAL: Use window close snapshots if available (passed via handle_window_close)
@@ -690,7 +699,7 @@ class CrossWindowPreviewMixin:
             hasattr(self, '_pending_window_close_after_snapshot') and
             self._pending_window_close_before_snapshot is not None and
             self._pending_window_close_after_snapshot is not None):
-            logger.debug(f"🔍 {self.__class__.__name__}._check_resolved_values_changed_batch: Using window_close snapshots: before={self._pending_window_close_before_snapshot.token}, after={self._pending_window_close_after_snapshot.token}")
+            logger.info(f"  - Using window_close snapshots: before={self._pending_window_close_before_snapshot.token}, after={self._pending_window_close_after_snapshot.token}")
             logger.debug(f"🔍 {self.__class__.__name__}._check_resolved_values_changed_batch: before scoped_values keys: {list(self._pending_window_close_before_snapshot.scoped_values.keys()) if hasattr(self._pending_window_close_before_snapshot, 'scoped_values') else 'N/A'}")
             logger.debug(f"🔍 {self.__class__.__name__}._check_resolved_values_changed_batch: after scoped_values keys: {list(self._pending_window_close_after_snapshot.scoped_values.keys()) if hasattr(self._pending_window_close_after_snapshot, 'scoped_values') else 'N/A'}")
             live_context_before = self._pending_window_close_before_snapshot
@@ -865,6 +874,11 @@ class CrossWindowPreviewMixin:
         import logging
         logger = logging.getLogger(__name__)
 
+        logger.info(f"🔍 _check_with_batch_resolution START:")
+        logger.info(f"  - token_before: {token_before}")
+        logger.info(f"  - token_after: {token_after}")
+        logger.info(f"  - Identifiers to check: {len(identifiers)}")
+
         # Try to find the scope_id from scoped_values
         scope_id = None
         if live_context_before:
@@ -877,10 +891,10 @@ class CrossWindowPreviewMixin:
         if scope_id and live_context_before:
             scoped_before = getattr(live_context_before, 'scoped_values', {})
             live_ctx_before = scoped_before.get(scope_id, {})
-            logger.debug(f"🔍 _check_with_batch_resolution: Using SCOPED values for scope_id={scope_id}")
+            logger.info(f"  - Using SCOPED values for scope_id={scope_id}")
         else:
             live_ctx_before = getattr(live_context_before, 'values', {}) if live_context_before else {}
-            logger.debug(f"🔍 _check_with_batch_resolution: Using GLOBAL values (no scope)")
+            logger.info(f"  - Using GLOBAL values (no scope)")
 
         if scope_id and live_context_after:
             scoped_after = getattr(live_context_after, 'scoped_values', {})
@@ -949,12 +963,16 @@ class CrossWindowPreviewMixin:
 
             for attr_name in simple_attrs:
                 if attr_name in before_attrs and attr_name in after_attrs:
-                    logger.info(f"🔍 _check_with_batch_resolution: Comparing {attr_name}: before={before_attrs[attr_name]}, after={after_attrs[attr_name]}")
+                    logger.info(f"🔍 _check_with_batch_resolution: Comparing {attr_name}:")
+                    logger.info(f"    before = {before_attrs[attr_name]}")
+                    logger.info(f"    after  = {after_attrs[attr_name]}")
                     if before_attrs[attr_name] != after_attrs[attr_name]:
-                        logger.info(f"🔍 _check_with_batch_resolution: CHANGED: {attr_name}")
+                        logger.info(f"    ✅ CHANGED!")
                         return True
                     else:
-                        logger.info(f"🔍 _check_with_batch_resolution: NO CHANGE: {attr_name}")
+                        logger.info(f"    ❌ NO CHANGE")
+                else:
+                    logger.info(f"🔍 _check_with_batch_resolution: Skipping {attr_name} (not in both before/after)")
 
         # Batch resolve nested attributes grouped by parent
         for parent_path, attr_names in parent_to_attrs.items():
@@ -990,10 +1008,18 @@ class CrossWindowPreviewMixin:
 
             for attr_name in attr_names:
                 if attr_name in before_attrs and attr_name in after_attrs:
+                    logger.info(f"🔍 _check_with_batch_resolution: Comparing {parent_path}.{attr_name}:")
+                    logger.info(f"    before = {before_attrs[attr_name]}")
+                    logger.info(f"    after  = {after_attrs[attr_name]}")
                     if before_attrs[attr_name] != after_attrs[attr_name]:
-                        logger.debug(f"🔍 _check_with_batch_resolution: CHANGED (parent): {parent_path}.{attr_name}")
+                        logger.info(f"    ✅ CHANGED!")
                         return True
+                    else:
+                        logger.info(f"    ❌ NO CHANGE")
+                else:
+                    logger.info(f"🔍 _check_with_batch_resolution: Skipping {parent_path}.{attr_name} (not in both before/after)")
 
+        logger.info(f"🔍 _check_with_batch_resolution: Final result = False (no changes detected)")
         return False
 
     def _expand_identifiers_for_inheritance(

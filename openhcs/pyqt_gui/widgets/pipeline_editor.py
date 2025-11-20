@@ -1430,6 +1430,13 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         # Use last snapshot as "before" for comparison
         live_context_before = self._last_live_context_snapshot
 
+        logger.info(f"🔍 PipelineEditor._process_pending_preview_updates START:")
+        logger.info(f"  - _last_live_context_snapshot is None: {live_context_before is None}")
+        logger.info(f"  - _last_live_context_snapshot token: {getattr(live_context_before, 'token', None)}")
+        logger.info(f"  - live_context_snapshot token: {getattr(live_context_snapshot, 'token', None)}")
+        logger.info(f"  - Pending indices: {len(indices)}")
+        logger.info(f"  - Changed fields: {changed_fields}")
+
         # CRITICAL: DON'T update _last_live_context_snapshot here!
         # We want to keep the original "before" state across multiple edits in the same editing session.
         # Only update it when the editing session ends (window close, focus change, etc.)
@@ -1654,6 +1661,11 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
                 item.setData(Qt.ItemDataRole.UserRole, step_index)
                 item.setData(Qt.ItemDataRole.UserRole + 1, not step.enabled)
                 item.setToolTip(self._create_step_tooltip(step))
+
+                # CRITICAL: Reapply flash color if item is currently flashing
+                # This prevents styling updates from killing an active flash animation
+                from openhcs.pyqt_gui.widgets.shared.list_item_flash_animation import reapply_flash_if_active
+                reapply_flash_if_active(self.step_list, step_index)
 
             # Collect steps that need to flash (but don't flash yet!)
             should_flash = should_flash_list[idx]
