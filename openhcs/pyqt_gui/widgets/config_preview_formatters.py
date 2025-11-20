@@ -352,10 +352,13 @@ def check_config_has_unsaved_changes(
                     import openhcs.core.config as config_module
                     step_config_type = getattr(config_module, step_config_type_name, None)
                     if step_config_type is not None:
-                        if step_config_type not in ParameterFormManager._configs_with_unsaved_changes:
-                            ParameterFormManager._configs_with_unsaved_changes[step_config_type] = set()
-                        ParameterFormManager._configs_with_unsaved_changes[step_config_type].add(field_name)
-                        logger.info(f"✅ FOUND CHANGES: Also marking {step_config_type_name} as changed (inherits from {config_type_name})")
+                        # CRITICAL: Use (type, scope) tuple as key, not just type!
+                        # This matches the lookup pattern in check_step_has_unsaved_changes()
+                        step_cache_key = (step_config_type, cache_scope_id)
+                        if step_cache_key not in ParameterFormManager._configs_with_unsaved_changes:
+                            ParameterFormManager._configs_with_unsaved_changes[step_cache_key] = set()
+                        ParameterFormManager._configs_with_unsaved_changes[step_cache_key].add(field_name)
+                        logger.info(f"✅ FOUND CHANGES: Also marking {step_config_type_name} as changed (inherits from {config_type_name}, scope={cache_scope_id})")
                 except (ImportError, AttributeError):
                     pass  # Step config type doesn't exist, that's OK
 
@@ -546,6 +549,23 @@ def check_step_has_unsaved_changes(
     # If a step-specific scope is expected, verify at least one manager with matching scope has changes
     # ALSO: If there's an active form manager for this step's scope, always proceed to full check
     # (even if cache is empty) because the step editor might be open and have unsaved changes
+    #
+    # CRITICAL: Track whether the cache hit was for global scope (None)
+    # Global scope changes affect ALL steps, so we should NOT require scope_matched_in_cache
+    cache_hit_was_global = False
+    if has_any_relevant_changes:
+        # Check if the cache hit was for global scope by looking at what was found
+        for config_attr, config in step_configs.items():
+            config_type = type(config)
+            for mro_class in config_type.__mro__:
+                global_cache_key = (mro_class, None)
+                if global_cache_key in ParameterFormManager._configs_with_unsaved_changes:
+                    cache_hit_was_global = True
+                    logger.debug(f"🔍 check_step_has_unsaved_changes: Cache hit was for GLOBAL scope (config_type={config_type.__name__}, mro_class={mro_class.__name__})")
+                    break
+            if cache_hit_was_global:
+                break
+
     if expected_step_scope:
         scope_matched_in_cache = False
         has_active_step_manager = False
@@ -577,19 +597,34 @@ def check_step_has_unsaved_changes(
             elif manager.scope_id and '::step_' in manager.scope_id:
                 continue
             # Non-step-specific manager (plate/global) affects all steps
-            # CRITICAL: Set has_any_relevant_changes to trigger full check (cache might not be populated yet)
-            elif hasattr(manager, '_last_emitted_values') and manager._last_emitted_values:
-                scope_matched_in_cache = True
-                has_any_relevant_changes = True
-                logger.debug(f"🔍 check_step_has_unsaved_changes: Non-step-specific manager affects all steps: {manager.field_id}")
-                break
+            # CRITICAL: Check if this manager has emitted changes to ANY of the step's config types
+            # This handles the case where PipelineConfig manager emits step_well_filter_config changes
+            # BEFORE the cache is populated by PlateManager
+            elif hasattr(manager, '_last_emitted_values'):
+                # Check if any emitted field paths match the step's config types
+                for config_attr, config in step_configs.items():
+                    # Check if manager has emitted changes to this config
+                    # Field paths are like "PipelineConfig.step_well_filter_config.well_filter"
+                    # We want to match "step_well_filter_config" in the path
+                    for field_path in manager._last_emitted_values.keys():
+                        if f".{config_attr}." in field_path or field_path.endswith(f".{config_attr}"):
+                            scope_matched_in_cache = True
+                            has_any_relevant_changes = True
+                            logger.debug(f"🔍 check_step_has_unsaved_changes: Non-step-specific manager {manager.field_id} has emitted changes to {config_attr} (field_path={field_path})")
+                            break
+                    if scope_matched_in_cache:
+                        break
+                if scope_matched_in_cache:
+                    break
 
         # If we have an active step manager, always proceed to full check (even if cache is empty)
         # This handles the case where the step editor is open but hasn't populated the cache yet
         if has_active_step_manager:
             has_any_relevant_changes = True
             logger.debug(f"🔍 check_step_has_unsaved_changes: Active step manager found - proceeding to full check")
-        elif has_any_relevant_changes and not scope_matched_in_cache:
+        elif has_any_relevant_changes and not scope_matched_in_cache and not cache_hit_was_global:
+            # CRITICAL: Only reject cache hits if they were NOT for global scope
+            # Global scope changes (like PipelineConfig.step_well_filter_config) affect ALL steps
             has_any_relevant_changes = False
             logger.debug(f"🔍 check_step_has_unsaved_changes: Type-based cache hit, but no scope match for {expected_step_scope}")
 

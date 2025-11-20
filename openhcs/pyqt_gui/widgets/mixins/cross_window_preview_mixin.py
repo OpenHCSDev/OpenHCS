@@ -1131,6 +1131,10 @@ class CrossWindowPreviewMixin:
 
                     logger.debug(f"🔍 Processing ParentType.field format: {identifier}")
 
+                    # CRITICAL: Always add the original identifier to expanded set
+                    # This ensures scoped identifiers like "step.step_well_filter_config" are preserved
+                    expanded.add(identifier)
+
                     # Get the type and value of the field from live context
                     field_type = None
                     field_value = None
