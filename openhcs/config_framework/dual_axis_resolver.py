@@ -318,7 +318,7 @@ def resolve_field_inheritance(
     """
     obj_type = type(obj)
 
-    if field_name in ['well_filter_mode', 'output_dir_suffix']:
+    if field_name in ['well_filter_mode', 'output_dir_suffix', 'num_workers']:
         logger.info(f"🔍 RESOLVER: {obj_type.__name__}.{field_name}")
         logger.info(f"🔍 RESOLVER: MRO = {[cls.__name__ for cls in obj_type.__mro__ if is_dataclass(cls)]}")
         logger.info(f"🔍 RESOLVER: available_configs keys = {list(available_configs.keys())}")
@@ -332,10 +332,10 @@ def resolve_field_inheritance(
                 # CRITICAL: Always use object.__getattribute__() to avoid infinite recursion
                 # Lazy configs store their raw values as instance attributes
                 field_value = object.__getattribute__(config_instance, field_name)
-                if field_name in ['well_filter_mode', 'output_dir_suffix']:
+                if field_name in ['well_filter_mode', 'output_dir_suffix', 'num_workers']:
                     logger.info(f"🔍 STEP 1: {config_name}.{field_name} = {field_value} (type match: {type(config_instance).__name__})")
                 if field_value is not None:
-                    if field_name in ['well_filter_mode', 'output_dir_suffix']:
+                    if field_name in ['well_filter_mode', 'output_dir_suffix', 'num_workers']:
                         logger.info(f"🔍 STEP 1: RETURNING {field_value} from {config_name}")
                     return field_value
             except AttributeError:
@@ -344,7 +344,7 @@ def resolve_field_inheritance(
     # Step 2: MRO-based inheritance - traverse MRO from most to least specific
     # For each class in the MRO, check if there's a config instance in context with concrete value
     for mro_class in obj_type.__mro__:
-        if field_name in ['well_filter_mode', 'output_dir_suffix']:
+        if field_name in ['well_filter_mode', 'output_dir_suffix', 'num_workers']:
             logger.info(f"🔍 STEP 2: Checking MRO class {mro_class.__name__}")
         if not is_dataclass(mro_class):
             continue
@@ -393,7 +393,7 @@ def resolve_field_inheritance(
         lazy_matches.sort(key=lambda x: x[2], reverse=True)
         base_matches.sort(key=lambda x: x[2], reverse=True)
 
-        if field_name == 'well_filter_mode' and mro_class.__name__ in ['WellFilterConfig', 'LazyWellFilterConfig']:
+        if field_name in ['well_filter_mode', 'num_workers'] and mro_class.__name__ in ['WellFilterConfig', 'LazyWellFilterConfig', 'GlobalPipelineConfig', 'PipelineConfig']:
             logger.info(f"🔍 SORTED MATCHES for {mro_class.__name__}:")
             logger.info(f"🔍   Lazy matches (sorted by specificity): {[(name, spec) for name, _, spec in lazy_matches]}")
             logger.info(f"🔍   Base matches (sorted by specificity): {[(name, spec) for name, _, spec in base_matches]}")
@@ -416,6 +416,8 @@ def resolve_field_inheritance(
         if lazy_match is not None:
             try:
                 value = object.__getattribute__(lazy_match, field_name)
+                if field_name == 'num_workers':
+                    logger.info(f"🔍 STEP 2: Checking lazy_match {type(lazy_match).__name__}.{field_name} = {value}")
                 if value is not None:
                     matched_instance = lazy_match
             except AttributeError:
@@ -424,7 +426,7 @@ def resolve_field_inheritance(
         if matched_instance is None and base_match is not None:
             matched_instance = base_match
 
-        if field_name in ['well_filter_mode', 'output_dir_suffix']:
+        if field_name in ['well_filter_mode', 'output_dir_suffix', 'num_workers']:
             if matched_instance is not None:
                 logger.info(f"🔍 STEP 2: Found match for {mro_class.__name__}: {type(matched_instance).__name__}")
             else:
@@ -435,25 +437,31 @@ def resolve_field_inheritance(
                 # CRITICAL: Always use object.__getattribute__() to avoid infinite recursion
                 # Lazy configs store their raw values as instance attributes
                 value = object.__getattribute__(matched_instance, field_name)
-                if field_name in ['well_filter_mode', 'output_dir_suffix']:
+                if field_name in ['well_filter_mode', 'output_dir_suffix', 'num_workers']:
                     logger.info(f"🔍 STEP 2: {type(matched_instance).__name__}.{field_name} = {value}")
                 if value is not None:
-                    if field_name in ['well_filter_mode', 'output_dir_suffix']:
+                    if field_name in ['well_filter_mode', 'output_dir_suffix', 'num_workers']:
                         logger.info(f"✅ RETURNING {value} from {type(matched_instance).__name__}")
                     return value
             except AttributeError:
-                if field_name in ['well_filter_mode', 'output_dir_suffix']:
+                if field_name in ['well_filter_mode', 'output_dir_suffix', 'num_workers']:
                     logger.info(f"🔍 STEP 2: {type(matched_instance).__name__} has no field {field_name}")
                 continue
 
     # Step 3: Class defaults as final fallback
     try:
         class_default = object.__getattribute__(obj_type, field_name)
+        if field_name == 'num_workers':
+            logger.info(f"🔍 STEP 3 FALLBACK: {obj_type.__name__}.{field_name} = {class_default} (from class default)")
         if class_default is not None:
+            if field_name == 'num_workers':
+                logger.info(f"❌ RETURNING CLASS DEFAULT {class_default}")
             return class_default
     except AttributeError:
         pass
 
+    if field_name == 'num_workers':
+        logger.info(f"❌ RETURNING None (no value found)")
     return None
 
 

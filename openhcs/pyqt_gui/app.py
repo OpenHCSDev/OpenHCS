@@ -98,6 +98,19 @@ class OpenHCSPyQtApp(QApplication):
         # ALSO ensure context for orchestrator creation (required by orchestrator.__init__)
         ensure_global_config_context(GlobalPipelineConfig, self.global_config)
 
+        # CRITICAL FIX: Invalidate lazy resolution cache after loading global config
+        # The cache uses _live_context_token_counter as part of the key. If any lazy dataclass
+        # fields were accessed BEFORE the global config was loaded (e.g., during early initialization),
+        # they would have cached the class default values instead of the loaded config values.
+        # Incrementing the token invalidates those stale cache entries.
+        try:
+            from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+            ParameterFormManager._live_context_token_counter += 1
+            logger.info(f"Invalidated lazy resolution cache after loading global config (token={ParameterFormManager._live_context_token_counter})")
+        except ImportError:
+            # ParameterFormManager not available - skip cache invalidation
+            pass
+
         logger.info("Global configuration context established for lazy dataclass resolution")
 
         # Set application icon (if available)

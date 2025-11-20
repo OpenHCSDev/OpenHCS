@@ -1296,7 +1296,15 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         """Return pipeline config merged with live overrides for current plate.
 
         Uses CrossWindowPreviewMixin._get_preview_instance_generic for scoped values.
+
+        CRITICAL: This method must merge BOTH:
+        1. Scoped PipelineConfig values (from PipelineConfig editor)
+        2. Global GlobalPipelineConfig values (from GlobalPipelineConfig editor)
+
+        The global values should be applied FIRST, then scoped values override them.
         """
+        from openhcs.core.config import GlobalPipelineConfig
+
         orchestrator = self._get_current_orchestrator()
         if not orchestrator:
             return None
@@ -1305,14 +1313,29 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         if not self.current_plate:
             return pipeline_config
 
-        # Use mixin's generic helper (scoped values)
-        return self._get_preview_instance_generic(
-            obj=pipeline_config,
-            obj_type=type(pipeline_config),
-            scope_id=self.current_plate,
-            live_context_snapshot=live_context_snapshot,
-            use_global_values=False
-        )
+        if live_context_snapshot is None:
+            return pipeline_config
+
+        # Step 1: Get scoped PipelineConfig values (from PipelineConfig editor)
+        scope_id = self.current_plate
+        scoped_values = getattr(live_context_snapshot, 'scoped_values', {}) or {}
+        scope_entries = scoped_values.get(scope_id, {})
+        pipeline_config_live_values = scope_entries.get(type(pipeline_config), {})
+
+        # Step 2: Get global GlobalPipelineConfig values (from GlobalPipelineConfig editor)
+        global_values = getattr(live_context_snapshot, 'values', {}) or {}
+        global_config_live_values = global_values.get(GlobalPipelineConfig, {})
+
+        # Step 3: Merge global values first, then scoped values (scoped overrides global)
+        merged_live_values = {}
+        merged_live_values.update(global_config_live_values)  # Global values first
+        merged_live_values.update(pipeline_config_live_values)  # Scoped values override
+
+        if not merged_live_values:
+            return pipeline_config
+
+        # Step 4: Merge into PipelineConfig instance
+        return self._merge_with_live_values(pipeline_config, merged_live_values)
 
     def _get_global_config_preview_instance(self, live_context_snapshot):
         """Return global config merged with live overrides.

@@ -721,9 +721,11 @@ class CrossWindowPreviewMixin:
         # live_context_after might be empty (e.g., window close after unregistering form manager)
         if obj_pairs:
             _, first_obj_after = obj_pairs[0]
+            logger.info(f"🔍 _check_resolved_values_changed_batch: BEFORE expansion: changed_fields={changed_fields}")
             expanded_identifiers = self._expand_identifiers_for_inheritance(
                 first_obj_after, changed_fields, live_context_before
             )
+            logger.info(f"🔍 _check_resolved_values_changed_batch: AFTER expansion: expanded_identifiers={expanded_identifiers}")
         else:
             expanded_identifiers = changed_fields
 
@@ -772,13 +774,20 @@ class CrossWindowPreviewMixin:
         Returns:
             True if any identifier changed
         """
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"🔍 _check_single_object_with_batch_resolution: identifiers={identifiers}")
+
         # Try to use batch resolution if we have a context stack
         context_stack_before = self._build_flash_context_stack(obj_before, live_context_before)
         context_stack_after = self._build_flash_context_stack(obj_after, live_context_after)
 
+        logger.info(f"🔍 _check_single_object_with_batch_resolution: context_stack_before={context_stack_before is not None}, context_stack_after={context_stack_after is not None}")
+
         if context_stack_before and context_stack_after:
             # Use batch resolution
-            return self._check_with_batch_resolution(
+            logger.info(f"🔍 _check_single_object_with_batch_resolution: Using BATCH resolution")
+            result = self._check_with_batch_resolution(
                 obj_before,
                 obj_after,
                 identifiers,
@@ -787,8 +796,11 @@ class CrossWindowPreviewMixin:
                 live_context_before,
                 live_context_after
             )
+            logger.info(f"🔍 _check_single_object_with_batch_resolution: Batch resolution returned {result}")
+            return result
 
         # Fallback to sequential resolution
+        logger.info(f"🔍 _check_single_object_with_batch_resolution: Using FALLBACK sequential resolution")
         for identifier in identifiers:
             if not identifier:
                 continue
@@ -937,9 +949,12 @@ class CrossWindowPreviewMixin:
 
             for attr_name in simple_attrs:
                 if attr_name in before_attrs and attr_name in after_attrs:
+                    logger.info(f"🔍 _check_with_batch_resolution: Comparing {attr_name}: before={before_attrs[attr_name]}, after={after_attrs[attr_name]}")
                     if before_attrs[attr_name] != after_attrs[attr_name]:
-                        logger.debug(f"🔍 _check_with_batch_resolution: CHANGED: {attr_name}")
+                        logger.info(f"🔍 _check_with_batch_resolution: CHANGED: {attr_name}")
                         return True
+                    else:
+                        logger.info(f"🔍 _check_with_batch_resolution: NO CHANGE: {attr_name}")
 
         # Batch resolve nested attributes grouped by parent
         for parent_path, attr_names in parent_to_attrs.items():
@@ -1019,14 +1034,18 @@ class CrossWindowPreviewMixin:
                 # 1. A dataclass attribute on obj (e.g., "napari_streaming_config")
                 # 2. A simple field name (e.g., "well_filter", "enabled")
 
-                # Case 1: Check if identifier is a dataclass attribute on obj
-                # DON'T expand to all fields - just keep the whole dataclass identifier
-                # The comparison will handle checking if the dataclass changed
+                # Case 1: Check if identifier is a direct attribute on obj
+                # This includes both dataclass attributes AND simple fields like num_workers
                 try:
                     attr_value = getattr(obj, identifier, None)
                     if attr_value is not None and is_dataclass(attr_value):
                         # This is a whole dataclass - keep it as-is
                         expanded.add(identifier)
+                        continue
+                    elif hasattr(obj, identifier):
+                        # This is a direct field on obj (like num_workers on PipelineConfig)
+                        expanded.add(identifier)
+                        logger.debug(f"🔍 Added direct field '{identifier}' to expanded set")
                         continue
                 except (AttributeError, Exception):
                     pass

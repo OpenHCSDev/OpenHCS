@@ -139,7 +139,10 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         # Configure preview routing + fields
         self._register_preview_scopes()
         self._configure_preview_fields()
-        
+
+        # Storage for pending cross-window changes (for scope resolution)
+        self._pending_cross_window_changes_for_scope_resolution = []
+
         # UI components
         self.plate_list: Optional[QListWidget] = None
         self.buttons: Dict[str, QPushButton] = {}
@@ -307,13 +310,46 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
 
     def _process_pending_preview_updates(self) -> None:
         """Apply incremental updates for pending plate keys using BATCH processing."""
+        logger.info(f"🔍 _process_pending_preview_updates CALLED: {len(self._pending_cross_window_changes_for_scope_resolution)} stored changes")
+
+        # CRITICAL: Populate _pending_preview_keys from stored cross-window changes
+        # This is necessary because the coordinated update system doesn't call handle_cross_window_preview_change
+        if self._pending_cross_window_changes_for_scope_resolution:
+            for manager, param_name, value, obj_instance, context_obj in self._pending_cross_window_changes_for_scope_resolution:
+                # Extract scope_id from the change
+                scope_id = self._extract_scope_id_for_preview(obj_instance, context_obj)
+                logger.info(f"🔍 _process_pending_preview_updates: scope_id={scope_id}")
+                target_keys, requires_full_refresh = self._resolve_scope_targets(scope_id)
+                logger.info(f"🔍 _process_pending_preview_updates: target_keys={target_keys}, requires_full_refresh={requires_full_refresh}")
+
+                if requires_full_refresh:
+                    self._pending_preview_keys.clear()
+                    self._pending_label_keys.clear()
+                    self._pending_changed_fields.clear()
+                    logger.info(f"🔍 _process_pending_preview_updates: Full refresh required")
+                    self._handle_full_preview_refresh()
+                    self._pending_cross_window_changes_for_scope_resolution.clear()
+                    return
+
+                if target_keys:
+                    self._pending_preview_keys.update(target_keys)
+                    self._pending_label_keys.update(target_keys)
+
+            # Clear stored changes
+            self._pending_cross_window_changes_for_scope_resolution.clear()
+
+        logger.info(f"🔍 _process_pending_preview_updates: _pending_preview_keys={self._pending_preview_keys}")
+
         if not self._pending_preview_keys:
+            logger.info(f"🔍 _process_pending_preview_updates: RETURNING EARLY - no pending keys")
             return
 
+        logger.info(f"🔍 _process_pending_preview_updates: Continuing with {len(self._pending_preview_keys)} pending keys")
+
         # Copy changed fields before clearing
-        logger.info(f"🔍 PlateManager._process_pending_preview_updates: _pending_changed_fields={self._pending_changed_fields}")
+        logger.debug(f"🔍 PlateManager._process_pending_preview_updates: _pending_changed_fields={self._pending_changed_fields}")
         changed_fields = set(self._pending_changed_fields) if self._pending_changed_fields else None
-        logger.info(f"🔍 PlateManager._process_pending_preview_updates: changed_fields={changed_fields}")
+        logger.debug(f"🔍 PlateManager._process_pending_preview_updates: changed_fields={changed_fields}")
 
         # Get current live context snapshot
         from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
@@ -325,6 +361,7 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         # Update last snapshot for next comparison
         self._last_live_context_snapshot = live_context_snapshot
 
+        logger.info(f"🔍 _process_pending_preview_updates: Calling _update_plate_items_batch with {len(self._pending_preview_keys)} plates")
         # Use BATCH update for all pending plates
         self._update_plate_items_batch(
             plate_paths=list(self._pending_preview_keys),
@@ -333,6 +370,7 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
             live_context_after=live_context_snapshot
         )
 
+        logger.info(f"🔍 _process_pending_preview_updates: DONE, clearing pending updates")
         # Clear pending updates
         self._pending_preview_keys.clear()
         self._pending_label_keys.clear()
@@ -344,6 +382,14 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         When a window closes with unsaved changes or reset is clicked, values revert
         to saved state and should flash to indicate the change.
         """
+        logger.info(f"🔍 _handle_full_preview_refresh CALLED")
+
+        # CRITICAL: Clear original values cache when windows close/reset
+        # This ensures we recapture the baseline after the window closes
+        if hasattr(self, '_original_pipeline_config_values'):
+            self._original_pipeline_config_values.clear()
+            logger.info(f"🔍 _handle_full_preview_refresh: Cleared original values cache")
+
         from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
 
         # CRITICAL: Use saved "after" snapshot if available (from window close)
@@ -355,6 +401,8 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
 
         # Use saved "before" snapshot if available (from window close), otherwise use last snapshot
         live_context_before = getattr(self, '_window_close_before_snapshot', None) or self._last_live_context_snapshot
+
+        logger.info(f"🔍 _handle_full_preview_refresh: live_context_before token={getattr(live_context_before, 'token', None)}, live_context_after token={getattr(live_context_after, 'token', None)}")
 
         # Get the user-modified fields from the closed window (if available)
         modified_fields = getattr(self, '_window_close_modified_fields', None)
@@ -370,6 +418,7 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         # Update last snapshot for next comparison
         self._last_live_context_snapshot = live_context_after
 
+        logger.info(f"🔍 _handle_full_preview_refresh: Calling _update_all_plate_items_batch")
         # Refresh ALL plates with flash detection using BATCH update
         # Pass the modified fields from the closed window (or None for reset events)
         self._update_all_plate_items_batch(
@@ -377,6 +426,7 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
             live_context_before=live_context_before,
             live_context_after=live_context_after
         )
+        logger.info(f"🔍 _handle_full_preview_refresh: DONE")
 
     def _update_all_plate_items_batch(
         self,
@@ -394,6 +444,7 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
             live_context_before: Live context snapshot before changes (for flash logic)
             live_context_after: Live context snapshot after changes (for flash logic)
         """
+        logger.info(f"🔍 _update_all_plate_items_batch CALLED: changed_fields={changed_fields}")
         # Update ALL plates
         self._update_plate_items_batch(
             plate_paths=None,  # None = all plates
@@ -448,33 +499,48 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
             live_context_after = ParameterFormManager.collect_live_context()
 
         # Build before/after config pairs for batch flash detection
+        # CRITICAL: Use _get_pipeline_config_preview_instance to merge BOTH scoped and global values
         config_pairs = []
         plate_indices = []
         for i, item, plate_data, plate_path, orchestrator in plate_items:
-            config_before = self._get_preview_instance(
-                obj=orchestrator.pipeline_config,
-                live_context_snapshot=live_context_before,
-                scope_id=str(plate_path),
-                obj_type=PipelineConfig
+            config_before = self._get_pipeline_config_preview_instance(
+                orchestrator,
+                live_context_before
             ) if live_context_before else None
 
-            config_after = self._get_preview_instance(
-                obj=orchestrator.pipeline_config,
-                live_context_snapshot=live_context_after,
-                scope_id=str(plate_path),
-                obj_type=PipelineConfig
+            config_after = self._get_pipeline_config_preview_instance(
+                orchestrator,
+                live_context_after
             )
 
             config_pairs.append((config_before, config_after))
             plate_indices.append(i)
 
         # Batch check which plates should flash
+        logger.info(f"🔍 _update_plate_items_batch: Calling _check_resolved_values_changed_batch with {len(config_pairs)} pairs, changed_fields={changed_fields}")
+        logger.info(f"🔍 _update_plate_items_batch: live_context_before token={getattr(live_context_before, 'token', None)}, live_context_after token={getattr(live_context_after, 'token', None)}")
+
+        # DEBUG: Log the actual num_workers values in the snapshots
+        if live_context_before and hasattr(live_context_before, 'scoped_values'):
+            for scope_id, scoped_vals in live_context_before.scoped_values.items():
+                from openhcs.core.config import PipelineConfig
+                if PipelineConfig in scoped_vals:
+                    num_workers_before = scoped_vals[PipelineConfig].get('num_workers', 'NOT FOUND')
+                    logger.info(f"🔍 _update_plate_items_batch: live_context_before[{scope_id}][PipelineConfig]['num_workers'] = {num_workers_before}")
+        if live_context_after and hasattr(live_context_after, 'scoped_values'):
+            for scope_id, scoped_vals in live_context_after.scoped_values.items():
+                from openhcs.core.config import PipelineConfig
+                if PipelineConfig in scoped_vals:
+                    num_workers_after = scoped_vals[PipelineConfig].get('num_workers', 'NOT FOUND')
+                    logger.info(f"🔍 _update_plate_items_batch: live_context_after[{scope_id}][PipelineConfig]['num_workers'] = {num_workers_after}")
+
         should_flash_list = self._check_resolved_values_changed_batch(
             config_pairs,
             changed_fields,
             live_context_before=live_context_before,
             live_context_after=live_context_after
         )
+        logger.info(f"🔍 _update_plate_items_batch: should_flash_list={should_flash_list}")
 
         # PHASE 1: Update all labels and styling (do this BEFORE flashing)
         # This ensures all flashes start simultaneously
@@ -483,7 +549,12 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         for idx, (i, item, plate_data, plate_path, orchestrator) in enumerate(plate_items):
             # Update display text
             # PERFORMANCE: Pass changed_fields to optimize unsaved changes check
-            display_text = self._format_plate_item_with_preview(plate_data, changed_fields=changed_fields)
+            # CRITICAL: Pass live_context_after to avoid stale data during coordinated updates
+            display_text = self._format_plate_item_with_preview(
+                plate_data,
+                changed_fields=changed_fields,
+                live_context_snapshot=live_context_after
+            )
 
             # Reapply scope-based styling BEFORE flash (so flash color isn't overwritten)
             self._apply_orchestrator_item_styling(item, plate_data)
@@ -501,7 +572,12 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
             for plate_path in plates_to_flash:
                 self._flash_plate_item(plate_path)
 
-    def _format_plate_item_with_preview(self, plate: Dict, changed_fields: Optional[set] = None) -> str:
+    def _format_plate_item_with_preview(
+        self,
+        plate: Dict,
+        changed_fields: Optional[set] = None,
+        live_context_snapshot = None
+    ) -> str:
         """Format plate item with status and config preview labels.
 
         Uses multiline format:
@@ -512,6 +588,7 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         Args:
             plate: Plate data dict
             changed_fields: Optional set of changed field paths (for optimization)
+            live_context_snapshot: Optional live context snapshot to use (if None, will collect a new one)
         """
         # Determine status prefix
         status_prefix = ""
@@ -547,9 +624,11 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
 
             # Check if PipelineConfig has unsaved changes
             # PERFORMANCE: Pass changed_fields to only check relevant configs
+            # CRITICAL: Pass live_context_snapshot to avoid stale data during coordinated updates
             has_unsaved_changes = self._check_pipeline_config_has_unsaved_changes(
                 orchestrator,
-                changed_fields=changed_fields
+                changed_fields=changed_fields,
+                live_context_snapshot=live_context_snapshot
             )
 
         # Line 1: [status] before plate name (user requirement)
@@ -653,7 +732,8 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
     def _check_pipeline_config_has_unsaved_changes(
         self,
         orchestrator,
-        changed_fields: Optional[set] = None
+        changed_fields: Optional[set] = None,
+        live_context_snapshot = None
     ) -> bool:
         """Check if PipelineConfig has any unsaved changes.
 
@@ -664,43 +744,76 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         Args:
             orchestrator: PipelineOrchestrator instance
             changed_fields: Optional set of changed field paths to limit checking
+            live_context_snapshot: Optional live context snapshot to use (if None, will collect a new one)
 
         Returns:
             True if PipelineConfig has unsaved changes, False otherwise
         """
-        logger.info(f"🔍🔍🔍 _check_pipeline_config_has_unsaved_changes: FUNCTION ENTRY 🔍🔍🔍")
+        logger.debug(f"🔍🔍🔍 _check_pipeline_config_has_unsaved_changes: FUNCTION ENTRY 🔍🔍🔍")
         from openhcs.pyqt_gui.widgets.config_preview_formatters import check_config_has_unsaved_changes
         from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
         from openhcs.core.config import PipelineConfig
         import dataclasses
 
-        logger.info(f"🔍🔍🔍 _check_pipeline_config_has_unsaved_changes: Checking orchestrator 🔍🔍🔍")
+        logger.debug(f"🔍🔍🔍 _check_pipeline_config_has_unsaved_changes: Checking orchestrator 🔍🔍🔍")
+
+        # CRITICAL: Ensure original values are captured for this plate
+        # This should have been done in update_plate_list, but check here as fallback
+        if not hasattr(self, '_original_pipeline_config_values'):
+            self._original_pipeline_config_values = {}
+
+        if not hasattr(self, '_baseline_capture_tokens'):
+            self._baseline_capture_tokens = {}
+
+        plate_path_key = orchestrator.plate_path
+
+        # CRITICAL: Check if baseline needs recapture due to token change
+        # This handles the case where global config was loaded after the plate was first loaded
+        current_token = ParameterFormManager._live_context_token_counter
+        needs_recapture = (
+            plate_path_key not in self._original_pipeline_config_values or
+            self._baseline_capture_tokens.get(plate_path_key) != current_token
+        )
+
+        if needs_recapture:
+            if plate_path_key in self._original_pipeline_config_values:
+                logger.info(f"🔄 Token changed, recapturing baseline for plate {plate_path_key} (old token={self._baseline_capture_tokens.get(plate_path_key)}, new token={current_token})")
+            else:
+                logger.warning(f"⚠️ Original values not captured for plate {plate_path_key}, capturing now")
+            self._capture_original_pipeline_config_values(orchestrator)
 
         # Get the raw pipeline_config (SAVED values, not merged with live)
         pipeline_config = orchestrator.pipeline_config
-        logger.info(f"🔍 _check_pipeline_config_has_unsaved_changes: Got pipeline_config={pipeline_config}")
+        logger.debug(f"🔍 _check_pipeline_config_has_unsaved_changes: Got pipeline_config={pipeline_config}")
 
         # Get live context snapshot (scoped to this plate)
-        live_context_snapshot = ParameterFormManager.collect_live_context(
-            scope_filter=orchestrator.plate_path
-        )
-        logger.info(f"🔍 _check_pipeline_config_has_unsaved_changes: Got live_context_snapshot={live_context_snapshot}")
+        # CRITICAL: Use provided snapshot if available (to avoid stale data during coordinated updates)
         if live_context_snapshot is None:
-            logger.info(f"🔍 _check_pipeline_config_has_unsaved_changes: No live context snapshot")
+            live_context_snapshot = ParameterFormManager.collect_live_context(
+                scope_filter=orchestrator.plate_path
+            )
+        logger.debug(f"🔍 _check_pipeline_config_has_unsaved_changes: Got live_context_snapshot={live_context_snapshot}")
+        if live_context_snapshot is None:
+            logger.debug(f"🔍 _check_pipeline_config_has_unsaved_changes: No live context snapshot")
             return False
 
-        # PERFORMANCE: Cache result by (plate_path, token) to avoid redundant checks
-        cache_key = (orchestrator.plate_path, live_context_snapshot.token)
-        logger.info(f"🔍 _check_pipeline_config_has_unsaved_changes: cache_key={cache_key}")
-        if not hasattr(self, '_unsaved_changes_cache'):
-            self._unsaved_changes_cache = {}
+        # UPGRADED CACHE SYSTEM:
+        # 1. Original values cache: Stores baseline when plate first loads (never invalidated by token)
+        #    Structure: Dict[plate_path, Dict[field_name, original_value]]
+        # 2. Token-based result cache: Stores boolean result for performance (invalidated on every edit)
+        #    Structure: Dict[(plate_path, token), bool]
 
+        if not hasattr(self, '_unsaved_changes_cache'):
+            self._unsaved_changes_cache = {}  # Dict[Tuple[str, int], bool]
+
+        # Check token-based result cache first (performance optimization)
+        cache_key = (plate_path_key, live_context_snapshot.token)
         if cache_key in self._unsaved_changes_cache:
             cached_result = self._unsaved_changes_cache[cache_key]
-            logger.info(f"🔍 _check_pipeline_config_has_unsaved_changes: Using cached result: {cached_result}")
+            logger.debug(f"🔍 _check_pipeline_config_has_unsaved_changes: Using cached result: {cached_result}")
             return cached_result
 
-        logger.info(f"🔍 _check_pipeline_config_has_unsaved_changes: Cache miss, proceeding to check")
+        logger.debug(f"🔍 _check_pipeline_config_has_unsaved_changes: Cache miss, proceeding to check")
 
         # Check each config field in PipelineConfig
         # CRITICAL: We need TWO pipeline_config instances:
@@ -715,54 +828,209 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
             live_context_snapshot
         )
 
-        logger.info(f"🔍 _check_pipeline_config_has_unsaved_changes: About to loop over fields in pipeline_config")
+        # DEBUG: Log what's in the live context snapshot
+        scope_id = str(orchestrator.plate_path)
+        if scope_id in live_context_snapshot.scoped_values:
+            scoped_data = live_context_snapshot.scoped_values[scope_id]
+            if PipelineConfig in scoped_data:
+                logger.info(f"🔍 DEBUG: Live values for PipelineConfig in scope {scope_id}: {scoped_data[PipelineConfig]}")
+            else:
+                logger.info(f"🔍 DEBUG: No PipelineConfig in scoped_data for scope {scope_id}, keys: {list(scoped_data.keys())}")
+        else:
+            logger.info(f"🔍 DEBUG: No scoped_values for scope {scope_id}, available scopes: {list(live_context_snapshot.scoped_values.keys())}")
+
+        logger.debug(f"🔍 _check_pipeline_config_has_unsaved_changes: About to loop over fields in pipeline_config")
         for field in dataclasses.fields(pipeline_config):
             field_name = field.name
             config = getattr(pipeline_config, field_name, None)
-            logger.info(f"🔍 _check_pipeline_config_has_unsaved_changes: Checking field {field_name}, config={config}")
+            logger.debug(f"🔍 _check_pipeline_config_has_unsaved_changes: Checking field {field_name}, config={config}, is_dataclass={dataclasses.is_dataclass(config)}")
 
-            # Skip non-dataclass fields
-            if not dataclasses.is_dataclass(config):
-                continue
+            # Check nested dataclass fields
+            if dataclasses.is_dataclass(config):
+                # Create resolver for this config
+                # CRITICAL: The resolver needs to use DIFFERENT pipeline_config instances for live vs saved:
+                # - For LIVE context: use pipeline_config_preview (with live values merged)
+                # - For SAVED context: use pipeline_config (original saved values)
+                # The context parameter's token tells us which one to use:
+                # - live_context_snapshot.token = current live token (use preview)
+                # - saved_context_snapshot.token = incremented token (use original)
+                def resolve_attr(parent_obj, config_obj, attr_name, context):
+                    # If context token matches live token, use preview instance
+                    # If context token is different (saved snapshot), use original instance
+                    is_live_context = (context.token == live_context_snapshot.token)
+                    pipeline_config_to_use = pipeline_config_preview if is_live_context else pipeline_config
 
-            # Create resolver for this config
-            # CRITICAL: The resolver needs to use DIFFERENT pipeline_config instances for live vs saved:
-            # - For LIVE context: use pipeline_config_preview (with live values merged)
-            # - For SAVED context: use pipeline_config (original saved values)
-            # The context parameter's token tells us which one to use:
-            # - live_context_snapshot.token = current live token (use preview)
-            # - saved_context_snapshot.token = incremented token (use original)
-            def resolve_attr(parent_obj, config_obj, attr_name, context):
-                # If context token matches live token, use preview instance
-                # If context token is different (saved snapshot), use original instance
-                is_live_context = (context.token == live_context_snapshot.token)
-                pipeline_config_to_use = pipeline_config_preview if is_live_context else pipeline_config
+                    return self._resolve_config_attr(
+                        pipeline_config_to_use,
+                        config_obj,
+                        attr_name,
+                        context  # Pass the context parameter through
+                    )
 
-                return self._resolve_config_attr(
-                    pipeline_config_to_use,
-                    config_obj,
-                    attr_name,
-                    context  # Pass the context parameter through
+                # Check if this config has unsaved changes
+                has_changes = check_config_has_unsaved_changes(
+                    field_name,
+                    config,
+                    resolve_attr,
+                    pipeline_config,  # Use ORIGINAL config as parent_obj (for field extraction)
+                    live_context_snapshot,
+                    scope_filter=orchestrator.plate_path  # CRITICAL: Pass scope filter
                 )
 
-            # Check if this config has unsaved changes
-            has_changes = check_config_has_unsaved_changes(
-                field_name,
-                config,
-                resolve_attr,
-                pipeline_config,  # Use ORIGINAL config as parent_obj (for field extraction)
-                live_context_snapshot,
-                scope_filter=orchestrator.plate_path  # CRITICAL: Pass scope filter
-            )
+                if has_changes:
+                    logger.info(f"✅ UNSAVED CHANGES DETECTED in PipelineConfig.{field_name}")
+                    self._unsaved_changes_cache[cache_key] = True
+                    return True
+            else:
+                # Check non-nested primitive fields (num_workers, etc.)
+                # CRITICAL: Compare against ORIGINAL values cached when plate first loaded,
+                # NOT against dynamically-resolved values that include other windows' live edits
 
-            if has_changes:
-                logger.info(f"✅ UNSAVED CHANGES DETECTED in PipelineConfig.{field_name}")
-                self._unsaved_changes_cache[cache_key] = True
-                return True
+                # Get current live value from preview instance
+                # CRITICAL: Two cases to handle:
+                # 1. No live editors: preview instance is raw lazy (all __dict__ values = None)
+                #    → Need to RESOLVE like we did for baseline
+                # 2. Live editors open: preview instance has MERGED values (__dict__ has concrete values)
+                #    → Use raw __dict__ value (bypass lazy resolution which would override it)
+                raw_value = object.__getattribute__(pipeline_config_preview, field_name)
 
-        logger.info(f"🔍 _check_pipeline_config_has_unsaved_changes: No unsaved changes")
+                if raw_value is None:
+                    # Case 1: Raw lazy instance, resolve from context (same as baseline capture)
+                    from openhcs.config_framework.context_manager import config_context
+                    scope_id_for_comparison = str(orchestrator.plate_path)
+                    with config_context(pipeline_config_preview, scope_id=scope_id_for_comparison):
+                        live_value = getattr(pipeline_config_preview, field_name)
+                else:
+                    # Case 2: Merged instance with explicit value, use it directly
+                    live_value = raw_value
+
+                # Get cached original value (captured when plate first loaded)
+                saved_value = self._original_pipeline_config_values[plate_path_key][field_name]
+
+                logger.info(f"🔍 _check_pipeline_config_has_unsaved_changes: Non-nested field {field_name}: live={live_value} (raw={raw_value}), saved={saved_value} (from cache)")
+
+                try:
+                    if live_value != saved_value:
+                        logger.info(f"✅ UNSAVED CHANGES DETECTED in PipelineConfig.{field_name} (non-nested field)")
+                        self._unsaved_changes_cache[cache_key] = True
+                        return True
+                except Exception as e:
+                    # If comparison fails (e.g., unhashable types), assume no change
+                    logger.info(f"🔍 _check_pipeline_config_has_unsaved_changes: Comparison failed for {field_name}: {e}")
+                    pass
+
+        logger.debug(f"🔍 _check_pipeline_config_has_unsaved_changes: No unsaved changes")
         self._unsaved_changes_cache[cache_key] = False
         return False
+
+    def _capture_original_pipeline_config_values(self, orchestrator, force_recapture: bool = False) -> None:
+        """Capture original PipelineConfig values when plate first loads.
+
+        This must be called BEFORE any edits to establish the true baseline.
+        The baseline is the resolved state WITHOUT any live edits from form managers.
+
+        Args:
+            orchestrator: The orchestrator to capture baseline for
+            force_recapture: If True, recapture even if baseline already exists (used after save)
+        """
+        import dataclasses
+        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+
+        if not hasattr(self, '_original_pipeline_config_values'):
+            self._original_pipeline_config_values = {}
+
+        if not hasattr(self, '_baseline_capture_tokens'):
+            self._baseline_capture_tokens = {}
+
+        plate_path_key = orchestrator.plate_path
+
+        # CRITICAL: Check if baseline needs recapture due to token change
+        # If the token has changed since baseline was captured, the global config may have been loaded
+        # and we need to recapture with the correct values
+        current_token = ParameterFormManager._live_context_token_counter
+        needs_recapture = (
+            force_recapture or
+            plate_path_key not in self._original_pipeline_config_values or
+            self._baseline_capture_tokens.get(plate_path_key) != current_token
+        )
+
+        if not needs_recapture:
+            return
+
+        if plate_path_key in self._original_pipeline_config_values:
+            logger.info(f"🔄 Recapturing baseline for plate {plate_path_key} (token changed: {self._baseline_capture_tokens.get(plate_path_key)} → {current_token})")
+        else:
+            logger.info(f"🔍 _capture_original_pipeline_config_values: Capturing baseline for plate {plate_path_key} (token={current_token})")
+
+        # Check ambient GlobalPipelineConfig context
+        from openhcs.config_framework.global_config import get_current_global_config
+        from openhcs.core.config import GlobalPipelineConfig
+        ambient_global = get_current_global_config(GlobalPipelineConfig)
+        logger.info(f"🔍 _capture_original_pipeline_config_values: ambient_global={ambient_global}")
+        if ambient_global:
+            logger.info(f"🔍 _capture_original_pipeline_config_values: ambient_global.use_threading={ambient_global.use_threading}")
+            logger.info(f"🔍 _capture_original_pipeline_config_values: ambient_global.num_workers={ambient_global.num_workers}")
+
+        # Create an empty live context snapshot (no active form managers)
+        # This gives us the "saved" state without any live edits
+        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import LiveContextSnapshot
+        empty_snapshot = LiveContextSnapshot(
+            token=0,  # Dummy token
+            values={},  # No global live values
+            scoped_values={}  # No scoped live values
+        )
+
+        # Create a baseline preview instance with NO live edits
+        baseline_config = self._get_pipeline_config_preview_instance(
+            orchestrator,
+            empty_snapshot
+        )
+
+        # Cache all field values from baseline
+        # CRITICAL: Use getattr() to get RESOLVED values, not __dict__ which has raw None values
+        # CRITICAL: Must use config_context() to activate lazy resolution via contextvars!
+        # Lazy __getattribute__ uses contextvars - thread-local storage alone is not enough
+        from openhcs.config_framework.context_manager import config_context
+
+        self._original_pipeline_config_values[plate_path_key] = {}
+
+        # Activate context with plate scope so lazy resolution works
+        # config_context() automatically merges with base global config from thread-local storage
+        # This makes GlobalPipelineConfig values (including default_factory fields) available
+        scope_id = str(plate_path_key)
+
+        # DEBUG: Check what's in the context before resolution
+        from openhcs.config_framework.context_manager import get_current_temp_global, get_base_global_config
+        debug_base = get_base_global_config()
+        logger.info(f"🔍 DEBUG baseline capture: get_base_global_config().num_workers = {getattr(debug_base, 'num_workers', 'NOT FOUND')}")
+        debug_current = get_current_temp_global()
+        logger.info(f"🔍 DEBUG baseline capture: get_current_temp_global() = {debug_current is not None}")
+
+        with config_context(baseline_config, scope_id=scope_id):
+            # DEBUG: Check context inside config_context block
+            debug_context_inside = get_current_temp_global()
+            logger.info(f"🔍 DEBUG inside config_context: get_current_temp_global().num_workers = {getattr(debug_context_inside, 'num_workers', 'NOT FOUND')}")
+
+            # DEBUG: Check available_configs
+            from openhcs.config_framework.context_manager import current_extracted_configs
+            debug_available = current_extracted_configs.get()
+            logger.info(f"🔍 DEBUG available_configs keys = {list(debug_available.keys()) if debug_available else 'NONE'}")
+            if debug_available and 'GlobalPipelineConfig' in debug_available:
+                logger.info(f"🔍 DEBUG GlobalPipelineConfig.num_workers in available_configs = {getattr(debug_available['GlobalPipelineConfig'], 'num_workers', 'NOT FOUND')}")
+
+            for field in dataclasses.fields(baseline_config):
+                field_name = field.name
+                # Get the RESOLVED value using getattr (triggers lazy resolution)
+                # This includes GlobalPipelineConfig defaults (e.g., use_threading from default_factory)
+                raw_value = baseline_config.__dict__.get(field_name)
+                resolved_value = getattr(baseline_config, field_name)
+                self._original_pipeline_config_values[plate_path_key][field_name] = resolved_value
+                logger.info(f"🔍 _capture_original_pipeline_config_values: {field_name} = {resolved_value} (raw={raw_value})")
+
+        # CRITICAL: Store the token when baseline was captured
+        # This allows us to detect when the global config has been loaded and recapture
+        self._baseline_capture_tokens[plate_path_key] = current_token
+        logger.info(f"✅ Baseline captured for plate {plate_path_key} with token={current_token}")
 
     def _apply_orchestrator_item_styling(self, item: QListWidgetItem, plate: Dict) -> None:
         """Apply scope-based background color and border to orchestrator list item.
@@ -832,7 +1100,7 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
             editing_object: Object being edited
             context_object: Context object
         """
-        logger.info(f"🔔 PlateManager.handle_cross_window_preview_change: field_path={field_path}, editing_object={type(editing_object).__name__ if editing_object else None}")
+        logger.info(f"🔔 PlateManager.handle_cross_window_preview_change: field_path={field_path}, new_value={new_value}, editing_object={type(editing_object).__name__ if editing_object else None}")
         # Call parent implementation (adds to pending updates, schedules debounced refresh with flash)
         super().handle_cross_window_preview_change(field_path, new_value, editing_object, context_object)
 
@@ -857,6 +1125,9 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         # Reconstruct live values (handles nested dataclasses)
         reconstructed_values = self._live_context_resolver.reconstruct_live_values(live_values)
 
+        logger.info(f"🔍 DEBUG _merge_with_live_values: live_values keys={list(live_values.keys())}")
+        logger.info(f"🔍 DEBUG _merge_with_live_values: reconstructed_values keys={list(reconstructed_values.keys())}")
+
         # Create a copy with live values merged
         merged_values = {}
         for field in dataclasses.fields(obj):
@@ -864,6 +1135,7 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
             if field_name in reconstructed_values:
                 # Use live value
                 merged_values[field_name] = reconstructed_values[field_name]
+                logger.info(f"🔍 DEBUG _merge_with_live_values: Using LIVE value for {field_name}: {reconstructed_values[field_name]}")
             else:
                 # Use original value
                 # CRITICAL: Use object.__getattribute__() to get RAW value without resolution
@@ -871,7 +1143,10 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
                 merged_values[field_name] = object.__getattribute__(obj, field_name)
 
         # Create new instance with merged values
-        return type(obj)(**merged_values)
+        result = type(obj)(**merged_values)
+        logger.info(f"🔍 DEBUG _merge_with_live_values: Created preview instance, num_workers={getattr(result, 'num_workers', 'NOT FOUND')}")
+        logger.info(f"🔍 DEBUG _merge_with_live_values: result.__dict__.get('num_workers')={result.__dict__.get('num_workers')}")
+        return result
 
     def _get_global_config_preview_instance(self, live_context_snapshot):
         """Return global config merged with live overrides.
@@ -895,6 +1170,12 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
 
         Uses CrossWindowPreviewMixin._get_preview_instance_generic for scoped values.
 
+        CRITICAL: This method must merge BOTH:
+        1. Scoped PipelineConfig values (from PipelineConfig editor)
+        2. Global GlobalPipelineConfig values (from GlobalPipelineConfig editor)
+
+        The global values should be applied FIRST, then scoped values override them.
+
         Args:
             orchestrator: Orchestrator object containing the pipeline_config
             live_context_snapshot: Live context snapshot
@@ -902,16 +1183,38 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         Returns:
             PipelineConfig instance with live values merged
         """
-        from openhcs.core.config import PipelineConfig
+        from openhcs.core.config import PipelineConfig, GlobalPipelineConfig
+        import dataclasses
 
-        # Use mixin's generic helper (scoped values)
-        return self._get_preview_instance_generic(
-            obj=orchestrator.pipeline_config,
-            obj_type=PipelineConfig,
-            scope_id=str(orchestrator.plate_path),
-            live_context_snapshot=live_context_snapshot,
-            use_global_values=False
-        )
+        if live_context_snapshot is None:
+            return orchestrator.pipeline_config
+
+        # Step 1: Get scoped PipelineConfig values (from PipelineConfig editor)
+        scope_id = str(orchestrator.plate_path)
+        scoped_values = getattr(live_context_snapshot, 'scoped_values', {}) or {}
+        scope_entries = scoped_values.get(scope_id, {})
+        pipeline_config_live_values = scope_entries.get(PipelineConfig, {})
+
+        # Step 2: Get global GlobalPipelineConfig values (from GlobalPipelineConfig editor)
+        global_values = getattr(live_context_snapshot, 'values', {}) or {}
+        global_config_live_values = global_values.get(GlobalPipelineConfig, {})
+
+        # Step 3: Merge global values first, then scoped values (scoped overrides global)
+        merged_live_values = {}
+        merged_live_values.update(global_config_live_values)  # Global values first
+        merged_live_values.update(pipeline_config_live_values)  # Scoped values override
+
+        logger.info(f"🔍 _get_pipeline_config_preview_instance: global_config_live_values keys={list(global_config_live_values.keys())}")
+        logger.info(f"🔍 _get_pipeline_config_preview_instance: pipeline_config_live_values keys={list(pipeline_config_live_values.keys())}")
+        logger.info(f"🔍 _get_pipeline_config_preview_instance: merged_live_values keys={list(merged_live_values.keys())}")
+        if 'num_workers' in merged_live_values:
+            logger.info(f"🔍 _get_pipeline_config_preview_instance: merged_live_values['num_workers']={merged_live_values['num_workers']}")
+
+        if not merged_live_values:
+            return orchestrator.pipeline_config
+
+        # Step 4: Merge into PipelineConfig instance
+        return self._merge_with_live_values(orchestrator.pipeline_config, merged_live_values)
 
     def _build_flash_context_stack(self, obj: Any, live_context_snapshot) -> Optional[list]:
         """Build context stack for flash resolution.
@@ -955,17 +1258,17 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         try:
             # Log live context snapshot for debugging
             if attr_name == 'well_filter' and live_context_snapshot:
-                logger.info(f"🔍 LIVE CONTEXT: values keys = {list(live_context_snapshot.values.keys()) if hasattr(live_context_snapshot, 'values') else 'N/A'}")
-                logger.info(f"🔍 LIVE CONTEXT: scoped_values keys = {list(live_context_snapshot.scoped_values.keys()) if hasattr(live_context_snapshot, 'scoped_values') else 'N/A'}")
+                logger.debug(f"🔍 LIVE CONTEXT: values keys = {list(live_context_snapshot.values.keys()) if hasattr(live_context_snapshot, 'values') else 'N/A'}")
+                logger.debug(f"🔍 LIVE CONTEXT: scoped_values keys = {list(live_context_snapshot.scoped_values.keys()) if hasattr(live_context_snapshot, 'scoped_values') else 'N/A'}")
                 if hasattr(live_context_snapshot, 'values'):
                     for config_type, values in live_context_snapshot.values.items():
                         if 'WellFilterConfig' in config_type.__name__ or 'PipelineConfig' in config_type.__name__:
-                            logger.info(f"🔍 LIVE CONTEXT: values[{config_type.__name__}] = {values}")
+                            logger.debug(f"🔍 LIVE CONTEXT: values[{config_type.__name__}] = {values}")
                 if hasattr(live_context_snapshot, 'scoped_values'):
                     for scope_id, scope_dict in live_context_snapshot.scoped_values.items():
                         for config_type, values in scope_dict.items():
                             if 'WellFilterConfig' in config_type.__name__ or 'PipelineConfig' in config_type.__name__:
-                                logger.info(f"🔍 LIVE CONTEXT: scoped_values[{scope_id}][{config_type.__name__}] = {values}")
+                                logger.debug(f"🔍 LIVE CONTEXT: scoped_values[{scope_id}][{config_type.__name__}] = {values}")
 
             # Build context stack: GlobalPipelineConfig (with live values) → PipelineConfig (with live values)
             # CRITICAL: Use preview instances for BOTH GlobalPipelineConfig and PipelineConfig
@@ -2893,6 +3196,10 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
                     # Register scope for incremental updates
                     scope_map[str(plate['path'])] = plate['path']
 
+                    # CRITICAL: Capture original PipelineConfig values when plate first loads
+                    # This must happen BEFORE any edits, so we have the true baseline
+                    self._capture_original_pipeline_config_values(orchestrator)
+
                 # Apply scope-based styling
                 self._apply_orchestrator_item_styling(item, plate)
 
@@ -3182,6 +3489,16 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         # This rebuilds their pipeline configs preserving concrete values
         for orchestrator in self.orchestrators.values():
             self._update_orchestrator_global_config(orchestrator, new_config)
+
+        # CRITICAL: Update baseline cache when GlobalPipelineConfig is SAVED
+        # on_config_changed is called AFTER save, so thread-local now has the new saved values
+        # We need to recapture baselines so they match the new saved file
+        # Note: This is NOT called on every edit, only on actual save (see main.py:624)
+        if hasattr(self, '_original_pipeline_config_values'):
+            logger.info(f"Recapturing baseline for {len(self.orchestrators)} plates after GlobalPipelineConfig save")
+            # Recapture baseline for each plate (force overwrite of existing cache)
+            for orchestrator in self.orchestrators.values():
+                self._capture_original_pipeline_config_values(orchestrator, force_recapture=True)
 
         # REMOVED: Thread-local modification - dual-axis resolver handles orchestrator context automatically
 

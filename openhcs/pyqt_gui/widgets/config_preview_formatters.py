@@ -171,18 +171,18 @@ def check_config_has_unsaved_changes(
 
     # If no resolver or parent, can't detect changes
     if not resolve_attr or parent_obj is None or live_context_snapshot is None:
-        logger.info(f"🔍 check_config_has_unsaved_changes: Early return - resolve_attr={resolve_attr is not None}, parent_obj={parent_obj is not None}, live_context_snapshot={live_context_snapshot is not None}")
+        logger.debug(f"🔍 check_config_has_unsaved_changes: Early return - resolve_attr={resolve_attr is not None}, parent_obj={parent_obj is not None}, live_context_snapshot={live_context_snapshot is not None}")
         return False
 
     # Get all dataclass fields to compare
     if not dataclasses.is_dataclass(config):
         return False
 
-    logger.info(f"🔍 check_config_has_unsaved_changes: CALLED for config_attr={config_attr}, parent_obj={type(parent_obj).__name__}, scope_filter={scope_filter}")
+    logger.debug(f"🔍 check_config_has_unsaved_changes: CALLED for config_attr={config_attr}, parent_obj={type(parent_obj).__name__}, scope_filter={scope_filter}")
 
     field_names = [f.name for f in dataclasses.fields(config)]
     if not field_names:
-        logger.info(f"🔍 check_config_has_unsaved_changes: No fields in config - returning False")
+        logger.debug(f"🔍 check_config_has_unsaved_changes: No fields in config - returning False")
         return False
 
     config_type = type(config)
@@ -326,7 +326,7 @@ def check_config_has_unsaved_changes(
         # Resolve in SAVED context (without form managers = saved values)
         saved_value = resolve_attr(parent_obj, config, field_name, saved_context_snapshot)
 
-        logger.info(f"🔍 check_config_has_unsaved_changes: Comparing {config_attr}.{field_name}: live={live_value}, saved={saved_value}")
+        logger.debug(f"🔍 check_config_has_unsaved_changes: Comparing {config_attr}.{field_name}: live={live_value}, saved={saved_value}")
 
         # Compare values - exit early on first difference
         if live_value != saved_value:
@@ -465,14 +465,19 @@ def check_step_has_unsaved_changes(
                 continue
         logger.debug(f"🔍 check_step_has_unsaved_changes: Step is non-dataclass, found {len(all_field_names)} dataclass attrs")
 
-    # Filter to only dataclass attributes
-    all_config_attrs = []
+    # Separate dataclass attributes from non-dataclass attributes
+    all_config_attrs = []  # Nested dataclass configs
+    all_primitive_attrs = []  # Non-nested primitive fields
     for field_name in all_field_names:
         field_value = getattr(step, field_name, None)
         if field_value is not None and dataclasses.is_dataclass(field_value):
             all_config_attrs.append(field_name)
+        elif field_value is not None:
+            # Non-dataclass field (e.g., name, description, enabled)
+            all_primitive_attrs.append(field_name)
 
     logger.debug(f"🔍 check_step_has_unsaved_changes: Found {len(all_config_attrs)} dataclass configs: {all_config_attrs}")
+    logger.debug(f"🔍 check_step_has_unsaved_changes: Found {len(all_primitive_attrs)} primitive fields: {all_primitive_attrs}")
 
     # PERFORMANCE: Fast path - check if ANY form manager has changes that could affect this step
     # Collect all config objects ONCE to avoid repeated getattr() calls
@@ -489,12 +494,12 @@ def check_step_has_unsaved_changes(
     # Example: StepWellFilterConfig inherits from WellFilterConfig, so changes to WellFilterConfig affect steps
     has_any_relevant_changes = False
 
-    logger.info(f"🔍 check_step_has_unsaved_changes: Checking {len(step_configs)} configs, cache has {len(ParameterFormManager._configs_with_unsaved_changes)} entries")
-    logger.info(f"🔍 check_step_has_unsaved_changes: Cache keys: {[(t.__name__, scope) for t, scope in ParameterFormManager._configs_with_unsaved_changes.keys()]}")
+    logger.debug(f"🔍 check_step_has_unsaved_changes: Checking {len(step_configs)} configs, cache has {len(ParameterFormManager._configs_with_unsaved_changes)} entries")
+    logger.debug(f"🔍 check_step_has_unsaved_changes: Cache keys: {[(t.__name__, scope) for t, scope in ParameterFormManager._configs_with_unsaved_changes.keys()]}")
 
     for config_attr, config in step_configs.items():
         config_type = type(config)
-        logger.info(f"🔍 check_step_has_unsaved_changes: Checking config_attr={config_attr}, type={config_type.__name__}, MRO={[c.__name__ for c in config_type.__mro__[:5]]}")
+        logger.debug(f"🔍 check_step_has_unsaved_changes: Checking config_attr={config_attr}, type={config_type.__name__}, MRO={[c.__name__ for c in config_type.__mro__[:5]]}")
         # Check the entire MRO chain (including parent classes)
         # CRITICAL: Check cache with SCOPED key (config_type, scope_id)
         # Try multiple scope levels: step-specific, plate-level, global
@@ -503,7 +508,7 @@ def check_step_has_unsaved_changes(
             step_cache_key = (mro_class, expected_step_scope)
             if step_cache_key in ParameterFormManager._configs_with_unsaved_changes:
                 has_any_relevant_changes = True
-                logger.info(
+                logger.debug(
                     f"🔍 check_step_has_unsaved_changes: Type-based cache hit for {config_attr} "
                     f"(type={config_type.__name__}, mro_class={mro_class.__name__}, scope={expected_step_scope}, "
                     f"changed_fields={ParameterFormManager._configs_with_unsaved_changes[step_cache_key]})"
@@ -516,7 +521,7 @@ def check_step_has_unsaved_changes(
                 plate_cache_key = (mro_class, plate_scope)
                 if plate_cache_key in ParameterFormManager._configs_with_unsaved_changes:
                     has_any_relevant_changes = True
-                    logger.info(
+                    logger.debug(
                         f"🔍 check_step_has_unsaved_changes: Type-based cache hit for {config_attr} "
                         f"(type={config_type.__name__}, mro_class={mro_class.__name__}, plate_scope={plate_scope}, "
                         f"changed_fields={ParameterFormManager._configs_with_unsaved_changes[plate_cache_key]})"
@@ -527,7 +532,7 @@ def check_step_has_unsaved_changes(
             global_cache_key = (mro_class, None)
             if global_cache_key in ParameterFormManager._configs_with_unsaved_changes:
                 has_any_relevant_changes = True
-                logger.info(
+                logger.debug(
                     f"🔍 check_step_has_unsaved_changes: Type-based cache hit for {config_attr} "
                     f"(type={config_type.__name__}, mro_class={mro_class.__name__}, scope=GLOBAL, "
                     f"changed_fields={ParameterFormManager._configs_with_unsaved_changes[global_cache_key]})"
@@ -560,13 +565,13 @@ def check_step_has_unsaved_changes(
             # Check if this manager matches the expected step scope
             if manager.scope_id == expected_step_scope:
                 has_active_step_manager = True
-                logger.info(f"🔍 check_step_has_unsaved_changes: Found active manager for step scope: {manager.field_id}")
+                logger.debug(f"🔍 check_step_has_unsaved_changes: Found active manager for step scope: {manager.field_id}")
                 # If this manager has emitted values, it has changes
                 # CRITICAL: Set has_any_relevant_changes to trigger full check (cache might not be populated yet)
                 if hasattr(manager, '_last_emitted_values') and manager._last_emitted_values:
                     scope_matched_in_cache = True
                     has_any_relevant_changes = True
-                    logger.info(f"🔍 check_step_has_unsaved_changes: Manager has emitted values")
+                    logger.debug(f"🔍 check_step_has_unsaved_changes: Manager has emitted values")
                 break
             # If manager has step-specific scope but doesn't match, skip it
             elif manager.scope_id and '::step_' in manager.scope_id:
@@ -576,17 +581,17 @@ def check_step_has_unsaved_changes(
             elif hasattr(manager, '_last_emitted_values') and manager._last_emitted_values:
                 scope_matched_in_cache = True
                 has_any_relevant_changes = True
-                logger.info(f"🔍 check_step_has_unsaved_changes: Non-step-specific manager affects all steps: {manager.field_id}")
+                logger.debug(f"🔍 check_step_has_unsaved_changes: Non-step-specific manager affects all steps: {manager.field_id}")
                 break
 
         # If we have an active step manager, always proceed to full check (even if cache is empty)
         # This handles the case where the step editor is open but hasn't populated the cache yet
         if has_active_step_manager:
             has_any_relevant_changes = True
-            logger.info(f"🔍 check_step_has_unsaved_changes: Active step manager found - proceeding to full check")
+            logger.debug(f"🔍 check_step_has_unsaved_changes: Active step manager found - proceeding to full check")
         elif has_any_relevant_changes and not scope_matched_in_cache:
             has_any_relevant_changes = False
-            logger.info(f"🔍 check_step_has_unsaved_changes: Type-based cache hit, but no scope match for {expected_step_scope}")
+            logger.debug(f"🔍 check_step_has_unsaved_changes: Type-based cache hit, but no scope match for {expected_step_scope}")
 
     if not has_any_relevant_changes:
         logger.debug(f"🔍 check_step_has_unsaved_changes: No relevant changes for step '{getattr(step, 'name', 'unknown')}' - skipping (fast-path)")
@@ -596,7 +601,7 @@ def check_step_has_unsaved_changes(
     else:
         logger.debug(f"🔍 check_step_has_unsaved_changes: Found relevant changes for step '{getattr(step, 'name', 'unknown')}' - proceeding to full check")
 
-    # Check each config for unsaved changes (exits early on first change)
+    # Check each nested dataclass config for unsaved changes (exits early on first change)
     for config_attr in all_config_attrs:
         config = getattr(step, config_attr, None)
         if config is None:
@@ -617,6 +622,57 @@ def check_step_has_unsaved_changes(
             if live_context_snapshot is not None:
                 check_step_has_unsaved_changes._cache[cache_key] = True
             return True
+
+    # Check non-nested primitive fields (name, description, enabled, etc.)
+    # Get step preview instance with live values merged
+    from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+
+    # Create a preview instance by merging live values into the step
+    # CRITICAL: We need to compare the step with live values vs the step with saved values
+    # The resolve_attr callback already handles this via token-based instance selection
+    # So we can just compare the field values directly from the step instances
+
+    # Get live and saved values for each primitive field
+    for field_name in all_primitive_attrs:
+        # Get live value (from step with live context)
+        # Get saved value (from step with saved context)
+        # The step object passed in is the ORIGINAL (saved) step
+        # We need to resolve the field through the live context to get the live value
+
+        # For primitive fields, we can't use resolve_attr (it's for nested configs)
+        # Instead, we need to check if there's a live value in the snapshot
+
+        # Check if this field has a live value in the snapshot
+        live_value = None
+        saved_value = getattr(step, field_name, None)
+
+        # Look for live value in scoped_values
+        if scope_filter and scope_filter in live_context_snapshot.scoped_values:
+            scoped_data = live_context_snapshot.scoped_values[scope_filter]
+            step_type = type(step)
+            if step_type in scoped_data:
+                step_data = scoped_data[step_type]
+                if field_name in step_data:
+                    live_value = step_data[field_name]
+                else:
+                    live_value = saved_value  # No live value, use saved
+            else:
+                live_value = saved_value
+        else:
+            live_value = saved_value
+
+        logger.debug(f"🔍 check_step_has_unsaved_changes: Primitive field {field_name}: live={live_value}, saved={saved_value}")
+
+        try:
+            if live_value != saved_value:
+                logger.info(f"✅ UNSAVED CHANGES DETECTED in step '{getattr(step, 'name', 'unknown')}' primitive field '{field_name}'")
+                if live_context_snapshot is not None:
+                    check_step_has_unsaved_changes._cache[cache_key] = True
+                return True
+        except Exception as e:
+            # If comparison fails (e.g., unhashable types), assume no change
+            logger.debug(f"🔍 check_step_has_unsaved_changes: Comparison failed for {field_name}: {e}")
+            pass
 
     # No changes found - cache the result
     logger.debug(f"🔍 check_step_has_unsaved_changes: No unsaved changes found for step '{getattr(step, 'name', 'unknown')}'")

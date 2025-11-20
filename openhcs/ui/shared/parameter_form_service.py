@@ -7,6 +7,7 @@ shared business logic and data management.
 """
 
 import dataclasses
+import logging
 from dataclasses import dataclass
 from typing import Dict, Any, Type, Optional, List, Tuple
 
@@ -15,6 +16,8 @@ from openhcs.core.lazy_placeholder import LazyDefaultPlaceholderService
 from openhcs.ui.shared.parameter_form_constants import CONSTANTS
 from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
 from openhcs.ui.shared.ui_utils import debug_param, format_param_name
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -374,6 +377,10 @@ class ParameterFormService:
         regardless of parent context. Placeholder behavior is handled at the widget level,
         not by discarding concrete values during parameter extraction.
         """
+        # DEBUG: Log for StreamingDefaults
+        if 'Streaming' in str(dataclass_type):
+            logger.info(f"🔍 EXTRACT NESTED: dataclass_type={dataclass_type.__name__}, instance type={type(dataclass_instance).__name__ if dataclass_instance else None}")
+
         if not dataclasses.is_dataclass(dataclass_type):
             return {}, {}
 
@@ -387,6 +394,10 @@ class ParameterFormService:
                 current_value = self._get_field_value(dataclass_instance, field)
             else:
                 current_value = None  # Only use None when no instance exists
+
+            # DEBUG: Log field extraction for StreamingDefaults
+            if 'Streaming' in str(dataclass_type):
+                logger.info(f"🔍 EXTRACT NESTED: {field.name} = {current_value}")
 
             parameters[field.name] = current_value
             parameter_types[field.name] = field.type

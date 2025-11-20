@@ -225,9 +225,12 @@ class LazyMethodBindings:
                     if cache_key in _lazy_resolution_cache:
                         # PERFORMANCE: Don't log cache hits - creates massive I/O bottleneck
                         # (414 log writes per keystroke was slower than the resolution itself!)
-                        if name == 'well_filter_mode':
-                            logger.info(f"🔍 CACHE HIT: {self.__class__.__name__}.{name} = {_lazy_resolution_cache[cache_key]}")
+                        if name == 'well_filter_mode' or name == 'num_workers':
+                            logger.info(f"🔍 CACHE HIT: {self.__class__.__name__}.{name} = {_lazy_resolution_cache[cache_key]} (token={current_token})")
                         return _lazy_resolution_cache[cache_key]
+                    else:
+                        if name == 'num_workers':
+                            logger.info(f"🔍 CACHE MISS: {self.__class__.__name__}.{name} (token={current_token})")
                 except ImportError:
                     # No ParameterFormManager available - skip caching
                     pass
@@ -243,6 +246,9 @@ class LazyMethodBindings:
 
                         cache_key = (self.__class__.__name__, name, current_token)
                         _lazy_resolution_cache[cache_key] = value
+
+                        if name == 'num_workers':
+                            logger.info(f"🔍 CACHED: {self.__class__.__name__}.{name} = {value} (token={current_token})")
 
                         # Prevent unbounded growth by evicting oldest entries
                         if len(_lazy_resolution_cache) > _LAZY_CACHE_MAX_SIZE:
@@ -300,10 +306,12 @@ class LazyMethodBindings:
 
                 resolved_value = resolve_field_inheritance(self, name, available_configs, scope_id, config_scopes)
 
-                if name == 'well_filter_mode':
-                    logger.info(f"🔍 LAZY __getattribute__: resolve_field_inheritance returned {resolved_value}")
+                if name == 'well_filter_mode' or name == 'num_workers':
+                    logger.info(f"🔍 LAZY __getattribute__: resolve_field_inheritance returned {resolved_value} for {self.__class__.__name__}.{name}")
 
                 if resolved_value is not None:
+                    if name == 'num_workers':
+                        logger.info(f"🔍 LAZY __getattribute__: About to cache {resolved_value} for {self.__class__.__name__}.{name}")
                     cache_value(resolved_value)
                     return resolved_value
 
@@ -318,9 +326,16 @@ class LazyMethodBindings:
 
             except LookupError:
                 # No context available - fallback to MRO concrete values
+                # CRITICAL: DO NOT CACHE MRO fallback values!
+                # MRO fallback is a "last resort" when no context is available.
+                # If we cache it, it pollutes the cache and prevents proper context-based
+                # resolution later (when context becomes available at the same token).
+                if name == 'num_workers':
+                    logger.info(f"🔍 LAZY __getattribute__: LookupError - falling back to MRO for {self.__class__.__name__}.{name}")
                 fallback_value = _find_mro_concrete_value(get_base_type_for_lazy(self.__class__), name)
-                if fallback_value is not None:
-                    cache_value(fallback_value)
+                if name == 'num_workers':
+                    logger.info(f"🔍 LAZY __getattribute__: MRO fallback returned {fallback_value} for {self.__class__.__name__}.{name} (NOT CACHED)")
+                # DO NOT call cache_value() here - MRO fallback should never be cached
                 return fallback_value
         return __getattribute__
 
@@ -516,22 +531,61 @@ class LazyDataclassFactory:
             )
 
         # Add constructor parameter tracking to detect user-set fields
-        original_init = lazy_class.__init__
-        def __init_with_tracking__(self, **kwargs):
-            # Track which fields were explicitly passed to constructor
-            object.__setattr__(self, '_explicitly_set_fields', set(kwargs.keys()))
-            # Store the global config type for inheritance resolution
-            object.__setattr__(self, '_global_config_type', global_config_type)
-            # Store the config field name for simple field path lookup
-            import re
-            def _camel_to_snake_local(name: str) -> str:
-                s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
-                return re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
-            config_field_name = _camel_to_snake_local(base_class.__name__)
-            object.__setattr__(self, '_config_field_name', config_field_name)
-            original_init(self, **kwargs)
+        # CRITICAL: Check if base_class already has a custom __init__ from @global_pipeline_config
+        # If so, we need to preserve it and wrap it instead of replacing it
+        base_has_custom_init = (
+            hasattr(base_class, '__init__') and
+            hasattr(base_class.__init__, '_is_custom_inherit_as_none_init') and
+            base_class.__init__._is_custom_inherit_as_none_init
+        )
 
-        lazy_class.__init__ = __init_with_tracking__
+        if base_has_custom_init:
+            # Base class has custom __init__ from decorator - we need to apply the same logic to lazy class
+            fields_set_to_none = base_class.__init__._fields_set_to_none
+            logger.info(f"🔍 LAZY FACTORY: {lazy_class_name} - applying custom __init__ from base class {base_class.__name__} with fields_set_to_none={fields_set_to_none}")
+
+            # Get the original dataclass-generated __init__ for lazy_class
+            dataclass_init = lazy_class.__init__
+
+            def custom_init_with_tracking(self, **kwargs):
+                # First apply the inherit-as-none logic (set missing fields to None)
+                for field_name in fields_set_to_none:
+                    if field_name not in kwargs:
+                        kwargs[field_name] = None
+
+                # Then add tracking
+                object.__setattr__(self, '_explicitly_set_fields', set(kwargs.keys()))
+                object.__setattr__(self, '_global_config_type', global_config_type)
+                import re
+                def _camel_to_snake_local(name: str) -> str:
+                    s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
+                    return re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
+                config_field_name = _camel_to_snake_local(base_class.__name__)
+                object.__setattr__(self, '_config_field_name', config_field_name)
+
+                # Call the dataclass-generated __init__
+                dataclass_init(self, **kwargs)
+
+            lazy_class.__init__ = custom_init_with_tracking
+        else:
+            # Normal case - no custom __init__ from decorator
+            original_init = lazy_class.__init__
+
+            def __init_with_tracking__(self, **kwargs):
+                # Track which fields were explicitly passed to constructor
+                object.__setattr__(self, '_explicitly_set_fields', set(kwargs.keys()))
+                # Store the global config type for inheritance resolution
+                object.__setattr__(self, '_global_config_type', global_config_type)
+                # Store the config field name for simple field path lookup
+                import re
+                def _camel_to_snake_local(name: str) -> str:
+                    s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
+                    return re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
+                config_field_name = _camel_to_snake_local(base_class.__name__)
+                object.__setattr__(self, '_config_field_name', config_field_name)
+                original_init(self, **kwargs)
+
+            lazy_class.__init__ = __init_with_tracking__
 
         # Bind methods declaratively - inline single-use method
         method_bindings = {
@@ -1008,6 +1062,16 @@ def create_global_default_decorator(target_config_class: Type):
             ui_hidden: Whether to hide from UI (apply decorator but don't inject into global config) (default: False)
         """
         def decorator(actual_cls):
+            # Configure logging inline for decorator execution (runs at import time before logging is configured)
+            import logging
+            import sys
+            _decorator_logger = logging.getLogger('openhcs.config_framework.lazy_factory')
+            if not _decorator_logger.handlers:
+                _handler = logging.StreamHandler(sys.stdout)
+                _handler.setLevel(logging.INFO)
+                _decorator_logger.addHandler(_handler)
+                _decorator_logger.setLevel(logging.INFO)
+
             # Apply inherit_as_none by modifying class BEFORE @dataclass (multiprocessing-safe)
             if inherit_as_none:
                 # Mark the class for inherit_as_none processing
@@ -1104,8 +1168,23 @@ def create_global_default_decorator(target_config_class: Type):
 
             # CRITICAL: Post-process dataclass fields after @dataclass has run
             # This fixes the constructor behavior for inherited fields that should be None
+            # Apply to BOTH base class AND lazy class
+            _decorator_logger.info(f"🔍 @global_pipeline_config: {actual_cls.__name__} - inherit_as_none={inherit_as_none}, fields_set_to_none={fields_set_to_none}")
             if inherit_as_none and hasattr(actual_cls, '__dataclass_fields__'):
-                _fix_dataclass_field_defaults_post_processing(actual_cls, fields_set_to_none)
+                _decorator_logger.info(f"🔍 BASE CLASS FIX: {actual_cls.__name__} - fixing {len(fields_set_to_none)} inherited fields")
+                _fix_dataclass_field_defaults_post_processing(actual_cls, fields_set_to_none, _decorator_logger)
+
+            # CRITICAL: Also fix lazy class to ensure ALL fields are None by default
+            # For lazy classes, ALL fields should be None (not just inherited ones)
+            _decorator_logger.info(f"🔍 LAZY CLASS CHECK: {lazy_class.__name__} - inherit_as_none={inherit_as_none}, has_dataclass_fields={hasattr(lazy_class, '__dataclass_fields__')}")
+            if inherit_as_none:
+                if hasattr(lazy_class, '__dataclass_fields__'):
+                    # Compute ALL fields for lazy class (not just inherited ones)
+                    lazy_fields_to_set_none = set(lazy_class.__dataclass_fields__.keys())
+                    _decorator_logger.info(f"🔍 LAZY CLASS FIX: {lazy_class.__name__} - setting {len(lazy_fields_to_set_none)} fields to None: {lazy_fields_to_set_none}")
+                    _fix_dataclass_field_defaults_post_processing(lazy_class, lazy_fields_to_set_none, _decorator_logger)
+                else:
+                    _decorator_logger.warning(f"🔍 WARNING: {lazy_class.__name__} does not have __dataclass_fields__!")
 
             return actual_cls
 
@@ -1120,7 +1199,7 @@ def create_global_default_decorator(target_config_class: Type):
     return global_default_decorator
 
 
-def _fix_dataclass_field_defaults_post_processing(cls: Type, fields_set_to_none: set) -> None:
+def _fix_dataclass_field_defaults_post_processing(cls: Type, fields_set_to_none: set, inline_logger=None) -> None:
     """
     Fix dataclass field defaults after @dataclass has processed the class.
 
@@ -1130,21 +1209,29 @@ def _fix_dataclass_field_defaults_post_processing(cls: Type, fields_set_to_none:
     """
     import dataclasses
 
+    _log = inline_logger if inline_logger else logger
+    _log.info(f"🔍 _fix_dataclass_field_defaults_post_processing: {cls.__name__} - fixing {len(fields_set_to_none)} fields: {fields_set_to_none}")
+
     # Store the original __init__ method
     original_init = cls.__init__
 
     def custom_init(self, **kwargs):
         """Custom __init__ that ensures inherited fields use None defaults."""
+        _log.info(f"🔍 {cls.__name__}.__init__: kwargs={kwargs}, fields_set_to_none={fields_set_to_none}")
         # For fields that should be None, set them to None if not explicitly provided
         for field_name in fields_set_to_none:
             if field_name not in kwargs:
                 kwargs[field_name] = None
+                _log.info(f"🔍 {cls.__name__}.__init__: Setting {field_name} = None (not in kwargs)")
 
         # Call the original __init__ with modified kwargs
+        _log.info(f"🔍 {cls.__name__}.__init__: Calling original_init with kwargs={kwargs}")
         original_init(self, **kwargs)
 
-    # Replace the __init__ method
+    # Replace the __init__ method and mark it as custom
     cls.__init__ = custom_init
+    cls.__init__._is_custom_inherit_as_none_init = True
+    cls.__init__._fields_set_to_none = fields_set_to_none  # Store for later use
 
     # Also update the field defaults for consistency
     for field_name in fields_set_to_none:

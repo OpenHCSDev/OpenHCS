@@ -43,6 +43,9 @@ class NoScrollComboBox(QComboBox):
     def setPlaceholder(self, text: str):
         """Set the placeholder text shown when currentIndex == -1."""
         self._placeholder = text
+        # CRITICAL FIX: Update placeholder_active flag based on current index
+        # This ensures placeholder renders even if setCurrentIndex(-1) was called before setPlaceholder()
+        self._placeholder_active = (self.currentIndex() == -1)
         self.update()
 
     def setCurrentIndex(self, index: int):

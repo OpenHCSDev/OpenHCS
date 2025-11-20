@@ -137,8 +137,8 @@ def config_context(obj, mask_with_none: bool = False, scope_id: Optional[str] = 
     if obj is not None:
         original_extracted = extract_all_configs(obj, bypass_lazy_resolution=True)
         if 'LazyWellFilterConfig' in original_extracted or 'WellFilterConfig' in original_extracted:
-            logger.info(f"🔍 CONTEXT MANAGER: original_extracted from {type(obj).__name__} has LazyWellFilterConfig={('LazyWellFilterConfig' in original_extracted)}, WellFilterConfig={('WellFilterConfig' in original_extracted)}")
-        logger.info(f"🔍 CONTEXT MANAGER: original_extracted from {type(obj).__name__} = {set(original_extracted.keys())}")
+            logger.debug(f"🔍 CONTEXT MANAGER: original_extracted from {type(obj).__name__} has LazyWellFilterConfig={('LazyWellFilterConfig' in original_extracted)}, WellFilterConfig={('WellFilterConfig' in original_extracted)}")
+        logger.debug(f"🔍 CONTEXT MANAGER: original_extracted from {type(obj).__name__} = {set(original_extracted.keys())}")
 
     # Find matching fields between obj and base config type
     overrides = {}
@@ -212,7 +212,7 @@ def config_context(obj, mask_with_none: bool = False, scope_id: Optional[str] = 
 
     # Extract configs from merged config
     extracted = extract_all_configs(merged_config)
-    logger.info(f"🔍 CONTEXT MANAGER: extracted from merged = {set(extracted.keys())}")
+    logger.debug(f"🔍 CONTEXT MANAGER: extracted from merged = {set(extracted.keys())}")
 
     # CRITICAL: Original configs ALWAYS override merged configs to preserve lazy types
     # This ensures LazyWellFilterConfig from PipelineConfig takes precedence over
@@ -233,7 +233,7 @@ def config_context(obj, mask_with_none: bool = False, scope_id: Optional[str] = 
         # Normalize: LazyWellFilterConfig -> WellFilterConfig
         normalized_name = config_name.replace('Lazy', '') if config_name.startswith('Lazy') else config_name
         current_context_configs.add(normalized_name)
-    logger.info(f"🔍 CONTEXT MANAGER: Built current_context_configs from original_extracted.keys() = {current_context_configs}")
+    logger.debug(f"🔍 CONTEXT MANAGER: Built current_context_configs from original_extracted.keys() = {current_context_configs}")
     if parent_extracted:
         # Start with parent's configs
         merged_extracted = dict(parent_extracted)
@@ -249,11 +249,11 @@ def config_context(obj, mask_with_none: bool = False, scope_id: Optional[str] = 
     if config_scopes is not None:
         # Merge with parent scopes
         parent_scopes = current_config_scopes.get()
-        logger.info(f"🔍 CONTEXT MANAGER: Entering {type(obj).__name__}, parent_scopes = {parent_scopes}")
-        logger.info(f"🔍 CONTEXT MANAGER: config_scopes parameter = {config_scopes}")
+        logger.debug(f"🔍 CONTEXT MANAGER: Entering {type(obj).__name__}, parent_scopes = {parent_scopes}")
+        logger.debug(f"🔍 CONTEXT MANAGER: config_scopes parameter = {config_scopes}")
         merged_scopes = dict(parent_scopes) if parent_scopes else {}
         merged_scopes.update(config_scopes)
-        logger.info(f"🔍 CONTEXT MANAGER: After merging config_scopes, merged_scopes = {merged_scopes}")
+        logger.debug(f"🔍 CONTEXT MANAGER: After merging config_scopes, merged_scopes = {merged_scopes}")
 
         # CRITICAL: Propagate scope to all extracted nested configs
         # If PipelineConfig has scope_id=plate_path, then all its nested configs
@@ -269,11 +269,11 @@ def config_context(obj, mask_with_none: bool = False, scope_id: Optional[str] = 
         # Apply scope to ONLY newly extracted configs from this context
         # Use current_context_configs to identify configs that were extracted from the current
         # context object (before merging with parent), not inherited from parent contexts
-        logger.info(f"🔍 CONTEXT MANAGER: current_context_configs = {current_context_configs}")
-        logger.info(f"🔍 CONTEXT MANAGER: parent_scopes = {parent_scopes}")
-        logger.info(f"🔍 CONTEXT MANAGER: About to loop over current_context_configs, len={len(current_context_configs)}")
+        logger.debug(f"🔍 CONTEXT MANAGER: current_context_configs = {current_context_configs}")
+        logger.debug(f"🔍 CONTEXT MANAGER: parent_scopes = {parent_scopes}")
+        logger.debug(f"🔍 CONTEXT MANAGER: About to loop over current_context_configs, len={len(current_context_configs)}")
         for config_name in current_context_configs:
-            logger.info(f"🔍 CONTEXT MANAGER: Loop iteration for config_name={config_name}, scope_id={scope_id}")
+            logger.debug(f"🔍 CONTEXT MANAGER: Loop iteration for config_name={config_name}, scope_id={scope_id}")
             # CRITICAL: Configs extracted from the CURRENT context object should ALWAYS get the current scope_id
             # Even if a normalized equivalent exists in parent_scopes, the current context's version
             # should use the current scope_id, not the parent's scope
@@ -282,18 +282,18 @@ def config_context(obj, mask_with_none: bool = False, scope_id: Optional[str] = 
             # Even though WellFilterConfig exists in parent with scope=None,
             # LazyWellFilterConfig should get scope=plate_path (not None)
             merged_scopes[config_name] = scope_id
-            logger.info(f"🔍 CONTEXT MANAGER: Set scope for {config_name} from context scope_id: {scope_id}")
+            logger.debug(f"🔍 CONTEXT MANAGER: Set scope for {config_name} from context scope_id: {scope_id}")
 
-        logger.info(f"🔍 CONTEXT MANAGER: Setting scopes: {merged_scopes}, scope_id: {scope_id}")
+        logger.debug(f"🔍 CONTEXT MANAGER: Setting scopes: {merged_scopes}, scope_id: {scope_id}")
     else:
         merged_scopes = current_config_scopes.get()
 
     # Set context, extracted configs, context stack, and scope information atomically
-    logger.info(
+    logger.debug(
         f"🔍 CONTEXT MANAGER: SET SCOPES FINAL for {type(obj).__name__}: "
         f"{merged_scopes}, scope_id={scope_id}"
     )
-    logger.info(f"🔍 CONTEXT MANAGER: About to set current_config_scopes.set(merged_scopes) where merged_scopes = {merged_scopes}")
+    logger.debug(f"🔍 CONTEXT MANAGER: About to set current_config_scopes.set(merged_scopes) where merged_scopes = {merged_scopes}")
     token = current_temp_global.set(merged_config)
     extracted_token = current_extracted_configs.set(extracted)
     stack_token = current_context_stack.set(new_stack)
@@ -652,17 +652,17 @@ def extract_all_configs(context_obj, bypass_lazy_resolution: bool = False) -> Di
 
                         # Log extraction of WellFilterConfig for debugging
                         if 'WellFilterConfig' in instance_type.__name__:
-                            logger.info(f"🔍 EXTRACT: Extracting {instance_type.__name__} from {type(context_obj).__name__}.{field_name} (bypass={bypass_lazy_resolution})")
-                            logger.info(f"🔍 EXTRACT: Instance ID: {id(field_value)}")
+                            logger.debug(f"🔍 EXTRACT: Extracting {instance_type.__name__} from {type(context_obj).__name__}.{field_name} (bypass={bypass_lazy_resolution})")
+                            logger.debug(f"🔍 EXTRACT: Instance ID: {id(field_value)}")
                             if hasattr(field_value, 'well_filter'):
                                 try:
                                     raw_wf = object.__getattribute__(field_value, 'well_filter')
-                                    logger.info(f"🔍 EXTRACT: {instance_type.__name__}.well_filter RAW={raw_wf}")
+                                    logger.debug(f"🔍 EXTRACT: {instance_type.__name__}.well_filter RAW={raw_wf}")
                                 except AttributeError:
-                                    logger.info(f"🔍 EXTRACT: {instance_type.__name__}.well_filter RAW=<no attribute>")
+                                    logger.debug(f"🔍 EXTRACT: {instance_type.__name__}.well_filter RAW=<no attribute>")
 
                         if 'WellFilterConfig' in instance_type.__name__ or 'PipelineConfig' in instance_type.__name__:
-                            logger.info(f"🔍 EXTRACT: field_name={field_name}, instance_type={instance_type.__name__}, context_obj={type(context_obj).__name__}, bypass={bypass_lazy_resolution}")
+                            logger.debug(f"🔍 EXTRACT: field_name={field_name}, instance_type={instance_type.__name__}, context_obj={type(context_obj).__name__}, bypass={bypass_lazy_resolution}")
                         configs[instance_type.__name__] = field_value
 
                         logger.debug(f"Extracted config {instance_type.__name__} from field {field_name} on {type(context_obj).__name__} (bypass={bypass_lazy_resolution})")

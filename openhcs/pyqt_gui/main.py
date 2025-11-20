@@ -23,6 +23,7 @@ from openhcs.io.base import storage_registry
 
 from openhcs.pyqt_gui.services.service_adapter import PyQtServiceAdapter
 
+
 logger = logging.getLogger(__name__)
 
 

@@ -218,11 +218,19 @@ def create_enum_widget_unified(enum_type: Type, current_value: Any, **kwargs) ->
         widget.addItem(display_text, enum_value)
 
     # Set current selection
-    if current_value and hasattr(current_value, '__class__') and isinstance(current_value, enum_type):
+    if current_value is None:
+        # CRITICAL: Set to -1 (no selection) for None values
+        # This allows placeholder text to be shown via NoScrollComboBox.paintEvent
+        widget.setCurrentIndex(-1)
+    elif hasattr(current_value, '__class__') and isinstance(current_value, enum_type):
+        # Set to matching enum value
         for i in range(widget.count()):
             if widget.itemData(i) == current_value:
                 widget.setCurrentIndex(i)
                 break
+    else:
+        # Fallback: set to -1 if value doesn't match any enum
+        widget.setCurrentIndex(-1)
 
     return widget
 
@@ -482,18 +490,37 @@ def _apply_placeholder_styling(widget: Any, interaction_hint: str, placeholder_t
 
 def _apply_lineedit_placeholder(widget: Any, text: str) -> None:
     """Apply placeholder to line edit with proper state tracking."""
-    signature = f"lineedit:{text}"
-    if widget.property("placeholder_signature") == signature and widget.property("is_placeholder_state"):
-        return
+    import logging
+    logger = logging.getLogger(__name__)
+
+    # CRITICAL FIX: Don't skip if signature matches - always apply placeholder
+    # The signature check was preventing placeholders from being updated after async widget creation
+    # signature = f"lineedit:{text}"
+    # if widget.property("placeholder_signature") == signature and widget.property("is_placeholder_state"):
+    #     return
+
+    # DEBUG: Log for streaming_defaults
+    if 'streaming' in text.lower() or 'localhost' in text.lower():
+        logger.info(f"🔍 _apply_lineedit_placeholder: widget={widget.objectName()}, text={text}, current_text={widget.text()}")
 
     # Clear existing text so placeholder becomes visible
     widget.clear()
     widget.setPlaceholderText(text)
+
+    # DEBUG: Verify placeholder was set
+    if 'streaming' in text.lower() or 'localhost' in text.lower():
+        logger.info(f"🔍 _apply_lineedit_placeholder: AFTER setPlaceholderText, placeholderText={widget.placeholderText()}, text={widget.text()}")
+
     # Set placeholder state property for consistency with other widgets
     widget.setProperty("is_placeholder_state", True)
     # Add tooltip for consistency
     widget.setToolTip(text)
-    widget.setProperty("placeholder_signature", signature)
+    # widget.setProperty("placeholder_signature", signature)  # Don't set signature to allow re-application
+
+    # CRITICAL: Force widget repaint to ensure placeholder is rendered
+    # This is essential for async-created widgets that may not have been painted yet
+    widget.update()
+    widget.repaint()
 
     # Flash widget to indicate update
     from openhcs.pyqt_gui.widgets.shared.widget_flash_animation import flash_widget
@@ -516,6 +543,11 @@ def _apply_spinbox_placeholder(widget: Any, text: str) -> None:
         'change value to set your own',
         text  # Keep full text in tooltip
     )
+
+    # CRITICAL: Force widget repaint to ensure placeholder is rendered
+    # This is essential for async-created widgets that may not have been painted yet
+    widget.update()
+    widget.repaint()
 
     # Flash widget to indicate update
     from openhcs.pyqt_gui.widgets.shared.widget_flash_animation import flash_widget
@@ -552,8 +584,10 @@ def _apply_checkbox_placeholder(widget: QCheckBox, placeholder_text: str) -> Non
         widget.setProperty("is_placeholder_state", True)
         widget.setProperty("placeholder_signature", signature)
 
-        # Trigger repaint to show gray styling
+        # CRITICAL: Force widget repaint to ensure placeholder is rendered
+        # This is essential for async-created widgets that may not have been painted yet
         widget.update()
+        widget.repaint()
 
         # Flash widget to indicate update
         from openhcs.pyqt_gui.widgets.shared.widget_flash_animation import flash_widget
@@ -606,6 +640,10 @@ def _apply_checkbox_group_placeholder(widget: Any, placeholder_text: str) -> Non
         widget.setToolTip(f"{placeholder_text} (click any checkbox to set your own value)")
         widget.setProperty("placeholder_signature", signature)
 
+        # CRITICAL: Force widget repaint to ensure placeholder is rendered
+        widget.update()
+        widget.repaint()
+
         # Flash widget to indicate update (note: individual checkboxes already flashed)
         from openhcs.pyqt_gui.widgets.shared.widget_flash_animation import flash_widget
         flash_widget(widget)
@@ -630,6 +668,10 @@ def _apply_path_widget_placeholder(widget: Any, placeholder_text: str) -> None:
             widget.path_input.setToolTip(placeholder_text)
             widget.path_input.setProperty("placeholder_signature", signature)
 
+            # CRITICAL: Force widget repaint to ensure placeholder is rendered
+            widget.path_input.update()
+            widget.path_input.repaint()
+
             # Flash the inner QLineEdit to indicate update
             from openhcs.pyqt_gui.widgets.shared.widget_flash_animation import flash_widget
             flash_widget(widget.path_input)
@@ -650,10 +692,15 @@ def _apply_combobox_placeholder(widget: QComboBox, placeholder_text: str) -> Non
     - Display only the inherited enum value (no 'Pipeline default:' prefix)
     - Dropdown shows only real enum items (no duplicate placeholder item)
     """
+    import logging
+    logger = logging.getLogger(__name__)
+
     try:
-        signature = f"combobox:{placeholder_text}"
-        if widget.property("placeholder_signature") == signature and widget.property("is_placeholder_state"):
-            return
+        # CRITICAL FIX: Don't skip if signature matches - always apply placeholder
+        # The signature check was preventing placeholders from being updated after async widget creation
+        # signature = f"combobox:{placeholder_text}"
+        # if widget.property("placeholder_signature") == signature and widget.property("is_placeholder_state"):
+        #     return
 
         default_value = _extract_default_value(placeholder_text)
 
@@ -666,6 +713,10 @@ def _apply_combobox_placeholder(widget: QComboBox, placeholder_text: str) -> Non
         placeholder_display = (
             widget.itemText(matching_index) if matching_index >= 0 else default_value
         )
+
+        # DEBUG: Log for streaming_defaults
+        if 'IPC' in placeholder_text or 'INCLUDE' in placeholder_text:
+            logger.info(f"🔍 _apply_combobox_placeholder: widget={widget.objectName()}, text={placeholder_text}, currentIndex={widget.currentIndex()}")
 
         # Block signals so this visual change doesn't emit change events
         widget.blockSignals(True)
@@ -682,11 +733,20 @@ def _apply_combobox_placeholder(widget: QComboBox, placeholder_text: str) -> Non
         finally:
             widget.blockSignals(False)
 
+        # DEBUG: Verify placeholder was set
+        if 'IPC' in placeholder_text or 'INCLUDE' in placeholder_text:
+            logger.info(f"🔍 _apply_combobox_placeholder: AFTER setPlaceholder, currentIndex={widget.currentIndex()}, placeholder={placeholder_display}")
+
         # Don't apply placeholder styling - our paintEvent handles the gray/italic styling
         # Just set the tooltip
         widget.setToolTip(f"{placeholder_text} ({PlaceholderConfig.INTERACTION_HINTS['combobox']})")
         widget.setProperty("is_placeholder_state", True)
-        widget.setProperty("placeholder_signature", signature)
+        # widget.setProperty("placeholder_signature", signature)  # Don't set signature to allow re-application
+
+        # CRITICAL: Force widget repaint to ensure placeholder is rendered
+        # This is essential for async-created widgets that may not have been painted yet
+        widget.update()
+        widget.repaint()
 
         # Flash widget to indicate update
         from openhcs.pyqt_gui.widgets.shared.widget_flash_animation import flash_widget
@@ -793,16 +853,29 @@ class PyQt6WidgetEnhancer:
     @staticmethod
     def apply_placeholder_text(widget: Any, placeholder_text: str) -> None:
         """Apply placeholder using declarative widget-strategy mapping."""
+        import logging
+        logger = logging.getLogger(__name__)
+
+        # DEBUG: Log for streaming_defaults
+        if 'localhost' in placeholder_text or 'IPC' in placeholder_text or 'INCLUDE' in placeholder_text:
+            logger.info(f"🔍 apply_placeholder_text: widget={widget.objectName()}, type={type(widget).__name__}, text={placeholder_text}")
+
         # Check for checkbox group (QGroupBox with _checkboxes attribute)
         if hasattr(widget, '_checkboxes'):
+            if 'localhost' in placeholder_text or 'IPC' in placeholder_text or 'INCLUDE' in placeholder_text:
+                logger.info(f"🔍 apply_placeholder_text: Using checkbox group strategy")
             return _apply_checkbox_group_placeholder(widget, placeholder_text)
 
         # Direct widget type mapping for enhanced placeholders
         widget_strategy = WIDGET_PLACEHOLDER_STRATEGIES.get(type(widget))
         if widget_strategy:
+            if 'localhost' in placeholder_text or 'IPC' in placeholder_text or 'INCLUDE' in placeholder_text:
+                logger.info(f"🔍 apply_placeholder_text: Found widget strategy for {type(widget).__name__}: {widget_strategy.__name__}")
             return widget_strategy(widget, placeholder_text)
 
         # Method-based fallback for standard widgets
+        if 'localhost' in placeholder_text or 'IPC' in placeholder_text or 'INCLUDE' in placeholder_text:
+            logger.info(f"🔍 apply_placeholder_text: Using method-based fallback")
         strategy = next(
             (strategy for method_name, strategy in PLACEHOLDER_STRATEGIES.items()
              if hasattr(widget, method_name)),

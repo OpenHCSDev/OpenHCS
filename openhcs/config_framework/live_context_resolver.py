@@ -348,9 +348,9 @@ class LiveContextResolver:
                     from openhcs.config_framework.context_manager import extract_all_configs_from_context, current_config_scopes
                     available_configs = extract_all_configs_from_context()
                     scopes_dict = current_config_scopes.get()
-                    logger.info(f"🔍 INNERMOST CONTEXT: Resolving {type(config_obj).__name__}.{attr_name}")
-                    logger.info(f"🔍 INNERMOST CONTEXT: available_configs = {list(available_configs.keys())}")
-                    logger.info(f"🔍 INNERMOST CONTEXT: scopes_dict = {scopes_dict}")
+                    logger.debug(f"🔍 INNERMOST CONTEXT: Resolving {type(config_obj).__name__}.{attr_name}")
+                    logger.debug(f"🔍 INNERMOST CONTEXT: available_configs = {list(available_configs.keys())}")
+                    logger.debug(f"🔍 INNERMOST CONTEXT: scopes_dict = {scopes_dict}")
                     for config_name, config_instance in available_configs.items():
                         if 'WellFilterConfig' in config_name or 'PathPlanningConfig' in config_name:
                             # Get RAW value (without resolution) using object.__getattribute__()
@@ -363,7 +363,7 @@ class LiveContextResolver:
                             # Normalize config name for scope lookup (LazyWellFilterConfig -> WellFilterConfig)
                             normalized_name = config_name.replace('Lazy', '') if config_name.startswith('Lazy') else config_name
                             scope = scopes_dict.get(normalized_name, 'N/A')
-                            logger.info(f"🔍 INNERMOST CONTEXT: {config_name}.{attr_name} RAW={raw_value}, RESOLVED={resolved_value}, scope={scope}")
+                            logger.debug(f"🔍 INNERMOST CONTEXT: {config_name}.{attr_name} RAW={raw_value}, RESOLVED={resolved_value}, scope={scope}")
                 return getattr(config_obj, attr_name)
 
             # Enter context and recurse

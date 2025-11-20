@@ -32,11 +32,6 @@ class LazyDefaultPlaceholderService:
     # Invalidated when context_token changes (any value changes)
     _placeholder_text_cache: dict = {}
 
-    # PERFORMANCE: Singleton instance cache to avoid repeated allocations
-    # Key: (dataclass_type, context_token) -> instance
-    # Reuse the same instance for all field resolutions within the same context
-    _instance_cache: dict = {}
-
     @staticmethod
     def has_lazy_resolution(dataclass_type: type) -> bool:
         """Check if dataclass has lazy resolution methods (created by factory)."""
@@ -101,8 +96,9 @@ class LazyDefaultPlaceholderService:
         if cache_key in LazyDefaultPlaceholderService._placeholder_text_cache:
             return LazyDefaultPlaceholderService._placeholder_text_cache[cache_key]
 
-        # PERFORMANCE: Reuse singleton instance per (type, token) to avoid repeated allocations
-        # Creating a new instance for every field is wasteful - reuse the same instance
+        # Create a fresh instance for each resolution
+        # The lazy resolution cache (in lazy_factory.py) handles caching the actual field values
+        # Instance caching is a micro-optimization that adds complexity without significant benefit
         try:
             # Log context for debugging
             if field_name == 'well_filter_mode':
@@ -114,15 +110,28 @@ class LazyDefaultPlaceholderService:
                 logger.info(f"🔍 Extracted configs: {list(extracted_configs.keys())}")
                 logger.info(f"🔍 Current temp global: {type(current_global).__name__ if current_global else 'None'}")
 
-            instance_cache_key = (dataclass_type, context_token)
-            if instance_cache_key not in LazyDefaultPlaceholderService._instance_cache:
-                LazyDefaultPlaceholderService._instance_cache[instance_cache_key] = dataclass_type()
-            instance = LazyDefaultPlaceholderService._instance_cache[instance_cache_key]
+            instance = dataclass_type()
+
+            # DEBUG: Log context for num_workers resolution
+            if field_name == 'num_workers':
+                from openhcs.config_framework.context_manager import current_context_stack, current_extracted_configs, get_current_temp_global
+                context_list = current_context_stack.get()
+                extracted_configs = current_extracted_configs.get()
+                current_global = get_current_temp_global()
+                logger.info(f"🔍 PLACEHOLDER: Resolving {dataclass_type.__name__}.{field_name}")
+                logger.info(f"🔍 PLACEHOLDER: Context stack has {len(context_list)} items: {[type(c).__name__ for c in context_list]}")
+                logger.info(f"🔍 PLACEHOLDER: Extracted configs: {list(extracted_configs.keys())}")
+                logger.info(f"🔍 PLACEHOLDER: Current temp global: {type(current_global).__name__ if current_global else 'None'}")
+                if current_global and hasattr(current_global, 'num_workers'):
+                    logger.info(f"🔍 PLACEHOLDER: current_global.num_workers = {getattr(current_global, 'num_workers', 'NOT FOUND')}")
+                if 'GlobalPipelineConfig' in extracted_configs:
+                    global_config = extracted_configs['GlobalPipelineConfig']
+                    logger.info(f"🔍 PLACEHOLDER: extracted GlobalPipelineConfig.num_workers = {getattr(global_config, 'num_workers', 'NOT FOUND')}")
 
             resolved_value = getattr(instance, field_name)
 
-            if field_name == 'well_filter_mode':
-                logger.info(f"✅ Resolved {dataclass_type.__name__}.{field_name} = {resolved_value}")
+            # TEMPORARY DEBUG: Log ALL field resolutions to debug placeholder issue
+            logger.info(f"✅ Resolved {dataclass_type.__name__}.{field_name} = {resolved_value}")
 
             result = LazyDefaultPlaceholderService._format_placeholder_text(resolved_value, prefix)
         except Exception as e:
