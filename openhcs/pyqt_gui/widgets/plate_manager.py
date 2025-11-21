@@ -351,34 +351,18 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
             if plate_data and plate_data.get('path') == plate_path:
                 # Rebuild just this item's display text
                 plate = plate_data
+                # DUMB FLASH: Just flash when label text changes (cheap string comparison)
+                old_text = item.text()
                 display_text = self._format_plate_item_with_preview(plate)
-                previous_text = item.text()
                 item.setText(display_text)
                 # Height is automatically calculated by MultilinePreviewItemDelegate.sizeHint()
 
                 # Reapply scope-based styling (in case colors changed)
                 self._apply_orchestrator_item_styling(item, plate)
 
-                flash_needed = False
-                # Flash if any resolved value changed
-                if changed_fields and live_context_before and plate_path in self.orchestrators:
-                    from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
-
-                    # Get current live context
-                    live_context_after = ParameterFormManager.collect_live_context(scope_filter=plate_path)
-
-                    # Get resolved pipeline config before and after
-                    orchestrator = self.orchestrators[plate_path]
-                    pipeline_config = orchestrator.pipeline_config
-                    if pipeline_config:
-                        config_before = self._get_preview_instance(pipeline_config, live_context_before, plate_path, type(pipeline_config))
-                        config_after = self._get_preview_instance(pipeline_config, live_context_after, plate_path, type(pipeline_config))
-
-                        # PERFORMANCE: Compare preview instances directly instead of field-by-field resolution
-                        # Preview instances are already fully resolved, so comparing them is O(1)
-                        # vs O(N fields) for field-by-field getattr() traversal
-                        if config_before != config_after:
-                            self._flash_plate_item(plate_path)
+                # Flash if label text actually changed
+                if old_text and old_text != display_text:
+                    self._flash_plate_item(plate_path)
 
                 break
 
