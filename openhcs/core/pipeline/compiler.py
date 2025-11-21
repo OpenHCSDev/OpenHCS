@@ -381,13 +381,13 @@ class PipelineCompiler:
         for step in steps_definition:
             logger.info(f"🔍 COMPILER: Before resolution - step '{step.name}' processing_config type = {type(step.processing_config).__name__}")
             logger.info(f"🔍 COMPILER: Before resolution - step '{step.name}' processing_config.variable_components = {step.processing_config.variable_components}")
-            napari_before = step.napari_streaming_config.enabled if hasattr(step, 'napari_streaming_config') else 'N/A'
+            napari_before = step.napari_streaming_config.enabled if hasattr(step, 'napari_streaming_config') and step.napari_streaming_config is not None else 'N/A'
             logger.info(f"🔍 COMPILER: Before resolution - step '{step.name}' napari_streaming_config.enabled = {napari_before}")
             with config_context(step, context_provider=orchestrator):  # Step-level context on top of pipeline context
                 resolved_step = resolve_lazy_configurations_for_serialization(step)
                 logger.info(f"🔍 COMPILER: After resolution - step '{resolved_step.name}' processing_config type = {type(resolved_step.processing_config).__name__}")
                 logger.info(f"🔍 COMPILER: After resolution - step '{resolved_step.name}' processing_config.variable_components = {resolved_step.processing_config.variable_components}")
-                napari_after = resolved_step.napari_streaming_config.enabled if hasattr(resolved_step, 'napari_streaming_config') else 'N/A'
+                napari_after = resolved_step.napari_streaming_config.enabled if hasattr(resolved_step, 'napari_streaming_config') and resolved_step.napari_streaming_config is not None else 'N/A'
                 logger.info(f"🔍 COMPILER: After resolution - step '{resolved_step.name}' napari_streaming_config.enabled = {napari_after}")
                 resolved_steps.append(resolved_step)
         steps_definition = resolved_steps
@@ -1251,7 +1251,8 @@ class PipelineCompiler:
                     context.step_axis_filters = global_step_axis_filters
 
                     logger.info(f"🔍 COMPILER: orchestrator.pipeline_config.processing_config.variable_components = {orchestrator.pipeline_config.processing_config.variable_components}")
-                    logger.info(f"🔍 COMPILER: orchestrator.pipeline_config.napari_streaming_config.enabled = {orchestrator.pipeline_config.napari_streaming_config.enabled}")
+                    napari_enabled = orchestrator.pipeline_config.napari_streaming_config.enabled if orchestrator.pipeline_config.napari_streaming_config is not None else 'N/A'
+                    logger.info(f"🔍 COMPILER: orchestrator.pipeline_config.napari_streaming_config.enabled = {napari_enabled}")
                     with config_context(orchestrator.pipeline_config, context_provider=orchestrator):
                         resolved_steps = PipelineCompiler.initialize_step_plans_for_context(context, pipeline_definition, orchestrator, metadata_writer=is_responsible, plate_path=orchestrator.plate_path)
                         PipelineCompiler.declare_zarr_stores_for_context(context, resolved_steps, orchestrator)

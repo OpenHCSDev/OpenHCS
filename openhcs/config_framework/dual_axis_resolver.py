@@ -62,29 +62,41 @@ def resolve_field_inheritance_old(
     """
     obj_type = type(obj)
 
-    if field_name == 'well_filter_mode':
+    # COMPREHENSIVE LOGGING: Log resolution for ALL fields in PipelineConfig-related configs
+    should_log = (
+        'WellFilterConfig' in obj_type.__name__ or
+        'StepWellFilterConfig' in obj_type.__name__ or
+        'PipelineConfig' in obj_type.__name__ or
+        field_name in ['well_filter', 'well_filter_mode', 'num_workers']
+    )
+
+    if should_log:
         logger.info(f"🔍 RESOLVER START: {obj_type.__name__}.{field_name}")
-        logger.info(f"🔍 RESOLVER: available_configs has {len(available_configs)} items")
+        logger.info(f"🔍 RESOLVER: available_configs has {len(available_configs)} items: {list(available_configs.keys())}")
+        logger.info(f"🔍 RESOLVER: obj MRO = {[cls.__name__ for cls in obj_type.__mro__ if is_dataclass(cls)]}")
 
     # Step 1: Check concrete value in merged context for obj's type (HIGHEST PRIORITY)
     # CRITICAL: Context values take absolute precedence over inheritance blocking
     # The config_context() manager merges concrete values into available_configs
     for config_name, config_instance in available_configs.items():
         if type(config_instance) == obj_type:
-            if field_name == 'well_filter_mode':
-                logger.info(f"🔍 STEP 1: Found exact type match: {config_name}")
+            if should_log:
+                logger.info(f"🔍 STEP 1: Found exact type match: {config_name} (type={type(config_instance).__name__})")
             try:
                 # Use object.__getattribute__ to avoid triggering lazy __getattribute__ recursion
                 value = object.__getattribute__(config_instance, field_name)
-                if field_name == 'well_filter_mode':
+                if should_log:
                     logger.info(f"🔍 STEP 1: {config_name}.{field_name} = {value}")
                 if value is not None:
-                    if field_name in ['well_filter', 'well_filter_mode']:
-                        logger.info(f"🔍 CONTEXT: Found concrete value in merged context {obj_type.__name__}.{field_name}: {value}")
+                    if should_log:
+                        logger.info(f"🔍 STEP 1: RETURNING {value} from {config_name} (concrete value in context)")
                     return value
+                else:
+                    if should_log:
+                        logger.info(f"🔍 STEP 1: {config_name}.{field_name} = None (not concrete)")
             except AttributeError:
                 # Field doesn't exist on this config type
-                if field_name == 'well_filter_mode':
+                if should_log:
                     logger.info(f"🔍 STEP 1: {config_name} has no field {field_name}")
                 continue
 
@@ -105,24 +117,24 @@ def resolve_field_inheritance_old(
     # Only block inheritance if the EXACT same type has a non-None value
     for config_name, config_instance in available_configs.items():
         if type(config_instance) == obj_type:
-            if field_name == 'well_filter_mode':
+            if should_log:
                 logger.info(f"🔍 STEP 2: Found exact type match: {config_name} (type={type(config_instance).__name__})")
             try:
                 field_value = object.__getattribute__(config_instance, field_name)
-                if field_name == 'well_filter_mode':
+                if should_log:
                     logger.info(f"🔍 STEP 2: {config_name}.{field_name} = {field_value}")
                 if field_value is not None:
                     # This exact type has a concrete value - use it, don't inherit
-                    if field_name in ['well_filter', 'well_filter_mode']:
+                    if should_log:
                         logger.info(f"🔍 FIELD-SPECIFIC BLOCKING: {obj_type.__name__}.{field_name} = {field_value} (concrete) - blocking inheritance")
                     return field_value
             except AttributeError:
-                if field_name == 'well_filter_mode':
+                if should_log:
                     logger.info(f"🔍 STEP 2: {config_name} has no field {field_name}")
                 continue
 
     # DEBUG: Log what we're trying to resolve
-    if field_name in ['output_dir_suffix', 'sub_dir', 'well_filter', 'well_filter_mode']:
+    if should_log:
         logger.info(f"🔍 RESOLVING {obj_type.__name__}.{field_name} - checking context and inheritance")
         logger.info(f"🔍 AVAILABLE CONFIGS: {list(available_configs.keys())}")
         logger.info(f"🔍 AVAILABLE CONFIG TYPES: {[type(v).__name__ for v in available_configs.values()]}")
@@ -131,19 +143,19 @@ def resolve_field_inheritance_old(
     # Step 3: Y-axis inheritance within obj's MRO
     blocking_class = _find_blocking_class_in_mro(obj_type, field_name)
 
-    if field_name == 'well_filter_mode':
+    if should_log:
         logger.info(f"🔍 Y-AXIS: Blocking class = {blocking_class.__name__ if blocking_class else 'None'}")
 
     for parent_type in obj_type.__mro__[1:]:
         if not is_dataclass(parent_type):
             continue
 
-        if field_name == 'well_filter_mode':
+        if should_log:
             logger.info(f"🔍 Y-AXIS: Checking parent {parent_type.__name__}")
 
         # Check blocking logic
         if blocking_class and parent_type != blocking_class:
-            if field_name == 'well_filter_mode':
+            if should_log:
                 logger.info(f"🔍 Y-AXIS: Skipping {parent_type.__name__} (not blocking class)")
             continue
 
@@ -154,15 +166,16 @@ def resolve_field_inheritance_old(
                     try:
                         # Use object.__getattribute__ to avoid triggering lazy __getattribute__ recursion
                         value = object.__getattribute__(config_instance, field_name)
-                        if field_name == 'well_filter_mode':
+                        if should_log:
                             logger.info(f"🔍 Y-AXIS: Blocking class {parent_type.__name__} has value {value}")
                         if value is None:
                             # Blocking class has None - inheritance blocked
-                            if field_name == 'well_filter_mode':
+                            if should_log:
                                 logger.info(f"🔍 Y-AXIS: Blocking class has None - inheritance blocked")
                             break
                         else:
-                            logger.debug(f"Inherited from blocking class {parent_type.__name__}: {value}")
+                            if should_log:
+                                logger.info(f"🔍 Y-AXIS: RETURNING {value} from blocking class {parent_type.__name__}")
                             return value
                     except AttributeError:
                         # Field doesn't exist on this config type
@@ -175,16 +188,15 @@ def resolve_field_inheritance_old(
                 try:
                     # Use object.__getattribute__ to avoid triggering lazy __getattribute__ recursion
                     value = object.__getattribute__(config_instance, field_name)
-                    if field_name in ['output_dir_suffix', 'sub_dir', 'well_filter', 'well_filter_mode']:
+                    if should_log:
                         logger.info(f"🔍 Y-AXIS INHERITANCE: {parent_type.__name__}.{field_name} = {value}")
                     if value is not None:
-                        if field_name in ['output_dir_suffix', 'sub_dir', 'well_filter', 'well_filter_mode']:
-                            logger.info(f"🔍 Y-AXIS INHERITANCE: FOUND {parent_type.__name__}.{field_name}: {value} (returning)")
-                        logger.debug(f"Inherited from {parent_type.__name__}: {value}")
+                        if should_log:
+                            logger.info(f"🔍 Y-AXIS INHERITANCE: RETURNING {value} from {parent_type.__name__}")
                         return value
                 except AttributeError:
                     # Field doesn't exist on this config type
-                    if field_name == 'well_filter_mode':
+                    if should_log:
                         logger.info(f"🔍 Y-AXIS: {parent_type.__name__} has no field {field_name}")
                     continue
 

@@ -355,6 +355,7 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         logger.debug(f"🔍 PlateManager._process_pending_preview_updates: changed_fields={changed_fields}")
 
         # Get current live context snapshot
+        # scope_filter=None means no filtering (include ALL scopes: global + all plates)
         from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
         live_context_snapshot = ParameterFormManager.collect_live_context()
 
@@ -408,6 +409,7 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         # If not available, collect a new snapshot (for reset events)
         live_context_after = getattr(self, '_window_close_after_snapshot', None)
         if live_context_after is None:
+            # scope_filter=None means no filtering (include ALL scopes: global + all plates)
             live_context_after = ParameterFormManager.collect_live_context()
 
         # Use saved "before" snapshot if available (from window close), otherwise use last snapshot
@@ -505,8 +507,7 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
 
         # Collect live context after if not provided
         if live_context_after is None:
-            # For batch update, we need a global live context (not per-plate)
-            # This is a simplification - in practice, each plate might have different scoped values
+            # scope_filter=None means no filtering (include ALL scopes: global + all plates)
             live_context_after = ParameterFormManager.collect_live_context()
 
         # Build before/after config pairs for batch flash detection

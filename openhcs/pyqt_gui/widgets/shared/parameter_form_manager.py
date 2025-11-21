@@ -269,7 +269,7 @@ class ParameterFormManager(QWidget):
     # Trailing debounce delays (ms) - timer restarts on each change, only executes after changes stop
     # This prevents expensive placeholder refreshes on every keystroke during rapid typing
     PARAMETER_CHANGE_DEBOUNCE_MS = 100  # Debounce for same-window placeholder refreshes
-    CROSS_WINDOW_REFRESH_DELAY_MS = 0  # INSTANT: No debounce for cross-window updates (batching handles it)
+    CROSS_WINDOW_REFRESH_DELAY_MS = 100  # INSTANT: No debounce for cross-window updates (batching handles it)
 
     _live_context_token_counter = 0
 
@@ -436,8 +436,9 @@ class ParameterFormManager(QWidget):
         The token is incremented whenever any form value changes.
 
         Args:
-            scope_filter: Optional scope filter (e.g., 'plate_path' or 'x::y::z')
-                         If None, collects from all scopes
+            scope_filter: Optional scope filter:
+                         - None: No filtering - collect ALL managers (global + all scopes)
+                         - plate_path: Filter to specific scope (global + that plate)
 
         Returns:
             LiveContextSnapshot with token and values dict
@@ -480,17 +481,18 @@ class ParameterFormManager(QWidget):
                     live_context[GlobalPipelineConfig] = global_values
                     logger.info(f"🔍 collect_live_context: Added thread-local GlobalPipelineConfig with {len(global_values)} values: {list(global_values.keys())[:5]}")
 
+                    # DEBUG: Log display and streaming configs
+                    for key in ['napari_display_config', 'fiji_display_config', 'streaming_defaults', 'napari_streaming_config', 'fiji_streaming_config']:
+                        if key in global_values:
+                            logger.info(f"🔍 collect_live_context (thread-local): {key} = {global_values[key]}")
+                        else:
+                            logger.info(f"🔍 collect_live_context (thread-local): {key} NOT IN global_values")
+
             for manager in cls._active_form_managers:
                 # Apply scope filter if provided
-                # CRITICAL SCOPE RULE: Global scope (scope_filter=None) should ONLY see global managers (scope_id=None)
-                # This prevents GlobalPipelineConfig from seeing PipelineConfig values
-                if scope_filter is None and manager.scope_id is not None:
-                    logger.info(
-                        f"🔍 collect_live_context: Skipping SCOPED manager {manager.field_id} "
-                        f"(scope_id={manager.scope_id}) - global scope (scope_filter=None) should only see global managers"
-                    )
-                    continue
-                elif scope_filter is not None and manager.scope_id is not None:
+                # scope_filter=None means no filtering (include ALL managers)
+                # scope_filter=plate_path means filter to that specific scope
+                if scope_filter is not None and manager.scope_id is not None:
                     if not cls._is_scope_visible_static(manager.scope_id, scope_filter):
                         logger.info(
                             f"🔍 collect_live_context: Skipping manager {manager.field_id} "
@@ -506,6 +508,14 @@ class ParameterFormManager(QWidget):
                 if 'num_workers' in live_values:
                     logger.info(f"🔍 collect_live_context: {manager.field_id} has num_workers={live_values['num_workers']}")
 
+                # DEBUG: Log streaming config values for GlobalPipelineConfig
+                if manager.field_id == 'GlobalPipelineConfig':
+                    for key in ['streaming_defaults', 'napari_streaming_config', 'fiji_streaming_config', 'napari_display_config', 'fiji_display_config']:
+                        if key in live_values:
+                            logger.info(f"🔍 collect_live_context: GlobalPipelineConfig.{key} = {live_values[key]}")
+                        else:
+                            logger.info(f"🔍 collect_live_context: GlobalPipelineConfig.{key} NOT IN live_values")
+
                 # CRITICAL: Only add GLOBAL managers (scope_id=None) to live_context
                 # Scoped managers should ONLY go into scoped_live_context, never live_context
                 #
@@ -519,14 +529,42 @@ class ParameterFormManager(QWidget):
                 # Fix: NEVER add scoped managers to live_context, only to scoped_live_context
                 if manager.scope_id is None:
                     # Global manager - affects all scopes
-                    # CRITICAL: Open window values override thread-local values
-                    logger.info(
-                        f"🔍 collect_live_context: Adding GLOBAL manager {manager.field_id} "
-                        f"(scope_id={manager.scope_id}, type={obj_type.__name__}) to live_context "
-                        f"(overriding thread-local if present) "
-                        f"with {len(live_values)} values: {list(live_values.keys())[:5]}"
-                    )
-                    live_context[obj_type] = live_values
+                    # CRITICAL: For GlobalPipelineConfig, filter out nested dataclass instances
+                    # from form values to prevent masking thread-local values
+                    from openhcs.config_framework.lazy_factory import is_global_config_type
+                    from dataclasses import is_dataclass
+                    if is_global_config_type(obj_type):
+                        # Filter out nested dataclass instances - they should come from thread-local
+                        scalar_values = {
+                            k: v for k, v in live_values.items()
+                            if not is_dataclass(v)
+                        }
+                        # Merge scalar values with thread-local values (if present)
+                        if obj_type in live_context:
+                            # Thread-local values already added - merge scalar values on top
+                            live_context[obj_type].update(scalar_values)
+                            logger.info(
+                                f"🔍 collect_live_context: Merging GLOBAL manager {manager.field_id} "
+                                f"scalar values into thread-local (filtered {len(live_values) - len(scalar_values)} nested configs) "
+                                f"with {len(scalar_values)} scalar values: {list(scalar_values.keys())[:5]}"
+                            )
+                        else:
+                            # No thread-local values - just use scalar values
+                            live_context[obj_type] = scalar_values
+                            logger.info(
+                                f"🔍 collect_live_context: Adding GLOBAL manager {manager.field_id} "
+                                f"(no thread-local present, filtered {len(live_values) - len(scalar_values)} nested configs) "
+                                f"with {len(scalar_values)} scalar values: {list(scalar_values.keys())[:5]}"
+                            )
+                    else:
+                        # Non-GlobalPipelineConfig - use all values
+                        logger.info(
+                            f"🔍 collect_live_context: Adding GLOBAL manager {manager.field_id} "
+                            f"(scope_id={manager.scope_id}, type={obj_type.__name__}) to live_context "
+                            f"(overriding thread-local if present) "
+                            f"with {len(live_values)} values: {list(live_values.keys())[:5]}"
+                        )
+                        live_context[obj_type] = live_values
                 else:
                     logger.info(
                         f"🔍 collect_live_context: NOT adding SCOPED manager {manager.field_id} "
@@ -961,8 +999,17 @@ class ParameterFormManager(QWidget):
                     name for name, val in self.parameters.items() if val is None
                 }
                 # DEBUG: Log placeholder candidates for AnalysisConsolidationConfig, PlateMetadataConfig, and StreamingDefaults
-                if 'AnalysisConsolidation' in str(self.dataclass_type) or 'PlateMetadata' in str(self.dataclass_type) or 'Streaming' in str(self.dataclass_type):
+                if 'AnalysisConsolidation' in str(self.dataclass_type) or 'PlateMetadata' in str(self.dataclass_type) or 'Streaming' in str(self.dataclass_type) or 'PathPlanning' in str(self.dataclass_type) or 'StepWellFilter' in str(self.dataclass_type) or 'StepMaterialization' in str(self.dataclass_type):
                     logger.info(f"🔍 PLACEHOLDER CANDIDATES: {self.dataclass_type.__name__} - parameters={self.parameters}")
+                    logger.info(f"🔍 PLACEHOLDER CANDIDATES: {self.dataclass_type.__name__} - _placeholder_candidates={self._placeholder_candidates}")
+
+                # DEBUG: Log cache for GlobalPipelineConfig
+                if self.dataclass_type and self.dataclass_type.__name__ == 'GlobalPipelineConfig':
+                    for key in ['napari_streaming_config', 'fiji_streaming_config', 'napari_display_config', 'fiji_display_config']:
+                        if key in self._current_value_cache:
+                            logger.info(f"🔍 CACHE INIT (GlobalPipelineConfig): {key} = {self._current_value_cache[key]}")
+                        else:
+                            logger.info(f"🔍 CACHE INIT (GlobalPipelineConfig): {key} NOT IN CACHE")
                     logger.info(f"🔍 PLACEHOLDER CANDIDATES: {self.dataclass_type.__name__} - _placeholder_candidates={self._placeholder_candidates}")
 
             # DELEGATE TO SERVICE LAYER: Analyze form structure using service
@@ -1128,29 +1175,14 @@ class ParameterFormManager(QWidget):
             # Connect to destroyed signal for cleanup
             self.destroyed.connect(self._on_destroyed)
 
-            # CRITICAL: Refresh placeholders with live context after initial load
-            # This ensures new windows immediately show live values from other open windows
-            is_root_global_config = (self.config.is_global_config_editing and
-                                     self.global_config_type is not None and
-                                     self.context_obj is None)
-            if is_root_global_config:
-                # For root GlobalPipelineConfig, refresh with sibling inheritance
-                with timer("  Root global config sibling inheritance refresh", threshold_ms=10.0):
-                    self._refresh_all_placeholders()
-                    self._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders())
-            else:
-                # For other windows (PipelineConfig, Step), refresh with live context from other windows
-                # CRITICAL: This collects live values from ALL other open windows (including unsaved edits)
-                # and uses them for initial placeholder resolution
-                with timer("  Initial live context refresh", threshold_ms=10.0):
-                    # CRITICAL: Only increment token for ROOT forms, not nested forms
-                    # Nested forms should use the same token as their parent to avoid cache thrashing
-                    if self._parent_manager is None:
-                        type(self)._live_context_token_counter += 1
-                        logger.info(f"🔍 INITIAL REFRESH: {self.field_id} collecting live context (token={type(self)._live_context_token_counter})")
-                    else:
-                        logger.info(f"🔍 INITIAL REFRESH (nested): {self.field_id} using parent token (token={type(self)._live_context_token_counter})")
-                    self._refresh_with_live_context()
+            # CRITICAL FIX: Skip placeholder refresh in __init__ for SYNC widget creation
+            # In sync mode, widgets are created but NOT visible yet when __init__ completes
+            # Placeholders will be applied by the deferred callback in build_form() after widgets are visible
+            # In async mode, this refresh is also skipped because placeholders are applied after async completion
+            # ONLY refresh here for nested managers in async mode (they need initial state before parent refreshes)
+            #
+            # TL;DR: Placeholder refresh moved to build_form() deferred callbacks for both sync and async paths
+            logger.info(f"🔍 INIT PLACEHOLDER SKIP: {self.field_id} - Skipping placeholder refresh in __init__, will be handled by build_form() deferred callbacks")
 
     # ==================== GENERIC OBJECT INTROSPECTION METHODS ====================
 
@@ -1498,30 +1530,45 @@ class ParameterFormManager(QWidget):
             # For sync creation, apply styling callbacks and refresh placeholders
             # CRITICAL: Order matters - placeholders must be resolved before enabled styling
             is_nested = self._parent_manager is not None
+            logger.info(f"🔍 BUILD_FORM: {self.field_id} - is_nested={is_nested}, _parent_manager={self._parent_manager}")
             if not is_nested:
-                # STEP 1: Apply styling callbacks (optional dataclass None-state dimming)
-                with timer("  Apply styling callbacks (sync)", threshold_ms=5.0):
-                    for callback in self._on_build_complete_callbacks:
-                        callback()
-                    self._on_build_complete_callbacks.clear()
+                # CRITICAL FIX: Use TWO levels of deferral to match async path behavior
+                # First deferral: ensure widgets are added to layout
+                # Second deferral: ensure widgets are painted and visible
+                def schedule_placeholder_application():
+                    logger.info(f"🔍 SYNC DEFER 1: {self.field_id} - First event loop tick, scheduling second deferral")
 
-                # STEP 2: Refresh placeholders (resolve inherited values)
-                # CRITICAL: Use _refresh_with_live_context() to collect live values from other open windows
-                # This ensures new windows immediately show unsaved changes from already-open windows
-                with timer("  Initial placeholder refresh with live context (sync)", threshold_ms=10.0):
-                    self._refresh_with_live_context()
+                    def apply_callbacks_after_layout():
+                        logger.info(f"🔍 SYNC DEFER 2: {self.field_id} - Second event loop tick, applying placeholders NOW")
+                        # STEP 1: Apply styling callbacks (optional dataclass None-state dimming)
+                        with timer("  Apply styling callbacks (sync)", threshold_ms=5.0):
+                            for callback in self._on_build_complete_callbacks:
+                                callback()
+                            self._on_build_complete_callbacks.clear()
 
-                # STEP 3: Apply post-placeholder callbacks (enabled styling that needs resolved values)
-                with timer("  Apply post-placeholder callbacks (sync)", threshold_ms=5.0):
-                    for callback in self._on_placeholder_refresh_complete_callbacks:
-                        callback()
-                    self._on_placeholder_refresh_complete_callbacks.clear()
-                    # Also apply for nested managers
-                    self._apply_to_nested_managers(lambda name, manager: manager._apply_all_post_placeholder_callbacks())
+                        # STEP 2: Refresh placeholders (resolve inherited values)
+                        # CRITICAL: Use _refresh_with_live_context() to collect live values from other open windows
+                        # This ensures new windows immediately show unsaved changes from already-open windows
+                        with timer("  Initial placeholder refresh with live context (sync)", threshold_ms=10.0):
+                            self._refresh_with_live_context()
 
-                # STEP 4: Refresh enabled styling (after placeholders are resolved)
-                with timer("  Enabled styling refresh (sync)", threshold_ms=5.0):
-                    self._apply_to_nested_managers(lambda name, manager: manager._refresh_enabled_styling())
+                        # STEP 3: Apply post-placeholder callbacks (enabled styling that needs resolved values)
+                        with timer("  Apply post-placeholder callbacks (sync)", threshold_ms=5.0):
+                            for callback in self._on_placeholder_refresh_complete_callbacks:
+                                callback()
+                            self._on_placeholder_refresh_complete_callbacks.clear()
+                            # Also apply for nested managers
+                            self._apply_to_nested_managers(lambda name, manager: manager._apply_all_post_placeholder_callbacks())
+
+                        # STEP 4: Refresh enabled styling (after placeholders are resolved)
+                        with timer("  Enabled styling refresh (sync)", threshold_ms=5.0):
+                            self._apply_to_nested_managers(lambda name, manager: manager._refresh_enabled_styling())
+
+                    # Second deferral to next event loop tick
+                    QTimer.singleShot(0, apply_callbacks_after_layout)
+
+                # First deferral to next event loop tick
+                QTimer.singleShot(0, schedule_placeholder_application)
             else:
                 # Nested managers: just apply callbacks
                 # Don't refresh placeholders - let parent do it once at the end after all widgets are created
@@ -2558,6 +2605,9 @@ class ParameterFormManager(QWidget):
         This ensures placeholders in other windows show what you're typing RIGHT NOW,
         even if you haven't pressed Enter or tabbed out yet.
         For None values, uses cache to preserve lazy resolution.
+
+        CRITICAL: Also includes ui_hidden fields from cache so they're available for
+        sibling inheritance (e.g., FijiStreamingConfig inheriting from FijiDisplayConfig).
         """
         with timer(f"get_current_values ({self.field_id})", threshold_ms=2.0):
             # CRITICAL: Read LIVE values from widgets, but only use them if non-None
@@ -2582,6 +2632,15 @@ class ParameterFormManager(QWidget):
                     name, manager, current_values
                 )
             )
+
+            # CRITICAL: Include ui_hidden fields from cache
+            # ui_hidden fields don't have widgets, but they're part of the form's state
+            # and need to be included in the overlay for correct context resolution.
+            # Without this, when the overlay is used in config_context(), its original_extracted
+            # will override the merged config's extracted values, removing ui_hidden fields.
+            for param_name, cached_value in self._current_value_cache.items():
+                if param_name not in current_values and cached_value is not None:
+                    current_values[param_name] = cached_value
 
             # Lazy dataclasses are now handled by LazyDataclassEditor, so no structure preservation needed
             return current_values
@@ -2686,8 +2745,8 @@ class ParameterFormManager(QWidget):
         """
         Create an overlay instance from a type and values dict.
 
-        Handles both dataclasses (instantiate normally) and non-dataclass types
-        like functions (use SimpleNamespace as fallback).
+        For GlobalPipelineConfig, merges values_dict into thread-local global config
+        to preserve ui_hidden fields. For other types, creates fresh instance.
 
         Args:
             overlay_type: Type to instantiate (dataclass, function, etc.)
@@ -2697,6 +2756,26 @@ class ParameterFormManager(QWidget):
             Instance of overlay_type or SimpleNamespace if type is not instantiable
         """
         try:
+            # CRITICAL: For GlobalPipelineConfig, merge form values into thread-local global config
+            # This preserves ui_hidden fields (napari_display_config, fiji_display_config)
+            # that don't have widgets but are needed for sibling inheritance
+            from openhcs.config_framework.lazy_factory import is_global_config_type
+            if is_global_config_type(overlay_type):
+                from openhcs.config_framework.context_manager import get_base_global_config
+                import dataclasses
+                thread_local_global = get_base_global_config()
+                if thread_local_global is not None and type(thread_local_global) == overlay_type:
+                    # CRITICAL: Only pass scalar values (not nested dataclass instances) to dataclasses.replace()
+                    # Nested config instances from the form have None fields that would mask thread-local values
+                    # So we skip them and let them come from thread-local instead
+                    from dataclasses import is_dataclass
+                    scalar_values = {
+                        k: v for k, v in values_dict.items()
+                        if v is not None and not is_dataclass(v)
+                    }
+                    return dataclasses.replace(thread_local_global, **scalar_values)
+
+            # For non-global configs, create fresh instance
             return overlay_type(**values_dict)
         except TypeError:
             # Function or other non-instantiable type: use SimpleNamespace
@@ -2798,6 +2877,32 @@ class ParameterFormManager(QWidget):
 
         if is_root_global_config:
             static_defaults = self.global_config_type()
+
+            # CRITICAL: Merge ui_hidden fields from thread-local global config into static defaults
+            # This ensures nested forms can inherit from ui_hidden fields (like napari_display_config)
+            # while still showing class defaults for visible fields
+            from openhcs.config_framework.context_manager import get_base_global_config
+            import dataclasses
+            thread_local_global = get_base_global_config()
+            if thread_local_global is not None and type(thread_local_global) == type(static_defaults):
+                # Get all ui_hidden fields from the dataclass by checking field metadata
+                ui_hidden_fields = [
+                    f.name for f in dataclasses.fields(type(static_defaults))
+                    if f.metadata.get('ui_hidden', False)
+                ]
+
+                # Extract ui_hidden field values from thread-local
+                ui_hidden_values = {
+                    field_name: getattr(thread_local_global, field_name)
+                    for field_name in ui_hidden_fields
+                    if hasattr(thread_local_global, field_name)
+                }
+
+                # Merge into static defaults
+                if ui_hidden_values:
+                    logger.info(f"🔍 GLOBAL DEFAULTS: Merging {len(ui_hidden_values)} ui_hidden fields from thread-local: {list(ui_hidden_values.keys())}")
+                    static_defaults = dataclasses.replace(static_defaults, **ui_hidden_values)
+
             # CRITICAL: DON'T pass config_scopes to config_context() for GlobalPipelineConfig
             # The scopes were already set in the ContextVar at lines 2712-2720
             # If we pass config_scopes here, it will REPLACE the ContextVar instead of merging
@@ -3033,7 +3138,17 @@ class ParameterFormManager(QWidget):
         # config_context() will filter None values and merge onto parent context
         # CRITICAL: Pass scope_id for the current form to enable scope-aware priority
         current_scope_id = getattr(self, 'scope_id', None)
-        logger.debug(f"🔍 FINAL OVERLAY: current_scope_id={current_scope_id}, dataclass_type={self.dataclass_type.__name__ if self.dataclass_type else None}, live_context_scopes={live_context_scopes}")
+        logger.info(f"🔍 FINAL OVERLAY: current_scope_id={current_scope_id}, dataclass_type={self.dataclass_type.__name__ if self.dataclass_type else None}, live_context_scopes={live_context_scopes}")
+        logger.info(f"🔍 FINAL OVERLAY: overlay_instance type = {type(overlay_instance).__name__}")
+        logger.info(f"🔍 FINAL OVERLAY: self.scope_id = {self.scope_id}, hasattr(self, 'scope_id') = {hasattr(self, 'scope_id')}")
+
+        # Log nested configs in overlay
+        import dataclasses
+        if dataclasses.is_dataclass(overlay_instance):
+            for field in dataclasses.fields(overlay_instance):
+                if field.name.endswith('_config'):
+                    field_value = getattr(overlay_instance, field.name, None)
+                    logger.info(f"🔍 FINAL OVERLAY: {field.name} = {field_value} (type={type(field_value).__name__ if field_value else 'None'})")
         if current_scope_id is not None or live_context_scopes:
             # Build scopes dict for current overlay
             overlay_scopes = dict(live_context_scopes) if live_context_scopes else {}
@@ -3660,6 +3775,13 @@ class ParameterFormManager(QWidget):
             exclude_param: Optional parameter name to exclude from refresh (e.g., the param that just changed)
             changed_fields: Optional set of field paths that changed (e.g., {'well_filter', 'well_filter_mode'})
         """
+        # CRITICAL FIX: If live_context is not a LiveContextSnapshot, collect it now
+        # This ensures we ALWAYS have scope information for _build_context_stack()
+        # Without scopes, PipelineConfig gets assigned scope=None, breaking placeholder inheritance
+        if not isinstance(live_context, LiveContextSnapshot):
+            logger.info(f"🔍 _refresh_all_placeholders: live_context is not LiveContextSnapshot, collecting now (type={type(live_context).__name__})")
+            live_context = type(self).collect_live_context(scope_filter=self.scope_id)
+
         # Extract token, live context values, and scopes
         token, live_context_values, live_context_scopes = self._unwrap_live_context(live_context)
 
@@ -3736,9 +3858,11 @@ class ParameterFormManager(QWidget):
                                 logger.info(f"🔍 APPLYING PLACEHOLDER: {self.field_id}.{param_name} - resolving with type {resolution_type.__name__}")
                             placeholder_text = self.service.get_placeholder_text(param_name, resolution_type)
                             if 'Streaming' in str(self.dataclass_type):
-                                logger.info(f"🔍 APPLYING PLACEHOLDER: {self.field_id}.{param_name} - got text: {placeholder_text}")
+                                logger.info(f"🔍 APPLYING PLACEHOLDER: {self.field_id}.{param_name} - got text: {placeholder_text}, type={type(placeholder_text)}, bool={bool(placeholder_text)}")
                             if placeholder_text:
                                 self._apply_placeholder_text_with_flash_detection(param_name, widget, placeholder_text)
+                            elif 'Streaming' in str(self.dataclass_type):
+                                logger.info(f"🔍 SKIPPING PLACEHOLDER: {self.field_id}.{param_name} - placeholder_text is falsy")
 
             return True  # Return sentinel value to indicate refresh was performed
 
@@ -4036,7 +4160,9 @@ class ParameterFormManager(QWidget):
         last_text = self._last_placeholder_text.get(param_name)
 
         # Apply placeholder text
+        logger.info(f"🔍 _apply_placeholder_text_with_flash_detection: {self.field_id}.{param_name} - calling PyQt6WidgetEnhancer.apply_placeholder_text with text='{placeholder_text}'")
         PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
+        logger.info(f"🔍 _apply_placeholder_text_with_flash_detection: {self.field_id}.{param_name} - DONE calling PyQt6WidgetEnhancer.apply_placeholder_text")
 
         # If placeholder changed, trigger flash
         if last_text is not None and last_text != placeholder_text:
@@ -4796,6 +4922,7 @@ class ParameterFormManager(QWidget):
                 # when creating preview instances for flash detection, they have all live values
                 # (e.g., if PipelineConfig closes but a step window is open, the step preview
                 # instance needs the step's override values to resolve correctly)
+                # scope_filter=None means no filtering (include ALL scopes: global + all plates)
                 before_snapshot = type(self).collect_live_context()
 
                 # Remove from registry
@@ -4836,6 +4963,7 @@ class ParameterFormManager(QWidget):
                 def notify_listeners():
                     logger.debug(f"🔍 Notifying external listeners of window close (AFTER unregister): {field_id}")
                     # Collect "after" snapshot (without form manager)
+                    # scope_filter=None means no filtering (include ALL scopes: global + all plates)
                     logger.debug(f"🔍 Active form managers count: {len(ParameterFormManager._active_form_managers)}")
                     after_snapshot = ParameterFormManager.collect_live_context()
                     logger.debug(f"🔍 Collected after_snapshot: token={after_snapshot.token}")

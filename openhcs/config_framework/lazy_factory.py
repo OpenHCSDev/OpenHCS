@@ -1471,15 +1471,43 @@ def _fix_dataclass_field_defaults_post_processing(cls: Type, fields_set_to_none:
     # to a signature of (self, **kwargs) - it needs explicit parameter names
 
     # Get all field names from the dataclass
-    field_names = [f.name for f in dataclasses.fields(cls)]
+    all_fields = dataclasses.fields(cls)
+    field_names = [f.name for f in all_fields]
 
     # Build the parameter list string for exec()
-    # Format: "self, *, field1=None, field2=None, ..."
-    params_str = "self, *, " + ", ".join(f"{name}=None" for name in field_names)
+    # CRITICAL FIX: Only set fields in fields_set_to_none to None default
+    # Other fields should use their original dataclass defaults
+    # Format: "self, *, field1=<default1>, field2=None, field3=<default3>, ..."
+    param_parts = []
+    for field_obj in all_fields:
+        if field_obj.name in fields_set_to_none:
+            # This field should inherit as None
+            param_parts.append(f"{field_obj.name}=None")
+        elif field_obj.default != dataclasses.MISSING:
+            # This field has a concrete default value - use it
+            # We need to reference it from the namespace
+            param_parts.append(f"{field_obj.name}=_field_defaults['{field_obj.name}']")
+        elif field_obj.default_factory != dataclasses.MISSING:
+            # This field has a default_factory - use MISSING sentinel to trigger factory
+            param_parts.append(f"{field_obj.name}=_MISSING")
+        else:
+            # Required field with no default
+            param_parts.append(field_obj.name)
+
+    params_str = "self, *, " + ", ".join(param_parts)
 
     # Build the function body that collects all kwargs
     # We need to capture all the parameters into a kwargs dict
-    kwargs_items = ", ".join(f"'{name}': {name}" for name in field_names)
+    # CRITICAL: Handle fields with default_factory by calling the factory if value is MISSING
+    kwargs_items_parts = []
+    for field_obj in all_fields:
+        if field_obj.default_factory != dataclasses.MISSING and field_obj.name not in fields_set_to_none:
+            # Field has default_factory - call it if value is MISSING
+            kwargs_items_parts.append(f"'{field_obj.name}': _field_factories['{field_obj.name}']() if {field_obj.name} is _MISSING else {field_obj.name}")
+        else:
+            # Regular field or inherit-as-none field
+            kwargs_items_parts.append(f"'{field_obj.name}': {field_obj.name}")
+    kwargs_items = ", ".join(kwargs_items_parts)
 
     # Build the logging string for parameters at generation time
     params_log_str = ', '.join(f'{name}={{{name}}}' for name in field_names)
@@ -1502,11 +1530,23 @@ def custom_init({params_str}):
     original_init(self, **kwargs)
 """
 
+    # Build namespace with field defaults and factories
+    field_defaults = {}
+    field_factories = {}
+    for field_obj in all_fields:
+        if field_obj.default != dataclasses.MISSING:
+            field_defaults[field_obj.name] = field_obj.default
+        if field_obj.default_factory != dataclasses.MISSING:
+            field_factories[field_obj.name] = field_obj.default_factory
+
     # Execute the function code to create the function
     namespace = {
         '_log': _log,
         'fields_set_to_none': fields_set_to_none,
-        'original_init': original_init
+        'original_init': original_init,
+        '_field_defaults': field_defaults,
+        '_field_factories': field_factories,
+        '_MISSING': dataclasses.MISSING
     }
     exec(func_code, namespace)
     custom_init = namespace['custom_init']

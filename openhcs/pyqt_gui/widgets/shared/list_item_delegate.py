@@ -51,20 +51,43 @@ class MultilinePreviewItemDelegate(QStyledItemDelegate):
 
         # CRITICAL: Draw custom background color FIRST (before style draws selection)
         # This allows scope-based colors to show through
-        background_brush = index.data(Qt.ItemDataRole.BackgroundRole)
-        if background_brush is not None:
-            import logging
-            logger = logging.getLogger(__name__)
-            if isinstance(background_brush, QBrush):
-                color = background_brush.color()
-                logger.debug(f"🎨 Painting background: row={index.row()}, color={color.name()}, alpha={color.alpha()}")
-            painter.save()
-            painter.fillRect(option.rect, background_brush)
-            painter.restore()
+        # BUT: Skip if item is currently flashing (flash animation manages background)
+        from openhcs.pyqt_gui.widgets.shared.list_item_flash_animation import is_item_flashing
+        import logging
+        logger = logging.getLogger(__name__)
 
-        # Let the style draw selection indicator, hover, borders (but NOT background)
-        # We skip the background by drawing it ourselves above
-        self.parent().style().drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, self.parent())
+        is_flashing = is_item_flashing(self.parent(), index.row())
+        logger.info(f"🎨 Delegate paint: row={index.row()}, is_flashing={is_flashing}")
+
+        if is_flashing:
+            # When flashing, paint the flash color directly and tell style to skip background
+            logger.info(f"🎨 Item is flashing: painting flash color directly")
+            background_brush = index.data(Qt.ItemDataRole.BackgroundRole)
+            if background_brush is not None:
+                if isinstance(background_brush, QBrush):
+                    color = background_brush.color()
+                    logger.info(f"🎨 Painting FLASH background: row={index.row()}, color={color.name()}, alpha={color.alpha()}")
+                painter.save()
+                painter.fillRect(option.rect, background_brush)
+                painter.restore()
+
+            # Remove background from style option so style doesn't overwrite our flash color
+            opt_no_bg = QStyleOptionViewItem(opt)
+            opt_no_bg.backgroundBrush = QBrush()  # Empty brush = no background
+            self.parent().style().drawControl(QStyle.ControlElement.CE_ItemViewItem, opt_no_bg, painter, self.parent())
+        else:
+            # Normal case: paint background then let style draw everything
+            background_brush = index.data(Qt.ItemDataRole.BackgroundRole)
+            if background_brush is not None:
+                if isinstance(background_brush, QBrush):
+                    color = background_brush.color()
+                    logger.info(f"🎨 Painting background: row={index.row()}, color={color.name()}, alpha={color.alpha()}")
+                painter.save()
+                painter.fillRect(option.rect, background_brush)
+                painter.restore()
+
+            # Let the style draw selection indicator, hover, borders
+            self.parent().style().drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, self.parent())
 
         # Draw layered step borders if present
         # Border layers are stored as list of (width, tint_index, pattern) tuples

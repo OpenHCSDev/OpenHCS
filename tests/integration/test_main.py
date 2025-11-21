@@ -213,16 +213,16 @@ def create_test_pipeline(enable_napari: bool = False, enable_fiji: bool = False,
                 func=[(stack_percentile_normalize, {'low_percentile': 0.5, 'high_percentile': 99.5})],
                 step_well_filter_config=LazyStepWellFilterConfig(well_filter=CONSTANTS.STEP_WELL_FILTER_TEST),
                 step_materialization_config=LazyStepMaterializationConfig(),
-                napari_streaming_config=LazyNapariStreamingConfig(port=5555) if enable_napari else None,
-                fiji_streaming_config=LazyFijiStreamingConfig() if enable_fiji else None
+                napari_streaming_config=LazyNapariStreamingConfig(port=5555, enabled=enable_napari),
+                fiji_streaming_config=LazyFijiStreamingConfig(enabled=enable_fiji)
             ),
             Step(
                 func=create_composite,
                 processing_config=LazyProcessingConfig(
                     variable_components=[VariableComponents.CHANNEL]
                 ),
-                napari_streaming_config=LazyNapariStreamingConfig(port=5557) if enable_napari else None,
-                fiji_streaming_config=LazyFijiStreamingConfig(port=5556) if enable_fiji else None
+                napari_streaming_config=LazyNapariStreamingConfig(port=5557, enabled=enable_napari),
+                fiji_streaming_config=LazyFijiStreamingConfig(port=5556, enabled=enable_fiji)
             ),
             Step(
                 name="Z-Stack Flattening",
@@ -269,9 +269,10 @@ def create_test_pipeline(enable_napari: bool = False, enable_fiji: bool = False,
                 ),
                 napari_streaming_config=LazyNapariStreamingConfig(
                     port=5559,
-                    variable_size_handling=NapariVariableSizeHandling.PAD_TO_MAX
-                ) if enable_napari else None,
-                fiji_streaming_config=LazyFijiStreamingConfig() if enable_fiji else None
+                    variable_size_handling=NapariVariableSizeHandling.PAD_TO_MAX,
+                    enabled=enable_napari
+                ),
+                fiji_streaming_config=LazyFijiStreamingConfig(enabled=enable_fiji)
             ),
         ],
         name=f"Multi-Subdirectory Test Pipeline{' (CPU-Only)' if cpu_only_mode else ''}",

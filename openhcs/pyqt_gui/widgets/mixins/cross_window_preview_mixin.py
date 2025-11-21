@@ -76,6 +76,7 @@ class CrossWindowPreviewMixin:
         )
 
         # Capture initial snapshot so first change has a baseline for flash detection
+        # scope_filter=None means no filtering (include ALL scopes: global + all plates)
         try:
             self._last_live_context_snapshot = ParameterFormManager.collect_live_context()
         except Exception:
@@ -699,9 +700,20 @@ class CrossWindowPreviewMixin:
             hasattr(self, '_pending_window_close_after_snapshot') and
             self._pending_window_close_before_snapshot is not None and
             self._pending_window_close_after_snapshot is not None):
-            logger.info(f"  - Using window_close snapshots: before={self._pending_window_close_before_snapshot.token}, after={self._pending_window_close_after_snapshot.token}")
-            logger.debug(f"🔍 {self.__class__.__name__}._check_resolved_values_changed_batch: before scoped_values keys: {list(self._pending_window_close_before_snapshot.scoped_values.keys()) if hasattr(self._pending_window_close_before_snapshot, 'scoped_values') else 'N/A'}")
-            logger.debug(f"🔍 {self.__class__.__name__}._check_resolved_values_changed_batch: after scoped_values keys: {list(self._pending_window_close_after_snapshot.scoped_values.keys()) if hasattr(self._pending_window_close_after_snapshot, 'scoped_values') else 'N/A'}")
+            logger.info(f"🔍 FLASH DETECTION: Using window_close snapshots: before={self._pending_window_close_before_snapshot.token}, after={self._pending_window_close_after_snapshot.token}")
+
+            # Log BEFORE snapshot contents WITH VALUES
+            logger.info(f"🔍 BEFORE SNAPSHOT (token={self._pending_window_close_before_snapshot.token}):")
+            logger.info(f"   values: {self._pending_window_close_before_snapshot.values}")
+            logger.info(f"   scoped_values: {self._pending_window_close_before_snapshot.scoped_values}")
+            logger.info(f"   scopes: {self._pending_window_close_before_snapshot.scopes}")
+
+            # Log AFTER snapshot contents WITH VALUES
+            logger.info(f"🔍 AFTER SNAPSHOT (token={self._pending_window_close_after_snapshot.token}):")
+            logger.info(f"   values: {self._pending_window_close_after_snapshot.values}")
+            logger.info(f"   scoped_values: {self._pending_window_close_after_snapshot.scoped_values}")
+            logger.info(f"   scopes: {self._pending_window_close_after_snapshot.scopes}")
+
             live_context_before = self._pending_window_close_before_snapshot
             live_context_after = self._pending_window_close_after_snapshot
             # Use window close changed fields if provided
@@ -711,6 +723,22 @@ class CrossWindowPreviewMixin:
             self._pending_window_close_before_snapshot = None
             self._pending_window_close_after_snapshot = None
             self._pending_window_close_changed_fields = None
+
+        # Log snapshots for normal typing (not window close)
+        if live_context_before is not None and live_context_after is not None:
+            logger.info(f"🔍 FLASH DETECTION (typing): Comparing snapshots: before={live_context_before.token}, after={live_context_after.token}")
+
+            # Log BEFORE snapshot contents WITH VALUES
+            logger.info(f"🔍 BEFORE SNAPSHOT (token={live_context_before.token}):")
+            logger.info(f"   values: {live_context_before.values}")
+            logger.info(f"   scoped_values: {live_context_before.scoped_values}")
+            logger.info(f"   scopes: {live_context_before.scopes}")
+
+            # Log AFTER snapshot contents WITH VALUES
+            logger.info(f"🔍 AFTER SNAPSHOT (token={live_context_after.token}):")
+            logger.info(f"   values: {live_context_after.values}")
+            logger.info(f"   scoped_values: {live_context_after.scoped_values}")
+            logger.info(f"   scopes: {live_context_after.scopes}")
 
         # If changed_fields is None, check ALL enabled preview fields (full refresh case)
         if changed_fields is None:

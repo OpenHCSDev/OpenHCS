@@ -57,23 +57,33 @@ class ListItemFlashAnimator:
         correct_color = self.item_type.get_background_color(color_scheme)
         logger.info(f"🔥 flash_update: correct_color={correct_color}, alpha={correct_color.alpha() if correct_color else None}")
 
+        if self._is_flashing:
+            # Already flashing - restart timer
+            logger.info(f"🔥 flash_update: Already flashing, restarting timer")
+            if self._flash_timer:
+                self._flash_timer.stop()
+                self._flash_timer.start(self.config.FLASH_DURATION_MS)
+            # Re-apply flash color
+            if correct_color is not None:
+                flash_color = QColor(correct_color)
+                flash_color.setAlpha(95)
+                logger.info(f"🔥 flash_update: Re-applying flash_color={flash_color.name()} alpha={flash_color.alpha()}")
+                item.setBackground(flash_color)
+                self.list_widget.update()
+            return
+
+        logger.info(f"🔥 flash_update: Starting NEW flash, duration={self.config.FLASH_DURATION_MS}ms")
+        # CRITICAL: Set _is_flashing BEFORE calling setBackground() to prevent delegate from overwriting
+        self._is_flashing = True
+
         if correct_color is not None:
             # Flash by increasing opacity to 100% (same color, just full opacity)
             flash_color = QColor(correct_color)
             flash_color.setAlpha(95)  # Full opacity
             logger.info(f"🔥 flash_update: Setting background to flash_color={flash_color.name()} alpha={flash_color.alpha()}")
             item.setBackground(flash_color)
-
-        if self._is_flashing:
-            # Already flashing - restart timer (flash color already re-applied above)
-            logger.info(f"🔥 flash_update: Already flashing, restarting timer")
-            if self._flash_timer:
-                self._flash_timer.stop()
-                self._flash_timer.start(self.config.FLASH_DURATION_MS)
-            return
-
-        logger.info(f"🔥 flash_update: Starting NEW flash, duration={self.config.FLASH_DURATION_MS}ms")
-        self._is_flashing = True
+            # CRITICAL: Force repaint so delegate sees the flash color immediately
+            self.list_widget.update()
 
         # Setup timer to restore correct background
         self._flash_timer = QTimer(self.list_widget)
@@ -99,6 +109,9 @@ class ListItemFlashAnimator:
         correct_color = self.item_type.get_background_color(color_scheme)
         logger.info(f"🔥 _restore_background: correct_color={correct_color}, alpha={correct_color.alpha() if correct_color else None}")
 
+        # CRITICAL: Set _is_flashing BEFORE calling setBackground() so delegate paints the restored color
+        self._is_flashing = False
+
         # Handle None (transparent) background
         if correct_color is None:
             logger.info(f"🔥 _restore_background: Setting transparent background")
@@ -107,7 +120,8 @@ class ListItemFlashAnimator:
             logger.info(f"🔥 _restore_background: Restoring to color={correct_color.name() if hasattr(correct_color, 'name') else correct_color}, alpha={correct_color.alpha()}")
             item.setBackground(correct_color)
 
-        self._is_flashing = False
+        # Force repaint to show restored color
+        self.list_widget.update()
         logger.info(f"🔥 _restore_background: Flash complete for row {self.row}")
 
 

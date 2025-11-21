@@ -42,11 +42,28 @@ class NoScrollComboBox(QComboBox):
 
     def setPlaceholder(self, text: str):
         """Set the placeholder text shown when currentIndex == -1."""
+        import logging
+        logger = logging.getLogger(__name__)
+
         self._placeholder = text
         # CRITICAL FIX: Update placeholder_active flag based on current index
         # This ensures placeholder renders even if setCurrentIndex(-1) was called before setPlaceholder()
         self._placeholder_active = (self.currentIndex() == -1)
+
+        # DEBUG: Log visibility and geometry
+        if 'INCLUDE' in text or 'IPC' in text:
+            logger.info(f"🔍 NoScrollComboBox.setPlaceholder: widget={self.objectName()}, text={text}, currentIndex={self.currentIndex()}, _placeholder_active={self._placeholder_active}, isVisible={self.isVisible()}, width={self.width()}, height={self.height()}")
+
         self.update()
+
+        # CRITICAL FIX: Force repaint even if widget is not visible yet
+        # This ensures placeholder renders when widget becomes visible
+        # Without this, sync widget creation doesn't show placeholders on initial window open
+        self.repaint()
+
+        # DEBUG: Check if update was called
+        if 'INCLUDE' in text or 'IPC' in text:
+            logger.info(f"🔍 NoScrollComboBox.setPlaceholder: AFTER update() and repaint() called")
 
     def setCurrentIndex(self, index: int):
         """Override to track when placeholder should be active."""
@@ -56,7 +73,18 @@ class NoScrollComboBox(QComboBox):
 
     def paintEvent(self, event):
         """Override to draw placeholder text when currentIndex == -1."""
+        import logging
+        logger = logging.getLogger(__name__)
+
+        # DEBUG: Log paintEvent calls for placeholders
+        if self._placeholder and ('INCLUDE' in self._placeholder or 'IPC' in self._placeholder):
+            logger.info(f"🔍 NoScrollComboBox.paintEvent: widget={self.objectName()}, _placeholder_active={self._placeholder_active}, currentIndex={self.currentIndex()}, _placeholder={self._placeholder}")
+
         if self._placeholder_active and self.currentIndex() == -1 and self._placeholder:
+            # DEBUG: Log that we're drawing placeholder
+            if 'INCLUDE' in self._placeholder or 'IPC' in self._placeholder:
+                logger.info(f"🔍 NoScrollComboBox.paintEvent: DRAWING PLACEHOLDER for {self.objectName()}")
+
             # Use regular QPainter to have full control over text rendering
             painter = QPainter(self)
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
