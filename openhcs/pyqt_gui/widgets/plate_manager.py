@@ -374,14 +374,10 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
                         config_before = self._get_preview_instance(pipeline_config, live_context_before, plate_path, type(pipeline_config))
                         config_after = self._get_preview_instance(pipeline_config, live_context_after, plate_path, type(pipeline_config))
 
-                        # Check if resolved values changed using mixin helper
-                        if self._check_resolved_value_changed(
-                            config_before,
-                            config_after,
-                            changed_fields,
-                            live_context_before=live_context_before,
-                            live_context_after=live_context_after,
-                        ):
+                        # PERFORMANCE: Compare preview instances directly instead of field-by-field resolution
+                        # Preview instances are already fully resolved, so comparing them is O(1)
+                        # vs O(N fields) for field-by-field getattr() traversal
+                        if config_before != config_after:
                             self._flash_plate_item(plate_path)
 
                 break

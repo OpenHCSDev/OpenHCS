@@ -1336,17 +1336,16 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
                 self._apply_step_item_styling(item)
 
             # Flash if any resolved value changed
+            # PERFORMANCE: Compare preview instances directly instead of field-by-field resolution
+            # Preview instances are already fully resolved (O(1) per step), so comparing them
+            # is much cheaper than doing getattr() traversal for each changed field (O(N fields))
             if changed_fields and live_context_before:
                 step_before = self._get_step_preview_instance(step, live_context_before)
                 step_after = self._get_step_preview_instance(step, live_context_snapshot)
 
-                if self._check_resolved_value_changed(
-                    step_before,
-                    step_after,
-                    changed_fields,
-                    live_context_before=live_context_before,
-                    live_context_after=live_context_snapshot,
-                ):
+                # Compare preview instances directly - if they're different, flash
+                # This is O(1) comparison vs O(N fields) field-by-field resolution
+                if step_before != step_after:
                     self._flash_step_item(step_index)
 
     def _apply_step_item_styling(self, item: QListWidgetItem) -> None:
