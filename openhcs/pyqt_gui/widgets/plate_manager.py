@@ -207,7 +207,7 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
             root_name='pipeline_config',
             editing_types=(PipelineConfig,),
             scope_resolver=self._resolve_pipeline_scope_from_config,
-            aliases=('PipelineConfig',),
+            aliases=(PipelineConfig.__name__,),  # GENERIC: Use __name__ instead of hardcoded string
             process_all_fields=True,
         )
 
@@ -215,7 +215,7 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
             root_name='global_config',
             editing_types=(GlobalPipelineConfig,),
             scope_resolver=lambda obj, ctx: self.ALL_ITEMS_SCOPE,
-            aliases=('GlobalPipelineConfig',),
+            aliases=(GlobalPipelineConfig.__name__,),  # GENERIC: Use __name__ instead of hardcoded string
             process_all_fields=True,
         )
 
@@ -538,16 +538,18 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         # DEBUG: Log the actual num_workers values in the snapshots
         if live_context_before and hasattr(live_context_before, 'scoped_values'):
             for scope_id, scoped_vals in live_context_before.scoped_values.items():
-                from openhcs.core.config import PipelineConfig
-                if PipelineConfig in scoped_vals:
-                    num_workers_before = scoped_vals[PipelineConfig].get('num_workers', 'NOT FOUND')
-                    logger.info(f"  - live_context_before[{scope_id}][PipelineConfig]['num_workers'] = {num_workers_before}")
+                # GENERIC: Log all config types in scoped values
+                for config_type, config_vals in scoped_vals.items():
+                    if isinstance(config_vals, dict) and 'num_workers' in config_vals:
+                        num_workers_before = config_vals.get('num_workers', 'NOT FOUND')
+                        logger.info(f"  - live_context_before[{scope_id}][{config_type.__name__}]['num_workers'] = {num_workers_before}")
         if live_context_after and hasattr(live_context_after, 'scoped_values'):
             for scope_id, scoped_vals in live_context_after.scoped_values.items():
-                from openhcs.core.config import PipelineConfig
-                if PipelineConfig in scoped_vals:
-                    num_workers_after = scoped_vals[PipelineConfig].get('num_workers', 'NOT FOUND')
-                    logger.info(f"  - live_context_after[{scope_id}][PipelineConfig]['num_workers'] = {num_workers_after}")
+                # GENERIC: Log all config types in scoped values
+                for config_type, config_vals in scoped_vals.items():
+                    if isinstance(config_vals, dict) and 'num_workers' in config_vals:
+                        num_workers_after = config_vals.get('num_workers', 'NOT FOUND')
+                        logger.info(f"  - live_context_after[{scope_id}][{config_type.__name__}]['num_workers'] = {num_workers_after}")
 
         should_flash_list = self._check_resolved_values_changed_batch(
             config_pairs,
@@ -651,11 +653,13 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
 
             # Check if PipelineConfig has unsaved changes
             # PERFORMANCE: Pass changed_fields to only check relevant configs
-            # CRITICAL: Pass live_context_snapshot to avoid stale data during coordinated updates
+            # CRITICAL: Don't pass live_context_snapshot - let the check collect its own with the correct scope filter
+            # The snapshot from _process_pending_preview_updates has scope_filter=None (only global managers),
+            # but the unsaved changes check needs scope_filter=plate_path to see scoped PipelineConfig values
             has_unsaved_changes = self._check_pipeline_config_has_unsaved_changes(
                 orchestrator,
                 changed_fields=changed_fields,
-                live_context_snapshot=live_context_snapshot
+                live_context_snapshot=None  # Force collection with correct scope filter
             )
 
         # Line 1: [status] before plate name (user requirement)
@@ -789,24 +793,13 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         if not hasattr(self, '_original_pipeline_config_values'):
             self._original_pipeline_config_values = {}
 
-        if not hasattr(self, '_baseline_capture_tokens'):
-            self._baseline_capture_tokens = {}
-
         plate_path_key = orchestrator.plate_path
 
-        # CRITICAL: Check if baseline needs recapture due to token change
-        # This handles the case where global config was loaded after the plate was first loaded
-        current_token = ParameterFormManager._live_context_token_counter
-        needs_recapture = (
-            plate_path_key not in self._original_pipeline_config_values or
-            self._baseline_capture_tokens.get(plate_path_key) != current_token
-        )
-
-        if needs_recapture:
-            if plate_path_key in self._original_pipeline_config_values:
-                logger.info(f"🔄 Token changed, recapturing baseline for plate {plate_path_key} (old token={self._baseline_capture_tokens.get(plate_path_key)}, new token={current_token})")
-            else:
-                logger.warning(f"⚠️ Original values not captured for plate {plate_path_key}, capturing now")
+        # CRITICAL: Only capture baseline if it doesn't exist yet
+        # DO NOT recapture based on token changes - token changes on EVERY keystroke!
+        # Baseline should only be recaptured on explicit save/reset via force_recapture=True
+        if plate_path_key not in self._original_pipeline_config_values:
+            logger.warning(f"⚠️ Original values not captured for plate {plate_path_key}, capturing now")
             self._capture_original_pipeline_config_values(orchestrator)
 
         # Get the raw pipeline_config (SAVED values, not merged with live)
@@ -859,10 +852,12 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         scope_id = str(orchestrator.plate_path)
         if scope_id in live_context_snapshot.scoped_values:
             scoped_data = live_context_snapshot.scoped_values[scope_id]
-            if PipelineConfig in scoped_data:
-                logger.info(f"🔍 DEBUG: Live values for PipelineConfig in scope {scope_id}: {scoped_data[PipelineConfig]}")
+            # GENERIC: Log all config types in scoped data
+            pipeline_config_type = type(pipeline_config)
+            if pipeline_config_type in scoped_data:
+                logger.info(f"🔍 DEBUG: Live values for {pipeline_config_type.__name__} in scope {scope_id}: {scoped_data[pipeline_config_type]}")
             else:
-                logger.info(f"🔍 DEBUG: No PipelineConfig in scoped_data for scope {scope_id}, keys: {list(scoped_data.keys())}")
+                logger.info(f"🔍 DEBUG: No {pipeline_config_type.__name__} in scoped_data for scope {scope_id}, keys: {[t.__name__ for t in scoped_data.keys()]}")
         else:
             logger.info(f"🔍 DEBUG: No scoped_values for scope {scope_id}, available scopes: {list(live_context_snapshot.scoped_values.keys())}")
 
@@ -924,8 +919,8 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
                 if raw_value is None:
                     # Case 1: Raw lazy instance, resolve from context (same as baseline capture)
                     from openhcs.config_framework.context_manager import config_context
-                    scope_id_for_comparison = str(orchestrator.plate_path)
-                    with config_context(pipeline_config_preview, scope_id=scope_id_for_comparison):
+                    # Use orchestrator as context_provider
+                    with config_context(pipeline_config_preview, context_provider=orchestrator):
                         live_value = getattr(pipeline_config_preview, field_name)
                 else:
                     # Case 2: Merged instance with explicit value, use it directly
@@ -966,28 +961,23 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         if not hasattr(self, '_original_pipeline_config_values'):
             self._original_pipeline_config_values = {}
 
-        if not hasattr(self, '_baseline_capture_tokens'):
-            self._baseline_capture_tokens = {}
-
         plate_path_key = orchestrator.plate_path
 
-        # CRITICAL: Check if baseline needs recapture due to token change
-        # If the token has changed since baseline was captured, the global config may have been loaded
-        # and we need to recapture with the correct values
-        current_token = ParameterFormManager._live_context_token_counter
+        # CRITICAL: Only recapture if baseline doesn't exist OR force_recapture=True
+        # DO NOT recapture based on token changes - token changes on EVERY keystroke!
+        # The token is NOT a "global config version" - it increments on every parameter change
         needs_recapture = (
             force_recapture or
-            plate_path_key not in self._original_pipeline_config_values or
-            self._baseline_capture_tokens.get(plate_path_key) != current_token
+            plate_path_key not in self._original_pipeline_config_values
         )
 
         if not needs_recapture:
             return
 
-        if plate_path_key in self._original_pipeline_config_values:
-            logger.info(f"🔄 Recapturing baseline for plate {plate_path_key} (token changed: {self._baseline_capture_tokens.get(plate_path_key)} → {current_token})")
+        if force_recapture:
+            logger.info(f"🔄 Force recapturing baseline for plate {plate_path_key}")
         else:
-            logger.info(f"🔍 _capture_original_pipeline_config_values: Capturing baseline for plate {plate_path_key} (token={current_token})")
+            logger.info(f"🔍 _capture_original_pipeline_config_values: Capturing baseline for plate {plate_path_key}")
 
         # Check ambient GlobalPipelineConfig context
         from openhcs.config_framework.global_config import get_current_global_config
@@ -1024,7 +1014,6 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         # Activate context with plate scope so lazy resolution works
         # config_context() automatically merges with base global config from thread-local storage
         # This makes GlobalPipelineConfig values (including default_factory fields) available
-        scope_id = str(plate_path_key)
 
         # DEBUG: Check what's in the context before resolution
         from openhcs.config_framework.context_manager import get_current_temp_global, get_base_global_config
@@ -1033,7 +1022,8 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         debug_current = get_current_temp_global()
         logger.info(f"🔍 DEBUG baseline capture: get_current_temp_global() = {debug_current is not None}")
 
-        with config_context(baseline_config, scope_id=scope_id):
+        # Use orchestrator as context_provider (we have it from line 1016!)
+        with config_context(baseline_config, context_provider=orchestrator):
             # DEBUG: Check context inside config_context block
             debug_context_inside = get_current_temp_global()
             logger.info(f"🔍 DEBUG inside config_context: get_current_temp_global().num_workers = {getattr(debug_context_inside, 'num_workers', 'NOT FOUND')}")
@@ -1042,8 +1032,13 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
             from openhcs.config_framework.context_manager import current_extracted_configs
             debug_available = current_extracted_configs.get()
             logger.info(f"🔍 DEBUG available_configs keys = {list(debug_available.keys()) if debug_available else 'NONE'}")
-            if debug_available and 'GlobalPipelineConfig' in debug_available:
-                logger.info(f"🔍 DEBUG GlobalPipelineConfig.num_workers in available_configs = {getattr(debug_available['GlobalPipelineConfig'], 'num_workers', 'NOT FOUND')}")
+            # GENERIC: Find global config in available_configs by checking isinstance
+            if debug_available:
+                from openhcs.config_framework.lazy_factory import is_global_config_instance
+                for config_name, config_obj in debug_available.items():
+                    if is_global_config_instance(config_obj):
+                        logger.info(f"🔍 DEBUG {config_name}.num_workers in available_configs = {getattr(config_obj, 'num_workers', 'NOT FOUND')}")
+                        break
 
             for field in dataclasses.fields(baseline_config):
                 field_name = field.name
@@ -1054,10 +1049,7 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
                 self._original_pipeline_config_values[plate_path_key][field_name] = resolved_value
                 logger.info(f"🔍 _capture_original_pipeline_config_values: {field_name} = {resolved_value} (raw={raw_value})")
 
-        # CRITICAL: Store the token when baseline was captured
-        # This allows us to detect when the global config has been loaded and recapture
-        self._baseline_capture_tokens[plate_path_key] = current_token
-        logger.info(f"✅ Baseline captured for plate {plate_path_key} with token={current_token}")
+        logger.info(f"✅ Baseline captured for plate {plate_path_key}")
 
     def _apply_orchestrator_item_styling(self, item: QListWidgetItem, plate: Dict) -> None:
         """Apply scope-based background color and border to orchestrator list item.
@@ -3015,8 +3007,9 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
 
                     # CRITICAL: Trigger cross-window refresh for all open config windows
                     # This ensures Step editors, PipelineConfig editors, etc. see the code editor changes
+                    # GlobalPipelineConfig has scope_id=None, so this refreshes ALL managers (correct)
                     from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
-                    ParameterFormManager.trigger_global_cross_window_refresh()
+                    ParameterFormManager.trigger_global_cross_window_refresh(source_scope_id=None)
                     logger.debug("Triggered global cross-window refresh after global config update")
 
                 # Handle per-plate configs (preferred) or single pipeline_config (legacy)
@@ -3051,9 +3044,13 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
                         self._broadcast_config_to_event_bus(last_pipeline_config)
 
                         # CRITICAL: Trigger cross-window refresh for all open config windows
+                        # PipelineConfig has plate_path scope, so this only refreshes plate and step managers
+                        # GlobalPipelineConfig will NOT be refreshed (correct - prevents upward contamination)
                         from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
-                        ParameterFormManager.trigger_global_cross_window_refresh()
-                        logger.debug("Triggered global cross-window refresh after per-plate pipeline config update")
+                        # Use the plate_path from the last config as source_scope_id
+                        source_scope_id = str(plate_key) if plate_key else None
+                        ParameterFormManager.trigger_global_cross_window_refresh(source_scope_id=source_scope_id)
+                        logger.debug(f"Triggered global cross-window refresh after per-plate pipeline config update (source_scope={source_scope_id})")
                 elif 'pipeline_config' in namespace:
                     # Legacy single pipeline_config for all plates
                     new_pipeline_config = namespace['pipeline_config']
@@ -3064,9 +3061,11 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
 
                     # CRITICAL: Trigger cross-window refresh for all open config windows
                     # This ensures Step editors, PipelineConfig editors, etc. see the code editor changes
+                    # Legacy mode: use selected plate path as source scope if available
                     from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
-                    ParameterFormManager.trigger_global_cross_window_refresh()
-                    logger.debug("Triggered global cross-window refresh after pipeline config update")
+                    source_scope_id = str(self.selected_plate_path) if self.selected_plate_path else None
+                    ParameterFormManager.trigger_global_cross_window_refresh(source_scope_id=source_scope_id)
+                    logger.debug(f"Triggered global cross-window refresh after pipeline config update (source_scope={source_scope_id})")
 
                     # Apply the new pipeline config to all affected orchestrators
                     for plate_path in new_plate_paths:

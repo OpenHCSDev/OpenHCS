@@ -313,8 +313,8 @@ class DualEditorWindow(BaseOpenHCSWindow):
         from openhcs.config_framework.context_manager import config_context
 
         try:
-            with config_context(self.orchestrator.pipeline_config):
-                with config_context(self.editing_step):
+            with config_context(self.orchestrator.pipeline_config, context_provider=self.orchestrator):
+                with config_context(self.editing_step, context_provider=self.orchestrator):
                     # Extract group_by from processing_config (lazy resolution happens here)
                     group_by = self.editing_step.processing_config.group_by
 

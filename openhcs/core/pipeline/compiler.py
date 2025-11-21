@@ -375,12 +375,20 @@ class PipelineCompiler:
         from openhcs.config_framework.context_manager import config_context
 
         # Resolve each step individually with nested context (pipeline -> step)
-        # NOTE: The caller has already set up config_context(orchestrator.pipeline_config)
+        # NOTE: The caller has already set up config_context(orchestrator.pipeline_config, context_provider=orchestrator)
         # We add step-level context on top for each step
         resolved_steps = []
         for step in steps_definition:
-            with config_context(step):  # Step-level context on top of pipeline context
+            logger.info(f"🔍 COMPILER: Before resolution - step '{step.name}' processing_config type = {type(step.processing_config).__name__}")
+            logger.info(f"🔍 COMPILER: Before resolution - step '{step.name}' processing_config.variable_components = {step.processing_config.variable_components}")
+            napari_before = step.napari_streaming_config.enabled if hasattr(step, 'napari_streaming_config') else 'N/A'
+            logger.info(f"🔍 COMPILER: Before resolution - step '{step.name}' napari_streaming_config.enabled = {napari_before}")
+            with config_context(step, context_provider=orchestrator):  # Step-level context on top of pipeline context
                 resolved_step = resolve_lazy_configurations_for_serialization(step)
+                logger.info(f"🔍 COMPILER: After resolution - step '{resolved_step.name}' processing_config type = {type(resolved_step.processing_config).__name__}")
+                logger.info(f"🔍 COMPILER: After resolution - step '{resolved_step.name}' processing_config.variable_components = {resolved_step.processing_config.variable_components}")
+                napari_after = resolved_step.napari_streaming_config.enabled if hasattr(resolved_step, 'napari_streaming_config') else 'N/A'
+                logger.info(f"🔍 COMPILER: After resolution - step '{resolved_step.name}' napari_streaming_config.enabled = {napari_after}")
                 resolved_steps.append(resolved_step)
         steps_definition = resolved_steps
 
@@ -913,7 +921,7 @@ class PipelineCompiler:
                 # Log dtype_config hierarchy BEFORE resolution
                 logger.info(f"  - Step.dtype_config = {step.dtype_config}")
 
-                with config_context(step):  # Add step context on top of pipeline context
+                with config_context(step, context_provider=orchestrator):  # Add step context on top of pipeline context
                     # Resolve this step's plan with full hierarchy
                     resolved_plan = resolve_lazy_configurations_for_serialization(context.step_plans[step_index])
                     context.step_plans[step_index] = resolved_plan
@@ -1058,6 +1066,14 @@ class PipelineCompiler:
         from openhcs.constants.constants import OrchestratorState
         from openhcs.core.pipeline.step_attribute_stripper import StepAttributeStripper
 
+        # Log the RAW pipeline_definition at the very start
+        logger.info(f"🔍 COMPILER ENTRY: Received {len(pipeline_definition)} steps")
+        for i, step in enumerate(pipeline_definition):
+            if hasattr(step, 'napari_streaming_config'):
+                raw_napari = object.__getattribute__(step, 'napari_streaming_config')
+                raw_enabled = object.__getattribute__(raw_napari, 'enabled')
+                logger.info(f"🔍 COMPILER ENTRY: Step {i} '{step.name}' RAW napari_streaming_config.enabled = {raw_enabled}")
+
         if not orchestrator.is_initialized():
             raise RuntimeError("PipelineOrchestrator must be explicitly initialized before calling compile_pipelines().")
 
@@ -1132,7 +1148,7 @@ class PipelineCompiler:
             # This preserves metadata coherence (ROIs must match image structure they were created from)
             # CRITICAL: Must be inside config_context() for lazy resolution of .enabled field
             from openhcs.config_framework.context_manager import config_context
-            with config_context(orchestrator.pipeline_config):
+            with config_context(orchestrator.pipeline_config, context_provider=orchestrator):
                 PipelineCompiler.ensure_analysis_materialization(pipeline_definition)
 
             # === BACKEND COMPATIBILITY VALIDATION ===
@@ -1148,9 +1164,19 @@ class PipelineCompiler:
             # Resolve each step with nested context (same as initialize_step_plans_for_context)
             # This ensures step-level configs inherit from pipeline-level configs
             resolved_steps_for_filters = []
-            with config_context(orchestrator.pipeline_config):
+            logger.info(f"🔍 COMPILER: About to resolve {len(pipeline_definition)} steps for axis filters")
+            for i, step in enumerate(pipeline_definition):
+                logger.info(f"🔍 COMPILER: pipeline_definition[{i}] '{step.name}' processing_config.variable_components = {step.processing_config.variable_components}")
+                if hasattr(step, 'napari_streaming_config'):
+                    # Use object.__getattribute__ to bypass lazy resolution and see the RAW value
+                    raw_napari_config = object.__getattribute__(step, 'napari_streaming_config')
+                    logger.info(f"🔍 COMPILER: pipeline_definition[{i}] '{step.name}' RAW napari_streaming_config = {raw_napari_config}")
+                    logger.info(f"🔍 COMPILER: pipeline_definition[{i}] '{step.name}' RAW napari_streaming_config.enabled = {object.__getattribute__(raw_napari_config, 'enabled')}")
+                napari_enabled = step.napari_streaming_config.enabled if hasattr(step, 'napari_streaming_config') else 'N/A'
+                logger.info(f"🔍 COMPILER: pipeline_definition[{i}] '{step.name}' napari_streaming_config.enabled (resolved) = {napari_enabled}")
+            with config_context(orchestrator.pipeline_config, context_provider=orchestrator):
                 for step in pipeline_definition:
-                    with config_context(step):  # Step-level context on top of pipeline context
+                    with config_context(step, context_provider=orchestrator):  # Step-level context on top of pipeline context
                         resolved_step = resolve_lazy_configurations_for_serialization(step)
                         resolved_steps_for_filters.append(resolved_step)
 
@@ -1160,7 +1186,7 @@ class PipelineCompiler:
             # Use orchestrator context during axis filter resolution
             # This ensures that lazy config resolution uses the orchestrator context
             from openhcs.config_framework.context_manager import config_context
-            with config_context(orchestrator.pipeline_config):
+            with config_context(orchestrator.pipeline_config, context_provider=orchestrator):
                 _resolve_step_axis_filters(resolved_steps_for_filters, temp_context, orchestrator)
             global_step_axis_filters = getattr(temp_context, 'step_axis_filters', {})
 
@@ -1178,7 +1204,7 @@ class PipelineCompiler:
 
                 # CRITICAL: Wrap all compilation steps in config_context() for lazy resolution
                 from openhcs.config_framework.context_manager import config_context
-                with config_context(orchestrator.pipeline_config):
+                with config_context(orchestrator.pipeline_config, context_provider=orchestrator):
                     # Validate sequential components compatibility BEFORE analyzing sequential mode
                     seq_config = temp_context.global_config.sequential_processing_config
                     if seq_config and seq_config.sequential_components:
@@ -1203,7 +1229,7 @@ class PipelineCompiler:
                         context.pipeline_sequential_combinations = combinations
                         context.current_sequential_combination = combo
 
-                        with config_context(orchestrator.pipeline_config):
+                        with config_context(orchestrator.pipeline_config, context_provider=orchestrator):
                             resolved_steps = PipelineCompiler.initialize_step_plans_for_context(context, pipeline_definition, orchestrator, metadata_writer=is_responsible, plate_path=orchestrator.plate_path)
                             PipelineCompiler.declare_zarr_stores_for_context(context, resolved_steps, orchestrator)
                             PipelineCompiler.plan_materialization_flags_for_context(context, resolved_steps, orchestrator)
@@ -1224,7 +1250,9 @@ class PipelineCompiler:
                     context = orchestrator.create_context(axis_id)
                     context.step_axis_filters = global_step_axis_filters
 
-                    with config_context(orchestrator.pipeline_config):
+                    logger.info(f"🔍 COMPILER: orchestrator.pipeline_config.processing_config.variable_components = {orchestrator.pipeline_config.processing_config.variable_components}")
+                    logger.info(f"🔍 COMPILER: orchestrator.pipeline_config.napari_streaming_config.enabled = {orchestrator.pipeline_config.napari_streaming_config.enabled}")
+                    with config_context(orchestrator.pipeline_config, context_provider=orchestrator):
                         resolved_steps = PipelineCompiler.initialize_step_plans_for_context(context, pipeline_definition, orchestrator, metadata_writer=is_responsible, plate_path=orchestrator.plate_path)
                         PipelineCompiler.declare_zarr_stores_for_context(context, resolved_steps, orchestrator)
                         PipelineCompiler.plan_materialization_flags_for_context(context, resolved_steps, orchestrator)

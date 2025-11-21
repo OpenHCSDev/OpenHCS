@@ -514,8 +514,13 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
             is_live_context = (context.token == live_context_snapshot.token)
             step_to_use = step_preview if is_live_context else original_step
 
-            return self._resolve_config_attr(step_to_use, config_obj, attr_name, context)
+            logger.info(f"🔍 resolve_attr: attr_name={attr_name}, context.token={context.token}, live_token={live_context_snapshot.token}, is_live={is_live_context}, step_to_use={'PREVIEW' if is_live_context else 'ORIGINAL'}")
 
+            result = self._resolve_config_attr(step_to_use, config_obj, attr_name, context)
+            logger.info(f"🔍 resolve_attr: attr_name={attr_name} resolved to {result}")
+            return result
+
+        logger.info(f"🔍 _format_resolved_step_for_display: About to call check_step_has_unsaved_changes for step {getattr(original_step, 'name', 'unknown')}")
         has_unsaved = check_step_has_unsaved_changes(
             original_step,  # Use ORIGINAL step as parent_obj (for field extraction)
             self.STEP_CONFIG_INDICATORS,
@@ -524,6 +529,7 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
             scope_filter=self.current_plate,  # CRITICAL: Pass scope filter
             saved_context_snapshot=saved_context_snapshot  # PERFORMANCE: Reuse saved snapshot
         )
+        logger.info(f"🔍 _format_resolved_step_for_display: check_step_has_unsaved_changes returned {has_unsaved} for step {getattr(original_step, 'name', 'unknown')}")
 
         logger.info(f"🔍 _format_resolved_step_for_display: step_name={step_name}, has_unsaved={has_unsaved}")
 
@@ -785,12 +791,88 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
             with self._patch_lazy_constructors():
                 exec(python_code, namespace)
 
+            # DEBUG: Check what VariableComponents values are in namespace
+            if 'VariableComponents' in namespace:
+                vc = namespace['VariableComponents']
+                logger.info(f"🔍 AUTO: VariableComponents.CHANNEL = {vc.CHANNEL}")
+                logger.info(f"🔍 AUTO: VariableComponents.Z_INDEX = {vc.Z_INDEX}")
+                logger.info(f"🔍 AUTO: VariableComponents.SITE = {vc.SITE}")
+
+            # DEBUG: Check LazyProcessingConfig class ID
+            if 'LazyProcessingConfig' in namespace:
+                lpc = namespace['LazyProcessingConfig']
+                logger.info(f"🔍 AUTO: LazyProcessingConfig class id={id(lpc)}")
+                logger.info(f"🔍 AUTO: LazyProcessingConfig.__init__ = {lpc.__init__}")
+                logger.info(f"🔍 AUTO: LazyProcessingConfig has __deepcopy__? {hasattr(lpc, '__deepcopy__')}")
+                if hasattr(lpc, '__deepcopy__'):
+                    logger.info(f"🔍 AUTO: LazyProcessingConfig.__deepcopy__ = {lpc.__deepcopy__}")
+
             # Get the pipeline_steps from the namespace
             if 'pipeline_steps' in namespace:
                 new_pipeline_steps = namespace['pipeline_steps']
+
+                # DEBUG: Check what values the steps have right after exec
+                for i, step in enumerate(new_pipeline_steps):
+                    if hasattr(step, 'processing_config') and step.processing_config:
+                        pc = step.processing_config
+                        # Use object.__getattribute__ to get RAW value
+                        raw_vc = object.__getattribute__(pc, 'variable_components')
+                        logger.info(f"🔍 AUTO: Step {i} RAW variable_components = {raw_vc}")
+
+                        # Test if deepcopy calls __deepcopy__
+                        if i == 1:  # Test on step 1 which has CHANNEL
+                            import copy
+                            logger.info(f"🔍 AUTO: Testing deepcopy on step {i} processing_config")
+                            logger.info(f"🔍 AUTO: pc has __deepcopy__? {hasattr(pc, '__deepcopy__')}")
+                            copied_pc = copy.deepcopy(pc)
+                            copied_raw_vc = object.__getattribute__(copied_pc, 'variable_components')
+                            logger.info(f"🔍 AUTO: After deepcopy processing_config, RAW variable_components = {copied_raw_vc}")
+
+                            # Now test deepcopy on the entire step
+                            logger.info(f"🔍 AUTO: Testing deepcopy on entire step {i}")
+                            copied_step = copy.deepcopy(step)
+                            copied_step_pc = copied_step.processing_config
+                            if copied_step_pc:
+                                copied_step_raw_vc = object.__getattribute__(copied_step_pc, 'variable_components')
+                                logger.info(f"🔍 AUTO: After deepcopy step, RAW variable_components = {copied_step_raw_vc}")
+                                # Check tracking attributes
+                                try:
+                                    tracking = object.__getattribute__(copied_step_pc, '_explicitly_set_fields')
+                                    logger.info(f"🔍 AUTO: After deepcopy step, _explicitly_set_fields = {tracking}")
+                                except AttributeError:
+                                    logger.info(f"🔍 AUTO: After deepcopy step, _explicitly_set_fields MISSING!")
+
+                                # Now test RESOLVED value (using normal getattr, which triggers lazy resolution)
+                                resolved_vc = copied_step_pc.variable_components
+                                logger.info(f"🔍 AUTO: After deepcopy step, RESOLVED variable_components = {resolved_vc}")
+
                 # Update the pipeline with new steps
                 self.pipeline_steps = new_pipeline_steps
+
+                # DEBUG: Check RAW values BEFORE normalize
+                for i, step in enumerate(self.pipeline_steps):
+                    if hasattr(step, 'processing_config') and step.processing_config:
+                        pc = step.processing_config
+                        raw_vc = object.__getattribute__(pc, 'variable_components')
+                        logger.info(f"🔍 AUTO: BEFORE normalize - Step {i} RAW variable_components = {raw_vc}")
+
                 self._normalize_step_scope_tokens()
+
+                # DEBUG: Check RAW values AFTER normalize
+                for i, step in enumerate(self.pipeline_steps):
+                    if hasattr(step, 'processing_config') and step.processing_config:
+                        pc = step.processing_config
+                        raw_vc = object.__getattribute__(pc, 'variable_components')
+                        logger.info(f"🔍 AUTO: AFTER normalize - Step {i} RAW variable_components = {raw_vc}")
+
+                # CRITICAL: Increment token to invalidate cache after loading new pipeline
+                # Auto-loading creates new step instances with different config values,
+                # but doesn't open any parameter forms, so the token doesn't get incremented automatically.
+                # Without this, the cache returns stale values from the previous pipeline.
+                from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+                ParameterFormManager._live_context_token_counter += 1
+                logger.info(f"🔍 AUTO: Incremented token to {ParameterFormManager._live_context_token_counter} after loading pipeline")
+
                 self.update_step_list()
                 self.pipeline_changed.emit(self.pipeline_steps)
                 self.status_message.emit(f"Auto-loaded {len(new_pipeline_steps)} steps from basic_pipeline.py")
@@ -1036,8 +1118,24 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
             return None
 
         try:
+            logger.info(f"🔍 _build_context_stack_with_live_values: Building context stack for step {getattr(step, 'name', 'unknown')}")
+            logger.info(f"🔍 _build_context_stack_with_live_values: live_context_snapshot.token={live_context_snapshot.token if live_context_snapshot else None}")
+
             # Get preview instances with scoped live values merged
             pipeline_config = self._get_pipeline_config_preview_instance(live_context_snapshot) or orchestrator.pipeline_config
+            logger.info(f"🔍 _build_context_stack_with_live_values: pipeline_config type={type(pipeline_config).__name__}, id={id(pipeline_config)}")
+
+            # Check if pipeline_config has well_filter_config
+            if hasattr(pipeline_config, 'well_filter_config'):
+                wfc = pipeline_config.well_filter_config
+                logger.info(f"🔍 _build_context_stack_with_live_values: pipeline_config.well_filter_config type={type(wfc).__name__}")
+                # Get RAW value without triggering lazy resolution
+                try:
+                    raw_well_filter = object.__getattribute__(wfc, 'well_filter')
+                    logger.info(f"🔍 _build_context_stack_with_live_values: pipeline_config.well_filter_config.well_filter (RAW) = {raw_well_filter}")
+                except AttributeError:
+                    logger.info(f"🔍 _build_context_stack_with_live_values: pipeline_config.well_filter_config.well_filter (RAW) = N/A")
+
             global_config = self._get_global_config_preview_instance(live_context_snapshot)
             if global_config is None:
                 global_config = get_current_global_config(GlobalPipelineConfig)
@@ -1051,6 +1149,7 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
                 step_preview = self._get_step_preview_instance(step, live_context_snapshot)
 
             # Build context stack: GlobalPipelineConfig → PipelineConfig → Step (with live values)
+            logger.info(f"🔍 _build_context_stack_with_live_values: Context stack built: [GlobalPipelineConfig, PipelineConfig(id={id(pipeline_config)}), Step]")
             return [global_config, pipeline_config, step_preview]
 
         except Exception:
@@ -1217,11 +1316,17 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
 
     def _get_step_preview_instance(self, step: FunctionStep, live_context_snapshot) -> FunctionStep:
         """Return a step instance that includes any live overrides for previews."""
+        logger.info(f"🔍 PREVIEW: _get_step_preview_instance called for step {step.name}")
+        logger.info(f"🔍 PREVIEW: live_context_snapshot = {live_context_snapshot}")
+
         if live_context_snapshot is None:
+            logger.info(f"🔍 PREVIEW: Returning step early - no live context snapshot")
             return step
 
         token = getattr(live_context_snapshot, 'token', None)
+        logger.info(f"🔍 PREVIEW: token = {token}")
         if token is None:
+            logger.info(f"🔍 PREVIEW: Returning step early - no token")
             return step
 
         # Token-based caching to avoid redundant merges
@@ -1234,6 +1339,12 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         if cached_step is not None:
             return cached_step
 
+        # DEBUG: Check RAW value BEFORE merge
+        if hasattr(step, 'processing_config') and step.processing_config:
+            pc = step.processing_config
+            raw_vc = object.__getattribute__(pc, 'variable_components')
+            logger.info(f"🔍 PREVIEW: BEFORE merge - step {step.name} RAW variable_components = {raw_vc}")
+
         # Use generic helper to merge scoped live values
         scope_id = self._build_step_scope_id(step)
         merged_step = self._get_preview_instance_generic(
@@ -1243,6 +1354,12 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
             live_context_snapshot=live_context_snapshot,
             use_global_values=False
         )
+
+        # DEBUG: Check RAW value AFTER merge
+        if hasattr(merged_step, 'processing_config') and merged_step.processing_config:
+            pc = merged_step.processing_config
+            raw_vc = object.__getattribute__(pc, 'variable_components')
+            logger.info(f"🔍 PREVIEW: AFTER merge - step {merged_step.name} RAW variable_components = {raw_vc}")
 
         self._preview_step_cache[cache_key] = merged_step
         return merged_step
@@ -1310,32 +1427,56 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
             return None
 
         pipeline_config = orchestrator.pipeline_config
+        logger.info(f"🔍 _get_pipeline_config_preview_instance: Original pipeline_config id={id(pipeline_config)}")
+
         if not self.current_plate:
+            logger.info(f"🔍 _get_pipeline_config_preview_instance: No current_plate, returning original")
             return pipeline_config
 
         if live_context_snapshot is None:
+            logger.info(f"🔍 _get_pipeline_config_preview_instance: No live_context_snapshot, returning original")
             return pipeline_config
+
+        logger.info(f"🔍 _get_pipeline_config_preview_instance: live_context_snapshot.token={live_context_snapshot.token}")
 
         # Step 1: Get scoped PipelineConfig values (from PipelineConfig editor)
         scope_id = self.current_plate
         scoped_values = getattr(live_context_snapshot, 'scoped_values', {}) or {}
         scope_entries = scoped_values.get(scope_id, {})
         pipeline_config_live_values = scope_entries.get(type(pipeline_config), {})
+        logger.info(f"🔍 _get_pipeline_config_preview_instance: Scoped PipelineConfig live values: {list(pipeline_config_live_values.keys()) if pipeline_config_live_values else 'EMPTY'}")
 
         # Step 2: Get global GlobalPipelineConfig values (from GlobalPipelineConfig editor)
         global_values = getattr(live_context_snapshot, 'values', {}) or {}
         global_config_live_values = global_values.get(GlobalPipelineConfig, {})
+        logger.info(f"🔍 _get_pipeline_config_preview_instance: Global GlobalPipelineConfig live values: {list(global_config_live_values.keys()) if global_config_live_values else 'EMPTY'}")
 
         # Step 3: Merge global values first, then scoped values (scoped overrides global)
         merged_live_values = {}
         merged_live_values.update(global_config_live_values)  # Global values first
         merged_live_values.update(pipeline_config_live_values)  # Scoped values override
+        logger.info(f"🔍 _get_pipeline_config_preview_instance: Merged live values: {list(merged_live_values.keys()) if merged_live_values else 'EMPTY'}")
 
         if not merged_live_values:
+            logger.info(f"🔍 _get_pipeline_config_preview_instance: No merged values, returning original pipeline_config")
             return pipeline_config
 
         # Step 4: Merge into PipelineConfig instance
-        return self._merge_with_live_values(pipeline_config, merged_live_values)
+        logger.info(f"🔍 _get_pipeline_config_preview_instance: Merging live values into pipeline_config")
+        merged_config = self._merge_with_live_values(pipeline_config, merged_live_values)
+        logger.info(f"🔍 _get_pipeline_config_preview_instance: Merged config id={id(merged_config)}")
+
+        # Check merged config's well_filter_config
+        if hasattr(merged_config, 'well_filter_config'):
+            wfc = merged_config.well_filter_config
+            logger.info(f"🔍 _get_pipeline_config_preview_instance: merged_config.well_filter_config type={type(wfc).__name__}")
+            try:
+                raw_well_filter = object.__getattribute__(wfc, 'well_filter')
+                logger.info(f"🔍 _get_pipeline_config_preview_instance: merged_config.well_filter_config.well_filter (RAW) = {raw_well_filter}")
+            except AttributeError:
+                logger.info(f"🔍 _get_pipeline_config_preview_instance: merged_config.well_filter_config.well_filter (RAW) = N/A")
+
+        return merged_config
 
     def _get_global_config_preview_instance(self, live_context_snapshot):
         """Return global config merged with live overrides.
@@ -1793,6 +1934,16 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
             from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
             with timer("  collect_live_context", threshold_ms=1.0):
                 live_context_snapshot = ParameterFormManager.collect_live_context(scope_filter=self.current_plate)
+
+            # DEBUG: Check what's in the live context snapshot
+            if live_context_snapshot:
+                logger.info(f"🔍 UPDATE_STEP_LIST: Live context token = {getattr(live_context_snapshot, 'token', None)}")
+                scoped_values = getattr(live_context_snapshot, 'scoped_values', {})
+                logger.info(f"🔍 UPDATE_STEP_LIST: Scoped values keys = {list(scoped_values.keys())}")
+                for scope_id, scope_entries in scoped_values.items():
+                    logger.info(f"🔍 UPDATE_STEP_LIST: Scope {scope_id} has types: {list(scope_entries.keys())}")
+            else:
+                logger.info(f"🔍 UPDATE_STEP_LIST: No live context snapshot")
 
             self.set_preview_scope_mapping(self._build_scope_index_map())
 

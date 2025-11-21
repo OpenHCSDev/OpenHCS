@@ -953,7 +953,7 @@ class SignatureAnalyzer:
     def _resolve_lazy_dataclass_for_docs(dataclass_type: type) -> type:
         """Resolve lazy dataclasses to their base classes for documentation extraction.
 
-        This handles the case where PipelineConfig (lazy) should resolve to GlobalPipelineConfig
+        This handles the case where lazy configs should resolve to their global base configs
         for documentation purposes.
 
         Args:
@@ -963,16 +963,14 @@ class SignatureAnalyzer:
             The resolved dataclass type for documentation extraction
         """
         try:
-            # Check if this is a lazy dataclass by looking for common patterns
-            class_name = dataclass_type.__name__
+            # GENERIC SCOPE RULE: Check if this is a lazy dataclass and resolve to base
+            from openhcs.config_framework.lazy_factory import _lazy_type_registry
 
-            # Handle PipelineConfig -> GlobalPipelineConfig
-            if class_name == 'PipelineConfig':
-                try:
-                    from openhcs.core.config import GlobalPipelineConfig
-                    return GlobalPipelineConfig
-                except ImportError:
-                    pass
+            # Check if this type has a base type in the registry
+            if dataclass_type in _lazy_type_registry:
+                base_type = _lazy_type_registry[dataclass_type]
+                if base_type:
+                    return base_type
 
             # Handle LazyXxxConfig -> XxxConfig mappings
             if class_name.startswith('Lazy') and class_name.endswith('Config'):

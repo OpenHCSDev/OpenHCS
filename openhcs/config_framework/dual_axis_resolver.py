@@ -289,6 +289,65 @@ def get_scope_specificity(scope_id: Optional[str]) -> int:
     return scope_id.count('::') + 1
 
 
+def get_parent_scope(scope_id: Optional[str]) -> Optional[str]:
+    """Get the parent scope of a given scope.
+
+    GENERIC SCOPE RULE: Works for any N-level hierarchy.
+
+    Examples:
+        >>> get_parent_scope("/path/to/plate::step_0::nested")
+        '/path/to/plate::step_0'
+        >>> get_parent_scope("/path/to/plate::step_0")
+        '/path/to/plate'
+        >>> get_parent_scope("/path/to/plate")
+        None
+        >>> get_parent_scope(None)
+        None
+
+    Args:
+        scope_id: Child scope identifier
+
+    Returns:
+        Parent scope identifier, or None if already at global scope
+    """
+    if scope_id is None:
+        return None
+
+    if '::' in scope_id:
+        # Remove last segment: "/a/b::c::d" → "/a/b::c"
+        return scope_id.rsplit('::', 1)[0]
+    else:
+        # No more segments, parent is global scope
+        return None
+
+
+def iter_scope_hierarchy(scope_id: Optional[str]):
+    """Iterate through scope hierarchy from most specific to global.
+
+    GENERIC SCOPE RULE: Works for any N-level hierarchy.
+
+    Examples:
+        >>> list(iter_scope_hierarchy("/path/to/plate::step_0::nested"))
+        ['/path/to/plate::step_0::nested', '/path/to/plate::step_0', '/path/to/plate', None]
+        >>> list(iter_scope_hierarchy("/path/to/plate"))
+        ['/path/to/plate', None]
+        >>> list(iter_scope_hierarchy(None))
+        [None]
+
+    Args:
+        scope_id: Starting scope identifier
+
+    Yields:
+        Scope identifiers from most specific to global (None)
+    """
+    current = scope_id
+    while True:
+        yield current
+        if current is None:
+            break
+        current = get_parent_scope(current)
+
+
 def resolve_field_inheritance(
     obj,
     field_name: str,
@@ -358,14 +417,35 @@ def resolve_field_inheritance(
         lazy_matches = []  # List of (config_name, config_instance, scope_specificity)
         base_matches = []
 
+        # CRITICAL: Calculate current resolution scope specificity for filtering
+        # Configs can only see values from their own scope or LESS specific scopes
+        # Example: GlobalPipelineConfig (specificity=0) should NOT see PipelineConfig (specificity=1) values
+        current_specificity = get_scope_specificity(current_scope_id)
+
         for config_name, config_instance in available_configs.items():
             instance_type = type(config_instance)
 
             # Get scope specificity for this config
             # Normalize config name for scope lookup (LazyWellFilterConfig -> WellFilterConfig)
             normalized_name = config_name.replace('Lazy', '') if config_name.startswith('Lazy') else config_name
-            config_scope = config_scopes.get(normalized_name) if config_scopes else None
+            if config_scopes:
+                # Prefer normalized base name, but fall back to the exact name when scopes
+                # were stored using lazy class names (e.g., LazyWellFilterConfig)
+                config_scope = config_scopes.get(normalized_name)
+                if config_scope is None:
+                    config_scope = config_scopes.get(config_name)
+            else:
+                config_scope = None
             scope_specificity = get_scope_specificity(config_scope)
+
+            # CRITICAL FIX: Skip configs from MORE SPECIFIC scopes than current resolution scope
+            # This prevents scope contamination where PipelineConfig values leak into GlobalPipelineConfig
+            # Scope hierarchy: Global (0) < Plate (1) < Step (2)
+            # A config can only see its own scope level or less specific (lower number)
+            if scope_specificity > current_specificity:
+                if field_name in ['well_filter', 'well_filter_mode', 'output_dir_suffix', 'num_workers', 'enabled', 'persistent', 'host', 'port']:
+                    logger.info(f"🔍 SCOPE FILTER: Skipping {config_name} (scope_specificity={scope_specificity} > current_specificity={current_specificity}) for field {field_name}")
+                continue
 
             # Check exact type match
             if instance_type == mro_class:

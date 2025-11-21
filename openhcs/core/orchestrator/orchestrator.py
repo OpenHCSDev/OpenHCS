@@ -417,7 +417,9 @@ class PipelineOrchestrator(ContextProvider):
     ):
         # Lock removed - was orphaned code never used
 
-        # Validate shared global context exists
+        # GENERIC SCOPE RULE: Validate shared global context exists
+        # get_current_global_config() already handles finding the global config generically
+        from openhcs.core.config import GlobalPipelineConfig
         if get_current_global_config(GlobalPipelineConfig) is None:
             raise RuntimeError(
                 "No global configuration context found. "
@@ -1486,10 +1488,10 @@ class PipelineOrchestrator(ContextProvider):
         This method sets the orchestrator's effective config in thread-local storage
         for step-level lazy configurations to resolve against.
         """
-        # Import PipelineConfig at runtime for isinstance check
-        from openhcs.core.config import PipelineConfig
-        if not isinstance(pipeline_config, PipelineConfig):
-            raise TypeError(f"Expected PipelineConfig, got {type(pipeline_config)}")
+        # GENERIC SCOPE RULE: Check if it's a non-global config (PipelineConfig or similar)
+        from openhcs.config_framework.lazy_factory import is_global_config_instance
+        if is_global_config_instance(pipeline_config):
+            raise TypeError(f"Expected non-global config (like PipelineConfig), got global config {type(pipeline_config).__name__}")
 
         # Temporarily disable auto-sync to prevent recursion
         self._auto_sync_enabled = False

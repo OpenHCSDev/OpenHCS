@@ -260,7 +260,7 @@ class ParameterFormManager(QWidget):
     OPTIMIZE_NESTED_WIDGETS = True
 
     # Performance optimization: Async widget creation for large forms
-    ASYNC_WIDGET_CREATION = True  # Create widgets progressively to avoid UI blocking
+    ASYNC_WIDGET_CREATION = False  # Create widgets progressively to avoid UI blocking
     ASYNC_THRESHOLD = 5  # Minimum number of parameters to trigger async widget creation
     INITIAL_SYNC_WIDGETS = 10  # Number of widgets to create synchronously for fast initial render
     ASYNC_PLACEHOLDER_REFRESH = True  # Resolve placeholders off the UI thread when possible
@@ -482,7 +482,15 @@ class ParameterFormManager(QWidget):
 
             for manager in cls._active_form_managers:
                 # Apply scope filter if provided
-                if scope_filter is not None and manager.scope_id is not None:
+                # CRITICAL SCOPE RULE: Global scope (scope_filter=None) should ONLY see global managers (scope_id=None)
+                # This prevents GlobalPipelineConfig from seeing PipelineConfig values
+                if scope_filter is None and manager.scope_id is not None:
+                    logger.info(
+                        f"🔍 collect_live_context: Skipping SCOPED manager {manager.field_id} "
+                        f"(scope_id={manager.scope_id}) - global scope (scope_filter=None) should only see global managers"
+                    )
+                    continue
+                elif scope_filter is not None and manager.scope_id is not None:
                     if not cls._is_scope_visible_static(manager.scope_id, scope_filter):
                         logger.info(
                             f"🔍 collect_live_context: Skipping manager {manager.field_id} "
@@ -550,21 +558,122 @@ class ParameterFormManager(QWidget):
             # CRITICAL: Do NOT alias GlobalPipelineConfig → PipelineConfig into live_context.
             # PipelineConfig is plate-scoped and should only appear in scoped_values.
             # Global live_context must only contain truly global configs; otherwise
-            # PipelineConfig in values[...] will incorrectly show global values.
-            from openhcs.core.config import PipelineConfig
+            # scoped configs in values[...] will incorrectly show global values.
+            from openhcs.config_framework.lazy_factory import is_global_config_type
             for alias_type, values in alias_context.items():
-                if alias_type is PipelineConfig:
+                # GENERIC SCOPE RULE: Skip non-global configs when scope_filter=None (global scope)
+                if not is_global_config_type(alias_type):
                     logger.info(
-                        "🔍 collect_live_context: Skipping alias PipelineConfig in live_context "
-                        "(PipelineConfig is scoped-only and must not appear in global values)."
+                        f"🔍 collect_live_context: Skipping alias {alias_type.__name__} in live_context "
+                        f"({alias_type.__name__} is scoped-only and must not appear in global values)."
                     )
                     continue
                 if alias_type not in live_context:
                     live_context[alias_type] = values
 
+            # Build scopes dict mapping config type names to their scope IDs
+            # This is critical for scope filtering in dual_axis_resolver
+            scopes_dict: Dict[str, Optional[str]] = {}
+            logger.info(f"🔍 BUILD SCOPES: Starting with {len(cls._active_form_managers)} active managers")
+
+            def add_manager_to_scopes(manager, is_nested=False):
+                """Helper to add a manager and its nested managers to scopes_dict."""
+                obj_type = type(manager.object_instance)
+                type_name = obj_type.__name__
+
+                # Get base and lazy type names for this config
+                base_type = get_base_type_for_lazy(obj_type)
+                base_name = base_type.__name__ if base_type and base_type != obj_type else None
+
+                lazy_type = LazyDefaultPlaceholderService._get_lazy_type_for_base(obj_type)
+                lazy_name = lazy_type.__name__ if lazy_type and lazy_type != obj_type else None
+
+                # Determine the canonical scope for this config family (base + lazy)
+                # CRITICAL: If lazy type already has a more specific scope, use that for base type too
+                # Example: LazyStreamingDefaults (plate_path) should set StreamingDefaults to plate_path
+                # even if GlobalPipelineConfig tries to set StreamingDefaults to None later
+                # EXCEPTION: Global configs must ALWAYS have scope=None, never inherit from lazy versions
+                canonical_scope = manager.scope_id
+
+                # GENERIC SCOPE RULE: Global configs must always have scope=None
+                from openhcs.config_framework.lazy_factory import is_global_config_type
+                if is_global_config_type(manager.dataclass_type):
+                    canonical_scope = None
+                    logger.info(f"🔍 BUILD SCOPES: Forcing {type_name} scope to None (global config must always be global)")
+                else:
+                    # Check if lazy equivalent already has a more specific scope
+                    if lazy_name and lazy_name in scopes_dict:
+                        existing_lazy_scope = scopes_dict[lazy_name]
+                        if existing_lazy_scope is not None and canonical_scope is None:
+                            canonical_scope = existing_lazy_scope
+                            logger.info(f"🔍 BUILD SCOPES: Using lazy scope {existing_lazy_scope} for {type_name} (lazy {lazy_name} already mapped)")
+
+                    # Check if base equivalent already has a more specific scope
+                    if base_name and base_name in scopes_dict:
+                        existing_base_scope = scopes_dict[base_name]
+                        if existing_base_scope is not None and canonical_scope is None:
+                            canonical_scope = existing_base_scope
+                            logger.info(f"🔍 BUILD SCOPES: Using base scope {existing_base_scope} for {type_name} (base {base_name} already mapped)")
+
+                # Map the actual type
+                if type_name not in scopes_dict:
+                    scopes_dict[type_name] = canonical_scope
+                    logger.info(f"🔍 BUILD SCOPES: {type_name} -> {canonical_scope} (from {manager.field_id}, nested={is_nested})")
+                else:
+                    # Already exists - only overwrite if new scope is MORE SPECIFIC (not None)
+                    existing_scope = scopes_dict[type_name]
+                    if existing_scope is None and canonical_scope is not None:
+                        scopes_dict[type_name] = canonical_scope
+                        logger.info(f"🔍 BUILD SCOPES: {type_name} -> {canonical_scope} (OVERWRITE: was None, now {canonical_scope})")
+                    else:
+                        logger.info(f"🔍 BUILD SCOPES: {type_name} already mapped to {existing_scope}, skipping {canonical_scope}")
+
+                # Also map base/lazy equivalents with the same canonical scope
+                # CRITICAL: NEVER map global configs to a non-None scope
+                # Global configs should ALWAYS have scope=None (global scope)
+                if base_name:
+                    # GENERIC SCOPE RULE: Global configs must always have scope=None
+                    from openhcs.config_framework.lazy_factory import is_global_config_type
+                    # Get the base type to check if it's a global config
+                    base_type = manager.dataclass_type.__mro__[1] if len(manager.dataclass_type.__mro__) > 1 else None
+                    if base_type and is_global_config_type(base_type) and canonical_scope is not None:
+                        logger.info(f"🔍 BUILD SCOPES: Skipping {base_name} -> {canonical_scope} (global config must always have scope=None)")
+                    elif base_name not in scopes_dict:
+                        scopes_dict[base_name] = canonical_scope
+                        logger.info(f"🔍 BUILD SCOPES: {base_name} -> {canonical_scope} (base of {type_name})")
+                    elif scopes_dict[base_name] is None and canonical_scope is not None:
+                        scopes_dict[base_name] = canonical_scope
+                        logger.info(f"🔍 BUILD SCOPES: {base_name} -> {canonical_scope} (OVERWRITE base: was None, now {canonical_scope})")
+
+                if lazy_name:
+                    if lazy_name not in scopes_dict:
+                        scopes_dict[lazy_name] = canonical_scope
+                        logger.info(f"🔍 BUILD SCOPES: {lazy_name} -> {canonical_scope} (lazy of {type_name})")
+                    elif scopes_dict[lazy_name] is None and canonical_scope is not None:
+                        scopes_dict[lazy_name] = canonical_scope
+                        logger.info(f"🔍 BUILD SCOPES: {lazy_name} -> {canonical_scope} (OVERWRITE lazy: was None, now {canonical_scope})")
+
+                # Recursively add nested managers
+                for _, nested_manager in manager.nested_managers.items():
+                    add_manager_to_scopes(nested_manager, is_nested=True)
+
+            for manager in cls._active_form_managers:
+                # Skip managers filtered out by scope_filter
+                if scope_filter is not None and manager.scope_id is not None:
+                    if not cls._is_scope_visible_static(manager.scope_id, scope_filter):
+                        logger.info(f"🔍 BUILD SCOPES: Skipping {manager.field_id} (scope_id={manager.scope_id}) - filtered out")
+                        continue
+
+                logger.info(f"🔍 BUILD SCOPES: Processing manager {manager.field_id} with {len(manager.nested_managers)} nested managers")
+                if 'streaming' in str(manager.nested_managers.keys()).lower():
+                    logger.info(f"🔍 BUILD SCOPES: Manager {manager.field_id} has streaming-related nested managers: {list(manager.nested_managers.keys())}")
+                add_manager_to_scopes(manager, is_nested=False)
+
+            logger.info(f"🔍 BUILD SCOPES: Final scopes_dict has {len(scopes_dict)} entries")
+
             # Create snapshot with current token (don't increment - that happens on value change)
             token = cls._live_context_token_counter
-            return LiveContextSnapshot(token=token, values=live_context, scoped_values=scoped_live_context)
+            return LiveContextSnapshot(token=token, values=live_context, scoped_values=scoped_live_context, scopes=scopes_dict)
 
         # Use token cache to get or compute
         snapshot = cls._live_context_cache.get_or_compute(cache_key, compute_live_context)
@@ -686,11 +795,20 @@ class ParameterFormManager(QWidget):
         logger.debug(f"Unregistered external listener: {listener.__class__.__name__}")
 
     @classmethod
-    def trigger_global_cross_window_refresh(cls):
+    def trigger_global_cross_window_refresh(cls, source_scope_id: Optional[str] = None):
         """Trigger cross-window refresh for all active form managers.
 
         This is called when global config changes (e.g., from plate manager code editor)
         to ensure all open windows refresh their placeholders with the new values.
+
+        CRITICAL SCOPE RULE: Only refresh managers with EQUAL OR MORE SPECIFIC scopes than source.
+        This prevents parent scopes from being refreshed when child scopes change.
+        Example: PipelineConfig (plate scope) changes should NOT refresh GlobalPipelineConfig (global scope).
+
+        Args:
+            source_scope_id: Optional scope ID of the manager that triggered the change.
+                           If None, refresh all managers (global change).
+                           If specified, only refresh managers with equal or more specific scopes.
 
         CRITICAL: Also emits context_refreshed signal for each manager so that
         downstream components (like function pattern editor) can refresh their state.
@@ -698,8 +816,20 @@ class ParameterFormManager(QWidget):
         CRITICAL: Also notifies external listeners (like PipelineEditor) directly,
         especially important when all managers are unregistered (e.g., after cancel).
         """
-        logger.debug(f"Triggering global cross-window refresh for {len(cls._active_form_managers)} active managers")
+        from openhcs.config_framework.dual_axis_resolver import get_scope_specificity
+        source_specificity = get_scope_specificity(source_scope_id)
+
+        logger.debug(f"Triggering global cross-window refresh for {len(cls._active_form_managers)} active managers (source_scope={source_scope_id}, source_specificity={source_specificity})")
+
         for manager in cls._active_form_managers:
+            # PERFORMANCE: Skip managers with less specific scopes than source
+            # They won't see any changes from the source scope anyway
+            if source_scope_id is not None:
+                manager_specificity = get_scope_specificity(manager.scope_id)
+                if manager_specificity < source_specificity:
+                    logger.debug(f"Skipping refresh for {manager.field_id} (specificity={manager_specificity} < source_specificity={source_specificity})")
+                    continue
+
             try:
                 manager._refresh_with_live_context()
                 # CRITICAL: Emit context_refreshed signal so dual editor window can refresh function editor
@@ -2385,7 +2515,7 @@ class ParameterFormManager(QWidget):
                 live_context = self._collect_live_context_from_other_windows() if self._parent_manager is None else None
 
                 # Build context stack (handles static defaults for global config editing + live context)
-                with self._build_context_stack(overlay, live_context=live_context):
+                with self._build_context_stack(overlay, live_context=live_context, live_context_scopes=live_context.scopes if live_context else None):
                     resolution_type = self._get_resolution_type_for_field(param_name)
                     placeholder_text = self.service.get_placeholder_text(param_name, resolution_type)
                     if placeholder_text:
@@ -2437,8 +2567,8 @@ class ParameterFormManager(QWidget):
                 if hasattr(widget, 'get_value'):
                     widget_value = widget.get_value()
                     if widget_value is not None:
-                        # Use live widget value for non-None values
-                        current_values[param_name] = widget_value
+                        # Convert widget value to proper type (handles tuple/list parsing, Path conversion, etc.)
+                        current_values[param_name] = self._convert_widget_value(widget_value, param_name)
                     else:
                         # Use cache for None values to preserve lazy resolution
                         current_values[param_name] = self._current_value_cache.get(param_name)
@@ -2616,22 +2746,76 @@ class ParameterFormManager(QWidget):
         is_root_global_config = (self.config.is_global_config_editing and
                                  self.global_config_type is not None and
                                  self.context_obj is None)  # No parent context = root form
+        logger.info(f"🔍 ROOT CHECK: {self.field_id} - is_global_config_editing={self.config.is_global_config_editing}, global_config_type={self.global_config_type}, context_obj={self.context_obj}, is_root_global_config={is_root_global_config}")
+
+        # CRITICAL: Initialize current_config_scopes with live_context_scopes BEFORE entering any contexts
+        # BUT: Do NOT do this for GlobalPipelineConfig OR nested forms inside GlobalPipelineConfig
+        # GlobalPipelineConfig is global scope and should not inherit plate-scoped values
+        from openhcs.config_framework.context_manager import current_config_scopes
+
+        # Check if this is a nested form inside GlobalPipelineConfig
+        is_nested_in_global_config = False
+        if self._parent_manager is not None:
+            logger.info(f"🔍 NESTED CHECK: {self.field_id} has parent manager")
+            # Walk up the parent chain to see if any parent is editing GlobalPipelineConfig
+            # CRITICAL: Check global_config_type, not is_global_config_editing
+            # is_global_config_editing can be False when PipelineConfig window triggers a refresh
+            # but global_config_type will still be a global config type
+            from openhcs.config_framework.lazy_factory import is_global_config_type
+            current_parent = self._parent_manager
+            while current_parent is not None:
+                logger.info(f"🔍 NESTED CHECK: Checking parent - is_global_config_editing={current_parent.config.is_global_config_editing}, global_config_type={current_parent.global_config_type}, context_obj={current_parent.context_obj}")
+                # GENERIC SCOPE RULE: Check if parent is editing a global config
+                if (is_global_config_type(current_parent.global_config_type) and
+                    current_parent.context_obj is None):
+                    is_nested_in_global_config = True
+                    logger.info(f"🔍 NESTED CHECK: {self.field_id} is nested in global config!")
+                    break
+                current_parent = getattr(current_parent, '_parent_manager', None)
+        else:
+            logger.info(f"🔍 NESTED CHECK: {self.field_id} has NO parent manager")
+
+        if is_root_global_config or is_nested_in_global_config:
+            # CRITICAL: Reset the ContextVar to empty dict for GlobalPipelineConfig and its nested forms
+            # This ensures that GlobalPipelineConfig doesn't inherit plate-scoped values
+            # from previous PipelineConfig refreshes that may have set the ContextVar
+            if is_root_global_config:
+                logger.info(f"🔍 INIT SCOPES: Resetting ContextVar to empty for GlobalPipelineConfig (must be global scope)")
+            else:
+                logger.info(f"🔍 INIT SCOPES: Resetting ContextVar to empty for nested form in GlobalPipelineConfig (must be global scope)")
+            token = current_config_scopes.set({})
+            stack.callback(current_config_scopes.reset, token)
+        elif live_context_scopes:
+            logger.info(f"🔍 INIT SCOPES: Setting initial scopes with {len(live_context_scopes)} entries")
+            if 'StreamingDefaults' in live_context_scopes:
+                logger.info(f"🔍 INIT SCOPES: live_context_scopes['StreamingDefaults'] = {live_context_scopes.get('StreamingDefaults')}")
+            # Set the initial scopes - this will be the parent scope for the first context entry
+            token = current_config_scopes.set(dict(live_context_scopes))
+            # Reset on exit
+            stack.callback(current_config_scopes.reset, token)
+        else:
+            logger.info(f"🔍 INIT SCOPES: live_context_scopes is empty or None")
 
         if is_root_global_config:
             static_defaults = self.global_config_type()
-            # Add GlobalPipelineConfig scope (None) to the scopes dict
-            global_scopes = dict(live_context_scopes) if live_context_scopes else {}
-            global_scopes['GlobalPipelineConfig'] = None
-            stack.enter_context(config_context(static_defaults, mask_with_none=True, config_scopes=global_scopes))
+            # CRITICAL: DON'T pass config_scopes to config_context() for GlobalPipelineConfig
+            # The scopes were already set in the ContextVar at lines 2712-2720
+            # If we pass config_scopes here, it will REPLACE the ContextVar instead of merging
+            # This causes plate-scoped configs to be overwritten with None
+            logger.info(f"🔍 GLOBAL SCOPES: Entering GlobalPipelineConfig context WITHOUT config_scopes parameter")
+            logger.info(f"🔍 GLOBAL SCOPES: ContextVar was already set with live_context_scopes at lines 2712-2720")
+            # Global config - no context_provider needed (scope_id will be None)
+            stack.enter_context(config_context(static_defaults, mask_with_none=True))
         else:
             # CRITICAL: Always add global context layer, either from live editor or thread-local
-            # This ensures placeholders show correct values even when GlobalPipelineConfig editor is closed
+            # This ensures placeholders show correct values even when global config editor is closed
             global_layer = self._get_cached_global_context(live_context_token, live_context)
             if global_layer is not None:
-                # Use live values from open GlobalPipelineConfig editor
-                # Add GlobalPipelineConfig scope (None) to the scopes dict
+                # Use live values from open global config editor
+                # Add global config scope (None) to the scopes dict
                 global_scopes = dict(live_context_scopes) if live_context_scopes else {}
-                global_scopes['GlobalPipelineConfig'] = None
+                # GENERIC: Use type name instead of hardcoded string
+                global_scopes[type(global_layer).__name__] = None
                 stack.enter_context(config_context(global_layer, config_scopes=global_scopes))
             else:
                 # No live editor - use thread-local global config (saved values)
@@ -2640,44 +2824,60 @@ class ParameterFormManager(QWidget):
                 if thread_local_global is not None:
                     # DEBUG: Check what num_workers value is in thread-local global
                     logger.info(f"🔍 _build_context_stack: thread_local_global.num_workers = {getattr(thread_local_global, 'num_workers', 'NOT FOUND')}")
-                    # Add GlobalPipelineConfig scope (None) to the scopes dict
+                    # Add global config scope (None) to the scopes dict
                     global_scopes = dict(live_context_scopes) if live_context_scopes else {}
-                    global_scopes['GlobalPipelineConfig'] = None
+                    # GENERIC: Use type name instead of hardcoded string
+                    global_scopes[type(thread_local_global).__name__] = None
                     stack.enter_context(config_context(thread_local_global, config_scopes=global_scopes))
                 else:
                     logger.warning(f"🔍 No global context available (neither live nor thread-local)")
 
-        # CRITICAL FIX: For function panes with step_instance as context_obj, we need to add PipelineConfig
-        # from live_context as a separate layer BEFORE the step_instance layer.
+        # CRITICAL FIX: For function panes with step_instance as context_obj, we need to add intermediate configs
+        # from live_context as separate layers BEFORE the step_instance layer.
         # This ensures the hierarchy: Global -> Pipeline -> Step -> Function
-        # Without this, function panes skip PipelineConfig and go straight from Global to Step.
-        # CRITICAL: Don't add PipelineConfig from live_context if:
-        # 1. context_obj is already PipelineConfig (would create duplicate layers)
-        # 2. We're editing PipelineConfig directly (context_obj is None AND object_instance is PipelineConfig)
-        #    In this case, the overlay already has the current values, and adding live_context would shadow it.
+        # Without this, function panes skip intermediate configs and go straight from Global to Step.
+        #
+        # GENERIC SCOPE RULE: Only add live context configs if they have LESS specific scopes than current scope.
+        # This prevents parent scopes from seeing child scope values.
+        # Example: GlobalPipelineConfig (scope=None) should NOT see PipelineConfig (scope=plate_path) values
         from openhcs.core.config import PipelineConfig
-        is_editing_pipeline_config_directly = (
-            self.context_obj is None and
-            isinstance(self.object_instance, PipelineConfig)
+        from openhcs.config_framework.dual_axis_resolver import get_scope_specificity
+
+        # Determine if we should add intermediate config layers from live_context
+        should_add_intermediate_configs = (
+            live_context and
+            not is_root_global_config and
+            not is_nested_in_global_config
         )
-        if live_context and not isinstance(self.context_obj, PipelineConfig) and not is_editing_pipeline_config_directly:
+
+        # GENERIC SCOPE CHECK: Only add configs with less specific scopes than current scope
+        if should_add_intermediate_configs:
+            current_specificity = get_scope_specificity(self.scope_id)
+
             # Check if we have PipelineConfig in live_context
             pipeline_config_live = self._find_live_values_for_type(PipelineConfig, live_context)
             if pipeline_config_live is not None:
-                try:
-                    # Create PipelineConfig instance from live values
-                    import dataclasses
-                    pipeline_config_instance = PipelineConfig(**pipeline_config_live)
-                    # Add PipelineConfig scope from live_context_scopes if available
-                    pipeline_scopes = dict(live_context_scopes) if live_context_scopes else {}
-                    if 'PipelineConfig' in pipeline_scopes:
-                        pipeline_scope_id = pipeline_scopes['PipelineConfig']
-                        stack.enter_context(config_context(pipeline_config_instance, scope_id=pipeline_scope_id, config_scopes=pipeline_scopes))
-                    else:
-                        stack.enter_context(config_context(pipeline_config_instance, config_scopes=pipeline_scopes))
-                    logger.debug(f"Added PipelineConfig layer from live context for {self.field_id}")
-                except Exception as e:
-                    logger.warning(f"Failed to add PipelineConfig layer from live context: {e}")
+                # Get PipelineConfig scope from live_context_scopes
+                pipeline_scopes = dict(live_context_scopes) if live_context_scopes else {}
+                pipeline_scope_id = pipeline_scopes.get('PipelineConfig')
+                pipeline_specificity = get_scope_specificity(pipeline_scope_id)
+
+                # GENERIC SCOPE RULE: Only add if pipeline scope is less specific than current scope
+                # This prevents GlobalPipelineConfig (specificity=0) from seeing PipelineConfig (specificity=1)
+                if pipeline_specificity < current_specificity:
+                    try:
+                        # Create PipelineConfig instance from live values
+                        import dataclasses
+                        pipeline_config_instance = PipelineConfig(**pipeline_config_live)
+                        # Create context_provider from scope_id if needed
+                        from openhcs.config_framework.context_manager import ScopeProvider
+                        context_provider = ScopeProvider(pipeline_scope_id) if pipeline_scope_id else None
+                        stack.enter_context(config_context(pipeline_config_instance, context_provider=context_provider, config_scopes=pipeline_scopes))
+                        logger.debug(f"Added PipelineConfig layer (scope={pipeline_scope_id}, specificity={pipeline_specificity}) from live context for {self.field_id} (current_specificity={current_specificity})")
+                    except Exception as e:
+                        logger.warning(f"Failed to add PipelineConfig layer from live context: {e}")
+                else:
+                    logger.debug(f"Skipped PipelineConfig layer (specificity={pipeline_specificity} >= current_specificity={current_specificity}) for {self.field_id}")
 
         # Apply parent context(s) if provided
         if self.context_obj is not None:
@@ -2728,8 +2928,20 @@ class ParameterFormManager(QWidget):
         # This allows live placeholder updates when sibling fields change
         # ONLY enable this AFTER initial form load to avoid polluting placeholders with initial widget values
         # SKIP if skip_parent_overlay=True (used during reset to prevent re-introducing old values)
+        # CRITICAL SCOPE RULE: Only add parent overlay if parent scope is compatible with current scope
+        # A form can only inherit from parents with EQUAL OR LESS specific scopes
+        # Example: GlobalPipelineConfig (scope=None, specificity=0) should NOT inherit from PipelineConfig (scope=plate_path, specificity=1)
         parent_manager = getattr(self, '_parent_manager', None)
+        parent_scope_compatible = True
+        if parent_manager and hasattr(parent_manager, 'scope_id'):
+            from openhcs.config_framework.dual_axis_resolver import get_scope_specificity
+            parent_specificity = get_scope_specificity(parent_manager.scope_id)
+            current_specificity = get_scope_specificity(self.scope_id)
+            parent_scope_compatible = parent_specificity <= current_specificity
+            logger.info(f"🔍 PARENT OVERLAY SCOPE CHECK: {self.field_id} - parent_scope={parent_manager.scope_id}, parent_specificity={parent_specificity}, current_scope={self.scope_id}, current_specificity={current_specificity}, compatible={parent_scope_compatible}")
+
         if (not skip_parent_overlay and
+            parent_scope_compatible and
             parent_manager and
             hasattr(parent_manager, 'get_user_modified_values') and
             hasattr(parent_manager, 'dataclass_type') and
@@ -2828,7 +3040,10 @@ class ParameterFormManager(QWidget):
             if current_scope_id is not None and self.dataclass_type:
                 overlay_scopes[self.dataclass_type.__name__] = current_scope_id
             logger.debug(f"🔍 FINAL OVERLAY: overlay_scopes={overlay_scopes}")
-            stack.enter_context(config_context(overlay_instance, scope_id=current_scope_id, config_scopes=overlay_scopes))
+            # Create context_provider from scope_id if needed
+            from openhcs.config_framework.context_manager import ScopeProvider
+            context_provider = ScopeProvider(current_scope_id) if current_scope_id else None
+            stack.enter_context(config_context(overlay_instance, context_provider=context_provider, config_scopes=overlay_scopes))
         else:
             stack.enter_context(config_context(overlay_instance))
 
@@ -3497,7 +3712,7 @@ class ParameterFormManager(QWidget):
                 if not candidate_names:
                     return
 
-                with self._build_context_stack(overlay, live_context=live_context):
+                with self._build_context_stack(overlay, live_context=live_context_values, live_context_scopes=live_context_scopes):
                     monitor = get_monitor("Placeholder resolution per field")
 
                     for param_name in candidate_names:
@@ -3691,7 +3906,7 @@ class ParameterFormManager(QWidget):
 
         # Build context stack and resolve placeholder
         overlay = self.parameters
-        with self._build_context_stack(overlay, live_context=live_context):
+        with self._build_context_stack(overlay, live_context=live_context, live_context_scopes=live_context.scopes if live_context else None):
             resolution_type = self._get_resolution_type_for_field(field_name)
             placeholder_text = self.service.get_placeholder_text(field_name, resolution_type)
             if placeholder_text:
@@ -3792,7 +4007,7 @@ class ParameterFormManager(QWidget):
             return {}
 
         placeholder_map: Dict[str, str] = {}
-        with self._build_context_stack(parameters_snapshot, live_context=live_context_snapshot):
+        with self._build_context_stack(parameters_snapshot, live_context=live_context_snapshot, live_context_scopes=live_context_snapshot.scopes if live_context_snapshot else None):
             for param_name, was_placeholder in placeholder_plan.items():
                 current_value = parameters_snapshot.get(param_name)
                 should_apply_placeholder = current_value is None or was_placeholder
@@ -4754,15 +4969,13 @@ class ParameterFormManager(QWidget):
     def _is_affected_by_context_change(self, editing_object: object, context_object: object) -> bool:
         """Determine if a context change from another window affects this form.
 
-        Hierarchical rules:
-        - GlobalPipelineConfig changes affect: PipelineConfig, Steps, Functions
-        - PipelineConfig changes affect: Steps in that pipeline, Functions in those steps
-        - Step changes affect: Functions in that step
+        GENERIC SCOPE RULE: A window is affected if its scope specificity >= source scope specificity.
+        This prevents parent scopes from being affected by child scope changes.
 
-        MRO inheritance rules:
-        - Config changes only affect configs that inherit from the changed type
-        - Example: StepWellFilterConfig changes affect StreamingDefaults (inherits from it)
-        - Example: StepWellFilterConfig changes DON'T affect ZarrConfig (unrelated)
+        Examples:
+        - GlobalPipelineConfig (specificity=0) changes affect ALL windows (specificity >= 0)
+        - PipelineConfig (specificity=1) changes affect PipelineConfig and Steps (specificity >= 1), NOT GlobalPipelineConfig
+        - Step (specificity=2) changes affect only Steps and Functions (specificity >= 2)
 
         Args:
             editing_object: The object being edited in the other window
@@ -4771,52 +4984,36 @@ class ParameterFormManager(QWidget):
         Returns:
             True if this form should refresh placeholders due to the change
         """
-        from openhcs.core.config import GlobalPipelineConfig, PipelineConfig
-        from openhcs.core.steps.abstract import AbstractStep
+        # CRITICAL: Find the source manager that's making the change
+        # We need its scope_id to determine if we're affected
+        source_manager = None
+        for manager in type(self)._active_form_managers:
+            if manager.object_instance is editing_object:
+                source_manager = manager
+                break
 
-        # If other window is editing GlobalPipelineConfig, check if we use GlobalPipelineConfig as context
-        if isinstance(editing_object, GlobalPipelineConfig):
-            # We're affected if our context_obj is GlobalPipelineConfig OR if we're editing GlobalPipelineConfig
-            # OR if we have no context (we use global context from thread-local)
-            is_affected = (
-                isinstance(self.context_obj, GlobalPipelineConfig) or
-                isinstance(self.object_instance, GlobalPipelineConfig) or
-                self.context_obj is None  # No context means we use global context
-            )
-            logger.info(f"[{self.field_id}] GlobalPipelineConfig change: context_obj={type(self.context_obj).__name__ if self.context_obj else 'None'}, object_instance={type(self.object_instance).__name__}, affected={is_affected}")
-            return is_affected
+        if source_manager is None:
+            # Can't determine source scope - assume affected for safety
+            logger.warning(f"[{self.field_id}] Could not find source manager for {type(editing_object).__name__} - assuming affected")
+            return True
 
-        # If other window is editing PipelineConfig, check if we're a step in that pipeline
-        if PipelineConfig and isinstance(editing_object, PipelineConfig):
-            # We're affected if our context_obj is a PipelineConfig (same type, scope matching handled elsewhere)
-            # Don't use instance identity check - the editing window has a different instance than our saved context
-            is_affected = isinstance(self.context_obj, PipelineConfig)
-            logger.info(f"[{self.field_id}] PipelineConfig change: context_obj={type(self.context_obj).__name__ if self.context_obj else 'None'}, affected={is_affected}")
-            return is_affected
+        # GENERIC SCOPE RULE: Compare scope specificities
+        from openhcs.config_framework.dual_axis_resolver import get_scope_specificity
+        source_specificity = get_scope_specificity(source_manager.scope_id)
+        self_specificity = get_scope_specificity(self.scope_id)
 
-        # If other window is editing a Step, check if we're a function in that step
-        if isinstance(editing_object, AbstractStep):
-            # We're affected if our context_obj is the same Step instance
-            is_affected = self.context_obj is editing_object
-            logger.debug(f"[{self.field_id}] Step change: affected={is_affected}")
-            return is_affected
+        # We're affected if our specificity >= source specificity
+        # This means changes flow DOWN the hierarchy (global → plate → step), not UP
+        is_affected = self_specificity >= source_specificity
 
-        # CRITICAL: Check MRO inheritance for nested config changes
-        # If the editing_object is a config instance, only refresh if this config inherits from it
-        if self.dataclass_type:
-            editing_type = type(editing_object)
-            # Check if this config type inherits from the changed config type
-            # Use try/except because issubclass requires both args to be classes
-            try:
-                if issubclass(self.dataclass_type, editing_type):
-                    logger.info(f"[{self.field_id}] Affected by MRO inheritance: {self.dataclass_type.__name__} inherits from {editing_type.__name__}")
-                    return True
-            except TypeError:
-                pass
+        logger.info(
+            f"[{self.field_id}] Scope check: source={source_manager.field_id} "
+            f"(scope={source_manager.scope_id}, specificity={source_specificity}), "
+            f"self=(scope={self.scope_id}, specificity={self_specificity}), "
+            f"affected={is_affected}"
+        )
 
-        logger.info(f"[{self.field_id}] NOT affected by {type(editing_object).__name__} change")
-        # Other changes don't affect this window
-        return False
+        return is_affected
 
     def _schedule_cross_window_refresh(self, emit_signal: bool = True, changed_field_path: str = None):
         """Schedule a debounced placeholder refresh for cross-window updates.
@@ -4862,10 +5059,27 @@ class ParameterFormManager(QWidget):
             logger.debug(f"🔍   values keys: {[t.__name__ for t in live_context.values.keys()]}")
             logger.debug(f"🔍   scoped_values keys: {list(live_context.scoped_values.keys())}")
 
-            # First check global values
+            # CRITICAL FIX: Check if the value in live_context.values came from a compatible scope
+            # live_context.values contains merged values from ALL scopes (latest value wins)
+            # But we should ONLY use values from scopes that are compatible with current manager's scope
+            # Scope hierarchy: Global (None) < Plate (plate_path) < Step (step_name)
+            # A global manager (scope=None) should NOT see values from plate/step scopes
+            # A plate manager (scope=plate_path) CAN see values from global scope, but not from other plates or steps
             if ctx_type in live_context.values:
-                logger.debug(f"🔍   Found {ctx_type.__name__} in global values")
-                return live_context.values[ctx_type]
+                # Check which scope this config type belongs to
+                config_scope = live_context.scopes.get(ctx_type.__name__) if live_context.scopes else None
+
+                # GENERIC SCOPE RULE: Use get_scope_specificity() instead of hardcoded levels
+                from openhcs.config_framework.dual_axis_resolver import get_scope_specificity
+                current_specificity = get_scope_specificity(self.scope_id)
+                config_specificity = get_scope_specificity(config_scope)
+
+                # Only use this value if it's from the same scope or a less specific (more general) scope
+                if config_specificity <= current_specificity:
+                    logger.debug(f"🔍   Found {ctx_type.__name__} in global values (config_specificity={config_specificity} <= current_specificity={current_specificity})")
+                    return live_context.values[ctx_type]
+                else:
+                    logger.debug(f"🔍   SKIPPING {ctx_type.__name__} from global values (config_specificity={config_specificity} > current_specificity={current_specificity}) - scope contamination prevention")
 
             # Then check scoped_values for this manager's scope
             if self.scope_id and self.scope_id in live_context.scoped_values:
@@ -4891,13 +5105,33 @@ class ParameterFormManager(QWidget):
 
             base_type = get_base_type_for_lazy(ctx_type)
             if base_type and base_type in live_context.values:
-                logger.debug(f"🔍   Found base type {base_type.__name__} in global values")
-                return live_context.values[base_type]
+                # Check scope compatibility for base type
+                config_scope = live_context.scopes.get(base_type.__name__) if live_context.scopes else None
+                # GENERIC SCOPE RULE: Use get_scope_specificity() instead of hardcoded levels
+                from openhcs.config_framework.dual_axis_resolver import get_scope_specificity
+                current_specificity = get_scope_specificity(self.scope_id)
+                config_specificity = get_scope_specificity(config_scope)
+
+                if config_specificity <= current_specificity:
+                    logger.debug(f"🔍   Found base type {base_type.__name__} in global values (config_specificity={config_specificity} <= current_specificity={current_specificity})")
+                    return live_context.values[base_type]
+                else:
+                    logger.debug(f"🔍   SKIPPING base type {base_type.__name__} from global values (config_specificity={config_specificity} > current_specificity={current_specificity})")
 
             lazy_type = LazyDefaultPlaceholderService._get_lazy_type_for_base(ctx_type)
             if lazy_type and lazy_type in live_context.values:
-                logger.debug(f"🔍   Found lazy type {lazy_type.__name__} in global values")
-                return live_context.values[lazy_type]
+                # Check scope compatibility for lazy type
+                config_scope = live_context.scopes.get(lazy_type.__name__) if live_context.scopes else None
+                # GENERIC SCOPE RULE: Use get_scope_specificity() instead of hardcoded levels
+                from openhcs.config_framework.dual_axis_resolver import get_scope_specificity
+                current_specificity = get_scope_specificity(self.scope_id)
+                config_specificity = get_scope_specificity(config_scope)
+
+                if config_specificity <= current_specificity:
+                    logger.debug(f"🔍   Found lazy type {lazy_type.__name__} in global values (config_specificity={config_specificity} <= current_specificity={current_specificity})")
+                    return live_context.values[lazy_type]
+                else:
+                    logger.debug(f"🔍   SKIPPING lazy type {lazy_type.__name__} from global values (config_specificity={config_specificity} > current_specificity={current_specificity})")
 
             logger.debug(f"🔍   NOT FOUND: {ctx_type.__name__}")
             return None

@@ -57,6 +57,9 @@ from openhcs.config_framework.lazy_factory import (
     auto_create_decorator,
     register_lazy_type_mapping,
     get_base_type_for_lazy,
+    GlobalConfigBase,
+    is_global_config_type,
+    is_global_config_instance,
     ensure_global_config_context,
 )
 
@@ -91,6 +94,8 @@ from openhcs.config_framework.global_config import (
 from openhcs.config_framework.config import (
     set_base_config_type,
     get_base_config_type,
+    get_framework_config,
+    FrameworkConfig,
 )
 
 # Cache warming
@@ -111,6 +116,9 @@ __all__ = [
     'auto_create_decorator',
     'register_lazy_type_mapping',
     'get_base_type_for_lazy',
+    'GlobalConfigBase',
+    'is_global_config_type',
+    'is_global_config_instance',
     'ensure_global_config_context',
     # Resolver
     'resolve_field_inheritance',

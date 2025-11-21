@@ -501,30 +501,53 @@ class DualEditorWindow(BaseFormDialog):
         Args:
             config: Updated config object (GlobalPipelineConfig, PipelineConfig, or StepConfig)
         """
-        from openhcs.core.config import GlobalPipelineConfig, PipelineConfig
         from openhcs.config_framework.global_config import get_current_global_config
-
-        # Only care about GlobalPipelineConfig and PipelineConfig changes
-        # (StepConfig changes are handled by the step editor's own form manager)
-        if not isinstance(config, (GlobalPipelineConfig, PipelineConfig)):
-            return
+        from openhcs.config_framework.dual_axis_resolver import get_scope_specificity
 
         # Only refresh if this is for our orchestrator
         if not self.orchestrator:
             return
 
+        # GENERIC SCOPE RULE: Only care about configs with specificity <= 1 (global and plate level)
+        # Step-level changes (specificity >= 2) are handled by the step editor's own form manager
+        # This replaces hardcoded isinstance checks for GlobalPipelineConfig and PipelineConfig
+
+        # Find the manager that owns this config to get its scope_id
+        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+        config_scope_id = None
+        for manager in ParameterFormManager._active_form_managers:
+            if manager.object_instance is config:
+                config_scope_id = manager.scope_id
+                break
+
+        # If we can't find the manager, infer scope from config type
+        from openhcs.config_framework import GlobalConfigBase
+        if config_scope_id is None:
+            if isinstance(config, GlobalConfigBase):
+                config_scope_id = None  # Global scope
+            else:
+                # Assume plate scope for non-global configs
+                config_scope_id = str(self.orchestrator.plate_path)
+
+        config_specificity = get_scope_specificity(config_scope_id)
+        if config_specificity > 1:
+            # Step-level or deeper - skip
+            return
+
         # Check if this config belongs to our orchestrator
-        if isinstance(config, PipelineConfig):
-            # Check if this is our orchestrator's pipeline config
-            if config is not self.orchestrator.pipeline_config:
-                return
-        elif isinstance(config, GlobalPipelineConfig):
+        if isinstance(config, GlobalConfigBase):
             # Check if this is the current global config
-            current_global = get_current_global_config(GlobalPipelineConfig)
+            # Get the global config type from the instance
+            global_config_type = type(config)
+            current_global = get_current_global_config(global_config_type)
             if config is not current_global:
                 return
+        else:
+            # For non-global configs, check if this is our orchestrator's pipeline config
+            if config is not self.orchestrator.pipeline_config:
+                return
 
-        logger.debug(f"Step editor received config change: {type(config).__name__}")
+        logger.debug(f"Step editor received config change: {type(config).__name__} (scope_id={config_scope_id}, specificity={config_specificity})")
 
         # Trigger cross-window refresh for all form managers
         # This will update placeholders in the step editor to show new inherited values

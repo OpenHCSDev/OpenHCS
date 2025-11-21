@@ -72,12 +72,20 @@ class LiveContextResolver:
         # The lazy cache uses current token, which breaks flash detection
         token = _disable_lazy_cache.set(True)
         try:
+            # Check if cache is disabled via framework config
+            cache_disabled = False
+            try:
+                from openhcs.config_framework.config import get_framework_config
+                cache_disabled = get_framework_config().is_cache_disabled('live_context_resolver')
+            except ImportError:
+                pass
+
             # Build cache key using object identities
             context_ids = tuple(id(ctx) for ctx in context_stack)
             cache_key = (id(config_obj), attr_name, context_ids, cache_token)
 
-            # Check resolved value cache
-            if cache_key in self._resolved_value_cache:
+            # Check resolved value cache (unless disabled)
+            if not cache_disabled and cache_key in self._resolved_value_cache:
                 return self._resolved_value_cache[cache_key]
 
             # Cache miss - resolve
@@ -85,8 +93,9 @@ class LiveContextResolver:
                 config_obj, attr_name, context_stack, live_context, context_scopes
             )
 
-            # Store in cache
-            self._resolved_value_cache[cache_key] = resolved_value
+            # Store in cache (unless disabled)
+            if not cache_disabled:
+                self._resolved_value_cache[cache_key] = resolved_value
 
             return resolved_value
         finally:
@@ -370,11 +379,15 @@ class LiveContextResolver:
             ctx = contexts_remaining[0]
             scope_id = scopes_remaining[0] if scopes_remaining else None
 
+            # Create context_provider from scope_id if needed
+            from openhcs.config_framework.context_manager import ScopeProvider
+            context_provider = ScopeProvider(scope_id) if scope_id else None
+
             # CRITICAL: Pass the CUMULATIVE config_scopes dict to every config_context() call
             # This ensures that nested configs extracted from this context get the full scope map
             # Example: When entering PipelineConfig, we pass {'GlobalPipelineConfig': None, 'PipelineConfig': plate_path}
             # so that LazyWellFilterConfig extracted from PipelineConfig gets scope=plate_path
-            with config_context(ctx, scope_id=scope_id, config_scopes=cumulative_config_scopes if cumulative_config_scopes else None):
+            with config_context(ctx, context_provider=context_provider, config_scopes=cumulative_config_scopes if cumulative_config_scopes else None):
                 next_scopes = scopes_remaining[1:] if scopes_remaining else None
                 return resolve_in_context(contexts_remaining[1:], next_scopes)
 

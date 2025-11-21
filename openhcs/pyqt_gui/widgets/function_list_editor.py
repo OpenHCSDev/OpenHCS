@@ -577,13 +577,21 @@ class FunctionListEditorWidget(QWidget):
 
             # Build context stack with live values
             from contextlib import ExitStack
-            from openhcs.core.config import PipelineConfig, GlobalPipelineConfig
+            from openhcs.core.config import PipelineConfig
+            from openhcs.config_framework.lazy_factory import is_global_config_type
             import dataclasses
 
             with ExitStack() as stack:
-                # Add GlobalPipelineConfig from live context if available
-                if GlobalPipelineConfig in live_context:
-                    global_live = live_context[GlobalPipelineConfig]
+                # GENERIC SCOPE RULE: Add global config from live context if available
+                # Find global config type in live_context
+                global_config_type = None
+                for config_type in live_context.keys():
+                    if is_global_config_type(config_type):
+                        global_config_type = config_type
+                        break
+
+                if global_config_type and global_config_type in live_context:
+                    global_live = live_context[global_config_type]
                     # Reconstruct nested dataclasses from live values
                     from openhcs.config_framework.context_manager import get_base_global_config
                     thread_local_global = get_base_global_config()

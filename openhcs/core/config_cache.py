@@ -231,6 +231,7 @@ def load_cached_global_config_sync() -> GlobalPipelineConfig:
     try:
         from openhcs.core.xdg_paths import get_config_file_path
         cache_file = get_config_file_path("global_config.config")
+        logger.info(f"load_cached_global_config_sync: cache_file={cache_file}")
         cached_config = _sync_load_config(cache_file)
         if cached_config is not None:
             logger.info("Using cached global configuration")

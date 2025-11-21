@@ -92,8 +92,16 @@ class LazyDefaultPlaceholderService:
 
         cache_key = (dataclass_type, field_name, context_token)
 
-        # Check cache first
-        if cache_key in LazyDefaultPlaceholderService._placeholder_text_cache:
+        # Check if cache is disabled via framework config
+        cache_disabled = False
+        try:
+            from openhcs.config_framework.config import get_framework_config
+            cache_disabled = get_framework_config().is_cache_disabled('placeholder_text')
+        except ImportError:
+            pass
+
+        # Check cache first (unless disabled)
+        if not cache_disabled and cache_key in LazyDefaultPlaceholderService._placeholder_text_cache:
             return LazyDefaultPlaceholderService._placeholder_text_cache[cache_key]
 
         # Create a fresh instance for each resolution
@@ -115,6 +123,7 @@ class LazyDefaultPlaceholderService:
             # DEBUG: Log context for num_workers resolution
             if field_name == 'num_workers':
                 from openhcs.config_framework.context_manager import current_context_stack, current_extracted_configs, get_current_temp_global
+                from openhcs.config_framework.lazy_factory import is_global_config_instance
                 context_list = current_context_stack.get()
                 extracted_configs = current_extracted_configs.get()
                 current_global = get_current_temp_global()
@@ -124,9 +133,11 @@ class LazyDefaultPlaceholderService:
                 logger.info(f"🔍 PLACEHOLDER: Current temp global: {type(current_global).__name__ if current_global else 'None'}")
                 if current_global and hasattr(current_global, 'num_workers'):
                     logger.info(f"🔍 PLACEHOLDER: current_global.num_workers = {getattr(current_global, 'num_workers', 'NOT FOUND')}")
-                if 'GlobalPipelineConfig' in extracted_configs:
-                    global_config = extracted_configs['GlobalPipelineConfig']
-                    logger.info(f"🔍 PLACEHOLDER: extracted GlobalPipelineConfig.num_workers = {getattr(global_config, 'num_workers', 'NOT FOUND')}")
+                # GENERIC: Find global config in extracted_configs
+                for config_name, config_obj in extracted_configs.items():
+                    if is_global_config_instance(config_obj):
+                        logger.info(f"🔍 PLACEHOLDER: extracted {config_name}.num_workers = {getattr(config_obj, 'num_workers', 'NOT FOUND')}")
+                        break
 
             resolved_value = getattr(instance, field_name)
 
@@ -146,8 +157,9 @@ class LazyDefaultPlaceholderService:
                 logger.info(f"📋 Using class default for {dataclass_type.__name__}.{field_name} = {class_default}")
             result = LazyDefaultPlaceholderService._format_placeholder_text(class_default, prefix)
 
-        # Cache the result
-        LazyDefaultPlaceholderService._placeholder_text_cache[cache_key] = result
+        # Cache the result (unless caching is disabled)
+        if not cache_disabled:
+            LazyDefaultPlaceholderService._placeholder_text_cache[cache_key] = result
 
         return result
 

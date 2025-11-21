@@ -21,6 +21,7 @@ import contextvars
 import dataclasses
 import inspect
 import logging
+from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from typing import Any, Dict, Union, Tuple, Optional
 from dataclasses import fields, is_dataclass
@@ -45,6 +46,64 @@ current_config_scopes: contextvars.ContextVar[Dict[str, Optional[str]]] = contex
 
 # Current scope ID for resolution context
 current_scope_id: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar('current_scope_id', default=None)
+
+
+class ScopedObject(ABC):
+    """
+    Abstract base class for objects that can provide scope information.
+
+    This is a generic interface that allows the config framework to remain
+    domain-agnostic while supporting hierarchical scope identification.
+
+    Implementations should build their scope identifier from a context provider
+    (e.g., orchestrator, session, request, etc.) that contains the necessary
+    contextual information.
+    """
+
+    @abstractmethod
+    def build_scope_id(self, context_provider) -> Optional[str]:
+        """
+        Build scope identifier from context provider.
+
+        Args:
+            context_provider: Domain-specific context provider (e.g., orchestrator)
+                            that contains information needed to build the scope.
+
+        Returns:
+            Scope identifier string, or None for global scope.
+
+        Examples:
+            - Global config: return None
+            - Plate-level config: return str(context_provider.plate_path)
+            - Step-level config: return f"{context_provider.plate_path}::{self.token}"
+        """
+        pass
+
+
+class ScopeProvider:
+    """
+    Minimal context provider for UI code that only has scope strings.
+
+    This allows UI code to create scoped contexts when it doesn't have
+    access to the full orchestrator, but only has the scope string
+    (e.g., from live_context_scopes).
+
+    Example:
+        scope_string = "/path/to/plate"
+        provider = ScopeProvider(scope_string)
+        with config_context(pipeline_config, context_provider=provider):
+            # ...
+    """
+    def __init__(self, scope_string: str):
+        from pathlib import Path
+        # Extract plate_path from scope string (format: "plate_path::step_token" or just "plate_path")
+        # CRITICAL: scope_string might be hierarchical like "/path/to/plate::step_0"
+        # We need to extract just the plate_path part (before the first ::)
+        if '::' in scope_string:
+            plate_path_str = scope_string.split('::')[0]
+        else:
+            plate_path_str = scope_string
+        self.plate_path = Path(plate_path_str)
 
 
 def _merge_nested_dataclass(base, override, mask_with_none: bool = False):
@@ -99,7 +158,7 @@ def _merge_nested_dataclass(base, override, mask_with_none: bool = False):
 
 
 @contextmanager
-def config_context(obj, mask_with_none: bool = False, scope_id: Optional[str] = None, config_scopes: Optional[Dict[str, Optional[str]]] = None):
+def config_context(obj, *, context_provider=None, mask_with_none: bool = False, config_scopes: Optional[Dict[str, Optional[str]]] = None):
     """
     Create new context scope with obj's matching fields merged into base config.
 
@@ -110,21 +169,36 @@ def config_context(obj, mask_with_none: bool = False, scope_id: Optional[str] = 
 
     Args:
         obj: Object with config fields (pipeline_config, step, etc.)
+        context_provider: Optional context provider (e.g., orchestrator or ScopeProvider) for deriving scope_id.
+                         If obj implements ScopedObject, scope_id will be auto-derived by calling
+                         obj.build_scope_id(context_provider). Not needed for global configs.
         mask_with_none: If True, None values override/mask base config values.
                        If False (default), None values are ignored (normal inheritance).
                        Use True when editing GlobalPipelineConfig to mask thread-local
                        loaded instance with static class defaults.
-        scope_id: Optional scope ID for this context (None for global, string for scoped)
         config_scopes: Optional dict mapping config type names to their scope IDs
 
     Usage:
-        with config_context(orchestrator.pipeline_config):  # Pipeline-level context
+        # Auto-derive scope from orchestrator:
+        with config_context(orchestrator.pipeline_config, context_provider=orchestrator):
+            with config_context(step, context_provider=orchestrator):
+                # ...
+
+        # UI code with scope string:
+        provider = ScopeProvider("/path/to/plate")
+        with config_context(pipeline_config, context_provider=provider):
             # ...
-        with config_context(step):  # Step-level context
-            # ...
-        with config_context(GlobalPipelineConfig(), mask_with_none=True):  # Static defaults
+
+        # Global scope (no context_provider needed):
+        with config_context(GlobalPipelineConfig(), mask_with_none=True):
             # ...
     """
+    # Auto-derive scope_id from context_provider
+    if context_provider is not None and isinstance(obj, ScopedObject):
+        scope_id = obj.build_scope_id(context_provider)
+    else:
+        scope_id = None
+
     # Get current context as base for nested contexts, or fall back to base global config
     current_context = get_current_temp_global()
     base_config = current_context if current_context is not None else get_base_global_config()
@@ -249,11 +323,33 @@ def config_context(obj, mask_with_none: bool = False, scope_id: Optional[str] = 
     if config_scopes is not None:
         # Merge with parent scopes
         parent_scopes = current_config_scopes.get()
-        logger.debug(f"🔍 CONTEXT MANAGER: Entering {type(obj).__name__}, parent_scopes = {parent_scopes}")
-        logger.debug(f"🔍 CONTEXT MANAGER: config_scopes parameter = {config_scopes}")
+        logger.info(f"🔍 SCOPE MERGE: Entering {type(obj).__name__}, parent_scopes has {len(parent_scopes)} entries")
+        logger.info(f"🔍 SCOPE MERGE: config_scopes parameter has {len(config_scopes)} entries")
+        if 'StreamingDefaults' in parent_scopes:
+            logger.info(f"🔍 SCOPE MERGE: parent_scopes['StreamingDefaults'] = {parent_scopes.get('StreamingDefaults')}")
+        if 'StreamingDefaults' in config_scopes:
+            logger.info(f"🔍 SCOPE MERGE: config_scopes['StreamingDefaults'] = {config_scopes.get('StreamingDefaults')}")
+
         merged_scopes = dict(parent_scopes) if parent_scopes else {}
-        merged_scopes.update(config_scopes)
-        logger.debug(f"🔍 CONTEXT MANAGER: After merging config_scopes, merged_scopes = {merged_scopes}")
+
+        # CRITICAL: Selectively update scopes - don't overwrite more specific scopes with None
+        # If parent has StreamingDefaults: plate_path and config_scopes has StreamingDefaults: None,
+        # keep the plate_path (more specific)
+        for config_name, new_scope in config_scopes.items():
+            existing_scope = merged_scopes.get(config_name)
+            if existing_scope is None and new_scope is not None:
+                # Existing is None, new is specific - overwrite
+                merged_scopes[config_name] = new_scope
+            elif existing_scope is not None and new_scope is None:
+                # Existing is specific, new is None - DON'T overwrite, keep existing
+                if config_name == 'StreamingDefaults':
+                    logger.info(f"🔍 SCOPE MERGE: PRESERVING {config_name} scope {existing_scope} (not overwriting with None)")
+            else:
+                # Both None or both specific - use new scope
+                merged_scopes[config_name] = new_scope
+
+        if 'StreamingDefaults' in merged_scopes:
+            logger.info(f"🔍 SCOPE MERGE: After merge, merged_scopes['StreamingDefaults'] = {merged_scopes.get('StreamingDefaults')}")
 
         # CRITICAL: Propagate scope to all extracted nested configs
         # If PipelineConfig has scope_id=plate_path, then all its nested configs
@@ -273,26 +369,44 @@ def config_context(obj, mask_with_none: bool = False, scope_id: Optional[str] = 
         logger.debug(f"🔍 CONTEXT MANAGER: parent_scopes = {parent_scopes}")
         logger.debug(f"🔍 CONTEXT MANAGER: About to loop over current_context_configs, len={len(current_context_configs)}")
         for config_name in current_context_configs:
-            logger.debug(f"🔍 CONTEXT MANAGER: Loop iteration for config_name={config_name}, scope_id={scope_id}")
-            # CRITICAL: Configs extracted from the CURRENT context object should ALWAYS get the current scope_id
-            # Even if a normalized equivalent exists in parent_scopes, the current context's version
-            # should use the current scope_id, not the parent's scope
+            # CRITICAL: Configs extracted from the CURRENT context object should get the current scope_id
+            # UNLESS a more specific scope already exists in merged_scopes
             #
-            # Example: PipelineConfig (scope=plate_path) extracts LazyWellFilterConfig
+            # Example 1: PipelineConfig (scope=plate_path) extracts LazyWellFilterConfig
             # Even though WellFilterConfig exists in parent with scope=None,
             # LazyWellFilterConfig should get scope=plate_path (not None)
-            merged_scopes[config_name] = scope_id
-            logger.debug(f"🔍 CONTEXT MANAGER: Set scope for {config_name} from context scope_id: {scope_id}")
+            #
+            # Example 2: GlobalPipelineConfig (scope=None) extracts StreamingDefaults
+            # If StreamingDefaults already has scope=plate_path from PipelineConfig's nested managers,
+            # DON'T overwrite with None - keep the more specific plate scope
+            existing_scope = merged_scopes.get(config_name)
+
+            if config_name == 'StreamingDefaults':
+                logger.info(f"🔍 SCOPE LOOP: Processing {config_name}, existing_scope={existing_scope}, scope_id={scope_id}")
+
+            if existing_scope is None and scope_id is not None:
+                # Existing scope is None (global), new scope is specific (plate/step) - overwrite
+                merged_scopes[config_name] = scope_id
+                logger.info(f"🔍 SCOPE ASSIGN: {config_name} -> {scope_id} (was None)")
+            elif existing_scope is not None and scope_id is None:
+                # Existing scope is specific, new scope is None - DON'T overwrite
+                logger.info(f"🔍 SCOPE PRESERVE: {config_name} keeping {existing_scope} (not overwriting with None)")
+            else:
+                # Both None or both specific - use current scope_id
+                merged_scopes[config_name] = scope_id
+                logger.info(f"🔍 SCOPE ASSIGN: {config_name} -> {scope_id}")
 
         logger.debug(f"🔍 CONTEXT MANAGER: Setting scopes: {merged_scopes}, scope_id: {scope_id}")
     else:
         merged_scopes = current_config_scopes.get()
 
     # Set context, extracted configs, context stack, and scope information atomically
-    logger.debug(
+    logger.info(
         f"🔍 CONTEXT MANAGER: SET SCOPES FINAL for {type(obj).__name__}: "
-        f"{merged_scopes}, scope_id={scope_id}"
+        f"{len(merged_scopes)} entries, scope_id={scope_id}"
     )
+    if 'StreamingDefaults' in merged_scopes:
+        logger.info(f"🔍 CONTEXT MANAGER: merged_scopes['StreamingDefaults'] = {merged_scopes.get('StreamingDefaults')}")
     logger.debug(f"🔍 CONTEXT MANAGER: About to set current_config_scopes.set(merged_scopes) where merged_scopes = {merged_scopes}")
     token = current_temp_global.set(merged_config)
     extracted_token = current_extracted_configs.set(extracted)

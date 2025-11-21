@@ -127,7 +127,11 @@ class ConfigWindow(TreeFormFlashMixin, BaseFormDialog):
         # Override the form manager's tree flash notification to flash tree items
         self.form_manager._notify_tree_flash = self._flash_tree_item
 
-        if self.config_class == GlobalPipelineConfig:
+        # GENERIC SCOPE RULE: Check if editing a global config using isinstance with GlobalConfigBase
+        # The @auto_create_decorator marks global configs, enabling isinstance(config, GlobalConfigBase)
+        # This returns True for GlobalPipelineConfig but False for PipelineConfig (lazy version)
+        from openhcs.config_framework import GlobalConfigBase
+        if isinstance(current_config, GlobalConfigBase):
             self._original_global_config_snapshot = copy.deepcopy(current_config)
             self.form_manager.parameter_changed.connect(self._on_global_config_field_changed)
 
@@ -466,7 +470,8 @@ class ConfigWindow(TreeFormFlashMixin, BaseFormDialog):
                 self._saving = False
                 logger.info(f"🔍 SAVE_CONFIG: Reset _saving=False (id={id(self)})")
 
-            if self.config_class == GlobalPipelineConfig:
+            # GENERIC SCOPE RULE: Check if editing global scope instead of hardcoding GlobalPipelineConfig
+            if self.form_manager.scope_id is None:
                 self._original_global_config_snapshot = copy.deepcopy(new_config)
                 self._global_context_dirty = False
 
@@ -561,19 +566,21 @@ class ConfigWindow(TreeFormFlashMixin, BaseFormDialog):
             # FIXED: Proper context propagation based on config type
             # ConfigWindow is used for BOTH GlobalPipelineConfig AND PipelineConfig editing
             from openhcs.config_framework.global_config import set_global_config_for_editing
-            from openhcs.core.config import GlobalPipelineConfig
+            from openhcs.config_framework import GlobalConfigBase
+
+            # GENERIC SCOPE RULE: Check if editing a global config using isinstance
+            is_global = isinstance(new_config, GlobalConfigBase)
 
             # Temporarily suppress per-field sync during code-mode bulk update
-            suppress_context = (self.config_class == GlobalPipelineConfig)
-            if suppress_context:
+            if is_global:
                 self._suppress_global_context_sync = True
                 self._needs_global_context_resync = False
 
             try:
-                if self.config_class == GlobalPipelineConfig:
-                    # For GlobalPipelineConfig: Update thread-local context immediately
-                    set_global_config_for_editing(GlobalPipelineConfig, new_config)
-                    logger.debug("Updated thread-local GlobalPipelineConfig context")
+                if is_global:
+                    # For global configs: Update thread-local context immediately
+                    set_global_config_for_editing(type(new_config), new_config)
+                    logger.debug(f"Updated thread-local {type(new_config).__name__} context")
                     self._global_context_dirty = True
                 # For PipelineConfig: No context update needed here
                 # The orchestrator.apply_pipeline_config() happens in the save callback
@@ -582,10 +589,10 @@ class ConfigWindow(TreeFormFlashMixin, BaseFormDialog):
                 # Update form values from the new config without rebuilding
                 self._update_form_from_config(new_config)
 
-                if suppress_context:
+                if is_global:
                     self._sync_global_context_with_current_values()
             finally:
-                if suppress_context:
+                if is_global:
                     self._suppress_global_context_sync = False
                     self._needs_global_context_resync = False
 
@@ -619,7 +626,9 @@ class ConfigWindow(TreeFormFlashMixin, BaseFormDialog):
 
     def _sync_global_context_with_current_values(self, source_param: str = None):
         """Rebuild global context from current form values once."""
-        if self.config_class != GlobalPipelineConfig:
+        # GENERIC SCOPE RULE: Only sync for global configs
+        from openhcs.config_framework import GlobalConfigBase
+        if not issubclass(self.config_class, GlobalConfigBase):
             return
         try:
             current_values = self.form_manager.get_current_values()
@@ -628,7 +637,9 @@ class ConfigWindow(TreeFormFlashMixin, BaseFormDialog):
             from openhcs.config_framework.global_config import set_global_config_for_editing
             set_global_config_for_editing(self.config_class, updated_config)
             self._global_context_dirty = True
-            ParameterFormManager.trigger_global_cross_window_refresh()
+            # CRITICAL: Pass source_scope_id to prevent refreshing parent scopes
+            # GlobalPipelineConfig has scope_id=None, so this will refresh all managers (correct)
+            ParameterFormManager.trigger_global_cross_window_refresh(source_scope_id=self.form_manager.scope_id)
             if source_param:
                 logger.debug("Synchronized GlobalPipelineConfig context after change (%s)", source_param)
         except Exception as exc:
@@ -651,12 +662,12 @@ class ConfigWindow(TreeFormFlashMixin, BaseFormDialog):
 
     def reject(self):
         """Handle dialog rejection (Cancel button)."""
-        from openhcs.core.config import GlobalPipelineConfig
-        if (self.config_class == GlobalPipelineConfig and
-                getattr(self, '_global_context_dirty', False) and
-                self._original_global_config_snapshot is not None):
+        # GENERIC SCOPE RULE: Check if editing a global config using isinstance
+        from openhcs.config_framework import GlobalConfigBase
+        if (isinstance(self._original_global_config_snapshot, GlobalConfigBase) if self._original_global_config_snapshot else False) and \
+                getattr(self, '_global_context_dirty', False):
             from openhcs.config_framework.global_config import set_global_config_for_editing
-            set_global_config_for_editing(GlobalPipelineConfig,
+            set_global_config_for_editing(type(self._original_global_config_snapshot),
                                           copy.deepcopy(self._original_global_config_snapshot))
             self._global_context_dirty = False
             logger.debug("Restored GlobalPipelineConfig context after cancel")

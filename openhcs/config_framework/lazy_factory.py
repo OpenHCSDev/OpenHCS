@@ -55,6 +55,78 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+
+# GENERIC SCOPE RULE: Virtual base class for global configs using __instancecheck__
+# This allows isinstance() checks without actual inheritance, so lazy versions don't inherit it
+class GlobalConfigMeta(type):
+    """
+    Metaclass that makes isinstance(obj, GlobalConfigBase) work by checking _is_global_config marker.
+
+    This enables type-safe isinstance checks without inheritance:
+        if isinstance(config, GlobalConfigBase):  # Returns True for GlobalPipelineConfig
+                                                   # Returns False for PipelineConfig (lazy version)
+    """
+    def __instancecheck__(cls, instance):
+        # Check if the instance's type has the _is_global_config marker
+        return hasattr(type(instance), '_is_global_config') and type(instance)._is_global_config
+
+
+class GlobalConfigBase(metaclass=GlobalConfigMeta):
+    """
+    Virtual base class for all global config types.
+
+    Uses custom metaclass to check _is_global_config marker instead of actual inheritance.
+    This prevents lazy versions (PipelineConfig) from being considered global configs.
+
+    Usage:
+        if isinstance(config, GlobalConfigBase):  # Generic, works for any global config
+
+    Instead of:
+        if isinstance(config, GlobalPipelineConfig):  # Hardcoded, breaks extensibility
+    """
+    pass
+
+
+def is_global_config_type(config_type: Type) -> bool:
+    """
+    Check if a config type is a global config (marked by @auto_create_decorator).
+
+    GENERIC SCOPE RULE: Use this instead of hardcoding class name checks like:
+        if config_class == GlobalPipelineConfig:
+
+    Instead use:
+        if is_global_config_type(config_class):
+
+    Args:
+        config_type: The config class to check
+
+    Returns:
+        True if the type is marked as a global config, False otherwise
+    """
+    return hasattr(config_type, '_is_global_config') and config_type._is_global_config
+
+
+def is_global_config_instance(config_instance: Any) -> bool:
+    """
+    Check if a config instance is an instance of a global config class.
+
+    GENERIC SCOPE RULE: Use this instead of hardcoding isinstance checks like:
+        if isinstance(config, GlobalPipelineConfig):
+
+    Instead use:
+        if isinstance(config, GlobalConfigBase):
+
+    This uses the GlobalConfigBase virtual base class with custom __instancecheck__.
+
+    Args:
+        config_instance: The config instance to check
+
+    Returns:
+        True if the instance is of a global config type, False otherwise
+    """
+    return isinstance(config_instance, GlobalConfigBase)
+
+
 # PERFORMANCE: Class-level cache for lazy dataclass field resolution
 # Shared across all instances to survive instance recreation (e.g., in pipeline editor)
 # Cache key: (lazy_class_name, field_name, context_token) -> resolved_value
@@ -210,9 +282,25 @@ class LazyMethodBindings:
             else:
                 is_dataclass_field = False
 
+            # CRITICAL: Check RAW instance value FIRST before cache
+            # The cache stores RESOLVED values (from global config), but if the instance
+            # has an explicit value set, we must return that instead of the cached global value
+            value = object.__getattribute__(self, name)
+
+            if value is not None or not is_dataclass_field:
+                return value
+
             # CRITICAL: Skip cache if disabled (e.g., during LiveContextResolver flash detection)
             # Flash detection needs to resolve with historical tokens, not current token
+            # Also skip if framework config disables this cache (for debugging)
             cache_disabled = _disable_lazy_cache.get(False)
+
+            if not cache_disabled:
+                try:
+                    from openhcs.config_framework.config import get_framework_config
+                    cache_disabled = get_framework_config().is_cache_disabled('lazy_resolution')
+                except ImportError:
+                    pass
 
             if is_dataclass_field and not cache_disabled:
                 try:
@@ -263,11 +351,6 @@ class LazyMethodBindings:
                     except ImportError:
                         # No ParameterFormManager available - skip caching
                         pass
-
-            # Stage 1: Get instance value
-            value = object.__getattribute__(self, name)
-            if value is not None or not is_dataclass_field:
-                return value
 
             # Stage 2: Simple field path lookup in current scope's merged global
             try:
@@ -338,6 +421,35 @@ class LazyMethodBindings:
                 # DO NOT call cache_value() here - MRO fallback should never be cached
                 return fallback_value
         return __getattribute__
+
+    @staticmethod
+    def create_deepcopy() -> Callable:
+        """Create __deepcopy__ method that preserves tracking attributes."""
+        def __deepcopy__(self, memo):
+            import copy
+            logger.info(f"🔍 DEEPCOPY: {self.__class__.__name__}.__deepcopy__ called")
+            # Create new instance with same field values
+            field_values = {}
+            for f in fields(self):
+                value = object.__getattribute__(self, f.name)
+                # Deepcopy the field value
+                field_values[f.name] = copy.deepcopy(value, memo)
+
+            # Create new instance
+            new_instance = self.__class__(**field_values)
+
+            # CRITICAL: Copy tracking attributes to new instance
+            # These are set by the tracking wrapper in __init__ and must be preserved across deepcopy
+            for attr in ['_explicitly_set_fields', '_global_config_type', '_config_field_name']:
+                try:
+                    value = object.__getattribute__(self, attr)
+                    object.__setattr__(new_instance, attr, value)
+                    logger.info(f"🔍 DEEPCOPY: Copied {attr}={value} to new instance")
+                except AttributeError:
+                    pass
+
+            return new_instance
+        return __deepcopy__
 
     @staticmethod
     def create_to_base_config(base_class: Type) -> Callable[[Any], Any]:
@@ -492,32 +604,105 @@ class LazyDataclassFactory:
 
         # CRITICAL: Preserve inheritance hierarchy in lazy versions
         # If base_class inherits from other dataclasses, make the lazy version inherit from their lazy versions
+        # This must happen BEFORE the has_unsafe_metaclass check so lazy_bases is populated
         lazy_bases = []
-        if not has_unsafe_metaclass:
-            for base in base_class.__bases__:
-                if base is object:
-                    continue
-                if is_dataclass(base):
-                    # Create or get lazy version of parent class
-                    lazy_parent_name = f"Lazy{base.__name__}"
-                    lazy_parent = LazyDataclassFactory.make_lazy_simple(
-                        base_class=base,
-                        lazy_class_name=lazy_parent_name
-                    )
-                    lazy_bases.append(lazy_parent)
-                    logger.debug(f"Lazy {lazy_class_name} inherits from lazy {lazy_parent_name}")
+        for base in base_class.__bases__:
+            if base is object:
+                continue
+            if is_dataclass(base):
+                # Create or get lazy version of parent class
+                lazy_parent_name = f"Lazy{base.__name__}"
+                lazy_parent = LazyDataclassFactory.make_lazy_simple(
+                    base_class=base,
+                    lazy_class_name=lazy_parent_name
+                )
+                lazy_bases.append(lazy_parent)
+                logger.debug(f"Lazy {lazy_class_name} inherits from lazy {lazy_parent_name}")
 
         if has_unsafe_metaclass:
-            # Base class has unsafe custom metaclass - don't inherit, just copy interface
-            print(f"🔧 LAZY FACTORY: {base_class.__name__} has custom metaclass {base_metaclass.__name__}, avoiding inheritance")
-            lazy_class = make_dataclass(
+            # Base class has unsafe custom metaclass - inherit using the same metaclass
+            logger.debug(f"Lazy {lazy_class_name}: {base_class.__name__} has custom metaclass {base_metaclass.__name__}, using same metaclass")
+
+            # CRITICAL: Inherit from base_class directly (e.g., PipelineConfig inherits from GlobalPipelineConfig)
+            # Use the same metaclass to avoid conflicts
+            from abc import ABCMeta
+            from dataclasses import dataclass as dataclass_decorator, field as dataclass_field
+
+            # Build class namespace with field annotations AND defaults
+            namespace = {'__module__': base_class.__module__}
+            annotations = {}
+
+            # Add field annotations and defaults from introspected fields
+            for field_info in LazyDataclassFactory._introspect_dataclass_fields(
+                base_class, debug_template, global_config_type, parent_field_path, parent_instance_provider
+            ):
+                if isinstance(field_info, tuple):
+                    if len(field_info) == 3:
+                        field_name, field_type, field_default = field_info
+                    else:
+                        field_name, field_type = field_info
+                        field_default = None
+                else:
+                    field_name = field_info.name
+                    field_type = field_info.type
+                    field_default = None
+
+                annotations[field_name] = field_type
+                # Set field default to None (or the provided default)
+                if field_default is None:
+                    namespace[field_name] = None
+                else:
+                    namespace[field_name] = field_default
+
+            namespace['__annotations__'] = annotations
+
+            # Create class with same metaclass, inheriting from base_class
+            lazy_class = base_metaclass(
                 lazy_class_name,
-                LazyDataclassFactory._introspect_dataclass_fields(
-                    base_class, debug_template, global_config_type, parent_field_path, parent_instance_provider
-                ),
-                bases=(),  # No inheritance to avoid metaclass conflicts
-                frozen=True
+                (base_class,),  # Inherit from base_class directly
+                namespace
             )
+            # Apply dataclass decorator
+            lazy_class = dataclass_decorator(frozen=True)(lazy_class)
+
+            # CRITICAL: Copy methods from base class when avoiding inheritance
+            # This includes abstract methods that need to be implemented
+            for attr_name in dir(base_class):
+                if not attr_name.startswith('_'):  # Skip private/magic methods
+                    attr_value = getattr(base_class, attr_name, None)
+                    # Only copy methods, not fields
+                    if attr_value is not None and callable(attr_value) and not isinstance(attr_value, type):
+                        # Don't copy if it's a dataclass field descriptor
+                        if not hasattr(lazy_class, attr_name) or not hasattr(getattr(lazy_class, attr_name), '__set__'):
+                            # CRITICAL: If this is an abstract method, we need to unwrap it
+                            # Otherwise the new class will still be considered abstract
+                            if hasattr(attr_value, '__isabstractmethod__') and attr_value.__isabstractmethod__:
+                                # Get the underlying function without the abstractmethod wrapper
+                                if hasattr(attr_value, '__func__'):
+                                    actual_func = attr_value.__func__
+                                else:
+                                    actual_func = attr_value
+                                # Create a new function without the abstractmethod marker
+                                import types
+                                new_func = types.FunctionType(
+                                    actual_func.__code__,
+                                    actual_func.__globals__,
+                                    actual_func.__name__,
+                                    actual_func.__defaults__,
+                                    actual_func.__closure__
+                                )
+                                setattr(lazy_class, attr_name, new_func)
+                            else:
+                                setattr(lazy_class, attr_name, attr_value)
+
+            # CRITICAL: Update __abstractmethods__ to reflect that we've implemented the abstract methods
+            # Python's ABC system caches abstract status at class creation time, so we need to manually update it
+            if hasattr(lazy_class, '__abstractmethods__'):
+                # Remove any methods we just copied from the abstract methods set
+                implemented_methods = {attr_name for attr_name in dir(base_class)
+                                     if not attr_name.startswith('_') and callable(getattr(base_class, attr_name, None))}
+                new_abstract_methods = lazy_class.__abstractmethods__ - implemented_methods
+                lazy_class.__abstractmethods__ = frozenset(new_abstract_methods)
         else:
             # Safe to inherit - use lazy parent classes if available, otherwise inherit from base_class
             bases_to_use = tuple(lazy_bases) if lazy_bases else (base_class,)
@@ -529,6 +714,18 @@ class LazyDataclassFactory:
                 bases=bases_to_use,
                 frozen=True
             )
+
+        # CRITICAL: Copy methods from base class to lazy class
+        # make_dataclass() only copies bases, not methods defined in the class body
+        # This preserves methods like build_scope_id() from ScopedObject implementations
+        for attr_name in dir(base_class):
+            if not attr_name.startswith('_'):  # Skip private/magic methods
+                attr_value = getattr(base_class, attr_name, None)
+                # Only copy methods, not fields (fields are already handled by make_dataclass)
+                if attr_value is not None and callable(attr_value) and not isinstance(attr_value, type):
+                    # Don't copy if it's a dataclass field descriptor
+                    if not hasattr(lazy_class, attr_name) or not hasattr(getattr(lazy_class, attr_name), '__set__'):
+                        setattr(lazy_class, attr_name, attr_value)
 
         # Add constructor parameter tracking to detect user-set fields
         # CRITICAL: Check if base_class already has a custom __init__ from @global_pipeline_config
@@ -547,24 +744,65 @@ class LazyDataclassFactory:
             # Get the original dataclass-generated __init__ for lazy_class
             dataclass_init = lazy_class.__init__
 
-            def custom_init_with_tracking(self, **kwargs):
-                # First apply the inherit-as-none logic (set missing fields to None)
-                for field_name in fields_set_to_none:
-                    if field_name not in kwargs:
-                        kwargs[field_name] = None
+            # CRITICAL FIX: Dynamically generate __init__ with explicit parameters
+            # This is necessary because Python can't match LazyNapariStreamingConfig(enabled=True, port=5555)
+            # to a signature of (self, **kwargs) - it needs explicit parameter names
 
-                # Then add tracking
-                object.__setattr__(self, '_explicitly_set_fields', set(kwargs.keys()))
-                object.__setattr__(self, '_global_config_type', global_config_type)
-                import re
-                def _camel_to_snake_local(name: str) -> str:
-                    s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
-                    return re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
-                config_field_name = _camel_to_snake_local(base_class.__name__)
-                object.__setattr__(self, '_config_field_name', config_field_name)
+            # Get all field names from the dataclass
+            field_names = [f.name for f in dataclasses.fields(lazy_class)]
 
-                # Call the dataclass-generated __init__
-                dataclass_init(self, **kwargs)
+            # Build the parameter list string for exec()
+            # Format: "self, *, field1=None, field2=None, ..."
+            params_str = "self, *, " + ", ".join(f"{name}=None" for name in field_names)
+
+            # Build the function body that collects all kwargs
+            # We need to capture all the parameters into a kwargs dict
+            kwargs_items = ", ".join(f"'{name}': {name}" for name in field_names)
+
+            # Build the logging string for parameters at generation time
+            params_log_str = ', '.join(f'{name}={{{name}}}' for name in field_names)
+
+            # Create the function code
+            func_code = f"""
+def custom_init_with_tracking({params_str}):
+    logger.info(f"🔍🔍🔍 {lazy_class_name}.__init__ CALLED with params: {params_log_str}")
+    kwargs = {{{kwargs_items}}}
+    logger.info(f"🔍 {lazy_class_name}.__init__: kwargs={{kwargs}}, fields_set_to_none={{fields_set_to_none}}")
+
+    # First apply the inherit-as-none logic (set missing fields to None)
+    for field_name in fields_set_to_none:
+        if field_name not in kwargs:
+            logger.info(f"🔍 {lazy_class_name}.__init__: Setting {{field_name}} = None (not in kwargs)")
+            kwargs[field_name] = None
+        else:
+            logger.info(f"🔍 {lazy_class_name}.__init__: Keeping {{field_name}} = {{kwargs[field_name]}} (in kwargs)")
+
+    # Then add tracking
+    object.__setattr__(self, '_explicitly_set_fields', set(kwargs.keys()))
+    object.__setattr__(self, '_global_config_type', global_config_type)
+    import re
+    def _camel_to_snake_local(name: str) -> str:
+        s1 = re.sub('(.)([A-Z][a-z]+)', r'\\1_\\2', name)
+        return re.sub('([a-z0-9])([A-Z])', r'\\1_\\2', s1).lower()
+    config_field_name = _camel_to_snake_local(base_class.__name__)
+    object.__setattr__(self, '_config_field_name', config_field_name)
+
+    logger.info(f"🔍 {lazy_class_name}.__init__: Calling original_init with kwargs={{kwargs}}")
+    # Call the dataclass-generated __init__
+    dataclass_init(self, **kwargs)
+"""
+
+            # Execute the function code to create the function
+            namespace = {
+                'logger': logger,
+                'fields_set_to_none': fields_set_to_none,
+                'global_config_type': global_config_type,
+                'base_class': base_class,
+                'dataclass_init': dataclass_init,
+                'object': object
+            }
+            exec(func_code, namespace)
+            custom_init_with_tracking = namespace['custom_init_with_tracking']
 
             lazy_class.__init__ = custom_init_with_tracking
         else:
@@ -592,6 +830,7 @@ class LazyDataclassFactory:
             RESOLVE_FIELD_VALUE_METHOD: LazyMethodBindings.create_resolver(),
             GET_ATTRIBUTE_METHOD: LazyMethodBindings.create_getattribute(),
             TO_BASE_CONFIG_METHOD: LazyMethodBindings.create_to_base_config(base_class),
+            '__deepcopy__': LazyMethodBindings.create_deepcopy(),
             **LazyMethodBindings.create_class_methods()
         }
         for method_name, method_impl in method_bindings.items():
@@ -1211,21 +1450,66 @@ def _fix_dataclass_field_defaults_post_processing(cls: Type, fields_set_to_none:
     _log = inline_logger if inline_logger else logger
     _log.info(f"🔍 _fix_dataclass_field_defaults_post_processing: {cls.__name__} - fixing {len(fields_set_to_none)} fields: {fields_set_to_none}")
 
+    # CRITICAL: Check if this is a lazy class that already has tracking wrapper
+    # If so, DON'T replace it - the tracking wrapper already handles inherit-as-none logic
+    if hasattr(cls.__init__, '__name__') and 'tracking' in cls.__init__.__name__:
+        _log.info(f"🔍 _fix_dataclass_field_defaults_post_processing: {cls.__name__} already has tracking wrapper, skipping")
+        # Still update field defaults for consistency
+        for field_name in fields_set_to_none:
+            if field_name in cls.__dataclass_fields__:
+                field_obj = cls.__dataclass_fields__[field_name]
+                field_obj.default = None
+                field_obj.default_factory = dataclasses.MISSING
+                setattr(cls, field_name, None)
+        return
+
     # Store the original __init__ method
     original_init = cls.__init__
 
-    def custom_init(self, **kwargs):
-        """Custom __init__ that ensures inherited fields use None defaults."""
-        _log.info(f"🔍 {cls.__name__}.__init__: kwargs={kwargs}, fields_set_to_none={fields_set_to_none}")
-        # For fields that should be None, set them to None if not explicitly provided
-        for field_name in fields_set_to_none:
-            if field_name not in kwargs:
-                kwargs[field_name] = None
-                _log.info(f"🔍 {cls.__name__}.__init__: Setting {field_name} = None (not in kwargs)")
+    # CRITICAL FIX: Dynamically generate __init__ with explicit parameters
+    # This is necessary because Python can't match LazyNapariStreamingConfig(enabled=True, port=5555)
+    # to a signature of (self, **kwargs) - it needs explicit parameter names
 
-        # Call the original __init__ with modified kwargs
-        _log.info(f"🔍 {cls.__name__}.__init__: Calling original_init with kwargs={kwargs}")
-        original_init(self, **kwargs)
+    # Get all field names from the dataclass
+    field_names = [f.name for f in dataclasses.fields(cls)]
+
+    # Build the parameter list string for exec()
+    # Format: "self, *, field1=None, field2=None, ..."
+    params_str = "self, *, " + ", ".join(f"{name}=None" for name in field_names)
+
+    # Build the function body that collects all kwargs
+    # We need to capture all the parameters into a kwargs dict
+    kwargs_items = ", ".join(f"'{name}': {name}" for name in field_names)
+
+    # Build the logging string for parameters at generation time
+    params_log_str = ', '.join(f'{name}={{{name}}}' for name in field_names)
+
+    # Create the function code
+    func_code = f"""
+def custom_init({params_str}):
+    \"\"\"Custom __init__ that ensures inherited fields use None defaults.\"\"\"
+    _log.info(f"🔍 {cls.__name__}.__init__ CALLED with params: {params_log_str}")
+    kwargs = {{{kwargs_items}}}
+    _log.info(f"🔍 {cls.__name__}.__init__: kwargs={{kwargs}}, fields_set_to_none={{fields_set_to_none}}")
+    # For fields that should be None, set them to None if not explicitly provided
+    for field_name in fields_set_to_none:
+        if field_name not in kwargs:
+            kwargs[field_name] = None
+            _log.info(f"🔍 {cls.__name__}.__init__: Setting {{field_name}} = None (not in kwargs)")
+
+    # Call the original __init__ with modified kwargs
+    _log.info(f"🔍 {cls.__name__}.__init__: Calling original_init with kwargs={{kwargs}}")
+    original_init(self, **kwargs)
+"""
+
+    # Execute the function code to create the function
+    namespace = {
+        '_log': _log,
+        'fields_set_to_none': fields_set_to_none,
+        'original_init': original_init
+    }
+    exec(func_code, namespace)
+    custom_init = namespace['custom_init']
 
     # Replace the __init__ method and mark it as custom
     cls.__init__ = custom_init
@@ -1305,6 +1589,45 @@ def _inject_multiple_fields_into_dataclass(target_class: Type, configs: List[Dic
     # make_dataclass() sets __module__ to the caller's module (lazy_factory.py)
     # We need to set it to the target class's original module for correct import paths
     new_class.__module__ = target_class.__module__
+
+    # CRITICAL: Copy methods from original class to new class
+    # make_dataclass() only copies bases, not methods defined in the class body
+    # This preserves methods like build_scope_id() from ScopedObject implementations
+    for attr_name in dir(target_class):
+        if not attr_name.startswith('_'):  # Skip private/magic methods
+            attr_value = getattr(target_class, attr_name)
+            # Only copy methods, not fields (fields are already in all_fields)
+            if callable(attr_value) and not isinstance(attr_value, type):
+                # CRITICAL: If this is an abstract method, we need to unwrap it
+                # Otherwise the new class will still be considered abstract
+                if hasattr(attr_value, '__isabstractmethod__') and attr_value.__isabstractmethod__:
+                    # Get the underlying function without the abstractmethod wrapper
+                    # The actual function is stored in __func__ for bound methods
+                    if hasattr(attr_value, '__func__'):
+                        actual_func = attr_value.__func__
+                    else:
+                        actual_func = attr_value
+                    # Create a new function without the abstractmethod marker
+                    import types
+                    new_func = types.FunctionType(
+                        actual_func.__code__,
+                        actual_func.__globals__,
+                        actual_func.__name__,
+                        actual_func.__defaults__,
+                        actual_func.__closure__
+                    )
+                    setattr(new_class, attr_name, new_func)
+                else:
+                    setattr(new_class, attr_name, attr_value)
+
+    # CRITICAL: Update __abstractmethods__ to reflect that we've implemented the abstract methods
+    # Python's ABC system caches abstract status at class creation time, so we need to manually update it
+    if hasattr(new_class, '__abstractmethods__'):
+        # Remove any methods we just copied from the abstract methods set
+        implemented_methods = {attr_name for attr_name in dir(target_class)
+                             if not attr_name.startswith('_') and callable(getattr(target_class, attr_name, None))}
+        new_abstract_methods = new_class.__abstractmethods__ - implemented_methods
+        new_class.__abstractmethods__ = frozenset(new_abstract_methods)
 
     # Sibling inheritance is now handled by the dual-axis resolver system
 

@@ -67,31 +67,61 @@ def _ensure_wcag_compliant(
         return color_rgb
 
 
+def get_scope_depth(scope_id: Optional[str]) -> int:
+    """Get the depth (number of levels) in a hierarchical scope.
+
+    GENERIC SCOPE RULE: Works for any N-level hierarchy.
+
+    Examples:
+        >>> get_scope_depth(None)
+        0
+        >>> get_scope_depth("plate")
+        1
+        >>> get_scope_depth("plate::step")
+        2
+        >>> get_scope_depth("plate::step::nested")
+        3
+
+    Args:
+        scope_id: Hierarchical scope identifier
+
+    Returns:
+        Number of levels in the scope (0 for None/global)
+    """
+    if scope_id is None:
+        return 0
+    return scope_id.count('::') + 1
+
+
 def extract_orchestrator_scope(scope_id: Optional[str]) -> Optional[str]:
     """Extract orchestrator scope from a scope_id.
-    
-    Scope IDs follow the pattern:
-    - Orchestrator scope: "plate_path" (e.g., "/path/to/plate")
-    - Step scope: "plate_path::step_token" (e.g., "/path/to/plate::step_0")
-    
-    Args:
-        scope_id: Full scope identifier (can be orchestrator or step scope)
-        
-    Returns:
-        Orchestrator scope (plate_path) or None if scope_id is None
-        
+
+    GENERIC SCOPE RULE: Extracts the ROOT (first level) of the scope hierarchy.
+    Works for any N-level hierarchy by extracting everything before the first '::'.
+
+    This is equivalent to extract_scope_segment(scope_id, 0).
+
     Examples:
         >>> extract_orchestrator_scope("/path/to/plate")
         '/path/to/plate'
         >>> extract_orchestrator_scope("/path/to/plate::step_0")
         '/path/to/plate'
+        >>> extract_orchestrator_scope("/path/to/plate::step_0::nested")
+        '/path/to/plate'
         >>> extract_orchestrator_scope(None)
         None
+
+    Args:
+        scope_id: Full scope identifier (can be any level in hierarchy)
+
+    Returns:
+        Root scope (orchestrator/plate level), or None if scope_id is None
     """
     if scope_id is None:
         return None
-    
-    # Split on :: separator
+
+    # GENERIC: Extract first segment using generic utility
+    # Note: We inline this for performance since it's called frequently
     if '::' in scope_id:
         return scope_id.split('::', 1)[0]
     else:
@@ -157,16 +187,65 @@ def hash_scope_to_color_index(scope_id: str, palette_size: int = 50) -> int:
     return hash_int % palette_size
 
 
+def extract_scope_segment(scope_id: str, level: int = -1) -> Optional[str]:
+    """Extract a specific segment from a hierarchical scope_id.
+
+    GENERIC SCOPE RULE: Works for any N-level hierarchy.
+
+    Examples:
+        >>> extract_scope_segment("plate::step::nested", 0)
+        'plate'
+        >>> extract_scope_segment("plate::step::nested", 1)
+        'step'
+        >>> extract_scope_segment("plate::step::nested", 2)
+        'nested'
+        >>> extract_scope_segment("plate::step::nested", -1)
+        'nested'
+        >>> extract_scope_segment("plate::step::nested", -2)
+        'step'
+        >>> extract_scope_segment("plate", 0)
+        'plate'
+        >>> extract_scope_segment("plate", 1)
+        None
+
+    Args:
+        scope_id: Hierarchical scope identifier
+        level: Index of segment to extract (0-based, supports negative indexing)
+               -1 = last segment (default), 0 = first segment, etc.
+
+    Returns:
+        The segment at the specified level, or None if level is out of bounds
+    """
+    if scope_id is None:
+        return None
+
+    segments = scope_id.split('::')
+
+    try:
+        return segments[level]
+    except IndexError:
+        return None
+
+
 def extract_step_index(scope_id: str) -> int:
     """Extract per-orchestrator step index from step scope_id.
 
-    The scope_id format is "plate_path::step_token@position" where position
+    GENERIC SCOPE RULE: Extracts the LAST segment of the scope hierarchy.
+    Works for any N-level hierarchy by extracting everything after the last '::'.
+
+    The scope_id format is "...::step_token@position" where position
     is the step's index within its orchestrator's pipeline (0-based).
 
-    This ensures each orchestrator has independent step indexing for visual styling.
+    Examples:
+        >>> extract_step_index("plate::step_0@5")
+        5
+        >>> extract_step_index("plate::nested::step_0@5")
+        5
+        >>> extract_step_index("plate")
+        0
 
     Args:
-        scope_id: Step scope in format "plate_path::step_token@position"
+        scope_id: Step scope in format "...::step_token@position"
 
     Returns:
         Step index (0-based) for visual styling, or 0 if not a step scope
@@ -174,8 +253,10 @@ def extract_step_index(scope_id: str) -> int:
     if '::' not in scope_id:
         return 0
 
-    # Extract the part after ::
-    step_part = scope_id.split('::')[1]
+    # GENERIC: Extract the LAST segment using generic utility
+    step_part = extract_scope_segment(scope_id, -1)
+    if step_part is None:
+        return 0
 
     # Check if position is included (format: "step_token@position")
     if '@' in step_part:

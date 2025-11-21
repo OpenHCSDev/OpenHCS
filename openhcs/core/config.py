@@ -20,6 +20,9 @@ from openhcs.constants.input_source import InputSource
 # Import decorator for automatic decorator creation
 from openhcs.config_framework import auto_create_decorator
 
+# Import ScopedObject for scope identification
+from openhcs.config_framework.context_manager import ScopedObject
+
 # Import platform-aware transport mode default
 # This must be imported here to avoid circular imports
 import platform
@@ -101,7 +104,7 @@ class TransportMode(Enum):
 
 @auto_create_decorator
 @dataclass(frozen=True)
-class GlobalPipelineConfig:
+class GlobalPipelineConfig(ScopedObject):
     """
     Root configuration object for an OpenHCS pipeline session.
     This object is intended to be instantiated at application startup and treated as immutable.
@@ -135,6 +138,18 @@ class GlobalPipelineConfig:
     # Future extension point:
     # logging_config: Optional[Dict[str, Any]] = None # For configuring logging levels, handlers
     # plugin_settings: Dict[str, Any] = field(default_factory=dict) # For plugin-specific settings
+
+    def build_scope_id(self, context_provider) -> None:
+        """
+        Global config always has None scope (visible to all orchestrators).
+
+        Args:
+            context_provider: Ignored for global config
+
+        Returns:
+            None (global scope)
+        """
+        return None
 
 
 # PipelineConfig will be created automatically by the injection system
@@ -562,6 +577,26 @@ FijiStreamingConfig = create_streaming_config(
 # Inject all accumulated fields at the end of module loading
 from openhcs.config_framework.lazy_factory import _inject_all_pending_fields
 _inject_all_pending_fields()
+
+# Add build_scope_id method to auto-generated PipelineConfig
+# PipelineConfig is created by @auto_create_decorator on GlobalPipelineConfig
+# We need to add the ScopedObject method after it's generated
+def _pipeline_config_build_scope_id(self, context_provider) -> str:
+    """
+    Build scope ID from orchestrator's plate_path.
+
+    Args:
+        context_provider: Orchestrator instance with plate_path attribute
+
+    Returns:
+        String representation of plate_path
+    """
+    return str(context_provider.plate_path)
+
+# Get the auto-generated PipelineConfig class
+PipelineConfig = globals()['PipelineConfig']
+# Add the method directly (can't add ScopedObject to bases due to metaclass conflicts)
+PipelineConfig.build_scope_id = _pipeline_config_build_scope_id
 
 
 # ============================================================================

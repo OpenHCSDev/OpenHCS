@@ -26,6 +26,8 @@ from openhcs.formats.func_arg_prep import prepare_patterns_and_functions
 from openhcs.core.memory.stack_utils import stack_slices, unstack_slices
 # OpenHCS imports moved to local imports to avoid circular dependencies
 
+# Import ScopedObject for scope identification
+from openhcs.config_framework.context_manager import ScopedObject
 
 logger = logging.getLogger(__name__)
 
@@ -792,7 +794,7 @@ def _process_single_pattern_group(
         logger.error(f"Full traceback for pattern group {pattern_repr}:\n{full_traceback}")
         raise ValueError(f"Failed to process pattern group {pattern_repr}: {e}") from e
 
-class FunctionStep(AbstractStep):
+class FunctionStep(AbstractStep, ScopedObject):
 
     def __init__(
         self,
@@ -814,6 +816,19 @@ class FunctionStep(AbstractStep):
 
         super().__init__(**kwargs)
         self.func = func # This is used by prepare_patterns_and_functions at runtime
+
+    def build_scope_id(self, context_provider) -> str:
+        """
+        Build scope ID from orchestrator's plate_path and step's pipeline scope token.
+
+        Args:
+            context_provider: Orchestrator instance with plate_path attribute
+
+        Returns:
+            Scope string in format "plate_path::step_token"
+        """
+        token = getattr(self, '_pipeline_scope_token', self.name)
+        return f"{context_provider.plate_path}::{token}"
 
     def process(self, context: 'ProcessingContext', step_index: int) -> None:
         # Access step plan by index (step_plans keyed by index, not step_id)
