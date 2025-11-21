@@ -134,6 +134,7 @@ TUI architecture, UI development patterns, form management systems, and visual f
    gui_performance_patterns
    cross_window_update_optimization
    reactive_ui_performance_optimizations
+   caching_architecture
    scope_visual_feedback_system
 
 Development Tools

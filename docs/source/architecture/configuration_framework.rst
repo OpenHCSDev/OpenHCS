@@ -24,13 +24,14 @@ Resolution combines context flattening (X-axis) with MRO traversal (Y-axis):
 .. code-block:: python
 
    # X-axis: Context hierarchy flattened into available_configs dict
-   with config_context(global_config):           # GlobalPipelineConfig
-       with config_context(pipeline_config):     # PipelineConfig  
-           with config_context(step_config):     # StepMaterializationConfig
+   with config_context(global_config, context_provider=orchestrator):           # GlobalPipelineConfig
+       with config_context(pipeline_config, context_provider=orchestrator):     # PipelineConfig
+           with config_context(step_config, context_provider=orchestrator):     # StepMaterializationConfig
                # All three merged into available_configs dict
-               
+               # Scope information automatically derived via build_scope_id()
+
    # Y-axis: MRO determines priority
-   # StepMaterializationConfig.__mro__ = [StepMaterializationConfig, StepWellFilterConfig, 
+   # StepMaterializationConfig.__mro__ = [StepMaterializationConfig, StepWellFilterConfig,
    #                                       PathPlanningConfig, WellFilterConfig, ...]
    # Walk MRO, check available_configs for each type, return first concrete value
 

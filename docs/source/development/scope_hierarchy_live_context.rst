@@ -776,7 +776,7 @@ When multiple configs match during MRO traversal, the resolver sorts them by sco
 
 **Context Manager Scope Tracking**:
 
-The ``config_context()`` manager now accepts ``scope_id`` and ``config_scopes`` parameters to track scope information through the context stack:
+The ``config_context()`` manager now accepts ``context_provider`` parameter for automatic scope derivation via the ``ScopedObject`` interface:
 
 .. code-block:: python
 
@@ -784,9 +784,42 @@ The ``config_context()`` manager now accepts ``scope_id`` and ``config_scopes`` 
     current_config_scopes: contextvars.ContextVar[Dict[str, Optional[str]]] = ...
     current_scope_id: contextvars.ContextVar[Optional[str]] = ...
 
-    with config_context(pipeline_config, scope_id=str(plate_path), config_scopes={...}):
-        # Scope information is now available during resolution
+    # Objects implementing ScopedObject can derive their own scope
+    with config_context(pipeline_config, context_provider=orchestrator):
+        # Scope information is automatically derived via pipeline_config.build_scope_id(orchestrator)
         # resolve_field_inheritance() can prioritize by scope specificity
+        pass
+
+**ScopedObject Interface**:
+
+Objects that need scope identification implement the ``ScopedObject`` ABC:
+
+.. code-block:: python
+
+    from openhcs.config_framework import ScopedObject
+
+    class GlobalPipelineConfig(ScopedObject):
+        def build_scope_id(self, context_provider) -> Optional[str]:
+            return None  # Global scope
+
+    class PipelineConfig(GlobalPipelineConfig):
+        def build_scope_id(self, context_provider) -> str:
+            return str(context_provider.plate_path)
+
+    class FunctionStep(ScopedObject):
+        def build_scope_id(self, context_provider) -> str:
+            return f"{context_provider.plate_path}::{self.token}"
+
+For UI code that only has scope strings (not full objects), use ``ScopeProvider``:
+
+.. code-block:: python
+
+    from openhcs.config_framework import ScopeProvider
+
+    # UI code with only scope string
+    scope_provider = ScopeProvider(scope_id="/plate_001::step_6")
+    with config_context(step_config, context_provider=scope_provider):
+        # Scope is provided without needing full orchestrator object
         pass
 
 Implementation Pattern
@@ -825,7 +858,7 @@ Structure
         token: int  # Cache invalidation token
         values: Dict[type, Dict[str, Any]]  # Global context (for GlobalPipelineConfig)
         scoped_values: Dict[str, Dict[type, Dict[str, Any]]]  # Scoped context (for PipelineConfig, FunctionStep)
-        scopes: Dict[str, Optional[str]]  # Added in cf4f06b0: Maps config type names to scope IDs
+        scopes: Dict[str, Optional[str]]  # Maps config type names to scope IDs for dual-axis resolution
 
 **Key Differences**:
 
@@ -840,11 +873,12 @@ Structure
   - Example: ``{"/plate_001": {PipelineConfig: {well_filter: 2}}}``
   - Example: ``{"/plate_001::step_6": {FunctionStep: {well_filter: 3}}}``
 
-- ``scopes``: **Added in commit cf4f06b0**. Maps config type names to their scope IDs for scope-aware resolution.
+- ``scopes``: Maps config type names to their scope IDs for scope-aware resolution.
 
   - Format: ``{config_type_name: scope_id}``
   - Example: ``{"GlobalPipelineConfig": None, "PipelineConfig": "/plate_001", "FunctionStep": "/plate_001::step_6"}``
-  - Used by ``_build_context_stack()`` to pass scope information to ``config_context()`` for scope-aware priority resolution
+  - Used by ``_build_context_stack()`` to initialize the ``current_config_scopes`` ContextVar for dual-axis resolution
+  - Enables scope specificity filtering to prevent parent scopes from seeing child scope values
 
 Usage in Preview Instance Creation
 -----------------------------------
@@ -877,6 +911,49 @@ Usage in Preview Instance Creation
 
         # Merge live values into object
         return self._merge_with_live_values(obj, live_values)
+
+Framework-Level Cache Control
+==============================
+
+The ``FrameworkConfig`` provides master switches to disable caching systems for debugging cache-related bugs.
+
+Environment Variables
+---------------------
+
+.. code-block:: bash
+
+    # Disable all token-based caches
+    export OPENHCS_DISABLE_TOKEN_CACHES=1
+
+    # Disable specific caches
+    export OPENHCS_DISABLE_LAZY_RESOLUTION_CACHE=1
+    export OPENHCS_DISABLE_PLACEHOLDER_TEXT_CACHE=1
+    export OPENHCS_DISABLE_LIVE_CONTEXT_RESOLVER_CACHE=1
+    export OPENHCS_DISABLE_UNSAVED_CHANGES_CACHE=1
+
+Configuration API
+-----------------
+
+.. code-block:: python
+
+    from openhcs.config_framework import get_framework_config, FrameworkConfig
+
+    # Get current framework config
+    config = get_framework_config()
+
+    # Check if caches are disabled
+    if config.disable_lazy_resolution_cache:
+        # Force full resolution without cache
+        pass
+
+**Integration Points**:
+
+- ``LazyMethodBindings.__getattribute__``: Checks ``disable_lazy_resolution_cache`` before using cache
+- ``LazyDefaultPlaceholderService``: Checks ``disable_placeholder_text_cache`` before using cache
+- ``LiveContextResolver``: Checks ``disable_live_context_resolver_cache`` before using cache
+- ``check_step_has_unsaved_changes()``: Checks ``disable_unsaved_changes_cache`` before using cache
+
+**Use Case**: When debugging cache-related bugs, set ``OPENHCS_DISABLE_TOKEN_CACHES=1`` to force all systems to bypass caches and perform full resolution on every access.
 
 Token-Based Cache Invalidation
 ===============================

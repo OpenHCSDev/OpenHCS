@@ -70,7 +70,7 @@ The factory integrates with Python's contextvars system for context scoping.
 
 Context Scoping
 ~~~~~~~~~~~~~~~
-The :py:func:`~openhcs.config_framework.context_manager.config_context` context manager creates a new scope where a specific configuration is merged into the current context. When you enter a ``config_context(pipeline_config)`` block, the pipeline config's fields are merged into the current global config, and this merged config becomes the active context for all lazy dataclass resolutions within that block.
+The :py:func:`~openhcs.config_framework.context_manager.config_context` context manager creates a new scope where a specific configuration is merged into the current context. When you enter a ``config_context(pipeline_config, context_provider=orchestrator)`` block, the pipeline config's fields are merged into the current global config, and this merged config becomes the active context for all lazy dataclass resolutions within that block. The ``context_provider`` parameter enables automatic scope derivation via the ``ScopedObject`` interface.
 
 Config Merging
 ~~~~~~~~~~~~~~
