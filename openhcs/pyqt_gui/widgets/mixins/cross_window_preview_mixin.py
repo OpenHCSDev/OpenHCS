@@ -48,6 +48,9 @@ class CrossWindowPreviewMixin:
         self._pending_changed_fields: Set[str] = set()  # Track which fields changed during debounce
         self._last_live_context_snapshot = None  # Last LiveContextSnapshot (becomes "before" for next change)
         self._preview_update_timer = None  # QTimer for debouncing preview updates
+        # Per-token, per-object batch resolution cache to avoid repeat resolver calls in one update
+        self._batch_resolution_cache: Dict[Tuple[int, int, Hashable], Dict[str, Any]] = {}
+        self._batch_resolution_cache_token: Optional[int] = None
 
         # Window close event state (passed as parameters, stored temporarily for timer callback)
         self._pending_window_close_before_snapshot = None
@@ -542,6 +545,60 @@ class CrossWindowPreviewMixin:
         merged_obj = self._merge_with_live_values(obj, live_values)
         return merged_obj
 
+    def _get_batched_attr_values(
+        self,
+        target_obj: Any,
+        attr_names: Iterable[str],
+        context_stack: list,
+        live_context_snapshot,
+        resolver: "LiveContextResolver",
+        scope_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Batch resolve attributes with per-token cache for the current update cycle."""
+        token = getattr(live_context_snapshot, "token", None) if live_context_snapshot else None
+        context_ids = tuple(id(ctx) for ctx in context_stack)
+        cache_key = (token or 0, id(target_obj), hash(context_ids), scope_id)
+
+        if self._batch_resolution_cache_token != token:
+            self._batch_resolution_cache.clear()
+            self._batch_resolution_cache_token = token
+
+        if cache_key in self._batch_resolution_cache:
+            return self._batch_resolution_cache[cache_key]
+
+        # Prefer scoped values when scope_id is provided
+        live_values = {}
+        if scope_id and live_context_snapshot:
+            scoped = getattr(live_context_snapshot, "scoped_values", {}) or {}
+            live_values = scoped.get(scope_id, {})
+        if not live_values and live_context_snapshot:
+            live_values = getattr(live_context_snapshot, "values", {}) or {}
+
+        # Fast-path: if live values already contain these attrs for this type, return them directly
+        direct_results: Dict[str, Any] = {}
+        type_values = live_values.get(type(target_obj))
+        if type_values:
+            missing = False
+            for attr in attr_names:
+                if attr in type_values:
+                    direct_results[attr] = type_values[attr]
+                else:
+                    missing = True
+                    break
+            if not missing:
+                self._batch_resolution_cache[cache_key] = direct_results
+                return direct_results
+
+        values = resolver.resolve_all_config_attrs(
+            config_obj=target_obj,
+            attr_names=list(attr_names),
+            context_stack=context_stack,
+            live_context=live_values,
+            cache_token=token or 0,
+        )
+        self._batch_resolution_cache[cache_key] = values
+        return values
+
     def _get_preview_instance(self, obj: Any, live_context_snapshot, scope_id: str, obj_type: Type) -> Any:
         """Get object instance with live values merged (shared pattern for PipelineEditor and PlateManager).
 
@@ -815,6 +872,14 @@ class CrossWindowPreviewMixin:
         logger = logging.getLogger(__name__)
         logger.info(f"🔍 _check_single_object_with_batch_resolution: identifiers={identifiers}")
 
+        # Filter identifiers to only preview-enabled fields
+        filtered_identifiers = {
+            ident for ident in identifiers if ident in self._preview_fields or any(ident.startswith(f"{pf}.") or pf.startswith(f"{ident}.") for pf in self._preview_fields)
+        }
+        if not filtered_identifiers:
+            return False
+        identifiers = filtered_identifiers
+
         # Try to use batch resolution if we have a context stack
         context_stack_before = self._build_flash_context_stack(obj_before, live_context_before)
         context_stack_after = self._build_flash_context_stack(obj_after, live_context_after)
@@ -902,10 +967,9 @@ class CrossWindowPreviewMixin:
         import logging
         logger = logging.getLogger(__name__)
 
-        logger.info(f"🔍 _check_with_batch_resolution START:")
-        logger.info(f"  - token_before: {token_before}")
-        logger.info(f"  - token_after: {token_after}")
-        logger.info(f"  - Identifiers to check: {len(identifiers)}")
+        # Early exit if nothing to compare
+        if not identifiers:
+            return False
 
         # Try to find the scope_id from scoped_values
         scope_id = None
@@ -945,7 +1009,7 @@ class CrossWindowPreviewMixin:
 
 
 
-        # Group identifiers by parent object path
+        # Group identifiers by parent object path, but prune to those that intersect preview fields
         # e.g., {'fiji_streaming_config': ['well_filter'], 'napari_streaming_config': ['well_filter']}
         parent_to_attrs = {}
         simple_attrs = []
@@ -969,38 +1033,19 @@ class CrossWindowPreviewMixin:
         logger.debug(f"🔍 _check_with_batch_resolution: simple_attrs={simple_attrs}")
         logger.debug(f"🔍 _check_with_batch_resolution: parent_to_attrs={parent_to_attrs}")
 
-        # Batch resolve simple attributes on root object
-        # Use resolve_all_config_attrs() instead of resolve_all_lazy_attrs() to handle
-        # inherited attributes (e.g., well_filter_config inherited from pipeline_config)
+        # Batch resolve simple attributes on root object using cached batch helper
         if simple_attrs:
-            before_attrs = resolver.resolve_all_config_attrs(
-                obj_before, list(simple_attrs), context_stack_before, live_ctx_before, token_before
+            before_attrs = self._get_batched_attr_values(
+                obj_before, simple_attrs, context_stack_before, live_context_before, resolver, scope_id=scope_id
             )
-            after_attrs = resolver.resolve_all_config_attrs(
-                obj_after, list(simple_attrs), context_stack_after, live_ctx_after, token_after
+            after_attrs = self._get_batched_attr_values(
+                obj_after, simple_attrs, context_stack_after, live_context_after, resolver, scope_id=scope_id
             )
-
-            # DEBUG: Log resolved values
-            logger.debug(f"🔍 _check_with_batch_resolution: Resolved {len(before_attrs)} before attrs, {len(after_attrs)} after attrs")
-            # Only log well_filter_config to reduce noise
-            if 'well_filter_config' in simple_attrs:
-                if 'well_filter_config' in before_attrs:
-                    logger.debug(f"🔍 _check_with_batch_resolution: before[well_filter_config] = {before_attrs['well_filter_config']}")
-                if 'well_filter_config' in after_attrs:
-                    logger.debug(f"🔍 _check_with_batch_resolution: after[well_filter_config] = {after_attrs['well_filter_config']}")
 
             for attr_name in simple_attrs:
                 if attr_name in before_attrs and attr_name in after_attrs:
-                    logger.info(f"🔍 _check_with_batch_resolution: Comparing {attr_name}:")
-                    logger.info(f"    before = {before_attrs[attr_name]}")
-                    logger.info(f"    after  = {after_attrs[attr_name]}")
                     if before_attrs[attr_name] != after_attrs[attr_name]:
-                        logger.info(f"    ✅ CHANGED!")
                         return True
-                    else:
-                        logger.info(f"    ❌ NO CHANGE")
-                else:
-                    logger.info(f"🔍 _check_with_batch_resolution: Skipping {attr_name} (not in both before/after)")
 
         # Batch resolve nested attributes grouped by parent
         for parent_path, attr_names in parent_to_attrs.items():
@@ -1018,34 +1063,17 @@ class CrossWindowPreviewMixin:
                 continue
 
             # Batch resolve all attributes on this parent object
-            before_attrs = resolver.resolve_all_lazy_attrs(
-                parent_before, context_stack_before, live_ctx_before, token_before
+            before_attrs = self._get_batched_attr_values(
+                parent_before, attr_names, context_stack_before, live_context_before, resolver, scope_id=scope_id
             )
-            after_attrs = resolver.resolve_all_lazy_attrs(
-                parent_after, context_stack_after, live_ctx_after, token_after
+            after_attrs = self._get_batched_attr_values(
+                parent_after, attr_names, context_stack_after, live_context_after, resolver, scope_id=scope_id
             )
-
-            logger.debug(f"🔍 _check_with_batch_resolution: Resolved {len(before_attrs)} before attrs, {len(after_attrs)} after attrs for parent_path={parent_path}")
-
-            # Only log well_filter_config to reduce noise
-            if 'well_filter_config' in attr_names:
-                if 'well_filter_config' in before_attrs:
-                    logger.debug(f"🔍 _check_with_batch_resolution: parent before[well_filter_config] = {before_attrs['well_filter_config']}")
-                if 'well_filter_config' in after_attrs:
-                    logger.debug(f"🔍 _check_with_batch_resolution: parent after[well_filter_config] = {after_attrs['well_filter_config']}")
 
             for attr_name in attr_names:
                 if attr_name in before_attrs and attr_name in after_attrs:
-                    logger.info(f"🔍 _check_with_batch_resolution: Comparing {parent_path}.{attr_name}:")
-                    logger.info(f"    before = {before_attrs[attr_name]}")
-                    logger.info(f"    after  = {after_attrs[attr_name]}")
                     if before_attrs[attr_name] != after_attrs[attr_name]:
-                        logger.info(f"    ✅ CHANGED!")
                         return True
-                    else:
-                        logger.info(f"    ❌ NO CHANGE")
-                else:
-                    logger.info(f"🔍 _check_with_batch_resolution: Skipping {parent_path}.{attr_name} (not in both before/after)")
 
         logger.info(f"🔍 _check_with_batch_resolution: Final result = False (no changes detected)")
         return False

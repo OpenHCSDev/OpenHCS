@@ -111,6 +111,9 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         self._preview_step_cache: Dict[int, FunctionStep] = {}
         self._preview_step_cache_token: Optional[int] = None
         self._next_scope_token = 0
+        # Cache for attribute resolutions per token to avoid repeat resolver calls within a refresh
+        self._attr_resolution_cache: Dict[Tuple[Optional[int], int, str], Any] = {}
+        self._attr_resolution_cache_token: Optional[int] = None
 
         self._init_cross_window_preview_mixin()
         self._register_preview_scopes()
@@ -473,15 +476,29 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         # to match the same resolution that step editor placeholders use
         from openhcs.pyqt_gui.widgets.config_preview_formatters import format_config_indicator
 
+        # Token-scoped resolution cache (per debounce cycle)
+        current_token = getattr(live_context_snapshot, 'token', None) if live_context_snapshot else None
+        if self._attr_resolution_cache_token != current_token:
+            self._attr_resolution_cache.clear()
+            self._attr_resolution_cache_token = current_token
+
+        def _cached_resolve(step_obj: FunctionStep, config_obj, attr_name: str, context):
+            cache_key = (getattr(context, 'token', None), id(config_obj), attr_name)
+            if cache_key in self._attr_resolution_cache:
+                return self._attr_resolution_cache[cache_key]
+            result = self._resolve_config_attr(step_obj, config_obj, attr_name, context)
+            self._attr_resolution_cache[cache_key] = result
+            return result
+
         config_indicators = []
         for config_attr in self.STEP_CONFIG_INDICATORS.keys():
             config = getattr(step_for_display, config_attr, None)
             if config is None:
                 continue
 
-            # Create resolver function that uses live context
+            # Create resolver function that uses live context with caching
             def resolve_attr(parent_obj, config_obj, attr_name, context):
-                return self._resolve_config_attr(step_for_display, config_obj, attr_name, live_context_snapshot)
+                return _cached_resolve(step_for_display, config_obj, attr_name, live_context_snapshot)
 
             # Use centralized formatter with unsaved change detection
             indicator_text = format_config_indicator(
@@ -511,14 +528,9 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         def resolve_attr(parent_obj, config_obj, attr_name, context):
             # If context token matches live token, use preview instance
             # If context token is different (saved snapshot), use original instance
-            is_live_context = (context.token == live_context_snapshot.token)
+            is_live_context = (context.token == current_token)
             step_to_use = step_preview if is_live_context else original_step
-
-            logger.info(f"🔍 resolve_attr: attr_name={attr_name}, context.token={context.token}, live_token={live_context_snapshot.token}, is_live={is_live_context}, step_to_use={'PREVIEW' if is_live_context else 'ORIGINAL'}")
-
-            result = self._resolve_config_attr(step_to_use, config_obj, attr_name, context)
-            logger.info(f"🔍 resolve_attr: attr_name={attr_name} resolved to {result}")
-            return result
+            return _cached_resolve(step_to_use, config_obj, attr_name, context)
 
         logger.info(f"🔍 _format_resolved_step_for_display: About to call check_step_has_unsaved_changes for step {getattr(original_step, 'name', 'unknown')}")
         has_unsaved = check_step_has_unsaved_changes(

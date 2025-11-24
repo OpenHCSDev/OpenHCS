@@ -382,6 +382,14 @@ Performance Impact
 - **Context merging**: O(n_configs) merge operation per context nesting level
 - **MRO resolution**: No performance impact (same O(n_mro) traversal, just using ``object.__getattribute__()``)
 
+Recent Incremental Optimizations (2025-11)
+------------------------------------------
+
+- **LiveContextResolver caching**: Merged-context cache keys now use context ids + token (no live_context hashing), reducing overhead on every resolve.
+- **Per-token preview caches**: PipelineEditor and PlateManager cache attribute resolutions per token during a refresh to avoid repeated resolver calls for the same object.
+- **Scoped batch resolution**: CrossWindowPreviewMixin batches only preview-enabled fields, prefers scoped live values when available, and reuses batched results across comparisons.
+- **Unsaved markers guarded**: Fast-path skips now require both an empty unsaved cache and no active editors with emitted values, preserving accuracy while keeping the fast path.
+
 Signal Architecture Fix
 =======================
 
@@ -565,5 +573,4 @@ See Also
 - :doc:`parameter_form_lifecycle` - Parameter form manager lifecycle
 - :doc:`configuration_framework` - Lazy configuration framework
 - :doc:`scope_visual_feedback_system` - Visual feedback system
-
 

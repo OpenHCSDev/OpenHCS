@@ -441,20 +441,25 @@ def check_step_has_unsaved_changes(
     else:
         logger.info(f"🔍 check_step_has_unsaved_changes: No live_context_snapshot provided, cache disabled")
 
-    # PERFORMANCE: Collect saved context snapshot ONCE for all configs
-    # This avoids collecting it separately for each config (3x per step)
-    # If saved_context_snapshot is provided, reuse it (for batch processing of multiple steps)
-    if saved_context_snapshot is None:
-        saved_managers = ParameterFormManager._active_form_managers.copy()
-        saved_token = ParameterFormManager._live_context_token_counter
+    # FAST-PATH: If no unsaved changes have ever been recorded, skip all resolution work.
+    cache_disabled = False
+    try:
+        from openhcs.config_framework.config import get_framework_config
+        cache_disabled = get_framework_config().is_cache_disabled('unsaved_changes')
+    except ImportError:
+        pass
 
-        try:
-            ParameterFormManager._active_form_managers.clear()
-            ParameterFormManager._live_context_token_counter += 1
-            saved_context_snapshot = ParameterFormManager.collect_live_context(scope_filter=scope_filter)
-        finally:
-            ParameterFormManager._active_form_managers[:] = saved_managers
-            ParameterFormManager._live_context_token_counter = saved_token
+    if not cache_disabled and not ParameterFormManager._configs_with_unsaved_changes:
+        # Only fast-path if no active manager has emitted values (i.e., no live edits)
+        active_changes = any(
+            getattr(mgr, "_last_emitted_values", None)
+            for mgr in ParameterFormManager._active_form_managers
+        )
+        if not active_changes:
+            if live_context_snapshot is not None:
+                check_step_has_unsaved_changes._cache[cache_key] = False
+            logger.info("🔍 check_step_has_unsaved_changes: No tracked unsaved changes and no active edits - RETURNING FALSE (global fast-path)")
+            return False
 
     # CRITICAL: Check ALL dataclass configs on the step, not just the ones in config_indicators!
     # Works for both dataclass and non-dataclass objects (e.g., FunctionStep)
@@ -509,14 +514,6 @@ def check_step_has_unsaved_changes(
     # CRITICAL: Check entire MRO chain because configs inherit from @global_pipeline_config decorated classes
     # Example: StepWellFilterConfig inherits from WellFilterConfig, so changes to WellFilterConfig affect steps
     has_any_relevant_changes = False
-
-    # Check if unsaved changes cache is disabled via framework config
-    cache_disabled = False
-    try:
-        from openhcs.config_framework.config import get_framework_config
-        cache_disabled = get_framework_config().is_cache_disabled('unsaved_changes')
-    except ImportError:
-        pass
 
     # If cache is disabled, skip the fast-path check and go straight to full resolution
     if cache_disabled:
@@ -650,6 +647,19 @@ def check_step_has_unsaved_changes(
         return False
     else:
         logger.info(f"🔍 check_step_has_unsaved_changes: Found relevant changes for step '{getattr(step, 'name', 'unknown')}' - proceeding to full check")
+
+    # Collect saved context snapshot only when we know we need it
+    if saved_context_snapshot is None:
+        saved_managers = ParameterFormManager._active_form_managers.copy()
+        saved_token = ParameterFormManager._live_context_token_counter
+
+        try:
+            ParameterFormManager._active_form_managers.clear()
+            ParameterFormManager._live_context_token_counter += 1
+            saved_context_snapshot = ParameterFormManager.collect_live_context(scope_filter=scope_filter)
+        finally:
+            ParameterFormManager._active_form_managers[:] = saved_managers
+            ParameterFormManager._live_context_token_counter = saved_token
 
     # Check each nested dataclass config for unsaved changes (exits early on first change)
     for config_attr in all_config_attrs:

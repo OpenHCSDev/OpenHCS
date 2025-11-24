@@ -80,7 +80,8 @@ class LiveContextResolver:
             except ImportError:
                 pass
 
-            # Build cache key using object identities
+            # Build cache key using object identities + token only
+            # NOTE: Token already encodes live_context changes, so avoid hashing live_context
             context_ids = tuple(id(ctx) for ctx in context_stack)
             cache_key = (id(config_obj), attr_name, context_ids, cache_token)
 
@@ -90,7 +91,7 @@ class LiveContextResolver:
 
             # Cache miss - resolve
             resolved_value = self._resolve_uncached(
-                config_obj, attr_name, context_stack, live_context, context_scopes
+                config_obj, attr_name, context_stack, live_context, cache_token, context_scopes
             )
 
             # Store in cache (unless disabled)
@@ -213,24 +214,8 @@ class LiveContextResolver:
 
             # Resolve all uncached attributes in one context setup
             # Build merged contexts once (reuse existing _resolve_uncached logic)
-            # Make live_context hashable (same logic as _resolve_uncached)
-            def make_hashable(obj):
-                if isinstance(obj, dict):
-                    return tuple(sorted((str(k), make_hashable(v)) for k, v in obj.items()))
-                elif isinstance(obj, list):
-                    return tuple(make_hashable(item) for item in obj)
-                elif isinstance(obj, set):
-                    return tuple(sorted(str(make_hashable(item)) for item in obj))
-                elif isinstance(obj, (int, str, float, bool, type(None))):
-                    return obj
-                else:
-                    return str(obj)
-
-            live_context_key = tuple(
-                (str(type_key), make_hashable(values))
-                for type_key, values in sorted(live_context.items(), key=lambda x: str(x[0]))
-            )
-            merged_cache_key = (context_ids, live_context_key)
+            # Cache key: context ids + token only (token encodes live_context changes)
+            merged_cache_key = (context_ids, cache_token)
 
             if merged_cache_key in self._merged_context_cache:
                 merged_contexts = self._merged_context_cache[merged_cache_key]
@@ -292,33 +277,14 @@ class LiveContextResolver:
         attr_name: str,
         context_stack: list,
         live_context: Dict[Type, Dict[str, Any]],
+        cache_token: int,
         context_scopes: Optional[List[Optional[str]]] = None
     ) -> Any:
         """Resolve config attribute through context hierarchy (uncached)."""
         # CRITICAL OPTIMIZATION: Cache merged contexts to avoid creating new dataclass instances
-        # Build cache key for merged contexts
+        # Build cache key for merged contexts (token already captures live_context changes)
         context_ids = tuple(id(ctx) for ctx in context_stack)
-
-        # Make live_context hashable by converting lists to tuples recursively
-        def make_hashable(obj):
-            if isinstance(obj, dict):
-                # Sort by string representation of keys to handle unhashable keys
-                return tuple(sorted((str(k), make_hashable(v)) for k, v in obj.items()))
-            elif isinstance(obj, list):
-                return tuple(make_hashable(item) for item in obj)
-            elif isinstance(obj, set):
-                return tuple(sorted(str(make_hashable(item)) for item in obj))
-            elif isinstance(obj, (int, str, float, bool, type(None))):
-                return obj
-            else:
-                # For other types (enums, objects, etc.), use string representation
-                return str(obj)
-
-        live_context_key = tuple(
-            (str(type_key), make_hashable(values))  # Convert type to string for hashability
-            for type_key, values in sorted(live_context.items(), key=lambda x: str(x[0]))
-        )
-        merged_cache_key = (context_ids, live_context_key)
+        merged_cache_key = (context_ids, cache_token)
 
         # Check merged context cache
         if merged_cache_key in self._merged_context_cache:

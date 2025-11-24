@@ -118,6 +118,9 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
 
         # Live context resolver for config attribute resolution
         self._live_context_resolver = LiveContextResolver()
+        # Per-token cache for attribute resolutions to avoid repeated resolver calls within a refresh
+        self._attr_resolution_cache: Dict[Tuple[Optional[int], int, str], Any] = {}
+        self._attr_resolution_cache_token: Optional[int] = None
 
         # Business logic state (extracted from Textual version)
         self.plates: List[Dict] = []  # List of plate dictionaries
@@ -701,6 +704,10 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
             live_context_snapshot = ParameterFormManager.collect_live_context(
                 scope_filter=orchestrator.plate_path
             )
+            current_token = getattr(live_context_snapshot, 'token', None) if live_context_snapshot else None
+            if self._attr_resolution_cache_token != current_token:
+                self._attr_resolution_cache.clear()
+                self._attr_resolution_cache_token = current_token
 
             # Get the preview instance with live values merged (uses ABC method)
             # This implements the pattern from docs/source/development/scope_hierarchy_live_context.rst
@@ -713,6 +720,19 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
             )
 
             effective_config = orchestrator.get_effective_config()
+
+            def _cached_resolve(config_obj, attr_name: str, context):
+                cache_key = (getattr(context, 'token', None), id(config_obj), attr_name)
+                if cache_key in self._attr_resolution_cache:
+                    return self._attr_resolution_cache[cache_key]
+                result = self._resolve_config_attr(
+                    config_for_display,
+                    config_obj,
+                    attr_name,
+                    context
+                )
+                self._attr_resolution_cache[cache_key] = result
+                return result
 
             # Check each enabled preview field
             for field_path in self.get_enabled_preview_fields():
@@ -735,12 +755,7 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
                 if hasattr(value, '__dataclass_fields__'):
                     # Config object - use centralized formatter with resolver
                     def resolve_attr(parent_obj, config_obj, attr_name, context):
-                        return self._resolve_config_attr(
-                            config_for_display,
-                            config_obj,
-                            attr_name,
-                            live_context_snapshot
-                        )
+                        return _cached_resolve(config_obj, attr_name, live_context_snapshot)
 
                     formatted = format_config_indicator(
                         field_path,
@@ -789,6 +804,23 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
 
         logger.debug(f"🔍🔍🔍 _check_pipeline_config_has_unsaved_changes: Checking orchestrator 🔍🔍🔍")
 
+        # FAST-PATH: If no unsaved changes have been tracked at all (and caching is enabled), skip work
+        cache_disabled = False
+        try:
+            from openhcs.config_framework.config import get_framework_config
+            cache_disabled = get_framework_config().is_cache_disabled('unsaved_changes')
+        except ImportError:
+            pass
+
+        if not cache_disabled and not ParameterFormManager._configs_with_unsaved_changes:
+            active_changes = any(
+                getattr(mgr, "_last_emitted_values", None)
+                for mgr in ParameterFormManager._active_form_managers
+                if mgr.scope_id is None or mgr.scope_id == str(orchestrator.plate_path)
+            )
+            if not active_changes:
+                return False
+
         # CRITICAL: Ensure original values are captured for this plate
         # This should have been done in update_plate_list, but check here as fallback
         if not hasattr(self, '_original_pipeline_config_values'):
@@ -817,6 +849,11 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         if live_context_snapshot is None:
             logger.debug(f"🔍 _check_pipeline_config_has_unsaved_changes: No live context snapshot")
             return False
+
+        current_token = getattr(live_context_snapshot, 'token', None)
+        if self._attr_resolution_cache_token != current_token:
+            self._attr_resolution_cache.clear()
+            self._attr_resolution_cache_token = current_token
 
         # UPGRADED CACHE SYSTEM:
         # 1. Original values cache: Stores baseline when plate first loads (never invalidated by token)
@@ -870,6 +907,22 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
 
             # Check nested dataclass fields
             if dataclasses.is_dataclass(config):
+                # Skip if changed_fields provided and this config_attr not affected
+                if changed_fields and field_name not in {cf.split('.')[0] for cf in changed_fields}:
+                    continue
+                def _cached_resolve(config_obj, attr_name: str, context):
+                    cache_key = (getattr(context, 'token', None), id(config_obj), attr_name)
+                    if cache_key in self._attr_resolution_cache:
+                        return self._attr_resolution_cache[cache_key]
+                    result = self._resolve_config_attr(
+                        pipeline_config_preview if context.token == current_token else pipeline_config,
+                        config_obj,
+                        attr_name,
+                        context
+                    )
+                    self._attr_resolution_cache[cache_key] = result
+                    return result
+
                 # Create resolver for this config
                 # CRITICAL: The resolver needs to use DIFFERENT pipeline_config instances for live vs saved:
                 # - For LIVE context: use pipeline_config_preview (with live values merged)
@@ -880,15 +933,7 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
                 def resolve_attr(parent_obj, config_obj, attr_name, context):
                     # If context token matches live token, use preview instance
                     # If context token is different (saved snapshot), use original instance
-                    is_live_context = (context.token == live_context_snapshot.token)
-                    pipeline_config_to_use = pipeline_config_preview if is_live_context else pipeline_config
-
-                    return self._resolve_config_attr(
-                        pipeline_config_to_use,
-                        config_obj,
-                        attr_name,
-                        context  # Pass the context parameter through
-                    )
+                    return _cached_resolve(config_obj, attr_name, context)
 
                 # Check if this config has unsaved changes
                 has_changes = check_config_has_unsaved_changes(
