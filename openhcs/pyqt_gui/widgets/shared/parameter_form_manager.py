@@ -489,10 +489,16 @@ class ParameterFormManager(QWidget):
                             logger.info(f"🔍 collect_live_context (thread-local): {key} NOT IN global_values")
 
             for manager in cls._active_form_managers:
-                # Apply scope filter if provided
-                # scope_filter=None means no filtering (include ALL managers)
-                # scope_filter=plate_path means filter to that specific scope
-                if scope_filter is not None and manager.scope_id is not None:
+                # Apply scope filter:
+                # - When scope_filter is None (global callers like GlobalPipelineConfig), SKIP scoped managers to avoid contamination
+                # - When scope_filter is set (e.g., Pipeline/Step), include managers visible to that scope
+                if manager.scope_id is not None:
+                    if scope_filter is None:
+                        logger.info(
+                            f"🔍 collect_live_context: Skipping scoped manager {manager.field_id} "
+                            f"(scope_id={manager.scope_id}) for global scope_filter=None"
+                        )
+                        continue
                     if not cls._is_scope_visible_static(manager.scope_id, scope_filter):
                         logger.info(
                             f"🔍 collect_live_context: Skipping manager {manager.field_id} "
@@ -516,96 +522,39 @@ class ParameterFormManager(QWidget):
                         else:
                             logger.info(f"🔍 collect_live_context: GlobalPipelineConfig.{key} NOT IN live_values")
 
-                # CRITICAL: Only add GLOBAL managers (scope_id=None) to live_context
-                # Scoped managers should ONLY go into scoped_live_context, never live_context
-                #
-                # This prevents cross-plate contamination where:
-                # - collect_live_context() is called for P1 with scope_filter=P1
-                # - It adds GlobalPipelineConfig to live_context (correct)
-                # - Later, collect_live_context() is called for P2 with scope_filter=P2
-                # - It adds P2's PipelineConfig to live_context, OVERWRITING GlobalPipelineConfig
-                # - P1's resolution then picks up P2's values instead of GlobalPipelineConfig
-                #
-                # Fix: NEVER add scoped managers to live_context, only to scoped_live_context
-                if manager.scope_id is None:
-                    # Global manager - affects all scopes
-                    # CRITICAL: For GlobalPipelineConfig, filter out nested dataclass instances
-                    # from form values to prevent masking thread-local values
-                    from openhcs.config_framework.lazy_factory import is_global_config_type
-                    from dataclasses import is_dataclass
-                    if is_global_config_type(obj_type):
-                        # Filter out nested dataclass instances - they should come from thread-local
-                        scalar_values = {
-                            k: v for k, v in live_values.items()
-                            if not is_dataclass(v)
-                        }
-                        # Merge scalar values with thread-local values (if present)
-                        if obj_type in live_context:
-                            # Thread-local values already added - merge scalar values on top
-                            live_context[obj_type].update(scalar_values)
-                            logger.info(
-                                f"🔍 collect_live_context: Merging GLOBAL manager {manager.field_id} "
-                                f"scalar values into thread-local (filtered {len(live_values) - len(scalar_values)} nested configs) "
-                                f"with {len(scalar_values)} scalar values: {list(scalar_values.keys())[:5]}"
-                            )
-                        else:
-                            # No thread-local values - just use scalar values
-                            live_context[obj_type] = scalar_values
-                            logger.info(
-                                f"🔍 collect_live_context: Adding GLOBAL manager {manager.field_id} "
-                                f"(no thread-local present, filtered {len(live_values) - len(scalar_values)} nested configs) "
-                                f"with {len(scalar_values)} scalar values: {list(scalar_values.keys())[:5]}"
-                            )
+                # Add ALL managers (global + scoped) to live_context so resolution sees scoped edits.
+                from openhcs.config_framework.lazy_factory import is_global_config_type
+                from dataclasses import is_dataclass
+                if manager.scope_id is None and is_global_config_type(obj_type):
+                    # For GlobalPipelineConfig, filter out nested dataclass instances to avoid masking thread-local
+                    scalar_values = {k: v for k, v in live_values.items() if not is_dataclass(v)}
+                    if obj_type in live_context:
+                        live_context[obj_type].update(scalar_values)
                     else:
-                        # Non-GlobalPipelineConfig - use all values
-                        logger.info(
-                            f"🔍 collect_live_context: Adding GLOBAL manager {manager.field_id} "
-                            f"(scope_id={manager.scope_id}, type={obj_type.__name__}) to live_context "
-                            f"(overriding thread-local if present) "
-                            f"with {len(live_values)} values: {list(live_values.keys())[:5]}"
-                        )
-                        live_context[obj_type] = live_values
+                        live_context[obj_type] = scalar_values
+                    logger.info(f"🔍 collect_live_context: Added GLOBAL manager {manager.field_id} to live_context with {len(scalar_values)} scalar keys: {list(scalar_values.keys())[:5]}")
                 else:
-                    logger.info(
-                        f"🔍 collect_live_context: NOT adding SCOPED manager {manager.field_id} "
-                        f"(scope_id={manager.scope_id}, type={obj_type.__name__}) to live_context (scoped managers only go in scoped_live_context) "
-                        f"with {len(live_values)} values: {list(live_values.keys())[:5]}"
-                    )
+                    live_context[obj_type] = live_values
+                    logger.info(f"🔍 collect_live_context: Added manager {manager.field_id} (scope_id={manager.scope_id}) to live_context with {len(live_values)} keys: {list(live_values.keys())[:5]}")
+                    # Bump live context token when any scoped/global manager contributes live values
+                    cls._live_context_token_counter += 1
 
                 # Track scope-specific mappings (for step-level overlays)
                 if manager.scope_id:
                     scoped_live_context.setdefault(manager.scope_id, {})[obj_type] = live_values
-                    logger.info(
-                        f"🔍 collect_live_context: Added to scoped_live_context[{manager.scope_id}][{obj_type.__name__}] "
-                        f"with {len(live_values)} values"
-                    )
+                    logger.info(f"🔍 collect_live_context: Added to scoped_live_context[{manager.scope_id}][{obj_type.__name__}] with {len(live_values)} keys: {list(live_values.keys())[:5]}")
 
-                # CRITICAL: Only add alias mappings for GLOBAL managers (scope_id=None)
-                # Scoped managers should NOT pollute the global live_context via aliases
-                if manager.scope_id is None:
-                    # Also map by the base/lazy equivalent type for flexible matching
-                    base_type = get_base_type_for_lazy(obj_type)
-                    if base_type and base_type != obj_type:
-                        alias_context.setdefault(base_type, live_values)
+                # Alias mappings for all managers
+                base_type = get_base_type_for_lazy(obj_type)
+                if base_type and base_type != obj_type:
+                    alias_context.setdefault(base_type, live_values)
 
-                    lazy_type = LazyDefaultPlaceholderService._get_lazy_type_for_base(obj_type)
-                    if lazy_type and lazy_type != obj_type:
-                        alias_context.setdefault(lazy_type, live_values)
+                lazy_type = LazyDefaultPlaceholderService._get_lazy_type_for_base(obj_type)
+                if lazy_type and lazy_type != obj_type:
+                    alias_context.setdefault(lazy_type, live_values)
 
             # Apply alias mappings only where no direct mapping exists
-            # CRITICAL: Do NOT alias GlobalPipelineConfig → PipelineConfig into live_context.
-            # PipelineConfig is plate-scoped and should only appear in scoped_values.
-            # Global live_context must only contain truly global configs; otherwise
-            # scoped configs in values[...] will incorrectly show global values.
-            from openhcs.config_framework.lazy_factory import is_global_config_type
             for alias_type, values in alias_context.items():
-                # GENERIC SCOPE RULE: Skip non-global configs when scope_filter=None (global scope)
-                if not is_global_config_type(alias_type):
-                    logger.info(
-                        f"🔍 collect_live_context: Skipping alias {alias_type.__name__} in live_context "
-                        f"({alias_type.__name__} is scoped-only and must not appear in global values)."
-                    )
-                    continue
                 if alias_type not in live_context:
                     live_context[alias_type] = values
 
@@ -616,6 +565,17 @@ class ParameterFormManager(QWidget):
 
             def add_manager_to_scopes(manager, is_nested=False):
                 """Helper to add a manager and its nested managers to scopes_dict."""
+                # Apply same visibility rules as live_context collection:
+                # - Global callers (scope_filter=None) should NOT see scoped managers in scopes_dict
+                # - Scoped callers only see managers visible to the scope_filter
+                if manager.scope_id is not None:
+                    if scope_filter is None:
+                        logger.info(f"🔍 BUILD SCOPES: Skipping scoped manager {manager.field_id} (scope_id={manager.scope_id}) for global scope_filter=None")
+                        return
+                    if not cls._is_scope_visible_static(manager.scope_id, scope_filter):
+                        logger.info(f"🔍 BUILD SCOPES: Skipping manager {manager.field_id} (scope_id={manager.scope_id}) - not visible in scope_filter={scope_filter}")
+                        return
+
                 obj_type = type(manager.object_instance)
                 type_name = obj_type.__name__
 
@@ -696,12 +656,6 @@ class ParameterFormManager(QWidget):
                     add_manager_to_scopes(nested_manager, is_nested=True)
 
             for manager in cls._active_form_managers:
-                # Skip managers filtered out by scope_filter
-                if scope_filter is not None and manager.scope_id is not None:
-                    if not cls._is_scope_visible_static(manager.scope_id, scope_filter):
-                        logger.info(f"🔍 BUILD SCOPES: Skipping {manager.field_id} (scope_id={manager.scope_id}) - filtered out")
-                        continue
-
                 logger.info(f"🔍 BUILD SCOPES: Processing manager {manager.field_id} with {len(manager.nested_managers)} nested managers")
                 if 'streaming' in str(manager.nested_managers.keys()).lower():
                     logger.info(f"🔍 BUILD SCOPES: Manager {manager.field_id} has streaming-related nested managers: {list(manager.nested_managers.keys())}")
@@ -2601,30 +2555,12 @@ class ParameterFormManager(QWidget):
         """
         Get current parameter values preserving lazy dataclass structure.
 
-        CRITICAL: Reads LIVE values directly from widgets for non-None values.
-        This ensures placeholders in other windows show what you're typing RIGHT NOW,
-        even if you haven't pressed Enter or tabbed out yet.
-        For None values, uses cache to preserve lazy resolution.
-
-        CRITICAL: Also includes ui_hidden fields from cache so they're available for
-        sibling inheritance (e.g., FijiStreamingConfig inheriting from FijiDisplayConfig).
+        Uses the cached parameter values updated on every edit. This avoids losing
+        concrete values when widgets are in placeholder state.
         """
         with timer(f"get_current_values ({self.field_id})", threshold_ms=2.0):
-            # CRITICAL: Read LIVE values from widgets, but only use them if non-None
-            # For None values, use cache to preserve lazy resolution
-            current_values = {}
-            for param_name, widget in self.widgets.items():
-                if hasattr(widget, 'get_value'):
-                    widget_value = widget.get_value()
-                    if widget_value is not None:
-                        # Convert widget value to proper type (handles tuple/list parsing, Path conversion, etc.)
-                        current_values[param_name] = self._convert_widget_value(widget_value, param_name)
-                    else:
-                        # Use cache for None values to preserve lazy resolution
-                        current_values[param_name] = self._current_value_cache.get(param_name)
-                else:
-                    # Fallback to cache for widgets without get_value
-                    current_values[param_name] = self._current_value_cache.get(param_name)
+            # Start from cached parameter values instead of re-reading widgets
+            current_values = dict(self._current_value_cache)
 
             # Collect values from nested managers, respecting optional dataclass checkbox states
             self._apply_to_nested_managers(
@@ -2633,16 +2569,6 @@ class ParameterFormManager(QWidget):
                 )
             )
 
-            # CRITICAL: Include ui_hidden fields from cache
-            # ui_hidden fields don't have widgets, but they're part of the form's state
-            # and need to be included in the overlay for correct context resolution.
-            # Without this, when the overlay is used in config_context(), its original_extracted
-            # will override the merged config's extracted values, removing ui_hidden fields.
-            for param_name, cached_value in self._current_value_cache.items():
-                if param_name not in current_values and cached_value is not None:
-                    current_values[param_name] = cached_value
-
-            # Lazy dataclasses are now handled by LazyDataclassEditor, so no structure preservation needed
             return current_values
 
     def get_user_modified_values(self) -> Dict[str, Any]:
@@ -3784,6 +3710,7 @@ class ParameterFormManager(QWidget):
 
         # Extract token, live context values, and scopes
         token, live_context_values, live_context_scopes = self._unwrap_live_context(live_context)
+        live_context_for_stack = live_context if isinstance(live_context, LiveContextSnapshot) else live_context_values
 
         # CRITICAL: Use token-based cache key, not value-based
         # The token increments whenever ANY value changes, which is correct behavior
@@ -3834,7 +3761,7 @@ class ParameterFormManager(QWidget):
                 if not candidate_names:
                     return
 
-                with self._build_context_stack(overlay, live_context=live_context_values, live_context_scopes=live_context_scopes):
+                with self._build_context_stack(overlay, live_context=live_context_for_stack, live_context_scopes=live_context_scopes):
                     monitor = get_monitor("Placeholder resolution per field")
 
                     for param_name in candidate_names:

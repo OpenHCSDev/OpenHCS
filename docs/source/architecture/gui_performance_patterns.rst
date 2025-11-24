@@ -347,16 +347,19 @@ Live Context Collection
 
 - Token-based: Snapshot cached until token changes
 - Scope-filtered: Separate cache entries per scope filter
+- Global callers skip scoped managers to avoid cross-plate contamination; scoped callers only see visible managers
 - Automatic invalidation: Token increments on any form value change
+- Cross-window collection also bumps the token when any manager contributes live values (keeps placeholder cache fresh)
 - Type aliasing: Maps lazy/base types for flexible matching
 
 **Token Lifecycle**
 
 1. User edits form field → ``_emit_cross_window_context_changed()``
 2. Token incremented → ``_live_context_token_counter += 1``
-3. All caches invalidated globally
-4. Next ``collect_live_context()`` call recomputes snapshot
-5. Subsequent calls with same token return cached snapshot
+3. Cross-window ``collect_live_context()`` also increments when managers contribute values (ensures cross-window placeholders see new live data)
+4. All caches invalidated globally
+5. Next ``collect_live_context()`` call recomputes snapshot
+6. Subsequent calls with same token return cached snapshot
 
 Async Operations in GUI
 ----------------------
