@@ -3533,6 +3533,7 @@ class ParameterFormManager(QWidget):
         3. Refresh enabled styling (in case siblings inherit enabled values)
         4. Propagate the change signal up to root for cross-window updates
         """
+        logger.info(f"🔔 _on_nested_parameter_changed CALLED: param_name={param_name}, value={value}, field_id={self.field_id}")
         # OPTIMIZATION: Skip expensive placeholder refreshes during batch reset
         # The reset operation will do a single refresh at the end
         # BUT: Still propagate the signal so dual editor window can sync function editor
@@ -3540,11 +3541,19 @@ class ParameterFormManager(QWidget):
         block_cross_window = getattr(self, '_block_cross_window_updates', False)
 
         # Find which nested manager emitted this change (needed for both refresh and signal propagation)
+        # CRITICAL: Use sender() to identify the actual emitting manager, not just param_name lookup
+        # Multiple nested managers can have the same parameter name (e.g., well_filter in both
+        # well_filter_config and step_well_filter_config), so we need to check which one sent the signal
         emitting_manager_name = None
+        sender_obj = self.sender()
+        logger.info(f"🔍 _on_nested_parameter_changed: param_name={param_name}, sender={sender_obj}, searching in {len(self.nested_managers)} nested managers")
         for nested_name, nested_manager in self.nested_managers.items():
-            if param_name in nested_manager.parameters:
+            if nested_manager is sender_obj:
+                logger.info(f"🔍 _on_nested_parameter_changed: FOUND sender in {nested_name}")
                 emitting_manager_name = nested_name
                 break
+        if not emitting_manager_name:
+            logger.warning(f"⚠️ _on_nested_parameter_changed: Could not find nested manager for sender={sender_obj}, param_name={param_name}")
 
         # CRITICAL OPTIMIZATION: Also check if ANY nested manager is in reset mode
         # When a nested dataclass's "Reset All" button is clicked, the nested manager
@@ -3661,6 +3670,7 @@ class ParameterFormManager(QWidget):
                 reconstructed_value = nested_values
 
             # Emit parent parameter name with reconstructed dataclass
+            logger.info(f"🔔 EMITTING PARENT CONFIG: {emitting_manager_name} = {reconstructed_value}")
             if param_name == 'enabled':
                 self._propagating_nested_enabled = True
 
