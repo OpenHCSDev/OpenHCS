@@ -95,15 +95,18 @@ def _merge_nested_dataclass(pipeline_value, global_value):
     # Both are dataclasses - merge field by field
     merged_values = {}
     for field in dataclass_fields(type(pipeline_value)):
-        pipeline_field_value = getattr(pipeline_value, field.name)
+        # CRITICAL FIX: Use __dict__.get() to get RAW stored value, not getattr()
+        # For lazy dataclasses, getattr() triggers resolution which falls back to class defaults
+        # We need the actual None value to know if it should inherit from global config
+        raw_pipeline_field = pipeline_value.__dict__.get(field.name)
         global_field_value = getattr(global_value, field.name)
 
-        if pipeline_field_value is not None:
-            # Pipeline has a value - check if it's a nested dataclass that needs merging
-            if is_dataclass(pipeline_field_value) and is_dataclass(global_field_value):
-                merged_values[field.name] = _merge_nested_dataclass(pipeline_field_value, global_field_value)
+        if raw_pipeline_field is not None:
+            # Pipeline has an explicitly set value - check if it's a nested dataclass that needs merging
+            if is_dataclass(raw_pipeline_field) and is_dataclass(global_field_value):
+                merged_values[field.name] = _merge_nested_dataclass(raw_pipeline_field, global_field_value)
             else:
-                merged_values[field.name] = pipeline_field_value
+                merged_values[field.name] = raw_pipeline_field
         else:
             # Pipeline value is None - use global value
             merged_values[field.name] = global_field_value
