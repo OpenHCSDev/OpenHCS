@@ -1717,10 +1717,16 @@ def auto_create_decorator(global_config_class):
     2. A lazy version of the global config itself
 
     Global config classes must start with "Global" prefix.
+
+    Also marks the class with _is_global_config = True for is_global_config_type() checks.
     """
     # Validate naming convention
     if not global_config_class.__name__.startswith(GLOBAL_CONFIG_PREFIX):
         raise ValueError(f"Global config class '{global_config_class.__name__}' must start with '{GLOBAL_CONFIG_PREFIX}' prefix")
+
+    # CRITICAL: Mark the class as a global config for is_global_config_type() checks
+    # This allows collect_live_context() to force scope=None for global configs
+    global_config_class._is_global_config = True
 
     decorator_name = _camel_to_snake(global_config_class.__name__)
     decorator = create_global_default_decorator(global_config_class)
