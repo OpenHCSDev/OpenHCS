@@ -59,9 +59,9 @@ Cache System 1: Lazy Resolution Cache
 
 **Location**: ``openhcs/config_framework/lazy_factory.py:133``
 
-**Variable**: ``_lazy_resolution_cache: Dict[Tuple[str, str, int], Any]``
+**Variable**: ``_lazy_resolution_cache: Dict[Tuple[str, str, int, Optional[str]], Any]``
 
-**Cache Key**: ``(class_name, field_name, token)``
+**Cache Key**: ``(class_name, field_name, token, scope_id)``
 
 **Purpose**: Caches resolved values for lazy dataclass fields to avoid re-resolving from global config
 
@@ -72,12 +72,15 @@ Cache System 1: Lazy Resolution Cache
 Access Pattern
 --------------
 
-- Line 305: Check cache BEFORE resolution
-- Line 310: Return cached value if hit
-- Line 328: Store resolved value after resolution
-- Line 334-339: Evict oldest 20% if max size exceeded
+- Line 305-313: Get scope_id from context for cache key
+- Line 322: Check cache with scope-aware key BEFORE resolution
+- Line 328: Return cached value if hit
+- Line 346: Store resolved value after resolution
+- Line 352-358: Evict oldest 20% if max size exceeded
 
-**CRITICAL BUG FIXED**: Cache check was happening BEFORE RAW value check, causing instance values to be overridden by cached global values. Fixed by moving RAW check to line 276 (before cache check).
+**CRITICAL BUG FIXED (Nov 2025)**: Cache key previously lacked scope_id, causing cross-scope cache pollution. Values resolved with ``scope_id=None`` (during PipelineConfig context) would be cached and incorrectly returned for step-scoped resolutions that should inherit from StepWellFilterConfig. Fixed by including ``scope_id`` in cache key.
+
+**CRITICAL BUG FIXED (earlier)**: Cache check was happening BEFORE RAW value check, causing instance values to be overridden by cached global values. Fixed by moving RAW check to line 276 (before cache check).
 
 Cache System 2: Placeholder Text Cache
 =======================================
@@ -265,6 +268,21 @@ Issue 4: Flash Animation Uses Wrong Token
 **Root Cause**: LiveContextResolver uses current token, not historical
 
 **Fix**: Disable cache via ``_disable_lazy_cache`` contextvar during flash detection
+
+Issue 5: Sibling Inheritance Shows Wrong Values (Cross-Scope Cache Pollution)
+-------------------------------------------------------------------------------
+
+**Symptom**: When changing ``step_well_filter_config.well_filter_mode = EXCLUDE``, some siblings (``napari_streaming_config``, ``fiji_streaming_config``) correctly show EXCLUDE, but others (``step_materialization_config``, ``streaming_defaults``) still show INCLUDE.
+
+**Root Cause**: Cache key was ``(class_name, field_name, token)`` without scope_id. Values resolved with ``scope_id=None`` (during PipelineConfig context setup) would be cached and incorrectly returned for step-scoped resolutions. The resolver with ``scope_id=None`` skips step-scoped configs due to scope filtering, falling back to ``WellFilterConfig`` which has INCLUDE. This wrong value gets cached and served to siblings.
+
+**Fix**: Cache key is now ``(class_name, field_name, token, scope_id)`` which ensures:
+
+- Values resolved with ``scope_id=None`` won't pollute step-scoped lookups
+- Different steps with different ``scope_id`` values get separate cache entries
+- Cross-scope cache pollution is prevented
+
+**Debug**: Set ``disable_all_token_caches = True`` in ``FrameworkConfig`` - if bug disappears, it's a cache pollution issue.
 
 Disabling Caches for Debugging
 ===============================
