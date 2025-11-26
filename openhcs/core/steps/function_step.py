@@ -816,18 +816,14 @@ class FunctionStep(AbstractStep):
 
     def build_scope_id(self, context_provider) -> str:
         """
-        Get step scope ID.
+        Build step scope ID from orchestrator's plate_path and step token.
 
         Args:
-            context_provider: Orchestrator (builds from plate_path + token)
-                             or ScopeProvider (returns scope_string directly)
+            context_provider: Orchestrator instance with plate_path attribute
 
         Returns:
             Scope string in format "plate_path::step_token"
         """
-        from openhcs.config_framework.context_manager import ScopeProvider
-        if isinstance(context_provider, ScopeProvider):
-            return context_provider.scope_string
         token = getattr(self, '_pipeline_scope_token', self.name)
         return f"{context_provider.plate_path}::{token}"
 
