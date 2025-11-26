@@ -55,8 +55,9 @@ See Also
 
 - :doc:`configuration_framework` - Dual-axis resolution and MRO-based inheritance
 - :doc:`context_system` - Context stacking and scope management
+- :doc:`scope_filtering_dual_use_cases` - Scope filtering for values vs scopes dict (critical for sibling inheritance)
 - :doc:`parameter_form_lifecycle` - Form lifecycle and placeholder updates
-- :doc:`scope_hierarchy_live_context` - Scope specificity and filtering
+- :doc:`../development/scope_hierarchy_live_context` - Scope specificity and filtering
 
 Implementation Details
 ----------------------
