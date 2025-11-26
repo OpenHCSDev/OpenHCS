@@ -3038,8 +3038,7 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
             logger.info(f"Added plate '{plate_name}' from orchestrator code")
 
         if added_count:
-            if self.plate_list:
-                self.update_plate_list()
+            self.update_plate_list()
             status_message = f"Added {added_count} plate(s) from orchestrator code"
             self.status_message.emit(status_message)
             logger.info(status_message)
