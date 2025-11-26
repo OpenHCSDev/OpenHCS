@@ -1314,3 +1314,162 @@ When a window closes, its ``_last_emitted_values`` must be cleared to prevent st
 
 Without this cleanup, other windows would see stale field paths and incorrectly think there are unsaved changes.
 
+Identifier Format Unification
+==============================
+
+**Critical architectural principle: window close must emit identifiers in the same format as typing.**
+
+The Problem
+-----------
+
+When users type in form widgets, field identifiers are emitted in ``field_name.nested_field`` format
+(e.g., ``well_filter_config.well_filter``). This format is "walkable" - you can traverse the path
+by calling ``getattr(obj, "well_filter_config")`` then ``getattr(result, "well_filter")``.
+
+Window close was emitting identifiers in ``TypeName.field`` format (e.g.,
+``GlobalPipelineConfig.well_filter_config``). This format is NOT walkable because ``TypeName``
+is a class name, not an attribute on the object.
+
+**Bug manifestation**: Flash detection failed when closing a window because:
+
+1. Window close emitted ``GlobalPipelineConfig.well_filter_config``
+2. Flash detection tried ``getattr(obj, "GlobalPipelineConfig")`` → returned ``None``
+3. Comparison skipped due to ``None`` parent → no flash triggered
+4. User sees no visual feedback when going from unsaved→saved state
+
+Root Cause Analysis
+-------------------
+
+The bug originated in ``unregister_from_cross_window_updates()`` which built field paths
+using the root form manager's ``field_id``:
+
+.. code-block:: python
+
+    # WRONG: Uses root form manager's field_id (which is a type name)
+    field_id = self.field_id  # "GlobalPipelineConfig"
+    param_names = list(self.parameters.keys())  # ["well_filter_config", "zarr_config", ...]
+
+    for param_name in param_names:
+        field_path = f"{field_id}.{param_name}"  # "GlobalPipelineConfig.well_filter_config"
+        changed_fields.add(field_path)
+
+But nested form managers emit paths using actual field names:
+
+.. code-block:: python
+
+    # CORRECT: Uses nested form manager's field_id (which is a field name)
+    field_id = self.field_id  # "well_filter_config"
+    param_name = "well_filter"
+    field_path = f"{field_id}.{param_name}"  # "well_filter_config.well_filter"
+
+The Fix: Recursive Field Path Collection
+-----------------------------------------
+
+The fix adds ``_collect_all_field_paths()`` to recursively collect paths from root AND nested managers:
+
+.. code-block:: python
+
+    def _collect_all_field_paths(self) -> Set[str]:
+        """Collect all field paths from this manager and all nested managers recursively.
+
+        Returns paths in the format that would be emitted during typing, e.g.:
+        - "well_filter_config.well_filter" (not "GlobalPipelineConfig.well_filter_config")
+        - "step_materialization_config.enabled" (not "PipelineConfig.step_materialization_config")
+
+        This ensures window close emits the same format as typing for flash detection.
+        """
+        field_paths = set()
+
+        # Add this manager's own field paths (field_id.param_name)
+        for param_name in self.parameters.keys():
+            # Skip nested dataclass params - their fields are handled by nested managers
+            if param_name in self.nested_managers:
+                continue
+            field_path = f"{self.field_id}.{param_name}" if self.field_id else param_name
+            field_paths.add(field_path)
+
+        # Recursively collect from nested managers
+        for param_name, nested_manager in self.nested_managers.items():
+            nested_paths = nested_manager._collect_all_field_paths()
+            field_paths.update(nested_paths)
+
+        return field_paths
+
+**Key insight**: Root managers skip their own nested dataclass parameters (like ``well_filter_config``)
+because those are handled by nested form managers that emit walkable paths.
+
+Window close now uses this method:
+
+.. code-block:: python
+
+    # In unregister_from_cross_window_updates():
+    # CRITICAL: Collect paths BEFORE the closure (managers may be destroyed later)
+    all_field_paths = self._collect_all_field_paths()
+
+    def notify_listeners():
+        # Use pre-collected field paths (same format as typing)
+        changed_fields = all_field_paths
+        # ...
+
+Identifier Expansion for Inheritance
+-------------------------------------
+
+The flash detection system expands identifiers to cover inheritance relationships. For example,
+when ``GlobalPipelineConfig.well_filter_config`` changes, steps that inherit from it should
+also check their ``step_well_filter_config``.
+
+**The hasattr guard**: When expanding identifiers across config types, not all attributes
+exist on all types. For example, ``LazyWellFilterConfig`` has ``well_filter`` but not ``source_mode``
+(which belongs to ``LazyDisplayConfig``).
+
+.. code-block:: python
+
+    # In _expand_identifiers_for_inheritance():
+    for nested_field in nested_field_names:
+        # CRITICAL: Only add fields that ACTUALLY EXIST on the target attribute
+        if hasattr(attr_value, nested_field):
+            nested_identifier = f"{attr_name}.{nested_field}"
+            expanded.add(nested_identifier)
+
+Without this guard, trying to resolve non-existent attributes raises ``AttributeError``.
+
+Flash Visibility: processEvents()
+---------------------------------
+
+After triggering flashes, the system must call ``QApplication.processEvents()`` to ensure
+the flash color is painted before any subsequent heavy work blocks the event loop:
+
+.. code-block:: python
+
+    # In _handle_full_preview_refresh():
+    for plate_path in plates_to_flash:
+        self._flash_plate_item(plate_path)
+
+    # CRITICAL: Process events immediately to ensure flash is visible
+    from PyQt6.QtWidgets import QApplication
+    QApplication.processEvents()
+
+Without this, the flash animation never becomes visible because heavy operations
+(like PipelineEditor's refresh) run immediately after and block the event loop.
+
+Testing the Fix
+---------------
+
+To verify the fix works:
+
+1. Open PlateManager with a plate
+2. Open a GlobalPipelineConfig window
+3. Change a value (e.g., ``well_filter_config.well_filter``)
+4. Close the window WITHOUT saving
+5. **Expected**: Plate item should flash briefly to indicate values reverted
+
+Check logs for:
+
+.. code-block:: text
+
+    # Window close should emit nested paths:
+    🔍 Changed fields (15): {'well_filter_config.well_filter', 'zarr_config.enabled', ...}
+
+    # NOT type-prefixed paths:
+    # WRONG: {'GlobalPipelineConfig.well_filter_config', 'GlobalPipelineConfig.zarr_config', ...}
+
