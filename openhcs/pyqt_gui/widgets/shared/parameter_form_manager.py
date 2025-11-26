@@ -246,6 +246,11 @@ class ParameterFormManager(QWidget):
     # CRITICAL: This is scoped per orchestrator/plate using scope_id to prevent cross-contamination
     _active_form_managers = []
 
+    # Class-level registry mapping scope_id to parent window (QDialog)
+    # Used to focus existing windows instead of opening duplicates
+    # Format: {scope_id: QDialog} where scope_id is str or None (global)
+    _scope_to_window: Dict[Optional[str], 'QWidget'] = {}
+
     # Class-level registry of external listeners (e.g., PipelineEditorWidget)
     # These are objects that want to receive cross-window signals but aren't ParameterFormManager instances
     # Format: [(listener_object, value_changed_handler, refresh_handler), ...]
@@ -260,7 +265,7 @@ class ParameterFormManager(QWidget):
     OPTIMIZE_NESTED_WIDGETS = True
 
     # Performance optimization: Async widget creation for large forms
-    ASYNC_WIDGET_CREATION = False  # Create widgets progressively to avoid UI blocking
+    ASYNC_WIDGET_CREATION = True  # Create widgets progressively to avoid UI blocking
     ASYNC_THRESHOLD = 5  # Minimum number of parameters to trigger async widget creation
     INITIAL_SYNC_WIDGETS = 10  # Number of widgets to create synchronously for fast initial render
     ASYNC_PLACEHOLDER_REFRESH = True  # Resolve placeholders off the UI thread when possible
@@ -775,6 +780,64 @@ class ParameterFormManager(QWidget):
         ]
 
         logger.debug(f"Unregistered external listener: {listener.__class__.__name__}")
+
+    @classmethod
+    def focus_existing_window(cls, scope_id: Optional[str]) -> bool:
+        """Focus an existing window with the given scope_id if one exists.
+
+        This enables "focus-instead-of-duplicate" behavior where opening a window
+        with the same scope_id will focus the existing window instead of creating
+        a new one.
+
+        Args:
+            scope_id: The scope identifier to look up. Can be None for global scope.
+
+        Returns:
+            True if an existing window was found and focused, False otherwise.
+        """
+        if scope_id in cls._scope_to_window:
+            window = cls._scope_to_window[scope_id]
+            try:
+                # Verify the window still exists and is valid
+                if window and not window.isHidden():
+                    window.show()
+                    window.raise_()
+                    window.activateWindow()
+                    logger.debug(f"Focused existing window for scope_id={scope_id}")
+                    return True
+                else:
+                    # Window was closed/hidden, remove stale entry
+                    del cls._scope_to_window[scope_id]
+                    logger.debug(f"Removed stale window entry for scope_id={scope_id}")
+            except RuntimeError:
+                # Window was deleted, remove stale entry
+                del cls._scope_to_window[scope_id]
+                logger.debug(f"Removed deleted window entry for scope_id={scope_id}")
+        return False
+
+    @classmethod
+    def register_window_for_scope(cls, scope_id: Optional[str], window: 'QWidget'):
+        """Register a window for a scope_id to enable focus-instead-of-duplicate behavior.
+
+        Args:
+            scope_id: The scope identifier. Can be None for global scope.
+            window: The window (QDialog) to register.
+        """
+        cls._scope_to_window[scope_id] = window
+        logger.debug(f"Registered window for scope_id={scope_id}: {window.__class__.__name__}")
+
+    @classmethod
+    def unregister_window_for_scope(cls, scope_id: Optional[str]):
+        """Unregister a window for a scope_id.
+
+        Should be called when a window closes.
+
+        Args:
+            scope_id: The scope identifier to unregister.
+        """
+        if scope_id in cls._scope_to_window:
+            del cls._scope_to_window[scope_id]
+            logger.debug(f"Unregistered window for scope_id={scope_id}")
 
     @classmethod
     def trigger_global_cross_window_refresh(cls, source_scope_id: Optional[str] = None):

@@ -2019,6 +2019,8 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         """
         Open configuration window with specified config class and current config.
 
+        If a window with the same scope_id already exists, focus it instead of creating a new one.
+
         Args:
             config_class: Configuration class type (PipelineConfig or GlobalPipelineConfig)
             current_config: Current configuration instance
@@ -2026,15 +2028,16 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
             orchestrator: Optional orchestrator reference for context persistence
         """
         from openhcs.pyqt_gui.windows.config_window import ConfigWindow
-        from openhcs.config_framework.context_manager import config_context
+        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
 
-
-        # SIMPLIFIED: ConfigWindow now uses the dataclass instance directly for context
-        # No need for external context management - the form manager handles it automatically
         # CRITICAL: Pass orchestrator's plate_path as scope_id to limit cross-window updates to same orchestrator
-        # CRITICAL: Do NOT wrap in config_context(orchestrator.pipeline_config) - this creates ambient context
-        # that interferes with placeholder resolution. The form manager builds its own context stack.
         scope_id = str(orchestrator.plate_path) if orchestrator else None
+
+        # FOCUS-INSTEAD-OF-DUPLICATE: Check if window with same scope_id already exists
+        if ParameterFormManager.focus_existing_window(scope_id):
+            return  # Existing window was focused, don't create new one
+
+        # Create new window
         config_window = ConfigWindow(
             config_class,           # config_class
             current_config,         # current_config
@@ -2044,9 +2047,8 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
             scope_id=scope_id       # Scope to this orchestrator
         )
 
-        # REMOVED: refresh_config signal connection - now obsolete with live placeholder context system
-        # Config windows automatically update their placeholders through cross-window signals
-        # when other windows save changes. No need to rebuild the entire form.
+        # Register window for focus-instead-of-duplicate behavior
+        ParameterFormManager.register_window_for_scope(scope_id, config_window)
 
         # Show as non-modal window (like main window configuration)
         config_window.show()

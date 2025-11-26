@@ -231,6 +231,12 @@ class BaseFormDialog(QDialog):
             try:
                 logger.info(f"🔍 {self.__class__.__name__}: Calling unregister on {manager.field_id} (id={id(manager)})")
                 manager.unregister_from_cross_window_updates()
+
+                # CRITICAL: Also unregister this window from scope-to-window registry
+                # This ensures focus-instead-of-duplicate works correctly after window closes
+                from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+                if hasattr(manager, 'scope_id'):
+                    ParameterFormManager.unregister_window_for_scope(manager.scope_id)
             except Exception as e:
                 logger.error(f"Failed to unregister form manager {manager.field_id}: {e}")
 

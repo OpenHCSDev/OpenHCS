@@ -1,10 +1,16 @@
-"""Flash animation for QListWidgetItem updates."""
+"""Flash animation for QListWidgetItem updates.
+
+Uses QVariantAnimation for smooth 60fps color transitions:
+- Rapid fade-in (~100ms) with OutQuad easing
+- Hold at max flash while rapid updates continue
+- Smooth fade-out (~350ms) with InOutCubic easing when updates stop
+"""
 
 import logging
 from typing import Optional
-from PyQt6.QtCore import QTimer
+from PyQt6.QtCore import QVariantAnimation, QEasingCurve, QTimer
 from PyQt6.QtWidgets import QListWidget
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QColor, QBrush
 
 from .scope_visual_config import ScopeVisualConfig, ListItemType
 
@@ -12,13 +18,24 @@ logger = logging.getLogger(__name__)
 
 
 class ListItemFlashAnimator:
-    """Manages flash animation for QListWidgetItem background color changes.
-    
+    """Manages smooth flash animation for QListWidgetItem background color changes.
+
+    Uses QVariantAnimation for 60fps color interpolation with:
+    - Rapid fade-in: 100ms with OutQuad easing (quick snap to flash color)
+    - Hold at max: stays at flash color while rapid updates continue
+    - Smooth fade-out: 350ms with InOutCubic easing (when updates stop)
+
     Design:
     - Does NOT store item references (items can be destroyed during flash)
     - Stores (list_widget, row, scope_id, item_type) for color recomputation
     - Gracefully handles item destruction (checks if item exists before restoring)
     """
+
+    # Animation timing constants
+    FADE_IN_DURATION_MS: int = 100   # Rapid fade-in
+    FADE_OUT_DURATION_MS: int = 350  # Smooth fade-out
+    HOLD_DURATION_MS: int = 150      # Hold at max flash before fade-out
+    FLASH_ALPHA: int = 95            # Flash color alpha (high opacity)
 
     def __init__(
         self,
@@ -40,89 +57,110 @@ class ListItemFlashAnimator:
         self.scope_id = scope_id
         self.item_type = item_type
         self.config = ScopeVisualConfig()
-        self._flash_timer: Optional[QTimer] = None
         self._is_flashing: bool = False
+        self._original_color: Optional[QColor] = None
+        self._flash_color: Optional[QColor] = None
+
+        # Create fade-in animation
+        self._fade_in_anim = QVariantAnimation()
+        self._fade_in_anim.setDuration(self.FADE_IN_DURATION_MS)
+        self._fade_in_anim.setEasingCurve(QEasingCurve.Type.OutQuad)
+        self._fade_in_anim.valueChanged.connect(self._apply_color)
+        self._fade_in_anim.finished.connect(self._on_fade_in_complete)
+
+        # Create fade-out animation
+        self._fade_out_anim = QVariantAnimation()
+        self._fade_out_anim.setDuration(self.FADE_OUT_DURATION_MS)
+        self._fade_out_anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        self._fade_out_anim.valueChanged.connect(self._apply_color)
+        self._fade_out_anim.finished.connect(self._on_animation_complete)
+
+        # Hold timer - resets on each flash, starts fade-out when expires
+        self._hold_timer = QTimer()
+        self._hold_timer.setSingleShot(True)
+        self._hold_timer.timeout.connect(self._start_fade_out)
 
     def flash_update(self) -> None:
-        """Trigger flash animation on item background by increasing opacity."""
-        logger.info(f"🔥 flash_update called for row {self.row}")
+        """Trigger smooth flash animation on item background."""
         item = self.list_widget.item(self.row)
-        if item is None:  # Item was destroyed
-            logger.info(f"🔥 flash_update: item is None, returning")
+        if item is None:
             return
 
-        # Get the correct background color from scope
+        # If already flashing, just reset the hold timer (stay at max flash)
+        if self._is_flashing and self._flash_color is not None:
+            self._hold_timer.stop()
+            self._fade_out_anim.stop()
+            # Ensure we're at max flash color
+            self._apply_color(self._flash_color)
+            self._hold_timer.start(self.HOLD_DURATION_MS)
+            return
+
+        # First flash - capture original and compute flash color
         from .scope_color_utils import get_scope_color_scheme
         color_scheme = get_scope_color_scheme(self.scope_id)
         correct_color = self.item_type.get_background_color(color_scheme)
-        logger.info(f"🔥 flash_update: correct_color={correct_color}, alpha={correct_color.alpha() if correct_color else None}")
 
-        if self._is_flashing:
-            # Already flashing - restart timer
-            logger.info(f"🔥 flash_update: Already flashing, restarting timer")
-            if self._flash_timer:
-                self._flash_timer.stop()
-                self._flash_timer.start(self.config.FLASH_DURATION_MS)
-            # Re-apply flash color
-            if correct_color is not None:
-                flash_color = QColor(correct_color)
-                flash_color.setAlpha(95)
-                logger.info(f"🔥 flash_update: Re-applying flash_color={flash_color.name()} alpha={flash_color.alpha()}")
-                item.setBackground(flash_color)
-                self.list_widget.update()
-            return
+        self._original_color = correct_color if correct_color else QColor(0, 0, 0, 0)
+        if correct_color is not None:
+            self._flash_color = QColor(correct_color)
+            self._flash_color.setAlpha(self.FLASH_ALPHA)
+        else:
+            self._flash_color = QColor(144, 238, 144, self.FLASH_ALPHA)
 
-        logger.info(f"🔥 flash_update: Starting NEW flash, duration={self.config.FLASH_DURATION_MS}ms")
-        # CRITICAL: Set _is_flashing BEFORE calling setBackground() to prevent delegate from overwriting
         self._is_flashing = True
 
-        if correct_color is not None:
-            # Flash by increasing opacity to 100% (same color, just full opacity)
-            flash_color = QColor(correct_color)
-            flash_color.setAlpha(95)  # Full opacity
-            logger.info(f"🔥 flash_update: Setting background to flash_color={flash_color.name()} alpha={flash_color.alpha()}")
-            item.setBackground(flash_color)
-            # CRITICAL: Force repaint so delegate sees the flash color immediately
-            self.list_widget.update()
+        # Start fade-in: original -> flash color
+        self._fade_in_anim.setStartValue(self._original_color)
+        self._fade_in_anim.setEndValue(self._flash_color)
+        self._fade_in_anim.start()
 
-        # Setup timer to restore correct background
-        self._flash_timer = QTimer(self.list_widget)
-        self._flash_timer.setSingleShot(True)
-        self._flash_timer.timeout.connect(self._restore_background)
-        self._flash_timer.start(self.config.FLASH_DURATION_MS)
+    def _on_fade_in_complete(self) -> None:
+        """Called when fade-in completes. Start hold timer."""
+        self._hold_timer.start(self.HOLD_DURATION_MS)
 
-    def _restore_background(self) -> None:
-        """Restore correct background color by recomputing from scope."""
-        logger.info(f"🔥 _restore_background called for row {self.row}")
+    def _start_fade_out(self) -> None:
+        """Called when hold timer expires. Start fade-out animation."""
+        self._fade_out_anim.setStartValue(self._flash_color)
+        self._fade_out_anim.setEndValue(self._original_color)
+        self._fade_out_anim.start()
+
+    def _apply_color(self, color: QColor) -> None:
+        """Apply interpolated color to list item. Called ~60 times/sec during animation."""
         item = self.list_widget.item(self.row)
-        if item is None:  # Item was destroyed during flash
-            logger.info(f"Flash restore skipped - item at row {self.row} was destroyed")
-            self._is_flashing = False
+        if item is None:
+            return
+        item.setBackground(color)
+        self.list_widget.update()
+
+    def _on_animation_complete(self) -> None:
+        """Called when fade-out completes. Restore original state."""
+        self._is_flashing = False
+        item = self.list_widget.item(self.row)
+        if item is None:
             return
 
-        # Recompute correct color from scope_id (handles list rebuilds during flash)
-        from PyQt6.QtGui import QBrush
+        # Recompute correct color (handles list rebuilds during flash)
         from .scope_color_utils import get_scope_color_scheme
         color_scheme = get_scope_color_scheme(self.scope_id)
-
-        # Use enum-based polymorphic dispatch to get correct color
         correct_color = self.item_type.get_background_color(color_scheme)
-        logger.info(f"🔥 _restore_background: correct_color={correct_color}, alpha={correct_color.alpha() if correct_color else None}")
 
-        # CRITICAL: Set _is_flashing BEFORE calling setBackground() so delegate paints the restored color
-        self._is_flashing = False
-
-        # Handle None (transparent) background
         if correct_color is None:
-            logger.info(f"🔥 _restore_background: Setting transparent background")
             item.setBackground(QBrush())  # Empty brush = transparent
         else:
-            logger.info(f"🔥 _restore_background: Restoring to color={correct_color.name() if hasattr(correct_color, 'name') else correct_color}, alpha={correct_color.alpha()}")
             item.setBackground(correct_color)
-
-        # Force repaint to show restored color
         self.list_widget.update()
-        logger.info(f"🔥 _restore_background: Flash complete for row {self.row}")
+
+    def _restore_original(self) -> None:
+        """Immediate restoration (for cleanup/cancellation)."""
+        self._fade_in_anim.stop()
+        self._fade_out_anim.stop()
+        self._on_animation_complete()
+
+    def stop(self) -> None:
+        """Stop all animations immediately."""
+        self._fade_in_anim.stop()
+        self._fade_out_anim.stop()
+        self._is_flashing = False
 
 
 # Global registry of animators (keyed by (list_widget_id, item_row))
@@ -196,8 +234,8 @@ def is_item_flashing(list_widget: QListWidget, row: int) -> bool:
 def reapply_flash_if_active(list_widget: QListWidget, row: int) -> None:
     """Reapply flash color if item is currently flashing.
 
-    This should be called after operations that might overwrite the background color
-    (like setText or setBackground) to ensure the flash remains visible.
+    With smooth animations, this restarts the animation from scratch
+    to ensure visual continuity after background overwrites.
 
     Args:
         list_widget: List widget containing the item
@@ -207,45 +245,27 @@ def reapply_flash_if_active(list_widget: QListWidget, row: int) -> None:
     if key in _list_item_animators:
         animator = _list_item_animators[key]
         if animator._is_flashing:
-            logger.info(f"🔥 reapply_flash_if_active: Reapplying flash for row {row}")
-            item = list_widget.item(row)
-            if item is not None:
-                # Reapply flash color
-                from .scope_color_utils import get_scope_color_scheme
-                color_scheme = get_scope_color_scheme(animator.scope_id)
-                correct_color = animator.item_type.get_background_color(color_scheme)
-                if correct_color is not None:
-                    flash_color = QColor(correct_color)
-                    flash_color.setAlpha(95)  # Full opacity
-                    item.setBackground(flash_color)
-
-                    # CRITICAL: Restart the timer to extend the flash duration
-                    # This prevents the flash from ending too soon after reapplying
-                    if animator._flash_timer:
-                        logger.info(f"🔥 reapply_flash_if_active: Restarting flash timer for row {row}")
-                        animator._flash_timer.stop()
-                        animator._flash_timer.start(animator.config.FLASH_DURATION_MS)
+            # Restart the animation from scratch
+            animator.flash_update()
 
 
 def clear_all_animators(list_widget: QListWidget) -> None:
     """Clear all animators for a specific list widget.
-    
+
     Call this before clearing/rebuilding the list to prevent
-    flash timers from accessing destroyed items.
-    
+    animations from accessing destroyed items.
+
     Args:
         list_widget: List widget whose animators should be cleared
     """
     widget_id = id(list_widget)
     keys_to_remove = [k for k in _list_item_animators.keys() if k[0] == widget_id]
-    
+
     for key in keys_to_remove:
         animator = _list_item_animators[key]
-        # Stop any active flash timers
-        if animator._flash_timer and animator._flash_timer.isActive():
-            animator._flash_timer.stop()
+        animator.stop()
         del _list_item_animators[key]
-    
+
     if keys_to_remove:
         logger.debug(f"Cleared {len(keys_to_remove)} flash animators for list widget")
 

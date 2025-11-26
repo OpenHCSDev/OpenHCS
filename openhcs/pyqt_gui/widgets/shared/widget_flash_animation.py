@@ -1,9 +1,15 @@
-"""Flash animation for form widgets (QLineEdit, QComboBox, etc.)."""
+"""Flash animation for form widgets (QLineEdit, QComboBox, etc.).
+
+Uses QVariantAnimation for smooth 60fps color transitions:
+- Rapid fade-in (~100ms) with OutQuad easing
+- Hold at max flash while rapid updates continue
+- Smooth fade-out (~350ms) with InOutCubic easing when updates stop
+"""
 
 import logging
 from typing import Optional
-from PyQt6.QtCore import QTimer, QPropertyAnimation, QEasingCurve, pyqtProperty
-from PyQt6.QtWidgets import QWidget
+from PyQt6.QtCore import QVariantAnimation, QEasingCurve, QTimer
+from PyQt6.QtWidgets import QWidget, QGroupBox
 from PyQt6.QtGui import QColor, QPalette
 
 from .scope_visual_config import ScopeVisualConfig
@@ -12,11 +18,21 @@ logger = logging.getLogger(__name__)
 
 
 class WidgetFlashAnimator:
-    """Manages flash animation for form widget background color changes.
+    """Manages smooth flash animation for form widget background color changes.
+
+    Uses QVariantAnimation for 60fps color interpolation with:
+    - Rapid fade-in: 100ms with OutQuad easing (quick snap to flash color)
+    - Hold at max: stays at flash color while rapid updates continue
+    - Smooth fade-out: 350ms with InOutCubic easing (when updates stop)
 
     Uses stylesheet manipulation for GroupBox (since stylesheets override palettes),
     and palette manipulation for input widgets.
     """
+
+    # Animation timing constants
+    FADE_IN_DURATION_MS: int = 100   # Rapid fade-in
+    FADE_OUT_DURATION_MS: int = 350  # Smooth fade-out
+    HOLD_DURATION_MS: int = 150      # Hold at max flash before fade-out
 
     def __init__(self, widget: QWidget, flash_color: Optional[QColor] = None):
         """Initialize animator.
@@ -28,109 +44,109 @@ class WidgetFlashAnimator:
         self.widget = widget
         self.config = ScopeVisualConfig()
         self.flash_color = flash_color or QColor(*self.config.FLASH_COLOR_RGB, 180)
-        self._original_palette: Optional[QPalette] = None
+        self._original_color: Optional[QColor] = None
         self._original_stylesheet: Optional[str] = None
-        self._flash_timer: Optional[QTimer] = None
         self._is_flashing: bool = False
-        self._use_stylesheet: bool = False  # Track which method we used
+        self._use_stylesheet: bool = False
 
-    def flash_update(self, use_coordinator: bool = True) -> None:
-        """Trigger flash animation on widget background.
+        # Create fade-in animation
+        self._fade_in_anim = QVariantAnimation()
+        self._fade_in_anim.setDuration(self.FADE_IN_DURATION_MS)
+        self._fade_in_anim.setEasingCurve(QEasingCurve.Type.OutQuad)
+        self._fade_in_anim.valueChanged.connect(self._apply_color)
+        self._fade_in_anim.finished.connect(self._on_fade_in_complete)
+
+        # Create fade-out animation
+        self._fade_out_anim = QVariantAnimation()
+        self._fade_out_anim.setDuration(self.FADE_OUT_DURATION_MS)
+        self._fade_out_anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        self._fade_out_anim.valueChanged.connect(self._apply_color)
+        self._fade_out_anim.finished.connect(self._on_animation_complete)
+
+        # Hold timer - resets on each flash, starts fade-out when expires
+        self._hold_timer = QTimer()
+        self._hold_timer.setSingleShot(True)
+        self._hold_timer.timeout.connect(self._start_fade_out)
+
+    def flash_update(self, use_coordinator: bool = False) -> None:  # noqa: ARG002
+        """Trigger smooth flash animation on widget background.
 
         Args:
-            use_coordinator: If True, schedule restoration via coordinator instead of local timer.
-                           This batches all flash restorations to prevent event loop blocking.
+            use_coordinator: Ignored (kept for API compatibility). Animations are self-contained.
         """
+        del use_coordinator  # Unused, kept for API compatibility
         if not self.widget or not self.widget.isVisible():
-            logger.info(f"⚠️ Widget not visible or None")
             return
 
+        # If already flashing, just reset the hold timer (stay at max flash)
         if self._is_flashing:
-            # Already flashing - cancel old timer if using coordinator
-            logger.info(f"⚠️ Already flashing, restarting")
-            if use_coordinator:
-                # Cancel local timer, coordinator will handle restoration
-                if self._flash_timer:
-                    self._flash_timer.stop()
-            else:
-                # Using local timer, just restart it
-                if self._flash_timer:
-                    self._flash_timer.stop()
-                    self._flash_timer.start(self.config.FLASH_DURATION_MS)
+            self._hold_timer.stop()
+            self._fade_out_anim.stop()  # Cancel fade-out if it started
+            # Ensure we're at max flash color
+            self._apply_color(self.flash_color)
+            self._hold_timer.start(self.HOLD_DURATION_MS)
             return
+
+        # First flash - capture original and start fade-in
+        self._use_stylesheet = isinstance(self.widget, QGroupBox)
+        if self._use_stylesheet:
+            self._original_stylesheet = self.widget.styleSheet()
+            palette = self.widget.palette()
+            self._original_color = palette.color(QPalette.ColorRole.Window)
+        else:
+            palette = self.widget.palette()
+            self._original_color = palette.color(QPalette.ColorRole.Base)
 
         self._is_flashing = True
-        logger.debug(f"🎨 Starting flash animation for {type(self.widget).__name__}")
 
-        # Use different approaches depending on widget type
-        # GroupBox: Use stylesheet (stylesheets override palettes)
-        # Input widgets: Use palette (works fine for QLineEdit, QComboBox, etc.)
-        from PyQt6.QtWidgets import QGroupBox
-        if isinstance(self.widget, QGroupBox):
-            self._use_stylesheet = True
-            # Store original stylesheet
-            self._original_stylesheet = self.widget.styleSheet()
-            logger.debug(f"   Is GroupBox, using stylesheet approach")
-            logger.debug(f"   Original stylesheet: '{self._original_stylesheet}'")
+        # Start fade-in: original -> flash color
+        self._fade_in_anim.setStartValue(self._original_color)
+        self._fade_in_anim.setEndValue(self.flash_color)
+        self._fade_in_anim.start()
 
-            # Apply flash color via stylesheet (overrides parent stylesheet)
-            r, g, b, a = self.flash_color.red(), self.flash_color.green(), self.flash_color.blue(), self.flash_color.alpha()
-            flash_style = f"QGroupBox {{ background-color: rgba({r}, {g}, {b}, {a}); }}"
-            logger.debug(f"   Applying flash style: '{flash_style}'")
-            self.widget.setStyleSheet(flash_style)
-        else:
-            self._use_stylesheet = False
-            # Store original palette
-            self._original_palette = self.widget.palette()
-            logger.debug(f"   Not GroupBox, using palette approach")
+    def _on_fade_in_complete(self) -> None:
+        """Called when fade-in completes. Start hold timer."""
+        self._hold_timer.start(self.HOLD_DURATION_MS)
 
-            # Apply flash color via palette
-            flash_palette = self.widget.palette()
-            flash_palette.setColor(QPalette.ColorRole.Base, self.flash_color)
-            self.widget.setPalette(flash_palette)
+    def _start_fade_out(self) -> None:
+        """Called when hold timer expires. Start fade-out animation."""
+        self._fade_out_anim.setStartValue(self.flash_color)
+        self._fade_out_anim.setEndValue(self._original_color)
+        self._fade_out_anim.start()
 
-        # PERFORMANCE: Schedule restoration via coordinator instead of local timer
-        if use_coordinator:
-            # Register with coordinator for batched restoration
-            try:
-                from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
-                ParameterFormManager.schedule_flash_restoration(self, self.config.FLASH_DURATION_MS)
-                logger.debug(f"   Scheduled restoration via coordinator ({self.config.FLASH_DURATION_MS}ms)")
-            except ImportError:
-                # Fallback to local timer if coordinator not available
-                use_coordinator = False
-
-        if not use_coordinator:
-            # Setup local timer to restore original state (fallback)
-            if self._flash_timer is None:
-                logger.debug(f"   Creating new timer")
-                self._flash_timer = QTimer(self.widget)
-                self._flash_timer.setSingleShot(True)
-                self._flash_timer.timeout.connect(self._restore_original)
-
-            logger.debug(f"   Starting timer for {self.config.FLASH_DURATION_MS}ms")
-            self._flash_timer.start(self.config.FLASH_DURATION_MS)
-
-    def _restore_original(self) -> None:
-        """Restore original stylesheet or palette."""
-        logger.debug(f"🔄 _restore_original called for {type(self.widget).__name__}")
+    def _apply_color(self, color: QColor) -> None:
+        """Apply interpolated color to widget. Called ~60 times/sec during animation."""
         if not self.widget:
-            logger.debug(f"   Widget is None, aborting")
-            self._is_flashing = False
             return
 
-        # Use the flag to determine which method to restore
         if self._use_stylesheet:
-            # Restore original stylesheet
-            logger.debug(f"   Restoring stylesheet: '{self._original_stylesheet}'")
-            self.widget.setStyleSheet(self._original_stylesheet)
+            # GroupBox: Apply via stylesheet
+            r, g, b, a = color.red(), color.green(), color.blue(), color.alpha()
+            style = f"QGroupBox {{ background-color: rgba({r}, {g}, {b}, {a}); }}"
+            self.widget.setStyleSheet(style)
         else:
-            # Restore original palette
-            logger.debug(f"   Restoring palette")
-            if self._original_palette:
-                self.widget.setPalette(self._original_palette)
+            # Other widgets: Apply via palette
+            palette = self.widget.palette()
+            palette.setColor(QPalette.ColorRole.Base, color)
+            self.widget.setPalette(palette)
 
-        logger.debug(f"✅ Restored original state")
+    def _on_animation_complete(self) -> None:
+        """Called when fade-out completes. Restore original state."""
+        if self._use_stylesheet and self._original_stylesheet is not None:
+            self.widget.setStyleSheet(self._original_stylesheet)
+        self._is_flashing = False
+        logger.debug(f"✅ Smooth flash complete for {type(self.widget).__name__}")
+
+    def _restore_original(self) -> None:
+        """Immediate restoration (for cleanup/cancellation)."""
+        self._fade_in_anim.stop()
+        self._fade_out_anim.stop()
+        self._on_animation_complete()
+
+    def stop(self) -> None:
+        """Stop all animations immediately."""
+        self._fade_in_anim.stop()
+        self._fade_out_anim.stop()
         self._is_flashing = False
 
 
@@ -139,7 +155,7 @@ _widget_animators: dict[int, WidgetFlashAnimator] = {}
 
 
 def flash_widget(widget: QWidget, flash_color: Optional[QColor] = None) -> None:
-    """Flash a widget to indicate update.
+    """Flash a widget with smooth fade-in/fade-out animation.
 
     Args:
         widget: Widget to flash
@@ -175,7 +191,6 @@ def cleanup_widget_animator(widget: QWidget) -> None:
     widget_id = id(widget)
     if widget_id in _widget_animators:
         animator = _widget_animators[widget_id]
-        if animator._flash_timer and animator._flash_timer.isActive():
-            animator._flash_timer.stop()
+        animator.stop()
         del _widget_animators[widget_id]
 

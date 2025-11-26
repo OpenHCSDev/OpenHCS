@@ -1,8 +1,14 @@
-"""Flash animation for QTreeWidgetItem updates."""
+"""Flash animation for QTreeWidgetItem updates.
+
+Uses QVariantAnimation for smooth 60fps color transitions:
+- Rapid fade-in (~100ms) with OutQuad easing
+- Hold at max flash while rapid updates continue
+- Smooth fade-out (~350ms) with InOutCubic easing when updates stop
+"""
 
 import logging
 from typing import Optional
-from PyQt6.QtCore import QTimer
+from PyQt6.QtCore import QVariantAnimation, QEasingCurve, QTimer
 from PyQt6.QtWidgets import QTreeWidget, QTreeWidgetItem
 from PyQt6.QtGui import QColor, QBrush, QFont
 
@@ -12,14 +18,24 @@ logger = logging.getLogger(__name__)
 
 
 class TreeItemFlashAnimator:
-    """Manages flash animation for QTreeWidgetItem background and font changes.
-    
+    """Manages smooth flash animation for QTreeWidgetItem background and font changes.
+
+    Uses QVariantAnimation for 60fps color interpolation with:
+    - Rapid fade-in: 100ms with OutQuad easing (quick snap to flash color)
+    - Hold at max: stays at flash color while rapid updates continue
+    - Smooth fade-out: 350ms with InOutCubic easing (when updates stop)
+
     Design:
     - Does NOT store item references (items can be destroyed during flash)
     - Stores (tree_widget, item_id) for item lookup
     - Gracefully handles item destruction (checks if item exists before restoring)
     - Flashes both background color AND font weight for visibility
     """
+
+    # Animation timing constants
+    FADE_IN_DURATION_MS: int = 100   # Rapid fade-in
+    FADE_OUT_DURATION_MS: int = 350  # Smooth fade-out
+    HOLD_DURATION_MS: int = 150      # Hold at max flash before fade-out
 
     def __init__(
         self,
@@ -38,70 +54,87 @@ class TreeItemFlashAnimator:
         self.item_id = id(item)  # Store ID, not reference
         self.flash_color = flash_color
         self.config = ScopeVisualConfig()
-        self._flash_timer: Optional[QTimer] = None
         self._is_flashing: bool = False
-        
+
         # Store original state when animator is created
         self.original_background = item.background(0)
         self.original_font = item.font(0)
+        # Extract original color from brush
+        self._original_color = self.original_background.color() if self.original_background.style() else QColor(0, 0, 0, 0)
 
-    def flash_update(self, use_coordinator: bool = True) -> None:
-        """Trigger flash animation on item background and font.
+        # Create fade-in animation
+        self._fade_in_anim = QVariantAnimation()
+        self._fade_in_anim.setDuration(self.FADE_IN_DURATION_MS)
+        self._fade_in_anim.setEasingCurve(QEasingCurve.Type.OutQuad)
+        self._fade_in_anim.valueChanged.connect(self._apply_color)
+        self._fade_in_anim.finished.connect(self._on_fade_in_complete)
+
+        # Create fade-out animation
+        self._fade_out_anim = QVariantAnimation()
+        self._fade_out_anim.setDuration(self.FADE_OUT_DURATION_MS)
+        self._fade_out_anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        self._fade_out_anim.valueChanged.connect(self._apply_color)
+        self._fade_out_anim.finished.connect(self._on_animation_complete)
+
+        # Hold timer - resets on each flash, starts fade-out when expires
+        self._hold_timer = QTimer()
+        self._hold_timer.setSingleShot(True)
+        self._hold_timer.timeout.connect(self._start_fade_out)
+
+    def flash_update(self, use_coordinator: bool = False) -> None:  # noqa: ARG002
+        """Trigger smooth flash animation on item background and font.
 
         Args:
-            use_coordinator: If True, schedule restoration via coordinator to prevent event loop blocking.
+            use_coordinator: Ignored (kept for API compatibility). Animations are self-contained.
         """
-        # Find item by searching tree (item might have been recreated)
+        del use_coordinator  # Unused, kept for API compatibility
         item = self._find_item()
-        if item is None:  # Item was destroyed
-            logger.debug(f"Flash skipped - tree item was destroyed")
+        if item is None:
             return
 
-        # Apply flash color AND make font bold for visibility
-        item.setBackground(0, QBrush(self.flash_color))
+        # If already flashing, just reset the hold timer (stay at max flash)
+        if self._is_flashing:
+            self._hold_timer.stop()
+            self._fade_out_anim.stop()
+            # Ensure we're at max flash color
+            self._apply_color(self.flash_color)
+            self._hold_timer.start(self.HOLD_DURATION_MS)
+            return
+
+        # First flash - set bold font and start fade-in
+        self._is_flashing = True
+
         flash_font = QFont(self.original_font)
         flash_font.setBold(True)
         item.setFont(0, flash_font)
 
-        # Force tree widget to repaint
-        self.tree_widget.viewport().update()
+        # Start fade-in: original -> flash color
+        self._fade_in_anim.setStartValue(self._original_color)
+        self._fade_in_anim.setEndValue(self.flash_color)
+        self._fade_in_anim.start()
 
-        if self._is_flashing:
-            # Already flashing - cancel old timer if using coordinator
-            if use_coordinator:
-                if self._flash_timer:
-                    self._flash_timer.stop()
-            else:
-                # Using local timer, just restart it
-                if self._flash_timer:
-                    self._flash_timer.stop()
-                    self._flash_timer.start(self.config.FLASH_DURATION_MS)
+    def _on_fade_in_complete(self) -> None:
+        """Called when fade-in completes. Start hold timer."""
+        self._hold_timer.start(self.HOLD_DURATION_MS)
+
+    def _start_fade_out(self) -> None:
+        """Called when hold timer expires. Start fade-out animation."""
+        self._fade_out_anim.setStartValue(self.flash_color)
+        self._fade_out_anim.setEndValue(self._original_color)
+        self._fade_out_anim.start()
+
+    def _apply_color(self, color: QColor) -> None:
+        """Apply interpolated color to tree item. Called ~60 times/sec during animation."""
+        item = self._find_item()
+        if item is None:
             return
-
-        self._is_flashing = True
-
-        # PERFORMANCE: Schedule restoration via coordinator instead of local timer
-        if use_coordinator:
-            try:
-                from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
-                ParameterFormManager.schedule_flash_restoration(self, self.config.FLASH_DURATION_MS)
-                logger.debug(f"   Scheduled tree item restoration via coordinator ({self.config.FLASH_DURATION_MS}ms)")
-            except ImportError:
-                use_coordinator = False
-
-        if not use_coordinator:
-            # Fallback to local timer
-            self._flash_timer = QTimer(self.tree_widget)
-            self._flash_timer.setSingleShot(True)
-            self._flash_timer.timeout.connect(self._restore_original)
-            self._flash_timer.start(self.config.FLASH_DURATION_MS)
+        item.setBackground(0, QBrush(color))
+        self.tree_widget.viewport().update()
 
     def _find_item(self) -> Optional[QTreeWidgetItem]:
         """Find tree item by ID (handles item recreation)."""
-        # Search all items in tree
         def search_tree(parent_item=None):
             if parent_item is None:
-                # Search top-level items
                 for i in range(self.tree_widget.topLevelItemCount()):
                     item = self.tree_widget.topLevelItem(i)
                     if id(item) == self.item_id:
@@ -110,7 +143,6 @@ class TreeItemFlashAnimator:
                     if result:
                         return result
             else:
-                # Search children
                 for i in range(parent_item.childCount()):
                     child = parent_item.child(i)
                     if id(child) == self.item_id:
@@ -119,22 +151,28 @@ class TreeItemFlashAnimator:
                     if result:
                         return result
             return None
-        
         return search_tree()
 
-    def _restore_original(self) -> None:
-        """Restore original background and font."""
+    def _on_animation_complete(self) -> None:
+        """Called when fade-out completes. Restore original state."""
+        self._is_flashing = False
         item = self._find_item()
-        if item is None:  # Item was destroyed during flash
-            logger.debug(f"Flash restore skipped - tree item was destroyed")
-            self._is_flashing = False
+        if item is None:
             return
-
-        # Restore original state
         item.setBackground(0, self.original_background)
         item.setFont(0, self.original_font)
         self.tree_widget.viewport().update()
-        
+
+    def _restore_original(self) -> None:
+        """Immediate restoration (for cleanup/cancellation)."""
+        self._fade_in_anim.stop()
+        self._fade_out_anim.stop()
+        self._on_animation_complete()
+
+    def stop(self) -> None:
+        """Stop all animations immediately."""
+        self._fade_in_anim.stop()
+        self._fade_out_anim.stop()
         self._is_flashing = False
 
 
@@ -188,23 +226,21 @@ def flash_tree_item(
 
 def clear_all_tree_animators(tree_widget: QTreeWidget) -> None:
     """Clear all animators for a specific tree widget.
-    
+
     Call this before clearing/rebuilding the tree to prevent
-    flash timers from accessing destroyed items.
-    
+    animations from accessing destroyed items.
+
     Args:
         tree_widget: Tree widget whose animators should be cleared
     """
     widget_id = id(tree_widget)
     keys_to_remove = [k for k in _tree_item_animators.keys() if k[0] == widget_id]
-    
+
     for key in keys_to_remove:
         animator = _tree_item_animators[key]
-        # Stop any active flash timers
-        if animator._flash_timer and animator._flash_timer.isActive():
-            animator._flash_timer.stop()
+        animator.stop()
         del _tree_item_animators[key]
-    
+
     if keys_to_remove:
         logger.debug(f"Cleared {len(keys_to_remove)} flash animators for tree widget")
 

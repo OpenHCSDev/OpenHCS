@@ -610,6 +610,12 @@ class OpenHCSMainWindow(QMainWindow):
     def show_configuration(self):
         """Show configuration dialog for global config editing."""
         from openhcs.pyqt_gui.windows.config_window import ConfigWindow
+        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+
+        # FOCUS-INSTEAD-OF-DUPLICATE: Check if global config window already exists
+        # Global config has scope_id=None
+        if ParameterFormManager.focus_existing_window(None):
+            return  # Existing window was focused, don't create new one
 
         def handle_config_save(new_config):
             """Handle configuration save (mirrors Textual TUI pattern)."""
@@ -635,6 +641,10 @@ class OpenHCSMainWindow(QMainWindow):
             self.service_adapter.get_current_color_scheme(),  # color_scheme
             self                   # parent
         )
+
+        # Register window for focus-instead-of-duplicate behavior
+        ParameterFormManager.register_window_for_scope(None, config_window)
+
         # Show as non-modal window (like plate manager and pipeline editor)
         config_window.show()
         config_window.raise_()

@@ -763,6 +763,12 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         except ValueError:
             step_position = None
 
+        # FOCUS-INSTEAD-OF-DUPLICATE: Build scope_id and check for existing window
+        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+        scope_id = self._build_step_scope_id(step_to_edit, position=None)  # No position for window lookup
+        if ParameterFormManager.focus_existing_window(scope_id):
+            return  # Existing window was focused, don't create new one
+
         editor = DualEditorWindow(
             step_data=step_to_edit,
             is_new=False,
@@ -774,6 +780,9 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         )
         # Set original step for change detection
         editor.set_original_step_for_change_detection()
+
+        # Register window for focus-instead-of-duplicate behavior
+        ParameterFormManager.register_window_for_scope(scope_id, editor)
 
         # Connect orchestrator config changes to step editor for live placeholder updates
         # This ensures the step editor's placeholders update when pipeline config is saved
