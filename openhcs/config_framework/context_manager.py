@@ -95,15 +95,9 @@ class ScopeProvider:
             # ...
     """
     def __init__(self, scope_string: str):
-        from pathlib import Path
-        # Extract plate_path from scope string (format: "plate_path::step_token" or just "plate_path")
-        # CRITICAL: scope_string might be hierarchical like "/path/to/plate::step_0"
-        # We need to extract just the plate_path part (before the first ::)
-        if '::' in scope_string:
-            plate_path_str = scope_string.split('::')[0]
-        else:
-            plate_path_str = scope_string
-        self.plate_path = Path(plate_path_str)
+        # Store the full scope string to preserve hierarchical scope
+        # (e.g., "/path/to/plate::step_0" instead of just "/path/to/plate")
+        self.scope_string = scope_string
 
 
 def _merge_nested_dataclass(base, override, mask_with_none: bool = False):
@@ -199,11 +193,12 @@ def config_context(obj, *, context_provider=None, mask_with_none: bool = False, 
         logger.info(f"🔍 CONFIG_CONTEXT SCOPE: ScopedObject.build_scope_id() -> {scope_id} for {type(obj).__name__}")
     elif context_provider is not None and isinstance(context_provider, ScopeProvider):
         # CRITICAL FIX: For UI code that passes ScopeProvider with a scope string,
-        # use the scope string directly even if obj is not a ScopedObject
+        # use the FULL scope string (not just plate_path) to preserve step scope
         # This enables placeholder resolution for LazyPipelineConfig and other lazy configs
         # that need scope information but don't implement ScopedObject
-        scope_id = str(context_provider.plate_path)
-        logger.info(f"🔍 CONFIG_CONTEXT SCOPE: ScopeProvider.plate_path -> {scope_id} for {type(obj).__name__}")
+        # CRITICAL: Use scope_string (full hierarchy) instead of plate_path (just root)
+        scope_id = context_provider.scope_string
+        logger.info(f"🔍 CONFIG_CONTEXT SCOPE: ScopeProvider.scope_string -> {scope_id} for {type(obj).__name__}")
     else:
         scope_id = None
         logger.info(f"🔍 CONFIG_CONTEXT SCOPE: None (no provider or not Scoped/Provider) for {type(obj).__name__}, provider={type(context_provider).__name__ if context_provider else None}")
