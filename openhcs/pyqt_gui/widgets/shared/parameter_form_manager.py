@@ -2562,12 +2562,26 @@ class ParameterFormManager(QWidget):
             # Start from cached parameter values instead of re-reading widgets
             current_values = dict(self._current_value_cache)
 
+            if self.field_id == 'step':
+                logger.info(f"🔍 get_current_values (step): _current_value_cache keys = {list(self._current_value_cache.keys())}")
+                for key in ['step_well_filter_config', 'step_materialization_config', 'streaming_defaults']:
+                    if key in self._current_value_cache:
+                        val = self._current_value_cache[key]
+                        logger.info(f"🔍 get_current_values (step): _current_value_cache[{key}] = {type(val).__name__}")
+
             # Collect values from nested managers, respecting optional dataclass checkbox states
             self._apply_to_nested_managers(
                 lambda name, manager: self._process_nested_values_if_checkbox_enabled(
                     name, manager, current_values
                 )
             )
+
+            if self.field_id == 'step':
+                logger.info(f"🔍 get_current_values (step): AFTER _apply_to_nested_managers")
+                for key in ['step_well_filter_config', 'step_materialization_config', 'streaming_defaults']:
+                    if key in current_values:
+                        val = current_values[key]
+                        logger.info(f"🔍 get_current_values (step): current_values[{key}] = {type(val).__name__}")
 
             return current_values
 
@@ -2583,12 +2597,23 @@ class ParameterFormManager(QWidget):
         CRITICAL: Includes fields that were explicitly reset to None (tracked in reset_fields).
         This ensures cross-window updates see reset operations and can override saved concrete values.
         The None values will be used in dataclasses.replace() to override saved values.
-        """
-        if not hasattr(self.config, '_resolve_field_value'):
-            return self.get_current_values()
 
+        CRITICAL: Works for ALL objects (lazy dataclasses, scoped objects like FunctionStep, etc.)
+        by extracting raw values from nested dataclasses regardless of parent type.
+        """
         user_modified = {}
         current_values = self.get_current_values()
+
+        if self.field_id == 'step':
+            logger.info(f"🔍 get_user_modified_values (step): current_values keys = {list(current_values.keys())}")
+            for key in ['step_well_filter_config', 'step_materialization_config', 'streaming_defaults']:
+                if key in current_values:
+                    val = current_values[key]
+                    logger.info(f"🔍 get_user_modified_values (step): {key} = {type(val).__name__}, value={val}")
+
+        # For non-lazy-dataclass objects (like FunctionStep), we still need to extract raw values
+        # from nested dataclasses for sibling inheritance to work
+        is_lazy_dataclass = hasattr(self.config, '_resolve_field_value')
 
         # Include fields where the raw value is not None OR the field was explicitly reset
         for field_name, value in current_values.items():
@@ -2600,11 +2625,17 @@ class ParameterFormManager(QWidget):
                 # CRITICAL: For nested dataclasses, we need to extract only user-modified fields
                 # by checking the raw values (using object.__getattribute__ to avoid resolution)
                 from dataclasses import is_dataclass, fields as dataclass_fields
+                if field_name in ['step_well_filter_config', 'step_materialization_config', 'streaming_defaults', 'well_filter_config']:
+                    logger.info(f"🔍 get_user_modified_values CHECK: {field_name} - value type={type(value).__name__}, is_dataclass={is_dataclass(value)}, isinstance(value, type)={isinstance(value, type)}")
                 if is_dataclass(value) and not isinstance(value, type):
+                    if field_name in ['step_well_filter_config', 'step_materialization_config', 'streaming_defaults', 'well_filter_config']:
+                        logger.info(f"🔍 get_user_modified_values: {field_name} IS A DATACLASS, extracting raw values")
                     # Extract raw field values from nested dataclass
                     nested_user_modified = {}
                     for field in dataclass_fields(value):
                         raw_value = object.__getattribute__(value, field.name)
+                        if field_name in ['step_well_filter_config', 'step_materialization_config', 'streaming_defaults', 'well_filter_config']:
+                            logger.info(f"🔍 get_user_modified_values:   {field_name}.{field.name} = {raw_value}")
                         if raw_value is not None:
                             nested_user_modified[field.name] = raw_value
 
@@ -2623,7 +2654,7 @@ class ParameterFormManager(QWidget):
                 else:
                     # Non-dataclass field, include if not None OR explicitly reset
                     if field_name in ['step_well_filter_config', 'step_materialization_config', 'streaming_defaults', 'well_filter_config']:
-                        logger.info(f"🔍 get_user_modified_values: {field_name} → NOT A DATACLASS, returning instance {type(value).__name__}")
+                        logger.info(f"🔍 get_user_modified_values: {field_name} → NOT A DATACLASS (is_dataclass={is_dataclass(value)}, isinstance(value, type)={isinstance(value, type)}), returning instance {type(value).__name__}")
                     user_modified[field_name] = value
 
         return user_modified
@@ -2674,39 +2705,62 @@ class ParameterFormManager(QWidget):
         For GlobalPipelineConfig, merges values_dict into thread-local global config
         to preserve ui_hidden fields. For other types, creates fresh instance.
 
+        CRITICAL: Handles tuple format (type, dict) from get_user_modified_values()
+        by reconstructing nested dataclasses before passing to constructor.
+
         Args:
             overlay_type: Type to instantiate (dataclass, function, etc.)
-            values_dict: Dict of parameter values to pass to constructor
+            values_dict: Dict of parameter values to pass to constructor.
+                        Values can be scalars, dataclass instances, or tuples (type, dict)
+                        for nested dataclasses with user-modified fields.
 
         Returns:
             Instance of overlay_type or SimpleNamespace if type is not instantiable
         """
         try:
+            # CRITICAL: Reconstruct nested dataclasses from tuple format (type, dict)
+            # get_user_modified_values() returns nested dataclasses as tuples to preserve only user-modified fields
+            # We need to instantiate them before passing to the constructor
+            import dataclasses
+            reconstructed_values = {}
+            for key, value in values_dict.items():
+                if isinstance(value, tuple) and len(value) == 2:
+                    # Nested dataclass in tuple format: (type, dict)
+                    dataclass_type, field_dict = value
+                    # Only reconstruct if it's actually a dataclass (not a function)
+                    if dataclasses.is_dataclass(dataclass_type):
+                        logger.info(f"🔍 OVERLAY INSTANCE: Reconstructing {key} from tuple: {dataclass_type.__name__}({field_dict})")
+                        reconstructed_values[key] = dataclass_type(**field_dict)
+                    else:
+                        # Not a dataclass (e.g., function), skip it
+                        logger.warning(f"⚠️ OVERLAY INSTANCE: Skipping non-dataclass tuple for {key}: {dataclass_type}")
+                        # Don't include it in reconstructed_values
+                else:
+                    reconstructed_values[key] = value
+
             # CRITICAL: For GlobalPipelineConfig, merge form values into thread-local global config
             # This preserves ui_hidden fields (napari_display_config, fiji_display_config)
             # that don't have widgets but are needed for sibling inheritance
             from openhcs.config_framework.lazy_factory import is_global_config_type
             if is_global_config_type(overlay_type):
                 from openhcs.config_framework.context_manager import get_base_global_config
-                import dataclasses
                 thread_local_global = get_base_global_config()
                 if thread_local_global is not None and type(thread_local_global) == overlay_type:
                     # CRITICAL: Only pass scalar values (not nested dataclass instances) to dataclasses.replace()
                     # Nested config instances from the form have None fields that would mask thread-local values
                     # So we skip them and let them come from thread-local instead
-                    from dataclasses import is_dataclass
                     scalar_values = {
-                        k: v for k, v in values_dict.items()
-                        if v is not None and not is_dataclass(v)
+                        k: v for k, v in reconstructed_values.items()
+                        if v is not None and not dataclasses.is_dataclass(v)
                     }
                     return dataclasses.replace(thread_local_global, **scalar_values)
 
             # For non-global configs, create fresh instance
-            return overlay_type(**values_dict)
+            return overlay_type(**reconstructed_values)
         except TypeError:
             # Function or other non-instantiable type: use SimpleNamespace
             from types import SimpleNamespace
-            return SimpleNamespace(**values_dict)
+            return SimpleNamespace(**reconstructed_values)
 
     def _build_context_stack(self, overlay, skip_parent_overlay: bool = False, live_context = None, live_context_token: Optional[int] = None, live_context_scopes: Optional[Dict[str, Optional[str]]] = None):
         """Build nested config_context() calls for placeholder resolution.
@@ -2971,6 +3025,10 @@ class ParameterFormManager(QWidget):
             parent_scope_compatible = parent_specificity <= current_specificity
             logger.info(f"🔍 PARENT OVERLAY SCOPE CHECK: {self.field_id} - parent_scope={parent_manager.scope_id}, parent_specificity={parent_specificity}, current_scope={self.scope_id}, current_specificity={current_specificity}, compatible={parent_scope_compatible}")
 
+        # DEBUG: Log why parent overlay might not be added
+        if parent_manager:
+            logger.info(f"🔍 PARENT OVERLAY CHECK: {self.field_id} - skip_parent_overlay={skip_parent_overlay}, parent_scope_compatible={parent_scope_compatible}, has_get_user_modified_values={hasattr(parent_manager, 'get_user_modified_values')}, has_dataclass_type={hasattr(parent_manager, 'dataclass_type')}, _initial_load_complete={parent_manager._initial_load_complete}")
+
         if (not skip_parent_overlay and
             parent_scope_compatible and
             parent_manager and
@@ -3019,13 +3077,28 @@ class ParameterFormManager(QWidget):
                                 parent_values_with_excluded[excluded_param] = getattr(parent_manager.object_instance, excluded_param)
 
                     # Create parent overlay with only user-modified values (excluding current nested config)
-                    # For global config editing (root form only), use mask_with_none=True to preserve None overrides
+                    # _create_overlay_instance() will handle reconstructing nested dataclasses from tuple format
                     parent_overlay_instance = self._create_overlay_instance(parent_type, parent_values_with_excluded)
 
-                    if is_root_global_config:
-                        stack.enter_context(config_context(parent_overlay_instance, mask_with_none=True))
+                    # CRITICAL FIX: Pass parent's scope when adding parent overlay for sibling inheritance
+                    # Without this, the parent overlay defaults to PipelineConfig scope (specificity=1)
+                    # instead of FunctionStep scope (specificity=2), causing the resolver to skip siblings
+                    parent_scopes = dict(live_context_scopes) if live_context_scopes else {}
+                    if parent_manager.scope_id is not None:
+                        # Add parent's scope to the scopes dict
+                        parent_scopes[type(parent_overlay_instance).__name__] = parent_manager.scope_id
+                        # Create context_provider from parent's scope_id
+                        from openhcs.config_framework.context_manager import ScopeProvider
+                        context_provider = ScopeProvider(parent_manager.scope_id)
+                        logger.info(f"🔍 PARENT OVERLAY: Adding parent overlay with scope={parent_manager.scope_id} for {self.field_id}")
                     else:
-                        stack.enter_context(config_context(parent_overlay_instance))
+                        context_provider = None
+                        logger.info(f"🔍 PARENT OVERLAY: Adding parent overlay with NO scope for {self.field_id}")
+
+                    if is_root_global_config:
+                        stack.enter_context(config_context(parent_overlay_instance, context_provider=context_provider, config_scopes=parent_scopes, mask_with_none=True))
+                    else:
+                        stack.enter_context(config_context(parent_overlay_instance, context_provider=context_provider, config_scopes=parent_scopes))
 
         # Convert overlay dict to object instance for config_context()
         # config_context() expects an object with attributes, not a dict
@@ -3669,6 +3742,21 @@ class ParameterFormManager(QWidget):
             else:
                 reconstructed_value = nested_values
 
+            # CRITICAL FIX: Update parent's cache with reconstructed dataclass
+            # This ensures get_user_modified_values() returns the latest nested values
+            # Without this, the parent's cache has a stale instance from initialization
+            self._store_parameter_value(emitting_manager_name, reconstructed_value)
+
+            # DEBUG: Check what's actually stored
+            if emitting_manager_name in ['step_well_filter_config', 'step_materialization_config', 'streaming_defaults']:
+                logger.info(f"🔍 STORED IN CACHE: {emitting_manager_name} = {reconstructed_value}")
+                logger.info(f"🔍 CACHE TYPE: {type(reconstructed_value).__name__}")
+                if reconstructed_value:
+                    from dataclasses import fields as dataclass_fields
+                    for field in dataclass_fields(reconstructed_value):
+                        raw_val = object.__getattribute__(reconstructed_value, field.name)
+                        logger.info(f"🔍 RAW VALUE: {emitting_manager_name}.{field.name} = {raw_val}")
+
             # Emit parent parameter name with reconstructed dataclass
             logger.info(f"🔔 EMITTING PARENT CONFIG: {emitting_manager_name} = {reconstructed_value}")
             if param_name == 'enabled':
@@ -4277,6 +4365,9 @@ class ParameterFormManager(QWidget):
 
         CRITICAL: ALL changes must emit cross-window signals so other windows can react in real time.
         'enabled' changes skip placeholder refreshes to avoid infinite loops.
+
+        CRITICAL: Also trigger parent's _on_nested_parameter_changed to refresh sibling managers.
+        This ensures sibling inheritance works at ALL levels, not just at the root level.
         """
         if (getattr(self, '_in_reset', False) or
                 getattr(self, '_block_cross_window_updates', False)):
@@ -4318,7 +4409,15 @@ class ParameterFormManager(QWidget):
         if param_name == 'enabled':
             return
 
-        # For other changes: also trigger placeholder refresh
+        # CRITICAL FIX: Trigger parent's _on_nested_parameter_changed to refresh sibling managers
+        # This ensures sibling inheritance works at ALL levels (not just root level)
+        # Example: In step editor, when streaming_defaults.host changes, napari_streaming_config.host should update
+        if self._parent_manager is not None:
+            # Manually call parent's _on_nested_parameter_changed with this manager as sender
+            # This triggers sibling refresh logic in the parent
+            self._parent_manager._on_nested_parameter_changed(param_name, value)
+
+        # For other changes: also trigger placeholder refresh at root level
         root._on_parameter_changed_root(param_name, value)
 
     def _run_debounced_placeholder_refresh(self) -> None:
@@ -4385,7 +4484,13 @@ class ParameterFormManager(QWidget):
                     self._apply_to_nested_managers(lambda name, manager: manager._refresh_enabled_styling())
 
     def _process_nested_values_if_checkbox_enabled(self, name: str, manager: Any, current_values: Dict[str, Any]) -> None:
-        """Process nested values if checkbox is enabled - convert dict back to dataclass."""
+        """
+        Process nested values if checkbox is enabled.
+
+        NOTE: The parent's _current_value_cache is now updated in _on_nested_parameter_changed,
+        so current_values[name] already has the latest dataclass instance. We just need to
+        handle the Optional dataclass checkbox logic here.
+        """
         if not hasattr(manager, 'get_current_values'):
             return
 
@@ -4408,20 +4513,22 @@ class ParameterFormManager(QWidget):
                 current_values[name] = None
                 return
 
-        # Get nested values from the nested form
-        nested_values = manager.get_current_values()
-        if nested_values:
-            # Convert dictionary back to dataclass instance
-            if param_type and hasattr(param_type, '__dataclass_fields__'):
-                # Direct dataclass type
-                current_values[name] = param_type(**nested_values)
-            elif param_type and ParameterTypeUtils.is_optional_dataclass(param_type):
-                # Optional dataclass type
-                inner_type = ParameterTypeUtils.get_optional_inner_type(param_type)
-                current_values[name] = inner_type(**nested_values)
-            else:
-                # Fallback to dictionary if type conversion fails
-                current_values[name] = nested_values
+        # If current_values doesn't have this nested field yet (e.g., during initialization),
+        # get it from the nested manager and reconstruct the dataclass
+        if name not in current_values:
+            nested_values = manager.get_current_values()
+            if nested_values:
+                # Convert dictionary back to dataclass instance
+                if param_type and hasattr(param_type, '__dataclass_fields__'):
+                    # Direct dataclass type
+                    current_values[name] = param_type(**nested_values)
+                elif param_type and ParameterTypeUtils.is_optional_dataclass(param_type):
+                    # Optional dataclass type
+                    inner_type = ParameterTypeUtils.get_optional_inner_type(param_type)
+                    current_values[name] = inner_type(**nested_values)
+                else:
+                    # Fallback to dictionary if type conversion fails
+                    current_values[name] = nested_values
         else:
             # No nested values, but checkbox might be checked - create empty instance
             if param_type and ParameterTypeUtils.is_optional_dataclass(param_type):

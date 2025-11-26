@@ -26,9 +26,6 @@ from openhcs.formats.func_arg_prep import prepare_patterns_and_functions
 from openhcs.core.memory.stack_utils import stack_slices, unstack_slices
 # OpenHCS imports moved to local imports to avoid circular dependencies
 
-# Import ScopedObject for scope identification
-from openhcs.config_framework.context_manager import ScopedObject
-
 logger = logging.getLogger(__name__)
 
 def _generate_materialized_paths(memory_paths: List[str], step_output_dir: Path, materialized_output_dir: Path) -> List[str]:
@@ -794,7 +791,7 @@ def _process_single_pattern_group(
         logger.error(f"Full traceback for pattern group {pattern_repr}:\n{full_traceback}")
         raise ValueError(f"Failed to process pattern group {pattern_repr}: {e}") from e
 
-class FunctionStep(AbstractStep, ScopedObject):
+class FunctionStep(AbstractStep):
 
     def __init__(
         self,

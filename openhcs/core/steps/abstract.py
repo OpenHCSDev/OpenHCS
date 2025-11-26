@@ -35,6 +35,8 @@ from openhcs.core.config import LazyProcessingConfig, LazyDtypeConfig
 
 # Import ContextProvider for automatic step context registration
 from openhcs.config_framework.lazy_factory import ContextProvider
+# Import ScopedObject for scope identification
+from openhcs.config_framework.context_manager import ScopedObject
 
 # ProcessingContext is used in type hints
 if TYPE_CHECKING:
@@ -63,12 +65,15 @@ if TYPE_CHECKING:
 #    return str(id(step))
 
 
-class AbstractStep(abc.ABC, ContextProvider):
+class AbstractStep(ContextProvider, ScopedObject):
     """
     Abstract base class for all steps in the OpenHCS pipeline.
 
     Inherits from ContextProvider to enable automatic context injection
-    for lazy configuration resolution.
+    for lazy configuration resolution, and from ScopedObject to provide
+    scope identification via build_scope_id().
+
+    Note: ScopedObject already inherits from ABC, so we don't need to inherit from abc.ABC directly.
 
     This class defines the interface that all steps must implement.
     Steps are stateful during pipeline definition and compilation (holding attributes
