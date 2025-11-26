@@ -1393,8 +1393,19 @@ class ImageBrowserWidget(QWidget):
 
     def _load_and_stream_batch_to_napari_async(self, viewer, filenames: list, plate_path: Path,
                                                  read_backend: str, config):
-        """Load and stream batch of images to Napari in background thread (NEVER blocks UI)."""
+        """Load and stream batch of images to Napari in background thread (NEVER blocks UI).
+
+        Uses chunked streaming to prevent file descriptor exhaustion when streaming
+        large batches (200+ images). Each chunk creates shared memory segments that
+        consume file descriptors, so we limit concurrent chunks to prevent hitting
+        OS limits.
+        """
         import threading
+        import time
+
+        # Chunk size to prevent file descriptor exhaustion
+        # Each image creates a shared memory segment (file descriptor on Linux)
+        CHUNK_SIZE = 50
 
         def load_and_stream():
             try:
@@ -1411,24 +1422,6 @@ class ImageBrowserWidget(QWidget):
                     register_launching_viewer(viewer.port, 'napari', len(filenames))
                     logger.info(f"Registered launching Napari viewer on port {viewer.port} with {len(filenames)} queued images")
 
-                # Show loading status
-                self._update_status_threadsafe(f"Loading {len(filenames)} images from disk...")
-
-                # HEAVY OPERATION: Load all images (runs in background thread)
-                image_data_list = []
-                file_paths = []
-                for i, filename in enumerate(filenames, 1):
-                    image_path = plate_path / filename
-                    image_data = self.filemanager.load(str(image_path), read_backend)
-                    image_data_list.append(image_data)
-                    file_paths.append(filename)
-
-                    # Update progress every 5 images
-                    if i % 5 == 0 or i == len(filenames):
-                        self._update_status_threadsafe(f"Loading images: {i}/{len(filenames)}...")
-
-                logger.info(f"Loaded {len(image_data_list)} images in background thread")
-
                 if not is_already_running:
                     # Viewer is launching - wait for it to be ready before streaming
                     logger.info(f"Waiting for Napari viewer on port {viewer.port} to be ready...")
@@ -1444,30 +1437,60 @@ class ImageBrowserWidget(QWidget):
                 else:
                     logger.info(f"Napari viewer on port {viewer.port} is already running")
 
-                # Use the napari streaming backend to send the batch
                 from openhcs.constants.constants import Backend as BackendEnum
 
-                # Build source from subdirectory name (image viewer context)
-                # Use first file path to determine subdirectory
-                source = Path(file_paths[0]).parent.name if file_paths else 'unknown_source'
+                # Stream in chunks to prevent file descriptor exhaustion
+                total_images = len(filenames)
+                num_chunks = (total_images + CHUNK_SIZE - 1) // CHUNK_SIZE
+                logger.info(f"Streaming {total_images} images in {num_chunks} chunks of {CHUNK_SIZE}")
 
-                # Prepare metadata for streaming
-                metadata = {
-                    'port': viewer.port,
-                    'display_config': config,
-                    'microscope_handler': self.orchestrator.microscope_handler,
-                    'plate_path': self.orchestrator.plate_path,
-                    'source': source
-                }
+                for chunk_idx in range(num_chunks):
+                    start_idx = chunk_idx * CHUNK_SIZE
+                    end_idx = min(start_idx + CHUNK_SIZE, total_images)
+                    chunk_filenames = filenames[start_idx:end_idx]
 
-                # Stream batch to Napari
-                self.filemanager.save_batch(
-                    image_data_list,
-                    file_paths,
-                    BackendEnum.NAPARI_STREAM.value,
-                    **metadata
-                )
-                logger.info(f"Successfully streamed batch of {len(file_paths)} images to Napari on port {viewer.port}")
+                    # Show loading status
+                    self._update_status_threadsafe(f"Loading chunk {chunk_idx + 1}/{num_chunks} ({len(chunk_filenames)} images)...")
+
+                    # Load chunk of images
+                    image_data_list = []
+                    file_paths = []
+                    for i, filename in enumerate(chunk_filenames, 1):
+                        image_path = plate_path / filename
+                        image_data = self.filemanager.load(str(image_path), read_backend)
+                        image_data_list.append(image_data)
+                        file_paths.append(filename)
+
+                    logger.info(f"Loaded chunk {chunk_idx + 1}/{num_chunks}: {len(image_data_list)} images")
+
+                    # Build source from subdirectory name (image viewer context)
+                    source = Path(file_paths[0]).parent.name if file_paths else 'unknown_source'
+
+                    # Prepare metadata for streaming
+                    metadata = {
+                        'port': viewer.port,
+                        'display_config': config,
+                        'microscope_handler': self.orchestrator.microscope_handler,
+                        'plate_path': self.orchestrator.plate_path,
+                        'source': source
+                    }
+
+                    # Stream chunk to Napari
+                    self.filemanager.save_batch(
+                        image_data_list,
+                        file_paths,
+                        BackendEnum.NAPARI_STREAM.value,
+                        **metadata
+                    )
+                    logger.info(f"Streamed chunk {chunk_idx + 1}/{num_chunks} ({len(file_paths)} images) to Napari on port {viewer.port}")
+
+                    # Brief pause between chunks to allow Napari to process and unlink shared memory
+                    # This prevents accumulation of file descriptors
+                    if chunk_idx < num_chunks - 1:
+                        time.sleep(0.1)
+
+                logger.info(f"Successfully streamed all {total_images} images to Napari on port {viewer.port}")
+                self._update_status_threadsafe(f"Streamed {total_images} images to Napari")
             except Exception as e:
                 logger.error(f"Failed to load/stream batch to Napari: {e}")
                 # Show error in UI thread
@@ -1480,7 +1503,7 @@ class ImageBrowserWidget(QWidget):
         # Start loading and streaming in background thread
         thread = threading.Thread(target=load_and_stream, daemon=True)
         thread.start()
-        logger.info(f"Started background thread to load and stream {len(filenames)} images to Napari")
+        logger.info(f"Started background thread to load and stream {len(filenames)} images to Napari in chunks")
 
     def _stream_batch_to_napari(self, viewer, image_data_list: list, file_paths: list, config):
         """Stream batch of images to Napari viewer asynchronously (builds hyperstack)."""
@@ -1558,8 +1581,19 @@ class ImageBrowserWidget(QWidget):
 
     def _load_and_stream_batch_to_fiji_async(self, viewer, filenames: list, plate_path: Path,
                                                read_backend: str, config):
-        """Load and stream batch of images to Fiji in background thread (NEVER blocks UI)."""
+        """Load and stream batch of images to Fiji in background thread (NEVER blocks UI).
+
+        Uses chunked streaming to prevent file descriptor exhaustion when streaming
+        large batches (200+ images). Each chunk creates shared memory segments that
+        consume file descriptors, so we limit concurrent chunks to prevent hitting
+        OS limits.
+        """
         import threading
+        import time
+
+        # Chunk size to prevent file descriptor exhaustion
+        # Each image creates a shared memory segment (file descriptor on Linux)
+        CHUNK_SIZE = 50
 
         def load_and_stream():
             try:
@@ -1576,24 +1610,6 @@ class ImageBrowserWidget(QWidget):
                     register_launching_viewer(viewer.port, 'fiji', len(filenames))
                     logger.info(f"Registered launching Fiji viewer on port {viewer.port} with {len(filenames)} queued images")
 
-                # Show loading status
-                self._update_status_threadsafe(f"Loading {len(filenames)} images from disk...")
-
-                # HEAVY OPERATION: Load all images (runs in background thread)
-                image_data_list = []
-                file_paths = []
-                for i, filename in enumerate(filenames, 1):
-                    image_path = plate_path / filename
-                    image_data = self.filemanager.load(str(image_path), read_backend)
-                    image_data_list.append(image_data)
-                    file_paths.append(filename)
-
-                    # Update progress every 5 images
-                    if i % 5 == 0 or i == len(filenames):
-                        self._update_status_threadsafe(f"Loading images: {i}/{len(filenames)}...")
-
-                logger.info(f"Loaded {len(image_data_list)} images in background thread")
-
                 if not is_already_running:
                     # Viewer is launching - wait for it to be ready before streaming
                     logger.info(f"Waiting for Fiji viewer on port {viewer.port} to be ready...")
@@ -1609,31 +1625,61 @@ class ImageBrowserWidget(QWidget):
                 else:
                     logger.info(f"Fiji viewer on port {viewer.port} is already running")
 
-                # Use the Fiji streaming backend to send the batch
                 from openhcs.constants.constants import Backend as BackendEnum
 
-                # Build source from subdirectory name (image viewer context)
-                # Use first file path to determine subdirectory
-                source = Path(file_paths[0]).parent.name if file_paths else 'unknown_source'
+                # Stream in chunks to prevent file descriptor exhaustion
+                total_images = len(filenames)
+                num_chunks = (total_images + CHUNK_SIZE - 1) // CHUNK_SIZE
+                logger.info(f"Streaming {total_images} images in {num_chunks} chunks of {CHUNK_SIZE}")
 
-                # Prepare metadata for streaming
-                metadata = {
-                    'port': viewer.port,
-                    'display_config': config,
-                    'microscope_handler': self.orchestrator.microscope_handler,
-                    'plate_path': self.orchestrator.plate_path,
-                    'source': source
-                }
+                for chunk_idx in range(num_chunks):
+                    start_idx = chunk_idx * CHUNK_SIZE
+                    end_idx = min(start_idx + CHUNK_SIZE, total_images)
+                    chunk_filenames = filenames[start_idx:end_idx]
 
-                # Stream batch to Fiji
-                logger.info(f"🚀 IMAGE BROWSER: Calling save_batch with {len(image_data_list)} images")
-                self.filemanager.save_batch(
-                    image_data_list,
-                    file_paths,
-                    BackendEnum.FIJI_STREAM.value,
-                    **metadata
-                )
-                logger.info(f"✅ IMAGE BROWSER: Successfully streamed batch of {len(file_paths)} images to Fiji on port {viewer.port}")
+                    # Show loading status
+                    self._update_status_threadsafe(f"Loading chunk {chunk_idx + 1}/{num_chunks} ({len(chunk_filenames)} images)...")
+
+                    # Load chunk of images
+                    image_data_list = []
+                    file_paths = []
+                    for i, filename in enumerate(chunk_filenames, 1):
+                        image_path = plate_path / filename
+                        image_data = self.filemanager.load(str(image_path), read_backend)
+                        image_data_list.append(image_data)
+                        file_paths.append(filename)
+
+                    logger.info(f"Loaded chunk {chunk_idx + 1}/{num_chunks}: {len(image_data_list)} images")
+
+                    # Build source from subdirectory name (image viewer context)
+                    source = Path(file_paths[0]).parent.name if file_paths else 'unknown_source'
+
+                    # Prepare metadata for streaming
+                    metadata = {
+                        'port': viewer.port,
+                        'display_config': config,
+                        'microscope_handler': self.orchestrator.microscope_handler,
+                        'plate_path': self.orchestrator.plate_path,
+                        'source': source
+                    }
+
+                    # Stream chunk to Fiji
+                    logger.info(f"🚀 IMAGE BROWSER: Calling save_batch with {len(image_data_list)} images (chunk {chunk_idx + 1}/{num_chunks})")
+                    self.filemanager.save_batch(
+                        image_data_list,
+                        file_paths,
+                        BackendEnum.FIJI_STREAM.value,
+                        **metadata
+                    )
+                    logger.info(f"✅ IMAGE BROWSER: Streamed chunk {chunk_idx + 1}/{num_chunks} ({len(file_paths)} images) to Fiji on port {viewer.port}")
+
+                    # Brief pause between chunks to allow Fiji to process and unlink shared memory
+                    # This prevents accumulation of file descriptors
+                    if chunk_idx < num_chunks - 1:
+                        time.sleep(0.1)
+
+                logger.info(f"Successfully streamed all {total_images} images to Fiji on port {viewer.port}")
+                self._update_status_threadsafe(f"Streamed {total_images} images to Fiji")
             except Exception as e:
                 logger.error(f"Failed to load/stream batch to Fiji: {e}")
                 # Show error in UI thread
@@ -1646,7 +1692,7 @@ class ImageBrowserWidget(QWidget):
         # Start loading and streaming in background thread
         thread = threading.Thread(target=load_and_stream, daemon=True)
         thread.start()
-        logger.info(f"Started background thread to load and stream {len(filenames)} images to Fiji")
+        logger.info(f"Started background thread to load and stream {len(filenames)} images to Fiji in chunks")
 
     def _stream_batch_to_fiji(self, viewer, image_data_list: list, file_paths: list, config):
         """Stream batch of images to Fiji viewer asynchronously (builds hyperstack)."""
