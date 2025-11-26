@@ -4405,17 +4405,19 @@ class ParameterFormManager(QWidget):
         root.context_value_changed.emit(field_path, value,
                                        root.object_instance, root.context_obj)
 
-        # For 'enabled' changes: skip placeholder refresh to avoid infinite loops
-        if param_name == 'enabled':
-            return
-
         # CRITICAL FIX: Trigger parent's _on_nested_parameter_changed to refresh sibling managers
         # This ensures sibling inheritance works at ALL levels (not just root level)
         # Example: In step editor, when streaming_defaults.host changes, napari_streaming_config.host should update
+        # CRITICAL: This must happen BEFORE the enabled early return, otherwise sibling inheritance breaks for enabled fields
         if self._parent_manager is not None:
             # Manually call parent's _on_nested_parameter_changed with this manager as sender
             # This triggers sibling refresh logic in the parent
             self._parent_manager._on_nested_parameter_changed(param_name, value)
+
+        # For 'enabled' changes: skip placeholder refresh to avoid infinite loops
+        # CRITICAL: This early return must come AFTER parent notification, otherwise sibling inheritance breaks
+        if param_name == 'enabled':
+            return
 
         # For other changes: also trigger placeholder refresh at root level
         root._on_parameter_changed_root(param_name, value)
