@@ -410,26 +410,27 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         # CRITICAL: Use saved "after" snapshot if available (from window close)
         # This snapshot was collected AFTER the form manager was unregistered
         # If not available, collect a new snapshot (for reset events)
-        live_context_after = getattr(self, '_window_close_after_snapshot', None)
+        # NOTE: Mixin stores these as _pending_window_close_* attributes
+        live_context_after = getattr(self, '_pending_window_close_after_snapshot', None)
         if live_context_after is None:
             # scope_filter=None means no filtering (include ALL scopes: global + all plates)
             live_context_after = ParameterFormManager.collect_live_context()
 
         # Use saved "before" snapshot if available (from window close), otherwise use last snapshot
-        live_context_before = getattr(self, '_window_close_before_snapshot', None) or self._last_live_context_snapshot
+        live_context_before = getattr(self, '_pending_window_close_before_snapshot', None) or self._last_live_context_snapshot
 
         logger.info(f"🔍 _handle_full_preview_refresh: live_context_before token={getattr(live_context_before, 'token', None)}, live_context_after token={getattr(live_context_after, 'token', None)}")
 
         # Get the user-modified fields from the closed window (if available)
-        modified_fields = getattr(self, '_window_close_modified_fields', None)
+        modified_fields = getattr(self, '_pending_window_close_changed_fields', None)
 
         # Clear the saved snapshots and modified fields after using them
-        if hasattr(self, '_window_close_before_snapshot'):
-            delattr(self, '_window_close_before_snapshot')
-        if hasattr(self, '_window_close_after_snapshot'):
-            delattr(self, '_window_close_after_snapshot')
-        if hasattr(self, '_window_close_modified_fields'):
-            delattr(self, '_window_close_modified_fields')
+        if hasattr(self, '_pending_window_close_before_snapshot'):
+            delattr(self, '_pending_window_close_before_snapshot')
+        if hasattr(self, '_pending_window_close_after_snapshot'):
+            delattr(self, '_pending_window_close_after_snapshot')
+        if hasattr(self, '_pending_window_close_changed_fields'):
+            delattr(self, '_pending_window_close_changed_fields')
 
         # Update last snapshot for next comparison
         self._last_live_context_snapshot = live_context_after
@@ -604,6 +605,12 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
             for plate_path in plates_to_flash:
                 logger.info(f"  - Calling _flash_plate_item({plate_path})")
                 self._flash_plate_item(plate_path)
+
+            # CRITICAL: Process events immediately to ensure flash is visible
+            # This prevents the flash from being blocked by subsequent heavy work
+            # (e.g., PipelineEditor's refresh running right after this)
+            from PyQt6.QtWidgets import QApplication
+            QApplication.processEvents()
 
     def _format_plate_item_with_preview(
         self,

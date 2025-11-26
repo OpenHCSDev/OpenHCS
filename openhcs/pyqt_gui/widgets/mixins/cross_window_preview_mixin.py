@@ -859,6 +859,10 @@ class CrossWindowPreviewMixin:
 
         This resolves all identifiers in one context setup instead of individually.
 
+        IMPORTANT: Flash detection checks ALL changed identifiers, not just preview fields.
+        This ensures flash triggers whenever ANY field changes (consistent with unsaved marker).
+        Label updates are limited to preview fields, but flash indicates "something changed".
+
         Args:
             obj_before: Object before changes
             obj_after: Object after changes
@@ -873,13 +877,12 @@ class CrossWindowPreviewMixin:
         logger = logging.getLogger(__name__)
         logger.info(f"🔍 _check_single_object_with_batch_resolution: identifiers={identifiers}")
 
-        # Filter identifiers to only preview-enabled fields
-        filtered_identifiers = {
-            ident for ident in identifiers if ident in self._preview_fields or any(ident.startswith(f"{pf}.") or pf.startswith(f"{ident}.") for pf in self._preview_fields)
-        }
-        if not filtered_identifiers:
+        # NOTE: We intentionally do NOT filter to _preview_fields here.
+        # Flash should trigger when ANY field changes (consistent with unsaved marker behavior).
+        # The _preview_fields filtering is only for label updates, not flash detection.
+
+        if not identifiers:
             return False
-        identifiers = filtered_identifiers
 
         # Try to use batch resolution if we have a context stack
         context_stack_before = self._build_flash_context_stack(obj_before, live_context_before)
@@ -1188,9 +1191,10 @@ class CrossWindowPreviewMixin:
 
                     logger.debug(f"🔍 Processing ParentType.field format: {identifier}")
 
-                    # CRITICAL: Always add the original identifier to expanded set
-                    # This ensures scoped identifiers like "step.step_well_filter_config" are preserved
-                    expanded.add(identifier)
+                    # NOTE: Do NOT add the original "TypeName.field" identifier to expanded set.
+                    # It's not a valid attribute path - TypeName is a type, not an attribute.
+                    # We only add the expanded nested field paths (e.g., "well_filter_config.well_filter")
+                    # that can actually be walked on the target object.
 
                     # Get the type and value of the field from live context
                     field_type = None
@@ -1247,11 +1251,14 @@ class CrossWindowPreviewMixin:
                                 if issubclass(attr_type, field_type) or issubclass(field_type, attr_type):
                                     # Add nested fields (e.g., step_well_filter_config.well_filter)
                                     # instead of just the dataclass attribute (step_well_filter_config)
+                                    # CRITICAL: Only add fields that ACTUALLY EXIST on the target attribute
+                                    # Different config types may have different fields even if they share inheritance
                                     for nested_field in nested_field_names:
-                                        nested_identifier = f"{attr_name}.{nested_field}"
-                                        if nested_identifier not in expanded:
-                                            expanded.add(nested_identifier)
-                                            logger.debug(f"🔍 Expanded '{identifier}' to include '{nested_identifier}' ({attr_type.__name__} inherits from {field_type.__name__})")
+                                        if hasattr(attr_value, nested_field):
+                                            nested_identifier = f"{attr_name}.{nested_field}"
+                                            if nested_identifier not in expanded:
+                                                expanded.add(nested_identifier)
+                                                logger.debug(f"🔍 Expanded '{identifier}' to include '{nested_identifier}' ({attr_type.__name__} inherits from {field_type.__name__})")
                             except TypeError:
                                 # issubclass can raise TypeError if types are not classes
                                 pass

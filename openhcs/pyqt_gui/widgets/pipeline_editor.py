@@ -1832,6 +1832,11 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
             for step_index in steps_to_flash:
                 self._flash_step_item(step_index)
 
+            # CRITICAL: Process events immediately to ensure flash is visible
+            # This prevents the flash from being blocked by subsequent heavy work
+            from PyQt6.QtWidgets import QApplication
+            QApplication.processEvents()
+
         # CRITICAL: Update snapshot AFTER all flashes are shown
         # This ensures subsequent edits trigger flashes correctly
         # Only update if we have a new snapshot (not None)

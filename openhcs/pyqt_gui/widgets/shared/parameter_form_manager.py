@@ -4238,6 +4238,32 @@ class ParameterFormManager(QWidget):
         for param_name, nested_manager in self.nested_managers.items():
             operation_func(param_name, nested_manager)
 
+    def _collect_all_field_paths(self) -> Set[str]:
+        """Collect all field paths from this manager and all nested managers recursively.
+
+        Returns paths in the format that would be emitted during typing, e.g.:
+        - "well_filter_config.well_filter" (not "GlobalPipelineConfig.well_filter_config")
+        - "step_materialization_config.enabled" (not "PipelineConfig.step_materialization_config")
+
+        This ensures window close emits the same format as typing for flash detection.
+        """
+        field_paths = set()
+
+        # Add this manager's own field paths (field_id.param_name)
+        for param_name in self.parameters.keys():
+            # Skip nested dataclass params - their fields are handled by nested managers
+            if param_name in self.nested_managers:
+                continue
+            field_path = f"{self.field_id}.{param_name}" if self.field_id else param_name
+            field_paths.add(field_path)
+
+        # Recursively collect from nested managers
+        for param_name, nested_manager in self.nested_managers.items():
+            nested_paths = nested_manager._collect_all_field_paths()
+            field_paths.update(nested_paths)
+
+        return field_paths
+
     def _notify_parent_to_flash_groupbox(self) -> None:
         """Notify parent manager to flash this nested config's GroupBox.
 
@@ -4996,14 +5022,16 @@ class ParameterFormManager(QWidget):
                 from PyQt6.QtCore import QTimer
 
                 # Capture variables in closure
-                field_id = self.field_id
-                param_names = list(self.parameters.keys())
+                # CRITICAL: Collect ALL field paths from this manager AND nested managers
+                # This ensures window close emits the same format as typing (e.g., "well_filter_config.well_filter")
+                # not the root format (e.g., "GlobalPipelineConfig.well_filter_config")
+                all_field_paths = self._collect_all_field_paths()
                 object_instance = self.object_instance
                 context_obj = self.context_obj
                 external_listeners = list(self._external_listeners)
 
                 def notify_listeners():
-                    logger.debug(f"🔍 Notifying external listeners of window close (AFTER unregister): {field_id}")
+                    logger.debug(f"🔍 Notifying external listeners of window close (AFTER unregister)")
                     # Collect "after" snapshot (without form manager)
                     # scope_filter=None means no filtering (include ALL scopes: global + all plates)
                     logger.debug(f"🔍 Active form managers count: {len(ParameterFormManager._active_form_managers)}")
@@ -5015,12 +5043,9 @@ class ParameterFormManager(QWidget):
                         try:
                             logger.debug(f"🔍   Notifying listener {listener.__class__.__name__}")
 
-                            # Build set of changed field identifiers
-                            changed_fields = set()
-                            for param_name in param_names:
-                                field_path = f"{field_id}.{param_name}" if field_id else param_name
-                                changed_fields.add(field_path)
-                                logger.debug(f"🔍     Changed field: {field_path}")
+                            # Use pre-collected field paths (same format as typing)
+                            changed_fields = all_field_paths
+                            logger.debug(f"🔍     Changed fields ({len(changed_fields)}): {changed_fields}")
 
                             # CRITICAL: Call dedicated handle_window_close() method if available
                             # This passes snapshots as parameters instead of storing them as state
