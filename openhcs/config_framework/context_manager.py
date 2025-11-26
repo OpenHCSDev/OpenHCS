@@ -188,17 +188,14 @@ def config_context(obj, *, context_provider=None, mask_with_none: bool = False, 
             # ...
     """
     # Auto-derive scope_id from context_provider
-    if context_provider is not None and isinstance(obj, ScopedObject):
-        scope_id = obj.build_scope_id(context_provider)
-        logger.info(f"🔍 CONFIG_CONTEXT SCOPE: ScopedObject.build_scope_id() -> {scope_id} for {type(obj).__name__}")
-    elif context_provider is not None and isinstance(context_provider, ScopeProvider):
-        # CRITICAL FIX: For UI code that passes ScopeProvider with a scope string,
-        # use the FULL scope string (not just plate_path) to preserve step scope
-        # This enables placeholder resolution for LazyPipelineConfig and other lazy configs
-        # that need scope information but don't implement ScopedObject
-        # CRITICAL: Use scope_string (full hierarchy) instead of plate_path (just root)
+    # CRITICAL: Check ScopeProvider FIRST - if we have a pre-built scope string, use it directly
+    # Don't call build_scope_id() when we already have the scope
+    if context_provider is not None and isinstance(context_provider, ScopeProvider):
         scope_id = context_provider.scope_string
         logger.info(f"🔍 CONFIG_CONTEXT SCOPE: ScopeProvider.scope_string -> {scope_id} for {type(obj).__name__}")
+    elif context_provider is not None and isinstance(obj, ScopedObject):
+        scope_id = obj.build_scope_id(context_provider)
+        logger.info(f"🔍 CONFIG_CONTEXT SCOPE: ScopedObject.build_scope_id() -> {scope_id} for {type(obj).__name__}")
     else:
         scope_id = None
         logger.info(f"🔍 CONFIG_CONTEXT SCOPE: None (no provider or not Scoped/Provider) for {type(obj).__name__}, provider={type(context_provider).__name__ if context_provider else None}")
