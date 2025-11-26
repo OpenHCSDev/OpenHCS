@@ -301,6 +301,106 @@ def get_scope_specificity(scope_id: Optional[str]) -> int:
     return scope_id.count('::') + 1
 
 
+def is_scope_visible(manager_scope: Optional[str], filter_scope: Optional[str]) -> bool:
+    """Check if manager_scope is visible/related to filter_scope.
+
+    Returns True if the scopes are in the same hierarchy (same plate).
+    This is used for finding managers that might be relevant to a scope.
+
+    GENERIC SCOPE RULE: Works for any N-level hierarchy.
+
+    Examples:
+        >>> is_scope_visible(None, "plate")              # global visible to all
+        True
+        >>> is_scope_visible("plate", "plate")           # exact match
+        True
+        >>> is_scope_visible("plate", "plate::step")     # manager is parent of filter
+        True
+        >>> is_scope_visible("plate::step", "plate")     # manager is child of filter (same hierarchy)
+        True
+        >>> is_scope_visible("plate1::step", "plate2")   # different hierarchy
+        False
+
+    Args:
+        manager_scope: Scope ID of the manager being checked
+        filter_scope: Scope ID of the perspective we're checking from
+
+    Returns:
+        True if scopes are in the same hierarchy
+    """
+    # Global scope (None) is visible to everyone
+    if manager_scope is None:
+        return True
+
+    # If filter is global (None), only global managers are visible
+    if filter_scope is None:
+        return False
+
+    # Exact match
+    if manager_scope == filter_scope:
+        return True
+
+    # Manager is parent of filter (less specific)
+    # e.g., manager="plate", filter="plate::step" → manager is parent
+    if filter_scope.startswith(f"{manager_scope}::"):
+        return True
+
+    # Manager is child of filter (more specific, but same hierarchy)
+    # e.g., manager="plate::step", filter="plate" → same plate hierarchy
+    if manager_scope.startswith(f"{filter_scope}::"):
+        return True
+
+    # Different hierarchies
+    return False
+
+
+def is_scope_at_or_above(manager_scope: Optional[str], filter_scope: Optional[str]) -> bool:
+    """Check if manager_scope is at the same level or LESS SPECIFIC than filter_scope.
+
+    Used for placeholder resolution to prevent scope contamination.
+    Managers MORE SPECIFIC than filter are NOT visible.
+
+    GENERIC SCOPE RULE: Works for any N-level hierarchy.
+
+    Examples:
+        >>> is_scope_at_or_above(None, "plate")           # global visible to all
+        True
+        >>> is_scope_at_or_above("plate", "plate")        # exact match
+        True
+        >>> is_scope_at_or_above("plate", "plate::step")  # manager is parent of filter
+        True
+        >>> is_scope_at_or_above("plate::step", "plate")  # manager is child of filter
+        False
+
+    Args:
+        manager_scope: Scope ID of the manager being checked
+        filter_scope: Scope ID of the perspective we're checking from
+
+    Returns:
+        True if manager_scope is at same level or less specific than filter_scope
+    """
+    # Global scope (None) is visible to everyone
+    if manager_scope is None:
+        return True
+
+    # If filter is global (None), only global managers are visible
+    if filter_scope is None:
+        return False
+
+    # Exact match - same scope level
+    if manager_scope == filter_scope:
+        return True
+
+    # Manager is LESS SPECIFIC than filter (filter is a child of manager)
+    # e.g., manager="plate", filter="plate::step" → manager is parent, visible
+    if filter_scope.startswith(f"{manager_scope}::"):
+        return True
+
+    # Manager is MORE SPECIFIC than filter - NOT visible for placeholder resolution
+    # e.g., manager="plate::step", filter="plate" → manager is child, NOT visible
+    return False
+
+
 def get_parent_scope(scope_id: Optional[str]) -> Optional[str]:
     """Get the parent scope of a given scope.
 

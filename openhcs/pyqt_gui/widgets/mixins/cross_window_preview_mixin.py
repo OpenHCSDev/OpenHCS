@@ -654,7 +654,8 @@ class CrossWindowPreviewMixin:
         if scope_id and scope_id in self._preview_scope_map:
             return {self._preview_scope_map[scope_id]}, False
         if scope_id is None:
-            return None, True
+            # Unknown scope = ignore, not full refresh (fail-safe default)
+            return set(), False
         return set(), False
 
     def _should_process_preview_field(
