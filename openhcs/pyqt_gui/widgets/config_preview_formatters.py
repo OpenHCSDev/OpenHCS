@@ -304,26 +304,34 @@ def check_config_has_unsaved_changes(
     # CRITICAL: Must increment token to bypass cache, otherwise we get cached live context
     # CRITICAL: Must use same scope_filter as live snapshot to get matching scoped values
     if saved_context_snapshot is None:
-        saved_managers = ParameterFormManager._active_form_managers.copy()
-        saved_token = ParameterFormManager._live_context_token_counter
+        # PERFORMANCE: Try to use pre-computed batch snapshots first (coordinator path)
+        _, batch_saved = ParameterFormManager.get_batch_snapshots()
+        if batch_saved is not None:
+            # Fast path: use coordinator's pre-computed saved context
+            saved_context_snapshot = batch_saved
+            logger.info(f"🔍 check_config_has_unsaved_changes: Using batch saved_context_snapshot (token={saved_context_snapshot.token})")
+        else:
+            # Fallback: compute saved context ourselves (non-coordinator path)
+            saved_managers = ParameterFormManager._active_form_managers.copy()
+            saved_token = ParameterFormManager._live_context_token_counter
 
-        logger.info(f"🔍 check_config_has_unsaved_changes: Collecting saved context snapshot for {config_attr}")
-        logger.info(f"🔍 check_config_has_unsaved_changes: Clearing {len(saved_managers)} active form managers")
+            logger.info(f"🔍 check_config_has_unsaved_changes: Collecting saved context snapshot for {config_attr}")
+            logger.info(f"🔍 check_config_has_unsaved_changes: Clearing {len(saved_managers)} active form managers")
 
-        try:
-            ParameterFormManager._active_form_managers.clear()
-            # Increment token to force cache miss
-            ParameterFormManager._live_context_token_counter += 1
-            saved_context_snapshot = ParameterFormManager.collect_live_context(scope_filter=scope_filter)
-            logger.info(f"🔍 check_config_has_unsaved_changes: Saved context snapshot collected: token={saved_context_snapshot.token if saved_context_snapshot else None}")
-            if saved_context_snapshot:
-                logger.info(f"🔍 check_config_has_unsaved_changes: Saved snapshot values keys: {list(saved_context_snapshot.values.keys()) if hasattr(saved_context_snapshot, 'values') else 'N/A'}")
-                logger.info(f"🔍 check_config_has_unsaved_changes: Saved snapshot scoped_values keys: {list(saved_context_snapshot.scoped_values.keys()) if hasattr(saved_context_snapshot, 'scoped_values') else 'N/A'}")
-        finally:
-            # Restore active form managers and token
-            ParameterFormManager._active_form_managers[:] = saved_managers
-            ParameterFormManager._live_context_token_counter = saved_token
-            logger.info(f"🔍 check_config_has_unsaved_changes: Restored {len(saved_managers)} active form managers")
+            try:
+                ParameterFormManager._active_form_managers.clear()
+                # Increment token to force cache miss
+                ParameterFormManager._live_context_token_counter += 1
+                saved_context_snapshot = ParameterFormManager.collect_live_context(scope_filter=scope_filter)
+                logger.info(f"🔍 check_config_has_unsaved_changes: Saved context snapshot collected: token={saved_context_snapshot.token if saved_context_snapshot else None}")
+                if saved_context_snapshot:
+                    logger.info(f"🔍 check_config_has_unsaved_changes: Saved snapshot values keys: {list(saved_context_snapshot.values.keys()) if hasattr(saved_context_snapshot, 'values') else 'N/A'}")
+                    logger.info(f"🔍 check_config_has_unsaved_changes: Saved snapshot scoped_values keys: {list(saved_context_snapshot.scoped_values.keys()) if hasattr(saved_context_snapshot, 'scoped_values') else 'N/A'}")
+            finally:
+                # Restore active form managers and token
+                ParameterFormManager._active_form_managers[:] = saved_managers
+                ParameterFormManager._live_context_token_counter = saved_token
+                logger.info(f"🔍 check_config_has_unsaved_changes: Restored {len(saved_managers)} active form managers")
 
     # PERFORMANCE: Compare each field and exit early on first difference
     for field_name in field_names:
@@ -441,6 +449,8 @@ def check_step_has_unsaved_changes(
         logger.info(f"🔍 check_step_has_unsaved_changes: No live_context_snapshot provided, cache disabled")
 
     # FAST-PATH: If no unsaved changes have ever been recorded, skip all resolution work.
+    # CRITICAL: Skip fast-path when saved_context_snapshot is provided (batch operation)
+    # because we need to do the actual live vs saved comparison
     cache_disabled = False
     try:
         from openhcs.config_framework.config import get_framework_config
@@ -448,7 +458,7 @@ def check_step_has_unsaved_changes(
     except ImportError:
         pass
 
-    if not cache_disabled and not ParameterFormManager._configs_with_unsaved_changes:
+    if not cache_disabled and not ParameterFormManager._configs_with_unsaved_changes and saved_context_snapshot is None:
         # Only fast-path if no active manager has emitted values (i.e., no live edits)
         active_changes = any(
             getattr(mgr, "_last_emitted_values", None)
@@ -514,9 +524,12 @@ def check_step_has_unsaved_changes(
     # Example: StepWellFilterConfig inherits from WellFilterConfig, so changes to WellFilterConfig affect steps
     has_any_relevant_changes = False
 
-    # If cache is disabled, skip the fast-path check and go straight to full resolution
-    if cache_disabled:
-        logger.info(f"🔍 check_step_has_unsaved_changes: Cache disabled, forcing full resolution")
+    # If cache is disabled OR saved_context_snapshot is provided (batch operation),
+    # skip the fast-path check and go straight to full resolution
+    # CRITICAL: When saved_context_snapshot is provided, we have pre-computed snapshots
+    # and must do the actual live vs saved comparison
+    if cache_disabled or saved_context_snapshot is not None:
+        logger.info(f"🔍 check_step_has_unsaved_changes: Cache disabled or batch mode, forcing full resolution (cache_disabled={cache_disabled}, has_saved_snapshot={saved_context_snapshot is not None})")
         has_any_relevant_changes = True  # Force full resolution (skip fast-path early return)
     else:
         logger.info(f"🔍 check_step_has_unsaved_changes: Cache enabled, checking type-based cache")
@@ -649,16 +662,24 @@ def check_step_has_unsaved_changes(
 
     # Collect saved context snapshot only when we know we need it
     if saved_context_snapshot is None:
-        saved_managers = ParameterFormManager._active_form_managers.copy()
-        saved_token = ParameterFormManager._live_context_token_counter
+        # PERFORMANCE: Try to use pre-computed batch snapshots first (coordinator path)
+        _, batch_saved = ParameterFormManager.get_batch_snapshots()
+        if batch_saved is not None:
+            # Fast path: use coordinator's pre-computed saved context
+            saved_context_snapshot = batch_saved
+            logger.info(f"🔍 check_step_has_unsaved_changes: Using batch saved_context_snapshot (token={saved_context_snapshot.token})")
+        else:
+            # Fallback: compute saved context ourselves (non-coordinator path)
+            saved_managers = ParameterFormManager._active_form_managers.copy()
+            saved_token = ParameterFormManager._live_context_token_counter
 
-        try:
-            ParameterFormManager._active_form_managers.clear()
-            ParameterFormManager._live_context_token_counter += 1
-            saved_context_snapshot = ParameterFormManager.collect_live_context(scope_filter=scope_filter)
-        finally:
-            ParameterFormManager._active_form_managers[:] = saved_managers
-            ParameterFormManager._live_context_token_counter = saved_token
+            try:
+                ParameterFormManager._active_form_managers.clear()
+                ParameterFormManager._live_context_token_counter += 1
+                saved_context_snapshot = ParameterFormManager.collect_live_context(scope_filter=scope_filter)
+            finally:
+                ParameterFormManager._active_form_managers[:] = saved_managers
+                ParameterFormManager._live_context_token_counter = saved_token
 
     # Check each nested dataclass config for unsaved changes (exits early on first change)
     for config_attr in all_config_attrs:

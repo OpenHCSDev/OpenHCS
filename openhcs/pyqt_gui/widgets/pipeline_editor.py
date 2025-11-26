@@ -1579,7 +1579,14 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         # Get current live context snapshot WITH scope filter (critical for resolution)
         if not self.current_plate:
             return
-        live_context_snapshot = ParameterFormManager.collect_live_context(scope_filter=self.current_plate)
+
+        # PERFORMANCE: Use pre-computed batch snapshots if available (coordinator path)
+        batch_live, _ = ParameterFormManager.get_batch_snapshots()
+        if batch_live is not None:
+            live_context_snapshot = batch_live
+            logger.info(f"📸 Using batch live_context_snapshot (token={live_context_snapshot.token})")
+        else:
+            live_context_snapshot = ParameterFormManager.collect_live_context(scope_filter=self.current_plate)
 
         indices = sorted(
             idx for idx in self._pending_preview_keys if isinstance(idx, int)
@@ -1785,20 +1792,27 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         # Do this BEFORE triggering flashes so all flashes start simultaneously
         steps_to_flash = []
 
-        # PERFORMANCE: Collect saved context snapshot ONCE for ALL steps
-        # This avoids collecting it separately for each step (7x collection -> 1x collection)
+        # PERFORMANCE: Use pre-computed batch snapshots if available (coordinator path)
+        # This avoids collecting saved context separately for each listener
         from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
 
-        saved_managers = ParameterFormManager._active_form_managers.copy()
-        saved_token = ParameterFormManager._live_context_token_counter
+        batch_live, batch_saved = ParameterFormManager.get_batch_snapshots()
+        if batch_saved is not None:
+            # Fast path: use coordinator's pre-computed saved context
+            saved_context_snapshot = batch_saved
+            logger.info(f"📸 Using batch saved_context_snapshot (token={saved_context_snapshot.token})")
+        else:
+            # Fallback: compute saved context ourselves (non-coordinator path)
+            saved_managers = ParameterFormManager._active_form_managers.copy()
+            saved_token = ParameterFormManager._live_context_token_counter
 
-        try:
-            ParameterFormManager._active_form_managers.clear()
-            ParameterFormManager._live_context_token_counter += 1
-            saved_context_snapshot = ParameterFormManager.collect_live_context(scope_filter=self.current_plate)
-        finally:
-            ParameterFormManager._active_form_managers[:] = saved_managers
-            ParameterFormManager._live_context_token_counter = saved_token
+            try:
+                ParameterFormManager._active_form_managers.clear()
+                ParameterFormManager._live_context_token_counter += 1
+                saved_context_snapshot = ParameterFormManager.collect_live_context(scope_filter=self.current_plate)
+            finally:
+                ParameterFormManager._active_form_managers[:] = saved_managers
+                ParameterFormManager._live_context_token_counter = saved_token
 
         for idx, (step_index, item, step, should_update_labels) in enumerate(step_items):
             # Reuse the step_after instance we already created

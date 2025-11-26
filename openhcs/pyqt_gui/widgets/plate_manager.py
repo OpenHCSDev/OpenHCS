@@ -358,9 +358,15 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         logger.debug(f"🔍 PlateManager._process_pending_preview_updates: changed_fields={changed_fields}")
 
         # Get current live context snapshot
-        # scope_filter=None means no filtering (include ALL scopes: global + all plates)
+        # PERFORMANCE: Use pre-computed batch snapshots if available (coordinator path)
         from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
-        live_context_snapshot = ParameterFormManager.collect_live_context()
+        batch_live, _ = ParameterFormManager.get_batch_snapshots()
+        if batch_live is not None:
+            live_context_snapshot = batch_live
+            logger.info(f"📸 Using batch live_context_snapshot (token={live_context_snapshot.token})")
+        else:
+            # scope_filter=None means no filtering (include ALL scopes: global + all plates)
+            live_context_snapshot = ParameterFormManager.collect_live_context()
 
         # Use last snapshot as "before" for comparison
         live_context_before = self._last_live_context_snapshot

@@ -557,14 +557,97 @@ Key implementation files:
 - ``openhcs/config_framework/cache_warming.py``: MRO cache building call (lines 154-162)
 - ``openhcs/core/config_cache.py``: Cache warming at startup (lines 98-107, 239-248)
 
+Batch Context Snapshot Optimization (2025-11)
+==============================================
+
+Problem
+-------
+
+When a user edits a configuration field, multiple UI components (PlateManager, PipelineEditor) need to:
+
+1. Compute a **live context snapshot** (current form values across all windows)
+2. Compute a **saved context snapshot** (what would the values be without active form managers)
+3. Compare live vs saved to detect unsaved changes
+
+Previously, each listener independently computed both snapshots, resulting in:
+
+- **Duplicate work**: Same expensive snapshot computation done 2× per batch
+- **800ms gap**: PlateManager and PipelineEditor flash animations were desynchronized
+- **Cache thrashing**: Token increments on every keystroke invalidated per-token caches
+
+Solution
+--------
+
+Pre-compute both snapshots ONCE in the coordinator, share with all listeners:
+
+.. code-block:: python
+
+   # In _execute_coordinated_updates (parameter_form_manager.py)
+   ParameterFormManager._batch_live_context_snapshot = (
+       ParameterFormManager._collect_live_context_from_other_windows()
+   )
+   ParameterFormManager._batch_saved_context_snapshot = (
+       ParameterFormManager._collect_live_context_without_forms()
+   )
+
+   # Listeners access via class method
+   live_snapshot, saved_snapshot = ParameterFormManager.get_batch_snapshots()
+
+**Fast-Path Bypass**: When ``saved_context_snapshot`` is provided (batch operation), both fast-paths in ``check_step_has_unsaved_changes`` are bypassed:
+
+1. **Global fast-path**: Skipped when ``saved_context_snapshot is not None``
+2. **Relevant changes fast-path**: Skipped when ``saved_context_snapshot is not None``
+
+This ensures the actual live vs saved comparison occurs during batch operations.
+
+Implementation Details
+----------------------
+
+**Class-Level Batch Snapshots** (``parameter_form_manager.py``):
+
+.. code-block:: python
+
+   class ParameterFormManager:
+       _batch_live_context_snapshot: Optional[LiveContextSnapshot] = None
+       _batch_saved_context_snapshot: Optional[LiveContextSnapshot] = None
+
+       @classmethod
+       def get_batch_snapshots(cls):
+           return cls._batch_live_context_snapshot, cls._batch_saved_context_snapshot
+
+**Listener Usage** (``pipeline_editor.py``, ``plate_manager.py``):
+
+.. code-block:: python
+
+   def _process_pending_preview_updates(self):
+       live_snapshot, saved_snapshot = ParameterFormManager.get_batch_snapshots()
+       # Use batch snapshots if available, otherwise compute fresh
+       if live_snapshot is None:
+           live_snapshot = ParameterFormManager._collect_live_context_from_other_windows()
+
+**Fast-Path Bypass** (``config_preview_formatters.py``):
+
+.. code-block:: python
+
+   # Skip type-based cache fast-path when batch snapshot provided
+   if cache_disabled or saved_context_snapshot is not None:
+       has_any_relevant_changes = True  # Force full resolution
+
+Performance Impact
+------------------
+
+- **Before**: ~800ms gap between PlateManager and PipelineEditor updates
+- **After**: Both components flash simultaneously (same batch execution)
+- **Snapshot computation**: Done 1× instead of 2× per batch
+
 Future Optimizations
 ====================
 
 Potential future optimizations (not yet implemented):
 
 1. **Incremental context updates**: Only update changed fields instead of rebuilding entire context
-2. **Debouncing**: Add trailing debounce (100ms) to batch rapid changes
-3. **Lazy config resolution mixin**: Reusable mixin for all config windows to cache resolved values
+2. **Block immediate emission during typing**: Similar to Reset button behavior
+3. **Batch-level unsaved status cache**: Cache unsaved status per batch instead of per-keystroke token
 
 See Also
 ========

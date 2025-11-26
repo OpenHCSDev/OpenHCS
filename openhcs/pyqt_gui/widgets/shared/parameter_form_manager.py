@@ -318,6 +318,11 @@ class ParameterFormManager(QWidget):
     _current_batch_changed_fields: Set[str] = set()  # Field identifiers that changed in current batch
     _coordinator_timer: Optional['QTimer'] = None
 
+    # PERFORMANCE: Shared snapshots for batch operations (computed ONCE, used by all listeners)
+    # These are set in _execute_coordinated_updates and cleared after batch completes
+    _batch_live_context_snapshot: Optional[Any] = None  # Live context for current batch
+    _batch_saved_context_snapshot: Optional[Any] = None  # Saved context for current batch (no form managers)
+
     # PERFORMANCE: MRO inheritance cache - maps (parent_type, field_name) → set of child types
     # This enables O(1) lookup of which config types can inherit a field from a parent type
     # Example: (PathPlanningConfig, 'output_dir_suffix') → {StepMaterializationConfig, ...}
@@ -4974,6 +4979,23 @@ class ParameterFormManager(QWidget):
                    f"{len(cls._pending_placeholder_refreshes)} placeholders, "
                    f"{len(cls._pending_flash_widgets)} flashes")
 
+        # PERFORMANCE: Compute shared snapshots ONCE for all listeners
+        # This prevents PlateManager and PipelineEditor from computing the same thing twice
+        cls._batch_live_context_snapshot = cls.collect_live_context()
+
+        # Compute saved context (with form managers temporarily cleared)
+        saved_managers = cls._active_form_managers.copy()
+        saved_token = cls._live_context_token_counter
+        try:
+            cls._active_form_managers.clear()
+            cls._live_context_token_counter += 1  # Different token for saved state
+            cls._batch_saved_context_snapshot = cls.collect_live_context()
+        finally:
+            cls._active_form_managers[:] = saved_managers
+            cls._live_context_token_counter = saved_token
+
+        logger.info(f"📸 Pre-computed batch snapshots: live_token={cls._batch_live_context_snapshot.token}, saved_token={cls._batch_saved_context_snapshot.token}")
+
         # 1. Update all external listeners (PlateManager, PipelineEditor)
         for listener in cls._pending_listener_updates:
             try:
@@ -5010,13 +5032,32 @@ class ParameterFormManager(QWidget):
             except Exception as e:
                 logger.error(f"❌ Error flashing {type(target).__name__}: {e}")
 
-        # Clear all pending updates
+        # Clear all pending updates and shared snapshots
         cls._pending_listener_updates.clear()
         cls._pending_placeholder_refreshes.clear()
         cls._pending_flash_widgets.clear()
         cls._current_batch_changed_fields.clear()
+        cls._batch_live_context_snapshot = None
+        cls._batch_saved_context_snapshot = None
 
         logger.debug(f"✅ Batch execution complete: {total_updates} updates in single pass")
+
+    @classmethod
+    def get_batch_snapshots(cls) -> Tuple[Optional[Any], Optional[Any]]:
+        """Get pre-computed snapshots for current batch operation.
+
+        Returns:
+            Tuple of (live_context_snapshot, saved_context_snapshot) if in a batch,
+            (None, None) otherwise.
+
+        Usage:
+            live_ctx, saved_ctx = ParameterFormManager.get_batch_snapshots()
+            if live_ctx and saved_ctx:
+                # Use pre-computed snapshots (fast path)
+            else:
+                # Compute own snapshots (fallback)
+        """
+        return cls._batch_live_context_snapshot, cls._batch_saved_context_snapshot
 
     def unregister_from_cross_window_updates(self):
         """Manually unregister this form manager from cross-window updates.
