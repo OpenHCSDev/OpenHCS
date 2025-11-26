@@ -810,6 +810,8 @@ Objects that need scope identification implement the ``ScopedObject`` ABC:
         def build_scope_id(self, context_provider) -> str:
             return f"{context_provider.plate_path}::{self.token}"
 
+Scope specificity is critical for sibling inheritance - the parent overlay must have the same scope as the current config to avoid being filtered out by the resolver. See :doc:`../architecture/sibling_inheritance_system` for details.
+
 For UI code that only has scope strings (not full objects), use ``ScopeProvider``:
 
 .. code-block:: python

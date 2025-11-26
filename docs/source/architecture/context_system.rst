@@ -162,6 +162,8 @@ Objects that need scope identification implement the ``ScopedObject`` ABC:
        def build_scope_id(self, context_provider) -> str:
            return f"{context_provider.plate_path}::{self.token}"
 
+``FunctionStep`` is a scoped object with lazy config attributes (e.g., ``step_well_filter_config``), enabling sibling inheritance between nested configs. See :doc:`sibling_inheritance_system` for details on how scoped objects work with the parent overlay pattern.
+
 For UI code that only has scope strings (not full objects), use ``ScopeProvider``:
 
 .. code-block:: python

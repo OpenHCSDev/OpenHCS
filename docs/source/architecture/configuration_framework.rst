@@ -73,7 +73,7 @@ Nested configs inherit through both their own MRO and the parent config hierarch
 Sibling Inheritance via MRO
 ---------------------------
 
-Multiple inheritance enables sibling field inheritance:
+Multiple inheritance enables sibling field inheritance within the same configuration context. See :doc:`sibling_inheritance_system` for complete implementation details and debugging guide.
 
 .. code-block:: python
 

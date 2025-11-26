@@ -72,6 +72,8 @@ Cross-Window Placeholder Updates
 ---------------------------------
 When multiple configuration dialogs are open simultaneously, they share live values for placeholder resolution. This enables real-time preview of configuration changes across windows.
 
+For sibling inheritance within the same window (e.g., nested configs in step editor), see :doc:`sibling_inheritance_system`.
+
 Live Context Collection
 ~~~~~~~~~~~~~~~~~~~~~~~~
 :py:meth:`~openhcs.pyqt_gui.widgets.shared.parameter_form_manager.ParameterFormManager._collect_live_context_from_other_windows` gathers current user-modified values from all active form managers. When a user types in one window, other windows immediately see the updated value in their placeholders. This creates a live preview system where configuration changes are visible before saving.

@@ -38,6 +38,7 @@ Lazy configuration, dual-axis resolution, inheritance detection, and field path 
    configuration_framework
    dynamic_dataclass_factory
    context_system
+   sibling_inheritance_system
    orchestrator_configuration_management
    component_configuration_framework
 
