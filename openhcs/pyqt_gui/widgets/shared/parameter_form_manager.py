@@ -393,13 +393,36 @@ class ParameterFormManager(QWidget):
     def _clear_unsaved_changes_cache(cls, reason: str):
         """Clear the entire unsaved changes cache.
 
-        This should be called when the comparison basis changes:
+        This should be called when the comparison basis changes globally:
         - Save happens (saved values change)
         - Reset happens (live values revert to saved)
-        - Window closes (live context changes)
+
+        NOTE: For window close, use _clear_unsaved_changes_cache_for_scope() instead
+        to avoid clearing entries for other open windows (like step editors).
         """
         cls._configs_with_unsaved_changes.clear()
         logger.debug(f"🔍 Cleared unsaved changes cache: {reason}")
+
+    @classmethod
+    def _clear_unsaved_changes_cache_for_scope(cls, scope_id: Optional[str], reason: str):
+        """Clear unsaved changes cache entries for a specific scope only.
+
+        This should be called when a window closes to avoid clearing entries
+        for other windows that are still open. For example, when a PipelineConfig
+        editor closes, we should NOT clear entries for step editors (which have
+        scope_ids like "plate::step_token").
+
+        The cache is keyed by (config_type, scope_id) tuples, so we filter by
+        matching the scope_id component.
+
+        Args:
+            scope_id: The scope to clear. If None, clears entries with None scope.
+            reason: Debug reason string for logging.
+        """
+        keys_to_remove = [key for key in cls._configs_with_unsaved_changes if key[1] == scope_id]
+        for key in keys_to_remove:
+            del cls._configs_with_unsaved_changes[key]
+        logger.debug(f"🔍 Cleared unsaved changes cache for scope '{scope_id}': {reason} ({len(keys_to_remove)} entries removed)")
 
     @classmethod
     def _invalidate_config_in_cache(cls, config_type: Type):
@@ -492,13 +515,11 @@ class ParameterFormManager(QWidget):
                 # Apply scope filter - use bidirectional matching to include all managers in the same hierarchy
                 # Step-level managers ARE included when plate-level filter is used (needed for pipeline editor previews)
                 # Specificity filtering for placeholder resolution happens at the RESOLUTION layer, not here
-                if manager.scope_id is not None:
-                    if scope_filter is None:
-                        logger.info(
-                            f"🔍 collect_live_context: Skipping scoped manager {manager.field_id} "
-                            f"(scope_id={manager.scope_id}) for global scope_filter=None"
-                        )
-                        continue
+                #
+                # CRITICAL: scope_filter=None means "no filtering" - include ALL managers (global + all scoped)
+                # This is needed for window close notifications where the pipeline editor needs to see
+                # step editor values to correctly detect unsaved changes.
+                if manager.scope_id is not None and scope_filter is not None:
                     if not cls._is_scope_visible_static(manager.scope_id, scope_filter):
                         logger.info(
                             f"🔍 collect_live_context: Skipping manager {manager.field_id} "
@@ -4990,9 +5011,15 @@ class ParameterFormManager(QWidget):
                 # Invalidate live context caches so external listeners drop stale data
                 type(self)._live_context_token_counter += 1
 
-                # CRITICAL: Clear unsaved changes cache when window closes
-                # Window closing changes the comparison basis (live context changes)
-                type(self)._clear_unsaved_changes_cache(f"window_close: {self.field_id}")
+                # CRITICAL: Clear unsaved changes cache ONLY for this window's scope
+                # BUG FIX: Previously cleared the entire cache, which caused step editors
+                # to lose their unsaved changes state when their parent PipelineConfig
+                # editor closed. Now we only clear entries matching this window's scope_id.
+                # Step editors have scope_ids like "plate::step_token" which don't match
+                # the PipelineConfig's scope_id (just "plate"), so they are preserved.
+                type(self)._clear_unsaved_changes_cache_for_scope(
+                    self.scope_id, f"window_close: {self.field_id}"
+                )
 
                 # CRITICAL: Notify external listeners AFTER removing from registry
                 # Use QTimer to defer notification until after current call stack completes
