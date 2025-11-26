@@ -941,7 +941,9 @@ def generate_complete_orchestrator_code(plate_paths, pipeline_data, global_confi
                     code_lines.append(f"# Step {i+1}: {step.name}")
 
                     # Generate all FunctionStep parameters automatically using introspection with name mappings
-                    step_args = _generate_step_parameters(step, default_step, clean_mode, name_mappings)
+                    # CRITICAL: Pass import containers so expanded defaults can add their imports
+                    step_args = _generate_step_parameters(step, default_step, clean_mode, name_mappings,
+                                                         all_function_imports, all_enum_imports)
 
                     args_str = ",\n    ".join(step_args)
                     code_lines.append(f"step_{i+1} = FunctionStep(\n    {args_str}\n)")
@@ -992,7 +994,9 @@ def generate_complete_orchestrator_code(plate_paths, pipeline_data, global_confi
                 code_lines.append(f"# Step {i+1}: {step.name}")
 
                 # Generate all FunctionStep parameters automatically using introspection with name mappings
-                step_args = _generate_step_parameters(step, default_step, clean_mode, name_mappings)
+                # CRITICAL: Pass import containers so expanded defaults can add their imports
+                step_args = _generate_step_parameters(step, default_step, clean_mode, name_mappings,
+                                                     all_function_imports, all_enum_imports)
 
                 args_str = ",\n    ".join(step_args)
                 code_lines.append(f"step_{i+1} = FunctionStep(\n    {args_str}\n)")
@@ -1027,7 +1031,9 @@ def generate_complete_orchestrator_code(plate_paths, pipeline_data, global_confi
                 code_lines.append(f"# Step {i+1}: {step.name}")
 
                 # Generate all FunctionStep parameters automatically using introspection with name mappings
-                step_args = _generate_step_parameters(step, default_step, clean_mode, name_mappings)
+                # CRITICAL: Pass import containers so expanded defaults can add their imports
+                step_args = _generate_step_parameters(step, default_step, clean_mode, name_mappings,
+                                                     all_function_imports, all_enum_imports)
 
                 args_str = ",\n    ".join(step_args)
                 code_lines.append(f"step_{i+1} = FunctionStep(\n    {args_str}\n)")

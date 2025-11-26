@@ -906,6 +906,11 @@ class QScintillaCodeEditorDialog(QDialog):
             self.editor.setText(new_code)
 
         except Exception as e:
+            import traceback
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Failed to toggle clean mode: {e}\n{traceback.format_exc()}")
+
             from PyQt6.QtWidgets import QMessageBox
             QMessageBox.critical(self, "Clean Mode Toggle Error",
                                f"Failed to toggle clean mode: {str(e)}")

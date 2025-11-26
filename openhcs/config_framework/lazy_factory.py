@@ -1409,7 +1409,7 @@ def create_global_default_decorator(target_config_class: Type):
             # _decorator_logger.info(f"🔍 @global_pipeline_config: {actual_cls.__name__} - inherit_as_none={inherit_as_none}, fields_set_to_none={fields_set_to_none}")
             if inherit_as_none and hasattr(actual_cls, '__dataclass_fields__'):
                 # _decorator_logger.info(f"🔍 BASE CLASS FIX: {actual_cls.__name__} - fixing {len(fields_set_to_none)} inherited fields")
-                _fix_dataclass_field_defaults_post_processing(actual_cls, fields_set_to_none, _decorator_logger)
+                _fix_dataclass_field_defaults_post_processing(actual_cls, fields_set_to_none)
 
             # CRITICAL: Also fix lazy class to ensure ALL fields are None by default
             # For lazy classes, ALL fields should be None (not just inherited ones)
@@ -1419,7 +1419,7 @@ def create_global_default_decorator(target_config_class: Type):
                     # Compute ALL fields for lazy class (not just inherited ones)
                     lazy_fields_to_set_none = set(lazy_class.__dataclass_fields__.keys())
                     # _decorator_logger.info(f"🔍 LAZY CLASS FIX: {lazy_class.__name__} - setting {len(lazy_fields_to_set_none)} fields to None: {lazy_fields_to_set_none}")
-                    _fix_dataclass_field_defaults_post_processing(lazy_class, lazy_fields_to_set_none, _decorator_logger)
+                    _fix_dataclass_field_defaults_post_processing(lazy_class, lazy_fields_to_set_none)
                 else:
                     # _decorator_logger.warning(f"🔍 WARNING: {lazy_class.__name__} does not have __dataclass_fields__!")
                     pass
