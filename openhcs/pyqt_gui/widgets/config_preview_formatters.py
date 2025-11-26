@@ -209,16 +209,15 @@ def check_config_has_unsaved_changes(
         if not hasattr(manager, '_last_emitted_values') or not manager._last_emitted_values:
             continue
 
-        # CRITICAL: Apply scope filter to prevent cross-plate contamination
-        # If scope_filter is provided (e.g., plate path), only check managers in that scope
-        # IMPORTANT: Managers with scope_id=None (global) should affect ALL scopes
-        if scope_filter is not None and manager.scope_id is not None:
-            if not ParameterFormManager._is_scope_visible_static(manager.scope_id, scope_filter):
-                logger.info(
-                    f"🔍 check_config_has_unsaved_changes: Skipping manager {manager.field_id} "
-                    f"(scope_id={manager.scope_id}) - not visible in scope_filter={scope_filter}"
-                )
-                continue
+        # Polymorphic scope filtering via enum factory method
+        from openhcs.config_framework.dual_axis_resolver import ScopeFilterMode
+        filter_mode = ScopeFilterMode.for_value_collection(scope_filter)
+        if not filter_mode.should_include(manager.scope_id, scope_filter):
+            logger.info(
+                f"🔍 check_config_has_unsaved_changes: Skipping manager {manager.field_id} "
+                f"(scope_id={manager.scope_id}) - filtered by {filter_mode.name}"
+            )
+            continue
 
         logger.info(
             f"🔍 check_config_has_unsaved_changes: Checking manager {manager.field_id} "
@@ -579,17 +578,17 @@ def check_step_has_unsaved_changes(
         scope_matched_in_cache = False
         has_active_step_manager = False
 
+        # Polymorphic scope filtering via enum factory method
+        from openhcs.config_framework.dual_axis_resolver import ScopeFilterMode
+        filter_mode = ScopeFilterMode.for_value_collection(scope_filter)
+
         for manager in ParameterFormManager._active_form_managers:
-            # CRITICAL: Apply plate-level scope filter to prevent cross-plate contamination
-            # If scope_filter is provided (e.g., plate path), only check managers in that scope
-            # IMPORTANT: Managers with scope_id=None (global) should affect ALL scopes
-            if scope_filter is not None and manager.scope_id is not None:
-                if not ParameterFormManager._is_scope_visible_static(manager.scope_id, scope_filter):
-                    logger.info(
-                        f"🔍 check_step_has_unsaved_changes: Skipping manager {manager.field_id} "
-                        f"(scope_id={manager.scope_id}) - not visible in scope_filter={scope_filter}"
-                    )
-                    continue
+            if not filter_mode.should_include(manager.scope_id, scope_filter):
+                logger.info(
+                    f"🔍 check_step_has_unsaved_changes: Skipping manager {manager.field_id} "
+                    f"(scope_id={manager.scope_id}) - filtered by {filter_mode.name}"
+                )
+                continue
 
             # Check if this manager matches the expected step scope
             if manager.scope_id == expected_step_scope:

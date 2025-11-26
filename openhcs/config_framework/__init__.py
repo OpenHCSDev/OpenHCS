@@ -67,6 +67,7 @@ from openhcs.config_framework.lazy_factory import (
 from openhcs.config_framework.dual_axis_resolver import (
     resolve_field_inheritance,
     _has_concrete_field_override,
+    ScopeFilterMode,
 )
 
 # Context

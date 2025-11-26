@@ -8,10 +8,61 @@ The resolver is completely generic and has no application-specific dependencies.
 """
 
 import logging
-from typing import Any, Dict, Type, Optional
+from enum import Enum
+from typing import Any, Dict, Type, Optional, Callable
 from dataclasses import is_dataclass
 
 logger = logging.getLogger(__name__)
+
+
+class ScopeFilterMode(Enum):
+    """Scope filtering strategies for different use cases.
+
+    Each mode encapsulates a predicate function that determines whether a manager
+    with a given scope_id should be included given a filter_scope.
+
+    Polymorphic dispatch via enum value → predicate mapping eliminates if/else branching.
+    Callers use factory methods to get the appropriate mode for their use case.
+
+    Use Cases:
+        INCLUDE_ALL: No filtering - include all managers (global + all scoped)
+                     Used for window close snapshots where pipeline editor needs
+                     to see step editor values to detect unsaved changes.
+
+        BIDIRECTIONAL: Include managers in the same hierarchy (parent, child, or same)
+                       Used for value collection where we want all related values.
+
+        STRICT_HIERARCHY: Only include managers at same level or LESS specific
+                          Used for scopes_dict building to prevent scope contamination.
+    """
+    INCLUDE_ALL = "include_all"
+    BIDIRECTIONAL = "bidirectional"
+    STRICT_HIERARCHY = "strict_hierarchy"
+
+    @classmethod
+    def for_value_collection(cls, scope_filter) -> 'ScopeFilterMode':
+        """Get mode for value collection. None filter → INCLUDE_ALL, otherwise BIDIRECTIONAL."""
+        return (cls.INCLUDE_ALL, cls.BIDIRECTIONAL)[scope_filter is not None]
+
+    @classmethod
+    def for_scopes_dict(cls) -> 'ScopeFilterMode':
+        """Get mode for scopes dict building. Always STRICT_HIERARCHY."""
+        return cls.STRICT_HIERARCHY
+
+    def should_include(self, manager_scope: Optional[str], filter_scope) -> bool:
+        """Polymorphic dispatch - check if manager should be included.
+
+        Handles filter_scope normalization (Path → str) internally.
+        """
+        # Normalize Path → str, pass str/None through unchanged
+        filter_str = {True: filter_scope, False: str(filter_scope)}.get(
+            filter_scope is None or isinstance(filter_scope, str), str(filter_scope)
+        )
+        return _SCOPE_FILTER_PREDICATES[self.value](manager_scope, filter_str)
+
+
+# Predicate dispatch table - module level to avoid enum member issues
+_SCOPE_FILTER_PREDICATES: Dict[str, Callable[[Optional[str], Optional[str]], bool]] = {}
 
 
 def _has_concrete_field_override(source_class, field_name: str) -> bool:
@@ -399,6 +450,14 @@ def is_scope_at_or_above(manager_scope: Optional[str], filter_scope: Optional[st
     # Manager is MORE SPECIFIC than filter - NOT visible for placeholder resolution
     # e.g., manager="plate::step", filter="plate" → manager is child, NOT visible
     return False
+
+
+# Initialize predicate dispatch table now that functions are defined
+_SCOPE_FILTER_PREDICATES.update({
+    "include_all": lambda _m, _f: True,
+    "bidirectional": is_scope_visible,
+    "strict_hierarchy": is_scope_at_or_above,
+})
 
 
 def get_parent_scope(scope_id: Optional[str]) -> Optional[str]:

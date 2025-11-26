@@ -511,21 +511,18 @@ class ParameterFormManager(QWidget):
                         else:
                             logger.info(f"🔍 collect_live_context (thread-local): {key} NOT IN global_values")
 
+            # Polymorphic scope filtering via enum factory method
+            from openhcs.config_framework.dual_axis_resolver import ScopeFilterMode
+            value_filter_mode = ScopeFilterMode.for_value_collection(scope_filter)
+
             for manager in cls._active_form_managers:
-                # Apply scope filter - use bidirectional matching to include all managers in the same hierarchy
-                # Step-level managers ARE included when plate-level filter is used (needed for pipeline editor previews)
-                # Specificity filtering for placeholder resolution happens at the RESOLUTION layer, not here
-                #
-                # CRITICAL: scope_filter=None means "no filtering" - include ALL managers (global + all scoped)
-                # This is needed for window close notifications where the pipeline editor needs to see
-                # step editor values to correctly detect unsaved changes.
-                if manager.scope_id is not None and scope_filter is not None:
-                    if not cls._is_scope_visible_static(manager.scope_id, scope_filter):
-                        logger.info(
-                            f"🔍 collect_live_context: Skipping manager {manager.field_id} "
-                            f"(scope_id={manager.scope_id}) - not visible in scope_filter={scope_filter}"
-                        )
-                        continue
+                # Enum handles str normalization internally
+                if not value_filter_mode.should_include(manager.scope_id, scope_filter):
+                    logger.info(
+                        f"🔍 collect_live_context: Skipping manager {manager.field_id} "
+                        f"(scope_id={manager.scope_id}) - filtered by {value_filter_mode.name}"
+                    )
+                    continue
 
                 # Collect values
                 live_values = manager.get_user_modified_values()
@@ -579,25 +576,17 @@ class ParameterFormManager(QWidget):
                 if alias_type not in live_context:
                     live_context[alias_type] = values
 
-            # Build scopes dict mapping config type names to their scope IDs
-            # This is critical for scope filtering in dual_axis_resolver
+            # Build scopes dict - uses STRICT_HIERARCHY to prevent scope contamination
             scopes_dict: Dict[str, Optional[str]] = {}
+            scopes_filter_mode = ScopeFilterMode.for_scopes_dict()
             logger.info(f"🔍 BUILD SCOPES: Starting with {len(cls._active_form_managers)} active managers")
 
             def add_manager_to_scopes(manager, is_nested=False):
                 """Helper to add a manager and its nested managers to scopes_dict."""
-                # CRITICAL: Use is_scope_at_or_above for scope filtering to prevent step-level scopes
-                # from polluting plate-level placeholder resolution.
-                # Step-level managers should NOT add their scope entries when building scopes for plate-level resolution.
-                from openhcs.config_framework.dual_axis_resolver import is_scope_at_or_above
-                if manager.scope_id is not None:
-                    if scope_filter is None:
-                        logger.info(f"🔍 BUILD SCOPES: Skipping scoped manager {manager.field_id} (scope_id={manager.scope_id}) for global scope_filter=None")
-                        return
-                    scope_filter_str = str(scope_filter) if not isinstance(scope_filter, str) else scope_filter
-                    if not is_scope_at_or_above(manager.scope_id, scope_filter_str):
-                        logger.info(f"🔍 BUILD SCOPES: Skipping manager {manager.field_id} (scope_id={manager.scope_id}) - more specific than scope_filter={scope_filter}")
-                        return
+                # Enum handles str normalization internally
+                if not scopes_filter_mode.should_include(manager.scope_id, scope_filter):
+                    logger.info(f"🔍 BUILD SCOPES: Skipping manager {manager.field_id} (scope_id={manager.scope_id}) - filtered by {scopes_filter_mode.name}")
+                    return
 
                 obj_type = type(manager.object_instance)
                 type_name = obj_type.__name__
@@ -746,27 +735,6 @@ class ParameterFormManager(QWidget):
         token = type(self)._live_context_token_counter
         logger.debug(f"🔍 _create_snapshot_for_this_manager: Created snapshot with scoped_values keys: {list(scoped_live_context.keys())}")
         return LiveContextSnapshot(token=token, values=live_context, scoped_values=scoped_live_context)
-
-    @staticmethod
-    def _is_scope_visible_static(manager_scope: str, filter_scope) -> bool:
-        """
-        Check if manager_scope is visible/related to filter_scope.
-        Uses bidirectional matching - returns True if scopes are in the same hierarchy.
-        Used for manager enumeration (e.g., finding step editors within a plate).
-
-        NOTE: For placeholder resolution, use is_scope_at_or_above instead to
-        prevent step-level scopes from polluting plate-level resolution.
-
-        Args:
-            manager_scope: Scope ID from the manager (always str)
-            filter_scope: Scope filter (can be str or Path)
-
-        Returns:
-            True if scopes are in the same hierarchy (parent, child, or same)
-        """
-        from openhcs.config_framework.dual_axis_resolver import is_scope_visible
-        filter_scope_str = str(filter_scope) if not isinstance(filter_scope, str) else filter_scope
-        return is_scope_visible(manager_scope, filter_scope_str)
 
     @classmethod
     def register_external_listener(cls, listener: object,
