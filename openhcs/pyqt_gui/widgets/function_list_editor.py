@@ -571,7 +571,10 @@ class FunctionListEditorWidget(QWidget):
                     # Check scope visibility (same logic as form managers)
                     if manager.scope_id is None or (self.scope_id and self.scope_id.startswith(manager.scope_id)):
                         # Get user-modified values (concrete, non-None values only)
-                        live_values = manager.get_user_modified_values()
+                        # CRITICAL FIX: Reconstruct tuples to dataclass instances
+                        # get_user_modified_values() returns nested dataclasses as (type, dict) tuples
+                        raw_live_values = manager.get_user_modified_values()
+                        live_values = ParameterFormManager._reconstruct_tuples_to_instances(raw_live_values)
                         obj_type = type(manager.object_instance)
                         live_context[obj_type] = live_values
 

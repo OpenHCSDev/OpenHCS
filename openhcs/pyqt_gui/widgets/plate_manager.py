@@ -737,14 +737,15 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
                 self._attr_resolution_cache.clear()
                 self._attr_resolution_cache_token = current_token
 
-            # Get the preview instance with live values merged (uses ABC method)
-            # This implements the pattern from docs/source/development/scope_hierarchy_live_context.rst
-            from openhcs.core.config import PipelineConfig
-            config_for_display = self._get_preview_instance(
-                obj=pipeline_config,
-                live_context_snapshot=live_context_snapshot,
-                scope_id=str(orchestrator.plate_path),  # Scope is just the plate path
-                obj_type=PipelineConfig
+            # Get the preview instance with live values merged
+            # CRITICAL: Use _get_pipeline_config_preview_instance which merges BOTH:
+            # 1. Global GlobalPipelineConfig values (from GlobalPipelineConfig editor)
+            # 2. Scoped PipelineConfig values (from PipelineConfig editor)
+            # The generic _get_preview_instance only gets scoped values, which would cause
+            # num_workers (from GlobalPipelineConfig) to not be included and fall back to MRO default.
+            config_for_display = self._get_pipeline_config_preview_instance(
+                orchestrator,
+                live_context_snapshot
             )
 
             effective_config = orchestrator.get_effective_config()
@@ -1235,15 +1236,18 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         logger.info(f"🔍 DEBUG _merge_with_live_values: reconstructed_values keys={list(reconstructed_values.keys())}")
 
         # Create a copy with live values merged
+        # CRITICAL: Skip None values from live values - they mean "inherit from parent"
+        # not "override with None". This allows the original saved value to be used
+        # and resolve properly through the context stack.
         merged_values = {}
         for field in dataclasses.fields(obj):
             field_name = field.name
-            if field_name in reconstructed_values:
-                # Use live value
+            if field_name in reconstructed_values and reconstructed_values[field_name] is not None:
+                # Use live value (only if not None)
                 merged_values[field_name] = reconstructed_values[field_name]
                 logger.info(f"🔍 DEBUG _merge_with_live_values: Using LIVE value for {field_name}: {reconstructed_values[field_name]}")
             else:
-                # Use original value
+                # Use original value (either not in live values, or live value is None)
                 # CRITICAL: Use object.__getattribute__() to get RAW value without resolution
                 # This preserves Lazy types instead of converting them to BASE
                 merged_values[field_name] = object.__getattribute__(obj, field_name)
@@ -1306,9 +1310,13 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         global_config_live_values = global_values.get(GlobalPipelineConfig, {})
 
         # Step 3: Merge global values first, then scoped values (scoped overrides global)
+        # CRITICAL: Only include non-None scoped values to preserve inheritance
+        # None values mean "inherit from parent", not "override with None"
         merged_live_values = {}
         merged_live_values.update(global_config_live_values)  # Global values first
-        merged_live_values.update(pipeline_config_live_values)  # Scoped values override
+        for key, value in pipeline_config_live_values.items():
+            if value is not None:
+                merged_live_values[key] = value  # Only override with non-None values
 
         logger.info(f"🔍 _get_pipeline_config_preview_instance: global_config_live_values keys={list(global_config_live_values.keys())}")
         logger.info(f"🔍 _get_pipeline_config_preview_instance: pipeline_config_live_values keys={list(pipeline_config_live_values.keys())}")

@@ -534,8 +534,9 @@ class ParameterFormManager(QWidget):
                     )
                     continue
 
-                # Collect values
-                live_values = manager.get_user_modified_values()
+                # Collect values and reconstruct nested dataclasses from tuple format
+                raw_live_values = manager.get_user_modified_values()
+                live_values = cls._reconstruct_tuples_to_instances(raw_live_values)
                 obj_type = type(manager.object_instance)
 
                 # Debug logging for num_workers
@@ -2732,6 +2733,39 @@ class ParameterFormManager(QWidget):
                     user_modified[field_name] = value
 
         return user_modified
+
+    @classmethod
+    def _reconstruct_tuples_to_instances(cls, values: dict) -> dict:
+        """
+        Reconstruct nested dataclasses from tuple format (type, dict) to instances.
+
+        This is a simpler version of _reconstruct_nested_dataclasses that doesn't
+        require a base instance. Used in collect_live_context to ensure stored
+        values are actual instances, not tuples.
+
+        Args:
+            values: Dict with values, may contain (type, dict) tuples for nested dataclasses
+
+        Returns:
+            Dict with tuples converted to actual dataclass instances
+        """
+        import dataclasses
+        from dataclasses import is_dataclass
+
+        reconstructed = {}
+        for field_name, value in values.items():
+            if isinstance(value, tuple) and len(value) == 2:
+                dataclass_type, field_dict = value
+                # Only reconstruct if first element is a dataclass type
+                if isinstance(dataclass_type, type) and is_dataclass(dataclass_type):
+                    logger.info(f"🔧 _reconstruct_tuples_to_instances: {field_name} → {dataclass_type.__name__}({field_dict})")
+                    reconstructed[field_name] = dataclass_type(**field_dict)
+                else:
+                    # Not a dataclass tuple, keep as-is
+                    reconstructed[field_name] = value
+            else:
+                reconstructed[field_name] = value
+        return reconstructed
 
     def _reconstruct_nested_dataclasses(self, live_values: dict, base_instance=None) -> dict:
         """

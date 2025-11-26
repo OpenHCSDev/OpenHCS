@@ -446,6 +446,12 @@ class ConfigWindow(TreeFormFlashMixin, BaseFormDialog):
                 # Get only values that were explicitly set by the user (non-None raw values)
                 user_modified_values = self.form_manager.get_user_modified_values()
 
+                # CRITICAL FIX: Reconstruct tuples to dataclass instances
+                # get_user_modified_values() returns nested dataclasses as (type, dict) tuples
+                # to preserve only user-modified fields for cross-window communication.
+                # We must convert these back to actual dataclass instances before saving.
+                user_modified_values = ParameterFormManager._reconstruct_tuples_to_instances(user_modified_values)
+
                 # Create fresh lazy instance with only user-modified values
                 # This preserves lazy resolution for unmodified fields
                 new_config = self.config_class(**user_modified_values)
