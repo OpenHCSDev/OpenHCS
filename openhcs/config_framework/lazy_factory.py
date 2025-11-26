@@ -302,41 +302,52 @@ class LazyMethodBindings:
                 except ImportError:
                     pass
 
+            # Get scope_id early for cache key - must include scope to prevent cross-scope cache pollution
+            # BUG FIX: Without scope_id in cache key, values resolved with scope_id=None (e.g., during
+            # PipelineConfig context) would be cached and incorrectly returned for step-scoped resolutions
+            cache_scope_id = None
+            try:
+                from openhcs.config_framework.context_manager import current_scope_id
+                cache_scope_id = current_scope_id.get()
+            except (ImportError, LookupError):
+                pass
+
             if is_dataclass_field and not cache_disabled:
                 try:
                     # Get current token from ParameterFormManager
                     from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
                     current_token = ParameterFormManager._live_context_token_counter
 
-                    # Check class-level cache
-                    cache_key = (self.__class__.__name__, name, current_token)
+                    # Check class-level cache - include scope_id to prevent cross-scope pollution
+                    cache_key = (self.__class__.__name__, name, current_token, cache_scope_id)
                     if cache_key in _lazy_resolution_cache:
                         # PERFORMANCE: Don't log cache hits - creates massive I/O bottleneck
                         # (414 log writes per keystroke was slower than the resolution itself!)
                         if name == 'well_filter_mode' or name == 'num_workers':
-                            logger.info(f"🔍 CACHE HIT: {self.__class__.__name__}.{name} = {_lazy_resolution_cache[cache_key]} (token={current_token})")
+                            logger.info(f"🔍 CACHE HIT: {self.__class__.__name__}.{name} = {_lazy_resolution_cache[cache_key]} (token={current_token}, scope={cache_scope_id})")
                         return _lazy_resolution_cache[cache_key]
                     else:
                         if name == 'num_workers':
-                            logger.info(f"🔍 CACHE MISS: {self.__class__.__name__}.{name} (token={current_token})")
+                            logger.info(f"🔍 CACHE MISS: {self.__class__.__name__}.{name} (token={current_token}, scope={cache_scope_id})")
                 except ImportError:
                     # No ParameterFormManager available - skip caching
                     pass
 
             # Helper function to cache resolved value
             def cache_value(value):
-                """Cache resolved value with current token in class-level cache."""
+                """Cache resolved value with current token and scope_id in class-level cache."""
                 # Skip caching if disabled (e.g., during LiveContextResolver flash detection)
                 if is_dataclass_field and not cache_disabled:
                     try:
                         from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
                         current_token = ParameterFormManager._live_context_token_counter
 
-                        cache_key = (self.__class__.__name__, name, current_token)
+                        # Include scope_id in cache key to prevent cross-scope pollution
+                        cache_key = (self.__class__.__name__, name, current_token, cache_scope_id)
                         _lazy_resolution_cache[cache_key] = value
 
                         if name == 'num_workers':
-                            logger.info(f"🔍 CACHED: {self.__class__.__name__}.{name} = {value} (token={current_token})")
+                            logger.info(f"🔍 CACHED: {self.__class__.__name__}.{name} = {value} (token={current_token}, scope={cache_scope_id})")
 
                         # Prevent unbounded growth by evicting oldest entries
                         if len(_lazy_resolution_cache) > _LAZY_CACHE_MAX_SIZE:
