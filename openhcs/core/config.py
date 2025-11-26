@@ -583,14 +583,14 @@ _inject_all_pending_fields()
 # We need to add the ScopedObject method after it's generated
 def _pipeline_config_build_scope_id(self, context_provider) -> str:
     """
-    Build scope ID from orchestrator's plate_path or ScopeProvider's scope_string.
+    Get plate scope ID.
 
     Args:
-        context_provider: Orchestrator instance with plate_path attribute,
-                         or ScopeProvider with scope_string attribute
+        context_provider: Orchestrator (uses plate_path)
+                         or ScopeProvider (extracts plate path from scope_string)
 
     Returns:
-        String representation of plate_path or scope_string
+        Plate path string
     """
     from openhcs.config_framework.context_manager import ScopeProvider
     if isinstance(context_provider, ScopeProvider):
