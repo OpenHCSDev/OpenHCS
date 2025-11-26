@@ -489,9 +489,9 @@ class ParameterFormManager(QWidget):
                             logger.info(f"🔍 collect_live_context (thread-local): {key} NOT IN global_values")
 
             for manager in cls._active_form_managers:
-                # Apply scope filter:
-                # - When scope_filter is None (global callers like GlobalPipelineConfig), SKIP scoped managers to avoid contamination
-                # - When scope_filter is set (e.g., Pipeline/Step), include managers visible to that scope
+                # Apply scope filter - use bidirectional matching to include all managers in the same hierarchy
+                # Step-level managers ARE included when plate-level filter is used (needed for pipeline editor previews)
+                # Specificity filtering for placeholder resolution happens at the RESOLUTION layer, not here
                 if manager.scope_id is not None:
                     if scope_filter is None:
                         logger.info(
@@ -565,15 +565,17 @@ class ParameterFormManager(QWidget):
 
             def add_manager_to_scopes(manager, is_nested=False):
                 """Helper to add a manager and its nested managers to scopes_dict."""
-                # Apply same visibility rules as live_context collection:
-                # - Global callers (scope_filter=None) should NOT see scoped managers in scopes_dict
-                # - Scoped callers only see managers visible to the scope_filter
+                # CRITICAL: Use is_scope_at_or_above for scope filtering to prevent step-level scopes
+                # from polluting plate-level placeholder resolution.
+                # Step-level managers should NOT add their scope entries when building scopes for plate-level resolution.
+                from openhcs.config_framework.dual_axis_resolver import is_scope_at_or_above
                 if manager.scope_id is not None:
                     if scope_filter is None:
                         logger.info(f"🔍 BUILD SCOPES: Skipping scoped manager {manager.field_id} (scope_id={manager.scope_id}) for global scope_filter=None")
                         return
-                    if not cls._is_scope_visible_static(manager.scope_id, scope_filter):
-                        logger.info(f"🔍 BUILD SCOPES: Skipping manager {manager.field_id} (scope_id={manager.scope_id}) - not visible in scope_filter={scope_filter}")
+                    scope_filter_str = str(scope_filter) if not isinstance(scope_filter, str) else scope_filter
+                    if not is_scope_at_or_above(manager.scope_id, scope_filter_str):
+                        logger.info(f"🔍 BUILD SCOPES: Skipping manager {manager.field_id} (scope_id={manager.scope_id}) - more specific than scope_filter={scope_filter}")
                         return
 
                 obj_type = type(manager.object_instance)
@@ -631,9 +633,8 @@ class ParameterFormManager(QWidget):
                 # Global configs should ALWAYS have scope=None (global scope)
                 if base_name:
                     # GENERIC SCOPE RULE: Global configs must always have scope=None
+                    # Use base_type from get_base_type_for_lazy (line 583), not MRO parent
                     from openhcs.config_framework.lazy_factory import is_global_config_type
-                    # Get the base type to check if it's a global config
-                    base_type = manager.dataclass_type.__mro__[1] if len(manager.dataclass_type.__mro__) > 1 else None
                     if base_type and is_global_config_type(base_type) and canonical_scope is not None:
                         logger.info(f"🔍 BUILD SCOPES: Skipping {base_name} -> {canonical_scope} (global config must always have scope=None)")
                     elif base_name not in scopes_dict:
@@ -728,23 +729,23 @@ class ParameterFormManager(QWidget):
     @staticmethod
     def _is_scope_visible_static(manager_scope: str, filter_scope) -> bool:
         """
-        Static version of _is_scope_visible for class method use.
+        Check if manager_scope is visible/related to filter_scope.
+        Uses bidirectional matching - returns True if scopes are in the same hierarchy.
+        Used for manager enumeration (e.g., finding step editors within a plate).
 
-        Check if scopes match (prefix matching for hierarchical scopes).
-        Supports generic hierarchical scope strings like 'x::y::z'.
+        NOTE: For placeholder resolution, use is_scope_at_or_above instead to
+        prevent step-level scopes from polluting plate-level resolution.
 
         Args:
             manager_scope: Scope ID from the manager (always str)
             filter_scope: Scope filter (can be str or Path)
-        """
-        # Convert filter_scope to string if it's a Path
-        filter_scope_str = str(filter_scope) if not isinstance(filter_scope, str) else filter_scope
 
-        return (
-            manager_scope == filter_scope_str or
-            manager_scope.startswith(f"{filter_scope_str}::") or
-            filter_scope_str.startswith(f"{manager_scope}::")
-        )
+        Returns:
+            True if scopes are in the same hierarchy (parent, child, or same)
+        """
+        from openhcs.config_framework.dual_axis_resolver import is_scope_visible
+        filter_scope_str = str(filter_scope) if not isinstance(filter_scope, str) else filter_scope
+        return is_scope_visible(manager_scope, filter_scope_str)
 
     @classmethod
     def register_external_listener(cls, listener: object,
@@ -5333,12 +5334,7 @@ class ParameterFormManager(QWidget):
 
     def _is_scope_visible(self, other_scope_id: Optional[str], my_scope_id: Optional[str]) -> bool:
         """Check if other_scope_id is visible from my_scope_id using hierarchical matching.
-
-        Rules:
-        - None (global scope) is visible to everyone
-        - Parent scopes are visible to child scopes (e.g., "plate1" visible to "plate1::step1")
-        - Sibling scopes are NOT visible to each other (e.g., "plate1::step1" NOT visible to "plate1::step2")
-        - Exact matches are visible
+        Delegates to dual_axis_resolver.is_scope_visible for centralized scope logic.
 
         Args:
             other_scope_id: The scope_id of the other manager
@@ -5347,25 +5343,8 @@ class ParameterFormManager(QWidget):
         Returns:
             True if other_scope_id is visible from my_scope_id
         """
-        # Global scope (None) is visible to everyone
-        if other_scope_id is None:
-            return True
-
-        # If I'm global scope (None), I can only see other global scopes
-        if my_scope_id is None:
-            return other_scope_id is None
-
-        # Exact match
-        if other_scope_id == my_scope_id:
-            return True
-
-        # Check if other_scope_id is a parent scope (prefix match with :: separator)
-        # e.g., "plate1" is parent of "plate1::step1"
-        if my_scope_id.startswith(other_scope_id + "::"):
-            return True
-
-        # Not visible (sibling or unrelated scope)
-        return False
+        from openhcs.config_framework.dual_axis_resolver import is_scope_visible
+        return is_scope_visible(other_scope_id, my_scope_id)
 
     def _collect_live_context_from_other_windows(self) -> LiveContextSnapshot:
         """Collect live values from other open form managers for context resolution.
