@@ -256,29 +256,10 @@ def check_config_has_unsaved_changes(
                         )
                     break
 
-            # Type-based match: check if any emitted value's type is related to this config's type
-            # This handles inheritance without hardcoding field names
-            if field_value is not None:
-                field_type = type(field_value)
-
-                # Check if types are related via isinstance (handles MRO inheritance)
-                # Example: LazyStepWellFilterConfig inherits from LazyWellFilterConfig
-                if isinstance(config, field_type) or isinstance(field_value, config_type):
-                    if manager.scope_id is not None:
-                        has_scoped_override = True
-                        logger.info(
-                            f"🔍 check_config_has_unsaved_changes: Found SCOPED override (type match) for "
-                            f"{config_attr} (config type={config_type.__name__}, "
-                            f"emitted field={field_path}, field type={field_type.__name__}, manager scope_id={manager.scope_id})"
-                        )
-                    else:
-                        has_form_manager_with_changes = True
-                        logger.info(
-                            f"🔍 check_config_has_unsaved_changes: Found GLOBAL change (type match) for "
-                            f"{config_attr} (config type={config_type.__name__}, "
-                            f"emitted field={field_path}, field type={field_type.__name__})"
-                        )
-                    break
+            # NOTE: Type-based matching was removed because it caused false positives.
+            # The deep inheritance hierarchy (e.g., LazyFijiStreamingConfig inherits from
+            # LazyWellFilterConfig) caused unrelated configs to match via isinstance().
+            # Path-based matching is sufficient and correct.
 
         if has_form_manager_with_changes or has_scoped_override:
             break

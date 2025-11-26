@@ -520,6 +520,15 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
             # scope_filter=None means no filtering (include ALL scopes: global + all plates)
             live_context_after = ParameterFormManager.collect_live_context()
 
+        # Get batch saved snapshot for fast-path bypass
+        # CRITICAL: This is needed to bypass the fast-path in _check_pipeline_config_has_unsaved_changes
+        # after reset, when _configs_with_unsaved_changes is empty but we still need to check
+        _, batch_saved = ParameterFormManager.get_batch_snapshots()
+        if batch_saved is not None:
+            logger.info(f"📸 PlateManager: Using batch saved_context_snapshot (token={batch_saved.token})")
+        else:
+            logger.info(f"📸 PlateManager: No batch saved_context_snapshot available")
+
         # Build before/after config pairs for batch flash detection
         # CRITICAL: Use _get_pipeline_config_preview_instance to merge BOTH scoped and global values
         config_pairs = []
@@ -582,10 +591,12 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
             # Update display text
             # PERFORMANCE: Pass changed_fields to optimize unsaved changes check
             # CRITICAL: Pass live_context_after to avoid stale data during coordinated updates
+            # CRITICAL: Pass batch_saved to bypass fast-path after reset
             display_text = self._format_plate_item_with_preview(
                 plate_data,
                 changed_fields=changed_fields,
-                live_context_snapshot=live_context_after
+                live_context_snapshot=live_context_after,
+                saved_context_snapshot=batch_saved
             )
 
             # Reapply scope-based styling BEFORE flash (so flash color isn't overwritten)
@@ -622,7 +633,8 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         self,
         plate: Dict,
         changed_fields: Optional[set] = None,
-        live_context_snapshot = None
+        live_context_snapshot = None,
+        saved_context_snapshot = None
     ) -> str:
         """Format plate item with status and config preview labels.
 
@@ -635,6 +647,7 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
             plate: Plate data dict
             changed_fields: Optional set of changed field paths (for optimization)
             live_context_snapshot: Optional live context snapshot to use (if None, will collect a new one)
+            saved_context_snapshot: Optional pre-computed saved context snapshot (for batch operations)
         """
         # Determine status prefix
         status_prefix = ""
@@ -673,10 +686,12 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
             # CRITICAL: Don't pass live_context_snapshot - let the check collect its own with the correct scope filter
             # The snapshot from _process_pending_preview_updates has scope_filter=None (only global managers),
             # but the unsaved changes check needs scope_filter=plate_path to see scoped PipelineConfig values
+            # CRITICAL: Pass saved_context_snapshot to bypass fast-path after reset
             has_unsaved_changes = self._check_pipeline_config_has_unsaved_changes(
                 orchestrator,
                 changed_fields=changed_fields,
-                live_context_snapshot=None  # Force collection with correct scope filter
+                live_context_snapshot=None,  # Force collection with correct scope filter
+                saved_context_snapshot=saved_context_snapshot  # Pass batch snapshot for bypass
             )
 
         # Line 1: [status] before plate name (user requirement)
@@ -793,7 +808,8 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         self,
         orchestrator,
         changed_fields: Optional[set] = None,
-        live_context_snapshot = None
+        live_context_snapshot = None,
+        saved_context_snapshot = None
     ) -> bool:
         """Check if PipelineConfig has any unsaved changes.
 
@@ -805,6 +821,7 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
             orchestrator: PipelineOrchestrator instance
             changed_fields: Optional set of changed field paths to limit checking
             live_context_snapshot: Optional live context snapshot to use (if None, will collect a new one)
+            saved_context_snapshot: Optional pre-computed saved context snapshot (for batch operations)
 
         Returns:
             True if PipelineConfig has unsaved changes, False otherwise
@@ -818,6 +835,8 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         logger.debug(f"🔍🔍🔍 _check_pipeline_config_has_unsaved_changes: Checking orchestrator 🔍🔍🔍")
 
         # FAST-PATH: If no unsaved changes have been tracked at all (and caching is enabled), skip work
+        # CRITICAL: Skip fast-path when saved_context_snapshot is provided (batch operation)
+        # because we need to do the actual live vs saved comparison
         cache_disabled = False
         try:
             from openhcs.config_framework.config import get_framework_config
@@ -825,13 +844,14 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         except ImportError:
             pass
 
-        if not cache_disabled and not ParameterFormManager._configs_with_unsaved_changes:
+        if not cache_disabled and not ParameterFormManager._configs_with_unsaved_changes and saved_context_snapshot is None:
             active_changes = any(
                 getattr(mgr, "_last_emitted_values", None)
                 for mgr in ParameterFormManager._active_form_managers
                 if mgr.scope_id is None or mgr.scope_id == str(orchestrator.plate_path)
             )
             if not active_changes:
+                logger.info("🔍 _check_pipeline_config_has_unsaved_changes: No tracked unsaved changes and no active edits - RETURNING FALSE (fast-path)")
                 return False
 
         # CRITICAL: Ensure original values are captured for this plate
@@ -955,7 +975,8 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
                     resolve_attr,
                     pipeline_config,  # Use ORIGINAL config as parent_obj (for field extraction)
                     live_context_snapshot,
-                    scope_filter=orchestrator.plate_path  # CRITICAL: Pass scope filter
+                    scope_filter=orchestrator.plate_path,  # CRITICAL: Pass scope filter
+                    saved_context_snapshot=saved_context_snapshot  # Pass batch snapshot for bypass
                 )
 
                 if has_changes:
