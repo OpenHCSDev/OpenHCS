@@ -550,9 +550,19 @@ class ParameterFormManager(QWidget):
                         else:
                             logger.info(f"🔍 collect_live_context: GlobalPipelineConfig.{key} NOT IN live_values")
 
-                # Add ALL managers (global + scoped) to live_context so resolution sees scoped edits.
+                # Add managers to live_context based on scope specificity:
+                # - Specificity 0 (global): goes to live_context (global values dict)
+                # - Specificity 1 (plate): goes to live_context AND scoped_live_context
+                # - Specificity 2+ (step): goes ONLY to scoped_live_context
+                #
+                # This prevents step-level changes from polluting global values and causing
+                # all steps to flash when only one step is edited.
                 from openhcs.config_framework.lazy_factory import is_global_config_type
+                from openhcs.config_framework.dual_axis_resolver import get_scope_specificity
                 from dataclasses import is_dataclass
+
+                scope_specificity = get_scope_specificity(manager.scope_id)
+
                 if manager.scope_id is None and is_global_config_type(obj_type):
                     # For GlobalPipelineConfig, filter out nested dataclass instances to avoid masking thread-local
                     scalar_values = {k: v for k, v in live_values.items() if not is_dataclass(v)}
@@ -560,11 +570,17 @@ class ParameterFormManager(QWidget):
                         live_context[obj_type].update(scalar_values)
                     else:
                         live_context[obj_type] = scalar_values
-                    logger.info(f"🔍 collect_live_context: Added GLOBAL manager {manager.field_id} to live_context with {len(scalar_values)} scalar keys: {list(scalar_values.keys())[:5]}")
+                    logger.info(f"🔍 collect_live_context: Added GLOBAL manager {manager.field_id} (specificity={scope_specificity}) to live_context with {len(scalar_values)} scalar keys: {list(scalar_values.keys())[:5]}")
+                elif scope_specificity >= 2:
+                    # Step-scoped (specificity >= 2) values go ONLY to scoped_live_context
+                    # This is critical: without this, editing step_6 causes step_0-5 to also flash
+                    # because they all read from the same global live_context[FunctionStep]
+                    logger.info(f"🔍 collect_live_context: STEP-SCOPED manager {manager.field_id} (scope_id={manager.scope_id}, specificity={scope_specificity}) - adding to scoped_live_context ONLY")
+                    cls._live_context_token_counter += 1
                 else:
+                    # Plate-scoped (specificity 1) values go to both live_context and scoped_live_context
                     live_context[obj_type] = live_values
-                    logger.info(f"🔍 collect_live_context: Added manager {manager.field_id} (scope_id={manager.scope_id}) to live_context with {len(live_values)} keys: {list(live_values.keys())[:5]}")
-                    # Bump live context token when any scoped/global manager contributes live values
+                    logger.info(f"🔍 collect_live_context: Added PLATE-SCOPED manager {manager.field_id} (scope_id={manager.scope_id}, specificity={scope_specificity}) to live_context with {len(live_values)} keys: {list(live_values.keys())[:5]}")
                     cls._live_context_token_counter += 1
 
                 # Track scope-specific mappings (for step-level overlays)
