@@ -157,6 +157,18 @@ The framework is extracted to ``openhcs.config_framework`` for reuse:
 **lazy_factory.py**
   Generates lazy dataclasses with ``__getattribute__`` interception
 
+  **Global Config Marker**: The ``@auto_create_decorator`` sets ``_is_global_config = True`` on global config classes. This marker is checked by ``is_global_config_type()`` and ``is_global_config_instance()`` to identify global configs without hardcoding class names:
+
+  .. code-block:: python
+
+     # Instead of hardcoding:
+     if config_class == GlobalPipelineConfig:  # Breaks extensibility
+
+     # Use the generic check:
+     if is_global_config_type(config_class):  # Works for any global config
+
+  This enables the scope system to enforce the rule that global configs must always have ``scope=None``.
+
   **Inheritance Preservation**: When creating lazy versions of dataclasses, the factory preserves the inheritance hierarchy by making lazy versions inherit from lazy parents. For example, if ``StepWellFilterConfig`` inherits from ``WellFilterConfig``, then ``LazyStepWellFilterConfig`` inherits from ``LazyWellFilterConfig``. This ensures MRO-based resolution works correctly in the lazy versions.
 
   **Cached Extracted Configs**: Lazy ``__getattribute__`` retrieves cached extracted configs from ``current_extracted_configs`` ContextVar instead of calling ``extract_all_configs()`` on every attribute access.

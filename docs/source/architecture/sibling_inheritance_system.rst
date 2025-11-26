@@ -296,6 +296,84 @@ Bug: Reconstructing Non-Dataclass Tuples
 
 **Fixed in**: Commit ``9d21d494`` (2025-11-25)
 
+Bug: GlobalPipelineConfig Assigned Plate-Level Scope
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Symptom**: Sibling inheritance works in step editor but NOT in pipeline config window. When step editor is closed, pipeline config window suddenly works correctly.
+
+**Root Cause**: Variable shadowing in ``collect_live_context()`` caused ``GlobalPipelineConfig`` to be incorrectly assigned a plate-level scope:
+
+.. code-block:: python
+
+   # In collect_live_context():
+   base_type = get_base_type_for_lazy(obj_type)  # Returns GlobalPipelineConfig for PipelineConfig
+
+   # Later, when mapping base types:
+   # WRONG - shadows base_type with MRO parent (NOT GlobalPipelineConfig)
+   base_type = manager.dataclass_type.__mro__[1]  # Returns ScopedObject, not GlobalPipelineConfig!
+   if base_type and is_global_config_type(base_type):  # Returns False!
+       # Skipped - global config not detected
+
+This breaks sibling inheritance because:
+
+1. ``get_base_type_for_lazy(PipelineConfig)`` correctly returns ``GlobalPipelineConfig``
+2. But line 636 shadows ``base_type`` with MRO parent (e.g., ``ScopedObject``)
+3. ``is_global_config_type(ScopedObject)`` returns ``False``
+4. ``GlobalPipelineConfig`` gets assigned plate-level scope instead of ``None``
+5. All configs are skipped by scope filter (``scope_specificity=1 > current_specificity=0``)
+6. Sibling configs show "(none)" instead of inherited values
+
+**Log Evidence**:
+
+.. code-block:: text
+
+   🔍 BUILD SCOPES: GlobalPipelineConfig -> /path/to/plate (base of PipelineConfig)
+   🔍 SCOPE FILTER: Skipping GlobalPipelineConfig (scope_specificity=1 > current_specificity=0) for field enabled
+
+**Fix**: Remove the shadowing line and use the original ``base_type`` from ``get_base_type_for_lazy()``:
+
+.. code-block:: python
+
+   # CORRECT - use base_type from get_base_type_for_lazy (line 583)
+   if base_name:
+       from openhcs.config_framework.lazy_factory import is_global_config_type
+       if base_type and is_global_config_type(base_type) and canonical_scope is not None:
+           logger.info(f"Skipping {base_name} -> {canonical_scope} (global config must always have scope=None)")
+       # ... rest of logic
+
+**Fixed in**: Commit ``289e1d52`` (2025-11-25)
+
+Bug: Missing _is_global_config Marker
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Symptom**: ``is_global_config_type(GlobalPipelineConfig)`` returns ``False`` even though ``GlobalPipelineConfig`` is decorated with ``@auto_create_decorator``.
+
+**Root Cause**: The ``@auto_create_decorator`` decorator never set the ``_is_global_config`` marker that ``is_global_config_type()`` checks for:
+
+.. code-block:: python
+
+   # is_global_config_type() checks for the marker
+   def is_global_config_type(config_type: Type) -> bool:
+       return hasattr(config_type, '_is_global_config') and config_type._is_global_config
+
+   # But auto_create_decorator never set it!
+   def auto_create_decorator(global_config_class):
+       # ... validation and decorator creation ...
+       # MISSING: global_config_class._is_global_config = True
+       return global_config_class
+
+**Fix**: Add the marker in ``auto_create_decorator``:
+
+.. code-block:: python
+
+   def auto_create_decorator(global_config_class):
+       # CRITICAL: Mark the class for is_global_config_type() checks
+       global_config_class._is_global_config = True
+       # ... rest of decorator logic ...
+       return global_config_class
+
+**Fixed in**: Commit ``9c8b45f4`` (2025-11-25)
+
 Debugging Checklist
 ~~~~~~~~~~~~~~~~~~~
 
