@@ -57,7 +57,13 @@ from openhcs.config_framework.lazy_factory import (
     auto_create_decorator,
     register_lazy_type_mapping,
     get_base_type_for_lazy,
+    get_lazy_type_for_base,
     ensure_global_config_context,
+    # Global config type checking
+    GlobalConfigBase,
+    GlobalConfigMeta,
+    is_global_config_type,
+    is_global_config_instance,
 )
 
 # Resolver
@@ -75,6 +81,16 @@ from openhcs.config_framework.context_manager import (
     merge_configs,
     extract_all_configs,
     get_base_global_config,
+    # Context hierarchy utilities
+    get_context_type_stack,
+    get_normalized_stack,
+    get_types_before_in_stack,
+    is_ancestor_in_context,
+    is_same_type_in_context,
+    # Hierarchy registry (populated by form managers)
+    register_hierarchy_relationship,
+    unregister_hierarchy_relationship,
+    get_ancestors_from_hierarchy,
 )
 
 # Placeholder
@@ -111,7 +127,13 @@ __all__ = [
     'auto_create_decorator',
     'register_lazy_type_mapping',
     'get_base_type_for_lazy',
+    'get_lazy_type_for_base',
     'ensure_global_config_context',
+    # Global config type checking
+    'GlobalConfigBase',
+    'GlobalConfigMeta',
+    'is_global_config_type',
+    'is_global_config_instance',
     # Resolver
     'resolve_field_inheritance',
     '_has_concrete_field_override',
@@ -123,6 +145,7 @@ __all__ = [
     'merge_configs',
     'extract_all_configs',
     'get_base_global_config',
+    'get_context_type_stack',
     # Placeholder
     'LazyDefaultPlaceholderService',
     # Global config

@@ -26,6 +26,7 @@ from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.pyqt_gui.windows.base_form_dialog import BaseFormDialog
 from openhcs.core.config import GlobalPipelineConfig
+from openhcs.config_framework import is_global_config_type
 from openhcs.ui.shared.code_editor_form_updater import CodeEditorFormUpdater
 # ❌ REMOVED: require_config_context decorator - enhanced decorator events system handles context automatically
 from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
@@ -117,7 +118,7 @@ class ConfigWindow(BaseFormDialog):
             scope_id=self.scope_id  # Pass scope_id to limit cross-window updates to same orchestrator
         )
 
-        if self.config_class == GlobalPipelineConfig:
+        if is_global_config_type(self.config_class):
             self._original_global_config_snapshot = copy.deepcopy(current_config)
             self.form_manager.parameter_changed.connect(self._on_global_config_field_changed)
 
@@ -419,7 +420,7 @@ class ConfigWindow(BaseFormDialog):
                 self._saving = False
                 logger.info(f"🔍 SAVE_CONFIG: Reset _saving=False (id={id(self)})")
 
-            if self.config_class == GlobalPipelineConfig:
+            if is_global_config_type(self.config_class):
                 self._original_global_config_snapshot = copy.deepcopy(new_config)
                 self._global_context_dirty = False
 
@@ -508,19 +509,18 @@ class ConfigWindow(BaseFormDialog):
             # FIXED: Proper context propagation based on config type
             # ConfigWindow is used for BOTH GlobalPipelineConfig AND PipelineConfig editing
             from openhcs.config_framework.global_config import set_global_config_for_editing
-            from openhcs.core.config import GlobalPipelineConfig
 
             # Temporarily suppress per-field sync during code-mode bulk update
-            suppress_context = (self.config_class == GlobalPipelineConfig)
+            suppress_context = is_global_config_type(self.config_class)
             if suppress_context:
                 self._suppress_global_context_sync = True
                 self._needs_global_context_resync = False
 
             try:
-                if self.config_class == GlobalPipelineConfig:
-                    # For GlobalPipelineConfig: Update thread-local context immediately
-                    set_global_config_for_editing(GlobalPipelineConfig, new_config)
-                    logger.debug("Updated thread-local GlobalPipelineConfig context")
+                if is_global_config_type(self.config_class):
+                    # For global configs: Update thread-local context immediately
+                    set_global_config_for_editing(self.config_class, new_config)
+                    logger.debug(f"Updated thread-local {self.config_class.__name__} context")
                     self._global_context_dirty = True
                 # For PipelineConfig: No context update needed here
                 # The orchestrator.apply_pipeline_config() happens in the save callback
@@ -554,7 +554,7 @@ class ConfigWindow(BaseFormDialog):
 
     def _sync_global_context_with_current_values(self, source_param: str = None):
         """Rebuild global context from current form values once."""
-        if self.config_class != GlobalPipelineConfig:
+        if not is_global_config_type(self.config_class):
             return
         try:
             current_values = self.form_manager.get_current_values()
@@ -565,7 +565,7 @@ class ConfigWindow(BaseFormDialog):
             self._global_context_dirty = True
             ParameterFormManager.trigger_global_cross_window_refresh()
             if source_param:
-                logger.debug("Synchronized GlobalPipelineConfig context after change (%s)", source_param)
+                logger.debug(f"Synchronized {self.config_class.__name__} context after change ({source_param})")
         except Exception as exc:
             logger.warning("Failed to sync global context%s: %s",
                            f' ({source_param})' if source_param else '', exc)
@@ -586,15 +586,14 @@ class ConfigWindow(BaseFormDialog):
 
     def reject(self):
         """Handle dialog rejection (Cancel button)."""
-        from openhcs.core.config import GlobalPipelineConfig
-        if (self.config_class == GlobalPipelineConfig and
+        if (is_global_config_type(self.config_class) and
                 getattr(self, '_global_context_dirty', False) and
                 self._original_global_config_snapshot is not None):
             from openhcs.config_framework.global_config import set_global_config_for_editing
-            set_global_config_for_editing(GlobalPipelineConfig,
+            set_global_config_for_editing(self.config_class,
                                           copy.deepcopy(self._original_global_config_snapshot))
             self._global_context_dirty = False
-            logger.debug("Restored GlobalPipelineConfig context after cancel")
+            logger.debug(f"Restored {self.config_class.__name__} context after cancel")
 
         self.config_cancelled.emit()
         super().reject()  # BaseFormDialog handles unregistration

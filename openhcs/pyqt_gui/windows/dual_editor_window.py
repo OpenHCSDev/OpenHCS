@@ -432,12 +432,15 @@ class DualEditorWindow(BaseFormDialog):
         Args:
             config: Updated config object (GlobalPipelineConfig, PipelineConfig, or StepConfig)
         """
-        from openhcs.core.config import GlobalPipelineConfig, PipelineConfig
+        from openhcs.core.config import PipelineConfig
+        from openhcs.config_framework import is_global_config_instance
         from openhcs.config_framework.global_config import get_current_global_config
 
-        # Only care about GlobalPipelineConfig and PipelineConfig changes
+        # Only care about global configs and PipelineConfig changes
         # (StepConfig changes are handled by the step editor's own form manager)
-        if not isinstance(config, (GlobalPipelineConfig, PipelineConfig)):
+        is_global = is_global_config_instance(config)
+        is_pipeline = isinstance(config, PipelineConfig)
+        if not (is_global or is_pipeline):
             return
 
         # Only refresh if this is for our orchestrator
@@ -445,13 +448,13 @@ class DualEditorWindow(BaseFormDialog):
             return
 
         # Check if this config belongs to our orchestrator
-        if isinstance(config, PipelineConfig):
+        if is_pipeline:
             # Check if this is our orchestrator's pipeline config
             if config is not self.orchestrator.pipeline_config:
                 return
-        elif isinstance(config, GlobalPipelineConfig):
+        elif is_global:
             # Check if this is the current global config
-            current_global = get_current_global_config(GlobalPipelineConfig)
+            current_global = get_current_global_config(type(config))
             if config is not current_global:
                 return
 

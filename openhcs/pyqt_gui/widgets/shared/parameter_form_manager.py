@@ -702,6 +702,12 @@ class ParameterFormManager(QWidget):
                 # Add this instance to the registry
                 self._active_form_managers.append(self)
 
+                # Register hierarchy relationship for cross-window context resolution
+                # This tells the config framework that context_obj type is parent of object_instance type
+                if self.context_obj is not None:
+                    from openhcs.config_framework.context_manager import register_hierarchy_relationship
+                    register_hierarchy_relationship(type(self.context_obj), type(self.object_instance))
+
             # Debounce timer for cross-window placeholder refresh
             self._cross_window_refresh_timer = None
 
@@ -2229,23 +2235,12 @@ class ParameterFormManager(QWidget):
                 else:
                     logger.warning(f"🔍 No global context available (neither live nor thread-local)")
 
-        # CRITICAL FIX: For function panes with step_instance as context_obj, we need to add PipelineConfig
-        # from live_context as a separate layer BEFORE the step_instance layer.
-        # This ensures the hierarchy: Global -> Pipeline -> Step -> Function
-        # Without this, function panes skip PipelineConfig and go straight from Global to Step.
-        from openhcs.core.config import PipelineConfig
-        if live_context and not isinstance(self.context_obj, PipelineConfig):
-            # Check if we have PipelineConfig in live_context
-            pipeline_config_live = self._find_live_values_for_type(PipelineConfig, live_context)
-            if pipeline_config_live is not None:
-                try:
-                    # Create PipelineConfig instance from live values
-                    import dataclasses
-                    pipeline_config_instance = PipelineConfig(**pipeline_config_live)
-                    stack.enter_context(config_context(pipeline_config_instance))
-                    logger.debug(f"Added PipelineConfig layer from live context for {self.field_id}")
-                except Exception as e:
-                    logger.warning(f"Failed to add PipelineConfig layer from live context: {e}")
+        # GENERIC: Inject intermediate config layers from live_context.
+        # Uses the context type stack to determine which types are "between" global and context_obj
+        # in the hierarchy, and injects them in proper order.
+        # This ensures the full hierarchy: Global -> Intermediate layers -> context_obj -> overlay
+        if live_context and self.context_obj is not None:
+            self._inject_intermediate_layers_from_live_context(stack, live_context, config_context)
 
         # Apply parent context(s) if provided
         if self.context_obj is not None:
@@ -3550,6 +3545,11 @@ class ParameterFormManager(QWidget):
                 # Remove from registry
                 self._active_form_managers.remove(self)
 
+                # Unregister hierarchy relationship
+                if self.context_obj is not None:
+                    from openhcs.config_framework.context_manager import unregister_hierarchy_relationship
+                    unregister_hierarchy_relationship(type(self.object_instance))
+
                 # Invalidate live context caches so external listeners drop stale data
                 type(self)._live_context_token_counter += 1
 
@@ -3658,28 +3658,37 @@ class ParameterFormManager(QWidget):
         Returns:
             True if this form should refresh placeholders due to the change
         """
-        from openhcs.core.config import GlobalPipelineConfig, PipelineConfig
         from openhcs.core.steps.abstract import AbstractStep
+        from openhcs.config_framework import is_global_config_instance
+        from openhcs.config_framework.context_manager import is_ancestor_in_context, is_same_type_in_context
 
-        # If other window is editing GlobalPipelineConfig, check if we use GlobalPipelineConfig as context
-        if isinstance(editing_object, GlobalPipelineConfig):
-            # We're affected if our context_obj is GlobalPipelineConfig OR if we're editing GlobalPipelineConfig
+        # If other window is editing a global config, check if we use global config as context
+        if is_global_config_instance(editing_object):
+            # We're affected if our context_obj is a global config OR if we're editing a global config
             # OR if we have no context (we use global context from thread-local)
             is_affected = (
-                isinstance(self.context_obj, GlobalPipelineConfig) or
-                isinstance(self.object_instance, GlobalPipelineConfig) or
+                is_global_config_instance(self.context_obj) if self.context_obj else False or
+                is_global_config_instance(self.object_instance) if self.object_instance else False or
                 self.context_obj is None  # No context means we use global context
             )
-            logger.debug(f"[{self.field_id}] GlobalPipelineConfig change: context_obj={type(self.context_obj).__name__ if self.context_obj else 'None'}, affected={is_affected}")
+            logger.debug(f"[{self.field_id}] Global config change: context_obj={type(self.context_obj).__name__ if self.context_obj else 'None'}, affected={is_affected}")
             return is_affected
 
-        # If other window is editing PipelineConfig, check if we're a step in that pipeline
-        if PipelineConfig and isinstance(editing_object, PipelineConfig):
-            # We're affected if our context_obj is a PipelineConfig (same type, scope matching handled elsewhere)
-            # Don't use instance identity check - the editing window has a different instance than our saved context
-            is_affected = isinstance(self.context_obj, PipelineConfig)
-            logger.info(f"[{self.field_id}] PipelineConfig change: context_obj={type(self.context_obj).__name__ if self.context_obj else 'None'}, affected={is_affected}")
-            return is_affected
+        # GENERIC: Check if editing_object's type is an ancestor in our context hierarchy
+        editing_type = type(editing_object)
+
+        if self.context_obj is not None:
+            context_obj_type = type(self.context_obj)
+
+            # If editing_type comes BEFORE context_obj in the hierarchy, we're affected
+            if is_ancestor_in_context(editing_type, context_obj_type):
+                logger.info(f"[{self.field_id}] Affected by hierarchy ancestor: {editing_type.__name__}")
+                return True
+
+            # If same type as context_obj, we're affected
+            if is_same_type_in_context(editing_type, context_obj_type):
+                logger.info(f"[{self.field_id}] Affected by same-type change: {editing_type.__name__}")
+                return True
 
         # If other window is editing a Step, check if we're a function in that step
         if isinstance(editing_object, AbstractStep):
@@ -3762,6 +3771,38 @@ class ParameterFormManager(QWidget):
             return live_context[lazy_type]
 
         return None
+
+    def _inject_intermediate_layers_from_live_context(self, stack, live_context: dict, config_context):
+        """Inject intermediate config layers from live_context between global and context_obj.
+
+        Uses the context type stack to determine the canonical hierarchy order, then injects
+        any types from live_context that are "between" global and context_obj in that hierarchy.
+
+        This is completely generic - no hardcoded type references.
+
+        Args:
+            stack: ExitStack to add config_context() calls to
+            live_context: Dict mapping types to their live values
+            config_context: The config_context function to use
+        """
+        from openhcs.config_framework.context_manager import get_types_before_in_stack
+
+        # Get types that come before context_obj in the hierarchy
+        ancestor_types = get_types_before_in_stack(type(self.context_obj))
+
+        if not ancestor_types:
+            return
+
+        # Inject each ancestor type from live_context
+        for base_t in ancestor_types:
+            live_values = self._find_live_values_for_type(base_t, live_context)
+            if live_values is not None:
+                try:
+                    instance = base_t(**live_values)
+                    stack.enter_context(config_context(instance))
+                    logger.debug(f"Injected intermediate layer {base_t.__name__} from live context for {self.field_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to inject intermediate layer {base_t.__name__} from live context: {e}")
 
     def _is_scope_visible(self, other_scope_id: Optional[str], my_scope_id: Optional[str]) -> bool:
         """Check if other_scope_id is visible from my_scope_id using hierarchical matching.
