@@ -196,6 +196,8 @@ class FieldChangeDispatcher:
         if DEBUG_DISPATCHER:
             logger.info(f"  📡 Emitting cross-window: path={full_path}")
 
+        # Emit with leaf field name so listeners can do targeted refresh
+        leaf_field = full_path.split(".")[-1] if full_path else None
         root_manager.context_value_changed.emit(
             full_path,
             value,
@@ -223,4 +225,3 @@ class FieldChangeDispatcher:
             logger.info(f"      ✅ Refreshing placeholder for {manager.field_id}.{field_name}")
 
         manager._parameter_ops_service.refresh_single_placeholder(manager, field_name)
-

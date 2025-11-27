@@ -1537,12 +1537,7 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
                 self._parameter_ops_service.refresh_with_live_context(self, use_user_modified_only=False)
                 self._apply_to_nested_managers(lambda _, manager: manager._enabled_field_styling_service.refresh_enabled_styling(manager))
 
-            # CRITICAL: Only emit context_refreshed signal if requested AND we're a root manager
-            # When emit_signal=False, this refresh was triggered by another window's context_refreshed,
-            # so we don't emit to prevent infinite ping-pong loops between windows
-            # Only root managers should emit cross-window signals - nested managers are internal to a window
-            # Example: GlobalPipelineConfig value change → emits signal → PipelineConfig (root) refreshes AND emits
-            #          → Step editor (root) refreshes (no emit) → stops
+            # CRITICAL: Only root managers emit signals to avoid nested ping-pong
             if emit_signal and self._parent_manager is None:
                 self.context_refreshed.emit(self.object_instance, self.context_obj, self.scope_id)
 
@@ -1571,6 +1566,3 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         # Also try in all nested managers (the field might be nested)
         for nested_manager in self.nested_managers.values():
             nested_manager._refresh_field_in_tree(field_name)
-
-
-
