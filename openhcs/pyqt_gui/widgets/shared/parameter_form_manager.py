@@ -43,19 +43,17 @@ from .clickable_help_components import GroupBoxWithHelp, LabelWithHelp
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from .layout_constants import CURRENT_LAYOUT
 
-# Import service classes for Phase 1: Service Extraction
-from openhcs.pyqt_gui.widgets.shared.services.widget_update_service import WidgetUpdateService
-from openhcs.pyqt_gui.widgets.shared.services.placeholder_refresh_service import PlaceholderRefreshService
+# Import consolidated services
+from openhcs.pyqt_gui.widgets.shared.services.widget_service import WidgetService
+from openhcs.pyqt_gui.widgets.shared.services.value_collection_service import ValueCollectionService
+from openhcs.pyqt_gui.widgets.shared.services.signal_service import SignalService
+from openhcs.pyqt_gui.widgets.shared.services.parameter_ops_service import ParameterOpsService
 from openhcs.pyqt_gui.widgets.shared.services.enabled_field_styling_service import EnabledFieldStylingService
-
-# Import service classes for Phase 2A: Quick Wins + Metaprogramming
 from openhcs.pyqt_gui.widgets.shared.services.flag_context_manager import FlagContextManager, ManagerFlag
-from openhcs.pyqt_gui.widgets.shared.services.signal_blocking_service import SignalBlockingService
-from openhcs.pyqt_gui.widgets.shared.services.nested_value_collection_service import NestedValueCollectionService
-from openhcs.pyqt_gui.widgets.shared.services.widget_finder_service import WidgetFinderService
-from openhcs.pyqt_gui.widgets.shared.services.widget_styling_service import WidgetStylingService
-from openhcs.pyqt_gui.widgets.shared.services.form_build_orchestrator import FormBuildOrchestrator
-from openhcs.pyqt_gui.widgets.shared.services.parameter_reset_service import ParameterResetService
+from openhcs.pyqt_gui.widgets.shared.services.form_init_service import (
+    FormBuildOrchestrator, InitialRefreshStrategy,
+    ParameterExtractionService, ConfigBuilderService, ServiceFactoryService
+)
 
 # ANTI-DUCK-TYPING: Removed ALL_INPUT_WIDGET_TYPES tuple
 # Widget discovery now uses ABC-based WidgetOperations.get_all_value_widgets()
@@ -269,28 +267,23 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
 
             # STEP 1: Extract parameters (metaprogrammed service + auto-unpack)
             with timer("  Extract parameters", threshold_ms=2.0):
-                from .services.initialization_services import ParameterExtractionService
-                from .services.dataclass_unpacker import unpack_to_self
-
                 extracted = ParameterExtractionService.build(
                     object_instance, config.exclude_params, config.initial_values
                 )
                 # METAPROGRAMMING: Auto-unpack all fields to self
                 # Field names match UnifiedParameterInfo for auto-extraction
-                unpack_to_self(self, extracted, {'_parameter_descriptions': 'description', 'parameters': 'default_value', 'parameter_types': 'param_type'})
+                ValueCollectionService.unpack_to_self(self, extracted, {'_parameter_descriptions': 'description', 'parameters': 'default_value', 'parameter_types': 'param_type'})
 
             # STEP 2: Build config (metaprogrammed service + auto-unpack)
             with timer("  Build config", threshold_ms=5.0):
-                from .services.initialization_services import ConfigBuilderService
                 from openhcs.ui.shared.parameter_form_service import ParameterFormService
-                from .services.dataclass_unpacker import unpack_to_self
 
                 self.service = ParameterFormService()
                 form_config = ConfigBuilderService.build(
                     field_id, extracted, config.context_obj, config.color_scheme, config.parent_manager, self.service
                 )
                 # METAPROGRAMMING: Auto-unpack all fields to self
-                unpack_to_self(self, form_config)
+                ValueCollectionService.unpack_to_self(self, form_config)
 
             # STEP 3: Extract parameter defaults for reset functionality
             with timer("  Extract parameter defaults", threshold_ms=1.0):
@@ -340,12 +333,9 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
 
             # STEP 5: Initialize services (metaprogrammed service + auto-unpack)
             with timer("  Initialize services", threshold_ms=1.0):
-                from .services.initialization_services import ServiceFactoryService
-                from .services.dataclass_unpacker import unpack_to_self
-
                 services = ServiceFactoryService.build()
                 # METAPROGRAMMING: Auto-unpack all services to self with _ prefix
-                unpack_to_self(self, services, prefix="_")
+                ValueCollectionService.unpack_to_self(self, services, prefix="_")
 
             # Get widget creator from registry
             self._widget_creator = create_pyqt6_registry()
@@ -361,15 +351,14 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
 
             # STEP 7: Connect signals (explicit service)
             with timer("  Connect signals", threshold_ms=1.0):
-                from .services.signal_connection_service import SignalConnectionService
-                SignalConnectionService.connect_all_signals(self)
+                SignalService.connect_all_signals(self)
 
                 # NOTE: Cross-window registration now handled by CALLER using:
-                #   with cross_window_registration(manager):
+                #   with SignalService.cross_window_registration(manager):
                 #       dialog.exec()
                 # For backward compatibility during migration, we still register here
                 # TODO: Remove this after all callers are updated to use context manager
-                SignalConnectionService.register_cross_window_signals(self)
+                SignalService.register_cross_window_signals(self)
 
             # Debounce timer for cross-window placeholder refresh
             self._cross_window_refresh_timer = None
@@ -388,7 +377,6 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
 
             # STEP 10: Execute initial refresh strategy (enum dispatch)
             with timer("  Initial refresh", threshold_ms=10.0):
-                from .services.initial_refresh_strategy import InitialRefreshStrategy
                 InitialRefreshStrategy.execute(self)
 
     # ==================== WIDGET CREATION METHODS ====================
@@ -752,7 +740,7 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
             # CRITICAL: Use refresh_with_live_context to build context stack from tree registry
             # Even when resetting to defaults, we need live context for sibling inheritance
             # REFACTORING: Inline delegate calls
-            self._placeholder_refresh_service.refresh_with_live_context(self, use_user_modified_only=False)
+            self._parameter_ops_service.refresh_with_live_context(self, use_user_modified_only=False)
 
 
 
@@ -779,7 +767,7 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
                 from openhcs.ui.shared.widget_protocols import ValueSettable
                 if isinstance(widget, ValueSettable):
                     # REFACTORING: Inline delegate call
-                    self._widget_update_service.update_widget_value(widget, converted_value, param_name, False, self)
+                    self._widget_service.update_widget_value(widget, converted_value, param_name, False, self)
 
             # Emit signal for PyQt6 compatibility
             # This will trigger both local placeholder refresh AND cross-window updates (via _emit_cross_window_change)
@@ -790,24 +778,18 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         if param_name not in self.parameters:
             return
 
-        # PHASE 2A: Use FlagContextManager + ParameterResetService
+        # PHASE 2A: Use FlagContextManager + ParameterOpsService
         with FlagContextManager.reset_context(self, block_cross_window=False):
-            reset_service = ParameterResetService()
-            reset_service.reset_parameter(self, param_name)
+            self._parameter_ops_service.reset_parameter(self, param_name)
 
         # CRITICAL: Emit parameter_changed signal AFTER _in_reset flag is restored
         # This ensures parent managers don't skip updates due to _in_reset=True check
-        # The signal was previously emitted inside ParameterResetService, but that caused
-        # parent managers to skip updates because _in_reset was still True
         reset_value = self.parameters.get(param_name)
         self.parameter_changed.emit(param_name, reset_value)
 
         # CRITICAL: Refresh all placeholders with live context after reset
-        # This ensures sibling inheritance works correctly (e.g., path_planning_config inheriting from well_filter_config)
-        # We refresh ALL placeholders instead of just the reset field to ensure consistency
-        # BUGFIX: Use use_user_modified_only=False so reset fields ARE included in sibling context
-        # When you reset a field to None, you WANT it to be visible to siblings for inheritance
-        self._placeholder_refresh_service.refresh_with_live_context(self, use_user_modified_only=False)
+        # This ensures sibling inheritance works correctly
+        self._parameter_ops_service.refresh_with_live_context(self, use_user_modified_only=False)
 
     def _get_reset_value(self, param_name: str) -> Any:
         """Get reset value based on editing context.
@@ -854,11 +836,11 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
                     if self.field_id == 'well_filter_config' and param_name == 'well_filter':
                         logger.warning(f"🔍 PARAM_READ: {self.field_id}.{param_name} from self.parameters={current_values[param_name]}")
                 else:
-                    # PHASE 2A: Use WidgetFinderService for consistent widget access
-                    widget = WidgetFinderService.get_widget_safe(self, param_name)
+                    # PHASE 2A: Use WidgetService for consistent widget access
+                    widget = WidgetService.get_widget_safe(self, param_name)
                     if widget:
                         # REFACTORING: Inline delegate call
-                        raw_value = self._widget_update_service.get_widget_value(widget)
+                        raw_value = self._widget_service.get_widget_value(widget)
                         # Apply unified type conversion
                         current_values[param_name] = self._convert_widget_value(raw_value, param_name)
 
@@ -875,7 +857,7 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
             # PHASE 2B: Collect values from nested managers using enum-driven dispatch
             # Eliminates if/elif type-checking smell with polymorphic dispatch
             def process_nested(name, manager):
-                current_values[name] = self._nested_value_collection_service.collect_nested_value(
+                current_values[name] = self._value_collection_service.collect_nested_value(
                     self, name, manager
                 )
 
@@ -1062,7 +1044,7 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         # refresh_with_live_context will:
         # 1. Refresh this form's placeholders (tree provides context stack)
         # 2. Refresh all nested managers' placeholders
-        self._placeholder_refresh_service.refresh_with_live_context(self, use_user_modified_only=False)
+        self._parameter_ops_service.refresh_with_live_context(self, use_user_modified_only=False)
 
         # CRITICAL: Also refresh enabled styling for all nested managers
         # This ensures that when one config's enabled field changes, siblings that inherit from it update their styling
@@ -1080,7 +1062,7 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         nested_manager = self.nested_managers.get(parent_field_name)
         if nested_manager:
             # Get the full nested dataclass value
-            nested_dataclass_value = self._nested_value_collection_service.collect_nested_value(
+            nested_dataclass_value = self._value_collection_service.collect_nested_value(
                 self, parent_field_name, nested_manager
             )
             
@@ -1153,8 +1135,8 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         Args:
             widget: Widget to make read-only
         """
-        # PHASE 2A: Delegate to WidgetStylingService
-        WidgetStylingService.make_readonly(widget, self.config.color_scheme)
+        # PHASE 2A: Delegate to WidgetService
+        WidgetService.make_readonly(widget, self.config.color_scheme)
 
     # ==================== CROSS-WINDOW CONTEXT UPDATE METHODS ====================
 
@@ -1204,14 +1186,13 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         current_values = self.get_current_values()
 
         # Reconstruct nested dataclasses from (type, dict) tuples
-        from openhcs.pyqt_gui.widgets.shared.services.dataclass_reconstruction_utils import reconstruct_nested_dataclasses
         from openhcs.config_framework.context_manager import get_base_global_config
 
         # Get the current thread-local config as base for merging
         base_config = get_base_global_config()
 
         # Reconstruct nested dataclasses, merging current values into base
-        reconstructed_values = reconstruct_nested_dataclasses(current_values, base_config)
+        reconstructed_values = ValueCollectionService.reconstruct_nested_dataclasses(current_values, base_config)
 
         # Create new GlobalPipelineConfig instance with reconstructed values
         try:
@@ -1256,11 +1237,10 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
                 unregister_hierarchy_relationship(type(self.object_instance))
 
             # Trigger refresh in remaining managers that might be affected
-            from .services.placeholder_refresh_service import PlaceholderRefreshService
-            service = PlaceholderRefreshService()
+            refresh_service = ParameterOpsService()
             for manager in self._active_form_managers:
                 if manager is not self:
-                    service.refresh_with_live_context(manager, use_user_modified_only=False)
+                    refresh_service.refresh_with_live_context(manager, use_user_modified_only=False)
 
         except (ValueError, AttributeError) as e:
             logger.warning(f"🔍 UNREGISTER: Error during unregistration: {e}")
@@ -1502,7 +1482,7 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
             # CRITICAL: Use refresh_with_live_context to build context stack from tree registry
             # This ensures cross-window updates see the latest values from all forms
             # REFACTORING: Inline delegate calls
-            self._placeholder_refresh_service.refresh_with_live_context(self, use_user_modified_only=False)
+            self._parameter_ops_service.refresh_with_live_context(self, use_user_modified_only=False)
             self._apply_to_nested_managers(lambda name, manager: manager._enabled_field_styling_service.refresh_enabled_styling(manager))
             self.context_refreshed.emit(self.object_instance, self.context_obj)
 
