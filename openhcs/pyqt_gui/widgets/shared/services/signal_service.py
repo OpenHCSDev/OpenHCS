@@ -109,38 +109,46 @@ class SignalService:
 
     @staticmethod
     def connect_all_signals(manager: Any) -> None:
-        """Wire all signals for the manager."""
-        def on_parameter_changed(param_name, value):
-            if not getattr(manager, '_in_reset', False) and param_name != 'enabled' and manager._parent_manager is None:
-                manager._parameter_ops_service.refresh_with_live_context(manager)
+        """Wire all signals for the manager.
 
-        manager.parameter_changed.connect(on_parameter_changed)
-        
+        DISPATCHER ARCHITECTURE: Most signal handling moved to FieldChangeDispatcher.
+        This method now only handles:
+        - Initial enabled styling setup (on form build complete)
+        - Cleanup on destroy
+        """
+        # Enabled styling initial setup (after placeholders are refreshed)
         if 'enabled' in manager.parameters:
-            manager.parameter_changed.connect(manager._on_enabled_field_changed_universal)
             manager._on_placeholder_refresh_complete_callbacks.append(
                 lambda: manager._enabled_field_styling_service.apply_initial_enabled_styling(manager)
             )
-        
+
         manager.destroyed.connect(manager.unregister_from_cross_window_updates)
 
     @staticmethod
     def register_cross_window_signals(manager: Any) -> None:
-        """Register manager for cross-window updates (only root managers)."""
+        """Register manager for cross-window updates (only root managers).
+
+        DISPATCHER ARCHITECTURE: Cross-window emission moved to FieldChangeDispatcher.
+        This method now only handles:
+        - Initial values snapshot
+        - Connecting receivers (context_value_changed, context_refreshed)
+        """
         if manager._parent_manager is not None:
             return
-        
+
         from dataclasses import is_dataclass
         if hasattr(manager.config, '_resolve_field_value'):
             manager._initial_values_on_open = manager.get_user_modified_values()
         else:
             manager._initial_values_on_open = manager.get_current_values()
-        
-        manager.parameter_changed.connect(manager._emit_cross_window_change)
+
+        # DELETED: manager.parameter_changed.connect(manager._emit_cross_window_change)
+        # Now handled by FieldChangeDispatcher._emit_cross_window()
 
         existing_count = len(manager._active_form_managers) - 1
         logger.info(f"🔍 REGISTER: {manager.field_id} connecting to {existing_count} existing managers")
 
+        # Connect receivers for cross-window signals
         for existing_manager in manager._active_form_managers:
             if existing_manager is manager:
                 continue

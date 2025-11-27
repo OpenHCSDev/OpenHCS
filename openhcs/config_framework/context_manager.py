@@ -418,6 +418,215 @@ def is_same_type_in_context(type_a, type_b):
     return _normalize_type(type_a) == _normalize_type(type_b)
 
 
+# ============================================================================
+# Context Stack Building (for UI placeholder resolution)
+# ============================================================================
+
+def build_context_stack(
+    context_obj: object | None,
+    overlay: dict | None = None,
+    dataclass_type: type | None = None,
+    live_context: dict | None = None,
+    is_global_config_editing: bool = False,
+    global_config_type: type | None = None,
+    root_form_values: dict | None = None,
+    root_form_type: type | None = None,
+):
+    """
+    Build a complete context stack for placeholder resolution.
+
+    This is the framework-agnostic function for building context stacks. It can
+    be called from any UI framework (PyQt6, Textual, etc.) and returns an ExitStack
+    with the proper layer order.
+
+    Layer order (innermost to outermost when entered):
+    1. Global context layer (live from editor OR thread-local)
+    2. Intermediate layers from live_context (via get_types_before_in_stack())
+    3. Parent context from context_obj
+    4. Root form layer (for sibling inheritance)
+    5. Overlay from current form values
+
+    Args:
+        context_obj: The parent context object (e.g., PipelineConfig for Step editor)
+        overlay: Dict of current form values to apply as overlay
+        dataclass_type: The type of the dataclass being edited
+        live_context: Dict mapping types to their live values from other forms
+        is_global_config_editing: True if editing a global config (masks thread-local)
+        global_config_type: The global config type (used when is_global_config_editing=True)
+        root_form_values: Dict of root form's values (for sibling inheritance)
+        root_form_type: Type of the root form's dataclass
+
+    Returns:
+        ExitStack with all context layers entered. Caller must manage the stack lifecycle.
+    """
+    from contextlib import ExitStack
+
+    stack = ExitStack()
+
+    # 1. Global context layer
+    global_layer = _get_global_context_layer(live_context, is_global_config_editing, global_config_type)
+    if global_layer is not None:
+        stack.enter_context(config_context(global_layer, mask_with_none=is_global_config_editing))
+
+    # 2. Intermediate layers (ancestors of context_obj in hierarchy)
+    if context_obj is not None and live_context:
+        _inject_intermediate_layers(stack, type(context_obj), live_context)
+
+    # 3. Parent context from context_obj
+    if context_obj is not None:
+        stack.enter_context(config_context(context_obj))
+
+    # 4. Root form layer (for sibling inheritance)
+    # The root form can be ANY object (dataclass, class, function, etc.)
+    # We use ONE path: create/use a dataclass-like object and inject via config_context.
+    # For non-dataclass roots, use SimpleNamespace to mimic a dataclass structure.
+    if root_form_values:
+        from types import SimpleNamespace
+
+        if root_form_type and is_dataclass(root_form_type):
+            # Root is a dataclass - instantiate directly
+            try:
+                root_instance = root_form_type(**root_form_values)
+                stack.enter_context(config_context(root_instance))
+                logger.info(f"build_context_stack: ✅ injected root form {root_form_type.__name__}")
+            except Exception as e:
+                logger.debug(f"build_context_stack: failed to inject root form: {e}")
+        else:
+            # Root is NOT a dataclass - wrap in SimpleNamespace to go through same path
+            root_instance = SimpleNamespace(**root_form_values)
+            stack.enter_context(config_context(root_instance))
+            logger.info(f"build_context_stack: ✅ injected root form as SimpleNamespace")
+
+    # 5. Overlay from current form values
+    if dataclass_type and overlay:
+        try:
+            if is_dataclass(dataclass_type):
+                overlay_instance = dataclass_type(**overlay)
+                stack.enter_context(config_context(overlay_instance))
+        except Exception:
+            # Skip overlay if instantiation fails (missing required fields, etc.)
+            pass
+
+    return stack
+
+
+def _get_global_context_layer(
+    live_context: dict | None,
+    is_global_config_editing: bool,
+    global_config_type: type | None,
+) -> object | None:
+    """
+    Get the global context layer for the stack.
+
+    Priority:
+    1. If editing global config, use static defaults (mask_with_none will mask thread-local)
+    2. If live_context has a global config, use that (from another open editor)
+    3. Fall back to thread-local global config
+
+    Args:
+        live_context: Dict mapping types to their live values
+        is_global_config_editing: True if editing a global config
+        global_config_type: The global config type
+
+    Returns:
+        Global config instance to use, or None if not available
+    """
+    # When editing global config, return a fresh instance to mask thread-local
+    if is_global_config_editing and global_config_type is not None:
+        try:
+            return global_config_type()
+        except Exception:
+            pass
+
+    # Try to find global config in live_context
+    if live_context:
+        from openhcs.config_framework.lazy_factory import is_global_config_type
+        for config_type, config_values in live_context.items():
+            if is_global_config_type(config_type):
+                try:
+                    return config_type(**config_values)
+                except Exception:
+                    pass
+
+    # Fall back to thread-local global config
+    return get_base_global_config()
+
+
+def _inject_intermediate_layers(stack, context_obj_type: type, live_context: dict):
+    """
+    Inject intermediate context layers between global and context_obj.
+
+    Uses get_types_before_in_stack() to find ancestor types, then injects
+    each one from live_context if available.
+
+    Args:
+        stack: ExitStack to add layers to
+        context_obj_type: The type of the context object
+        live_context: Dict mapping types to their live values
+    """
+    ancestor_types = get_types_before_in_stack(context_obj_type)
+
+    for ancestor_type in ancestor_types:
+        # Skip global types (already handled)
+        if _is_global_type(ancestor_type):
+            continue
+
+        # Find live values for this ancestor type
+        live_values = _find_live_values_for_type(ancestor_type, live_context)
+        if live_values is not None:
+            try:
+                ancestor_instance = ancestor_type(**live_values)
+                stack.enter_context(config_context(ancestor_instance))
+            except Exception:
+                # Skip if instantiation fails
+                pass
+
+
+def _find_live_values_for_type(target_type: type, live_context: dict) -> dict | None:
+    """
+    Find live values for a target type in live_context.
+
+    Handles type normalization (lazy vs base types) AND inheritance.
+    For sibling inheritance, a StepWellFilterConfig's values should be
+    usable when resolving WellFilterConfig's placeholders.
+
+    IMPORTANT: Prefers subclass matches over exact matches.
+    This ensures StepWellFilterConfig values (with concrete value) are used
+    for WellFilterConfig resolution, not WellFilterConfig values (with None).
+
+    Args:
+        target_type: The type to find values for
+        live_context: Dict mapping types to their live values
+
+    Returns:
+        Dict of field values, or None if not found
+    """
+    target_base = _normalize_type(target_type)
+    logger.info(f"_find_live_values_for_type: target={target_type.__name__} -> base={target_base.__name__}")
+    logger.info(f"_find_live_values_for_type: live_context has {len(live_context)} types")
+
+    # First pass: look for subclass match (more specific wins)
+    # e.g., StepWellFilterConfig values for WellFilterConfig resolution
+    for config_type, config_values in live_context.items():
+        config_base = _normalize_type(config_type)
+        try:
+            if config_base != target_base and issubclass(config_base, target_base):
+                logger.info(f"_find_live_values_for_type: ✅ using {config_base.__name__} values for {target_base.__name__} (subclass)")
+                return config_values
+        except TypeError:
+            pass  # Not a class
+
+    # Second pass: exact type match (after normalization)
+    for config_type, config_values in live_context.items():
+        config_base = _normalize_type(config_type)
+        if config_base == target_base:
+            logger.info(f"_find_live_values_for_type: ✅ exact match for {target_base.__name__}")
+            return config_values
+
+    logger.warning(f"_find_live_values_for_type: ❌ no match for {target_base.__name__}")
+    return None
+
+
 # Removed: extract_config_overrides - no longer needed with field matching approach
 
 

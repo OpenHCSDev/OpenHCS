@@ -6,8 +6,8 @@ All components MUST inherit from ParameterFormManager and implement the interfac
 
 This is the Python equivalent of React's component interface:
 - State management (parameters, nested_managers, widgets)
-- Lifecycle hooks (_apply_initial_enabled_styling, _emit_parameter_change)
-- Reactive updates (update_parameter, reset_parameter)
+- Lifecycle hooks (_apply_initial_enabled_styling)
+- Reactive updates (update_parameter, reset_parameter) - routed through FieldChangeDispatcher
 - Component tree traversal (_apply_to_nested_managers)
 """
 
@@ -51,7 +51,7 @@ class ParameterFormManager(ABC, metaclass=_CombinedMeta):
     Semantics (React equivalents):
     - State: parameters, nested_managers, widgets (like React state)
     - Lifecycle: _apply_initial_enabled_styling (like useEffect)
-    - Reactive updates: _emit_parameter_change (like setState + event emitter)
+    - Reactive updates: update_parameter/reset_parameter routed through FieldChangeDispatcher
     - Component tree: _apply_to_nested_managers (like recursive component traversal)
     """
 
@@ -70,15 +70,7 @@ class ParameterFormManager(ABC, metaclass=_CombinedMeta):
 
     # ==================== LIFECYCLE HOOKS ====================
     # These are like React useEffect hooks
-
-    @abstractmethod
-    def _emit_parameter_change(self, param_name: str, value: Any) -> None:
-        """
-        Reactive update: Emit signal when parameter changes.
-
-        Equivalent to: setState(name, value) + emit event
-        """
-        pass
+    # DELETED: _emit_parameter_change - replaced by FieldChangeDispatcher
 
     # ==================== STATE MUTATIONS ====================
     # These are like React state setters

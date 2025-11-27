@@ -22,6 +22,7 @@ from .widget_creation_types import (
     ParameterFormManager, ParameterInfo, DisplayInfo, FieldIds,
     WidgetCreationConfig
 )
+from .services.field_change_dispatcher import FieldChangeDispatcher, FieldChangeEvent
 
 logger = logging.getLogger(__name__)
 
@@ -473,7 +474,15 @@ def create_widget_parametric(manager: ParameterFormManager, param_info: Paramete
     else:
         # For regular, store the main widget
         manager.widgets[param_info.name] = main_widget
-        PyQt6WidgetEnhancer.connect_change_signal(main_widget, param_info.name, manager._emit_parameter_change)
+
+        # Connect widget changes to dispatcher
+        # NOTE: connect_change_signal calls callback(param_name, value)
+        def on_widget_change(pname, value, mgr=manager):
+            converted_value = mgr._convert_widget_value(value, pname)
+            event = FieldChangeEvent(pname, converted_value, mgr)
+            FieldChangeDispatcher.instance().dispatch(event)
+
+        PyQt6WidgetEnhancer.connect_change_signal(main_widget, param_info.name, on_widget_change)
 
         if manager.read_only:
             manager._make_widget_readonly(main_widget)

@@ -216,10 +216,14 @@ class WidgetService:
         manager
     ) -> None:
         """Apply placeholder behavior based on value."""
+        logger.info(f"        🎨 _apply_context_behavior: {manager.field_id}.{param_name}, value={repr(value)[:30]}")
+
         if not param_name or not manager.dataclass_type:
+            logger.warning(f"        ⏭️  No param_name or dataclass_type, skipping")
             return
 
         if value is None:
+            logger.info(f"        ✅ Value is None, computing placeholder...")
             from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
             from openhcs.config_framework.context_manager import config_context
             live_context = ParameterFormManager.collect_live_context(scope_filter=manager.scope_id)
@@ -243,9 +247,14 @@ class WidgetService:
                         pass
 
                 placeholder_text = manager.service.get_placeholder_text(param_name, manager.dataclass_type)
+                logger.info(f"        📝 Placeholder text: {repr(placeholder_text)[:50]}")
                 if placeholder_text:
                     self.widget_enhancer.apply_placeholder_text(widget, placeholder_text)
+                    logger.info(f"        ✅ Applied placeholder")
+                else:
+                    logger.warning(f"        ⚠️  No placeholder text returned")
         elif value is not None:
+            logger.info(f"        🧹 Value not None, clearing placeholder state")
             self.widget_enhancer._clear_placeholder_state(widget)
 
     def clear_widget_to_default_state(self, widget: QWidget) -> None:
