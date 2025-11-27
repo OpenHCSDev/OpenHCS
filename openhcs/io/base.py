@@ -98,6 +98,18 @@ class BackendBase(metaclass=AutoRegisterMeta):
         """
         pass
 
+    # Class attribute: can be accessed without instantiation
+    supports_arbitrary_files: bool = True
+    """
+    Whether this backend can save arbitrary file formats (e.g., .tif, .csv, .roi.zip).
+    
+    True for backends that handle files directly (disk, streaming viewers)
+    False for backends that only handle array data (zarr, HDF5)
+    
+    Override this in specific backends that cannot handle arbitrary files.
+    Default is True for backwards compatibility.
+    """
+
 
 class DataSink(BackendBase):
     """

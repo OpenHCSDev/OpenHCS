@@ -1,8 +1,10 @@
-name: Tests and Coverage Reports
+name: Combined Coverage Report
 
 on:
-  push:
-    branches: [main]
+  workflow_run:
+    workflows: ["Integration Tests"]
+    types:
+      - completed
   workflow_dispatch:
 
 permissions:
@@ -15,8 +17,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test-and-deploy:
+  combine-and-deploy:
     runs-on: ubuntu-latest
+    # Only run if integration tests completed (even if some failed)
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure' || github.event_name == 'workflow_dispatch' }}
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -29,26 +33,157 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install dependencies
+      - name: Install coverage tools
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install coverage[toml] genbadge[coverage]
 
-      - name: Run integration tests with coverage
-        continue-on-error: true  # Continue workflow even if tests fail
-        env:
-          OPENHCS_CPU_ONLY: true
+      - name: Download all coverage artifacts from triggering workflow
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            // Debug: Log the workflow_run context
+            console.log('Event name:', context.eventName);
+            console.log('Workflow run ID:', context.payload.workflow_run?.id || 'N/A');
+            console.log('Workflow run conclusion:', context.payload.workflow_run?.conclusion || 'N/A');
+
+            // Determine the run ID to use
+            let runId;
+            if (context.eventName === 'workflow_run') {
+              runId = context.payload.workflow_run.id;
+              console.log('Using workflow_run trigger, run ID:', runId);
+            } else if (context.eventName === 'workflow_dispatch') {
+              // For manual dispatch, we need to find the most recent integration test run
+              const runs = await github.rest.actions.listWorkflowRuns({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: 'integration-tests.yml',
+                per_page: 1,
+                status: 'completed'
+              });
+              if (runs.data.workflow_runs.length === 0) {
+                throw new Error('No completed integration test runs found');
+              }
+              runId = runs.data.workflow_runs[0].id;
+              console.log('Using workflow_dispatch trigger, found most recent run ID:', runId);
+            } else {
+              throw new Error(`Unsupported event type: ${context.eventName}`);
+            }
+
+            // Get all artifacts from the workflow run
+            const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: runId,
+            });
+
+            console.log(`Found ${artifacts.data.artifacts.length} total artifacts`);
+
+            // Filter for coverage artifacts
+            const coverageArtifacts = artifacts.data.artifacts.filter(a => a.name.startsWith('coverage-'));
+            console.log(`Found ${coverageArtifacts.length} coverage artifacts:`, coverageArtifacts.map(a => a.name));
+
+            if (coverageArtifacts.length === 0) {
+              console.log('No coverage artifacts found. This may be expected if tests were skipped or failed early.');
+              // Create empty directory so subsequent steps don't fail
+              const coverageDir = 'coverage-reports';
+              if (!fs.existsSync(coverageDir)) {
+                fs.mkdirSync(coverageDir, { recursive: true });
+              }
+              return;
+            }
+
+            // Create coverage-reports directory
+            const coverageDir = 'coverage-reports';
+            if (!fs.existsSync(coverageDir)) {
+              fs.mkdirSync(coverageDir, { recursive: true });
+            }
+
+            // Download each coverage artifact
+            for (const artifact of coverageArtifacts) {
+              console.log(`Downloading artifact: ${artifact.name}`);
+
+                const download = await github.rest.actions.downloadArtifact({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  artifact_id: artifact.id,
+                  archive_format: 'zip',
+                });
+
+                // Save the zip file
+                const zipPath = path.join(coverageDir, `${artifact.name}.zip`);
+                fs.writeFileSync(zipPath, Buffer.from(download.data));
+
+                // Unzip the artifact
+                const artifactDir = path.join(coverageDir, artifact.name);
+                if (!fs.existsSync(artifactDir)) {
+                  fs.mkdirSync(artifactDir, { recursive: true });
+                }
+
+                // Use unzip command to extract
+                const { execSync } = require('child_process');
+                execSync(`unzip -q "${zipPath}" -d "${artifactDir}"`);
+
+                // Remove the zip file
+                fs.unlinkSync(zipPath);
+
+                console.log(`Extracted ${artifact.name} to ${artifactDir}`);
+              }
+            }
+
+      - name: Combine coverage reports
         run: |
           mkdir -p site
-          python -m pytest --cov=openhcs \
-                --cov-report=xml \
-                --cov-report=html:site/coverage \
-                tests/integration/ \
-                --it-backends disk,zarr \
-                --it-microscopes ImageXpress,OperaPhenix \
-                --it-dims 3d \
-                --it-exec-mode multiprocessing \
-                -v || echo "Some integration tests failed, but continuing with coverage report generation"
+
+          # Check if coverage-reports directory exists and has content
+          if [ ! -d "coverage-reports" ] || [ -z "$(ls -A coverage-reports 2>/dev/null)" ]; then
+            echo "No coverage reports found. Creating empty report."
+            echo "<html><body><h1>No Coverage Data</h1><p>No coverage artifacts were found from the integration tests.</p></body></html>" > site/index.html
+            exit 0
+          fi
+
+          # Find all .coverage files
+          echo "=== Coverage files found ==="
+          find coverage-reports -name ".coverage*" -type f || echo "No .coverage files found"
+
+          # Rename all .coverage files to have unique names for combining
+          # coverage combine expects files named .coverage.*
+          cd coverage-reports
+          coverage_count=0
+          for dir in */; do
+            if [ -f "$dir/.coverage" ]; then
+              # Extract job name from directory
+              job_name=$(basename "$dir")
+              mv "$dir/.coverage" ".coverage.$job_name"
+              echo "Renamed $dir/.coverage to .coverage.$job_name"
+              coverage_count=$((coverage_count + 1))
+            fi
+            if [ -f "$dir/.coverage.wheel" ]; then
+              mv "$dir/.coverage.wheel" ".coverage.wheel"
+              echo "Found wheel coverage file"
+              coverage_count=$((coverage_count + 1))
+            fi
+          done
+          cd ..
+
+          if [ $coverage_count -eq 0 ]; then
+            echo "No .coverage files found in artifacts. Creating empty report."
+            echo "<html><body><h1>No Coverage Data</h1><p>Coverage artifacts were downloaded but contained no .coverage files.</p></body></html>" > site/index.html
+            exit 0
+          fi
+
+          # Combine all .coverage files
+          coverage combine coverage-reports/.coverage.* || echo "Coverage combine completed with warnings"
+
+          # Generate combined reports
+          coverage xml -o coverage.xml
+          coverage html -d site/coverage
+
+          echo "=== Combined coverage report generated ==="
+          ls -la coverage.xml site/coverage/
 
 
 
@@ -77,7 +212,7 @@ jobs:
           cat > site/README.md << 'EOF'
           # OpenHCS Code Coverage Reports
 
-          This site contains the code coverage reports for the [OpenHCS](https://github.com/trissim/openhcs) project.
+          This site contains the combined code coverage reports for the [OpenHCS](https://github.com/trissim/openhcs) project.
 
           ## Navigation
 
@@ -85,8 +220,13 @@ jobs:
 
           ## About
 
-          These reports are automatically generated by GitHub Actions whenever changes are pushed to the main branch.
-          They show the percentage of code that is covered by automated tests.
+          These reports are automatically generated by GitHub Actions and combine coverage from all integration test jobs:
+          - Python boundary tests (3.11, 3.13) across Linux, Windows, macOS
+          - Backend/microscope combinations (disk, zarr × ImageXpress, OperaPhenix) across all OSes
+          - OMERO tests (Linux only, Python 3.11-3.12)
+          - Wheel installation tests
+
+          The combined coverage shows the total percentage of code covered by all test suites together.
 
           Last updated: $(date)
           EOF

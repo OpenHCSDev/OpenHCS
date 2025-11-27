@@ -483,6 +483,49 @@ class OpenHCSMainWindow(QMainWindow):
 
         view_menu.addSeparator()
 
+        # Tools menu
+        tools_menu = menubar.addMenu("&Tools")
+
+        # Custom Functions submenu
+        custom_functions_menu = tools_menu.addMenu("&Custom Functions")
+
+        # Create new custom function action
+        create_function_action = QAction("&Create New Function...", self)
+        create_function_action.triggered.connect(self._on_create_custom_function)
+        custom_functions_menu.addAction(create_function_action)
+
+        # Manage custom functions action
+        manage_functions_action = QAction("&Manage Functions...", self)
+        manage_functions_action.triggered.connect(self._on_manage_custom_functions)
+        custom_functions_menu.addAction(manage_functions_action)
+
+        tools_menu.addSeparator()
+
+        # Analysis Consolidation submenu
+        analysis_menu = tools_menu.addMenu("&Analysis Consolidation")
+
+        # Consolidate Results action
+        consolidate_action = QAction("&Consolidate Results Directory...", self)
+        consolidate_action.triggered.connect(self._on_consolidate_results)
+        analysis_menu.addAction(consolidate_action)
+
+        # Merge MetaXpress Summaries action
+        merge_summaries_action = QAction("&Merge MetaXpress Summaries...", self)
+        merge_summaries_action.triggered.connect(self._on_merge_metaxpress_summaries)
+        analysis_menu.addAction(merge_summaries_action)
+
+        # Concatenate MetaXpress Summaries (keep all headers) action
+        concat_summaries_action = QAction("&Concatenate MetaXpress Summaries (Keep Headers)...", self)
+        concat_summaries_action.triggered.connect(self._on_concat_metaxpress_summaries)
+        analysis_menu.addAction(concat_summaries_action)
+
+        analysis_menu.addSeparator()
+
+        # Run Experimental Analysis action
+        experimental_analysis_action = QAction("Run &Experimental Analysis...", self)
+        experimental_analysis_action.triggered.connect(self._on_run_experimental_analysis)
+        analysis_menu.addAction(experimental_analysis_action)
+
         # Help menu
         help_menu = menubar.addMenu("&Help")
 
@@ -626,6 +669,9 @@ class OpenHCSMainWindow(QMainWindow):
                 if hasattr(plate_manager_widget, 'set_pipeline_editor'):
                     plate_manager_widget.set_pipeline_editor(pipeline_widget)
 
+                # Set plate manager reference in pipeline editor (for step editor signal connections)
+                pipeline_widget.plate_manager = plate_manager_widget
+
                 # Set current plate if one is already selected
                 if plate_manager_widget.selected_plate_path:
                     pipeline_widget.set_current_plate(plate_manager_widget.selected_plate_path)
@@ -659,6 +705,9 @@ class OpenHCSMainWindow(QMainWindow):
                 # Set pipeline editor reference in plate manager
                 if hasattr(plate_manager_widget, 'set_pipeline_editor'):
                     plate_manager_widget.set_pipeline_editor(pipeline_editor_widget)
+
+                # Set plate manager reference in pipeline editor (for step editor signal connections)
+                pipeline_editor_widget.plate_manager = plate_manager_widget
 
                 # Set current plate if one is already selected
                 if plate_manager_widget.selected_plate_path:
@@ -760,6 +809,268 @@ class OpenHCSMainWindow(QMainWindow):
             raise
 
 
+
+    def _on_consolidate_results(self):
+        """Open file dialog to select results directory and consolidate analysis results."""
+        from PyQt6.QtWidgets import QFileDialog, QMessageBox
+        from pathlib import Path
+
+        # Select results directory
+        results_dir = QFileDialog.getExistingDirectory(
+            self,
+            "Select Results Directory",
+            "",
+            QFileDialog.Option.ShowDirsOnly
+        )
+
+        if not results_dir:
+            return
+
+        results_path = Path(results_dir)
+
+        # Check for CSV files
+        csv_files = list(results_path.glob("*.csv"))
+        csv_files = [f for f in csv_files if not any(
+            pattern in f.name.lower()
+            for pattern in ['metaxpress', 'summary', 'consolidated', 'global']
+        )]
+
+        if not csv_files:
+            QMessageBox.warning(
+                self,
+                "No CSV Files",
+                f"No CSV files found in:\n{results_dir}"
+            )
+            return
+
+        try:
+            from openhcs.processing.backends.analysis.consolidate_analysis_results import consolidate_analysis_results
+            from openhcs.config_framework.global_config import get_current_global_config
+            from openhcs.core.config import GlobalPipelineConfig
+
+            # Get global config
+            global_config = get_current_global_config(GlobalPipelineConfig)
+
+            # Extract well IDs from CSV filenames
+            well_ids = set()
+            for csv_file in csv_files:
+                import re
+                match = re.search(r'([A-Z]\d{2})', csv_file.name, re.IGNORECASE)
+                if match:
+                    well_ids.add(match.group(1).upper())
+
+            well_ids = sorted(list(well_ids))
+
+            if not well_ids:
+                QMessageBox.warning(
+                    self,
+                    "No Wells Found",
+                    f"Could not extract well IDs from CSV filenames in:\n{results_dir}"
+                )
+                return
+
+            # Run consolidation
+            consolidate_analysis_results(
+                results_directory=str(results_path),
+                well_ids=well_ids,
+                consolidation_config=global_config.analysis_consolidation_config,
+                plate_metadata_config=global_config.plate_metadata_config
+            )
+
+            output_file = results_path / global_config.analysis_consolidation_config.output_filename
+
+            QMessageBox.information(
+                self,
+                "Consolidation Complete",
+                f"Successfully consolidated {len(csv_files)} CSV files from {len(well_ids)} wells.\n\n"
+                f"Output: {output_file.name}"
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to consolidate results: {e}", exc_info=True)
+            QMessageBox.critical(
+                self,
+                "Consolidation Failed",
+                f"Failed to consolidate results:\n\n{str(e)}"
+            )
+
+    def _on_merge_metaxpress_summaries(self):
+        """Open file dialog to select multiple MetaXpress summaries and merge them (concat rows)."""
+        from PyQt6.QtWidgets import QFileDialog, QMessageBox
+        from pathlib import Path
+
+        # Open file dialog to select multiple CSV files
+        file_dialog = QFileDialog(self)
+        file_dialog.setFileMode(QFileDialog.FileMode.ExistingFiles)
+        file_dialog.setNameFilter("MetaXpress CSV (*.csv)")
+        file_dialog.setWindowTitle("Select MetaXpress Summary Files to Merge (Concat Rows)")
+
+        if not file_dialog.exec():
+            return
+
+        selected_files = file_dialog.selectedFiles()
+        if not selected_files:
+            return
+
+        # Ask for output location
+        output_file, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Merged Summary As",
+            "merged_metaxpress_summary.csv",
+            "CSV Files (*.csv)"
+        )
+
+        if not output_file:
+            return
+
+        try:
+            from openhcs.processing.backends.analysis.consolidate_analysis_results import consolidate_multi_plate_summaries
+
+            # Extract plate names from file paths (parent directory name)
+            plate_names = [Path(f).parent.name for f in selected_files]
+
+            # Merge the summaries (concat rows from different plates)
+            consolidate_multi_plate_summaries(
+                summary_paths=selected_files,
+                output_path=output_file,
+                plate_names=plate_names
+            )
+
+            QMessageBox.information(
+                self,
+                "Merge Complete",
+                f"Successfully merged {len(selected_files)} summaries into:\n{output_file}"
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to merge summaries: {e}", exc_info=True)
+            QMessageBox.critical(
+                self,
+                "Merge Failed",
+                f"Failed to merge summaries:\n\n{str(e)}"
+            )
+
+    def _on_concat_metaxpress_summaries(self):
+        """Open file dialog to select multiple MetaXpress summaries and concatenate them (keep all headers)."""
+        from PyQt6.QtWidgets import QFileDialog, QMessageBox
+        from pathlib import Path
+
+        # Open file dialog to select multiple CSV files
+        file_dialog = QFileDialog(self)
+        file_dialog.setFileMode(QFileDialog.FileMode.ExistingFiles)
+        file_dialog.setNameFilter("MetaXpress CSV (*.csv)")
+        file_dialog.setWindowTitle("Select MetaXpress Summary Files to Concatenate (Keep All Headers)")
+
+        if not file_dialog.exec():
+            return
+
+        selected_files = file_dialog.selectedFiles()
+        if not selected_files:
+            return
+
+        # Ask for output location
+        output_file, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Concatenated Summary As",
+            "concatenated_metaxpress_summary.csv",
+            "CSV Files (*.csv)"
+        )
+
+        if not output_file:
+            return
+
+        try:
+            # Read all files and concatenate with headers
+            with open(output_file, 'w') as outfile:
+                for i, input_file in enumerate(selected_files):
+                    with open(input_file, 'r') as infile:
+                        content = infile.read()
+                        outfile.write(content)
+                        # Add blank line between files (except after last file)
+                        if i < len(selected_files) - 1:
+                            outfile.write('\n')
+
+            QMessageBox.information(
+                self,
+                "Concatenation Complete",
+                f"Successfully concatenated {len(selected_files)} summaries (with all headers) into:\n{output_file}"
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to concatenate summaries: {e}", exc_info=True)
+            QMessageBox.critical(
+                self,
+                "Concatenation Failed",
+                f"Failed to concatenate summaries:\n\n{str(e)}"
+            )
+
+    def _on_run_experimental_analysis(self):
+        """Open file dialog to select directory and run experimental analysis."""
+        from PyQt6.QtWidgets import QFileDialog, QMessageBox
+        from pathlib import Path
+
+        # Select directory containing config.xlsx and metaxpress_style_summary.csv
+        analysis_dir = QFileDialog.getExistingDirectory(
+            self,
+            "Select Experimental Analysis Directory",
+            "",
+            QFileDialog.Option.ShowDirsOnly
+        )
+
+        if not analysis_dir:
+            return
+
+        analysis_path = Path(analysis_dir)
+        config_file = analysis_path / "config.xlsx"
+        results_file = analysis_path / "metaxpress_style_summary.csv"
+
+        # Check if required files exist
+        if not config_file.exists():
+            QMessageBox.warning(
+                self,
+                "Config File Missing",
+                f"Expected config.xlsx not found in:\n{analysis_dir}"
+            )
+            return
+
+        if not results_file.exists():
+            QMessageBox.warning(
+                self,
+                "Results File Missing",
+                f"Expected metaxpress_style_summary.csv not found in:\n{analysis_dir}"
+            )
+            return
+
+        try:
+            from openhcs.formats.experimental_analysis import run_experimental_analysis
+
+            # Define output paths
+            compiled_results = analysis_path / "compiled_results_normalized.xlsx"
+            heatmaps = analysis_path / "heatmaps.xlsx"
+
+            # Run analysis
+            run_experimental_analysis(
+                results_path=str(results_file),
+                config_file=str(config_file),
+                compiled_results_path=str(compiled_results),
+                heatmap_path=str(heatmaps)
+            )
+
+            QMessageBox.information(
+                self,
+                "Analysis Complete",
+                f"Experimental analysis complete!\n\n"
+                f"Compiled results: {compiled_results.name}\n"
+                f"Heatmaps: {heatmaps.name}"
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to run experimental analysis: {e}", exc_info=True)
+            QMessageBox.critical(
+                self,
+                "Analysis Failed",
+                f"Failed to run experimental analysis:\n\n{str(e)}"
+            )
 
     def show_help(self):
         """Opens documentation URL in default web browser."""
@@ -911,3 +1222,49 @@ class OpenHCSMainWindow(QMainWindow):
         """Handle plate manager progress finished signal."""
         if hasattr(self, '_status_progress_bar'):
             self._status_progress_bar.setVisible(False)
+
+    def _on_create_custom_function(self):
+        """Handle create custom function action."""
+        from openhcs.pyqt_gui.services.simple_code_editor import QScintillaCodeEditorDialog
+        from openhcs.processing.custom_functions.templates import get_default_template
+        from openhcs.processing.custom_functions import CustomFunctionManager
+        from openhcs.processing.custom_functions.validation import ValidationError
+
+        # Get default template (numpy backend)
+        template = get_default_template()
+
+        # Open code editor (LLM assist always available via button)
+        editor = QScintillaCodeEditorDialog(
+            parent=self,
+            initial_content=template,
+            title="Create Custom Function",
+            code_type='function'
+        )
+
+        if editor.exec():
+            # User clicked Save
+            code = editor.get_content()
+            manager = CustomFunctionManager()
+
+            try:
+                functions = manager.register_from_code(code)
+                func_names = ", ".join(f.__name__ for f in functions)
+                QMessageBox.information(
+                    self,
+                    "Success",
+                    f"Function(s) '{func_names}' registered successfully!"
+                )
+            except ValidationError as e:
+                # Validation failed - show specific error
+                QMessageBox.critical(
+                    self,
+                    "Validation Failed",
+                    f"Function code validation failed:\n\n{str(e)}"
+                )
+            # Let other exceptions propagate (fail-loud)
+
+    def _on_manage_custom_functions(self):
+        """Open custom function manager dialog."""
+        from openhcs.pyqt_gui.dialogs.custom_function_manager_dialog import CustomFunctionManagerDialog
+        dialog = CustomFunctionManagerDialog(parent=self)
+        dialog.exec()

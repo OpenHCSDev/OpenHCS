@@ -557,6 +557,9 @@ def stack_equalize_histogram(
     """
     _validate_3d_array(stack)
 
+    # Remember input dtype to preserve it
+    input_dtype = stack.dtype
+
     # MATCH NUMPY EXACTLY - Flatten the entire stack to compute the global histogram
     flat_stack = stack.flatten()
 
@@ -564,16 +567,25 @@ def stack_equalize_histogram(
     hist, bin_edges = cp.histogram(flat_stack, bins=bins, range=(range_min, range_max))
     cdf = hist.cumsum()
 
-    # Normalize the CDF to the range [0, 65535] - MATCH NUMPY EXACTLY
+    # Normalize the CDF to the input dtype range
     # Avoid division by zero
     if cdf[-1] > 0:
-        cdf = 65535 * cdf / cdf[-1]
+        if cp.issubdtype(input_dtype, cp.integer):
+            dtype_info = cp.iinfo(input_dtype)
+            cdf = dtype_info.max * cdf / cdf[-1]
+        else:
+            # For float dtypes, normalize to [0, 1]
+            cdf = cdf / cdf[-1]
 
     # Use linear interpolation to map input values to equalized values - MATCH NUMPY EXACTLY
     equalized_stack = cp.interp(stack.flatten(), bin_edges[:-1], cdf).reshape(stack.shape)
 
-    # Convert to uint16 - MATCH NUMPY EXACTLY
-    return equalized_stack.astype(cp.uint16)
+    # Convert back to input dtype
+    if cp.issubdtype(input_dtype, cp.integer):
+        dtype_info = cp.iinfo(input_dtype)
+        return cp.clip(equalized_stack, dtype_info.min, dtype_info.max).astype(input_dtype)
+    else:
+        return equalized_stack.astype(input_dtype)
 
 @cupy_func
 def create_projection(
@@ -996,21 +1008,39 @@ def sobel(image: "cp.ndarray", mask: Optional["cp.ndarray"] = None, *,
         cval: Constant value for 'constant' mode
 
     Returns:
-        Edge-filtered CuPy array (same shape as input)
+        Edge-filtered CuPy array (same shape and dtype as input)
 
     Note:
         This is a manual wrapper around CuCIM's sobel function that provides
         the same functionality as auto-discovered functions but is pickleable
         for subprocess execution.
+
+        CuCIM's sobel normalizes integer inputs to [0, 1] range and returns float64.
+        This wrapper always preserves the input dtype by forcing dtype conversion.
     """
     if cucim_filters is None:
         raise ImportError("CuCIM is required for sobel edge detection but is not available")
 
-    # Let the decorator handle slice processing - just call CuCIM sobel directly
-    return cucim_filters.sobel(
+    # Import here to avoid circular dependency
+    from openhcs.core.memory.decorators import DtypeConversion
+    from openhcs.core.memory.dtype_scaling import SCALING_FUNCTIONS
+    from openhcs.constants.constants import MemoryType
+
+    # Store original dtype
+    original_dtype = image.dtype
+
+    # Call CuCIM sobel
+    result = cucim_filters.sobel(
         image,
         mask=mask,
         axis=axis,
         mode=mode,
         cval=cval
     )
+
+    # Always preserve input dtype (CuCIM normalizes integer inputs to [0, 1])
+    if result.dtype != original_dtype:
+        scale_func = SCALING_FUNCTIONS[MemoryType.CUPY.value]
+        result = scale_func(result, original_dtype)
+
+    return result

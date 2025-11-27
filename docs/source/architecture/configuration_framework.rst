@@ -172,3 +172,145 @@ The framework is extracted to ``openhcs.config_framework`` for reuse:
   Framework initialization - ``set_base_config_type(GlobalPipelineConfig)``
 
 Backward compatibility shims at old paths (``openhcs.core.lazy_config``, etc.) re-export from framework.
+
+Thread-Local Context Synchronization
+------------------------------------
+
+The configuration framework maintains thread-local context for GlobalPipelineConfig to support lazy placeholder resolution across the application.
+
+**Context Lifecycle**
+
+1. **Initialization**: Context set during GUI startup
+2. **Live Updates**: Context synchronized with form edits in real-time
+3. **Restoration**: Original context restored on cancel
+4. **Cleanup**: Context cleared on window close
+
+**GUI Integration**
+
+The configuration window implements special handling for GlobalPipelineConfig to ensure thread-local context stays synchronized with form edits. Each field change triggers immediate context update, ensuring placeholder values in other windows update immediately.
+
+When users cancel config editing, the original context is restored to prevent context pollution from experimental changes.
+
+**Implementation Details**
+
+See :doc:`code_ui_interconversion` for detailed implementation of context synchronization during code editing.
+
+Token-Based Caching Infrastructure
+-----------------------------------
+
+The configuration framework includes reusable caching abstractions that eliminate redundant context resolution operations, particularly in GUI scenarios where the same values are resolved repeatedly.
+
+**Core Abstractions**
+
+**TokenCache<T>**
+  Generic multi-key cache with automatic invalidation when a token changes. Useful when caching multiple related values that should all invalidate together.
+
+  .. code-block:: python
+
+     from openhcs.config_framework import TokenCache, CacheKey
+
+     # Create cache with token provider
+     cache = TokenCache(lambda: global_token_counter)
+
+     # Get or compute value
+     value = cache.get_or_compute(
+         key=CacheKey.from_args('scope', 'param_name'),
+         compute_fn=lambda: expensive_computation()
+     )
+
+     # Cache automatically invalidates when token changes
+
+**SingleValueTokenCache<T>**
+  Simplified variant for caching a single value. More efficient when you only need one cached value per token.
+
+  .. code-block:: python
+
+     from openhcs.config_framework import SingleValueTokenCache
+
+     cache = SingleValueTokenCache(lambda: global_token_counter)
+     value = cache.get_or_compute(lambda: expensive_computation())
+
+**LiveContextResolver**
+  Pure service for resolving config attributes through context hierarchies with caching. Completely UI-agnostic - works with any dataclasses and context stacks.
+
+  .. code-block:: python
+
+     from openhcs.config_framework import LiveContextResolver
+
+     resolver = LiveContextResolver()
+
+     # Resolve attribute through context stack
+     resolved_value = resolver.resolve_config_attr(
+         config_obj=step_config,
+         attr_name='enabled',
+         context_stack=[global_config, pipeline_config, step],
+         live_context={PipelineConfig: {'num_workers': 4}},
+         cache_token=current_token
+     )
+
+  **Critical None Value Semantics**: The resolver passes ``None`` values through during live context merge. When a field is reset to ``None`` in a form, the ``None`` value overrides the saved concrete value via ``dataclasses.replace()``. This triggers MRO resolution which walks up the context hierarchy to find the inherited value from parent context (e.g., GlobalPipelineConfig).
+
+**Architecture Principles**
+
+1. **Token-based invalidation**: O(1) cache invalidation across all caches by incrementing a single counter
+2. **Separation of concerns**: Caching logic is independent of domain concepts (steps, pipelines, etc.)
+3. **Caller responsibility**: UI layer provides live context and token; service layer handles resolution
+4. **Incremental updates**: Only changed values trigger token increment, enabling fine-grained cache control
+
+**Performance Impact**
+
+Token-based caching eliminates redundant operations:
+
+- **Context stack building**: Avoided when token unchanged (was happening 20+ times per UI refresh)
+- **Placeholder text resolution**: Cached expensive string formatting operations
+- **Entire refresh operations**: Skipped when inputs haven't changed
+
+Measured improvements: 60ms → 1ms for pipeline editor preview updates.
+
+**When to Use**
+
+Use ``TokenCache`` when:
+
+- Multiple related values need synchronized invalidation
+- Cache keys have multiple components (scope, parameter name, etc.)
+- You need explicit cache key management
+
+Use ``SingleValueTokenCache`` when:
+
+- Only one value needs caching per token
+- Simpler API is preferred
+- Cache key is implicit (always the same computation)
+
+Use ``LiveContextResolver`` when:
+
+- Resolving config attributes through context hierarchies
+- Need to merge live values from multiple sources
+- Want to cache resolution results automatically
+
+Cross-Window Update System
+---------------------------
+
+The configuration framework includes a real-time cross-window update system that propagates changes between open configuration windows using type-based inheritance filtering and targeted field refresh.
+
+**Performance Characteristics**
+
+- **Type-based filtering**: Only refresh configs that inherit from the changed type via MRO
+- **Targeted field refresh**: Only refresh the specific field that changed, not all fields
+- **Widget signature checks**: Skip UI updates when placeholder text hasn't changed
+- **Update latency**: <10ms per change (down from ~200ms before optimization)
+
+**Architecture**
+
+The system uses class-level signals (``context_value_changed``, ``context_refreshed``) to propagate changes between windows. When a field changes:
+
+1. Emitting window sends field path (e.g., ``"PipelineConfig.well_filter_config.well_filter"``)
+2. Receiving windows check if they're affected using MRO inheritance checks
+3. Affected windows extract relevant field name from path for their level
+4. Only fields inheriting from the changed field's type are refreshed
+5. Widget signature checks prevent redundant UI updates
+
+**Reset Propagation**
+
+When fields are reset to ``None``, the system tracks them in a ``reset_fields`` set and includes them in live context even though their value is ``None``. The ``LiveContextResolver`` filters out ``None`` values during merge to preserve MRO inheritance semantics.
+
+For detailed information about cross-window update optimization, see :doc:`cross_window_update_optimization`.

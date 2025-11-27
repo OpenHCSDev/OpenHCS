@@ -6,13 +6,13 @@ Uses hybrid approach: extracted business logic + clean PyQt6 UI.
 """
 
 import logging
-from typing import Optional, Callable, Dict
+from typing import Optional, Callable, Dict, List
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QTabWidget, QWidget, QStackedWidget
 )
-from PyQt6.QtCore import pyqtSignal, Qt
+from PyQt6.QtCore import pyqtSignal, Qt, QTimer
 from PyQt6.QtGui import QFont
 
 from openhcs.core.steps.function_step import FunctionStep
@@ -22,6 +22,8 @@ from openhcs.ui.shared.pattern_data_manager import PatternDataManager
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 from openhcs.pyqt_gui.windows.base_form_dialog import BaseFormDialog
+from openhcs.introspection.unified_parameter_analyzer import UnifiedParameterAnalyzer
+from typing import List
 logger = logging.getLogger(__name__)
 
 
@@ -49,6 +51,7 @@ class DualEditorWindow(BaseFormDialog):
         Initialize the dual editor window.
 
         Args:
+        if self.tab_bar is not None:
             step_data: FunctionStep to edit (None for new step)
             is_new: Whether this is a new step
             on_save_callback: Function to call when step is saved
@@ -76,7 +79,8 @@ class DualEditorWindow(BaseFormDialog):
         self.pattern_manager = PatternDataManager()
 
         # Store original step reference (never modified)
-        self.original_step_reference = step_data
+        # CRITICAL: For new steps, this must be None until first save
+        self.original_step_reference = None if is_new else step_data
 
         if step_data:
             # CRITICAL FIX: Work on a copy to prevent immediate modification of original
@@ -85,6 +89,9 @@ class DualEditorWindow(BaseFormDialog):
         else:
             self.editing_step = self._create_new_step()
             self.original_step = None
+
+        # Snapshot of last-saved state for change detection
+        self._baseline_snapshot = self._serialize_for_change_detection(self.editing_step)
         
         # Change tracking
         self.has_changes = False
@@ -109,10 +116,7 @@ class DualEditorWindow(BaseFormDialog):
 
     def setup_ui(self):
         """Setup the user interface."""
-        title = "New Step" if self.is_new else f"Edit Step: {getattr(self.editing_step, 'name', 'Unknown')}"
-        self.setWindowTitle(title)
-        # Keep non-modal (already set in __init__)
-        # No minimum size - let it be determined by content
+        self._update_window_title()
         self.resize(1000, 700)
 
         layout = QVBoxLayout(self)
@@ -126,20 +130,18 @@ class DualEditorWindow(BaseFormDialog):
 
         # Tab widget (tabs on the left)
         self.tab_widget = QTabWidget()
-        # Get the tab bar and add it to our horizontal layout
         self.tab_bar = self.tab_widget.tabBar()
-        # Prevent tab scrolling by setting expanding to false and using minimum size hint
         self.tab_bar.setExpanding(False)
         self.tab_bar.setUsesScrollButtons(False)
-        tab_row.addWidget(self.tab_bar, 0)  # 0 stretch - don't expand
+        tab_row.addWidget(self.tab_bar, 0)
 
-        # Title on the right of tabs (allow it to be cropped if needed)
-        header_label = QLabel(title)
-        header_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
-        header_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_accent)};")
+        # Title label
+        self.header_label = QLabel()
+        self.header_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
+        self.header_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_accent)};")
         from PyQt6.QtWidgets import QSizePolicy
-        header_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        tab_row.addWidget(header_label, 1)  # 1 stretch - allow to expand and be cropped
+        self.header_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        tab_row.addWidget(self.header_label, 1)
 
         tab_row.addStretch()
 
@@ -159,12 +161,13 @@ class DualEditorWindow(BaseFormDialog):
         cancel_button.setStyleSheet(button_styles["cancel"])
         tab_row.addWidget(cancel_button)
 
-        # Save button
-        self.save_button = QPushButton("Save")
+        # Save/Create button
+        self.save_button = QPushButton()
+        self._update_save_button_text()
         self.save_button.setFixedHeight(28)
         self.save_button.setMinimumWidth(70)
-        self.save_button.setEnabled(False)  # Initially disabled
-        self.save_button.clicked.connect(self.save_edit)
+        self.save_button.setEnabled(False)
+        self._setup_save_button(self.save_button, self.save_edit)
         self.save_button.setStyleSheet(button_styles["save"] + f"""
             QPushButton:disabled {{
                 background-color: {self.color_scheme.to_hex(self.color_scheme.panel_bg)};
@@ -175,6 +178,7 @@ class DualEditorWindow(BaseFormDialog):
         tab_row.addWidget(self.save_button)
 
         layout.addLayout(tab_row)
+
         # Style the tab bar
         self.tab_bar.setStyleSheet(f"""
             QTabBar::tab {{
@@ -214,6 +218,31 @@ class DualEditorWindow(BaseFormDialog):
 
         # Apply centralized styling
         self.setStyleSheet(self.style_generator.generate_config_window_style())
+
+        # Debounce timer for function editor synchronization (batches rapid updates)
+        self._function_sync_timer = QTimer(self)
+        self._function_sync_timer.setSingleShot(True)
+        self._function_sync_timer.timeout.connect(self._flush_function_editor_sync)
+        self._pending_function_editor_sync = False
+
+    def _update_window_title(self):
+        title = "New Step" if getattr(self, 'is_new', False) else f"Edit Step: {getattr(self.editing_step, 'name', 'Unknown')}"
+        self.setWindowTitle(title)
+        if hasattr(self, 'header_label'):
+            self.header_label.setText(title)
+
+    def _update_save_button_text(self):
+        if hasattr(self, 'save_button'):
+            new_text = "Create" if getattr(self, 'is_new', False) else "Save"
+            logger.info(f"🔘 Updating save button text: is_new={self.is_new} → '{new_text}'")
+            self.save_button.setText(new_text)
+
+    def _build_step_scope_id(self, fallback_name: str) -> str:
+        plate_scope = getattr(self.orchestrator, 'plate_path', 'no_orchestrator')
+        token = getattr(self.editing_step, '_pipeline_scope_token', None)
+        if token:
+            return f"{plate_scope}::{token}"
+        return f"{plate_scope}::{fallback_name}"
     
     def create_step_tab(self):
         """Create the step settings tab (using dedicated widget)."""
@@ -222,34 +251,10 @@ class DualEditorWindow(BaseFormDialog):
 
         # Create step parameter editor widget with proper nested context
         # Step must be nested: GlobalPipelineConfig -> PipelineConfig -> Step
-        # CRITICAL: Pass orchestrator's plate_path as scope_id to limit cross-window updates to same orchestrator
-        scope_id = str(self.orchestrator.plate_path) if self.orchestrator else None
-
-        # TREE REGISTRY: Get or create plate node, determine step index
-        from openhcs.config_framework.config_tree_registry import ConfigTreeRegistry
-        registry = ConfigTreeRegistry.instance()
-
-        # Get or create plate node
-        plate_node = None
-        step_index = None
-        if scope_id:
-            plate_node = registry.get_node(scope_id)
-            if not plate_node:
-                # Create plate node (parent is global)
-                global_node = registry.get_node("global")
-                if not global_node:
-                    # Create global node on demand
-                    from openhcs.config_framework.context_manager import get_base_global_config
-                    global_config = get_base_global_config()
-                    global_node = registry.register("global", global_config, parent=None)
-                plate_node = registry.register(scope_id, self.orchestrator.pipeline_config, parent=global_node)
-
-            # Find step index in pipeline config
-            if self.orchestrator and hasattr(self.orchestrator.pipeline_config, 'steps'):
-                try:
-                    step_index = self.orchestrator.pipeline_config.steps.index(self.editing_step)
-                except ValueError:
-                    step_index = None  # Step not in pipeline (new step)
+        # CRITICAL: Use hierarchical scope_id to isolate this step editor + its function panes
+        # Format: "plate_path::step_name" to prevent cross-contamination between different step editors
+        step_name = getattr(self.editing_step, 'name', 'unknown_step')
+        scope_id = self._build_step_scope_id(step_name)
 
         with config_context(self.orchestrator.pipeline_config):  # Pipeline level
             with config_context(self.editing_step):              # Step level
@@ -258,13 +263,14 @@ class DualEditorWindow(BaseFormDialog):
                     service_adapter=None,
                     color_scheme=self.color_scheme,
                     pipeline_config=self.orchestrator.pipeline_config,
-                    scope_id=scope_id,
-                    step_index=step_index,
-                    parent_node=plate_node
+                    scope_id=scope_id
                 )
 
         # Connect parameter changes - use form manager signal for immediate response
         self.step_editor.form_manager.parameter_changed.connect(self.on_form_parameter_changed)
+
+        # CRITICAL: Connect context_refreshed signal for cross-window updates from code editor
+        self.step_editor.form_manager.context_refreshed.connect(self._on_step_context_refreshed)
 
         self.tab_widget.addTab(self.step_editor, "Step Settings")
 
@@ -276,11 +282,17 @@ class DualEditorWindow(BaseFormDialog):
         initial_functions = self._convert_step_func_to_list()
 
         # Create function list editor widget (mirrors Textual TUI)
-        step_id = getattr(self.editing_step, 'name', 'unknown_step')
+        # CRITICAL: Pass editing_step for context hierarchy (Function → Step → Pipeline → Global)
+        # CRITICAL: Use same hierarchical scope_id as step editor to isolate this step editor + its function panes
+        step_name = getattr(self.editing_step, 'name', 'unknown_step')
+        scope_id = self._build_step_scope_id(step_name)
+
         self.func_editor = FunctionListEditorWidget(
             initial_functions=initial_functions,
-            step_identifier=step_id,
-            service_adapter=None
+            step_identifier=step_name,
+            service_adapter=None,
+            step_instance=self.editing_step,  # Pass step for lazy resolution context
+            scope_id=scope_id  # Same hierarchical scope_id as step editor
         )
 
         # Store main window reference for orchestrator access (find it through parent chain)
@@ -314,9 +326,145 @@ class DualEditorWindow(BaseFormDialog):
         self.detect_changes()
         logger.debug(f"Function pattern changed: {current_pattern}")
 
+    def _on_step_context_refreshed(self, object_instance, context_obj):
+        """Handle context refresh from step editor.
 
+        CRITICAL: This is called when:
+        1. Code editor saves (updates step instance)
+        2. Cross-window refresh (placeholders update due to PipelineConfig/GlobalPipelineConfig changes)
+        3. Reset button clicked (placeholders update to show inherited values)
 
+        We need to refresh the function editor's component button to show the new resolved group_by value.
+        """
+        # Refresh function editor from step context (updates component button with resolved group_by)
+        if hasattr(self, 'func_editor') and self.func_editor is not None:
+            self.func_editor.refresh_from_step_context()
 
+        # Detect changes
+        self.detect_changes()
+        logger.debug("Step context refreshed - updated function editor component button")
+
+    def _get_event_bus(self):
+        """Get the global event bus from the service adapter.
+
+        Returns:
+            GlobalEventBus instance or None if not found
+        """
+        try:
+            # Navigate up to find main window with service adapter
+            current = self.parent()
+            while current:
+                if hasattr(current, 'service_adapter'):
+                    return current.service_adapter.get_event_bus()
+                current = current.parent()
+
+            logger.warning("Could not find service adapter for event bus")
+            return None
+        except Exception as e:
+            logger.error(f"Error getting event bus: {e}")
+            return None
+
+    def _on_pipeline_changed(self, new_pipeline_steps: list):
+        """Handle pipeline_changed signal from global event bus.
+
+        CRITICAL: This is connected to the global event bus in setup_connections().
+        It receives updates from ANY window that modifies the pipeline:
+        - Pipeline editor code button
+        - Plate manager code button
+        - Pipeline editor UI
+        - Any future pipeline editing source
+
+        This is the OpenHCS "set and forget" pattern - one handler receives ALL updates.
+
+        Args:
+            new_pipeline_steps: Updated list of FunctionStep objects from the pipeline
+        """
+        # Find our step in the new pipeline by matching the original step reference
+        # (The step we're editing might have been modified in the code editor)
+        original_step = getattr(self, 'original_step', None)
+        if not original_step:
+            return
+
+        # Try to find the updated version of our step in the new pipeline
+        # Match by object identity first (if editing existing step)
+        updated_step = None
+        for step in new_pipeline_steps:
+            if step is original_step:
+                updated_step = step
+                break
+
+        # If we found an updated version, refresh our editor with the new values
+        if updated_step and updated_step is not self.editing_step:
+            logger.debug(f"Pipeline changed - updating step editor with new step: {updated_step.name}")
+
+            # Update our editing step reference
+            self.editing_step = updated_step
+            self.step = updated_step
+
+            # Update step editor's step reference
+            if hasattr(self, 'step_editor') and self.step_editor:
+                self.step_editor.step = updated_step
+
+                # Refresh the form manager with new values
+                if hasattr(self.step_editor, 'form_manager') and self.step_editor.form_manager:
+                    self.step_editor.form_manager.object_instance = updated_step
+                    self.step_editor.form_manager._refresh_with_live_context()
+
+            # Update function list editor with new func
+            if hasattr(self, 'func_editor') and self.func_editor and hasattr(updated_step, 'func'):
+                self.func_editor._initialize_pattern_data(updated_step.func)
+                self.func_editor._populate_function_list()
+
+            # Detect changes (might have unsaved changes now)
+            self.detect_changes()
+
+    def _on_config_changed(self, config):
+        """Handle config_changed signal from global event bus.
+
+        CRITICAL: This is connected to the global event bus in setup_connections().
+        It receives updates from ANY window that modifies configs:
+        - PlateManager code button (GlobalPipelineConfig, PipelineConfig)
+        - ConfigWindow code button (GlobalPipelineConfig, PipelineConfig, StepConfig)
+        - Any future config editing source
+
+        This is the OpenHCS "set and forget" pattern - one handler receives ALL updates.
+
+        Args:
+            config: Updated config object (GlobalPipelineConfig, PipelineConfig, or StepConfig)
+        """
+        from openhcs.core.config import PipelineConfig
+        from openhcs.config_framework import is_global_config_instance
+        from openhcs.config_framework.global_config import get_current_global_config
+
+        # Only care about global configs and PipelineConfig changes
+        # (StepConfig changes are handled by the step editor's own form manager)
+        is_global = is_global_config_instance(config)
+        is_pipeline = isinstance(config, PipelineConfig)
+        if not (is_global or is_pipeline):
+            return
+
+        # Only refresh if this is for our orchestrator
+        if not self.orchestrator:
+            return
+
+        # Check if this config belongs to our orchestrator
+        if is_pipeline:
+            # Check if this is our orchestrator's pipeline config
+            if config is not self.orchestrator.pipeline_config:
+                return
+        elif is_global:
+            # Check if this is the current global config
+            current_global = get_current_global_config(type(config))
+            if config is not current_global:
+                return
+
+        logger.debug(f"Step editor received config change: {type(config).__name__}")
+
+        # Trigger cross-window refresh for all form managers
+        # This will update placeholders in the step editor to show new inherited values
+        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+        ParameterFormManager.trigger_global_cross_window_refresh()
+        logger.debug("Triggered global cross-window refresh after config change")
 
     def setup_connections(self):
         """Setup signal/slot connections."""
@@ -326,6 +474,15 @@ class DualEditorWindow(BaseFormDialog):
         # Change detection
         self.changes_detected.connect(self.on_changes_detected)
 
+        # CRITICAL: Connect to global event bus for cross-window updates
+        # This is the OpenHCS "set and forget" pattern - one connection handles ALL sources
+        event_bus = self._get_event_bus()
+        if event_bus:
+            event_bus.pipeline_changed.connect(self._on_pipeline_changed)
+            event_bus.config_changed.connect(self._on_config_changed)
+            event_bus.register_window(self)
+            logger.debug("Connected to global event bus for cross-window updates")
+
     def _convert_step_func_to_list(self):
         """Convert step func to initial pattern format for function list editor."""
         if not hasattr(self.editing_step, 'func') or not self.editing_step.func:
@@ -333,8 +490,22 @@ class DualEditorWindow(BaseFormDialog):
 
         # Return the step func directly - the function list editor will handle the conversion
         result = self.editing_step.func
-        print(f"🔍 DUAL EDITOR _convert_step_func_to_list: returning {result}")
+        logger.debug(f"🔍 DUAL EDITOR _convert_step_func_to_list: returning {result}")
         return result
+
+    def _schedule_function_editor_sync(self):
+        """Schedule a batched sync of the function editor."""
+        self._pending_function_editor_sync = True
+        if not self._function_sync_timer.isActive():
+            self._function_sync_timer.start(0)
+
+    def _flush_function_editor_sync(self):
+        """Run any pending function editor sync."""
+        if not getattr(self, '_pending_function_editor_sync', False):
+            return
+        self._pending_function_editor_sync = False
+        self._sync_function_editor_from_step()
+        self.detect_changes()
 
     def _sync_function_editor_from_step(self):
         """
@@ -350,62 +521,20 @@ class DualEditorWindow(BaseFormDialog):
 
         If the step structure changes in the future, only this method needs updating.
         """
-        logger.info("🔄 _sync_function_editor_from_step called")
+        logger.debug("🔄 _sync_function_editor_from_step called")
 
         # Guard: Only sync if function editor exists
         if not hasattr(self, 'func_editor') or self.func_editor is None:
-            logger.info("⏭️  Function editor doesn't exist yet, skipping sync")
+            logger.debug("⏭️  Function editor doesn't exist yet, skipping sync")
             return
 
-        # CRITICAL: Read from form manager's current values (live context), not from self.editing_step
-        # The form manager updates its self.parameters dict as the user types, but doesn't update
-        # the dataclass instance until save. So we need to read from the form's current state.
-        #
-        # CRITICAL: Also apply lazy resolution to handle None values (inherit from pipeline config)
-        from openhcs.config_framework.context_manager import config_context
+        # CRITICAL: The function editor already has access to step_instance and can resolve
+        # group_by using the same lazy resolution pattern as the function panes.
+        # Just trigger a refresh - the function editor will read from step_instance.processing_config.group_by
+        # with proper context resolution (including live context from other open windows).
+        self.func_editor.refresh_from_step_context()
 
-        try:
-            # Get current values from step editor form (includes nested dataclasses)
-            current_values = self.step_editor.form_manager.get_current_values()
-            processing_config = current_values.get('processing_config')
-
-            if processing_config:
-                # CRITICAL: Apply config_context to enable lazy resolution for None values
-                # When group_by is None, it should inherit from pipeline config
-                # We need to create a temporary step-like object with the live processing_config
-                # so that lazy resolution can work properly
-
-                # Create a simple object that mimics the step's structure for lazy resolution
-                class TempStep:
-                    def __init__(self, processing_config):
-                        self.processing_config = processing_config
-
-                temp_step = TempStep(processing_config)
-
-                with config_context(self.orchestrator.pipeline_config):
-                    with config_context(temp_step):
-                        # Read from the live processing_config with lazy resolution
-                        # If group_by is None, this will resolve to pipeline config's value
-                        effective_group_by = processing_config.group_by
-                        variable_components = processing_config.variable_components or []
-                        logger.info(f"🔍 Live form values (lazy-resolved): group_by={effective_group_by}, variable_components={variable_components}")
-            else:
-                # Fallback: processing_config not in current values (shouldn't happen)
-                logger.warning("⚠️  processing_config not found in current form values, using defaults")
-                effective_group_by = None
-                variable_components = []
-        except Exception as e:
-            logger.error(f"❌ Failed to read live form values: {e}", exc_info=True)
-            effective_group_by = None
-            variable_components = []
-
-        # Update function editor with extracted values
-        logger.info(f"📤 Updating function editor: group_by={effective_group_by}, variable_components={variable_components}")
-        self.func_editor.set_effective_group_by(effective_group_by)
-        self.func_editor.current_variable_components = variable_components
-        self.func_editor._refresh_component_button()
-
-        logger.info(f"✅ Synced function editor: group_by={effective_group_by}, variable_components={variable_components}")
+        logger.debug(f"✅ Triggered function editor refresh from step context")
 
 
 
@@ -487,6 +616,59 @@ class DualEditorWindow(BaseFormDialog):
         
         return info
     
+    def on_orchestrator_config_changed(self, plate_path: str, effective_config):
+        """Handle orchestrator configuration changes for placeholder refresh.
+
+        This is called when the pipeline config is saved and the orchestrator's
+        effective config changes. We need to update our stored pipeline_config
+        reference and refresh the step editor's placeholders.
+
+        Args:
+            plate_path: Path of the plate whose orchestrator config changed
+            effective_config: The orchestrator's new effective configuration
+        """
+        # Only refresh if this is for our orchestrator
+        if self.orchestrator and str(self.orchestrator.plate_path) == plate_path:
+            logger.debug(f"Step editor received orchestrator config change for {plate_path}")
+
+            # Update our stored pipeline_config reference to the orchestrator's current config
+            self.pipeline_config = self.orchestrator.pipeline_config
+
+            # Update the step editor's pipeline_config reference
+            if hasattr(self, 'step_editor') and self.step_editor:
+                self.step_editor.pipeline_config = self.orchestrator.pipeline_config
+
+                # Update the form manager's context_obj to use the new pipeline config
+                if hasattr(self.step_editor, 'form_manager') and self.step_editor.form_manager:
+                    # CRITICAL: Update context_obj for root form manager AND all nested managers
+                    # Nested managers (e.g., processing_config) also have context_obj references that need updating
+                    self._update_context_obj_recursively(self.step_editor.form_manager, self.orchestrator.pipeline_config)
+
+                    # Refresh placeholders to show new inherited values
+                    self.step_editor.form_manager._refresh_all_placeholders()
+                    logger.debug("Refreshed step editor placeholders after pipeline config change")
+
+    def _update_context_obj_recursively(self, form_manager, new_context_obj):
+        """Recursively update context_obj for a form manager and all its nested managers.
+
+        This is critical for proper placeholder resolution after pipeline config changes.
+        When the pipeline config is saved, we get a new PipelineConfig object from the
+        orchestrator. We need to update not just the root form manager's context_obj,
+        but also all nested managers (processing_config, zarr_config, etc.) so they
+        resolve placeholders against the new config.
+
+        Args:
+            form_manager: The ParameterFormManager to update
+            new_context_obj: The new context object (pipeline_config)
+        """
+        # Update this manager's context_obj
+        form_manager.context_obj = new_context_obj
+
+        # Recursively update all nested managers
+        if hasattr(form_manager, 'nested_managers'):
+            for nested_name, nested_manager in form_manager.nested_managers.items():
+                self._update_context_obj_recursively(nested_manager, new_context_obj)
+
     def on_form_parameter_changed(self, param_name: str, value):
         """Handle form parameter changes directly from form manager.
 
@@ -497,14 +679,12 @@ class DualEditorWindow(BaseFormDialog):
         Handles both top-level parameters (e.g., 'name', 'processing_config') and
         nested parameters from nested forms (e.g., 'group_by' from processing_config form).
         """
-        logger.info(f"🔔 on_form_parameter_changed: param_name={param_name}, value type={type(value).__name__}")
+        logger.debug(f"🔔 on_form_parameter_changed: param_name={param_name}, value type={type(value).__name__}")
 
         # Handle reset_all completion signal
         if param_name == "__reset_all_complete__":
-            logger.info("🔄 Received reset_all_complete signal, syncing function editor")
-            # Sync function editor after reset_all completes
-            self._sync_function_editor_from_step()
-            self.detect_changes()
+            logger.debug("🔄 Received reset_all_complete signal, syncing function editor")
+            self._schedule_function_editor_sync()
             return
 
         # CRITICAL: Check if this is a nested parameter (from a nested form manager)
@@ -514,14 +694,12 @@ class DualEditorWindow(BaseFormDialog):
         NESTED_PARAMS = {'group_by', 'variable_components', 'input_source'}
 
         if param_name in NESTED_PARAMS:
-            logger.info(f"🔍 {param_name} is a nested parameter from processing_config")
             # This is a nested parameter change - the nested form manager already updated
             # the processing_config dataclass, so we just need to sync the function editor
             # The step_editor.form_manager has a nested manager for processing_config that
             # already updated self.editing_step.processing_config.{param_name}
-            logger.info(f"🔄 Calling _sync_function_editor_from_step after nested {param_name} change")
-            self._sync_function_editor_from_step()
-            self.detect_changes()
+            logger.debug(f"🔄 Scheduling function editor sync after nested {param_name} change")
+            self._schedule_function_editor_sync()
             return
 
         # CRITICAL FIX: For function parameters, use fresh imports to avoid unpicklable registry wrappers
@@ -538,38 +716,33 @@ class DualEditorWindow(BaseFormDialog):
         # This preserves lazy resolution for fields that weren't changed
         from dataclasses import is_dataclass, fields
         if is_dataclass(value) and not isinstance(value, type):
-            logger.info(f"📦 {param_name} is a nested dataclass, updating fields individually")
+            logger.debug(f"📦 {param_name} is a nested dataclass, updating fields individually")
             # This is a nested dataclass - update fields individually
             existing_config = getattr(self.editing_step, param_name, None)
             if existing_config is not None and hasattr(existing_config, '_resolve_field_value'):
-                logger.info(f"✅ {param_name} is lazy, preserving lazy resolution")
+                logger.debug(f"✅ {param_name} is lazy, preserving lazy resolution")
                 # Existing config is lazy - update fields individually to preserve lazy resolution
                 for field in fields(value):
                     # Use object.__getattribute__ to get raw value (not lazy-resolved)
                     raw_value = object.__getattribute__(value, field.name)
-                    logger.info(f"  📝 Field {field.name}: raw_value={raw_value} (type={type(raw_value).__name__})")
                     # CRITICAL: Always update the field, even if None
                     # When user resets a field, we MUST update it to None so lazy resolution can inherit from context
                     # When user sets a concrete value, we update it to that value
                     object.__setattr__(existing_config, field.name, raw_value)
-                    logger.info(f"    ✏️  Updated {field.name} to {raw_value}")
-                logger.info(f"✅ Updated lazy {param_name} fields individually to preserve lazy resolution")
+                    logger.debug(f"    ✏️  Updated {field.name} to {raw_value}")
+                logger.debug(f"✅ Updated lazy {param_name} fields individually to preserve lazy resolution")
             else:
-                logger.info(f"⚠️  {param_name} is not lazy or doesn't exist, replacing entire config")
+                logger.debug(f"⚠️  {param_name} is not lazy or doesn't exist, replacing entire config")
                 # Not lazy or doesn't exist - just replace it
                 setattr(self.editing_step, param_name, value)
         else:
-            logger.info(f"📄 {param_name} is not a nested dataclass, setting normally")
+            logger.debug(f"📄 {param_name} is not a nested dataclass, setting normally")
             # Not a nested dataclass - just set it normally
             setattr(self.editing_step, param_name, value)
 
-        # SINGLE SOURCE OF TRUTH: Always sync function editor from step
-        # This handles any parameter that might affect component selection
-        # (group_by, variable_components, processing_config, etc.)
-        logger.info(f"🔄 Calling _sync_function_editor_from_step after {param_name} change")
-        self._sync_function_editor_from_step()
-
-        self.detect_changes()
+        # SINGLE SOURCE OF TRUTH: Always sync function editor from step (batched)
+        logger.debug(f"🔄 Scheduling function editor sync after {param_name} change")
+        self._schedule_function_editor_sync()
     
     def on_tab_changed(self, index: int):
         """Handle tab changes."""
@@ -580,14 +753,9 @@ class DualEditorWindow(BaseFormDialog):
     
     def detect_changes(self):
         """Detect if changes have been made."""
-        has_changes = self.original_step != self.editing_step
-
-        # Check function pattern
-        if not has_changes:
-            original_func = getattr(self.original_step, 'func', None)
-            current_func = getattr(self.editing_step, 'func', None)
-            # Simple comparison - could be enhanced for deep comparison
-            has_changes = str(original_func) != str(current_func)
+        current_snapshot = self._serialize_current_form_state()
+        baseline_snapshot = getattr(self, '_baseline_snapshot', None)
+        has_changes = current_snapshot != baseline_snapshot
 
         if has_changes != self.has_changes:
             self.has_changes = has_changes
@@ -602,8 +770,8 @@ class DualEditorWindow(BaseFormDialog):
             self.changes_label.setText("")
             self.save_button.setEnabled(False)
     
-    def save_edit(self):
-        """Save the edited step."""
+    def save_edit(self, *, close_window=True):
+        """Save the edited step. If close_window is True, close after saving; else, keep open."""
         try:
             # CRITICAL FIX: Sync function pattern from function editor BEFORE collecting form values
             # The function editor doesn't use a form manager, so we need to explicitly sync it
@@ -645,21 +813,39 @@ class DualEditorWindow(BaseFormDialog):
 
             # CRITICAL FIX: For existing steps, apply changes to original step object
             # This ensures the pipeline gets the updated step with the same object identity
+            logger.info(f"💾 Save: is_new={self.is_new}, original_step_reference={self.original_step_reference is not None}")
+
             if self.original_step_reference is not None:
-                # Copy all attributes from editing_step to original_step_reference
+                # Editing existing step
+                logger.info(f"💾 Editing existing step: {getattr(self.original_step_reference, 'name', 'Unknown')}")
                 self._apply_changes_to_original()
                 step_to_save = self.original_step_reference
             else:
-                # For new steps, use the editing_step directly
+                # For new steps, after first save, switch to edit mode
+                logger.info(f"💾 Creating new step, switching to edit mode")
                 step_to_save = self.editing_step
+                self.original_step_reference = self.editing_step
+                self.is_new = False
+                logger.info(f"💾 Set is_new=False, original_step_reference set")
+                self._update_window_title()
+                self._update_save_button_text()
 
             # Emit signals and call callback
+            logger.info(f"💾 Emitting step_saved signal for: {getattr(step_to_save, 'name', 'Unknown')}")
             self.step_saved.emit(step_to_save)
 
             if self.on_save_callback:
+                logger.info(f"💾 Calling on_save_callback")
                 self.on_save_callback(step_to_save)
 
-            self.accept()  # BaseFormDialog handles unregistration
+            # After a successful save, refresh the baseline snapshot used for change detection.
+            # This ensures Shift+Save (which keeps the window open) clears the "Unsaved changes" label.
+            self.original_step = self._clone_step(self.editing_step)
+            self._baseline_snapshot = self._serialize_for_change_detection(self.editing_step)
+            self.detect_changes()
+
+            if close_window:
+                self.accept()  # BaseFormDialog handles unregistration
             logger.debug(f"Step saved: {getattr(step_to_save, 'name', 'Unknown')}")
 
         except Exception as e:
@@ -698,6 +884,83 @@ class DualEditorWindow(BaseFormDialog):
         import copy
         return copy.deepcopy(step)
 
+    _CHANGE_DETECTION_EXCLUDE_PARAMS = {'kwargs'}
+
+    def _serialize_for_change_detection(self, step):
+        """Create a normalized snapshot of the step for change detection."""
+        params = UnifiedParameterAnalyzer.analyze(step)
+        snapshot = {}
+        for name, param_info in params.items():
+            if name in self._CHANGE_DETECTION_EXCLUDE_PARAMS:
+                continue
+            current_value = getattr(step, name, param_info.default_value)
+            snapshot[name] = self._normalize_value_for_change_detection(current_value)
+        return snapshot
+
+    def _serialize_current_form_state(self):
+        """Serialize a snapshot of the step using live form values (including nested dataclasses)."""
+        import copy
+
+        temp_step = copy.deepcopy(self.editing_step)
+
+        for tab_index in range(self.tab_widget.count()):
+            tab_widget = self.tab_widget.widget(tab_index)
+            form_manager = getattr(tab_widget, 'form_manager', None)
+            if not form_manager:
+                continue
+
+            current_values = form_manager.get_current_values()
+            for param_name, value in current_values.items():
+                if hasattr(temp_step, param_name):
+                    setattr(temp_step, param_name, value)
+
+        return self._serialize_for_change_detection(temp_step)
+
+    def _normalize_value_for_change_detection(self, value):
+        """Normalize complex values into comparison-friendly primitives."""
+        from dataclasses import is_dataclass, fields
+        from pathlib import Path
+
+        if value is None:
+            return None
+
+        if isinstance(value, (str, int, float, bool)):
+            return value
+
+        if isinstance(value, Path):
+            return str(value)
+
+        if isinstance(value, list):
+            return [self._normalize_value_for_change_detection(v) for v in value]
+
+        if isinstance(value, tuple):
+            return tuple(self._normalize_value_for_change_detection(v) for v in value)
+
+        if isinstance(value, dict):
+            return {k: self._normalize_value_for_change_detection(v) for k, v in value.items()}
+
+        if hasattr(value, 'value') and hasattr(value, 'name'):
+            return value.value
+
+        if callable(value):
+            module = getattr(value, '__module__', '')
+            qualname = getattr(value, '__qualname__', getattr(value, '__name__', repr(value)))
+            return f"{module}.{qualname}"
+
+        if is_dataclass(value):
+            from openhcs.config_framework.lazy_factory import get_base_type_for_lazy
+            is_lazy_dataclass = get_base_type_for_lazy(type(value)) is not None
+            normalized = {}
+            for field in fields(value):
+                if is_lazy_dataclass:
+                    raw_field_value = object.__getattribute__(value, field.name)
+                else:
+                    raw_field_value = getattr(value, field.name)
+                normalized[field.name] = self._normalize_value_for_change_detection(raw_field_value)
+            return normalized
+
+        return repr(value)
+
     def _create_new_step(self):
         """Create a new empty step."""
         from openhcs.core.steps.function_step import FunctionStep
@@ -708,6 +971,11 @@ class DualEditorWindow(BaseFormDialog):
 
     def cancel_edit(self):
         """Cancel editing and close dialog."""
+        # Just call reject() - it handles everything including the confirmation dialog
+        self.reject()
+
+    def reject(self):
+        """Handle dialog rejection (Cancel button or Escape key)."""
         if self.has_changes:
             from PyQt6.QtWidgets import QMessageBox
             reply = QMessageBox.question(
@@ -722,8 +990,15 @@ class DualEditorWindow(BaseFormDialog):
                 return
 
         self.step_cancelled.emit()
-        self.reject()  # BaseFormDialog handles unregistration
-        logger.debug("Step editing cancelled")
+        logger.info("🔍 DualEditorWindow: About to call super().reject()")
+        super().reject()  # BaseFormDialog handles unregistration
+
+        # CRITICAL: Trigger global refresh AFTER unregistration so other windows
+        # re-collect live context without this cancelled window's values
+        logger.info("🔍 DualEditorWindow: About to trigger global refresh")
+        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+        ParameterFormManager.trigger_global_cross_window_refresh()
+        logger.info("🔍 DualEditorWindow: Triggered global refresh after cancel")
 
     def closeEvent(self, event):
         """Handle dialog close event."""

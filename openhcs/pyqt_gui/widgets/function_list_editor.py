@@ -36,13 +36,14 @@ class FunctionListEditorWidget(QWidget):
     # Signals
     function_pattern_changed = pyqtSignal()
     
-    def __init__(self, initial_functions: Union[List, Dict, callable, None] = None, 
-                 step_identifier: str = None, service_adapter=None, color_scheme: Optional[PyQt6ColorScheme] = None, parent=None):
+    def __init__(self, initial_functions: Union[List, Dict, callable, None] = None,
+                 step_identifier: str = None, service_adapter=None, color_scheme: Optional[PyQt6ColorScheme] = None,
+                 step_instance=None, scope_id: Optional[str] = None, parent=None):
         super().__init__(parent)
 
         # Initialize color scheme
         self.color_scheme = color_scheme or PyQt6ColorScheme()
-        
+
         # Initialize services (reuse existing business logic)
         self.registry_service = RegistryService()
         self.data_manager = PatternDataManager()
@@ -50,6 +51,12 @@ class FunctionListEditorWidget(QWidget):
 
         # Step identifier for cache isolation
         self.step_identifier = step_identifier or f"widget_{id(self)}"
+
+        # CRITICAL: Store step instance for context hierarchy (Function → Step → Pipeline → Global)
+        self.step_instance = step_instance
+
+        # CRITICAL: Store scope_id for cross-window live context updates
+        self.scope_id = scope_id
 
         # Step configuration properties (mirrors Textual TUI)
         self.current_group_by = None  # Current GroupBy setting from step editor
@@ -63,13 +70,13 @@ class FunctionListEditorWidget(QWidget):
 
         # Initialize pattern data and mode
         self._initialize_pattern_data(initial_functions)
-        
+
         # UI components
         self.function_panes = []
-        
+
         self.setup_ui()
         self.setup_connections()
-        
+
         logger.debug(f"Function list editor initialized with {len(self.functions)} functions")
 
     def _initialize_pattern_data(self, initial_functions):
@@ -277,7 +284,8 @@ class FunctionListEditorWidget(QWidget):
             # Create function panes
             for i, func_item in enumerate(self.functions):
                 print(f"🔍 FUNC LIST EDITOR: Creating pane {i} with func_item = {func_item}")
-                pane = FunctionPaneWidget(func_item, i, self.service_adapter, color_scheme=self.color_scheme)
+                pane = FunctionPaneWidget(func_item, i, self.service_adapter, color_scheme=self.color_scheme,
+                                         step_instance=self.step_instance, scope_id=self.scope_id)
 
                 # Connect signals (using actual FunctionPaneWidget signal names)
                 pane.move_function.connect(self._move_function)
@@ -449,57 +457,19 @@ class FunctionListEditorWidget(QWidget):
             self._populate_function_list()
             self.function_pattern_changed.emit()
 
+            # CRITICAL: Trigger global cross-window refresh for ALL open windows
+            # This ensures any window with placeholders (configs, steps, etc.) refreshes
+            from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+            ParameterFormManager.trigger_global_cross_window_refresh()
+
         except Exception as e:
             if self.service_adapter:
                 self.service_adapter.show_error_dialog(f"Failed to apply edited pattern: {str(e)}")
 
     def _patch_lazy_constructors(self):
         """Context manager that patches lazy dataclass constructors to preserve None vs concrete distinction."""
-        from contextlib import contextmanager
-        from openhcs.core.lazy_placeholder import LazyDefaultPlaceholderService
-        import dataclasses
-
-        @contextmanager
-        def patch_context():
-            # Store original constructors
-            original_constructors = {}
-
-            # Find all lazy dataclass types that need patching
-            from openhcs.core.config import LazyZarrConfig, LazyStepMaterializationConfig, LazyWellFilterConfig
-            lazy_types = [LazyZarrConfig, LazyStepMaterializationConfig, LazyWellFilterConfig]
-
-            # Add any other lazy types that might be used
-            for lazy_type in lazy_types:
-                if LazyDefaultPlaceholderService.has_lazy_resolution(lazy_type):
-                    # Store original constructor
-                    original_constructors[lazy_type] = lazy_type.__init__
-
-                    # Create patched constructor that uses raw values
-                    def create_patched_init(original_init, dataclass_type):
-                        def patched_init(self, **kwargs):
-                            # Use raw value approach instead of calling original constructor
-                            # This prevents lazy resolution during code execution
-                            for field in dataclasses.fields(dataclass_type):
-                                value = kwargs.get(field.name, None)
-                                object.__setattr__(self, field.name, value)
-
-                            # Initialize any required lazy dataclass attributes
-                            if hasattr(dataclass_type, '_is_lazy_dataclass'):
-                                object.__setattr__(self, '_is_lazy_dataclass', True)
-
-                        return patched_init
-
-                    # Apply the patch
-                    lazy_type.__init__ = create_patched_init(original_constructors[lazy_type], lazy_type)
-
-            try:
-                yield
-            finally:
-                # Restore original constructors
-                for lazy_type, original_init in original_constructors.items():
-                    lazy_type.__init__ = original_init
-
-        return patch_context()
+        from openhcs.introspection import patch_lazy_constructors
+        return patch_lazy_constructors()
 
     def _move_function(self, index, direction):
         """Move function up or down."""
@@ -574,6 +544,75 @@ class FunctionListEditorWidget(QWidget):
         self.functions = functions.copy() if functions else []
         self._update_pattern_data()
         self._populate_function_list()
+
+    def refresh_from_step_context(self) -> None:
+        """Refresh group_by and variable_components from step_instance using lazy resolution.
+
+        CRITICAL: This uses the SAME live context collection mechanism as form managers
+        to ensure we see live values from other open windows (PipelineConfig editor, etc.).
+        """
+        if not hasattr(self, 'step_instance') or self.step_instance is None:
+            logger.warning("No step_instance available for context refresh")
+            return
+
+        from openhcs.config_framework.context_manager import config_context
+        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+
+        try:
+            # CRITICAL: Collect live context from other open windows using the same mechanism as form managers
+            # This ensures we see live PipelineConfig values, not just the saved ones
+            live_context = {}
+
+            # Iterate through all active form managers to collect live context
+            for manager in ParameterFormManager._active_form_managers:
+                # Only collect from managers in the same scope hierarchy
+                if hasattr(self, 'scope_id') and hasattr(manager, 'scope_id'):
+                    # Check scope visibility (same logic as form managers)
+                    if manager.scope_id is None or (self.scope_id and self.scope_id.startswith(manager.scope_id)):
+                        # Get user-modified values (concrete, non-None values only)
+                        live_values = manager.get_user_modified_values()
+                        obj_type = type(manager.object_instance)
+                        live_context[obj_type] = live_values
+
+            # Build context stack with live values
+            from contextlib import ExitStack
+            from openhcs.core.config import PipelineConfig, GlobalPipelineConfig
+            import dataclasses
+
+            with ExitStack() as stack:
+                # Add GlobalPipelineConfig from live context if available
+                if GlobalPipelineConfig in live_context:
+                    global_live = live_context[GlobalPipelineConfig]
+                    # Reconstruct nested dataclasses from live values
+                    from openhcs.config_framework.context_manager import get_base_global_config
+                    thread_local_global = get_base_global_config()
+                    if thread_local_global and global_live:
+                        global_instance = dataclasses.replace(thread_local_global, **global_live)
+                        stack.enter_context(config_context(global_instance))
+
+                # Add PipelineConfig from live context if available
+                if PipelineConfig in live_context:
+                    pipeline_live = live_context[PipelineConfig]
+                    if pipeline_live:
+                        pipeline_instance = PipelineConfig(**pipeline_live)
+                        stack.enter_context(config_context(pipeline_instance))
+
+                # Add step instance
+                stack.enter_context(config_context(self.step_instance))
+
+                # Resolve group_by and variable_components with full context stack
+                effective_group_by = self.step_instance.processing_config.group_by
+                variable_components = self.step_instance.processing_config.variable_components or []
+
+            # Update state
+            self.current_group_by = effective_group_by
+            self.current_variable_components = variable_components
+
+            # Refresh UI
+            self._refresh_component_button()
+
+        except Exception as e:
+            logger.error(f"❌ Failed to refresh from step context: {e}", exc_info=True)
 
     def set_effective_group_by(self, group_by: Optional[GroupBy]) -> None:
         """Accept authoritative GroupBy from parent (step.processing_config) and refresh UI.

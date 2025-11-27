@@ -325,8 +325,21 @@ class ZMQServer(ABC, metaclass=AutoRegisterMeta):
         import zmq
         if not self._running:
             return
+
+        # CRITICAL: ZMQ REP sockets require strict recv->send->recv->send alternation
+        # If recv() succeeds but send() doesn't happen, the socket enters an invalid
+        # state and refuses all future recv() calls, causing the server to hang.
+        # We must ensure that once recv() succeeds, we ALWAYS send a response.
+
+        # Step 1: Try to receive a message (non-blocking)
         try:
             control_data = pickle.loads(self.control_socket.recv(zmq.NOBLOCK))
+        except zmq.Again:
+            # No message available - this is normal, just return
+            return
+
+        # Step 2: We received a message, so we MUST send a response to maintain socket state
+        try:
             if control_data.get(MessageFields.TYPE) == ControlMessageType.PING.value:
                 if not self._ready:
                     self._ready = True
@@ -334,9 +347,18 @@ class ZMQServer(ABC, metaclass=AutoRegisterMeta):
                 response = self._create_pong_response()
             else:
                 response = self.handle_control_message(control_data)
+        except Exception as e:
+            # ANY error during processing - send error response to maintain socket state
+            logger.error(f"Error processing control message: {e}", exc_info=True)
+            response = {'status': 'error', 'message': str(e), 'type': 'error'}
+
+        # Step 3: ALWAYS send response (even if it's an error response)
+        try:
             self.control_socket.send(pickle.dumps(response))
-        except zmq.Again:
-            pass
+        except Exception as e:
+            # If send fails, the socket is likely broken - log and continue
+            # The socket will be cleaned up when the server stops
+            logger.error(f"Failed to send response on control socket: {e}", exc_info=True)
 
     def _create_pong_response(self):
         return PongResponse(port=self.port, control_port=self.control_port, ready=self._ready,

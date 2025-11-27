@@ -19,6 +19,7 @@ from PyQt6.QtGui import QFont
 # Use the registry service from correct location
 from openhcs.processing.backends.lib_registry.registry_service import RegistryService
 from openhcs.processing.backends.lib_registry.unified_registry import FunctionMetadata
+from openhcs.processing.custom_functions.signals import custom_function_signals
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 
@@ -144,6 +145,9 @@ class FunctionSelectorDialog(QDialog):
         self.populate_module_tree()
         self.populate_function_table()
 
+        # Connect to custom function signals for auto-refresh
+        custom_function_signals.functions_changed.connect(self._on_functions_changed)
+
         logger.debug(f"Function selector initialized with {len(self.all_functions_metadata)} functions")
 
     def _load_function_data(self) -> None:
@@ -193,6 +197,22 @@ class FunctionSelectorDialog(QDialog):
 
 
         self.filtered_functions = self.all_functions_metadata.copy()
+
+    def _on_functions_changed(self):
+        """Handle custom function changes by reloading and refreshing the view."""
+        logger.info("Custom functions changed - refreshing function selector")
+
+        # Clear caches to force reload
+        FunctionSelectorDialog.clear_metadata_cache()
+
+        # Reload function data
+        self._load_function_data()
+
+        # Refresh both views
+        self.populate_module_tree()
+        self.populate_function_table()
+
+        logger.debug(f"Function selector refreshed with {len(self.all_functions_metadata)} functions")
 
     def populate_module_tree(self):
         """Populate the module tree with hierarchical function organization based purely on module paths."""

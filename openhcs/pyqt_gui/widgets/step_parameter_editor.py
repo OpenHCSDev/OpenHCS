@@ -11,18 +11,22 @@ from pathlib import Path
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QScrollArea
+    QScrollArea, QSplitter, QTreeWidget, QTreeWidgetItem
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 
 from openhcs.core.steps.function_step import FunctionStep
 from openhcs.introspection.signature_analyzer import SignatureAnalyzer
 from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+from openhcs.pyqt_gui.widgets.shared.config_hierarchy_tree import ConfigHierarchyTreeHelper
+from openhcs.pyqt_gui.widgets.shared.collapsible_splitter_helper import CollapsibleSplitterHelper
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
+from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 from openhcs.pyqt_gui.config import PyQtGUIConfig, get_default_pyqt_gui_config
 # REMOVED: LazyDataclassFactory import - no longer needed since step editor
 # uses existing lazy dataclass instances from the step
 from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
+from openhcs.ui.shared.code_editor_form_updater import CodeEditorFormUpdater
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +50,7 @@ class StepParameterEditorWidget(QWidget):
         # Initialize color scheme and GUI config
         self.color_scheme = color_scheme or PyQt6ColorScheme()
         self.gui_config = gui_config or get_default_pyqt_gui_config()
+        self.style_generator = StyleSheetGenerator(self.color_scheme)
 
         self.step = step
         self.service_adapter = service_adapter
@@ -92,6 +97,10 @@ class StepParameterEditorWidget(QWidget):
 
             parameters[name] = current_value
             parameter_types[name] = info.param_type
+
+        # Track dataclass-backed parameters for the hierarchy tree
+        self._tree_dataclass_params = self._collect_dataclass_parameters(parameter_types)
+        self.tree_helper = ConfigHierarchyTreeHelper()
         
         # SIMPLIFIED: Create parameter form manager using dual-axis resolution
 
@@ -122,7 +131,9 @@ class StepParameterEditorWidget(QWidget):
             field_id=field_id,                   # Unique field_id based on step index
             config=config                        # Pass configuration object
         )
-        
+        self.hierarchy_tree = None
+        self.content_splitter = None
+
         self.setup_ui()
         self.setup_connections()
 
@@ -181,6 +192,112 @@ class StepParameterEditorWidget(QWidget):
     # not create new "StepLevel" versions. The AbstractStep already has the correct
     # lazy dataclass types (LazyNapariStreamingConfig, LazyStepMaterializationConfig, etc.)
 
+    def _collect_dataclass_parameters(self, parameter_types):
+        """Return dataclass-based parameters for building the hierarchy tree."""
+        dataclass_params = {}
+        for field_name, param_type in parameter_types.items():
+            if field_name == 'func':
+                continue
+
+            dataclass_type = self._extract_dataclass_from_param_type(param_type)
+            if dataclass_type is not None:
+                dataclass_params[field_name] = dataclass_type
+
+        return dataclass_params
+
+    def _extract_dataclass_from_param_type(self, param_type):
+        """Resolve the concrete dataclass type from the annotated parameter."""
+        import dataclasses
+        from typing import Union, get_args, get_origin
+
+        resolved_type = param_type
+
+        try:
+            origin = get_origin(param_type)
+        except Exception:
+            origin = None
+
+        if origin is Union:
+            args = [arg for arg in get_args(param_type) if arg is not type(None)]
+            if len(args) == 1:
+                resolved_type = args[0]
+
+        if resolved_type is None or isinstance(resolved_type, str):
+            return None
+
+        if dataclasses.is_dataclass(resolved_type):
+            return resolved_type
+
+        return None
+
+    def _create_configuration_tree(self) -> Optional[QTreeWidget]:
+        """Create and populate the configuration hierarchy tree."""
+        if not getattr(self, '_tree_dataclass_params', None):
+            return None
+
+        # Use default minimum_width=0 from shared helper (allows collapsing)
+        tree = self.tree_helper.create_tree_widget()
+        self.tree_helper.populate_from_mapping(tree, self._tree_dataclass_params)
+
+        tree.itemDoubleClicked.connect(self._on_tree_item_double_clicked)
+        return tree
+
+    def _on_tree_item_double_clicked(self, item: QTreeWidgetItem, column: int):
+        """Scroll to the associated form section when a tree item is activated."""
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+        if not data or data.get('ui_hidden'):
+            return
+
+        item_type = data.get('type')
+        if item_type == 'dataclass':
+            field_name = data.get('field_name')
+            if field_name:
+                self._scroll_to_section(field_name)
+        elif item_type == 'inheritance_link':
+            target_class = data.get('target_class')
+            if target_class:
+                field_name = self._find_field_for_class(target_class)
+                if field_name:
+                    self._scroll_to_section(field_name)
+
+    def _find_field_for_class(self, target_class) -> Optional[str]:
+        """Locate the parameter field that edits the given dataclass."""
+        for field_name, dataclass_type in self._tree_dataclass_params.items():
+            base_type = self.tree_helper.get_base_type(dataclass_type)
+            if target_class in (dataclass_type, base_type):
+                return field_name
+        return None
+
+    def _scroll_to_section(self, field_name: str):
+        """Ensure the requested parameter section is visible."""
+        if not hasattr(self, 'scroll_area') or self.scroll_area is None:
+            logger.warning("Scroll area not initialized; cannot navigate to section")
+            return
+
+        nested_managers = getattr(self.form_manager, 'nested_managers', {})
+        nested_manager = nested_managers.get(field_name)
+        if not nested_manager:
+            logger.warning(f"Field '{field_name}' not found in nested managers")
+            return
+
+        first_widget = None
+        if hasattr(nested_manager, 'widgets') and nested_manager.widgets:
+            first_param_name = next(iter(nested_manager.widgets.keys()))
+            first_widget = nested_manager.widgets[first_param_name]
+
+        if first_widget:
+            self.scroll_area.ensureWidgetVisible(first_widget, 100, 100)
+            return
+
+        from PyQt6.QtWidgets import QGroupBox
+        current = nested_manager.parentWidget()
+        while current:
+            if isinstance(current, QGroupBox):
+                self.scroll_area.ensureWidgetVisible(current, 50, 50)
+                return
+            current = current.parentWidget()
+
+        logger.warning(f"Could not locate widget for '{field_name}' to scroll into view")
 
 
 
@@ -204,6 +321,12 @@ class StepParameterEditorWidget(QWidget):
         header_layout.addStretch()
 
         # Action buttons in header (preserving functionality)
+        code_btn = QPushButton("Code")
+        code_btn.setMaximumWidth(60)
+        code_btn.setStyleSheet(self._get_button_style())
+        code_btn.clicked.connect(self.view_step_code)
+        header_layout.addWidget(code_btn)
+
         load_btn = QPushButton("Load .step")
         load_btn.setMaximumWidth(100)
         load_btn.setStyleSheet(self._get_button_style())
@@ -227,7 +350,28 @@ class StepParameterEditorWidget(QWidget):
 
         # Add form manager directly to scroll area (like config window)
         self.scroll_area.setWidget(self.form_manager)
-        layout.addWidget(self.scroll_area)
+        hierarchy_tree = self._create_configuration_tree()
+        if hierarchy_tree:
+            splitter = QSplitter(Qt.Orientation.Horizontal)
+            splitter.setChildrenCollapsible(True)  # CRITICAL: Allow tree to collapse
+            splitter.setHandleWidth(5)  # Make handle more visible
+            splitter.addWidget(hierarchy_tree)
+            splitter.addWidget(self.scroll_area)
+            splitter.setSizes([280, 720])
+            layout.addWidget(splitter, 1)
+            self.hierarchy_tree = hierarchy_tree
+            self.content_splitter = splitter
+
+            # Install collapsible splitter helper for double-click toggle
+            self.splitter_helper = CollapsibleSplitterHelper(splitter, left_panel_index=0)
+            self.splitter_helper.set_initial_size(280)
+        else:
+            layout.addWidget(self.scroll_area)
+            self.hierarchy_tree = None
+            self.content_splitter = None
+
+        # Apply tree widget styling (matches config window)
+        self.setStyleSheet(self.style_generator.generate_tree_widget_style())
     
     def _get_button_style(self) -> str:
         """Get consistent button styling."""
@@ -376,5 +520,103 @@ class StepParameterEditorWidget(QWidget):
         for param_name in self.form_manager.parameters.keys():
             current_value = getattr(self.step, param_name, None)
             self.form_manager.update_parameter(param_name, current_value)
-        
+
         logger.debug(f"Updated step parameter editor for step: {getattr(step, 'name', 'Unknown')}")
+
+    def view_step_code(self):
+        """View the complete FunctionStep as Python code."""
+        try:
+            from openhcs.pyqt_gui.services.simple_code_editor import SimpleCodeEditorService
+            from openhcs.debug.pickle_to_python import generate_step_code
+            import os
+
+            # CRITICAL: Refresh with live context BEFORE getting current values
+            self.form_manager._refresh_with_live_context()
+
+            # Get current step from form (includes live context values)
+            current_values = self.form_manager.get_current_values()
+
+            # CRITICAL: Get func from parent dual editor's function list editor if available
+            # The func is managed by the Function Pattern tab in the dual editor
+            func = self.step.func  # Default to step's current func
+
+            # Check if we're inside a dual editor window with a function list editor
+            parent_window = self.window()
+            if hasattr(parent_window, 'func_editor') and parent_window.func_editor:
+                # Get live func pattern from function list editor
+                func = parent_window.func_editor.current_pattern
+                logger.debug(f"Using live func from function list editor: {func}")
+            else:
+                logger.debug(f"Using func from step instance: {func}")
+
+            current_values['func'] = func
+
+            from openhcs.core.steps.function_step import FunctionStep
+            current_step = FunctionStep(**current_values)
+
+            # Generate code using existing pattern
+            python_code = generate_step_code(current_step, clean_mode=False)
+
+            # Launch editor
+            editor_service = SimpleCodeEditorService(self)
+            use_external = os.environ.get('OPENHCS_USE_EXTERNAL_EDITOR', '').lower() in ('1', 'true', 'yes')
+
+            editor_service.edit_code(
+                initial_content=python_code,
+                title=f"Edit Step: {current_step.name}",
+                callback=self._handle_edited_step_code,
+                use_external=use_external,
+                code_type='step'
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to open step code editor: {e}")
+            if self.service_adapter:
+                self.service_adapter.show_error_dialog(f"Failed to open code editor: {str(e)}")
+
+    def _handle_edited_step_code(self, edited_code: str) -> None:
+        """Handle the edited step code from code editor."""
+        try:
+            # SIMPLIFIED: Just exec with patched constructors
+            # The patched constructors preserve None vs concrete distinction in raw field values
+            # No need to parse code - just inspect raw values after exec
+            namespace = {}
+            with CodeEditorFormUpdater.patch_lazy_constructors():
+                exec(edited_code, namespace)
+
+            new_step = namespace.get('step')
+            if not new_step:
+                raise ValueError("No 'step' variable found in edited code")
+
+            # Update step object
+            self.step = new_step
+
+            # OPTIMIZATION: Block cross-window updates during bulk update
+            self.form_manager._block_cross_window_updates = True
+            try:
+                CodeEditorFormUpdater.update_form_from_instance(
+                    self.form_manager,
+                    new_step,
+                    broadcast_callback=None
+                )
+            finally:
+                self.form_manager._block_cross_window_updates = False
+
+            # CRITICAL: Update function list editor if we're inside a dual editor window
+            parent_window = self.window()
+            if hasattr(parent_window, 'func_editor') and parent_window.func_editor:
+                func_editor = parent_window.func_editor
+                func_editor._initialize_pattern_data(new_step.func)
+                func_editor._populate_function_list()
+                logger.debug(f"Updated function list editor with new func: {new_step.func}")
+
+            # CodeEditorFormUpdater already refreshes placeholders and emits context events
+
+            # Emit step parameter changed signal for parent window
+            self.step_parameter_changed.emit()
+
+            logger.info(f"Updated step from code editor: {new_step.name}")
+
+        except Exception as e:
+            logger.error(f"Failed to apply edited step code: {e}")
+            raise

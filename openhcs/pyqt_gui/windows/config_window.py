@@ -7,6 +7,7 @@ Uses hybrid approach: extracted business logic + clean PyQt6 UI.
 
 import logging
 import dataclasses
+import copy
 from typing import Type, Any, Callable, Optional
 
 from PyQt6.QtWidgets import (
@@ -15,14 +16,18 @@ from PyQt6.QtWidgets import (
     QLineEdit, QSpinBox, QDoubleSpinBox, QCheckBox, QComboBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont, QColor
+from PyQt6.QtGui import QFont
 
 # Infrastructure classes removed - functionality migrated to ParameterFormManager service layer
 from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+from openhcs.pyqt_gui.widgets.shared.config_hierarchy_tree import ConfigHierarchyTreeHelper
+from openhcs.pyqt_gui.widgets.shared.collapsible_splitter_helper import CollapsibleSplitterHelper
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.pyqt_gui.windows.base_form_dialog import BaseFormDialog
 from openhcs.core.config import GlobalPipelineConfig
+from openhcs.config_framework import is_global_config_type
+from openhcs.ui.shared.code_editor_form_updater import CodeEditorFormUpdater
 # ❌ REMOVED: require_config_context decorator - enhanced decorator events system handles context automatically
 from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
 
@@ -52,8 +57,7 @@ class ConfigWindow(BaseFormDialog):
     def __init__(self, config_class: Type, current_config: Any,
                  on_save_callback: Optional[Callable] = None,
                  color_scheme: Optional[PyQt6ColorScheme] = None, parent=None,
-                 scope_id: Optional[str] = None,
-                 orchestrator=None):
+                 scope_id: Optional[str] = None):
         """
         Initialize the configuration window.
 
@@ -64,7 +68,6 @@ class ConfigWindow(BaseFormDialog):
             color_scheme: Color scheme for styling (optional, uses default if None)
             parent: Parent widget
             scope_id: Optional scope identifier (e.g., plate_path) to limit cross-window updates to same orchestrator
-            orchestrator: Optional orchestrator reference for live updates (PipelineConfig only)
         """
         super().__init__(parent)
 
@@ -73,20 +76,18 @@ class ConfigWindow(BaseFormDialog):
         self.current_config = current_config
         self.on_save_callback = on_save_callback
         self.scope_id = scope_id  # Store scope_id for passing to form_manager
-        self.orchestrator = orchestrator  # Store orchestrator for live updates
+        self._global_context_dirty = False
+        self._original_global_config_snapshot = None
 
         # Flag to prevent refresh during save operation
         self._saving = False
-
-        # LIVE UPDATES ARCHITECTURE: Store original config for Cancel restoration
-        # When user clicks Cancel, we restore this original state
-        import copy
-        self._original_config = copy.deepcopy(current_config)
-        logger.debug(f"🔍 LIVE_UPDATES: Stored original config for Cancel restoration")
+        self._suppress_global_context_sync = False
+        self._needs_global_context_resync = False
 
         # Initialize color scheme and style generator
         self.color_scheme = color_scheme or PyQt6ColorScheme()
         self.style_generator = StyleSheetGenerator(self.color_scheme)
+        self.tree_helper = ConfigHierarchyTreeHelper()
 
         # SIMPLIFIED: Use dual-axis resolution
         from openhcs.core.lazy_placeholder import LazyDefaultPlaceholderService
@@ -106,51 +107,26 @@ class ConfigWindow(BaseFormDialog):
 
         # CRITICAL: Config window manages its own scroll area, so tell form_manager NOT to create one
         # This prevents double scroll areas which cause navigation bugs
-
-        # TREE REGISTRY: Determine parent node based on config type
-        from openhcs.config_framework.config_tree_registry import ConfigTreeRegistry
-        registry = ConfigTreeRegistry.instance()
-
-        # Determine parent node and field_id based on config type:
-        # - GlobalPipelineConfig: No parent (root of tree), field_id = "global"
-        # - PipelineConfig (Plate): Parent is global node, field_id = scope_id
-        is_global_config = (root_field_id == "GlobalPipelineConfig")
-
-        if is_global_config:
-            parent_node = None
-            field_id = "global"
-        else:
-            # Plate config - parent is global node (get or create)
-            global_node = registry.get_node("global")
-            if not global_node:
-                # Create global node on demand
-                from openhcs.config_framework.context_manager import get_base_global_config
-                global_config = get_base_global_config()
-                global_node = registry.register("global", global_config, parent=None)
-            parent_node = global_node
-            field_id = self.scope_id if self.scope_id else root_field_id
-
         self.form_manager = ParameterFormManager.from_dataclass_instance(
             dataclass_instance=current_config,
-            field_id=field_id,
+            field_id=root_field_id,
             placeholder_prefix=placeholder_prefix,
             color_scheme=self.color_scheme,
             use_scroll_area=False,  # Config window handles scrolling
             global_config_type=global_config_type,
             context_obj=None,  # Inherit from thread-local GlobalPipelineConfig only
-            scope_id=self.scope_id,  # Pass scope_id to limit cross-window updates to same orchestrator
-            parent_node=parent_node  # Parent ConfigNode for tree registry
+            scope_id=self.scope_id  # Pass scope_id to limit cross-window updates to same orchestrator
         )
+
+        if is_global_config_type(self.config_class):
+            self._original_global_config_snapshot = copy.deepcopy(current_config)
+            self.form_manager.parameter_changed.connect(self._on_global_config_field_changed)
 
         # No config_editor needed - everything goes through form_manager
         self.config_editor = None
 
         # Setup UI
         self.setup_ui()
-
-        # LIVE UPDATES ARCHITECTURE: ParameterFormManager now handles thread-local updates
-        # automatically via _emit_cross_window_change() - no need to connect here
-        # ConfigWindow only needs to handle Cancel restoration (see reject() method)
 
         logger.debug(f"Config window initialized for {config_class.__name__}")
 
@@ -214,18 +190,20 @@ class ConfigWindow(BaseFormDialog):
         save_button = QPushButton("Save")
         save_button.setFixedHeight(28)
         save_button.setMinimumWidth(70)
-        save_button.clicked.connect(self.save_config)
+        self._setup_save_button(save_button, self.save_config)
         save_button.setStyleSheet(button_styles["save"])
         header_layout.addWidget(save_button)
 
         layout.addWidget(header_widget)
 
         # Create splitter with tree view on left and form on right
-        splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.splitter.setChildrenCollapsible(True)  # Allow collapsing to 0
+        self.splitter.setHandleWidth(5)  # Make handle more visible
 
         # Left panel - Inheritance hierarchy tree
         self.tree_widget = self._create_inheritance_tree()
-        splitter.addWidget(self.tree_widget)
+        self.splitter.addWidget(self.tree_widget)
 
         # Right panel - Parameter form with scroll area
         # Always use scroll area for consistent navigation behavior
@@ -234,13 +212,17 @@ class ConfigWindow(BaseFormDialog):
         self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.scroll_area.setWidget(self.form_manager)
-        splitter.addWidget(self.scroll_area)
+        self.splitter.addWidget(self.scroll_area)
 
         # Set splitter proportions (30% tree, 70% form)
-        splitter.setSizes([300, 700])
+        self.splitter.setSizes([300, 700])
+
+        # Install collapsible splitter helper for double-click toggle
+        self.splitter_helper = CollapsibleSplitterHelper(self.splitter, left_panel_index=0)
+        self.splitter_helper.set_initial_size(300)
 
         # Add splitter with stretch factor so it expands to fill available space
-        layout.addWidget(splitter, 1)  # stretch factor = 1
+        layout.addWidget(self.splitter, 1)  # stretch factor = 1
 
         # Apply centralized styling (config window style includes tree styling now)
         self.setStyleSheet(
@@ -250,185 +232,13 @@ class ConfigWindow(BaseFormDialog):
 
     def _create_inheritance_tree(self) -> QTreeWidget:
         """Create tree widget showing inheritance hierarchy for navigation."""
-        tree = QTreeWidget()
-        tree.setHeaderLabel("Configuration Hierarchy")
-        # Remove width restrictions to allow horizontal dragging
-        tree.setMinimumWidth(200)
-
-        # Disable expand on double-click (use arrow only)
-        tree.setExpandsOnDoubleClick(False)
-
-        # Build inheritance hierarchy
-        self._populate_inheritance_tree(tree)
+        tree = self.tree_helper.create_tree_widget()
+        self.tree_helper.populate_from_root_dataclass(tree, self.config_class)
 
         # Connect double-click to navigation
         tree.itemDoubleClicked.connect(self._on_tree_item_double_clicked)
 
         return tree
-
-    def _populate_inheritance_tree(self, tree: QTreeWidget):
-        """Populate the inheritance tree with only dataclasses visible in the UI.
-
-        Excludes the root node (PipelineConfig/GlobalPipelineConfig) and shows
-        its attributes directly as top-level items.
-        """
-        import dataclasses
-
-        # Skip creating root item - add children directly to tree as top-level items
-        if dataclasses.is_dataclass(self.config_class):
-            self._add_ui_visible_dataclasses_to_tree(tree, self.config_class, is_root=True)
-
-        # Leave tree collapsed by default (user can expand as needed)
-
-    def _get_base_type(self, dataclass_type):
-        """Get base (non-lazy) type for a dataclass - type-based detection."""
-        from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
-
-        # Type-based lazy detection
-        if LazyDefaultPlaceholderService.has_lazy_resolution(dataclass_type):
-            # Get first non-Lazy base class
-            for base in dataclass_type.__bases__:
-                if base.__name__ != 'object' and not LazyDefaultPlaceholderService.has_lazy_resolution(base):
-                    return base
-
-        return dataclass_type
-
-    def _add_ui_visible_dataclasses_to_tree(self, parent_item, dataclass_type, is_root=False):
-        """Add only dataclasses that are visible in the UI form.
-
-        Args:
-            parent_item: Either a QTreeWidgetItem or QTreeWidget (for root level)
-            dataclass_type: The dataclass type to process
-            is_root: True if adding direct children of the root config class
-        """
-        import dataclasses
-
-        # Get all fields from this dataclass
-        fields = dataclasses.fields(dataclass_type)
-
-        for field in fields:
-            field_name = field.name
-            field_type = field.type
-
-            # Only show dataclass fields (these appear as sections in the UI)
-            if dataclasses.is_dataclass(field_type):
-                # Get the base (non-lazy) type for display and inheritance
-                base_type = self._get_base_type(field_type)
-                display_name = base_type.__name__
-
-                # Check if this field is hidden from UI
-                is_ui_hidden = self._is_field_ui_hidden(dataclass_type, field_name, field_type)
-
-                # Skip root-level ui_hidden items entirely (don't show them in tree at all)
-                # For nested items, show them but styled differently (for inheritance visibility)
-                if is_root and is_ui_hidden:
-                    continue
-
-                # For root-level items, show only the class name (matching child style)
-                # For nested items, show "field_name (ClassName)"
-                if is_root:
-                    label = display_name
-                else:
-                    label = f"{field_name} ({display_name})"
-
-                # Create a child item for this nested dataclass
-                field_item = QTreeWidgetItem([label])
-                field_item.setData(0, Qt.ItemDataRole.UserRole, {
-                    'type': 'dataclass',
-                    'class': field_type,  # Store original type for field lookup
-                    'field_name': field_name,
-                    'ui_hidden': is_ui_hidden  # Store ui_hidden flag
-                })
-
-                # Style ui_hidden items differently (grayed out, italicized)
-                if is_ui_hidden:
-                    font = field_item.font(0)
-                    font.setItalic(True)
-                    field_item.setFont(0, font)
-                    field_item.setForeground(0, QColor(128, 128, 128))
-                    field_item.setToolTip(0, "This configuration is not editable in the UI (inherited by other configs)")
-
-                # Add to parent (either QTreeWidget for root or QTreeWidgetItem for nested)
-                if is_root:
-                    parent_item.addTopLevelItem(field_item)
-                else:
-                    parent_item.addChild(field_item)
-
-                # Show inheritance hierarchy using the BASE type (not lazy type)
-                # This automatically skips the lazy→base transition
-                self._add_inheritance_info(field_item, base_type)
-
-                # Recursively add nested dataclasses using BASE type (not root anymore)
-                self._add_ui_visible_dataclasses_to_tree(field_item, base_type, is_root=False)
-
-    def _is_field_ui_hidden(self, dataclass_type, field_name: str, field_type) -> bool:
-        """Check if a field should be hidden from the UI.
-
-        Args:
-            dataclass_type: The parent dataclass containing the field
-            field_name: Name of the field
-            field_type: Type of the field
-
-        Returns:
-            True if the field should be hidden from UI
-        """
-        import dataclasses
-
-        # Check field metadata for ui_hidden flag
-        try:
-            field_obj = next(f for f in dataclasses.fields(dataclass_type) if f.name == field_name)
-            if field_obj.metadata.get('ui_hidden', False):
-                return True
-        except (StopIteration, TypeError):
-            pass
-
-        # Check if the field's type itself has _ui_hidden attribute
-        # IMPORTANT: Check __dict__ directly to avoid inheriting _ui_hidden from parent classes
-        # We only want to hide fields whose type DIRECTLY has _ui_hidden=True
-        base_type = self._get_base_type(field_type)
-        if hasattr(base_type, '__dict__') and '_ui_hidden' in base_type.__dict__ and base_type._ui_hidden:
-            return True
-
-        return False
-
-    def _add_inheritance_info(self, parent_item: QTreeWidgetItem, dataclass_type):
-        """Add inheritance information for a dataclass with proper hierarchy."""
-        # Get direct base classes (dataclass_type is already the base/non-lazy type)
-        direct_bases = []
-        for cls in dataclass_type.__bases__:
-            if cls.__name__ == 'object':
-                continue
-            if not hasattr(cls, '__dataclass_fields__'):
-                continue
-
-            # Always use base type (no lazy wrappers at this point)
-            base_type = self._get_base_type(cls)
-            direct_bases.append(base_type)
-
-        # Add base classes directly as children (no "Inherits from:" label)
-        for base_class in direct_bases:
-            # Check if this base class is ui_hidden
-            is_ui_hidden = hasattr(base_class, '__dict__') and '_ui_hidden' in base_class.__dict__ and base_class._ui_hidden
-
-            base_item = QTreeWidgetItem([base_class.__name__])
-            base_item.setData(0, Qt.ItemDataRole.UserRole, {
-                'type': 'inheritance_link',
-                'target_class': base_class,
-                'ui_hidden': is_ui_hidden
-            })
-
-            # Style ui_hidden items differently (grayed out, italicized)
-            if is_ui_hidden:
-                font = base_item.font(0)
-                font.setItalic(True)
-                base_item.setFont(0, font)
-                base_item.setForeground(0, QColor(128, 128, 128))
-                base_item.setToolTip(0, "This configuration is not editable in the UI (inherited by other configs)")
-
-            parent_item.addChild(base_item)
-
-            # Recursively add inheritance for this base class
-            self._add_inheritance_info(base_item, base_class)
 
     def _on_tree_item_double_clicked(self, item: QTreeWidgetItem, column: int):
         """Handle tree item double-clicks for navigation."""
@@ -504,10 +314,32 @@ class ConfigWindow(BaseFormDialog):
         if field_name in self.form_manager.nested_managers:
             nested_manager = self.form_manager.nested_managers[field_name]
 
-            # The nested_manager itself is a QWidget (ParameterFormManager inherits from QWidget)
-            # Scroll directly to it - this will show the entire section
-            self.scroll_area.ensureWidgetVisible(nested_manager, 100, 100)
-            logger.info(f"✅ Scrolled to {field_name} via nested manager widget")
+            # Strategy: Find the first parameter widget in this nested manager (like the test does)
+            # This is more reliable than trying to find the GroupBox
+            first_widget = None
+
+            if hasattr(nested_manager, 'widgets') and nested_manager.widgets:
+                # Get the first widget from the nested manager's widgets dict
+                first_param_name = next(iter(nested_manager.widgets.keys()))
+                first_widget = nested_manager.widgets[first_param_name]
+                logger.info(f"Found first widget: {first_param_name}")
+
+            if first_widget:
+                # Scroll to the first widget (this will show the section header too)
+                self.scroll_area.ensureWidgetVisible(first_widget, 100, 100)
+                logger.info(f"✅ Scrolled to {field_name} via first widget")
+            else:
+                # Fallback: try to find the GroupBox
+                from PyQt6.QtWidgets import QGroupBox
+                current = nested_manager.parentWidget()
+                while current:
+                    if isinstance(current, QGroupBox):
+                        self.scroll_area.ensureWidgetVisible(current, 50, 50)
+                        logger.info(f"✅ Scrolled to {field_name} via GroupBox")
+                        return
+                    current = current.parentWidget()
+
+                logger.warning(f"⚠️ Could not find widget or GroupBox for {field_name}")
         else:
             logger.warning(f"❌ Field '{field_name}' not in nested_managers")
 
@@ -556,70 +388,21 @@ class ConfigWindow(BaseFormDialog):
 
         logger.debug("Reset all parameters using enhanced ParameterFormManager service")
 
-    def save_config(self):
-        """Save the configuration preserving lazy behavior for unset fields."""
+    def save_config(self, *, close_window=True):
+        """Save the configuration preserving lazy behavior for unset fields. If close_window is True, close after saving; else, keep open."""
         try:
             if LazyDefaultPlaceholderService.has_lazy_resolution(self.config_class):
                 # BETTER APPROACH: For lazy dataclasses, only save user-modified values
                 # Get only values that were explicitly set by the user (non-None raw values)
                 user_modified_values = self.form_manager.get_user_modified_values()
 
-                # CRITICAL FIX: Reconstruct nested dataclasses from (type, dict) tuples
-                # get_user_modified_values() returns nested dataclasses as (type, dict) tuples
-                # We need to convert them to actual dataclass instances before passing to constructor
-                # Pass self.current_config as base_instance to merge user-modified fields into base nested dataclasses
-                from openhcs.pyqt_gui.widgets.shared.services.dataclass_reconstruction_utils import reconstruct_nested_dataclasses
-                reconstructed_values = reconstruct_nested_dataclasses(user_modified_values, base_instance=self.current_config)
-
                 # Create fresh lazy instance with only user-modified values
                 # This preserves lazy resolution for unmodified fields
-                new_config = self.config_class(**reconstructed_values)
-
-                # CRITICAL FIX: Track explicitly set fields for PipelineConfig
-                # This allows the config window to distinguish between user-set values
-                # and inherited values when reopening the window
-                # Track both top-level fields and nested dataclass fields
-                explicitly_set_fields = set(user_modified_values.keys())
-                object.__setattr__(new_config, '_explicitly_set_fields', explicitly_set_fields)
-
-                # CRITICAL FIX: Also set _explicitly_set_fields on nested dataclasses
-                # This preserves which nested fields were user-set vs inherited
-                for field_name, value in user_modified_values.items():
-                    if isinstance(value, tuple) and len(value) == 2:
-                        # Nested dataclass in tuple format: (type, dict)
-                        _, field_dict = value  # We only need field_dict, not dataclass_type
-                        nested_instance = getattr(new_config, field_name)
-                        if nested_instance is not None:
-                            nested_explicitly_set = set(field_dict.keys())
-                            object.__setattr__(nested_instance, '_explicitly_set_fields', nested_explicitly_set)
-                            logger.debug(f"🔍 SAVE_CONFIG: Set {field_name}._explicitly_set_fields = {nested_explicitly_set}")
-
-                logger.debug(f"🔍 SAVE_CONFIG: Set _explicitly_set_fields = {explicitly_set_fields}")
+                new_config = self.config_class(**user_modified_values)
             else:
                 # For non-lazy dataclasses, use all current values
                 current_values = self.form_manager.get_current_values()
                 new_config = self.config_class(**current_values)
-
-                # CRITICAL FIX: Track explicitly set fields for PipelineConfig (even non-lazy)
-                # This allows the config window to distinguish between user-set values
-                # and inherited values when reopening the window
-                user_modified_values = self.form_manager.get_user_modified_values()
-                explicitly_set_fields = set(user_modified_values.keys())
-                object.__setattr__(new_config, '_explicitly_set_fields', explicitly_set_fields)
-
-                # CRITICAL FIX: Also set _explicitly_set_fields on nested dataclasses
-                # This preserves which nested fields were user-set vs inherited
-                for field_name, value in user_modified_values.items():
-                    if isinstance(value, tuple) and len(value) == 2:
-                        # Nested dataclass in tuple format: (type, dict)
-                        _, field_dict = value
-                        nested_instance = getattr(new_config, field_name)
-                        if nested_instance is not None:
-                            nested_explicitly_set = set(field_dict.keys())
-                            object.__setattr__(nested_instance, '_explicitly_set_fields', nested_explicitly_set)
-                            logger.debug(f"🔍 SAVE_CONFIG (non-lazy): Set {field_name}._explicitly_set_fields = {nested_explicitly_set}")
-
-                logger.debug(f"🔍 SAVE_CONFIG (non-lazy): Set _explicitly_set_fields = {explicitly_set_fields}")
 
             # CRITICAL: Set flag to prevent refresh_config from recreating the form
             # The window already has the correct data - it just saved it!
@@ -637,58 +420,32 @@ class ConfigWindow(BaseFormDialog):
                 self._saving = False
                 logger.info(f"🔍 SAVE_CONFIG: Reset _saving=False (id={id(self)})")
 
-            self.accept()
+            if is_global_config_type(self.config_class):
+                self._original_global_config_snapshot = copy.deepcopy(new_config)
+                self._global_context_dirty = False
+
+            if close_window:
+                self.accept()
+            else:
+                # CRITICAL: If keeping window open after save, update the form manager's object_instance
+                # and refresh placeholders to reflect the new saved values
+                self.form_manager.object_instance = new_config
+
+                # Increment token to invalidate caches
+                from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+                ParameterFormManager._live_context_token_counter += 1
+
+                # Refresh this window's placeholders with new saved values as base
+                self.form_manager._refresh_with_live_context()
+
+                # Emit context_refreshed to notify other windows
+                self.form_manager.context_refreshed.emit(new_config, self.form_manager.context_obj)
 
         except Exception as e:
             logger.error(f"Failed to save configuration: {e}")
             from PyQt6.QtWidgets import QMessageBox
             QMessageBox.critical(self, "Save Error", f"Failed to save configuration:\n{e}")
     
-
-    def _patch_lazy_constructors(self):
-        """Context manager that patches lazy dataclass constructors to preserve None vs concrete distinction."""
-        from contextlib import contextmanager
-        from openhcs.core.lazy_placeholder import LazyDefaultPlaceholderService
-        from openhcs.config_framework.lazy_factory import _lazy_type_registry
-        import dataclasses
-
-        @contextmanager
-        def patch_context():
-            original_constructors = {}
-
-            # FIXED: Dynamically discover all lazy types from registry instead of hardcoding
-            # This ensures we patch ALL lazy types, including future additions
-            for lazy_type in _lazy_type_registry.keys():
-                if LazyDefaultPlaceholderService.has_lazy_resolution(lazy_type):
-                    # Store original constructor
-                    original_constructors[lazy_type] = lazy_type.__init__
-
-                    # Create patched constructor that uses raw values
-                    def create_patched_init(original_init, dataclass_type):
-                        def patched_init(self, **kwargs):
-                            # Use raw value approach instead of calling original constructor
-                            # This prevents lazy resolution during code execution
-                            for field in dataclasses.fields(dataclass_type):
-                                value = kwargs.get(field.name, None)
-                                object.__setattr__(self, field.name, value)
-
-                            # Initialize any required lazy dataclass attributes
-                            if hasattr(dataclass_type, '_is_lazy_dataclass'):
-                                object.__setattr__(self, '_is_lazy_dataclass', True)
-
-                        return patched_init
-
-                    # Apply the patch
-                    lazy_type.__init__ = create_patched_init(original_constructors[lazy_type], lazy_type)
-
-            try:
-                yield
-            finally:
-                # Restore original constructors
-                for lazy_type, original_init in original_constructors.items():
-                    lazy_type.__init__ = original_init
-
-        return patch_context()
 
     def _view_code(self):
         """Open code editor to view/edit the configuration as Python code."""
@@ -697,7 +454,13 @@ class ConfigWindow(BaseFormDialog):
             from openhcs.debug.pickle_to_python import generate_config_code
             import os
 
-            # Get current config from form
+            # CRITICAL: Refresh with live context BEFORE getting current values
+            # This ensures code editor shows unsaved changes from other open windows
+            # Example: GlobalPipelineConfig editor open with unsaved zarr_config changes
+            #          → PipelineConfig code editor should show those live zarr_config values
+            self.form_manager._refresh_with_live_context()
+
+            # Get current config from form (now includes live context values)
             current_values = self.form_manager.get_current_values()
             current_config = self.config_class(**current_values)
 
@@ -725,14 +488,12 @@ class ConfigWindow(BaseFormDialog):
     def _handle_edited_config_code(self, edited_code: str):
         """Handle edited configuration code from the code editor."""
         try:
-            # CRITICAL: Parse the code to extract explicitly specified fields
-            # This prevents overwriting None values for unspecified fields
-            explicitly_set_fields = self._extract_explicitly_set_fields(edited_code)
-
+            # SIMPLIFIED: Just exec with patched constructors
+            # The patched constructors preserve None vs concrete distinction in raw field values
+            # No need to parse code - just inspect raw values after exec
             namespace = {}
 
-            # CRITICAL FIX: Use lazy constructor patching
-            with self._patch_lazy_constructors():
+            with CodeEditorFormUpdater.patch_lazy_constructors():
                 exec(edited_code, namespace)
 
             new_config = namespace.get('config')
@@ -748,19 +509,32 @@ class ConfigWindow(BaseFormDialog):
             # FIXED: Proper context propagation based on config type
             # ConfigWindow is used for BOTH GlobalPipelineConfig AND PipelineConfig editing
             from openhcs.config_framework.global_config import set_global_config_for_editing
-            from openhcs.core.config import GlobalPipelineConfig
 
-            if self.config_class == GlobalPipelineConfig:
-                # For GlobalPipelineConfig: Update thread-local context
-                # This ensures all lazy resolution uses the new config
-                set_global_config_for_editing(GlobalPipelineConfig, new_config)
-                logger.debug("Updated thread-local GlobalPipelineConfig context")
-            # For PipelineConfig: No context update needed here
-            # The orchestrator.apply_pipeline_config() happens in the save callback
-            # Code edits just update the form, actual application happens on Save
+            # Temporarily suppress per-field sync during code-mode bulk update
+            suppress_context = is_global_config_type(self.config_class)
+            if suppress_context:
+                self._suppress_global_context_sync = True
+                self._needs_global_context_resync = False
 
-            # Update form values from the new config without rebuilding
-            self._update_form_from_config(new_config, explicitly_set_fields)
+            try:
+                if is_global_config_type(self.config_class):
+                    # For global configs: Update thread-local context immediately
+                    set_global_config_for_editing(self.config_class, new_config)
+                    logger.debug(f"Updated thread-local {self.config_class.__name__} context")
+                    self._global_context_dirty = True
+                # For PipelineConfig: No context update needed here
+                # The orchestrator.apply_pipeline_config() happens in the save callback
+                # Code edits just update the form, actual application happens on Save
+
+                # Update form values from the new config without rebuilding
+                self._update_form_from_config(new_config)
+
+                if suppress_context:
+                    self._sync_global_context_with_current_values()
+            finally:
+                if suppress_context:
+                    self._suppress_global_context_sync = False
+                    self._needs_global_context_resync = False
 
             logger.info("Updated config from edited code")
 
@@ -769,135 +543,66 @@ class ConfigWindow(BaseFormDialog):
             from PyQt6.QtWidgets import QMessageBox
             QMessageBox.critical(self, "Code Edit Error", f"Failed to apply edited code:\n{e}")
 
-    def _extract_explicitly_set_fields(self, code: str) -> set:
-        """
-        Parse code to extract which fields were explicitly set.
+    def _on_global_config_field_changed(self, param_name: str, value: Any):
+        """Keep thread-local global config context in sync with live edits."""
+        if self._saving:
+            return
+        if self._suppress_global_context_sync:
+            self._needs_global_context_resync = True
+            return
+        self._sync_global_context_with_current_values(param_name)
 
-        Returns a set of field names that appear in the config constructor call.
-        For nested fields, uses dot notation like 'zarr_config.chunk_size'.
-        """
-        import re
+    def _sync_global_context_with_current_values(self, source_param: str = None):
+        """Rebuild global context from current form values once."""
+        if not is_global_config_type(self.config_class):
+            return
+        try:
+            current_values = self.form_manager.get_current_values()
+            updated_config = self.config_class(**current_values)
+            self.current_config = updated_config
+            from openhcs.config_framework.global_config import set_global_config_for_editing
+            set_global_config_for_editing(self.config_class, updated_config)
+            self._global_context_dirty = True
+            ParameterFormManager.trigger_global_cross_window_refresh()
+            if source_param:
+                logger.debug(f"Synchronized {self.config_class.__name__} context after change ({source_param})")
+        except Exception as exc:
+            logger.warning("Failed to sync global context%s: %s",
+                           f' ({source_param})' if source_param else '', exc)
 
-        # Find the config = ClassName(...) pattern
-        # Match the class name and capture everything inside parentheses
-        pattern = rf'config\s*=\s*{self.config_class.__name__}\s*\((.*?)\)\s*$'
-        match = re.search(pattern, code, re.DOTALL | re.MULTILINE)
+    def _update_form_from_config(self, new_config):
+        """Update form values from new config using the shared updater."""
+        self.form_manager._block_cross_window_updates = True
+        try:
+            CodeEditorFormUpdater.update_form_from_instance(
+                self.form_manager,
+                new_config,
+                broadcast_callback=self._broadcast_config_changed
+            )
+        finally:
+            self.form_manager._block_cross_window_updates = False
 
-        if not match:
-            return set()
-
-        constructor_args = match.group(1)
-
-        # Extract field names (simple pattern: field_name=...)
-        # This handles both simple fields and nested dataclass fields
-        field_pattern = r'(\w+)\s*='
-        fields_found = set(re.findall(field_pattern, constructor_args))
-
-        logger.debug(f"Explicitly set fields from code: {fields_found}")
-        return fields_found
-
-    def _update_form_from_config(self, new_config, explicitly_set_fields: set):
-        """Update form values from new config without rebuilding the entire form."""
-        from dataclasses import fields, is_dataclass
-
-        # CRITICAL: Only update fields that were explicitly set in the code
-        # This preserves None values for fields not mentioned in the code
-        for field in fields(new_config):
-            if field.name in explicitly_set_fields:
-                new_value = getattr(new_config, field.name)
-                if field.name in self.form_manager.parameters:
-                    # For nested dataclasses, we need to recursively update nested fields
-                    if is_dataclass(new_value) and not isinstance(new_value, type):
-                        self._update_nested_dataclass(field.name, new_value)
-                    else:
-                        self.form_manager.update_parameter(field.name, new_value)
-
-        # Refresh placeholders to reflect the new values
-        self.form_manager._placeholder_refresh_service.refresh_all_placeholders(self.form_manager, None)
-        self.form_manager._apply_to_nested_managers(lambda name, manager: manager._placeholder_refresh_service.refresh_all_placeholders(manager, None))
-
-    def _update_nested_dataclass(self, field_name: str, new_value):
-        """Recursively update a nested dataclass field and all its children."""
-        from dataclasses import fields, is_dataclass
-
-        # Update the parent field first
-        self.form_manager.update_parameter(field_name, new_value)
-
-        # Get the nested manager for this field
-        nested_manager = self.form_manager.nested_managers.get(field_name)
-        if nested_manager:
-            # Update each field in the nested manager
-            for field in fields(new_value):
-                nested_field_value = getattr(new_value, field.name)
-                if field.name in nested_manager.parameters:
-                    # Recursively handle nested dataclasses
-                    if is_dataclass(nested_field_value) and not isinstance(nested_field_value, type):
-                        self._update_nested_dataclass_in_manager(nested_manager, field.name, nested_field_value)
-                    else:
-                        nested_manager.update_parameter(field.name, nested_field_value)
-
-    def _update_nested_dataclass_in_manager(self, manager, field_name: str, new_value):
-        """Helper to update nested dataclass within a specific manager."""
-        from dataclasses import fields, is_dataclass
-
-        manager.update_parameter(field_name, new_value)
-
-        nested_manager = manager.nested_managers.get(field_name)
-        if nested_manager:
-            for field in fields(new_value):
-                nested_field_value = getattr(new_value, field.name)
-                if field.name in nested_manager.parameters:
-                    if is_dataclass(nested_field_value) and not isinstance(nested_field_value, type):
-                        self._update_nested_dataclass_in_manager(nested_manager, field.name, nested_field_value)
-                    else:
-                        nested_manager.update_parameter(field.name, nested_field_value)
-
-    # DELETED: _on_parameter_changed_live_update() - moved to ParameterFormManager
-    # Live updates are now handled by ParameterFormManager._update_thread_local_global_config()
-    # which is called automatically from _emit_cross_window_change()
-    # This is architecturally correct - parameter management belongs in the infrastructure layer,
-    # not the UI layer.
+        ParameterFormManager.trigger_global_cross_window_refresh()
 
     def reject(self):
-        """
-        Handle dialog rejection (Cancel button).
-
-        LIVE UPDATES ARCHITECTURE: Restore original config state.
-        This undoes all live updates that were applied during editing.
-        """
-        logger.debug(f"🔍 LIVE_UPDATES: Cancel clicked - restoring original config")
-
-        # Restore original config based on config type
-        if self.config_class == GlobalPipelineConfig:
-            # For GlobalPipelineConfig: Restore thread-local storage
+        """Handle dialog rejection (Cancel button)."""
+        if (is_global_config_type(self.config_class) and
+                getattr(self, '_global_context_dirty', False) and
+                self._original_global_config_snapshot is not None):
             from openhcs.config_framework.global_config import set_global_config_for_editing
-            set_global_config_for_editing(GlobalPipelineConfig, self._original_config)
-            logger.debug(f"🔍 LIVE_UPDATES: Restored original GlobalPipelineConfig to thread-local")
-
-            # ANTI-DUCK-TYPING: Use explicit isinstance check instead of hasattr
-            from openhcs.pyqt_gui.widgets.plate_manager import PlateManagerWidget
-            parent = self.parent()
-            if isinstance(parent, PlateManagerWidget):
-                parent.global_config_changed.emit()
-                logger.debug(f"🔍 LIVE_UPDATES: Emitted global_config_changed signal with original config")
-        else:
-            # For PipelineConfig: Restore orchestrator context
-            if self.orchestrator:
-                self.orchestrator.apply_pipeline_config(self._original_config)
-                logger.debug(f"🔍 LIVE_UPDATES: Restored original PipelineConfig to orchestrator {self.orchestrator.plate_path}")
-
-                # ANTI-DUCK-TYPING: Use explicit isinstance check instead of hasattr
-                from openhcs.pyqt_gui.widgets.plate_manager import PlateManagerWidget
-                parent = self.parent()
-                if isinstance(parent, PlateManagerWidget):
-                    effective_config = self.orchestrator.get_effective_config()
-                    parent.orchestrator_config_changed.emit(str(self.orchestrator.plate_path), effective_config)
-                    logger.debug(f"🔍 LIVE_UPDATES: Emitted orchestrator_config_changed signal with original config")
-            else:
-                logger.debug(f"🔍 LIVE_UPDATES: PipelineConfig cancel - no orchestrator reference")
+            set_global_config_for_editing(self.config_class,
+                                          copy.deepcopy(self._original_global_config_snapshot))
+            self._global_context_dirty = False
+            logger.debug(f"Restored {self.config_class.__name__} context after cancel")
 
         self.config_cancelled.emit()
         super().reject()  # BaseFormDialog handles unregistration
+
+        # CRITICAL: Trigger global refresh AFTER unregistration so other windows
+        # re-collect live context without this cancelled window's values
+        # This ensures group_by selector and other placeholders sync correctly
+        ParameterFormManager.trigger_global_cross_window_refresh()
+        logger.debug(f"Triggered global refresh after cancelling {self.config_class.__name__} editor")
 
     def _get_form_managers(self):
         """Return list of form managers to unregister (required by BaseFormDialog)."""

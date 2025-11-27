@@ -60,6 +60,22 @@ class CupyRegistry(RuntimeTestingRegistryBase):
         """Get proper display name for CuPy."""
         return 'CuPy'
 
+    def _warmup_library(self) -> None:
+        """
+        Ensure CuPy can create basic arrays before registry discovery.
+
+        This mirrors GUI behavior (PyQtGraph imports CuPy early) so detached
+        interpreters fail fast if CUDA libraries are missing.
+        """
+        if not cp or not cucim_skimage:
+            raise RuntimeError("CuPy or CuCIM not available for warm-up")
+
+        try:
+            _ = cp.zeros((1,), dtype=self.FLOAT_DTYPE)
+            cp.cuda.runtime.deviceSynchronize()
+        except Exception as exc:
+            raise RuntimeError(f"CuPy warm-up failed: {exc}") from exc
+
     # ===== HOOK IMPLEMENTATIONS =====
     def _create_array(self, shape: Tuple[int, ...], dtype):
         try:
@@ -97,5 +113,4 @@ class CupyRegistry(RuntimeTestingRegistryBase):
     def _arrays_close(self, arr1, arr2):
         """Compare arrays using CuPy."""
         return np.allclose(arr1.get(), arr2.get(), rtol=1e-5, atol=1e-8)
-
 

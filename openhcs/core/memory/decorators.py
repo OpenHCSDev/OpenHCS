@@ -18,7 +18,7 @@ import logging
 import threading
 from typing import Any, Callable, Optional, TypeVar
 
-from openhcs.constants.constants import VALID_MEMORY_TYPES, MemoryType
+from openhcs.constants.constants import VALID_MEMORY_TYPES, MemoryType, DtypeConversion
 from openhcs.core.utils import optional_import
 from openhcs.core.memory.oom_recovery import _execute_with_oom_recovery
 from openhcs.core.memory.framework_ops import _FRAMEWORK_OPS
@@ -28,35 +28,6 @@ from openhcs.core.memory.slice_processing import process_slices
 logger = logging.getLogger(__name__)
 
 F = TypeVar('F', bound=Callable[..., Any])
-
-# Dtype conversion enum and utilities for consistent dtype handling across all frameworks
-from enum import Enum
-import numpy as np
-
-class DtypeConversion(Enum):
-    """Data type conversion modes for all memory type functions."""
-
-    PRESERVE_INPUT = "preserve"     # Keep input dtype (default)
-    NATIVE_OUTPUT = "native"        # Use framework's native output
-    UINT8 = "uint8"                # Force uint8 (0-255 range)
-    UINT16 = "uint16"              # Force uint16 (microscopy standard)
-    INT16 = "int16"                # Force int16 (signed microscopy data)
-    INT32 = "int32"                # Force int32 (large integer values)
-    FLOAT32 = "float32"            # Force float32 (GPU performance)
-    FLOAT64 = "float64"            # Force float64 (maximum precision)
-
-    @property
-    def numpy_dtype(self):
-        """Get the corresponding numpy dtype."""
-        dtype_map = {
-            self.UINT8: np.uint8,
-            self.UINT16: np.uint16,
-            self.INT16: np.int16,
-            self.INT32: np.int32,
-            self.FLOAT32: np.float32,
-            self.FLOAT64: np.float64,
-        }
-        return dtype_map.get(self, None)
 
 
 # Thread-local cache for lazy-loaded GPU frameworks
@@ -160,10 +131,28 @@ def _create_dtype_wrapper(func, mem_type: MemoryType, func_name: str):
     scale_func = SCALING_FUNCTIONS[mem_type.value]
     
     @functools.wraps(func)
-    def dtype_wrapper(image, *args, dtype_conversion=None, slice_by_slice: bool = False, **kwargs):
-        # Set default dtype_conversion if not provided
+    def dtype_wrapper(image, *args, dtype_conversion=None, dtype_config=None, slice_by_slice: bool = False, **kwargs):
+        # Resolve dtype_conversion from multiple sources (priority order):
+        # 1. Explicit dtype_conversion parameter (highest priority)
+        # 2. dtype_config parameter (from compilation/injection)
+        # 3. Global config (fallback)
+
         if dtype_conversion is None:
-            dtype_conversion = DtypeConversion.PRESERVE_INPUT
+            # Try to get from dtype_config parameter (injected by registry)
+            if dtype_config is not None and hasattr(dtype_config, 'default_dtype_conversion'):
+                dtype_conversion = dtype_config.default_dtype_conversion
+            else:
+                # Fall back to global config
+                try:
+                    from openhcs.config_framework import get_current_global_config
+                    from openhcs.core.config import GlobalPipelineConfig
+                    global_config = get_current_global_config(GlobalPipelineConfig)
+                    if global_config is not None and hasattr(global_config, 'dtype_config'):
+                        dtype_conversion = global_config.dtype_config.default_dtype_conversion
+                    else:
+                        dtype_conversion = DtypeConversion.NATIVE_OUTPUT
+                except (ImportError, AttributeError):
+                    dtype_conversion = DtypeConversion.NATIVE_OUTPUT
         
         try:
             # Store original dtype
@@ -222,15 +211,19 @@ def _create_dtype_wrapper(func, mem_type: MemoryType, func_name: str):
             new_params.extend(original_params)
         
         # Add dtype_conversion parameter (keyword-only, before **kwargs)
+        # Default is None so it resolves from dtype_config or global config
         if 'dtype_conversion' not in param_names:
             dtype_param = inspect.Parameter(
                 'dtype_conversion',
                 inspect.Parameter.KEYWORD_ONLY,
-                default=DtypeConversion.PRESERVE_INPUT,
+                default=None,
                 annotation=Optional[DtypeConversion]
             )
             new_params.append(dtype_param)
-        
+
+        # NOTE: dtype_config is injected by the registry (unified_registry.py INJECTABLE_PARAMS)
+        # with default LazyDtypeConfig(), so we don't add it here to avoid conflicts
+
         # Add slice_by_slice parameter (keyword-only, before **kwargs)
         if 'slice_by_slice' not in param_names:
             slice_param = inspect.Parameter(
@@ -253,9 +246,10 @@ def _create_dtype_wrapper(func, mem_type: MemoryType, func_name: str):
         if dtype_wrapper.__doc__:
             dtype_wrapper.__doc__ += f"\n\n    Additional Parameters (added by {mem_type.value} decorator):\n"
             dtype_wrapper.__doc__ += "        dtype_conversion (DtypeConversion, optional): How to handle output dtype.\n"
-            dtype_wrapper.__doc__ += "            Defaults to PRESERVE_INPUT (match input dtype).\n"
+            dtype_wrapper.__doc__ += "            Defaults to value from dtype_config or global config (NATIVE_OUTPUT).\n"
             dtype_wrapper.__doc__ += "        slice_by_slice (bool, optional): Process 3D arrays slice-by-slice.\n"
             dtype_wrapper.__doc__ += "            Defaults to False. Prevents cross-slice contamination.\n"
+            dtype_wrapper.__doc__ += "\n    Note: dtype_config parameter is injected by the registry during function registration.\n"
     
     except Exception as e:
         logger.warning(f"Could not update signature for {func_name}: {e}")
@@ -386,4 +380,3 @@ __all__ = [
     'jax',
     'pyclesperanto',
 ]
-

@@ -58,6 +58,7 @@ dependencies = [
     "setuptools",
     "watchdog>=6.0.0",
     "portalocker>=2.8.2",  # Cross-platform file locking (Windows compatibility for fcntl)
+    "requests>=2.31.0",  # HTTP library for LLM service communication
 
     # System monitoring (required by ui/shared/system_monitor_core.py)
     "psutil>=5.9.0",
@@ -241,3 +242,19 @@ openhcs = ["**/*.css", "**/*.yaml", "**/*.yml", "**/*.json"]
 # - With GPU support: pip install "openhcs[gpu]"
 # - Full installation: pip install "openhcs[all]"
 
+[tool.coverage.run]
+omit = [
+    "openhcs/textual_tui/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod",
+]

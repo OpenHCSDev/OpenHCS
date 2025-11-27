@@ -10,7 +10,7 @@ from typing import Optional
 from pathlib import Path
 
 from PyQt6.QtWidgets import QMessageBox, QFileDialog, QApplication, QWidget
-from PyQt6.QtCore import QProcess, QThread, pyqtSignal
+from PyQt6.QtCore import QProcess, QThread, pyqtSignal, QObject
 from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtCore import QUrl
 
@@ -19,6 +19,92 @@ from openhcs.pyqt_gui.shared.palette_manager import ThemeManager
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 
 logger = logging.getLogger(__name__)
+
+
+class GlobalEventBus(QObject):
+    """
+    Centralized event bus for cross-window communication.
+
+    ARCHITECTURE: OpenHCS "Set and Forget" Pattern
+    ===============================================
+
+    Instead of manually connecting every window to every other window's signals,
+    all windows register with this global event bus once during initialization.
+
+    When ANY window modifies pipeline/config (via code editor, UI, etc.), it
+    broadcasts to the event bus, which automatically notifies ALL registered windows.
+
+    Benefits:
+    - No manual cross-connections between windows
+    - Adding a new window type automatically works with all existing windows
+    - Single source of truth for cross-window events
+    - Eliminates scattered signal connection code
+
+    Usage:
+    1. Windows inherit from BaseFormDialog (automatic registration)
+    2. Windows call _broadcast_pipeline_changed() or _broadcast_config_changed()
+    3. Windows implement _on_pipeline_changed() to receive updates
+
+    This is the OpenHCS "set and forget" pattern - add a new window type once,
+    and it automatically receives updates from all other windows.
+    """
+
+    # Global signals that all windows can emit/receive
+    pipeline_changed = pyqtSignal(list)  # List[FunctionStep] - emitted when pipeline changes
+    config_changed = pyqtSignal(object)  # Config object - emitted when any config changes
+    step_changed = pyqtSignal(object)  # FunctionStep - emitted when a step is modified
+
+    def __init__(self):
+        super().__init__()
+        self._registered_windows = []
+        logger.debug("Global event bus initialized")
+
+    def register_window(self, window):
+        """Register a window to receive global events.
+
+        Args:
+            window: Window instance to register
+        """
+        if window not in self._registered_windows:
+            self._registered_windows.append(window)
+            logger.debug(f"Registered window: {window.__class__.__name__}")
+
+    def unregister_window(self, window):
+        """Unregister a window from receiving global events.
+
+        Args:
+            window: Window instance to unregister
+        """
+        if window in self._registered_windows:
+            self._registered_windows.remove(window)
+            logger.debug(f"Unregistered window: {window.__class__.__name__}")
+
+    def emit_pipeline_changed(self, pipeline_steps: list):
+        """Emit pipeline changed event to all registered windows.
+
+        Args:
+            pipeline_steps: Updated list of FunctionStep objects
+        """
+        logger.debug(f"Broadcasting pipeline_changed to {len(self._registered_windows)} windows")
+        self.pipeline_changed.emit(pipeline_steps)
+
+    def emit_config_changed(self, config):
+        """Emit config changed event to all registered windows.
+
+        Args:
+            config: Updated config object
+        """
+        logger.debug(f"Broadcasting config_changed to {len(self._registered_windows)} windows")
+        self.config_changed.emit(config)
+
+    def emit_step_changed(self, step):
+        """Emit step changed event to all registered windows.
+
+        Args:
+            step: Updated FunctionStep object
+        """
+        logger.debug(f"Broadcasting step_changed to {len(self._registered_windows)} windows")
+        self.step_changed.emit(step)
 
 
 class PyQtServiceAdapter:
@@ -41,6 +127,9 @@ class PyQtServiceAdapter:
 
         # Initialize theme manager for centralized color management
         self.theme_manager = ThemeManager()
+
+        # Initialize global event bus for cross-window communication
+        self.event_bus = GlobalEventBus()
 
         # Apply dark theme globally to ensure consistent dialog styling
         self._apply_dark_theme()
@@ -441,7 +530,7 @@ class PyQtServiceAdapter:
     def get_file_manager(self):
         """
         Get FileManager instance from application.
-        
+
         Returns:
             FileManager instance
         """
@@ -454,6 +543,14 @@ class PyQtServiceAdapter:
             file_manager = FileManager(storage_registry)
             setattr(self.app, 'file_manager', file_manager)
             return file_manager
+
+    def get_event_bus(self) -> GlobalEventBus:
+        """Get the global event bus for cross-window communication.
+
+        Returns:
+            GlobalEventBus instance
+        """
+        return self.event_bus
 
 
 class ExternalEditorProcess(QThread):

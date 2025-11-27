@@ -18,6 +18,8 @@ Fundamental systems that define OpenHCS architecture.
    plugin_registry_advanced
    function_pattern_system
    function_registry_system
+   function_reference_pattern
+   custom_function_registration_system
    pipeline_compilation_system
    special_io_system
    roi_system
@@ -104,6 +106,7 @@ GPU management, multiprocessing, and performance optimization.
    gpu_resource_management
    compilation_system_detailed
    concurrency_model
+   orchestrator_cleanup_guarantees
 
 Metaprogramming and Parsing
 ===========================

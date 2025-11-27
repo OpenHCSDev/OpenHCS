@@ -12,7 +12,7 @@ import copy
 import sys
 import subprocess
 import tempfile
-from typing import List, Dict, Optional, Callable
+from typing import List, Dict, Optional, Callable, Any
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
@@ -21,7 +21,7 @@ from PyQt6.QtWidgets import (
     QSplitter, QApplication, QSizePolicy, QScrollArea
 )
 from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot, QTimer
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QColor
 
 from openhcs.core.config import GlobalPipelineConfig
 from openhcs.core.config import PipelineConfig
@@ -31,20 +31,29 @@ from openhcs.core.pipeline import Pipeline
 from openhcs.constants.constants import VariableComponents
 from openhcs.pyqt_gui.widgets.mixins import (
     preserve_selection_during_update,
-    handle_selection_change_with_prevention
+    handle_selection_change_with_prevention,
+    CrossWindowPreviewMixin
 )
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
+from openhcs.config_framework import LiveContextResolver
+
+# Import shared list widget components (single source of truth)
+from openhcs.pyqt_gui.widgets.shared.reorderable_list_widget import ReorderableListWidget
+from openhcs.pyqt_gui.widgets.shared.list_item_delegate import MultilinePreviewItemDelegate
 
 logger = logging.getLogger(__name__)
 
 
-class PlateManagerWidget(QWidget):
+class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
     """
     PyQt6 Plate Manager Widget.
-    
+
     Manages plate selection, initialization, compilation, and execution.
     Preserves all business logic from Textual version with clean PyQt6 UI.
+
+    Uses CrossWindowPreviewMixin for reactive preview labels showing orchestrator
+    config states (num_workers, well_filter, streaming configs, etc.).
     """
     
     # Signals
@@ -71,6 +80,11 @@ class PlateManagerWidget(QWidget):
     compilation_error = pyqtSignal(str, str)  # plate_name, error_message
     initialization_error = pyqtSignal(str, str)  # plate_name, error_message
     execution_error = pyqtSignal(str)  # error_message
+
+    # Internal signals for thread-safe completion handling
+    _execution_complete_signal = pyqtSignal(dict, str)  # result, plate_path
+    _execution_error_signal = pyqtSignal(str)  # error_msg
+    _execution_status_changed_signal = pyqtSignal(str, str)  # plate_path, new_status ("queued" | "running")
     
     def __init__(self, file_manager: FileManager, service_adapter,
                  color_scheme: Optional[PyQt6ColorScheme] = None, parent=None):
@@ -85,6 +99,9 @@ class PlateManagerWidget(QWidget):
         """
         super().__init__(parent)
 
+        # Initialize CrossWindowPreviewMixin
+        self._init_cross_window_preview_mixin()
+
         # Core dependencies
         self.file_manager = file_manager
         self.service_adapter = service_adapter
@@ -94,7 +111,13 @@ class PlateManagerWidget(QWidget):
         # Initialize color scheme and style generator
         self.color_scheme = color_scheme or service_adapter.get_current_color_scheme()
         self.style_generator = StyleSheetGenerator(self.color_scheme)
-        
+
+        # Get event bus for cross-window communication
+        self.event_bus = service_adapter.get_event_bus() if service_adapter else None
+
+        # Live context resolver for config attribute resolution
+        self._live_context_resolver = LiveContextResolver()
+
         # Business logic state (extracted from Textual version)
         self.plates: List[Dict] = []  # List of plate dictionaries
         self.selected_plate_path: str = ""
@@ -107,6 +130,14 @@ class PlateManagerWidget(QWidget):
         self.execution_state = "idle"
         self.log_file_path: Optional[str] = None
         self.log_file_position: int = 0
+
+        # Track per-plate execution state
+        self.plate_execution_ids: Dict[str, str] = {}  # plate_path -> execution_id
+        self.plate_execution_states: Dict[str, str] = {}  # plate_path -> "queued" | "running" | "completed" | "failed"
+
+        # Configure preview routing + fields
+        self._register_preview_scopes()
+        self._configure_preview_fields()
         
         # UI components
         self.plate_list: Optional[QListWidget] = None
@@ -123,7 +154,11 @@ class PlateManagerWidget(QWidget):
         self.setup_ui()
         self.setup_connections()
         self.update_button_states()
-        
+
+        # Connect internal signals for thread-safe completion handling
+        self._execution_complete_signal.connect(self._on_execution_complete)
+        self._execution_error_signal.connect(self._on_execution_error)
+
         logger.debug("Plate manager widget initialized")
 
     def cleanup(self):
@@ -156,6 +191,405 @@ class PlateManagerWidget(QWidget):
                 self.current_process = None
 
         logger.info("✅ PlateManagerWidget cleanup completed")
+
+    # ========== CrossWindowPreviewMixin Configuration ==========
+
+    def _register_preview_scopes(self) -> None:
+        """Configure scope resolvers used by CrossWindowPreviewMixin."""
+        from openhcs.core.config import GlobalPipelineConfig, PipelineConfig
+        from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
+
+        self.register_preview_scope(
+            root_name='pipeline_config',
+            editing_types=(PipelineConfig,),
+            scope_resolver=self._resolve_pipeline_scope_from_config,
+            aliases=('PipelineConfig',),
+            process_all_fields=True,
+        )
+
+        self.register_preview_scope(
+            root_name='global_config',
+            editing_types=(GlobalPipelineConfig,),
+            scope_resolver=lambda obj, ctx: self.ALL_ITEMS_SCOPE,
+            aliases=('GlobalPipelineConfig',),
+            process_all_fields=True,
+        )
+
+        self.register_preview_scope(
+            root_name='orchestrator',
+            editing_types=(PipelineOrchestrator,),
+            scope_resolver=lambda obj, ctx: str(getattr(obj, 'plate_path', '')) or self.ALL_ITEMS_SCOPE,
+            aliases=('PipelineOrchestrator',),
+            process_all_fields=True,
+        )
+
+    def _configure_preview_fields(self):
+        """Configure which config fields show preview labels in plate list.
+
+        Uses centralized formatters from config_preview_formatters module to ensure
+        consistency with PipelineEditor and other widgets.
+        """
+        # Streaming config previews (uses centralized CONFIG_INDICATORS: NAP, FIJI)
+        # Only shown if enabled=True
+        self.enable_preview_for_field(
+            'napari_streaming_config',
+            scope_root='pipeline_config'
+        )
+        self.enable_preview_for_field(
+            'fiji_streaming_config',
+            scope_root='pipeline_config'
+        )
+
+        # Materialization config preview (uses centralized CONFIG_INDICATORS: MAT)
+        # Only shown if enabled=True
+        self.enable_preview_for_field(
+            'step_materialization_config',
+            scope_root='pipeline_config'
+        )
+
+        # FILT should never be shown (per user requirement)
+        # self.enable_preview_for_field('well_filter_config', None)
+
+        # Execution config preview (plate-specific, not in pipeline editor)
+        self.enable_preview_for_field(
+            'num_workers',
+            lambda v: f'W:{v if v is not None else 0}',
+            scope_root='pipeline_config'
+        )
+
+        # Sequential processing preview (plate-specific, not in pipeline editor)
+        self.enable_preview_for_field(
+            'sequential_processing_config.sequential_components',
+            lambda v: f'Seq:{",".join(c.value for c in v)}' if v else None,
+            scope_root='pipeline_config'
+        )
+
+        self.enable_preview_for_field(
+            'vfs_config.materialization_backend',
+            lambda v: f'{v.value.upper()}',
+            scope_root='pipeline_config'
+        )
+
+        # Output directory (shows whenever a custom path is set)
+        self.enable_preview_for_field(
+            'path_planning_config.output_dir_suffix',
+            scope_root='pipeline_config',
+            formatter=lambda p: f'output={p}',
+            fallback_resolver=self._build_effective_config_fallback('path_planning_config.output_dir_suffix')
+        )
+        
+        # Well filter (only show when the list is non-empty)
+        self.enable_preview_for_field(
+            'path_planning_config.well_filter',
+            scope_root='pipeline_config',
+            formatter=lambda wf: f'wf={len(wf)}' if wf else None,
+            fallback_resolver=self._build_effective_config_fallback('path_planning_config.well_filter')
+        )
+        
+        # Subdir (only show when it differs from the default)
+        self.enable_preview_for_field(
+            'path_planning_config.sub_dir',
+            scope_root='pipeline_config',
+            formatter=lambda sub: f'subdir={sub}',
+            fallback_resolver=self._build_effective_config_fallback('path_planning_config.sub_dir')
+        )
+
+
+    def _resolve_pipeline_scope_from_config(self, config_obj, context_obj) -> str:
+        """Return plate scope for a PipelineConfig instance."""
+        for plate_path, orchestrator in self.orchestrators.items():
+            if orchestrator.pipeline_config is config_obj:
+                return str(plate_path)
+        return self.ALL_ITEMS_SCOPE
+
+    # ========== CrossWindowPreviewMixin Hooks ==========
+
+    def _process_pending_preview_updates(self) -> None:
+        """Apply incremental updates for pending plate keys."""
+        if not self._pending_preview_keys:
+            return
+
+        # Update only the affected plate items
+        for plate_path in self._pending_preview_keys:
+            self._update_single_plate_item(plate_path)
+
+        # Clear pending updates
+        self._pending_preview_keys.clear()
+
+    def _handle_full_preview_refresh(self) -> None:
+        """Fallback when incremental updates not possible."""
+        self.update_plate_list()
+
+    def _update_single_plate_item(self, plate_path: str):
+        """Update a single plate item's preview text without rebuilding the list."""
+        # Find the item in the list
+        for i in range(self.plate_list.count()):
+            item = self.plate_list.item(i)
+            plate_data = item.data(Qt.ItemDataRole.UserRole)
+            if plate_data and plate_data.get('path') == plate_path:
+                # Rebuild just this item's display text
+                plate = plate_data
+                display_text = self._format_plate_item_with_preview(plate)
+                item.setText(display_text)
+                # Height is automatically calculated by MultilinePreviewItemDelegate.sizeHint()
+
+                break
+
+    def _format_plate_item_with_preview(self, plate: Dict) -> str:
+        """Format plate item with status and config preview labels.
+
+        Uses multiline format:
+        Line 1: [status] Plate name
+        Line 2: Plate path
+        Line 3: Config preview labels (if any)
+        """
+        # Determine status prefix
+        status_prefix = ""
+        preview_labels = []
+
+        if plate['path'] in self.orchestrators:
+            orchestrator = self.orchestrators[plate['path']]
+            if orchestrator.state == OrchestratorState.READY:
+                status_prefix = "✓ Init"
+            elif orchestrator.state == OrchestratorState.COMPILED:
+                status_prefix = "✓ Compiled"
+            elif orchestrator.state == OrchestratorState.EXECUTING:
+                # Check actual execution state (queued vs running)
+                exec_state = self.plate_execution_states.get(plate['path'])
+                if exec_state == "queued":
+                    status_prefix = "⏳ Queued"
+                elif exec_state == "running":
+                    status_prefix = "🔄 Running"
+                else:
+                    status_prefix = "🔄 Executing"
+            elif orchestrator.state == OrchestratorState.COMPLETED:
+                status_prefix = "✅ Complete"
+            elif orchestrator.state == OrchestratorState.INIT_FAILED:
+                status_prefix = "❌ Init Failed"
+            elif orchestrator.state == OrchestratorState.COMPILE_FAILED:
+                status_prefix = "❌ Compile Failed"
+            elif orchestrator.state == OrchestratorState.EXEC_FAILED:
+                status_prefix = "❌ Exec Failed"
+
+            # Build config preview labels for line 3
+            preview_labels = self._build_config_preview_labels(orchestrator)
+
+        # Line 1: [status] before plate name (user requirement)
+        if status_prefix:
+            line1 = f"{status_prefix} ▶ {plate['name']}"
+        else:
+            line1 = f"▶ {plate['name']}"
+
+        # Line 2: Plate path on new line (user requirement)
+        line2 = f"  {plate['path']}"
+
+        # Line 3: Config preview labels (if any)
+        if preview_labels:
+            line3 = f"  └─ configs=[{', '.join(preview_labels)}]"
+            return f"{line1}\n{line2}\n{line3}"
+
+        return f"{line1}\n{line2}"
+
+    def _build_config_preview_labels(self, orchestrator: PipelineOrchestrator) -> List[str]:
+        """Build preview labels for orchestrator config.
+
+        Uses centralized formatters from config_preview_formatters module to ensure
+        consistency with PipelineEditor.
+        """
+        from openhcs.pyqt_gui.widgets.config_preview_formatters import format_config_indicator
+        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+
+        labels = []
+
+        try:
+            # Get the raw pipeline_config (like PipelineEditor gets the raw step)
+            pipeline_config = orchestrator.pipeline_config
+
+            # Collect live context for resolving lazy values (same as PipelineEditor)
+            live_context_snapshot = ParameterFormManager.collect_live_context(
+                scope_filter=orchestrator.plate_path
+            )
+
+            # Get the preview instance with live values merged (uses ABC method)
+            # This implements the pattern from docs/source/development/scope_hierarchy_live_context.rst
+            from openhcs.core.config import PipelineConfig
+            config_for_display = self._get_preview_instance(
+                obj=pipeline_config,
+                live_context_snapshot=live_context_snapshot,
+                scope_id=str(orchestrator.plate_path),  # Scope is just the plate path
+                obj_type=PipelineConfig
+            )
+
+            effective_config = orchestrator.get_effective_config()
+
+            # Check each enabled preview field
+            for field_path in self.get_enabled_preview_fields():
+                value = self._resolve_preview_field_value(
+                    pipeline_config_for_display=config_for_display,
+                    field_path=field_path,
+                    live_context_snapshot=live_context_snapshot,
+                    fallback_context={
+                        'orchestrator': orchestrator,
+                        'field_path': field_path,
+                        'effective_config': effective_config,
+                        'pipeline_config': config_for_display,
+                        'live_context_snapshot': live_context_snapshot,
+                    }
+                )
+
+                if value is None:
+                    continue
+
+                if hasattr(value, '__dataclass_fields__'):
+                    # Config object - use centralized formatter with resolver
+                    def resolve_attr(parent_obj, config_obj, attr_name, context):
+                        return self._resolve_config_attr(
+                            config_for_display,
+                            config_obj,
+                            attr_name,
+                            live_context_snapshot
+                        )
+
+                    formatted = format_config_indicator(field_path, value, resolve_attr)
+                else:
+                    formatted = self.format_preview_value(field_path, value)
+
+                if formatted:
+                    labels.append(formatted)
+        except Exception as e:
+            import traceback
+            logger.error(f"Error building config preview labels: {e}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
+
+        return labels
+
+    def _merge_with_live_values(self, obj: Any, live_values: Dict[str, Any]) -> Any:
+        """Merge PipelineConfig with live values from ParameterFormManager.
+
+        Implementation of CrossWindowPreviewMixin hook for PlateManager.
+        Uses LiveContextResolver to reconstruct nested dataclass values.
+
+        Args:
+            obj: PipelineConfig instance
+            live_values: Dict of field_name -> value from ParameterFormManager
+
+        Returns:
+            New PipelineConfig with live values merged
+        """
+        import dataclasses
+
+        if not dataclasses.is_dataclass(obj):
+            return obj
+
+        # Reconstruct live values (handles nested dataclasses)
+        reconstructed_values = self._live_context_resolver.reconstruct_live_values(live_values)
+
+        # Create a copy with live values merged
+        merged_values = {}
+        for field in dataclasses.fields(obj):
+            field_name = field.name
+            if field_name in reconstructed_values:
+                # Use live value
+                merged_values[field_name] = reconstructed_values[field_name]
+                logger.info(f"Using live value for {field_name}: {reconstructed_values[field_name]}")
+            else:
+                # Use original value
+                merged_values[field_name] = getattr(obj, field_name)
+
+        # Create new instance with merged values
+        return type(obj)(**merged_values)
+
+    def _resolve_config_attr(self, pipeline_config_for_display, config: object, attr_name: str,
+                             live_context_snapshot=None) -> object:
+        """
+        Resolve any config attribute through lazy resolution system using LIVE context.
+
+        Uses LiveContextResolver service from configuration framework for cached resolution.
+
+        Args:
+            pipeline_config_for_display: PipelineConfig with live values merged (same as step_for_display in PipelineEditor)
+            config: Config dataclass instance (e.g., NapariStreamingConfig)
+            attr_name: Name of the attribute to resolve (e.g., 'enabled', 'well_filter')
+            live_context_snapshot: Optional pre-collected LiveContextSnapshot (for performance)
+
+        Returns:
+            Resolved attribute value (type depends on attribute)
+        """
+        from openhcs.config_framework.global_config import get_current_global_config
+
+        try:
+            # Build context stack: GlobalPipelineConfig → PipelineConfig (with live values merged)
+            # CRITICAL: Use pipeline_config_for_display (with live values merged), not raw pipeline_config
+            # This matches PipelineEditor pattern where context_stack includes step_for_display
+            context_stack = [
+                get_current_global_config(GlobalPipelineConfig),
+                pipeline_config_for_display
+            ]
+
+            # Resolve using service
+            resolved_value = self._live_context_resolver.resolve_config_attr(
+                config_obj=config,
+                attr_name=attr_name,
+                context_stack=context_stack,
+                live_context=live_context_snapshot.values if live_context_snapshot else {},
+                cache_token=live_context_snapshot.token if live_context_snapshot else 0
+            )
+
+            return resolved_value
+
+        except Exception as e:
+            import traceback
+            logger.warning(f"Failed to resolve config.{attr_name} for {type(config).__name__}: {e}")
+            logger.warning(f"Traceback: {traceback.format_exc()}")
+            # Fallback to raw value
+            raw_value = object.__getattribute__(config, attr_name)
+            return raw_value
+
+    def _resolve_preview_field_value(
+        self,
+        pipeline_config_for_display,
+        field_path: str,
+        live_context_snapshot=None,
+        fallback_context: Optional[Dict[str, Any]] = None,
+    ):
+        """Resolve a preview field path using the live context resolver."""
+        parts = field_path.split('.')
+        current_obj = pipeline_config_for_display
+        resolved_value = None
+
+        for part in parts:
+            if current_obj is None:
+                resolved_value = None
+                break
+
+            resolved_value = self._resolve_config_attr(
+                pipeline_config_for_display,
+                current_obj,
+                part,
+                live_context_snapshot
+            )
+            current_obj = resolved_value
+
+        if resolved_value is None:
+            return self._apply_preview_field_fallback(field_path, fallback_context)
+
+        return resolved_value
+
+    def _build_effective_config_fallback(self, field_path: str) -> Callable:
+        """Return a fallback resolver that reads from effective config when pipeline config is None."""
+        def _resolver(widget, context: Dict[str, Any]):
+            effective_config = context.get('effective_config')
+            if effective_config is None:
+                return None
+
+            value = effective_config
+            for part in field_path.split('.'):
+                value = getattr(value, part, None)
+                if value is None:
+                    return None
+            return value
+
+        return _resolver
 
     # ========== UI Setup ==========
 
@@ -213,9 +647,13 @@ class PlateManagerWidget(QWidget):
         splitter = QSplitter(Qt.Orientation.Vertical)
         layout.addWidget(splitter)
         
-        # Plate list
-        self.plate_list = QListWidget()
-        self.plate_list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
+        # Plate list (uses shared reorderable list widget)
+        self.plate_list = ReorderableListWidget()
+
+        # Enable horizontal scrolling for long plate paths
+        self.plate_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.plate_list.setHorizontalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
+
         # Apply explicit styling to plate list for consistent background
         self.plate_list.setStyleSheet(f"""
             QListWidget {{
@@ -238,6 +676,17 @@ class PlateManagerWidget(QWidget):
                 background-color: {self.color_scheme.to_hex(self.color_scheme.hover_bg)};
             }}
         """)
+
+        # Set custom delegate to render multiline items with grey preview text (shared with PipelineEditor)
+        try:
+            name_color = QColor(self.color_scheme.to_hex(self.color_scheme.text_primary))
+            preview_color = QColor(self.color_scheme.to_hex(self.color_scheme.text_disabled))
+            selected_text_color = QColor("#FFFFFF")  # White text when selected
+            self.plate_list.setItemDelegate(MultilinePreviewItemDelegate(name_color, preview_color, selected_text_color, self.plate_list))
+        except Exception:
+            # Fallback silently if color scheme isn't ready
+            pass
+
         # Apply centralized styling to main widget
         self.setStyleSheet(self.style_generator.generate_plate_manager_style())
         splitter.addWidget(self.plate_list)
@@ -320,7 +769,10 @@ class PlateManagerWidget(QWidget):
         # Plate list selection
         self.plate_list.itemSelectionChanged.connect(self.on_selection_changed)
         self.plate_list.itemDoubleClicked.connect(self.on_item_double_clicked)
-        
+
+        # Plate list reordering
+        self.plate_list.items_reordered.connect(self.on_plates_reordered)
+
         # Internal signals
         self.status_message.connect(self.update_status)
         self.orchestrator_state_changed.connect(self.on_orchestrator_state_changed)
@@ -334,6 +786,13 @@ class PlateManagerWidget(QWidget):
         self.compilation_error.connect(self._handle_compilation_error)
         self.initialization_error.connect(self._handle_initialization_error)
         self.execution_error.connect(self._handle_execution_error)
+
+        # ZMQ execution signals
+        self._execution_complete_signal.connect(self._on_execution_complete)
+        self._execution_error_signal.connect(self._on_execution_error)
+        self._execution_status_changed_signal.connect(self._on_execution_status_changed)
+
+        # Note: ParameterFormManager registration is handled by CrossWindowPreviewMixin._init_cross_window_preview_mixin()
     
     def handle_button_action(self, action: str):
         """
@@ -387,14 +846,15 @@ class PlateManagerWidget(QWidget):
         from openhcs.config_framework.lazy_factory import ensure_global_config_context
         ensure_global_config_context(GlobalPipelineConfig, new_global_config)
 
-        # Rebuild orchestrator-specific config if it exists
-        if orchestrator.pipeline_config is not None:
-            orchestrator.pipeline_config = rebuild_lazy_config_with_new_global_reference(
-                orchestrator.pipeline_config,
-                new_global_config,
-                GlobalPipelineConfig
-            )
-            logger.info(f"Rebuilt orchestrator-specific config for plate: {orchestrator.plate_path}")
+        # Always ensure orchestrator has a pipeline config hooked to the new global reference
+        from openhcs.core.config import PipelineConfig
+        current_config = orchestrator.pipeline_config or PipelineConfig()
+        orchestrator.pipeline_config = rebuild_lazy_config_with_new_global_reference(
+            current_config,
+            new_global_config,
+            GlobalPipelineConfig
+        )
+        logger.info(f"Rebuilt orchestrator-specific config for plate: {orchestrator.plate_path}")
 
         # Get effective config and emit signal for UI refresh
         effective_config = orchestrator.get_effective_config()
@@ -530,6 +990,10 @@ class PlateManagerWidget(QWidget):
                 plate_path=plate_path,
                 storage_registry=plate_registry
             )
+            saved_config = self.plate_configs.get(str(plate_path))
+            if saved_config:
+                orchestrator.apply_pipeline_config(saved_config)
+
             # Only run heavy initialization in worker thread
             # Need to set up context in worker thread too since initialize() runs there
             def initialize_with_context():
@@ -617,35 +1081,9 @@ class PlateManagerWidget(QWidget):
         # The config window should work with the current orchestrator context
         # Reset behavior will be handled differently to avoid corrupting step editor context
 
-        # CRITICAL FIX: Create PipelineConfig that preserves user-set values but shows placeholders for inherited fields
-        # The orchestrator's pipeline_config has concrete values filled in from global config inheritance,
-        # but we need to distinguish between user-set values (keep concrete) and inherited values (show as placeholders)
-        from openhcs.config_framework.lazy_factory import create_dataclass_for_editing
-        from dataclasses import fields
-
-        # CRITICAL FIX: Create config for editing that preserves user values while showing placeholders for inherited fields
-        if representative_orchestrator.pipeline_config is not None:
-            # Orchestrator has existing config - preserve explicitly set fields, reset others to None for placeholders
-            existing_config = representative_orchestrator.pipeline_config
-            explicitly_set_fields = getattr(existing_config, '_explicitly_set_fields', set())
-
-            # Create field values: keep explicitly set values, use None for inherited fields
-            field_values = {}
-            for field in fields(PipelineConfig):
-                if field.name in explicitly_set_fields:
-                    # User explicitly set this field - preserve the concrete value
-                    field_values[field.name] = object.__getattribute__(existing_config, field.name)
-                else:
-                    # Field was inherited from global config - use None to show placeholder
-                    field_values[field.name] = None
-
-            # Create config with preserved user values and None for inherited fields
-            current_plate_config = PipelineConfig(**field_values)
-            # Preserve the explicitly set fields tracking (bypass frozen restriction)
-            object.__setattr__(current_plate_config, '_explicitly_set_fields', explicitly_set_fields.copy())
-        else:
-            # No existing config - create fresh config with all None values (all show as placeholders)
-            current_plate_config = create_dataclass_for_editing(PipelineConfig, self.global_config)
+        # SIMPLIFIED: Always use the orchestrator's PipelineConfig directly.
+        # ParameterFormManager inspects raw values to distinguish inherited vs user-set.
+        current_plate_config = representative_orchestrator.pipeline_config
 
         def handle_config_save(new_config: PipelineConfig) -> None:
             """Apply per-orchestrator configuration without global side effects."""
@@ -657,6 +1095,8 @@ class PlateManagerWidget(QWidget):
                 logger.debug(f"🔍 CONFIG SAVE - new_config.{field.name} = {raw_value}")
 
             for orchestrator in selected_orchestrators:
+                plate_key = str(orchestrator.plate_path)
+                self.plate_configs[plate_key] = new_config
                 # Direct synchronous call - no async needed
                 orchestrator.apply_pipeline_config(new_config)
                 # Emit signal for UI components to refresh
@@ -696,26 +1136,26 @@ class PlateManagerWidget(QWidget):
         # SIMPLIFIED: ConfigWindow now uses the dataclass instance directly for context
         # No need for external context management - the form manager handles it automatically
         # CRITICAL: Pass orchestrator's plate_path as scope_id to limit cross-window updates to same orchestrator
+        # CRITICAL: Do NOT wrap in config_context(orchestrator.pipeline_config) - this creates ambient context
+        # that interferes with placeholder resolution. The form manager builds its own context stack.
         scope_id = str(orchestrator.plate_path) if orchestrator else None
-        with config_context(orchestrator.pipeline_config):
-            config_window = ConfigWindow(
-                config_class,           # config_class
-                current_config,         # current_config
-                on_save_callback,       # on_save_callback
-                self.color_scheme,      # color_scheme
-                self,                   # parent
-                scope_id,               # scope_id
-                orchestrator            # orchestrator (for live updates)
-            )
+        config_window = ConfigWindow(
+            config_class,           # config_class
+            current_config,         # current_config
+            on_save_callback,       # on_save_callback
+            self.color_scheme,      # color_scheme
+            self,                   # parent
+            scope_id=scope_id       # Scope to this orchestrator
+        )
 
-            # REMOVED: refresh_config signal connection - now obsolete with live placeholder context system
-            # Config windows automatically update their placeholders through cross-window signals
-            # when other windows save changes. No need to rebuild the entire form.
+        # REMOVED: refresh_config signal connection - now obsolete with live placeholder context system
+        # Config windows automatically update their placeholders through cross-window signals
+        # when other windows save changes. No need to rebuild the entire form.
 
-            # Show as non-modal window (like main window configuration)
-            config_window.show()
-            config_window.raise_()
-            config_window.activateWindow()
+        # Show as non-modal window (like main window configuration)
+        config_window.show()
+        config_window.raise_()
+        config_window.activateWindow()
 
     def action_edit_global_config(self):
         """
@@ -732,7 +1172,7 @@ class PlateManagerWidget(QWidget):
             """Apply global configuration to all orchestrators and save to cache."""
             self.service_adapter.set_global_config(new_config)  # Update app-level config
 
-            # Update thread-local storage (single source of truth for persistent global config)
+            # Update thread-local storage for MaterializationPathConfig defaults
             from openhcs.core.config import GlobalPipelineConfig
             from openhcs.config_framework.global_config import set_global_config_for_editing
             set_global_config_for_editing(GlobalPipelineConfig, new_config)
@@ -746,10 +1186,6 @@ class PlateManagerWidget(QWidget):
             # SIMPLIFIED: Dual-axis resolver handles context discovery automatically
             if self.selected_plate_path and self.selected_plate_path in self.orchestrators:
                 logger.debug(f"Global config applied to selected orchestrator: {self.selected_plate_path}")
-
-            # REACTIVITY: Emit signal so other windows can refresh automatically
-            self.global_config_changed.emit()
-            logger.debug("Emitted global_config_changed signal for reactive placeholder updates")
 
             self.service_adapter.show_info_dialog("Global configuration applied to all orchestrators")
 
@@ -854,6 +1290,9 @@ class PlateManagerWidget(QWidget):
                         plate_path=plate_path,
                         storage_registry=plate_registry
                     )
+                    saved_config = self.plate_configs.get(str(plate_path))
+                    if saved_config:
+                        orchestrator.apply_pipeline_config(saved_config)
                     # Only run heavy initialization in worker thread
                     # Need to set up context in worker thread too since initialize() runs there
                     def initialize_with_context():
@@ -1003,15 +1442,22 @@ class PlateManagerWidget(QWidget):
 
             logger.info("✅ Connected to ZMQ execution server")
 
-            # Update orchestrator states to show running state
+            # Clear previous execution tracking
+            self.plate_execution_ids.clear()
+            self.plate_execution_states.clear()
+
+            # Set all plates to EXECUTING state (they're in the execution pipeline)
+            # Use internal plate_execution_states to track queued vs running
             for plate in ready_items:
                 plate_path = plate['path']
+                self.plate_execution_states[plate_path] = "queued"
+                # Set orchestrator to EXECUTING (they're in the execution pipeline)
                 if plate_path in self.orchestrators:
                     self.orchestrators[plate_path]._state = OrchestratorState.EXECUTING
                     self.orchestrator_state_changed.emit(plate_path, OrchestratorState.EXECUTING.value)
 
             self.execution_state = "running"
-            self.status_message.emit(f"Running {len(ready_items)} plate(s) via ZMQ...")
+            self.status_message.emit(f"Submitting {len(ready_items)} plate(s) to ZMQ server...")
             self.update_button_states()
 
             # Execute each plate
@@ -1037,58 +1483,63 @@ class PlateManagerWidget(QWidget):
 
                 logger.info(f"Executing plate: {plate_path}")
 
-                # Execute via ZMQ (in executor to avoid blocking UI)
+                # Submit pipeline via ZMQ (non-blocking - returns immediately)
                 # Send original definition pipeline - server will compile it
-                def _execute():
-                    return self.zmq_client.execute_pipeline(
+                def _submit():
+                    return self.zmq_client.submit_pipeline(
                         plate_id=str(plate_path),
                         pipeline_steps=definition_pipeline,
                         global_config=global_config_to_send,
                         pipeline_config=pipeline_config
                     )
 
-                response = await loop.run_in_executor(None, _execute)
+                response = await loop.run_in_executor(None, _submit)
 
-                # Track execution ID for cancellation
-                if response.get('execution_id'):
-                    self.current_execution_id = response['execution_id']
+                # Track execution ID per plate
+                execution_id = response.get('execution_id')
+                if execution_id:
+                    self.plate_execution_ids[plate_path] = execution_id
+                    self.current_execution_id = execution_id  # Keep for backward compatibility
 
-                logger.info(f"Plate {plate_path} execution response: {response.get('status')}")
+                logger.info(f"Plate {plate_path} submission response: {response.get('status')}")
 
-                # Handle different response statuses
+                # Handle submission response (not completion - that comes via progress callback)
                 status = response.get('status')
-                if status == 'cancelled':
-                    # Cancellation is expected, not an error - just log it
-                    logger.info(f"Plate {plate_path} execution was cancelled")
-                    self.status_message.emit(f"Execution cancelled for {plate_path}")
-                elif status != 'complete':
-                    # Actual error - use signal for thread-safe error reporting
+                if status == 'accepted':
+                    # Execution submitted successfully - it's now queued on server
+                    logger.info(f"Plate {plate_path} execution submitted successfully, ID={execution_id}")
+                    self.status_message.emit(f"Submitted {plate_path} (queued on server)")
+
+                    # Start polling for THIS plate's completion in background (non-blocking)
+                    if execution_id:
+                        self._start_completion_poller(execution_id, plate_path)
+                else:
+                    # Submission failed - handle error for THIS plate only
                     error_msg = response.get('message', 'Unknown error')
-                    logger.error(f"Plate {plate_path} execution failed: {error_msg}")
-                    self.execution_error.emit(f"Execution failed for {plate_path}: {error_msg}")
+                    logger.error(f"Plate {plate_path} submission failed: {error_msg}")
+                    self.execution_error.emit(f"Submission failed for {plate_path}: {error_msg}")
 
-            # Execution complete
-            self.execution_state = "idle"
-            self.current_execution_id = None
-            self.status_message.emit(f"Completed {len(ready_items)} plate(s)")
-
-            # Update orchestrator states
-            for plate in ready_items:
-                plate_path = plate['path']
-                if plate_path in self.orchestrators:
-                    self.orchestrators[plate_path]._state = OrchestratorState.COMPLETED
-                    self.orchestrator_state_changed.emit(plate_path, OrchestratorState.COMPLETED.value)
-
-            self.update_button_states()
+                    # Mark THIS plate as failed
+                    self.plate_execution_states[plate_path] = "failed"
+                    if plate_path in self.orchestrators:
+                        self.orchestrators[plate_path]._state = OrchestratorState.EXEC_FAILED
+                        self.orchestrator_state_changed.emit(plate_path, OrchestratorState.EXEC_FAILED.value)
 
         except Exception as e:
             logger.error(f"Failed to execute plates via ZMQ: {e}", exc_info=True)
             # Use signal for thread-safe error reporting
             self.execution_error.emit(f"Failed to execute: {e}")
+
+            # Mark all plates as failed
+            for plate_path in self.plate_execution_states.keys():
+                self.plate_execution_states[plate_path] = "failed"
+                if plate_path in self.orchestrators:
+                    self.orchestrators[plate_path]._state = OrchestratorState.EXEC_FAILED
+                    self.orchestrator_state_changed.emit(plate_path, OrchestratorState.EXEC_FAILED.value)
+
             self.execution_state = "idle"
 
-        finally:
-            # Always disconnect client after execution to avoid state conflicts
+            # Disconnect client on error
             if self.zmq_client is not None:
                 try:
                     def _disconnect():
@@ -1102,9 +1553,253 @@ class PlateManagerWidget(QWidget):
             self.current_execution_id = None
             self.update_button_states()
 
+    def _start_completion_poller(self, execution_id, plate_path):
+        """
+        Start background thread to poll for THIS plate's execution completion (non-blocking).
+
+        Also detects status transitions (queued → running) and emits signals for UI updates.
+
+        Args:
+            execution_id: Execution ID to poll
+            plate_path: Plate path being executed
+        """
+        import threading
+        import time
+
+        def poll_completion():
+            """Poll for completion in background thread."""
+            try:
+                # Track previous status to detect transitions
+                previous_status = "queued"
+                poll_count = 0
+
+                # Poll status until completion
+                while True:
+                    time.sleep(0.5)  # Poll every 0.5 seconds
+                    poll_count += 1
+
+                    try:
+                        # Check if client still exists (may be disconnected after completion)
+                        if self.zmq_client is None:
+                            logger.debug(f"ZMQ client disconnected, stopping poller for {plate_path}")
+                            break
+
+                        status_response = self.zmq_client.get_status(execution_id)
+
+                        if status_response.get('status') == 'ok':
+                            execution = status_response.get('execution', {})
+                            exec_status = execution.get('status')
+
+                            # Detect status transitions
+                            if exec_status == 'running' and previous_status == 'queued':
+                                logger.info(f"🔄 Detected transition: {plate_path} queued → running")
+                                self._execution_status_changed_signal.emit(plate_path, "running")
+                                previous_status = "running"
+
+                            # Check for completion
+                            if exec_status == 'complete':
+                                logger.info(f"✅ Execution complete: {plate_path}")
+                                result = {'status': 'complete', 'execution_id': execution_id, 'results': execution.get('results_summary', {})}
+                                self._execution_complete_signal.emit(result, plate_path)
+                                break
+                            elif exec_status == 'failed':
+                                logger.info(f"❌ Execution failed: {plate_path}")
+                                result = {'status': 'error', 'execution_id': execution_id, 'message': execution.get('error')}
+                                self._execution_complete_signal.emit(result, plate_path)
+                                break
+                            elif exec_status == 'cancelled':
+                                logger.info(f"🚫 Execution cancelled: {plate_path}")
+                                result = {'status': 'cancelled', 'execution_id': execution_id, 'message': 'Execution was cancelled'}
+                                self._execution_complete_signal.emit(result, plate_path)
+                                break
+
+                    except Exception as poll_error:
+                        logger.warning(f"Error polling status for {plate_path}: {poll_error}")
+                        # Continue polling despite errors
+
+            except Exception as e:
+                logger.error(f"Error in completion poller for {plate_path}: {e}", exc_info=True)
+                # Emit error signal (thread-safe via Qt signal)
+                self._execution_error_signal.emit(f"{plate_path}: {e}")
+
+        # Start polling thread
+        thread = threading.Thread(target=poll_completion, daemon=True)
+        thread.start()
+
+    def _on_execution_status_changed(self, plate_path, new_status):
+        """Handle execution status change (queued → running) for a single plate."""
+        try:
+            logger.info(f"🔄 Status changed for {plate_path}: {new_status}")
+
+            # Update internal state
+            self.plate_execution_states[plate_path] = new_status
+
+            # Update UI to show new status
+            self.update_plate_list()
+
+            # Emit status message
+            if new_status == "running":
+                self.status_message.emit(f"▶️ Running {plate_path}")
+
+        except Exception as e:
+            logger.error(f"Error handling status change for {plate_path}: {e}", exc_info=True)
+
+    def _on_execution_complete(self, result, plate_path):
+        """Handle execution completion for a single plate (called from main thread via signal)."""
+        try:
+            status = result.get('status')
+            logger.info(f"Plate {plate_path} completed with status: {status}")
+
+            # Update THIS plate's state
+            if status == 'complete':
+                self.plate_execution_states[plate_path] = "completed"
+                self.status_message.emit(f"✓ Completed {plate_path}")
+                if plate_path in self.orchestrators:
+                    self.orchestrators[plate_path]._state = OrchestratorState.COMPLETED
+                    self.orchestrator_state_changed.emit(plate_path, OrchestratorState.COMPLETED.value)
+            elif status == 'cancelled':
+                self.plate_execution_states[plate_path] = "failed"
+                self.status_message.emit(f"✗ Cancelled {plate_path}")
+                if plate_path in self.orchestrators:
+                    self.orchestrators[plate_path]._state = OrchestratorState.READY
+                    self.orchestrator_state_changed.emit(plate_path, OrchestratorState.READY.value)
+            else:
+                self.plate_execution_states[plate_path] = "failed"
+                error_msg = result.get('message', 'Unknown error')
+                self.execution_error.emit(f"Execution failed for {plate_path}: {error_msg}")
+                if plate_path in self.orchestrators:
+                    self.orchestrators[plate_path]._state = OrchestratorState.EXEC_FAILED
+                    self.orchestrator_state_changed.emit(plate_path, OrchestratorState.EXEC_FAILED.value)
+
+            # Check if ALL plates are done
+            all_done = all(
+                state in ("completed", "failed")
+                for state in self.plate_execution_states.values()
+            )
+
+            if all_done:
+                logger.info("All plates completed - disconnecting ZMQ client")
+                # Disconnect ZMQ client when ALL plates are done
+                if self.zmq_client is not None:
+                    try:
+                        logger.info("Disconnecting ZMQ client after all executions complete")
+                        self.zmq_client.disconnect()
+                    except Exception as disconnect_error:
+                        logger.warning(f"Failed to disconnect ZMQ client: {disconnect_error}")
+                    finally:
+                        self.zmq_client = None
+
+                # Update global state
+                self.execution_state = "idle"
+                self.current_execution_id = None
+
+                # Count results
+                completed_count = sum(1 for s in self.plate_execution_states.values() if s == "completed")
+                failed_count = sum(1 for s in self.plate_execution_states.values() if s == "failed")
+
+                # Run global multi-plate consolidation if multiple plates completed successfully
+                if completed_count > 1 and self.global_config.analysis_consolidation_config.enabled:
+                    try:
+                        logger.info(f"Starting global multi-plate consolidation for {completed_count} plates")
+                        self._consolidate_multi_plate_results()
+                        self.status_message.emit(f"All done: {completed_count} completed, {failed_count} failed. Global summary created.")
+                    except Exception as consolidation_error:
+                        logger.error(f"Failed to create global summary: {consolidation_error}", exc_info=True)
+                        self.status_message.emit(f"All done: {completed_count} completed, {failed_count} failed. Global summary failed.")
+                else:
+                    self.status_message.emit(f"All done: {completed_count} completed, {failed_count} failed")
+
+                # Update button states to show "Run" instead of "Stop"
+                self.update_button_states()
+
+        except Exception as e:
+            logger.error(f"Error handling execution completion: {e}", exc_info=True)
+
+    def _consolidate_multi_plate_results(self):
+        """
+        Consolidate results from multiple completed plates into a global summary.
+
+        This collects MetaXpress summaries from all successfully completed plates
+        and creates a unified global summary file.
+        """
+        from pathlib import Path
+        from openhcs.processing.backends.analysis.consolidate_analysis_results import consolidate_multi_plate_summaries
+
+        # Collect summary paths from completed plates
+        summary_paths = []
+        plate_names = []
+
+        for plate_path_str, state in self.plate_execution_states.items():
+            if state != "completed":
+                continue
+
+            plate_path = Path(plate_path_str)
+
+            # Build output directory path (same logic as orchestrator)
+            path_config = self.global_config.path_planning_config
+            if path_config.global_output_folder:
+                base = Path(path_config.global_output_folder)
+            else:
+                base = plate_path.parent
+
+            output_plate_root = base / f"{plate_path.name}{path_config.output_dir_suffix}"
+
+            # Get results directory
+            materialization_path = self.global_config.materialization_results_path
+            if Path(materialization_path).is_absolute():
+                results_dir = Path(materialization_path)
+            else:
+                results_dir = output_plate_root / materialization_path
+
+            # Look for MetaXpress summary
+            summary_filename = self.global_config.analysis_consolidation_config.output_filename
+            summary_path = results_dir / summary_filename
+
+            if summary_path.exists():
+                summary_paths.append(str(summary_path))
+                plate_names.append(output_plate_root.name)
+                logger.info(f"Found summary for plate {output_plate_root.name}: {summary_path}")
+            else:
+                logger.warning(f"No summary found for plate {plate_path} at {summary_path}")
+
+        if len(summary_paths) < 2:
+            logger.info(f"Only {len(summary_paths)} summary found, skipping global consolidation")
+            return
+
+        # Determine global output location
+        path_config = self.global_config.path_planning_config
+        if path_config.global_output_folder:
+            global_output_dir = Path(path_config.global_output_folder)
+        else:
+            # Use parent of first plate's output directory
+            global_output_dir = Path(summary_paths[0]).parent.parent.parent
+
+        global_summary_filename = self.global_config.analysis_consolidation_config.global_summary_filename
+        global_summary_path = global_output_dir / global_summary_filename
+
+        # Consolidate all summaries
+        logger.info(f"Consolidating {len(summary_paths)} summaries to {global_summary_path}")
+        consolidate_multi_plate_summaries(
+            summary_paths=summary_paths,
+            output_path=str(global_summary_path),
+            plate_names=plate_names
+        )
+        logger.info(f"✅ Global summary created: {global_summary_path}")
+
+    def _on_execution_error(self, error_msg):
+        """Handle execution error (called from main thread via signal)."""
+        self.execution_error.emit(f"Execution error: {error_msg}")
+        self.execution_state = "idle"
+        self.current_execution_id = None
+        self.update_button_states()
+
     def _on_zmq_progress(self, message):
         """
         Handle progress updates from ZMQ execution server.
+
+        NOTE: Progress updates don't currently work with ProcessPoolExecutor because
+        progress callbacks can't be pickled across process boundaries. This method
+        is kept for future implementation of multiprocessing-safe progress (e.g., Manager().Queue()).
 
         This is called from the progress listener thread (background thread),
         so we must use QMetaObject.invokeMethod to safely emit signals from the main thread.
@@ -1136,62 +1831,71 @@ class PlateManagerWidget(QWidget):
         """Emit status message from main thread (called via QMetaObject.invokeMethod)."""
         self.status_message.emit(message)
 
-    async def action_stop_execution(self):
-        """Handle Stop Execution - cancel ZMQ execution or terminate subprocess."""
-        logger.info("🛑 Stop button pressed.")
-        self.status_message.emit("Terminating execution...")
+    @pyqtSlot(str, str)
+    def _emit_orchestrator_state_changed(self, plate_path: str, state: str):
+        """Emit orchestrator state changed from main thread (called via QMetaObject.invokeMethod)."""
+        self.orchestrator_state_changed.emit(plate_path, state)
 
-        # Immediately set state to "stopping" and disable the button
-        self.execution_state = "stopping"
-        self.update_button_states()
+    async def action_stop_execution(self):
+        """Handle Stop Execution - cancel ZMQ execution or terminate subprocess.
+
+        First click: Graceful shutdown, button changes to "Force Kill"
+        Second click: Force shutdown
+
+        Uses EXACT same code path as ZMQ browser quit button.
+        """
+        logger.info("🛑🛑🛑 action_stop_execution CALLED")
+        logger.info(f"🛑 execution_state: {self.execution_state}")
+        logger.info(f"🛑 zmq_client: {self.zmq_client}")
+        logger.info(f"🛑 Button text: {self.buttons['run_plate'].text()}")
+
+        # Check if this is a force kill (button text is "Force Kill")
+        is_force_kill = self.buttons["run_plate"].text() == "Force Kill"
 
         # Check if using ZMQ execution
         if self.zmq_client:
-            try:
-                logger.info("🛑 Requesting graceful cancellation via ZMQ...")
+            port = self.zmq_client.port
 
-                import asyncio
-                loop = asyncio.get_event_loop()
-
-                # Use the same code path as the ZMQ browser Quit button - it works perfectly!
-                # Send 'shutdown' message which kills workers but keeps server alive
-                logger.info(f"🛑 Killing workers using same code path as Quit button (port {self.zmq_client.port})")
-
-                def _kill_workers():
-                    from openhcs.runtime.zmq_base import ZMQClient
-                    return ZMQClient.kill_server_on_port(self.zmq_client.port, graceful=True)
-
-                success = await loop.run_in_executor(None, _kill_workers)
-
-                if success:
-                    logger.info("🛑 Workers killed successfully, server still alive")
-                    self.status_message.emit("Execution cancelled - workers killed")
-                else:
-                    logger.warning("🛑 Failed to kill workers")
-                    self.status_message.emit("Failed to cancel execution")
-
-                # Disconnect client
-                def _disconnect():
-                    self.zmq_client.disconnect()
-
-                await loop.run_in_executor(None, _disconnect)
-
-                self.zmq_client = None
-                self.current_execution_id = None
-                self.execution_state = "idle"
-
-                # Update orchestrator states
-                for orchestrator in self.orchestrators.values():
-                    if orchestrator.state == OrchestratorState.EXECUTING:
-                        orchestrator._state = OrchestratorState.COMPILED
-
-                self.status_message.emit("Execution cancelled by user")
+            # Change button to "Force Kill" IMMEDIATELY (before any async operations)
+            if not is_force_kill:
+                logger.info(f"🛑 Stop button pressed - changing to Force Kill")
+                self.execution_state = "force_kill_ready"
                 self.update_button_states()
+                # Force immediate UI update
+                QApplication.processEvents()
 
-            except Exception as e:
-                logger.error(f"🛑 Error cancelling ZMQ execution: {e}")
-                # Use signal for thread-safe error reporting from async context
-                self.execution_error.emit(f"Failed to cancel execution: {e}")
+            # Use EXACT same code path as ZMQ browser quit button
+            import threading
+
+            def kill_server():
+                from openhcs.runtime.zmq_base import ZMQClient
+                try:
+                    graceful = not is_force_kill
+                    logger.info(f"🛑 {'Gracefully' if graceful else 'Force'} killing server on port {port}...")
+                    success = ZMQClient.kill_server_on_port(port, graceful=graceful)
+
+                    if success:
+                        logger.info(f"✅ Successfully {'quit' if graceful else 'force killed'} server on port {port}")
+                        # Mark all tracked plates as cancelled
+                        for plate_path in list(self.plate_execution_states.keys()):
+                            # Emit signal to update UI on main thread for each plate
+                            self._execution_complete_signal.emit(
+                                {'status': 'cancelled'},
+                                plate_path
+                            )
+                    else:
+                        logger.warning(f"❌ Failed to {'quit' if graceful else 'force kill'} server on port {port}")
+                        self._execution_error_signal.emit(f"Failed to stop execution on port {port}")
+
+                except Exception as e:
+                    logger.error(f"❌ Error stopping server on port {port}: {e}")
+                    self._execution_error_signal.emit(f"Error stopping execution: {e}")
+
+            # Run in background thread (same as ZMQ browser)
+            thread = threading.Thread(target=kill_server, daemon=True)
+            thread.start()
+
+            return
 
         elif self.current_process and self.current_process.poll() is None:  # Still running subprocess
             try:
@@ -1249,8 +1953,6 @@ class PlateManagerWidget(QWidget):
                 self.status_message.emit("Execution terminated by user")
                 self.update_button_states()
                 self.subprocess_log_stopped.emit()
-        else:
-            self.service_adapter.show_info_dialog("No execution is currently running.")
     
     def action_code_plate(self):
         """Generate Python code for selected plates and their pipelines (Tier 3)."""
@@ -1258,8 +1960,12 @@ class PlateManagerWidget(QWidget):
 
         selected_items = self.get_selected_plates()
         if not selected_items:
-            self.service_adapter.show_error_dialog("No plates selected for code generation")
-            return
+            if self.plates:
+                logger.info("Code button pressed with no selection, falling back to all plates.")
+                selected_items = list(self.plates)
+            else:
+                logger.info("Code button pressed with no plates configured; generating empty template.")
+                selected_items = []
 
         try:
             # Collect plate paths, pipeline data, and per-plate pipeline configs
@@ -1282,8 +1988,7 @@ class PlateManagerWidget(QWidget):
                 # Get the actual pipeline config from this plate's orchestrator
                 if plate_path in self.orchestrators:
                     orchestrator = self.orchestrators[plate_path]
-                    if orchestrator.pipeline_config:
-                        per_plate_configs[plate_path] = orchestrator.pipeline_config
+                    per_plate_configs[plate_path] = orchestrator.pipeline_config
 
             # Generate complete orchestrator code using new per_plate_configs parameter
             from openhcs.debug.pickle_to_python import generate_complete_orchestrator_code
@@ -1329,56 +2034,55 @@ class PlateManagerWidget(QWidget):
 
     def _patch_lazy_constructors(self):
         """Context manager that patches lazy dataclass constructors to preserve None vs concrete distinction."""
-        from contextlib import contextmanager
-        from openhcs.core.lazy_placeholder import LazyDefaultPlaceholderService
-        import dataclasses
+        from openhcs.introspection import patch_lazy_constructors
+        return patch_lazy_constructors()
 
-        @contextmanager
-        def patch_context():
-            # Store original constructors
-            original_constructors = {}
+    def _ensure_plate_entries_from_code(self, plate_paths: List[str]) -> None:
+        """Ensure that any plates referenced in orchestrator code exist in the UI list."""
+        if not plate_paths:
+            return
 
-            # Find all lazy dataclass types that need patching
-            from openhcs.core.config import LazyZarrConfig, LazyStepMaterializationConfig, LazyWellFilterConfig
-            lazy_types = [LazyZarrConfig, LazyStepMaterializationConfig, LazyWellFilterConfig]
+        existing_paths = {str(plate['path']) for plate in self.plates}
+        added_count = 0
 
-            # Add any other lazy types that might be used
-            for lazy_type in lazy_types:
-                if LazyDefaultPlaceholderService.has_lazy_resolution(lazy_type):
-                    # Store original constructor
-                    original_constructors[lazy_type] = lazy_type.__init__
+        for plate_path in plate_paths:
+            plate_str = str(plate_path)
+            if plate_str in existing_paths:
+                continue
 
-                    # Create patched constructor that uses raw values
-                    def create_patched_init(original_init, dataclass_type):
-                        def patched_init(self, **kwargs):
-                            # Use raw value approach instead of calling original constructor
-                            # This prevents lazy resolution during code execution
-                            for field in dataclasses.fields(dataclass_type):
-                                value = kwargs.get(field.name, None)
-                                object.__setattr__(self, field.name, value)
+            plate_name = Path(plate_str).name or plate_str
+            self.plates.append({'name': plate_name, 'path': plate_str})
+            existing_paths.add(plate_str)
+            added_count += 1
+            logger.info(f"Added plate '{plate_name}' from orchestrator code")
 
-                            # Initialize any required lazy dataclass attributes
-                            if hasattr(dataclass_type, '_is_lazy_dataclass'):
-                                object.__setattr__(self, '_is_lazy_dataclass', True)
+        if added_count:
+            if self.plate_list:
+                self.update_plate_list()
+            status_message = f"Added {added_count} plate(s) from orchestrator code"
+            self.status_message.emit(status_message)
+            logger.info(status_message)
 
-                        return patched_init
+    def _get_orchestrator_for_path(self, plate_path: str):
+        """Return orchestrator instance for the provided plate path string."""
+        plate_key = str(plate_path)
+        if plate_key in self.orchestrators:
+            return self.orchestrators[plate_key]
 
-                    # Apply the patch
-                    lazy_type.__init__ = create_patched_init(original_constructors[lazy_type], lazy_type)
-
-            try:
-                yield
-            finally:
-                # Restore original constructors
-                for lazy_type, original_init in original_constructors.items():
-                    lazy_type.__init__ = original_init
-
-        return patch_context()
+        for key, orchestrator in self.orchestrators.items():
+            if str(key) == plate_key:
+                return orchestrator
+        return None
 
     def _handle_edited_orchestrator_code(self, edited_code: str):
         """Handle edited orchestrator code and update UI state (same logic as Textual TUI)."""
         logger.debug("Orchestrator code edited, processing changes...")
         try:
+            # Ensure pipeline editor window is open before processing orchestrator code
+            main_window = self._find_main_window()
+            if main_window and hasattr(main_window, 'show_pipeline_editor'):
+                main_window.show_pipeline_editor()
+
             # CRITICAL FIX: Execute code with lazy dataclass constructor patching to preserve None vs concrete distinction
             namespace = {}
             with self._patch_lazy_constructors():
@@ -1388,6 +2092,7 @@ class PlateManagerWidget(QWidget):
             if 'plate_paths' in namespace and 'pipeline_data' in namespace:
                 new_plate_paths = namespace['plate_paths']
                 new_pipeline_data = namespace['pipeline_data']
+                self._ensure_plate_entries_from_code(new_plate_paths)
 
                 # Update global config if present
                 if 'global_config' in namespace:
@@ -1405,33 +2110,65 @@ class PlateManagerWidget(QWidget):
 
                     self.global_config_changed.emit()
 
+                    # CRITICAL: Broadcast to global event bus for ALL windows to receive
+                    # This is the OpenHCS "set and forget" pattern - one broadcast reaches everyone
+                    self._broadcast_config_to_event_bus(new_global_config)
+
+                    # CRITICAL: Trigger cross-window refresh for all open config windows
+                    # This ensures Step editors, PipelineConfig editors, etc. see the code editor changes
+                    from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+                    ParameterFormManager.trigger_global_cross_window_refresh()
+                    logger.debug("Triggered global cross-window refresh after global config update")
+
                 # Handle per-plate configs (preferred) or single pipeline_config (legacy)
                 if 'per_plate_configs' in namespace:
                     # New per-plate config system
                     per_plate_configs = namespace['per_plate_configs']
 
-                    # CRITICAL FIX: Match string keys to actual plate path objects
-                    # The keys in per_plate_configs are strings, but orchestrators dict uses Path/str objects
-                    for plate_path_str, new_pipeline_config in per_plate_configs.items():
-                        # Find matching orchestrator by comparing string representations
-                        matched_orchestrator = None
-                        for orch_key, orchestrator in self.orchestrators.items():
-                            if str(orch_key) == str(plate_path_str):
-                                matched_orchestrator = orchestrator
-                                matched_key = orch_key
-                                break
+                    # SIMPLIFIED: No need to track _explicitly_set_fields
+                    # The patched constructors already preserve None vs concrete distinction in raw field values
+                    # ParameterFormManager will use object.__getattribute__ to inspect raw values
+                    # Raw None = inherited, Raw concrete = user-set (same pattern as pickle_to_python)
 
-                        if matched_orchestrator:
-                            matched_orchestrator.apply_pipeline_config(new_pipeline_config)
-                            # Emit signal for UI components to refresh (including config windows)
-                            effective_config = matched_orchestrator.get_effective_config()
-                            self.orchestrator_config_changed.emit(str(matched_key), effective_config)
-                            logger.debug(f"Applied per-plate pipeline config to orchestrator: {matched_key}")
+                    last_pipeline_config = None  # Track last config for broadcasting
+                    for plate_path_str, new_pipeline_config in per_plate_configs.items():
+                        plate_key = str(plate_path_str)
+                        self.plate_configs[plate_key] = new_pipeline_config
+
+                        orchestrator = self._get_orchestrator_for_path(plate_key)
+                        if orchestrator:
+                            orchestrator.apply_pipeline_config(new_pipeline_config)
+                            effective_config = orchestrator.get_effective_config()
+                            self.orchestrator_config_changed.emit(str(orchestrator.plate_path), effective_config)
+                            logger.debug(f"Applied per-plate pipeline config to orchestrator: {orchestrator.plate_path}")
                         else:
-                            logger.warning(f"No orchestrator found for plate path: {plate_path_str}")
+                            logger.info(f"Stored pipeline config for {plate_key}; will apply when initialized.")
+
+                        last_pipeline_config = new_pipeline_config
+
+                    # CRITICAL: Broadcast PipelineConfig to event bus ONCE after all updates
+                    # This ensures ConfigWindow instances showing PipelineConfig will update
+                    if last_pipeline_config:
+                        self._broadcast_config_to_event_bus(last_pipeline_config)
+
+                        # CRITICAL: Trigger cross-window refresh for all open config windows
+                        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+                        ParameterFormManager.trigger_global_cross_window_refresh()
+                        logger.debug("Triggered global cross-window refresh after per-plate pipeline config update")
                 elif 'pipeline_config' in namespace:
                     # Legacy single pipeline_config for all plates
                     new_pipeline_config = namespace['pipeline_config']
+
+                    # CRITICAL: Broadcast PipelineConfig to event bus ONCE for cross-window updates
+                    # This ensures ConfigWindow instances showing PipelineConfig will update
+                    self._broadcast_config_to_event_bus(new_pipeline_config)
+
+                    # CRITICAL: Trigger cross-window refresh for all open config windows
+                    # This ensures Step editors, PipelineConfig editors, etc. see the code editor changes
+                    from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+                    ParameterFormManager.trigger_global_cross_window_refresh()
+                    logger.debug("Triggered global cross-window refresh after pipeline config update")
+
                     # Apply the new pipeline config to all affected orchestrators
                     for plate_path in new_plate_paths:
                         if plate_path in self.orchestrators:
@@ -1462,13 +2199,16 @@ class PlateManagerWidget(QWidget):
                             self.pipeline_editor.update_step_list()
                             # Emit pipeline changed signal to cascade to step editors
                             self.pipeline_editor.pipeline_changed.emit(new_steps)
+
+                            # CRITICAL: Also broadcast to event bus for ALL windows
+                            self._broadcast_pipeline_to_event_bus(new_steps)
+
                             logger.debug(f"Triggered UI cascade refresh for current plate: {plate_path}")
                 else:
                     logger.warning("No pipeline editor available to update pipeline data")
 
                 # Trigger UI refresh
                 self.pipeline_data_changed.emit()
-                self.service_adapter.show_info_dialog("Orchestrator configuration updated successfully")
 
             else:
                 raise ValueError("No valid assignments found in edited code")
@@ -1479,6 +2219,26 @@ class PlateManagerWidget(QWidget):
             logger.error(f"Failed to parse edited orchestrator code: {e}\nFull traceback:\n{full_traceback}")
             # Re-raise so the code editor can handle it (keep dialog open, move cursor to error line)
             raise
+
+    def _broadcast_config_to_event_bus(self, config):
+        """Broadcast config changed event to global event bus.
+
+        Args:
+            config: Updated config object
+        """
+        if self.event_bus:
+            self.event_bus.emit_config_changed(config)
+            logger.debug("Broadcasted config_changed to event bus")
+
+    def _broadcast_pipeline_to_event_bus(self, pipeline_steps: list):
+        """Broadcast pipeline changed event to global event bus.
+
+        Args:
+            pipeline_steps: Updated list of FunctionStep objects
+        """
+        if self.event_bus:
+            self.event_bus.emit_pipeline_changed(pipeline_steps)
+            logger.debug(f"Broadcasted pipeline_changed to event bus ({len(pipeline_steps)} steps)")
 
     def _invalidate_orchestrator_compilation_state(self, plate_path: str):
         """Invalidate compilation state for an orchestrator when its pipeline changes.
@@ -1544,49 +2304,32 @@ class PlateManagerWidget(QWidget):
     
     def update_plate_list(self):
         """Update the plate list widget using selection preservation mixin."""
-        def format_plate_item(plate):
-            """Format plate item for display."""
-            display_text = f"{plate['name']} ({plate['path']})"
-
-            # Add status indicators
-            status_indicators = []
-            if plate['path'] in self.orchestrators:
-                orchestrator = self.orchestrators[plate['path']]
-                if orchestrator.state == OrchestratorState.READY:
-                    status_indicators.append("✓ Init")
-                elif orchestrator.state == OrchestratorState.COMPILED:
-                    status_indicators.append("✓ Compiled")
-                elif orchestrator.state == OrchestratorState.EXECUTING:
-                    status_indicators.append("🔄 Running")
-                elif orchestrator.state == OrchestratorState.COMPLETED:
-                    status_indicators.append("✅ Complete")
-                elif orchestrator.state == OrchestratorState.INIT_FAILED:
-                    status_indicators.append("🚫 Init Failed")
-                elif orchestrator.state == OrchestratorState.COMPILE_FAILED:
-                    status_indicators.append("❌ Compile Failed")
-                elif orchestrator.state == OrchestratorState.EXEC_FAILED:
-                    status_indicators.append("❌ Exec Failed")
-
-            if status_indicators:
-                display_text = f"[{', '.join(status_indicators)}] {display_text}"
-
-            return display_text, plate
-
         def update_func():
             """Update function that clears and rebuilds the list."""
             self.plate_list.clear()
 
+            # Build scope map for incremental updates
+            scope_map = {}
+
             for plate in self.plates:
-                display_text, plate_data = format_plate_item(plate)
+                # Use new preview formatting method
+                display_text = self._format_plate_item_with_preview(plate)
                 item = QListWidgetItem(display_text)
-                item.setData(Qt.ItemDataRole.UserRole, plate_data)
+                item.setData(Qt.ItemDataRole.UserRole, plate)
 
                 # Add tooltip
                 if plate['path'] in self.orchestrators:
                     orchestrator = self.orchestrators[plate['path']]
                     item.setToolTip(f"Status: {orchestrator.state.value}")
 
+                    # Register scope for incremental updates
+                    scope_map[str(plate['path'])] = plate['path']
+
                 self.plate_list.addItem(item)
+                # Height is automatically calculated by MultilinePreviewItemDelegate.sizeHint()
+
+            # Update scope mapping for CrossWindowPreviewMixin
+            self.set_preview_scope_mapping(scope_map)
 
             # Auto-select first plate if no selection and plates exist
             if self.plates and not self.selected_plate_path:
@@ -1630,7 +2373,11 @@ class PlateManagerWidget(QWidget):
         """Update button enabled/disabled states based on selection."""
         selected_plates = self.get_selected_plates()
         has_selection = len(selected_plates) > 0
-        has_initialized = any(plate['path'] in self.orchestrators for plate in selected_plates)
+        def _plate_is_initialized(plate_dict):
+            orchestrator = self.orchestrators.get(plate_dict['path'])
+            return orchestrator and orchestrator.state != OrchestratorState.CREATED
+
+        has_initialized = any(_plate_is_initialized(plate) for plate in selected_plates)
         has_compiled = any(plate['path'] in self.plate_compiled_data for plate in selected_plates)
         is_running = self.is_any_plate_running()
 
@@ -1639,7 +2386,8 @@ class PlateManagerWidget(QWidget):
         self.buttons["edit_config"].setEnabled(has_initialized and not is_running)
         self.buttons["init_plate"].setEnabled(has_selection and not is_running)
         self.buttons["compile_plate"].setEnabled(has_initialized and not is_running)
-        self.buttons["code_plate"].setEnabled(has_initialized and not is_running)
+        # Code button available even without initialized plates so users can edit templates
+        self.buttons["code_plate"].setEnabled(not is_running)
         self.buttons["view_metadata"].setEnabled(has_initialized and not is_running)
 
         # Run button - enabled if plates are compiled or if currently running (for stop)
@@ -1647,6 +2395,10 @@ class PlateManagerWidget(QWidget):
             # Stopping state - keep button as "Stop" but disable it
             self.buttons["run_plate"].setEnabled(False)
             self.buttons["run_plate"].setText("Stop")
+        elif self.execution_state == "force_kill_ready":
+            # Force kill ready state - button is "Force Kill" and enabled
+            self.buttons["run_plate"].setEnabled(True)
+            self.buttons["run_plate"].setText("Force Kill")
         elif is_running:
             # Running state - button is "Stop" and enabled
             self.buttons["run_plate"].setEnabled(True)
@@ -1663,8 +2415,8 @@ class PlateManagerWidget(QWidget):
         Returns:
             True if any plate is running, False otherwise
         """
-        # Consider both "running" and "stopping" states as "busy"
-        return self.execution_state in ("running", "stopping")
+        # Consider "running", "stopping", and "force_kill_ready" states as "busy"
+        return self.execution_state in ("running", "stopping", "force_kill_ready")
     
     def update_status(self, message: str):
         """
@@ -1798,6 +2550,31 @@ class PlateManagerWidget(QWidget):
 
         self.update_button_states()
 
+    def on_plates_reordered(self, from_index: int, to_index: int):
+        """
+        Handle plate reordering from drag and drop.
+
+        Args:
+            from_index: Original position of the moved plate
+            to_index: New position of the moved plate
+        """
+        # Update the underlying plates list to match the visual order
+        current_plates = list(self.plates)
+
+        # Move the plate in the data model
+        plate = current_plates.pop(from_index)
+        current_plates.insert(to_index, plate)
+
+        # Update plates list
+        self.plates = current_plates
+
+        # Update status message
+        plate_name = plate['name']
+        direction = "up" if to_index < from_index else "down"
+        self.status_message.emit(f"Moved plate '{plate_name}' {direction}")
+
+        logger.debug(f"Reordered plate '{plate_name}' from index {from_index} to {to_index}")
+
 
 
 
@@ -1878,6 +2655,15 @@ class PlateManagerWidget(QWidget):
         """
         self.pipeline_editor = pipeline_editor
         logger.debug("Pipeline editor reference set in plate manager")
+
+    def _find_main_window(self):
+        """Find the main window by traversing parent hierarchy."""
+        widget = self
+        while widget:
+            if hasattr(widget, 'floating_windows'):
+                return widget
+            widget = widget.parent()
+        return None
 
     async def _start_monitoring(self):
         """Start monitoring subprocess execution."""

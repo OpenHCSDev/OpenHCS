@@ -31,6 +31,11 @@ logger = logging.getLogger(__name__)
 # This holds the current context state that resolution functions can access
 current_temp_global = contextvars.ContextVar('current_temp_global')
 
+# Context type stack - tracks the types of objects pushed via config_context()
+# This enables generic hierarchy inference without hardcoding specific types
+# The stack is a tuple of types, ordered from outermost to innermost context
+context_type_stack = contextvars.ContextVar('context_type_stack', default=())
+
 
 def _merge_nested_dataclass(base, override, mask_with_none: bool = False):
     """
@@ -182,11 +187,235 @@ def config_context(obj, mask_with_none: bool = False):
         merged_config = base_config
         logger.debug(f"Creating config context with no overrides from {type(obj).__name__}")
 
-    token = current_temp_global.set(merged_config)
+    # Track the type in the context type stack
+    current_types = context_type_stack.get()
+    new_types = current_types + (type(obj),) if obj is not None else current_types
+
+    merged_token = current_temp_global.set(merged_config)
+    type_token = context_type_stack.set(new_types)
     try:
         yield
     finally:
-        current_temp_global.reset(token)
+        current_temp_global.reset(merged_token)
+        context_type_stack.reset(type_token)
+
+
+def get_context_type_stack():
+    """
+    Get the current stack of context types (outermost to innermost).
+
+    This enables generic hierarchy inference without hardcoding specific types.
+    The stack represents the order in which config_context() calls were nested.
+
+    Returns:
+        Tuple of types representing the context hierarchy.
+        Empty tuple if no context is active.
+
+    Example:
+        with config_context(global_config):      # stack = (GlobalPipelineConfig,)
+            with config_context(pipeline_config):  # stack = (GlobalPipelineConfig, PipelineConfig)
+                with config_context(step):         # stack = (GlobalPipelineConfig, PipelineConfig, Step)
+                    types = get_context_type_stack()
+                    # types == (GlobalPipelineConfig, PipelineConfig, Step)
+    """
+    return context_type_stack.get()
+
+
+def _normalize_type(t):
+    """Normalize a type by getting its base type if it's a lazy variant.
+
+    This function is defined here to avoid circular imports with lazy_factory.
+    The actual get_base_type_for_lazy is imported lazily when needed.
+    """
+    try:
+        from openhcs.config_framework.lazy_factory import get_base_type_for_lazy
+        return get_base_type_for_lazy(t) or t
+    except ImportError:
+        return t
+
+
+def _is_global_type(t):
+    """Check if a type is a global config type.
+
+    This function is defined here to avoid circular imports with lazy_factory.
+    """
+    try:
+        from openhcs.config_framework.lazy_factory import is_global_config_type
+        return is_global_config_type(t)
+    except ImportError:
+        return False
+
+
+# Hierarchy registry - built from active form managers
+# Maps: child_type -> parent_type (normalized base types)
+# This is populated by ParameterFormManager when it registers
+_known_hierarchy: dict = {}
+
+
+def register_hierarchy_relationship(context_obj_type, object_instance_type):
+    """Register that context_obj_type is the parent of object_instance_type in the hierarchy.
+
+    Called by ParameterFormManager when a root manager registers.
+    This builds up the known hierarchy from actual usage patterns.
+
+    Args:
+        context_obj_type: The parent/context type (e.g., PipelineConfig for Step editor)
+        object_instance_type: The child type being edited (e.g., Step)
+    """
+    if context_obj_type is None or object_instance_type is None:
+        return
+
+    parent_base = _normalize_type(context_obj_type)
+    child_base = _normalize_type(object_instance_type)
+
+    if parent_base != child_base and not _is_global_type(parent_base):
+        _known_hierarchy[child_base] = parent_base
+        logger.debug(f"Registered hierarchy: {parent_base.__name__} -> {child_base.__name__}")
+
+
+def unregister_hierarchy_relationship(object_instance_type):
+    """Remove a type from the hierarchy registry when its editor closes.
+
+    Args:
+        object_instance_type: The type to remove from the registry
+    """
+    child_base = _normalize_type(object_instance_type)
+    if child_base in _known_hierarchy:
+        del _known_hierarchy[child_base]
+        logger.debug(f"Unregistered hierarchy for: {child_base.__name__}")
+
+
+def get_ancestors_from_hierarchy(target_type):
+    """Get all ancestor types for target_type by walking up the known hierarchy.
+
+    Returns ancestors in order from outermost to innermost (excluding target_type itself).
+
+    Args:
+        target_type: The type to find ancestors for
+
+    Returns:
+        List of ancestor types in hierarchy order (grandparent, parent, ...)
+    """
+    target_base = _normalize_type(target_type)
+    ancestors = []
+
+    # Walk up the hierarchy
+    current = target_base
+    visited = set()
+    while current in _known_hierarchy:
+        if current in visited:
+            # Cycle detected - stop
+            break
+        visited.add(current)
+        parent = _known_hierarchy[current]
+        ancestors.append(parent)
+        current = parent
+
+    # Reverse so outermost is first
+    ancestors.reverse()
+    return ancestors
+
+
+def get_normalized_stack():
+    """
+    Get the context type stack with normalized (base) types, excluding global configs.
+
+    Returns:
+        List of base types in hierarchy order (outermost to innermost),
+        with global config types filtered out.
+    """
+    canonical_stack = get_context_type_stack()
+    normalized = []
+    for t in canonical_stack:
+        base_t = _normalize_type(t)
+        if not _is_global_type(base_t):
+            normalized.append(base_t)
+    return normalized
+
+
+def get_types_before_in_stack(target_type):
+    """
+    Get all non-global types that come before target_type in the hierarchy.
+
+    First tries the active context_type_stack (for resolution during config_context),
+    then falls back to the known hierarchy registry (for cross-window updates).
+
+    Args:
+        target_type: The type to find ancestors for (will be normalized)
+
+    Returns:
+        List of base types that come before target_type in the hierarchy.
+        Empty list if no ancestors found.
+    """
+    # First try active context stack
+    normalized_stack = get_normalized_stack()
+    if normalized_stack:
+        target_base = _normalize_type(target_type)
+
+        # Find target's position
+        target_index = -1
+        for i, base_t in enumerate(normalized_stack):
+            if base_t == target_base:
+                target_index = i
+                break
+
+        if target_index > 0:
+            return normalized_stack[:target_index]
+
+    # Fall back to known hierarchy registry
+    return get_ancestors_from_hierarchy(target_type)
+
+
+def is_ancestor_in_context(ancestor_type, descendant_type):
+    """
+    Check if ancestor_type comes before descendant_type in the context hierarchy.
+
+    This determines whether changes to ancestor_type should affect descendant_type.
+
+    Args:
+        ancestor_type: The potential ancestor type (will be normalized)
+        descendant_type: The potential descendant type (will be normalized)
+
+    Returns:
+        True if ancestor_type is an ancestor of descendant_type,
+        False otherwise.
+    """
+    ancestor_base = _normalize_type(ancestor_type)
+    descendant_base = _normalize_type(descendant_type)
+
+    # First try active context stack
+    normalized_stack = get_normalized_stack()
+    if normalized_stack:
+        ancestor_index = -1
+        descendant_index = -1
+        for i, base_t in enumerate(normalized_stack):
+            if base_t == ancestor_base:
+                ancestor_index = i
+            if base_t == descendant_base:
+                descendant_index = i
+
+        if ancestor_index >= 0 and descendant_index >= 0:
+            return ancestor_index < descendant_index
+
+    # Fall back to known hierarchy registry
+    ancestors = get_ancestors_from_hierarchy(descendant_type)
+    return ancestor_base in ancestors
+
+
+def is_same_type_in_context(type_a, type_b):
+    """
+    Check if two types are the same when normalized.
+
+    Handles lazy vs base type equivalence.
+
+    Args:
+        type_a: First type to compare
+        type_b: Second type to compare
+
+    Returns:
+        True if both types normalize to the same base type.
+    """
+    return _normalize_type(type_a) == _normalize_type(type_b)
 
 
 # Removed: extract_config_overrides - no longer needed with field matching approach

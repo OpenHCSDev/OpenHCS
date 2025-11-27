@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 class ShapeType(Enum):
     """ROI shape types."""
     POLYGON = "polygon"
+    POLYLINE = "polyline"
     MASK = "mask"
     POINT = "point"
     ELLIPSE = "ellipse"
@@ -45,6 +46,27 @@ class PolygonShape:
             raise ValueError(f"Polygon coordinates must be Nx2 array, got shape {self.coordinates.shape}")
         if len(self.coordinates) < 3:
             raise ValueError(f"Polygon must have at least 3 vertices, got {len(self.coordinates)}")
+
+
+@dataclass(frozen=True)
+class PolylineShape:
+    """Polyline ROI shape defined by path coordinates (open path, not closed polygon).
+
+    Used for skeleton branches and other continuous line segments.
+
+    Attributes:
+        coordinates: Nx2 array of (y, x) coordinates
+        shape_type: Always ShapeType.POLYLINE
+    """
+    coordinates: np.ndarray  # Nx2 array of (y, x) coordinates
+    shape_type: ShapeType = field(default=ShapeType.POLYLINE, init=False)
+
+    def __post_init__(self):
+        """Validate polyline coordinates."""
+        if self.coordinates.ndim != 2 or self.coordinates.shape[1] != 2:
+            raise ValueError(f"Polyline coordinates must be Nx2 array, got shape {self.coordinates.shape}")
+        if len(self.coordinates) < 2:
+            raise ValueError(f"Polyline must have at least 2 points, got {len(self.coordinates)}")
 
 
 @dataclass(frozen=True)
@@ -139,6 +161,7 @@ def extract_rois_from_labeled_mask(
     """
     from skimage import measure
     from skimage.measure import regionprops
+    from scipy.ndimage import find_objects
 
     if labeled_mask.ndim != 2:
         raise ValueError(f"Labeled mask must be 2D, got shape {labeled_mask.shape}")
@@ -149,6 +172,9 @@ def extract_rois_from_labeled_mask(
 
     # Get region properties
     regions = regionprops(labeled_mask)
+
+    # Pre-compute bounding box slices for all regions (much faster than creating full binary masks)
+    slices = find_objects(labeled_mask)
 
     rois = []
     for region in regions:
@@ -169,18 +195,41 @@ def extract_rois_from_labeled_mask(
         shapes = []
 
         if extract_contours:
-            # Find contours for this region
-            # Create binary mask for this label
-            binary_mask = (labeled_mask == region.label)
+            # Use bounding box slice to extract only the region of interest
+            # This is MUCH faster than creating a full-size binary mask
+            label_idx = region.label - 1  # slices are 0-indexed
+            if label_idx < len(slices) and slices[label_idx] is not None:
+                slice_y, slice_x = slices[label_idx]
 
-            # Find contours
-            contours = measure.find_contours(binary_mask.astype(float), level=0.5)
+                # Extract cropped region
+                cropped_mask = labeled_mask[slice_y, slice_x]
 
-            # Convert contours to polygon shapes
-            for contour in contours:
-                if len(contour) >= 3:  # Valid polygon
-                    # Contour is already in (y, x) format
-                    shapes.append(PolygonShape(coordinates=contour))
+                # Create binary mask for this label (only in cropped region)
+                binary_mask = (cropped_mask == region.label).astype(np.uint8)
+
+                # Pad mask to keep contours closed when the object touches the crop edge
+                padded_mask = np.pad(
+                    binary_mask,
+                    pad_width=1,
+                    mode='constant',
+                    constant_values=0
+                )
+
+                # Find contours in cropped region (with padding)
+                contours = measure.find_contours(padded_mask, level=0.5)
+
+                # Offset coordinates back to full image space
+                offset_y = slice_y.start
+                offset_x = slice_x.start
+                padding_offset = np.array([offset_y, offset_x]) - 1  # remove padding shift
+
+                # Convert contours to polygon shapes
+                for contour in contours:
+                    if len(contour) >= 3:  # Valid polygon
+                        # Offset contour coordinates to full image space
+                        # Contour is in (y, x) format
+                        contour_full = contour + padding_offset
+                        shapes.append(PolygonShape(coordinates=contour_full))
         else:
             # Use binary mask
             binary_mask = (labeled_mask == region.label)
@@ -272,6 +321,10 @@ def load_rois_from_json(json_path: Path) -> List[ROI]:
                 coordinates = np.array(shape_dict['coordinates'])
                 shapes.append(PolygonShape(coordinates=coordinates))
 
+            elif shape_type == 'polyline':
+                coordinates = np.array(shape_dict['coordinates'])
+                shapes.append(PolylineShape(coordinates=coordinates))
+
             elif shape_type == 'mask':
                 mask = np.array(shape_dict['mask'], dtype=bool)
                 bbox = tuple(shape_dict['bbox'])
@@ -321,7 +374,7 @@ def load_rois_from_zip(zip_path: Path) -> List[ROI]:
         raise FileNotFoundError(f"ROI zip file not found: {zip_path}")
 
     try:
-        from roifile import ImagejRoi
+        from roifile import ImagejRoi, ROI_TYPE
     except ImportError:
         raise ImportError("roifile library required for loading .roi.zip files. Install with: pip install roifile")
 
@@ -340,7 +393,13 @@ def load_rois_from_zip(zip_path: Path) -> List[ROI]:
                     if coords is not None and len(coords) > 0:
                         coords_yx = coords[:, [1, 0]]  # Swap to (y, x)
 
-                        shape = PolygonShape(coordinates=coords_yx)
+                        # Detect ROI type and create appropriate shape
+                        if ij_roi.roitype == ROI_TYPE.POLYLINE:
+                            shape = PolylineShape(coordinates=coords_yx)
+                        else:
+                            # Default to polygon for all other types (POLYGON, FREEHAND, etc.)
+                            shape = PolygonShape(coordinates=coords_yx)
+
                         roi = ROI(
                             shapes=[shape],
                             metadata={'label': ij_roi.name or filename.replace('.roi', '')}
@@ -355,4 +414,3 @@ def load_rois_from_zip(zip_path: Path) -> List[ROI]:
 
     logger.info(f"Loaded {len(rois)} ROIs from {zip_path}")
     return rois
-

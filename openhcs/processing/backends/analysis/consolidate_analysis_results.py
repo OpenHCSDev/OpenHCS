@@ -26,7 +26,8 @@ from openhcs.core.pipeline.function_contracts import special_outputs
 # Import config classes with TYPE_CHECKING to avoid circular imports
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from openhcs.core.config import AnalysisConsolidationConfig, PlateMetadataConfig
+    from openhcs.core.config import AnalysisConsolidationConfig, PlateMetadataConfig, GlobalPipelineConfig
+    from openhcs.microscopes.microscope_interfaces import FilenameParser
 
 logger = logging.getLogger(__name__)
 
@@ -458,7 +459,7 @@ def consolidate_analysis_results_pipeline(
 ) -> tuple[np.ndarray, pd.DataFrame]:
     """
     Pipeline-compatible version of consolidate_analysis_results.
-    
+
     This function can be used as a FunctionStep in OpenHCS pipelines.
     """
     # Call the main consolidation function
@@ -468,5 +469,322 @@ def consolidate_analysis_results_pipeline(
         plate_metadata_config=plate_metadata_config,
         output_path=None  # Will be handled by materialization
     )
-    
+
     return image_stack, summary_df
+
+
+def merge_result_type_summaries(
+    summary_paths: List[str],
+    output_path: str,
+    plate_names: Optional[List[str]] = None,
+    plate_folder_name: Optional[str] = None,
+    plate_id: Optional[str] = None
+) -> pd.DataFrame:
+    """
+    Merge multiple MetaXpress-style summaries from different result types within the SAME plate.
+
+    This creates one row per well with all columns combined from different result directories
+    (e.g., cellbody_results, images_results, axon_results).
+
+    Args:
+        summary_paths: List of paths to MetaXpress summary CSV files from different result types
+        output_path: Path where the merged summary should be saved
+        plate_names: Optional list of result type names (for logging)
+        plate_folder_name: Optional plate folder name for header
+        plate_id: Optional plate ID for header
+
+    Returns:
+        Merged DataFrame with one row per well
+    """
+    if not summary_paths:
+        logger.warning("No summary paths provided for result type merging")
+        return pd.DataFrame()
+
+    logger.info(f"Merging {len(summary_paths)} result type summaries into single table")
+
+    # Read all summaries and merge on Well (one row per well)
+    merged_df = None
+    for i, summary_path in enumerate(summary_paths):
+        if not Path(summary_path).exists():
+            logger.warning(f"Summary file not found: {summary_path}, skipping")
+            continue
+
+        try:
+            # Read MetaXpress CSV, skipping the 6-line header
+            df = pd.read_csv(summary_path, skiprows=6)
+            result_type = plate_names[i] if plate_names and i < len(plate_names) else f"type_{i}"
+            logger.info(f"Loaded {len(df)} rows from {result_type}")
+
+            if merged_df is None:
+                merged_df = df
+            else:
+                # Merge on Well - one row per well with all columns combined
+                # Use outer join to keep all wells from all result types
+                merged_df = merged_df.merge(df, on='Well', how='outer', suffixes=('', '_dup'))
+
+                # Drop duplicate columns (keep first occurrence)
+                dup_cols = [col for col in merged_df.columns if col.endswith('_dup')]
+                if dup_cols:
+                    logger.info(f"Dropping {len(dup_cols)} duplicate columns from merge")
+                    merged_df = merged_df.drop(columns=dup_cols)
+
+        except Exception as e:
+            logger.error(f"Failed to read summary from {summary_path}: {e}")
+            continue
+
+    if merged_df is None:
+        logger.error("No valid summaries could be loaded")
+        return pd.DataFrame()
+
+    logger.info(f"Merged into {len(merged_df)} unique wells with {len(merged_df.columns)} total columns")
+
+    # Create MetaXpress header for merged summary
+    # Use plate folder name and plate ID if provided
+    if plate_folder_name and plate_id:
+        merged_metadata = {
+            'barcode': f"OpenHCS-{plate_folder_name}",
+            'plate_name': plate_folder_name,
+            'plate_id': plate_id,
+            'description': f"Merged analysis from {len(summary_paths)} result types: {', '.join(plate_names[:3]) if plate_names else 'unknown'}",
+            'acquisition_user': 'OpenHCS',
+            'z_step': '1'
+        }
+    else:
+        merged_metadata = {
+            'barcode': f"OpenHCS-Merged-{len(summary_paths)}ResultTypes",
+            'plate_name': f"Merged Analysis ({len(summary_paths)} result types)",
+            'plate_id': str(hash(str(summary_paths)) % 100000),
+            'description': f"Merged analysis from {len(summary_paths)} result types: {', '.join(plate_names[:3]) if plate_names else 'unknown'}",
+            'acquisition_user': 'OpenHCS',
+            'z_step': '1'
+        }
+
+    # Save with MetaXpress header
+    save_with_metaxpress_header(merged_df, output_path, merged_metadata)
+    logger.info(f"Saved merged summary to: {output_path}")
+
+    return merged_df
+
+
+def consolidate_multi_plate_summaries(
+    summary_paths: List[str],
+    output_path: str,
+    plate_names: Optional[List[str]] = None
+) -> pd.DataFrame:
+    """
+    Consolidate multiple MetaXpress-style summaries from DIFFERENT plates into a single table.
+
+    This function reads individual plate summaries and CONCATENATES them (stacks rows),
+    keeping each plate's wells as separate rows. Never merges wells from different plates.
+
+    Args:
+        summary_paths: List of paths to individual plate MetaXpress summary CSV files
+        output_path: Path where the global consolidated summary should be saved
+        plate_names: Optional list of plate names (same length as summary_paths).
+                    If None, plate names are extracted from the summary file paths.
+
+    Returns:
+        Combined DataFrame with all plates' data (rows stacked)
+
+    Example:
+        >>> summary_paths = [
+        ...     "/data/plate1/global_metaxpress_summary.csv",
+        ...     "/data/plate2/global_metaxpress_summary.csv"
+        ... ]
+        >>> df = consolidate_multi_plate_summaries(
+        ...     summary_paths,
+        ...     "/data/all_plates_summary.csv"
+        ... )
+    """
+    if not summary_paths:
+        logger.warning("No summary paths provided for multi-plate consolidation")
+        return pd.DataFrame()
+
+    # Generate plate names if not provided
+    if plate_names is None:
+        plate_names = []
+        for path in summary_paths:
+            # Extract plate name from path
+            path_obj = Path(path)
+            plate_dir = path_obj.parent.name
+            plate_names.append(plate_dir)
+
+    if len(plate_names) != len(summary_paths):
+        raise ValueError(f"plate_names length ({len(plate_names)}) must match summary_paths length ({len(summary_paths)})")
+
+    logger.info(f"Concatenating {len(summary_paths)} plate summaries (different plates)")
+
+    # Read all summaries and CONCAT (stack rows - never merge different plates)
+    combined_dfs = []
+    for plate_name, summary_path in zip(plate_names, summary_paths):
+        if not Path(summary_path).exists():
+            logger.warning(f"Summary file not found: {summary_path}, skipping")
+            continue
+
+        try:
+            # Read CSV (skip header if present, otherwise read as-is)
+            try:
+                # Try reading with MetaXpress header
+                df = pd.read_csv(summary_path, skiprows=6)
+            except:
+                # Fallback: read without skipping
+                df = pd.read_csv(summary_path)
+
+            logger.info(f"Loaded {len(df)} rows from {plate_name}")
+            combined_dfs.append(df)
+
+        except Exception as e:
+            logger.error(f"Failed to read summary from {summary_path}: {e}")
+            continue
+
+    if not combined_dfs:
+        logger.error("No valid summaries could be loaded")
+        return pd.DataFrame()
+
+    # CONCAT all DataFrames (stack rows, keep plates separate)
+    result_df = pd.concat(combined_dfs, ignore_index=True)
+    logger.info(f"Concatenated {len(combined_dfs)} plates into {len(result_df)} total rows")
+
+    # Save as simple CSV
+    result_df.to_csv(output_path, index=False)
+    logger.info(f"Saved concatenated summary to: {output_path}")
+
+    return result_df
+
+
+def consolidate_results_directories(
+    results_dirs: List[Path],
+    plate_path: Path,
+    global_config: 'GlobalPipelineConfig',
+    filename_parser: Optional['FilenameParser'] = None
+) -> tuple[List[str], List[tuple[str, str]]]:
+    """
+    Consolidate multiple results directories and create global summary.
+
+    This is a high-level function that:
+    1. Consolidates each results directory individually
+    2. Creates a global multi-plate summary combining all individual summaries
+
+    Args:
+        results_dirs: List of results directory paths to consolidate
+        plate_path: Root plate path (used for determining global output location)
+        global_config: Global pipeline configuration
+        filename_parser: Optional filename parser from microscope handler (preferred).
+                        If not provided, falls back to regex pattern from config.
+
+    Returns:
+        Tuple of (successful_dirs, failed_dirs) where:
+        - successful_dirs: List of successfully consolidated directory names
+        - failed_dirs: List of (dir_name, error_message) tuples for failures
+    """
+    from openhcs.core.orchestrator.orchestrator import _get_consolidate_analysis_results
+
+    consolidate_fn = _get_consolidate_analysis_results()
+    successful_dirs = []
+    failed_dirs = []
+    summary_paths = []
+
+    # Step 1: Consolidate each results directory individually
+    for results_dir in results_dirs:
+        csv_files = list(results_dir.glob("*.csv"))
+        # Skip MetaXpress summaries and other consolidated files
+        csv_files = [f for f in csv_files if not any(
+            pattern in f.name.lower()
+            for pattern in ['metaxpress', 'summary', 'consolidated', 'global']
+        )]
+
+        if not csv_files:
+            logger.info(f"Skipping {results_dir} - no CSV files found")
+            continue
+
+        # Extract well IDs from CSV filenames using parser or regex
+        well_ids = set()
+        for csv_file in csv_files:
+            well_id = None
+
+            # Try using filename parser first (preferred - handles all microscope formats)
+            if filename_parser:
+                parsed = filename_parser.parse_filename(csv_file.name)
+                if parsed and 'well' in parsed:
+                    well_id = parsed['well']
+                else:
+                    logger.error(f"Parser failed to extract well ID from {csv_file.name}: {parsed}")
+
+            # Fall back to regex pattern from config (case-insensitive)
+            if not well_id:
+                import re
+                # Make pattern case-insensitive by using re.IGNORECASE
+                pattern = global_config.analysis_consolidation_config.well_pattern
+                match = re.search(pattern, csv_file.name, re.IGNORECASE)
+                if match:
+                    well_id = match.group(1).upper()  # Normalize to uppercase
+
+            if well_id:
+                well_ids.add(well_id)
+
+        well_ids = sorted(list(well_ids))
+        if not well_ids:
+            logger.warning(f"No well IDs found in {results_dir}, skipping")
+            continue
+
+        logger.info(f"Consolidating {len(csv_files)} CSV files from {len(well_ids)} wells in {results_dir}")
+
+        try:
+            consolidate_fn(
+                results_directory=str(results_dir),
+                well_ids=well_ids,
+                consolidation_config=global_config.analysis_consolidation_config,
+                plate_metadata_config=global_config.plate_metadata_config
+            )
+            successful_dirs.append(results_dir.name)
+
+            # Track summary path for global consolidation
+            summary_filename = global_config.analysis_consolidation_config.output_filename
+            summary_path = results_dir / summary_filename
+            if summary_path.exists():
+                summary_paths.append(str(summary_path))
+
+        except Exception as e:
+            logger.error(f"Failed to consolidate {results_dir}: {e}", exc_info=True)
+            failed_dirs.append((results_dir.name, str(e)))
+
+    # Step 2: Create global summary by merging result types if multiple directories were consolidated
+    if len(summary_paths) > 1:
+        try:
+            logger.info(f"Creating global summary from {len(summary_paths)} result type summaries")
+
+            # Use plate_path root for global output
+            global_output_dir = plate_path
+            global_summary_filename = global_config.analysis_consolidation_config.global_summary_filename
+            global_summary_path = global_output_dir / global_summary_filename
+
+            # Extract result type names from results directory paths
+            result_type_names = [results_dir.name for results_dir in results_dirs if (results_dir / global_config.analysis_consolidation_config.output_filename).exists()]
+
+            # Get plate folder name and plate ID from first summary
+            plate_folder_name = plate_path.name
+            plate_id = None
+            if summary_paths:
+                try:
+                    # Read Plate ID from first summary's MetaXpress header (line 3)
+                    with open(summary_paths[0], 'r') as f:
+                        lines = [next(f) for _ in range(3)]
+                        plate_id_line = lines[2]  # Line 3: "Plate ID,12345,..."
+                        plate_id = plate_id_line.split(',')[1]
+                except:
+                    pass
+
+            # Merge result types on Well (one row per well with all columns)
+            merge_result_type_summaries(
+                summary_paths=summary_paths,
+                output_path=str(global_summary_path),
+                plate_names=result_type_names,
+                plate_folder_name=plate_folder_name,
+                plate_id=plate_id
+            )
+            logger.info(f"✅ Global summary created: {global_summary_path}")
+
+        except Exception as e:
+            logger.error(f"Failed to create global summary: {e}", exc_info=True)
+
+    return successful_dirs, failed_dirs

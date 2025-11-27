@@ -27,12 +27,16 @@ class ZMQExecutionClient(ZMQClient):
 
     def _start_progress_listener(self):
         if self._progress_thread and self._progress_thread.is_alive():
+            logger.info("🎧 Progress listener already running")
             return
         if not self.progress_callback:
+            logger.info("🎧 No progress callback, skipping listener")
             return
+        logger.info("🎧 Starting progress listener thread")
         self._progress_stop_event.clear()
         self._progress_thread = threading.Thread(target=self._progress_listener_loop, daemon=True)
         self._progress_thread.start()
+        logger.info("🎧 Progress listener thread started")
 
     def _stop_progress_listener(self):
         if not self._progress_thread:
@@ -43,28 +47,36 @@ class ZMQExecutionClient(ZMQClient):
         self._progress_thread = None
 
     def _progress_listener_loop(self):
+        logger.info("🎧 Progress listener loop started")
         try:
+            message_count = 0
             while not self._progress_stop_event.is_set():
                 if not self.data_socket:
                     time.sleep(0.1)
                     continue
                 try:
                     message = self.data_socket.recv_string(zmq.NOBLOCK)
+                    message_count += 1
+                    logger.debug(f"🎧 Received message #{message_count}: {message[:100]}")
                     try:
                         data = json.loads(message)
                         if self.progress_callback and data.get('type') == 'progress':
+                            logger.debug(f"🎧 Calling progress callback for: {data.get('well_id')}")
                             try:
                                 self.progress_callback(data)
-                            except:
-                                pass
-                    except json.JSONDecodeError:
-                        pass
+                            except Exception as e:
+                                logger.warning(f"🎧 Progress callback error: {e}")
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"🎧 JSON decode error: {e}")
                 except zmq.Again:
                     time.sleep(0.05)
-                except:
+                except Exception as e:
+                    logger.warning(f"🎧 Progress listener error: {e}")
                     time.sleep(0.1)
-        except:
-            pass
+        except Exception as e:
+            logger.error(f"🎧 Progress listener loop crashed: {e}", exc_info=True)
+        finally:
+            logger.info("🎧 Progress listener loop exited")
 
     def submit_pipeline(self, plate_id, pipeline_steps, global_config, pipeline_config=None, config_params=None):
         """
@@ -255,6 +267,8 @@ class ZMQExecutionClient(ZMQClient):
     def _spawn_server_process(self):
         from pathlib import Path
         import time
+        import os
+        import glob
         log_dir = Path.home() / ".local" / "share" / "openhcs" / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
         log_file_path = log_dir / f"openhcs_zmq_server_port_{self.port}_{int(time.time() * 1000000)}.log"
@@ -263,7 +277,23 @@ class ZMQExecutionClient(ZMQClient):
             cmd.append('--persistent')
         cmd.extend(['--log-file-path', str(log_file_path)])
         cmd.extend(['--transport-mode', self.transport_mode.value])
-        return subprocess.Popen(cmd, stdout=open(log_file_path, 'w'), stderr=subprocess.STDOUT, start_new_session=self.persistent)
+
+        # Inherit parent process environment and add CUDA library paths
+        env = os.environ.copy()
+
+        # Add nvidia CUDA libraries from venv to LD_LIBRARY_PATH
+        # These are bundled with cupy/cucim and need to be findable by the subprocess
+        site_packages = Path(sys.executable).parent.parent / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages"
+        nvidia_lib_pattern = str(site_packages / "nvidia" / "*" / "lib")
+        venv_nvidia_libs = [p for p in glob.glob(nvidia_lib_pattern) if os.path.isdir(p)]
+
+        if venv_nvidia_libs:
+            existing_ld_path = env.get('LD_LIBRARY_PATH', '')
+            nvidia_paths = ':'.join(venv_nvidia_libs)
+            env['LD_LIBRARY_PATH'] = f"{nvidia_paths}:{existing_ld_path}" if existing_ld_path else nvidia_paths
+
+        return subprocess.Popen(cmd, stdout=open(log_file_path, 'w'), stderr=subprocess.STDOUT,
+                               start_new_session=self.persistent, env=env)
 
     def disconnect(self):
         self._stop_progress_listener()
@@ -278,4 +308,3 @@ class ZMQExecutionClient(ZMQClient):
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.disconnect()
-

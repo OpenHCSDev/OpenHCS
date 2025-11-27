@@ -18,6 +18,9 @@ from openhcs.core.auto_register_meta import AutoRegisterMeta, RegistryConfig
 # Type registry for lazy dataclass to base class mapping
 _lazy_type_registry: Dict[Type, Type] = {}
 
+# Reverse registry for base class to lazy dataclass mapping (for O(1) lookup)
+_base_to_lazy_registry: Dict[Type, Type] = {}
+
 # Cache for lazy classes to prevent duplicate creation
 _lazy_class_cache: Dict[str, Type] = {}
 
@@ -30,6 +33,7 @@ _lazy_class_cache: Dict[str, Type] = {}
 def register_lazy_type_mapping(lazy_type: Type, base_type: Type) -> None:
     """Register mapping between lazy dataclass type and its base type."""
     _lazy_type_registry[lazy_type] = base_type
+    _base_to_lazy_registry[base_type] = lazy_type
 
 
 def get_base_type_for_lazy(lazy_type: Type) -> Optional[Type]:
@@ -82,6 +86,41 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+# =============================================================================
+# GENERIC SCOPE RULE: Virtual base class for global configs using __instancecheck__
+# This allows isinstance() checks without actual inheritance, so lazy versions don't inherit it
+# =============================================================================
+
+
+class GlobalConfigMeta(type):
+    """
+    Metaclass that makes isinstance(obj, GlobalConfigBase) work by checking _is_global_config marker.
+
+    This enables type-safe isinstance checks without inheritance:
+        if isinstance(config, GlobalConfigBase):  # Returns True for GlobalPipelineConfig
+                                                   # Returns False for PipelineConfig (lazy version)
+    """
+    def __instancecheck__(cls, instance):
+        # Check if the instance's type has the _is_global_config marker
+        return hasattr(type(instance), '_is_global_config') and type(instance)._is_global_config
+
+
+class GlobalConfigBase(metaclass=GlobalConfigMeta):
+    """
+    Virtual base class for all global config types.
+
+    Uses custom metaclass to check _is_global_config marker instead of actual inheritance.
+    This prevents lazy versions (PipelineConfig) from being considered global configs.
+
+    Usage:
+        if isinstance(config, GlobalConfigBase):  # Generic, works for any global config
+
+    Instead of:
+        if isinstance(config, GlobalPipelineConfig):  # Hardcoded, breaks extensibility
+    """
+    pass
+
+
 class LazyDataclass:
     """
     Base class for all lazy dataclasses created by LazyDataclassFactory.
@@ -101,6 +140,53 @@ class LazyDataclass:
     pass
 
 
+def is_global_config_type(config_type: Type) -> bool:
+    """
+    Check if a config type is a global config (marked by @auto_create_decorator).
+
+    GENERIC SCOPE RULE: Use this instead of hardcoding class name checks like:
+        if config_class == GlobalPipelineConfig:
+
+    Instead use:
+        if is_global_config_type(config_class):
+
+    Args:
+        config_type: The config class to check
+
+    Returns:
+        True if the type is marked as a global config, False otherwise
+    """
+    return hasattr(config_type, '_is_global_config') and config_type._is_global_config
+
+
+def is_global_config_instance(config_instance: Any) -> bool:
+    """
+    Check if a config instance is an instance of a global config class.
+
+    GENERIC SCOPE RULE: Use this instead of hardcoding isinstance checks like:
+        if isinstance(config, GlobalPipelineConfig):
+
+    Instead use:
+        if is_global_config_instance(config):
+
+    Or use the virtual base class:
+        if isinstance(config, GlobalConfigBase):
+
+    Args:
+        config_instance: The config instance to check
+
+    Returns:
+        True if the instance is of a global config type, False otherwise
+    """
+    return is_global_config_type(type(config_instance))
+
+
+def get_lazy_type_for_base(base_type: Type) -> Optional[Type]:
+    """Get the lazy type for a base dataclass type."""
+    return _base_to_lazy_registry.get(base_type)
+
+
+# =============================================================================
 # Constants for lazy configuration system - simplified from class to module-level
 MATERIALIZATION_DEFAULTS_PATH = "materialization_defaults"
 RESOLVE_FIELD_VALUE_METHOD = "_resolve_field_value"
@@ -895,6 +981,14 @@ def create_global_default_decorator(target_config_class: Type):
             ui_hidden: Whether to hide from UI (apply decorator but don't inject into global config) (default: False)
         """
         def decorator(actual_cls):
+            # Configure logging inline for decorator execution (runs at import time before logging is configured)
+            import logging
+            import sys
+            _decorator_logger = logging.getLogger('openhcs.config_framework.lazy_factory')
+            # DISABLED: StreamHandler causes print output even when logging is disabled
+            # This logger will use the root logger's handlers configured in launch.py
+            pass
+
             # Apply inherit_as_none by modifying class BEFORE @dataclass (multiprocessing-safe)
             if inherit_as_none:
                 # Mark the class for inherit_as_none processing
@@ -991,8 +1085,24 @@ def create_global_default_decorator(target_config_class: Type):
 
             # CRITICAL: Post-process dataclass fields after @dataclass has run
             # This fixes the constructor behavior for inherited fields that should be None
+            # Apply to BOTH base class AND lazy class
+            # _decorator_logger.info(f"🔍 @global_pipeline_config: {actual_cls.__name__} - inherit_as_none={inherit_as_none}, fields_set_to_none={fields_set_to_none}")
             if inherit_as_none and hasattr(actual_cls, '__dataclass_fields__'):
+                # _decorator_logger.info(f"🔍 BASE CLASS FIX: {actual_cls.__name__} - fixing {len(fields_set_to_none)} inherited fields")
                 _fix_dataclass_field_defaults_post_processing(actual_cls, fields_set_to_none)
+
+            # CRITICAL: Also fix lazy class to ensure ALL fields are None by default
+            # For lazy classes, ALL fields should be None (not just inherited ones)
+            # _decorator_logger.info(f"🔍 LAZY CLASS CHECK: {lazy_class.__name__} - inherit_as_none={inherit_as_none}, has_dataclass_fields={hasattr(lazy_class, '__dataclass_fields__')}")
+            if inherit_as_none:
+                if hasattr(lazy_class, '__dataclass_fields__'):
+                    # Compute ALL fields for lazy class (not just inherited ones)
+                    lazy_fields_to_set_none = set(lazy_class.__dataclass_fields__.keys())
+                    # _decorator_logger.info(f"🔍 LAZY CLASS FIX: {lazy_class.__name__} - setting {len(lazy_fields_to_set_none)} fields to None: {lazy_fields_to_set_none}")
+                    _fix_dataclass_field_defaults_post_processing(lazy_class, lazy_fields_to_set_none)
+                else:
+                    # _decorator_logger.warning(f"🔍 WARNING: {lazy_class.__name__} does not have __dataclass_fields__!")
+                    pass
 
             return actual_cls
 
@@ -1160,6 +1270,9 @@ def auto_create_decorator(global_config_class):
     if not global_config_class.__name__.startswith(GLOBAL_CONFIG_PREFIX):
         raise ValueError(f"Global config class '{global_config_class.__name__}' must start with '{GLOBAL_CONFIG_PREFIX}' prefix")
 
+    # Mark this class as a global config for isinstance checks via GlobalConfigBase
+    global_config_class._is_global_config = True
+
     decorator_name = _camel_to_snake(global_config_class.__name__)
     decorator = create_global_default_decorator(global_config_class)
 
@@ -1170,7 +1283,6 @@ def auto_create_decorator(global_config_class):
     # Lazy global config will be created after field injection
 
     return global_config_class
-
 
 
 

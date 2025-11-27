@@ -805,3 +805,69 @@ See Also
 - Long if/elif chains for type checking
 - Magic strings scattered throughout the codebase
 
+Code Editor Form Update Pattern
+--------------------------------
+
+When implementing code editing for new UI components, use the **CodeEditorFormUpdater** utility to ensure consistent behavior.
+
+**Standard Implementation**
+
+.. code-block:: python
+
+    from openhcs.ui.shared.code_editor_form_updater import CodeEditorFormUpdater
+
+    def _handle_edited_code(self, edited_code: str):
+        """Handle edited code from code editor."""
+        try:
+            # 1. Extract explicitly set fields
+            explicitly_set_fields = CodeEditorFormUpdater.extract_explicitly_set_fields(
+                edited_code,
+                class_name='YourClass',
+                variable_name='your_var'
+            )
+
+            # 2. Execute with lazy constructor patching
+            namespace = {}
+            with CodeEditorFormUpdater.patch_lazy_constructors():
+                exec(edited_code, namespace)
+
+            new_instance = namespace.get('your_var')
+
+            # 3. Update form using shared utility
+            self.form_manager._block_cross_window_updates = True
+            try:
+                CodeEditorFormUpdater.update_form_from_instance(
+                    self.form_manager,
+                    new_instance,
+                    explicitly_set_fields,
+                    broadcast_callback=self._broadcast_changes  # Optional
+                )
+            finally:
+                self.form_manager._block_cross_window_updates = False
+
+            # 4. Trigger cross-window refresh
+            ParameterFormManager.trigger_global_cross_window_refresh()
+
+        except Exception as e:
+            logger.error(f"Failed to apply edited code: {e}")
+            raise
+
+**Key Principles**
+
+- **Always extract explicitly set fields** - Preserves None vs concrete value distinction
+- **Always use lazy constructor patching** - Prevents unwanted default value resolution
+- **Always block cross-window updates during bulk operations** - Prevents redundant refreshes
+- **Always trigger global refresh after updates** - Ensures all windows stay synchronized
+
+**Do Not**
+
+- ❌ Manually implement nested dataclass update logic
+- ❌ Call ``update_parameter()`` in loops without blocking cross-window updates
+- ❌ Execute code without lazy constructor patching
+- ❌ Forget to trigger cross-window refresh after bulk updates
+
+**See Also**
+
+- :doc:`../architecture/code_ui_interconversion` - System architecture and design
+- :doc:`../user_guide/code_ui_editing` - User guide for bidirectional editing
+

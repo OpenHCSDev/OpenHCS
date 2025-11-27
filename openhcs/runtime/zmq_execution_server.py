@@ -127,6 +127,12 @@ class ZMQExecutionServer(ZMQServer):
                         self.execution_queue.task_done()
                         break
 
+                    # Check if execution was cancelled while queued
+                    if record[MessageFields.STATUS] == ExecutionStatus.CANCELLED.value:
+                        logger.info(f"[{execution_id}] Execution was cancelled while queued, skipping")
+                        self.execution_queue.task_done()
+                        continue
+
                     # Run the execution (this blocks until complete)
                     self._run_execution(execution_id, request, record)
 
@@ -354,10 +360,13 @@ class ZMQExecutionServer(ZMQServer):
             if not plate_path_str.startswith("/omero/"):
                 plate_path_str = f"/omero/plate_{plate_path_str}"
 
+        # CRITICAL: Don't pass progress_callback - it can't be pickled for ProcessPoolExecutor
+        # Progress updates would need a multiprocessing-safe mechanism (e.g., Manager().Queue())
+        # For now, progress is tracked via worker process monitoring in get_server_info()
         orchestrator = PipelineOrchestrator(
             plate_path=Path(plate_path_str),
             pipeline_config=pipeline_config,
-            progress_callback=lambda axis_id, step, status, _metadata: self.send_progress_update(axis_id, step, status)
+            progress_callback=None  # Can't pickle lambdas for multiprocessing
         )
         orchestrator.initialize()
         self.active_executions[execution_id]['orchestrator'] = orchestrator
@@ -439,17 +448,50 @@ class ZMQExecutionServer(ZMQServer):
         try:
             import psutil
 
-            # Find all child processes that are Python workers (exclude Napari and Fiji viewers)
-            workers = [c for c in psutil.Process(os.getpid()).children(recursive=False)
-                      if (cmd := c.cmdline()) and 'python' in cmd[0].lower()
-                      and 'napari' not in ' '.join(cmd).lower()
-                      and 'fiji' not in ' '.join(cmd).lower()]
+            # Find all child processes (including zombies)
+            all_children = psutil.Process(os.getpid()).children(recursive=False)
+
+            # Separate zombies from live processes
+            zombies = []
+            workers = []
+
+            for child in all_children:
+                try:
+                    # Check if process is a zombie
+                    if child.status() == psutil.STATUS_ZOMBIE:
+                        zombies.append(child)
+                        logger.info(f"Found zombie process PID {child.pid}")
+                        continue
+
+                    # For live processes, check if it's a Python worker
+                    cmd = child.cmdline()
+                    if cmd and 'python' in cmd[0].lower():
+                        cmdline_str = ' '.join(cmd)
+                        # Exclude Napari and Fiji viewers
+                        if 'napari' not in cmdline_str.lower() and 'fiji' not in cmdline_str.lower():
+                            workers.append(child)
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess) as e:
+                    # Process disappeared or became zombie while we were checking it
+                    logger.debug(f"Process {child.pid} became inaccessible: {e}")
+                    continue
+
+            # Reap zombie processes by waiting for them
+            if zombies:
+                logger.info(f"Reaping {len(zombies)} zombie processes: {[z.pid for z in zombies]}")
+                for zombie in zombies:
+                    try:
+                        # Wait for zombie to be reaped (this should be instant)
+                        zombie.wait(timeout=0.1)
+                        logger.info(f"Reaped zombie process PID {zombie.pid}")
+                    except (psutil.NoSuchProcess, psutil.TimeoutExpired) as e:
+                        # Zombie already reaped or wait timed out
+                        logger.debug(f"Could not reap zombie PID {zombie.pid}: {e}")
 
             if not workers:
-                logger.info("No worker processes found to kill")
-                return 0
+                logger.info("No live worker processes found to kill")
+                return len(zombies)  # Return count of zombies reaped
 
-            logger.info(f"Found {len(workers)} worker processes to kill: {[w.pid for w in workers]}")
+            logger.info(f"Found {len(workers)} live worker processes to kill: {[w.pid for w in workers]}")
 
             # First try SIGTERM (graceful)
             for w in workers:
@@ -471,11 +513,17 @@ class ZMQExecutionServer(ZMQServer):
                 except Exception as e:
                     logger.warning(f"Failed to kill worker PID {w.pid}: {e}")
 
-            logger.info(f"Successfully killed {len(workers)} worker processes")
-            return len(workers)
+            # Wait for killed processes to become zombies, then reap them
+            if alive:
+                gone_after_kill, still_alive = psutil.wait_procs(alive, timeout=1)
+                logger.info(f"After SIGKILL: {len(gone_after_kill)} workers exited, {len(still_alive)} still alive")
+
+            total_killed = len(workers) + len(zombies)
+            logger.info(f"Successfully killed {len(workers)} worker processes and reaped {len(zombies)} zombies (total: {total_killed})")
+            return total_killed
 
         except (ImportError, Exception) as e:
-            logger.error(f"Failed to kill worker processes: {e}")
+            logger.error(f"Failed to kill worker processes: {e}", exc_info=True)
             return 0
 
     def _handle_force_shutdown(self, msg):

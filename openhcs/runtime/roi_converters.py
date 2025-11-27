@@ -22,6 +22,10 @@ class NapariROIConverter:
             np.tile(prepend_dims, (len(shape_dict['coordinates']), 1)),
             np.array(shape_dict['coordinates'])
         ]),
+        'polyline': lambda shape_dict, prepend_dims: np.hstack([
+            np.tile(prepend_dims, (len(shape_dict['coordinates']), 1)),
+            np.array(shape_dict['coordinates'])
+        ]),
         'ellipse': lambda shape_dict, prepend_dims: np.hstack([
             np.tile(prepend_dims, (4, 1)),
             np.array([
@@ -68,40 +72,58 @@ class NapariROIConverter:
     @staticmethod
     def rois_to_shapes(rois: List) -> List[Dict[str, Any]]:
         """Convert ROI objects to Napari shapes data.
-        
+
         Args:
             rois: List of ROI objects
-            
+
         Returns:
             List of shape dicts with 'type', 'coordinates', 'metadata'
         """
-        from openhcs.core.roi import PolygonShape, EllipseShape, PointShape
+        from openhcs.core.roi import PolygonShape, PolylineShape, EllipseShape, PointShape
         
         shapes_data = []
         for roi in rois:
-            for shape in roi.shapes:
-                if isinstance(shape, PolygonShape):
-                    # Napari expects (y, x) coordinates - same as OpenHCS
-                    shapes_data.append({
-                        'type': 'polygon',
-                        'coordinates': shape.coordinates.tolist(),
-                        'metadata': roi.metadata
-                    })
-                elif isinstance(shape, EllipseShape):
-                    # Napari ellipse format: center (y, x) and radii (ry, rx)
-                    shapes_data.append({
-                        'type': 'ellipse',
-                        'center': [shape.center_y, shape.center_x],
-                        'radii': [shape.radius_y, shape.radius_x],
-                        'metadata': roi.metadata
-                    })
-                elif isinstance(shape, PointShape):
-                    # Napari point format: (y, x)
-                    shapes_data.append({
-                        'type': 'point',
-                        'coordinates': [shape.y, shape.x],
-                        'metadata': roi.metadata
-                    })
+            # Check if this ROI contains only PointShape objects (for points layer)
+            if roi.shapes and all(isinstance(shape, PointShape) for shape in roi.shapes):
+                # Collect all points from this ROI into a single entry
+                points = [[shape.y, shape.x] for shape in roi.shapes]
+                shapes_data.append({
+                    'type': 'points',  # Special type for points layer
+                    'coordinates': points,
+                    'metadata': roi.metadata
+                })
+            else:
+                # Handle other shape types individually
+                for shape in roi.shapes:
+                    if isinstance(shape, PolygonShape):
+                        # Napari expects (y, x) coordinates - same as OpenHCS
+                        shapes_data.append({
+                            'type': 'polygon',
+                            'coordinates': shape.coordinates.tolist(),
+                            'metadata': roi.metadata
+                        })
+                    elif isinstance(shape, PolylineShape):
+                        # Napari path format: (y, x) coordinates for open paths
+                        shapes_data.append({
+                            'type': 'path',
+                            'coordinates': shape.coordinates.tolist(),
+                            'metadata': roi.metadata
+                        })
+                    elif isinstance(shape, EllipseShape):
+                        # Napari ellipse format: center (y, x) and radii (ry, rx)
+                        shapes_data.append({
+                            'type': 'ellipse',
+                            'center': [shape.center_y, shape.center_x],
+                            'radii': [shape.radius_y, shape.radius_x],
+                            'metadata': roi.metadata
+                        })
+                    elif isinstance(shape, PointShape):
+                        # Single point
+                        shapes_data.append({
+                            'type': 'point',
+                            'coordinates': [shape.y, shape.x],
+                            'metadata': roi.metadata
+                        })
         
         return shapes_data
     
@@ -176,18 +198,18 @@ class FijiROIConverter:
     @staticmethod
     def rois_to_imagej_bytes(rois: List, roi_prefix: str = "") -> List[bytes]:
         """Convert ROI objects to ImageJ ROI bytes.
-        
+
         Args:
             rois: List of ROI objects
             roi_prefix: Prefix for ROI names (e.g., "A01_s001_w1_rois_step7")
-            
+
         Returns:
             List of ROI bytes (not base64 encoded)
         """
-        from openhcs.core.roi import PolygonShape, EllipseShape, PointShape
-        
+        from openhcs.core.roi import PolygonShape, PolylineShape, EllipseShape, PointShape
+
         try:
-            from roifile import ImagejRoi
+            from roifile import ImagejRoi, ROI_TYPE
         except ImportError:
             raise ImportError("roifile library required for ImageJ ROI conversion. Install with: pip install roifile")
         
@@ -199,15 +221,30 @@ class FijiROIConverter:
                     # ImageJ expects (x, y) coordinates, OpenHCS has (y, x)
                     coords_xy = shape.coordinates[:, [1, 0]]  # Swap columns
                     ij_roi = ImagejRoi.frompoints(coords_xy)
-                    
+
                     # Set ROI name with descriptive prefix
                     if 'label' in roi.metadata:
                         ij_roi.name = f"{roi_prefix}_ROI_{roi.metadata['label']}"
                     else:
                         ij_roi.name = f"{roi_prefix}_ROI"
-                    
+
                     roi_bytes_list.append(ij_roi.tobytes())
-                    
+
+                elif isinstance(shape, PolylineShape):
+                    # ImageJ polyline ROI (open path)
+                    # ImageJ expects (x, y) coordinates, OpenHCS has (y, x)
+                    coords_xy = shape.coordinates[:, [1, 0]]  # Swap columns
+                    ij_roi = ImagejRoi.frompoints(coords_xy)
+                    ij_roi.roitype = ROI_TYPE.POLYLINE
+
+                    # Set ROI name with descriptive prefix
+                    if 'label' in roi.metadata:
+                        ij_roi.name = f"{roi_prefix}_ROI_{roi.metadata['label']}"
+                    else:
+                        ij_roi.name = f"{roi_prefix}_ROI"
+
+                    roi_bytes_list.append(ij_roi.tobytes())
+
                 elif isinstance(shape, EllipseShape):
                     # ImageJ ellipse ROI
                     # Convert center (y, x) to (x, y) and radii (ry, rx) to (rx, ry)

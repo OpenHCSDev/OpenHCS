@@ -78,8 +78,14 @@ jobs:
       - name: Run boundary version tests
         env:
           OPENHCS_CPU_ONLY: true
-        run: |
-          python -m pytest tests/integration/ --it-backends disk --it-microscopes ImageXpress --it-dims 3d --it-exec-mode multiprocessing --it-zmq-mode zmq --it-visualizers none -v --tb=short
+        run: python -m pytest tests/integration/ --cov=openhcs --cov-report=term --it-backends disk --it-microscopes ImageXpress --it-dims 3d --it-exec-mode multiprocessing --it-zmq-mode zmq --it-visualizers none -v --tb=short
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-python-${{ matrix.python-version }}-${{ matrix.os }}
+          path: .coverage
+          retention-days: 1
 
       - name: Show ZMQ server logs on failure
         if: failure()
@@ -135,8 +141,14 @@ jobs:
       - name: Run backend/microscope combination tests
         env:
           OPENHCS_CPU_ONLY: true
-        run: |
-          python -m pytest tests/integration/ --it-backends ${{ matrix.backend }} --it-microscopes ${{ matrix.microscope }} --it-dims 3d --it-exec-mode multiprocessing --it-zmq-mode zmq --it-visualizers none -v --tb=short
+        run: python -m pytest tests/integration/ --cov=openhcs --cov-report=term --it-backends ${{ matrix.backend }} --it-microscopes ${{ matrix.microscope }} --it-dims 3d --it-exec-mode multiprocessing --it-zmq-mode zmq --it-visualizers none -v --tb=short
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.os }}-${{ matrix.backend }}-${{ matrix.microscope }}
+          path: .coverage
+          retention-days: 1
 
       - name: Show ZMQ server logs on failure
         if: failure()
@@ -200,9 +212,15 @@ jobs:
       - name: Run OMERO integration tests (auto-starts Docker + OMERO)
         env:
           OPENHCS_CPU_ONLY: true
-        run: |
-          python -m pytest tests/integration/ --it-backends disk --it-microscopes OMERO --it-dims 3d --it-exec-mode multiprocessing --it-visualizers none -v --tb=short -s --log-cli-level=INFO
+        run: python -m pytest tests/integration/ --cov=openhcs --cov-report=term --it-backends disk --it-microscopes OMERO --it-dims 3d --it-exec-mode multiprocessing --it-visualizers none -v --tb=short -s --log-cli-level=INFO
         timeout-minutes: 15
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-omero-python-${{ matrix.python-version }}
+          path: .coverage
+          retention-days: 1
 
       - name: Show OMERO logs on failure
         if: failure()
@@ -349,18 +367,15 @@ jobs:
           source test_wheel/bin/activate
           WHEEL=$(ls dist/*.whl)
           pip install "${WHEEL}[dev]"
-
-          # Run focused integration test (1 backend/microscope combo to verify packaging)
-          python -m pytest tests/integration/ \
-                --it-backends disk \
-                --it-microscopes ImageXpress \
-                --it-dims 3d \
-                --it-exec-mode multiprocessing \
-                --it-zmq-mode zmq \
-                --it-visualizers none \
-                -v --tb=short
-
+          python -m pytest tests/integration/ --cov=openhcs --cov-report=term --it-backends disk --it-microscopes ImageXpress --it-dims 3d --it-exec-mode multiprocessing --it-zmq-mode zmq --it-visualizers none -v --tb=short
+          cp .coverage ../.coverage.wheel
           deactivate
-          rm -rf test_wheel
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-wheel-integration
+          path: .coverage.wheel
+          retention-days: 1
 
 

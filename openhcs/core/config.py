@@ -13,8 +13,8 @@ from pathlib import Path
 from typing import Optional, Union, Any, List
 from enum import Enum
 from abc import ABC, abstractmethod
-from openhcs.constants import Microscope, SequentialComponents, VirtualComponents, VariableComponents, GroupBy
-from openhcs.constants.constants import Backend, get_default_variable_components, get_default_group_by
+from openhcs.constants import Microscope, SequentialComponents, VirtualComponents, VariableComponents, GroupBy, DtypeConversion
+from openhcs.constants.constants import Backend, LiteralDtype, get_default_variable_components, get_default_group_by
 from openhcs.constants.input_source import InputSource
 
 # Import decorator for automatic decorator creation
@@ -106,8 +106,6 @@ class GlobalPipelineConfig:
     Root configuration object for an OpenHCS pipeline session.
     This object is intended to be instantiated at application startup and treated as immutable.
     """
-    num_workers: int = 1
-    """Number of worker processes/threads for parallelizable tasks."""
 
     materialization_results_path: Path = field(default=Path("results"), metadata={'ui_hidden': True})
     """
@@ -124,6 +122,9 @@ class GlobalPipelineConfig:
     by the sub_dir field in each step's step_materialization_config.
     """
 
+    num_workers: int = 1
+    """Number of worker processes/threads for parallelizable tasks."""
+    
     microscope: Microscope = field(default=Microscope.AUTO, metadata={'ui_hidden': True})
     """Default microscope type for auto-detection."""
 
@@ -166,6 +167,11 @@ class NapariVariableSizeHandling(Enum):
     PAD_TO_MAX = "pad_to_max"  # Pad smaller images to match largest (enables stacking)
 
 
+# Visualization dtype normalization (alias to LiteralDtype - no duplication)
+VisualizationDtype = LiteralDtype
+VisualizationDtype.__doc__ = """Dtype normalization for visualization streaming (Napari/Fiji stacking)."""
+
+
 # Create NapariDisplayConfig using factory
 # Note: Uses lazy colormap enum to avoid importing napari at module level
 # Note: component_order is automatically derived from VirtualComponents + AllComponents
@@ -174,6 +180,7 @@ NapariDisplayConfig = create_napari_display_config(
     colormap_enum=NapariColormap,
     dimension_mode_enum=NapariDimensionMode,
     variable_size_handling_enum=NapariVariableSizeHandling,
+    visualization_dtype_enum=VisualizationDtype,
     virtual_components=VirtualComponents,
     component_order=_build_component_order(),  # Auto-generated from VirtualComponents
     virtual_component_defaults={
@@ -285,6 +292,16 @@ class VFSConfig:
 
 @global_pipeline_config
 @dataclass(frozen=True)
+class DtypeConfig:
+    """Configuration for dtype conversion behavior in memory type decorators."""
+
+    default_dtype_conversion: DtypeConversion = DtypeConversion.NATIVE_OUTPUT
+    """Default dtype conversion mode for all decorated functions.
+    NATIVE_OUTPUT (no scaling) or PRESERVE_INPUT (scale to input dtype)."""
+
+
+@global_pipeline_config
+@dataclass(frozen=True)
 class ProcessingConfig:
     """Configuration for step processing behavior including variable components, grouping, and input source."""
 
@@ -335,6 +352,9 @@ class AnalysisConsolidationConfig:
 
     output_filename: str = "metaxpress_style_summary.csv"
     """Name of the consolidated output file."""
+
+    global_summary_filename: str = "global_metaxpress_summary.csv"
+    """Name of the global consolidated summary file combining all plates."""
 
 
 @global_pipeline_config
@@ -444,7 +464,7 @@ class StepMaterializationConfig(StepWellFilterConfig, PathPlanningConfig):
     sub_dir: str = "checkpoints"
     """Subdirectory for materialized outputs (different from global 'images')."""
 
-    enabled: bool = True
+    enabled: bool = False
     """Whether this materialization config is enabled. When False, config exists but materialization is disabled."""
 
 
@@ -455,7 +475,7 @@ _DEFAULT_TRANSPORT_MODE = TransportMode.TCP if platform.system() == 'Windows' el
 
 @global_pipeline_config
 @dataclass(frozen=True)
-class StreamingDefaults:
+class StreamingDefaults(StepWellFilterConfig):
     """Default configuration for streaming to visualizers."""
     persistent: bool = True
     """Whether viewer stays open after pipeline completion."""
@@ -463,18 +483,16 @@ class StreamingDefaults:
     host: str = 'localhost'
     """Host for streaming communication. Use 'localhost' for local, or remote IP for network streaming."""
 
-    port: int = None  # Subclasses must override with their specific default
-    """Port for streaming communication. Each streamer type has its own default."""
 
     transport_mode: TransportMode = _DEFAULT_TRANSPORT_MODE
     """ZMQ transport mode: Platform-aware default (TCP on Windows, IPC on Unix/Mac)."""
 
-    enabled: bool = True
+    enabled: bool = False
     """Whether this streaming config is enabled. When False, config exists but streaming is disabled."""
 
 @global_pipeline_config(ui_hidden=True)
 @dataclass(frozen=True)
-class StreamingConfig(StepWellFilterConfig, StreamingDefaults, ABC):
+class StreamingConfig(StreamingDefaults, ABC):
     """Abstract base configuration for streaming to visualizers.
 
     Uses multiple inheritance from StepWellFilterConfig and StreamingDefaults.
@@ -482,6 +500,11 @@ class StreamingConfig(StepWellFilterConfig, StreamingDefaults, ABC):
     by @global_pipeline_config(inherit_as_none=True), enabling polymorphic access without
     type-specific attribute names.
     """
+    @property
+    @abstractmethod
+    def port(self) -> int:
+        """Port for streaming communication. Each streamer type has its own default."""
+        pass
 
     @property
     @abstractmethod

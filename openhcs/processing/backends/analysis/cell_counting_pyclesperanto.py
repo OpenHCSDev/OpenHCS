@@ -140,18 +140,10 @@ def materialize_segmentation_masks(data: List[np.ndarray], path: str, filemanage
     for i, mask in enumerate(data):
         mask_filename = f"{base_path}_slice_{i:03d}.tif"
 
-        # Convert mask to appropriate dtype for saving (uint16 to match input images)
-        if mask.dtype != np.uint16:
-            # Normalize to uint16 range if needed
-            if mask.max() <= 1.0:
-                mask_uint16 = (mask * 65535).astype(np.uint16)
-            else:
-                mask_uint16 = mask.astype(np.uint16)
-        else:
-            mask_uint16 = mask
-
+        # Labeled masks must preserve dtype to support >255 labels
+        # Do NOT convert to uint8 - keep as int32/uint16
         # Save using filemanager with provided backend
-        filemanager.save(mask_uint16, mask_filename, backend)
+        filemanager.save(mask, mask_filename, backend)
         logger.debug(f"🔬 SEGMENTATION_MATERIALIZE: Saved mask {i} to {mask_filename} (backend={backend})")
 
     # Return summary path

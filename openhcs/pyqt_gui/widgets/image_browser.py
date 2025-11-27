@@ -30,11 +30,11 @@ logger = logging.getLogger(__name__)
 class ImageBrowserWidget(QWidget):
     """
     Image browser widget that displays all image files from plate metadata.
-    
+
     Users can click on files to view them in Napari with configurable settings
     from the current PipelineConfig.
     """
-    
+
     # Signals
     image_selected = pyqtSignal(str)  # Emitted when an image is selected
     _status_update_signal = pyqtSignal(str)  # Internal signal for thread-safe status updates
@@ -719,7 +719,7 @@ class ImageBrowserWidget(QWidget):
             self.all_images = {}
             for filename in image_files:
                 parsed = handler.parser.parse_filename(filename)
-                
+
                 # Get file size
                 file_path = plate_path / filename
                 if file_path.exists():
@@ -732,7 +732,7 @@ class ImageBrowserWidget(QWidget):
                         size_str = f"{size_bytes / (1024 * 1024):.1f} MB"
                 else:
                     size_str = "N/A"
-                
+
                 metadata = {
                     'filename': filename,
                     'type': 'Image',
@@ -826,98 +826,90 @@ class ImageBrowserWidget(QWidget):
             with open(metadata_path) as f:
                 metadata = json.load(f)
 
-            # Find the main subdirectory's results_dir field
-            results_dir = None
+            # Collect ALL results directories from ALL subdirectories
+            results_dirs = []
             if metadata and 'subdirectories' in metadata:
-                # First try to find the subdirectory marked as main
                 for subdir_name, subdir_metadata in metadata['subdirectories'].items():
-                    if subdir_metadata.get('main') and 'results_dir' in subdir_metadata and subdir_metadata['results_dir']:
-                        # Build full path: plate_path / results_dir
-                        results_dir = plate_path / subdir_metadata['results_dir']
-                        logger.info(f"IMAGE BROWSER RESULTS: Found results_dir in main subdirectory '{subdir_name}': {subdir_metadata['results_dir']}")
-                        break
+                    if 'results_dir' in subdir_metadata and subdir_metadata['results_dir']:
+                        results_dir_path = plate_path / subdir_metadata['results_dir']
+                        results_dirs.append((subdir_name, results_dir_path))
+                        logger.info(f"IMAGE BROWSER RESULTS: Found results_dir for subdirectory '{subdir_name}': {subdir_metadata['results_dir']}")
 
-                # Fallback: if no main subdirectory, use first subdirectory with results_dir
-                if not results_dir:
-                    for subdir_name, subdir_metadata in metadata['subdirectories'].items():
-                        if 'results_dir' in subdir_metadata and subdir_metadata['results_dir']:
-                            results_dir = plate_path / subdir_metadata['results_dir']
-                            logger.info(f"IMAGE BROWSER RESULTS: Found results_dir in subdirectory '{subdir_name}': {subdir_metadata['results_dir']}")
-                            break
-
-            if not results_dir:
-                logger.warning("IMAGE BROWSER RESULTS: No results_dir found in metadata")
+            if not results_dirs:
+                logger.warning("IMAGE BROWSER RESULTS: No results_dir found in any subdirectory")
                 return
 
-            logger.info(f"IMAGE BROWSER RESULTS: plate_path = {plate_path}")
-            logger.info(f"IMAGE BROWSER RESULTS: Resolved results directory = {results_dir}")
-
-            if not results_dir.exists():
-                logger.warning(f"IMAGE BROWSER RESULTS: Results directory does not exist: {results_dir}")
-                return
+            logger.info(f"IMAGE BROWSER RESULTS: Scanning {len(results_dirs)} results directories")
 
             # Get parser from orchestrator for filename parsing
             handler = self.orchestrator.microscope_handler
 
-            # Scan for ROI JSON files and CSV files
-            logger.info(f"IMAGE BROWSER RESULTS: Scanning directory recursively...")
+            # Scan all results directories
             file_count = 0
-            for file_path in results_dir.rglob('*'):
-                if file_path.is_file():
-                    file_count += 1
-                    suffix = file_path.suffix.lower()
-                    logger.debug(f"IMAGE BROWSER RESULTS: Found file: {file_path.name} (suffix={suffix})")
+            for subdir_name, results_dir in results_dirs:
+                if not results_dir.exists():
+                    logger.warning(f"IMAGE BROWSER RESULTS: Results directory does not exist: {results_dir}")
+                    continue
 
-                    # Determine file type using FileFormat registry
-                    from openhcs.constants.constants import FileFormat
+                logger.info(f"IMAGE BROWSER RESULTS: Scanning results directory for '{subdir_name}': {results_dir}")
 
-                    file_type = None
-                    if file_path.name.endswith('.roi.zip'):
-                        file_type = 'ROI'
-                        logger.info(f"IMAGE BROWSER RESULTS: ✓ Matched as ROI: {file_path.name}")
-                    elif suffix in FileFormat.CSV.value:
-                        file_type = 'CSV'
-                        logger.info(f"IMAGE BROWSER RESULTS: ✓ Matched as CSV: {file_path.name}")
-                    elif suffix in FileFormat.JSON.value:
-                        file_type = 'JSON'
-                        logger.info(f"IMAGE BROWSER RESULTS: ✓ Matched as JSON: {file_path.name}")
-                    else:
-                        logger.debug(f"IMAGE BROWSER RESULTS: ✗ Filtered out: {file_path.name} (suffix={suffix})")
+                # Scan for ROI JSON files and CSV files
+                for file_path in results_dir.rglob('*'):
+                    if file_path.is_file():
+                        file_count += 1
+                        suffix = file_path.suffix.lower()
+                        logger.debug(f"IMAGE BROWSER RESULTS: Found file: {file_path.name} (suffix={suffix})")
 
-                    if file_type:
-                        # Get relative path from plate_path (not results_dir) to include subdirectory
-                        rel_path = file_path.relative_to(plate_path)
+                        # Determine file type using FileFormat registry
+                        from openhcs.constants.constants import FileFormat
 
-                        # Get file size
-                        size_bytes = file_path.stat().st_size
-                        if size_bytes < 1024:
-                            size_str = f"{size_bytes} B"
-                        elif size_bytes < 1024 * 1024:
-                            size_str = f"{size_bytes / 1024:.1f} KB"
+                        file_type = None
+                        if file_path.name.endswith('.roi.zip'):
+                            file_type = 'ROI'
+                            logger.info(f"IMAGE BROWSER RESULTS: ✓ Matched as ROI: {file_path.name}")
+                        elif suffix in FileFormat.CSV.value:
+                            file_type = 'CSV'
+                            logger.info(f"IMAGE BROWSER RESULTS: ✓ Matched as CSV: {file_path.name}")
+                        elif suffix in FileFormat.JSON.value:
+                            file_type = 'JSON'
+                            logger.info(f"IMAGE BROWSER RESULTS: ✓ Matched as JSON: {file_path.name}")
                         else:
-                            size_str = f"{size_bytes / (1024 * 1024):.1f} MB"
+                            logger.debug(f"IMAGE BROWSER RESULTS: ✗ Filtered out: {file_path.name} (suffix={suffix})")
 
-                        # Parse ONLY the filename (not the full path) to extract metadata
-                        parsed = handler.parser.parse_filename(file_path.name)
+                        if file_type:
+                            # Get relative path from plate_path (not results_dir) to include subdirectory
+                            rel_path = file_path.relative_to(plate_path)
 
-                        # Build file info with parsed metadata (no full_path in metadata dict)
-                        file_info = {
-                            'filename': str(rel_path),
-                            'type': file_type,
-                            'size': size_str,
-                        }
+                            # Get file size
+                            size_bytes = file_path.stat().st_size
+                            if size_bytes < 1024:
+                                size_str = f"{size_bytes} B"
+                            elif size_bytes < 1024 * 1024:
+                                size_str = f"{size_bytes / 1024:.1f} KB"
+                            else:
+                                size_str = f"{size_bytes / (1024 * 1024):.1f} MB"
 
-                        # Add parsed metadata components if parsing succeeded
-                        if parsed:
-                            file_info.update(parsed)
-                            logger.info(f"IMAGE BROWSER RESULTS: ✓ Parsed result: {file_path.name} -> {parsed}")
-                            logger.info(f"IMAGE BROWSER RESULTS:   Full file_info: {file_info}")
-                        else:
-                            logger.warning(f"IMAGE BROWSER RESULTS: ✗ Could not parse filename: {file_path.name}")
+                            # Parse ONLY the filename (not the full path) to extract metadata
+                            parsed = handler.parser.parse_filename(file_path.name)
 
-                        # Store file info and full path separately
-                        self.all_results[str(rel_path)] = file_info
-                        self.result_full_paths[str(rel_path)] = file_path
+                            # Build file info with parsed metadata (no full_path in metadata dict)
+                            file_info = {
+                                'filename': str(rel_path),
+                                'type': file_type,
+                                'size': size_str,
+                            }
+
+                            # Add parsed metadata components if parsing succeeded
+                            if parsed:
+                                file_info.update(parsed)
+                                logger.info(f"IMAGE BROWSER RESULTS: ✓ Parsed result: {file_path.name} -> {parsed}")
+                                logger.info(f"IMAGE BROWSER RESULTS:   Full file_info: {file_info}")
+                            else:
+                                logger.warning(f"IMAGE BROWSER RESULTS: ✗ Could not parse filename: {file_path.name}")
+
+                            # Store file info and full path separately
+                            self.all_results[str(rel_path)] = file_info
+                            self.result_full_paths[str(rel_path)] = file_path
 
             logger.info(f"IMAGE BROWSER RESULTS: Scanned {file_count} total files, matched {len(self.all_results)} result files")
 
@@ -928,18 +920,15 @@ class ImageBrowserWidget(QWidget):
     # Removed on_result_double_clicked - now using unified on_file_double_clicked
 
     def _stream_roi_file(self, roi_zip_path: Path):
-        """Load ROI .roi.zip file and stream to enabled viewer(s)."""
+        """Stream ROI .roi.zip file to enabled viewer(s) asynchronously.
+
+        This method now only performs lightweight UI-thread work:
+        - Checks which viewers are enabled.
+        - Resolves streaming configs and viewers.
+        - Spawns background workers that do all heavy ROI loading + streaming.
+        """
         try:
-            from openhcs.core.roi import load_rois_from_zip
-
-            # Load ROIs from .roi.zip archive
-            rois = load_rois_from_zip(roi_zip_path)
-
-            if not rois:
-                QMessageBox.information(self, "No ROIs", f"No ROIs found in {roi_zip_path.name}")
-                return
-
-            # Check which viewers are enabled
+            # Check which viewers are enabled (cheap, safe on UI thread)
             napari_enabled = self.napari_enable_checkbox.isChecked()
             fiji_enabled = self.fiji_enable_checkbox.isChecked()
 
@@ -951,18 +940,166 @@ class ImageBrowserWidget(QWidget):
                 )
                 return
 
-            # Stream to enabled viewers
+            if not self.orchestrator:
+                raise RuntimeError("No orchestrator set")
+
+            from openhcs.config_framework.context_manager import config_context
+            from openhcs.config_framework.lazy_factory import (
+                resolve_lazy_configurations_for_serialization,
+            )
+            from openhcs.constants.constants import Backend as BackendEnum
+
+            # For each enabled viewer, resolve config + viewer on UI thread, then spawn worker
             if napari_enabled:
-                self._stream_rois_to_napari(rois, roi_zip_path)
+                from openhcs.core.config import LazyNapariStreamingConfig
+                current_values = self.napari_config_form.get_current_values()
+                temp_config = LazyNapariStreamingConfig(
+                    **{k: v for k, v in current_values.items() if v is not None}
+                )
+
+                with config_context(self.orchestrator.pipeline_config):
+                    with config_context(temp_config):
+                        napari_config = resolve_lazy_configurations_for_serialization(temp_config)
+
+                napari_viewer = self.orchestrator.get_or_create_visualizer(napari_config)
+
+                import threading
+
+                threading.Thread(
+                    target=self._stream_single_roi_async,
+                    args=(
+                        napari_viewer,
+                        roi_zip_path,
+                        napari_config,
+                        BackendEnum.NAPARI_STREAM,
+                        "napari",
+                    ),
+                    daemon=True,
+                ).start()
 
             if fiji_enabled:
-                self._stream_rois_to_fiji(rois, roi_zip_path)
+                from openhcs.core.config import LazyFijiStreamingConfig
+                current_values = self.fiji_config_form.get_current_values()
+                temp_config = LazyFijiStreamingConfig(
+                    **{k: v for k, v in current_values.items() if v is not None}
+                )
 
-            logger.info(f"Streamed {len(rois)} ROIs from {roi_zip_path.name}")
+                with config_context(self.orchestrator.pipeline_config):
+                    with config_context(temp_config):
+                        fiji_config = resolve_lazy_configurations_for_serialization(temp_config)
+
+                fiji_viewer = self.orchestrator.get_or_create_visualizer(fiji_config)
+
+                import threading
+
+                threading.Thread(
+                    target=self._stream_single_roi_async,
+                    args=(
+                        fiji_viewer,
+                        roi_zip_path,
+                        fiji_config,
+                        BackendEnum.FIJI_STREAM,
+                        "fiji",
+                    ),
+                    daemon=True,
+                ).start()
+
+            logger.info(f"Started async streaming of ROI file {roi_zip_path.name}")
 
         except Exception as e:
-            logger.error(f"Failed to stream ROI file: {e}")
+            logger.error(f"Failed to start ROI streaming: {e}")
             QMessageBox.warning(self, "Error", f"Failed to stream ROI file: {e}")
+
+
+    def _stream_single_roi_async(self, viewer, roi_zip_path: Path, config, backend_enum, viewer_type: str):
+        """Worker: load a single ROI file and stream to a viewer in a background thread.
+
+        Heavy operations only:
+        - load_rois_from_zip
+        - viewer.wait_for_ready (long timeout)
+        - filemanager.save
+        """
+        import threading
+
+        def _worker():
+            try:
+                from pathlib import Path as _Path
+                from PyQt6.QtCore import QTimer
+                from openhcs.core.roi import load_rois_from_zip
+
+                # Load ROIs from disk
+                self._status_update_signal.emit(
+                    f"Loading ROIs from {roi_zip_path.name}..."
+                )
+                rois = load_rois_from_zip(roi_zip_path)
+
+                if not rois:
+                    msg = f"No ROIs found in {roi_zip_path.name}"
+                    self._status_update_signal.emit(msg)
+
+                    # Show info dialog on UI thread
+                    QTimer.singleShot(0, lambda: QMessageBox.information(self, "No ROIs", msg))
+                    return
+
+                # Wait for viewer to be ready (never on UI thread)
+                is_already_running = viewer.wait_for_ready(timeout=0.1)
+                if not is_already_running:
+                    logger.info(
+                        f"Waiting for {viewer_type.capitalize()} viewer on port {viewer.port} to be ready..."
+                    )
+                    if not viewer.wait_for_ready(timeout=15.0):
+                        raise RuntimeError(
+                            f"{viewer_type.capitalize()} viewer on port {viewer.port} failed to become ready"
+                        )
+
+                # Prepare metadata for streaming
+                source = _Path(roi_zip_path).parent.name
+                metadata = {
+                    "port": viewer.port,
+                    "display_config": config,
+                    "microscope_handler": self.orchestrator.microscope_handler,
+                    "plate_path": self.orchestrator.plate_path,
+                    "source": source,
+                }
+
+                # Stream ROIs to viewer backend
+                self._status_update_signal.emit(
+                    f"Streaming ROIs from {roi_zip_path.name} to {viewer_type.capitalize()}..."
+                )
+                self.filemanager.save(
+                    rois,
+                    roi_zip_path,
+                    backend_enum.value,
+                    **metadata,
+                )
+
+                msg = (
+                    f"Streamed {len(rois)} ROIs from {roi_zip_path.name} "
+                    f"to {viewer_type.capitalize()} on port {viewer.port}"
+                )
+                logger.info(msg)
+                self._status_update_signal.emit(msg)
+
+            except Exception as e:  # noqa: BLE001
+                logger.error(
+                    f"Failed to load/stream ROI file {roi_zip_path.name} "
+                    f"to {viewer_type.capitalize()}: {e}"
+                )
+                self._status_update_signal.emit(f"Error: {e}")
+
+                from PyQt6.QtCore import QTimer
+
+                # Route to appropriate error dialog on UI thread
+                if viewer_type == "napari":
+                    QTimer.singleShot(
+                        0, lambda: self._show_streaming_error(str(e))
+                    )
+                else:
+                    QTimer.singleShot(
+                        0, lambda: self._show_fiji_streaming_error(str(e))
+                    )
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     def _populate_table(self, files_dict: Dict[str, Dict]):
         """Populate table with files (images + results) from dictionary."""
@@ -1038,14 +1175,14 @@ class ImageBrowserWidget(QWidget):
         # Restore previous selection if it still exists
         if selected_folder is not None:
             self._restore_folder_selection(selected_folder, folder_items)
-    
+
     def on_selection_changed(self):
         """Handle selection change in the table."""
         has_selection = len(self.file_table.selectedItems()) > 0
         # Enable buttons based on selection AND checkbox state
         self.view_napari_btn.setEnabled(has_selection and self.napari_enable_checkbox.isChecked())
         self.view_fiji_btn.setEnabled(has_selection and self.fiji_enable_checkbox.isChecked())
-    
+
     def on_file_double_clicked(self, row: int, column: int):
         """Handle double-click on a file row - stream images or display results."""
         # Get file info from table
@@ -1109,7 +1246,7 @@ class ImageBrowserWidget(QWidget):
             # Open JSON in system default application
             import subprocess
             subprocess.run(['xdg-open', str(file_path)])
-    
+
     def view_selected_in_napari(self):
         """View all selected images in Napari as a batch (builds hyperstack)."""
         selected_rows = self.file_table.selectionModel().selectedRows()
@@ -1182,7 +1319,7 @@ class ImageBrowserWidget(QWidget):
         except Exception as e:
             logger.error(f"Failed to view images in Fiji: {e}")
             QMessageBox.warning(self, "Error", f"Failed to view images in Fiji: {e}")
-    
+
     def _load_and_stream_batch_to_napari(self, filenames: list):
         """Load multiple images and stream as batch to Napari (builds hyperstack)."""
         if not self.orchestrator:
@@ -1264,8 +1401,19 @@ class ImageBrowserWidget(QWidget):
 
     def _load_and_stream_batch_to_napari_async(self, viewer, filenames: list, plate_path: Path,
                                                  read_backend: str, config):
-        """Load and stream batch of images to Napari in background thread (NEVER blocks UI)."""
+        """Load and stream batch of images to Napari in background thread (NEVER blocks UI).
+
+        Uses chunked streaming to prevent file descriptor exhaustion when streaming
+        large batches (200+ images). Each chunk creates shared memory segments that
+        consume file descriptors, so we limit concurrent chunks to prevent hitting
+        OS limits.
+        """
         import threading
+        import time
+
+        # Chunk size to prevent file descriptor exhaustion
+        # Each image creates a shared memory segment (file descriptor on Linux)
+        CHUNK_SIZE = 50
 
         def load_and_stream():
             try:
@@ -1282,24 +1430,6 @@ class ImageBrowserWidget(QWidget):
                     register_launching_viewer(viewer.port, 'napari', len(filenames))
                     logger.info(f"Registered launching Napari viewer on port {viewer.port} with {len(filenames)} queued images")
 
-                # Show loading status
-                self._update_status_threadsafe(f"Loading {len(filenames)} images from disk...")
-
-                # HEAVY OPERATION: Load all images (runs in background thread)
-                image_data_list = []
-                file_paths = []
-                for i, filename in enumerate(filenames, 1):
-                    image_path = plate_path / filename
-                    image_data = self.filemanager.load(str(image_path), read_backend)
-                    image_data_list.append(image_data)
-                    file_paths.append(filename)
-
-                    # Update progress every 5 images
-                    if i % 5 == 0 or i == len(filenames):
-                        self._update_status_threadsafe(f"Loading images: {i}/{len(filenames)}...")
-
-                logger.info(f"Loaded {len(image_data_list)} images in background thread")
-
                 if not is_already_running:
                     # Viewer is launching - wait for it to be ready before streaming
                     logger.info(f"Waiting for Napari viewer on port {viewer.port} to be ready...")
@@ -1315,30 +1445,60 @@ class ImageBrowserWidget(QWidget):
                 else:
                     logger.info(f"Napari viewer on port {viewer.port} is already running")
 
-                # Use the napari streaming backend to send the batch
                 from openhcs.constants.constants import Backend as BackendEnum
 
-                # Build source from subdirectory name (image viewer context)
-                # Use first file path to determine subdirectory
-                source = Path(file_paths[0]).parent.name if file_paths else 'unknown_source'
+                # Stream in chunks to prevent file descriptor exhaustion
+                total_images = len(filenames)
+                num_chunks = (total_images + CHUNK_SIZE - 1) // CHUNK_SIZE
+                logger.info(f"Streaming {total_images} images in {num_chunks} chunks of {CHUNK_SIZE}")
 
-                # Prepare metadata for streaming
-                metadata = {
-                    'port': viewer.port,
-                    'display_config': config,
-                    'microscope_handler': self.orchestrator.microscope_handler,
-                    'plate_path': self.orchestrator.plate_path,
-                    'source': source
-                }
+                for chunk_idx in range(num_chunks):
+                    start_idx = chunk_idx * CHUNK_SIZE
+                    end_idx = min(start_idx + CHUNK_SIZE, total_images)
+                    chunk_filenames = filenames[start_idx:end_idx]
 
-                # Stream batch to Napari
-                self.filemanager.save_batch(
-                    image_data_list,
-                    file_paths,
-                    BackendEnum.NAPARI_STREAM.value,
-                    **metadata
-                )
-                logger.info(f"Successfully streamed batch of {len(file_paths)} images to Napari on port {viewer.port}")
+                    # Show loading status
+                    self._update_status_threadsafe(f"Loading chunk {chunk_idx + 1}/{num_chunks} ({len(chunk_filenames)} images)...")
+
+                    # Load chunk of images
+                    image_data_list = []
+                    file_paths = []
+                    for i, filename in enumerate(chunk_filenames, 1):
+                        image_path = plate_path / filename
+                        image_data = self.filemanager.load(str(image_path), read_backend)
+                        image_data_list.append(image_data)
+                        file_paths.append(filename)
+
+                    logger.info(f"Loaded chunk {chunk_idx + 1}/{num_chunks}: {len(image_data_list)} images")
+
+                    # Build source from subdirectory name (image viewer context)
+                    source = Path(file_paths[0]).parent.name if file_paths else 'unknown_source'
+
+                    # Prepare metadata for streaming
+                    metadata = {
+                        'port': viewer.port,
+                        'display_config': config,
+                        'microscope_handler': self.orchestrator.microscope_handler,
+                        'plate_path': self.orchestrator.plate_path,
+                        'source': source
+                    }
+
+                    # Stream chunk to Napari
+                    self.filemanager.save_batch(
+                        image_data_list,
+                        file_paths,
+                        BackendEnum.NAPARI_STREAM.value,
+                        **metadata
+                    )
+                    logger.info(f"Streamed chunk {chunk_idx + 1}/{num_chunks} ({len(file_paths)} images) to Napari on port {viewer.port}")
+
+                    # Brief pause between chunks to allow Napari to process and unlink shared memory
+                    # This prevents accumulation of file descriptors
+                    if chunk_idx < num_chunks - 1:
+                        time.sleep(0.1)
+
+                logger.info(f"Successfully streamed all {total_images} images to Napari on port {viewer.port}")
+                self._update_status_threadsafe(f"Streamed {total_images} images to Napari")
             except Exception as e:
                 logger.error(f"Failed to load/stream batch to Napari: {e}")
                 # Show error in UI thread
@@ -1351,7 +1511,7 @@ class ImageBrowserWidget(QWidget):
         # Start loading and streaming in background thread
         thread = threading.Thread(target=load_and_stream, daemon=True)
         thread.start()
-        logger.info(f"Started background thread to load and stream {len(filenames)} images to Napari")
+        logger.info(f"Started background thread to load and stream {len(filenames)} images to Napari in chunks")
 
     def _stream_batch_to_napari(self, viewer, image_data_list: list, file_paths: list, config):
         """Stream batch of images to Napari viewer asynchronously (builds hyperstack)."""
@@ -1429,8 +1589,19 @@ class ImageBrowserWidget(QWidget):
 
     def _load_and_stream_batch_to_fiji_async(self, viewer, filenames: list, plate_path: Path,
                                                read_backend: str, config):
-        """Load and stream batch of images to Fiji in background thread (NEVER blocks UI)."""
+        """Load and stream batch of images to Fiji in background thread (NEVER blocks UI).
+
+        Uses chunked streaming to prevent file descriptor exhaustion when streaming
+        large batches (200+ images). Each chunk creates shared memory segments that
+        consume file descriptors, so we limit concurrent chunks to prevent hitting
+        OS limits.
+        """
         import threading
+        import time
+
+        # Chunk size to prevent file descriptor exhaustion
+        # Each image creates a shared memory segment (file descriptor on Linux)
+        CHUNK_SIZE = 50
 
         def load_and_stream():
             try:
@@ -1447,24 +1618,6 @@ class ImageBrowserWidget(QWidget):
                     register_launching_viewer(viewer.port, 'fiji', len(filenames))
                     logger.info(f"Registered launching Fiji viewer on port {viewer.port} with {len(filenames)} queued images")
 
-                # Show loading status
-                self._update_status_threadsafe(f"Loading {len(filenames)} images from disk...")
-
-                # HEAVY OPERATION: Load all images (runs in background thread)
-                image_data_list = []
-                file_paths = []
-                for i, filename in enumerate(filenames, 1):
-                    image_path = plate_path / filename
-                    image_data = self.filemanager.load(str(image_path), read_backend)
-                    image_data_list.append(image_data)
-                    file_paths.append(filename)
-
-                    # Update progress every 5 images
-                    if i % 5 == 0 or i == len(filenames):
-                        self._update_status_threadsafe(f"Loading images: {i}/{len(filenames)}...")
-
-                logger.info(f"Loaded {len(image_data_list)} images in background thread")
-
                 if not is_already_running:
                     # Viewer is launching - wait for it to be ready before streaming
                     logger.info(f"Waiting for Fiji viewer on port {viewer.port} to be ready...")
@@ -1480,31 +1633,61 @@ class ImageBrowserWidget(QWidget):
                 else:
                     logger.info(f"Fiji viewer on port {viewer.port} is already running")
 
-                # Use the Fiji streaming backend to send the batch
                 from openhcs.constants.constants import Backend as BackendEnum
 
-                # Build source from subdirectory name (image viewer context)
-                # Use first file path to determine subdirectory
-                source = Path(file_paths[0]).parent.name if file_paths else 'unknown_source'
+                # Stream in chunks to prevent file descriptor exhaustion
+                total_images = len(filenames)
+                num_chunks = (total_images + CHUNK_SIZE - 1) // CHUNK_SIZE
+                logger.info(f"Streaming {total_images} images in {num_chunks} chunks of {CHUNK_SIZE}")
 
-                # Prepare metadata for streaming
-                metadata = {
-                    'port': viewer.port,
-                    'display_config': config,
-                    'microscope_handler': self.orchestrator.microscope_handler,
-                    'plate_path': self.orchestrator.plate_path,
-                    'source': source
-                }
+                for chunk_idx in range(num_chunks):
+                    start_idx = chunk_idx * CHUNK_SIZE
+                    end_idx = min(start_idx + CHUNK_SIZE, total_images)
+                    chunk_filenames = filenames[start_idx:end_idx]
 
-                # Stream batch to Fiji
-                logger.info(f"🚀 IMAGE BROWSER: Calling save_batch with {len(image_data_list)} images")
-                self.filemanager.save_batch(
-                    image_data_list,
-                    file_paths,
-                    BackendEnum.FIJI_STREAM.value,
-                    **metadata
-                )
-                logger.info(f"✅ IMAGE BROWSER: Successfully streamed batch of {len(file_paths)} images to Fiji on port {viewer.port}")
+                    # Show loading status
+                    self._update_status_threadsafe(f"Loading chunk {chunk_idx + 1}/{num_chunks} ({len(chunk_filenames)} images)...")
+
+                    # Load chunk of images
+                    image_data_list = []
+                    file_paths = []
+                    for i, filename in enumerate(chunk_filenames, 1):
+                        image_path = plate_path / filename
+                        image_data = self.filemanager.load(str(image_path), read_backend)
+                        image_data_list.append(image_data)
+                        file_paths.append(filename)
+
+                    logger.info(f"Loaded chunk {chunk_idx + 1}/{num_chunks}: {len(image_data_list)} images")
+
+                    # Build source from subdirectory name (image viewer context)
+                    source = Path(file_paths[0]).parent.name if file_paths else 'unknown_source'
+
+                    # Prepare metadata for streaming
+                    metadata = {
+                        'port': viewer.port,
+                        'display_config': config,
+                        'microscope_handler': self.orchestrator.microscope_handler,
+                        'plate_path': self.orchestrator.plate_path,
+                        'source': source
+                    }
+
+                    # Stream chunk to Fiji
+                    logger.info(f"🚀 IMAGE BROWSER: Calling save_batch with {len(image_data_list)} images (chunk {chunk_idx + 1}/{num_chunks})")
+                    self.filemanager.save_batch(
+                        image_data_list,
+                        file_paths,
+                        BackendEnum.FIJI_STREAM.value,
+                        **metadata
+                    )
+                    logger.info(f"✅ IMAGE BROWSER: Streamed chunk {chunk_idx + 1}/{num_chunks} ({len(file_paths)} images) to Fiji on port {viewer.port}")
+
+                    # Brief pause between chunks to allow Fiji to process and unlink shared memory
+                    # This prevents accumulation of file descriptors
+                    if chunk_idx < num_chunks - 1:
+                        time.sleep(0.1)
+
+                logger.info(f"Successfully streamed all {total_images} images to Fiji on port {viewer.port}")
+                self._update_status_threadsafe(f"Streamed {total_images} images to Fiji")
             except Exception as e:
                 logger.error(f"Failed to load/stream batch to Fiji: {e}")
                 # Show error in UI thread
@@ -1517,7 +1700,7 @@ class ImageBrowserWidget(QWidget):
         # Start loading and streaming in background thread
         thread = threading.Thread(target=load_and_stream, daemon=True)
         thread.start()
-        logger.info(f"Started background thread to load and stream {len(filenames)} images to Fiji")
+        logger.info(f"Started background thread to load and stream {len(filenames)} images to Fiji in chunks")
 
     def _stream_batch_to_fiji(self, viewer, image_data_list: list, file_paths: list, config):
         """Stream batch of images to Fiji viewer asynchronously (builds hyperstack)."""
@@ -1593,180 +1776,184 @@ class ImageBrowserWidget(QWidget):
         """Show Fiji streaming error in UI thread."""
         QMessageBox.warning(self, "Streaming Error", f"Failed to stream images to Fiji: {error_msg}")
 
-    def _stream_rois_to_napari(self, rois: list, roi_json_path: Path):
-        """Stream ROIs to Napari viewer."""
-        try:
-            # Get Napari config using current form values
-            from openhcs.config_framework.context_manager import config_context
-            from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization
-            from openhcs.core.config import LazyNapariStreamingConfig
-
-            current_values = self.napari_config_form.get_current_values()
-            temp_config = LazyNapariStreamingConfig(**{k: v for k, v in current_values.items() if v is not None})
-
-            with config_context(self.orchestrator.pipeline_config):
-                with config_context(temp_config):
-                    napari_config = resolve_lazy_configurations_for_serialization(temp_config)
-
-            # Get or create viewer
-            viewer = self.orchestrator.get_or_create_visualizer(napari_config)
-
-            # Stream ROIs using filemanager.save() - same as pipeline execution
-            # Pass display_config and microscope_handler just like image streaming does
-            from openhcs.constants.constants import Backend as BackendEnum
-            from pathlib import Path
-
-            # Build source from subdirectory name (image viewer context)
-            source = Path(roi_json_path).parent.name
-
-            self.filemanager.save(
-                rois,
-                roi_json_path,
-                BackendEnum.NAPARI_STREAM.value,
-                host='localhost',
-                port=napari_config.port,
-                display_config=napari_config,
-                microscope_handler=self.orchestrator.microscope_handler,
-                source=source
-            )
-
-            logger.info(f"Streamed {len(rois)} ROIs to Napari on port {napari_config.port}")
-
-        except Exception as e:
-            logger.error(f"Failed to stream ROIs to Napari: {e}")
-            raise
-
-    def _stream_rois_to_fiji(self, rois: list, roi_json_path: Path):
-        """Stream ROIs to Fiji viewer."""
-        try:
-            # Get Fiji config using current form values
-            from openhcs.config_framework.context_manager import config_context
-            from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization
-            from openhcs.core.config import LazyFijiStreamingConfig
-
-            current_values = self.fiji_config_form.get_current_values()
-            temp_config = LazyFijiStreamingConfig(**{k: v for k, v in current_values.items() if v is not None})
-
-            with config_context(self.orchestrator.pipeline_config):
-                with config_context(temp_config):
-                    fiji_config = resolve_lazy_configurations_for_serialization(temp_config)
-
-            # Get or create viewer
-            viewer = self.orchestrator.get_or_create_visualizer(fiji_config)
-
-            # Stream ROIs using filemanager.save() - same as pipeline execution
-            # Pass display_config and microscope_handler just like image streaming does
-            from openhcs.constants.constants import Backend as BackendEnum
-            from pathlib import Path
-
-            # Build source from subdirectory name (image viewer context)
-            source = Path(roi_json_path).parent.name
-
-            self.filemanager.save(
-                rois,
-                roi_json_path,
-                BackendEnum.FIJI_STREAM.value,
-                host='localhost',
-                port=fiji_config.port,
-                display_config=fiji_config,
-                microscope_handler=self.orchestrator.microscope_handler,
-                source=source
-            )
-
-            logger.info(f"Streamed {len(rois)} ROIs to Fiji on port {fiji_config.port}")
-
-        except Exception as e:
-            logger.error(f"Failed to stream ROIs to Fiji: {e}")
-            raise
 
     def _stream_roi_batch_to_napari(self, roi_filenames: list, plate_path: Path):
-        """Stream a batch of ROI files to Napari."""
-        self._stream_batch_to_viewer(roi_filenames, plate_path, 'napari', is_roi=True)
+        """Stream a batch of ROI files to Napari asynchronously (never blocks UI)."""
+        if not self.orchestrator:
+            raise RuntimeError("No orchestrator set")
 
-    def _stream_roi_batch_to_fiji(self, roi_filenames: list, plate_path: Path):
-        """Stream a batch of ROI files to Fiji."""
-        self._stream_batch_to_viewer(roi_filenames, plate_path, 'fiji', is_roi=True)
-    
-    def _stream_batch_to_viewer(self, filenames: list, plate_path: Path, viewer_type: str, is_roi: bool = False):
-        """Generic method to stream batch of files (images or ROIs) to a viewer (Napari or Fiji).
-        
-        Args:
-            filenames: List of file names to stream
-            plate_path: Path to the plate directory
-            viewer_type: 'napari' or 'fiji'
-            is_roi: True for ROI files, False for image files
-        """
         from openhcs.config_framework.context_manager import config_context
-        from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization
+        from openhcs.config_framework.lazy_factory import (
+            resolve_lazy_configurations_for_serialization,
+        )
+        from openhcs.core.config import LazyNapariStreamingConfig
         from openhcs.constants.constants import Backend as BackendEnum
-        
-        # Get appropriate config class and form
-        if viewer_type == 'napari':
-            from openhcs.core.config import LazyNapariStreamingConfig
-            config_class = LazyNapariStreamingConfig
-            config_form = self.napari_config_form
-            backend_enum = BackendEnum.NAPARI_STREAM
-        else:  # fiji
-            from openhcs.core.config import LazyFijiStreamingConfig
-            config_class = LazyFijiStreamingConfig
-            config_form = self.fiji_config_form
-            backend_enum = BackendEnum.FIJI_STREAM
-        
-        # Resolve config
-        current_values = config_form.get_current_values()
-        temp_config = config_class(**{k: v for k, v in current_values.items() if v is not None})
-        
+
+        current_values = self.napari_config_form.get_current_values()
+        temp_config = LazyNapariStreamingConfig(
+            **{k: v for k, v in current_values.items() if v is not None}
+        )
+
         with config_context(self.orchestrator.pipeline_config):
             with config_context(temp_config):
-                config = resolve_lazy_configurations_for_serialization(temp_config)
-        
-        # Get or create viewer
-        viewer = self.orchestrator.get_or_create_visualizer(config)
-        
-        # Wait for viewer to be ready
-        is_already_running = viewer.wait_for_ready(timeout=0.1)
-        if not is_already_running:
-            logger.info(f"Waiting for {viewer_type.capitalize()} viewer on port {viewer.port} to be ready...")
-            if not viewer.wait_for_ready(timeout=15.0):
-                raise RuntimeError(f"{viewer_type.capitalize()} viewer on port {viewer.port} failed to become ready")
-            logger.info(f"{viewer_type.capitalize()} viewer on port {viewer.port} is ready")
-        else:
-            logger.info(f"{viewer_type.capitalize()} viewer on port {viewer.port} is already running")
-        
-        # Load data
-        if is_roi:
-            from openhcs.core.roi import load_rois_from_zip
-            data_list = []
-            paths = []
-            for filename in filenames:
-                file_path = plate_path / filename
-                rois = load_rois_from_zip(file_path)
-                if not rois:
-                    logger.warning(f"No ROIs found in {file_path.name}")
-                    continue
-                data_list.append(rois)
-                paths.append(filename)
-            
-            if not data_list:
-                logger.warning("No ROIs loaded from any files")
-                return
-        else:
-            # For images, this would load image data - not currently used but kept for future
-            raise NotImplementedError("Image loading through generic method not yet implemented")
-        
-        # Prepare metadata for streaming
-        source = Path(paths[0]).parent.name if paths else 'unknown_source'
-        metadata = {
-            'port': viewer.port,
-            'display_config': config,
-            'microscope_handler': self.orchestrator.microscope_handler,
-            'plate_path': self.orchestrator.plate_path,
-            'source': source
-        }
-        
-        # Stream batch
-        self.filemanager.save_batch(data_list, paths, backend_enum.value, **metadata)
-        logger.info(f"Successfully streamed batch of {len(paths)} {'ROI' if is_roi else 'image'} files to {viewer_type.capitalize()} on port {viewer.port}")
+                napari_config = resolve_lazy_configurations_for_serialization(temp_config)
+
+        viewer = self.orchestrator.get_or_create_visualizer(napari_config)
+
+        self._load_and_stream_roi_batch_async(
+            viewer,
+            roi_filenames,
+            plate_path,
+            BackendEnum.NAPARI_STREAM,
+            napari_config,
+            "napari",
+        )
+
+    def _stream_roi_batch_to_fiji(self, roi_filenames: list, plate_path: Path):
+        """Stream a batch of ROI files to Fiji asynchronously (never blocks UI)."""
+        if not self.orchestrator:
+            raise RuntimeError("No orchestrator set")
+
+        from openhcs.config_framework.context_manager import config_context
+        from openhcs.config_framework.lazy_factory import (
+            resolve_lazy_configurations_for_serialization,
+        )
+        from openhcs.core.config import LazyFijiStreamingConfig
+        from openhcs.constants.constants import Backend as BackendEnum
+
+        current_values = self.fiji_config_form.get_current_values()
+        temp_config = LazyFijiStreamingConfig(
+            **{k: v for k, v in current_values.items() if v is not None}
+        )
+
+        with config_context(self.orchestrator.pipeline_config):
+            with config_context(temp_config):
+                fiji_config = resolve_lazy_configurations_for_serialization(temp_config)
+
+        viewer = self.orchestrator.get_or_create_visualizer(fiji_config)
+
+        self._load_and_stream_roi_batch_async(
+            viewer,
+            roi_filenames,
+            plate_path,
+            BackendEnum.FIJI_STREAM,
+            fiji_config,
+            "fiji",
+        )
+
+
+    def _load_and_stream_roi_batch_async(
+        self,
+        viewer,
+        roi_filenames: list,
+        plate_path: Path,
+        backend_enum,
+        config,
+        viewer_type: str,
+    ) -> None:
+        """Load ROI files and stream them as a batch to a viewer in a background thread.
+
+        Heavy operations only:
+        - load_rois_from_zip for each ROI file
+        - viewer.wait_for_ready (long timeout)
+        - filemanager.save_batch
+        """
+
+        import threading
+
+        def _worker() -> None:
+            try:
+                from pathlib import Path as _Path
+                from PyQt6.QtCore import QTimer
+                from openhcs.core.roi import load_rois_from_zip
+
+                total = len(roi_filenames)
+                if total == 0:
+                    return
+
+                self._status_update_signal.emit(
+                    f"Loading {total} ROI file(s) from disk..."
+                )
+
+                data_list: list = []
+                paths: list[str] = []
+
+                for i, filename in enumerate(roi_filenames, 1):
+                    file_path = plate_path / filename
+                    rois = load_rois_from_zip(file_path)
+                    if not rois:
+                        logger.warning(f"No ROIs found in {file_path.name}")
+                        continue
+
+                    data_list.append(rois)
+                    paths.append(filename)
+
+                    if i % 5 == 0 or i == total:
+                        self._status_update_signal.emit(
+                            f"Loading ROIs: {i}/{total} file(s)..."
+                        )
+
+                if not data_list:
+                    msg = "No ROIs loaded from any selected files."
+                    logger.warning(msg)
+                    self._status_update_signal.emit(msg)
+                    return
+
+                # Wait for viewer to be ready in background thread
+                is_already_running = viewer.wait_for_ready(timeout=0.1)
+                if not is_already_running:
+                    logger.info(
+                        f"Waiting for {viewer_type.capitalize()} viewer on port {viewer.port} to be ready..."
+                    )
+                    if not viewer.wait_for_ready(timeout=15.0):
+                        raise RuntimeError(
+                            f"{viewer_type.capitalize()} viewer on port {viewer.port} failed to become ready"
+                        )
+
+                # Prepare metadata for streaming
+                source = _Path(paths[0]).parent.name if paths else "unknown_source"
+                metadata = {
+                    "port": viewer.port,
+                    "display_config": config,
+                    "microscope_handler": self.orchestrator.microscope_handler,
+                    "plate_path": self.orchestrator.plate_path,
+                    "source": source,
+                }
+
+                self._status_update_signal.emit(
+                    f"Streaming {len(paths)} ROI file(s) to {viewer_type.capitalize()}..."
+                )
+
+                self.filemanager.save_batch(
+                    data_list,
+                    paths,
+                    backend_enum.value,
+                    **metadata,
+                )
+
+                msg = (
+                    f"Streamed {len(paths)} ROI file(s) to {viewer_type.capitalize()} "
+                    f"on port {viewer.port}"
+                )
+                logger.info(msg)
+                self._status_update_signal.emit(msg)
+
+            except Exception as e:  # noqa: BLE001
+                logger.error(
+                    f"Failed to load/stream ROI batch to {viewer_type.capitalize()}: {e}"
+                )
+                self._status_update_signal.emit(f"Error: {e}")
+
+                from PyQt6.QtCore import QTimer
+
+                if viewer_type == "napari":
+                    QTimer.singleShot(0, lambda: self._show_streaming_error(str(e)))
+                else:
+                    QTimer.singleShot(0, lambda: self._show_fiji_streaming_error(str(e)))
+
+        thread = threading.Thread(target=_worker, daemon=True)
+        thread.start()
+
 
     def _display_csv_file(self, csv_path: Path):
         """Display CSV file in preview area."""

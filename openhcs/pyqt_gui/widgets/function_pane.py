@@ -39,24 +39,34 @@ class FunctionPaneWidget(QWidget):
     move_function = pyqtSignal(int, int)  # index, direction
     reset_parameters = pyqtSignal(int)  # index
     
-    def __init__(self, func_item: Tuple[Callable, Dict], index: int, service_adapter, color_scheme: Optional[PyQt6ColorScheme] = None, parent=None):
+    def __init__(self, func_item: Tuple[Callable, Dict], index: int, service_adapter, color_scheme: Optional[PyQt6ColorScheme] = None,
+                 step_instance=None, scope_id: Optional[str] = None, parent=None):
         """
         Initialize the function pane widget.
-        
+
         Args:
             func_item: Tuple of (function, kwargs)
             index: Function index in the list
             service_adapter: PyQt service adapter for dialogs and operations
+            color_scheme: Color scheme for UI components
+            step_instance: Step instance for context hierarchy (Function → Step → Pipeline → Global)
+            scope_id: Scope identifier for cross-window live context updates
             parent: Parent widget
         """
         super().__init__(parent)
 
         # Initialize color scheme
         self.color_scheme = color_scheme or PyQt6ColorScheme()
-        
+
         # Core dependencies
         self.service_adapter = service_adapter
-        
+
+        # CRITICAL: Store step instance for context hierarchy
+        self.step_instance = step_instance
+
+        # CRITICAL: Store scope_id for cross-window live context updates
+        self.scope_id = scope_id
+
         # Business logic state (extracted from Textual version)
         self.func, self.kwargs = func_item
         self.index = index
@@ -223,13 +233,17 @@ class FunctionPaneWidget(QWidget):
         from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager as PyQtParameterFormManager, FormManagerConfig
 
         # Create form manager with initial_values to load saved kwargs
+        # CRITICAL: Pass step_instance as context_obj for lazy resolution hierarchy
+        # Function parameters → Step → Pipeline → Global
+        # CRITICAL: Pass scope_id for cross-window live context updates (real-time placeholder sync)
         self.form_manager = PyQtParameterFormManager(
             object_instance=self.func,       # Pass function as the object to build form for
             field_id=f"func_{self.index}",   # Use function index as field identifier
             config=FormManagerConfig(
                 parent=self,                     # Pass self as parent widget
-                context_obj=None,                # Functions don't need context for placeholder resolution
+                context_obj=self.step_instance,  # Step instance for context hierarchy (Function → Step → Pipeline → Global)
                 initial_values=self.kwargs,      # Pass saved kwargs to populate form fields
+                scope_id=self.scope_id,          # Scope ID for cross-window live context (same as step editor)
                 color_scheme=self.color_scheme   # Pass color_scheme for consistent theming
             )
         )

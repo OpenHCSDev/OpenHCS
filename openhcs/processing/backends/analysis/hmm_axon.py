@@ -125,19 +125,19 @@ def materialize_trace_visualizations(data: List[np.ndarray], path: str, filemana
     for i, visualization in enumerate(data):
         viz_filename = f"{base_path}_slice_{i:03d}.tif"
 
-        # Convert visualization to appropriate dtype for saving (uint16 to match input images)
-        if visualization.dtype != np.uint16:
-            # Normalize to uint16 range if needed
+        # Convert visualization to uint8 for tracing visualizations (standard format)
+        if visualization.dtype != np.uint8:
+            # Normalize to uint8 range if needed
             if visualization.max() <= 1.0:
-                viz_uint16 = (visualization * 65535).astype(np.uint16)
+                viz_uint8 = (visualization * 255).astype(np.uint8)
             else:
-                viz_uint16 = visualization.astype(np.uint16)
+                viz_uint8 = visualization.astype(np.uint8)
         else:
-            viz_uint16 = visualization
+            viz_uint8 = visualization
 
         # Save using filemanager
         from openhcs.constants.constants import Backend
-        filemanager.save(viz_uint16, viz_filename, Backend.DISK.value)
+        filemanager.save(viz_uint8, viz_filename, Backend.DISK.value)
 
     # Return summary path
     summary_path = f"{base_path}_trace_summary.txt"

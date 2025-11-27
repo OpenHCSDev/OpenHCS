@@ -128,9 +128,11 @@ def create_napari_display_config(
     colormap_enum: Type[Enum],
     dimension_mode_enum: Type[Enum],
     variable_size_handling_enum: Type[Enum],
+    visualization_dtype_enum: Type[Enum],
     virtual_components: Optional[Type[Enum]] = None,
     component_order: Optional[list[str]] = None,
-    virtual_component_defaults: Optional[Dict[str, Any]] = None
+    virtual_component_defaults: Optional[Dict[str, Any]] = None,
+    default_visualization_dtype: Optional[Any] = None
 ) -> Type:
     """
     Create NapariDisplayConfig with component-specific fields.
@@ -139,9 +141,11 @@ def create_napari_display_config(
         colormap_enum: Enum for colormap options
         dimension_mode_enum: Enum for dimension modes (SLICE/STACK)
         variable_size_handling_enum: Enum for variable size handling
+        visualization_dtype_enum: Enum for dtype normalization (UINT8/UINT16/FLOAT32)
         virtual_components: Optional enum of virtual components (step_name, source, etc.)
         component_order: Canonical order for layer naming
         virtual_component_defaults: Optional dict mapping virtual component names to default modes
+        default_visualization_dtype: Default dtype for visualization normalization (defaults to UINT16)
 
     Returns:
         NapariDisplayConfig dataclass
@@ -177,11 +181,16 @@ def create_napari_display_config(
     if virtual_component_defaults:
         component_defaults.update(virtual_component_defaults)
 
+    # Default visualization dtype to UINT16 (microscopy standard) if not specified
+    if default_visualization_dtype is None:
+        default_visualization_dtype = visualization_dtype_enum.UINT16
+
     return create_display_config(
         name='NapariDisplayConfig',
         base_fields={
             'colormap': (colormap_enum, colormap_enum.GRAY),
             'variable_size_handling': (variable_size_handling_enum, variable_size_handling_enum.PAD_TO_MAX),
+            'visualization_dtype': (visualization_dtype_enum, default_visualization_dtype),
         },
         component_mode_enum=dimension_mode_enum,
         component_defaults=component_defaults,
@@ -202,6 +211,10 @@ def create_napari_display_config(
         which dimension is used as the multiprocessing axis.
 
         Also includes virtual components (step_name, step_index, source) for streaming contexts.
+
+        visualization_dtype controls dtype normalization for stacking - all images in a stack
+        are normalized to this dtype using contrast-preserving scaling (not simple casting).
+        Defaults to UINT16 (microscopy standard) for optimal precision preservation.
         """
     )
 

@@ -82,6 +82,7 @@ class LazyDefaultPlaceholderService:
         try:
             instance = dataclass_type()
             resolved_value = getattr(instance, field_name)
+
             result = LazyDefaultPlaceholderService._format_placeholder_text(resolved_value, prefix)
             logger.debug(f"[LAZY_RESOLVE] {dataclass_type.__name__}.{field_name}: resolved_value={resolved_value!r} -> '{result}'")
         except Exception as e:

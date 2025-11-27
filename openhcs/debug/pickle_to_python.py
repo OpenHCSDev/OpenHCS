@@ -12,6 +12,8 @@ from collections import defaultdict
 from enum import Enum
 import dataclasses
 from dataclasses import is_dataclass, fields
+import typing
+from typing import get_origin, get_args
 
 from openhcs.core.steps.function_step import FunctionStep
 
@@ -130,6 +132,9 @@ def format_imports_as_strings(function_imports, enum_imports):
     for module, names in enum_imports.items():
         all_imports.setdefault(module, set()).update(names)
 
+    # Filter out None modules (can happen with custom functions)
+    all_imports = {module: names for module, names in all_imports.items() if module is not None}
+
     # Build collision map
     name_to_modules = defaultdict(list)
     for module, names in all_imports.items():
@@ -201,8 +206,21 @@ def generate_complete_function_pattern_code(func_obj, indent=0, clean_mode=False
 
     return "\n".join(code_lines)
 
-def _value_to_repr(value, required_imports=None, name_mappings=None):
-    """Converts a value to its Python representation string and tracks required imports."""
+def _value_to_repr(value, required_imports=None, name_mappings=None, clean_mode=False):
+    """
+    Converts a value to its Python representation string and tracks required imports.
+
+    Unified function that handles all value types including lazy dataclasses.
+
+    Args:
+        value: The value to convert to Python code representation
+        required_imports: Optional dict to track required imports (module -> set of names)
+        name_mappings: Optional dict for collision-resolved names
+        clean_mode: If True, only show non-None fields in lazy dataclasses; if False, show all fields
+
+    Returns:
+        String representation of the value as valid Python code
+    """
     if isinstance(value, Enum):
         enum_class_name = value.__class__.__name__
         enum_module = value.__class__.__module__
@@ -237,9 +255,67 @@ def _value_to_repr(value, required_imports=None, name_mappings=None):
         # which is not valid Python code
         if not value:
             return '[]'
-        elements = [_value_to_repr(item, required_imports, name_mappings) for item in value]
+        elements = [_value_to_repr(item, required_imports, name_mappings, clean_mode) for item in value]
         return f"[{', '.join(elements)}]"
+    elif is_dataclass(value) and 'Lazy' in value.__class__.__name__:
+        # Handle lazy dataclasses - preserve None semantics
+        class_name = value.__class__.__name__
+
+        # Track import for the lazy dataclass
+        if required_imports is not None:
+            value_module = value.__class__.__module__
+            if value_module and class_name:
+                required_imports[value_module].add(class_name)
+
+        if not clean_mode:
+            # Explicit mode: Include all fields with their current values (even None)
+            nested_repr = generate_clean_dataclass_repr(value, indent_level=1, clean_mode=False)
+            if nested_repr.strip():
+                return f"{class_name}(\n{nested_repr}\n)"
+            return f"{class_name}()"
+        else:
+            # Clean mode: Only include explicitly set fields (non-None values)
+            explicit_args = [
+                f"{f.name}={_value_to_repr(object.__getattribute__(value, f.name), required_imports, name_mappings, clean_mode)}"
+                for f in fields(value)
+                if object.__getattribute__(value, f.name) is not None
+            ]
+            return f"{class_name}({', '.join(explicit_args)})" if explicit_args else f"{class_name}()"
     return repr(value)
+
+def _resolve_dataclass_class_from_type(field_type):
+    """Resolve actual dataclass class from a typing annotation."""
+    if field_type is None:
+        return None
+
+    origin = get_origin(field_type)
+    if origin is typing.Union:
+        for arg in get_args(field_type):
+            if arg is type(None):
+                continue
+            resolved = _resolve_dataclass_class_from_type(arg)
+            if resolved:
+                return resolved
+        return None
+
+    if isinstance(field_type, type) and dataclasses.is_dataclass(field_type):
+        return field_type
+
+    return None
+
+
+def _create_placeholder_dataclass_instance(dataclass_cls):
+    """Create a dataclass instance with all fields set to None (without calling __init__)."""
+    instance = object.__new__(dataclass_cls)
+    for dc_field in dataclasses.fields(dataclass_cls):
+        object.__setattr__(instance, dc_field.name, None)
+
+    # Preserve lazy dataclass marker when present
+    if hasattr(dataclass_cls, '_is_lazy_dataclass'):
+        object.__setattr__(instance, '_is_lazy_dataclass', True)
+
+    return instance
+
 
 def generate_clean_dataclass_repr(instance, indent_level=0, clean_mode=False, required_imports=None, name_mappings=None):
     """
@@ -271,6 +347,11 @@ def generate_clean_dataclass_repr(instance, indent_level=0, clean_mode=False, re
         # Regular dataclass - use normal constructor
         default_instance = instance.__class__()
 
+    try:
+        type_hints = typing.get_type_hints(instance.__class__)
+    except Exception:
+        type_hints = {}
+
     for field in dataclasses.fields(instance):
         field_name = field.name
 
@@ -284,6 +365,13 @@ def generate_clean_dataclass_repr(instance, indent_level=0, clean_mode=False, re
             # Regular dataclass - use normal getattr
             current_value = getattr(instance, field_name)
             default_value = getattr(default_instance, field_name)
+
+        if (not clean_mode) and current_value is None:
+            # Expand nested dataclass placeholders even when value is None
+            field_type = type_hints.get(field_name, field.type)
+            dataclass_cls = _resolve_dataclass_class_from_type(field_type)
+            if dataclass_cls is not None:
+                current_value = _create_placeholder_dataclass_instance(dataclass_cls)
 
         if clean_mode and current_value == default_value:
             continue
@@ -411,7 +499,17 @@ def convert_pickle_to_python(pickle_path, output_path=None, clean_mode=False):
 
 def generate_readable_function_repr(func_obj, indent=0, clean_mode=False, name_mappings=None,
                                    required_function_imports=None, required_enum_imports=None):
-    """Generate readable Python representation with collision-resolved function names."""
+    """
+    Generate readable Python representation with collision-resolved function names.
+
+    Args:
+        func_obj: The function object or data structure to represent
+        indent: Current indentation level
+        clean_mode: If True, only show non-default values and collapse lazy dataclasses
+        name_mappings: Dict for collision-resolved names
+        required_function_imports: Dict to track required function imports
+        required_enum_imports: Dict to track required enum imports
+    """
     indent_str = "    " * indent
     next_indent_str = "    " * (indent + 1)
     name_mappings = name_mappings or {}
@@ -427,7 +525,7 @@ def generate_readable_function_repr(func_obj, indent=0, clean_mode=False, name_m
 
     if callable(func_obj):
         return get_name(func_obj)
-    
+
     elif isinstance(func_obj, tuple) and len(func_obj) == 2 and callable(func_obj[0]):
         func, args = func_obj
 
@@ -492,48 +590,17 @@ def generate_readable_function_repr(func_obj, indent=0, clean_mode=False, name_m
         return f"{{{separator.join(items)}\n{indent_str}}}"
 
     else:
-        return _value_to_repr(func_obj, required_imports=required_enum_imports, name_mappings=name_mappings)
+        return _value_to_repr(func_obj, required_imports=required_enum_imports, name_mappings=name_mappings, clean_mode=clean_mode)
 
 
-def _format_parameter_value(param_name, value, name_mappings=None):
-    """Format parameter values with lazy dataclass preservation."""
-    if isinstance(value, Enum):
-        enum_class_name = value.__class__.__name__
-        enum_module = value.__class__.__module__
+def _format_parameter_value(param_name, value, name_mappings=None, clean_mode=False):
+    """
+    Format parameter values with lazy dataclass preservation.
 
-        # Use name mapping if available to handle collisions
-        if name_mappings and (enum_class_name, enum_module) in name_mappings:
-            mapped_name = name_mappings[(enum_class_name, enum_module)]
-            return f"{mapped_name}.{value.name}"
-        else:
-            return f"{enum_class_name}.{value.name}"
-    elif isinstance(value, str):
-        return f'"{value}"'
-    elif isinstance(value, list) and value and isinstance(value[0], Enum):
-        formatted_items = []
-        for item in value:
-            enum_class_name = item.__class__.__name__
-            enum_module = item.__class__.__module__
-
-            # Use name mapping if available to handle collisions
-            if name_mappings and (enum_class_name, enum_module) in name_mappings:
-                mapped_name = name_mappings[(enum_class_name, enum_module)]
-                formatted_items.append(f"{mapped_name}.{item.name}")
-            else:
-                formatted_items.append(f"{enum_class_name}.{item.name}")
-
-        return f"[{', '.join(formatted_items)}]"
-    elif is_dataclass(value) and 'Lazy' in value.__class__.__name__:
-        # Preserve lazy behavior by only including explicitly set fields
-        class_name = value.__class__.__name__
-        explicit_args = [
-            f"{f.name}={_format_parameter_value(f.name, object.__getattribute__(value, f.name), name_mappings)}"
-            for f in fields(value)
-            if object.__getattribute__(value, f.name) is not None
-        ]
-        return f"{class_name}({', '.join(explicit_args)})" if explicit_args else f"{class_name}()"
-    else:
-        return repr(value)
+    This is now a thin wrapper around _value_to_repr for backwards compatibility.
+    """
+    # Use unified _value_to_repr function (no import tracking needed for parameter formatting)
+    return _value_to_repr(value, required_imports=None, name_mappings=name_mappings, clean_mode=clean_mode)
 
 
 
@@ -609,9 +676,23 @@ def _generate_step_parameters(step, default_step, clean_mode=False, name_mapping
                  [(name, param) for name, param in inspect.signature(AbstractStep.__init__).parameters.items()
                   if name != 'self']
 
-    return [f"{name}={generate_readable_function_repr(getattr(step, name, param.default), 1, clean_mode, name_mappings, required_function_imports, required_enum_imports) if name == 'func' else _format_parameter_value(name, getattr(step, name, param.default), name_mappings)}"
+    return [f"{name}={generate_readable_function_repr(getattr(step, name, param.default), 1, clean_mode, name_mappings, required_function_imports, required_enum_imports) if name == 'func' else _format_parameter_value(name, getattr(step, name, param.default), name_mappings, clean_mode=clean_mode)}"
             for name, param in signatures
             if not clean_mode or getattr(step, name, param.default) != getattr(default_step, name, param.default)]
+
+
+def generate_step_code(step, clean_mode=False):
+    """Generate complete Python code for a single FunctionStep with imports."""
+    return generate_complete_pipeline_steps_code([step], clean_mode=clean_mode).replace(
+        "# Pipeline steps\npipeline_steps = []\n\n# Step 1:",
+        "# Function Step\n#"
+    ).replace(
+        "step_1 = FunctionStep(",
+        "step = FunctionStep("
+    ).replace(
+        "\npipeline_steps.append(step_1)",
+        ""
+    )
 
 
 def generate_complete_pipeline_steps_code(pipeline_steps, clean_mode=False):
@@ -860,7 +941,9 @@ def generate_complete_orchestrator_code(plate_paths, pipeline_data, global_confi
                     code_lines.append(f"# Step {i+1}: {step.name}")
 
                     # Generate all FunctionStep parameters automatically using introspection with name mappings
-                    step_args = _generate_step_parameters(step, default_step, clean_mode, name_mappings)
+                    # CRITICAL: Pass import containers so expanded defaults can add their imports
+                    step_args = _generate_step_parameters(step, default_step, clean_mode, name_mappings,
+                                                         all_function_imports, all_enum_imports)
 
                     args_str = ",\n    ".join(step_args)
                     code_lines.append(f"step_{i+1} = FunctionStep(\n    {args_str}\n)")
@@ -911,7 +994,9 @@ def generate_complete_orchestrator_code(plate_paths, pipeline_data, global_confi
                 code_lines.append(f"# Step {i+1}: {step.name}")
 
                 # Generate all FunctionStep parameters automatically using introspection with name mappings
-                step_args = _generate_step_parameters(step, default_step, clean_mode, name_mappings)
+                # CRITICAL: Pass import containers so expanded defaults can add their imports
+                step_args = _generate_step_parameters(step, default_step, clean_mode, name_mappings,
+                                                     all_function_imports, all_enum_imports)
 
                 args_str = ",\n    ".join(step_args)
                 code_lines.append(f"step_{i+1} = FunctionStep(\n    {args_str}\n)")
@@ -946,7 +1031,9 @@ def generate_complete_orchestrator_code(plate_paths, pipeline_data, global_confi
                 code_lines.append(f"# Step {i+1}: {step.name}")
 
                 # Generate all FunctionStep parameters automatically using introspection with name mappings
-                step_args = _generate_step_parameters(step, default_step, clean_mode, name_mappings)
+                # CRITICAL: Pass import containers so expanded defaults can add their imports
+                step_args = _generate_step_parameters(step, default_step, clean_mode, name_mappings,
+                                                     all_function_imports, all_enum_imports)
 
                 args_str = ",\n    ".join(step_args)
                 code_lines.append(f"step_{i+1} = FunctionStep(\n    {args_str}\n)")

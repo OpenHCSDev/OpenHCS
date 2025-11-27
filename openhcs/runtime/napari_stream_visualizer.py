@@ -163,6 +163,69 @@ def _build_nd_shapes(layer_items, stack_components):
     return all_shapes_nd, all_shape_types, all_properties
 
 
+def _build_nd_points(layer_items, stack_components, component_values=None):
+    """
+    Build nD points by prepending stack component indices to 2D point coordinates.
+
+    Args:
+        layer_items: List of items with 'data' (list of point coordinate arrays) and 'components'
+        stack_components: List of component names to stack
+        component_values: Optional dict of {component: [sorted values]} to use for mapping.
+                         If provided, uses this for building the stack dimensions.
+                         If None, derives from layer_items.
+
+    Returns:
+        Tuple of (all_points_nd, all_properties)
+    """
+    all_points_nd = []
+    all_properties = {"label": [], "component": []}
+
+    # Build component value to index mapping (use global if provided)
+    if component_values is None:
+        component_values = {}
+        for comp in stack_components:
+            values = sorted(set(item["components"].get(comp, 0) for item in layer_items))
+            component_values[comp] = values
+
+    for item in layer_items:
+        points_data = item["data"]  # List of shape dicts from ROI converter
+        components = item["components"]
+        
+        # DEBUG: Log what we actually have
+        logger.info(f"🐛 DEBUG: points_data type: {type(points_data)}")
+        if isinstance(points_data, list) and len(points_data) > 0:
+            logger.info(f"🐛 DEBUG: first element type: {type(points_data[0])}")
+            logger.info(f"🐛 DEBUG: first element: {points_data[0]}")
+
+        # Get stack component INDICES to prepend
+        prepend_dims = [
+            component_values[comp].index(components.get(comp, 0))
+            for comp in stack_components
+        ]
+
+        # Convert each shape dict to nD points
+        # points_data is a list of dicts with 'type', 'coordinates', 'metadata'
+        for shape_dict in points_data:
+            # Only process 'points' type entries
+            if shape_dict.get("type") != "points":
+                continue
+                
+            coordinates = shape_dict.get("coordinates", [])
+            metadata = shape_dict.get("metadata", {})
+            
+            # coordinates is a list of [y, x] pairs
+            # Prepend stack dimensions to each point: [y, x] -> [stack_idx, ..., y, x]
+            for coord in coordinates:
+                nd_coord = prepend_dims + list(coord)
+                all_points_nd.append(nd_coord)
+                
+                # Track properties for this point
+                all_properties["label"].append(metadata.get("label", ""))
+                all_properties["component"].append(metadata.get("component", 0))
+
+    return np.array(all_points_nd) if all_points_nd else np.empty((0, 2 + len(stack_components))), all_properties
+
+
 def _build_nd_image_array(layer_items, stack_components, component_values=None):
     """
     Build nD image array by stacking images along stack component dimensions.
@@ -233,25 +296,25 @@ def _build_nd_image_array(layer_items, stack_components, component_values=None):
     return stacked_array
 
 
-def _create_or_update_shapes_layer(
-    viewer, layers, layer_name, shapes_data, shape_types, properties
+def _create_or_update_layer(
+    viewer, layers, layer_name, layer_type, data, **layer_kwargs
 ):
     """
-    Create or update a Napari shapes layer.
-
-    Note: Shapes layers don't handle .data updates well when dimensions change.
-    We remove and recreate the layer instead of updating in place.
+    Create or update a Napari layer of any type.
+    
+    All layers are handled identically: if layer exists, remove and recreate.
+    This ensures consistent behavior across all layer types.
 
     Args:
         viewer: Napari viewer
         layers: Dict of existing layers
         layer_name: Name for the layer
-        shapes_data: List of shape coordinate arrays
-        shape_types: List of shape type strings
-        properties: Dict of properties
+        layer_type: Type of layer ('image', 'shapes', 'points', etc.)
+        data: Data for the layer (format depends on layer_type)
+        **layer_kwargs: Additional kwargs to pass to viewer.add_<layer_type>()
 
     Returns:
-        The created or updated layer
+        The created layer
     """
     # Check if layer exists
     existing_layer = None
@@ -260,89 +323,79 @@ def _create_or_update_shapes_layer(
             existing_layer = layer
             break
 
+    # Remove existing layer if present
     if existing_layer is not None:
-        # For shapes, we need to remove and recreate because .data assignment doesn't work
-        # when dimensions change. But we need to be careful: removing the layer will trigger
-        # the reconciliation code to clear component_groups on the NEXT data arrival.
-        #
-        # Solution: Remove the layer, but immediately recreate it so it exists when
-        # reconciliation runs on the next well.
         viewer.layers.remove(existing_layer)
         layers.pop(layer_name, None)
         logger.info(
-            f"🔬 NAPARI PROCESS: Removed existing shapes layer {layer_name} for recreation"
+            f"🔬 NAPARI PROCESS: Removed existing {layer_type} layer {layer_name} for recreation"
         )
 
-    # Create new layer (or recreate if we just removed it)
-    new_layer = viewer.add_shapes(
+    # Get the add_* method for this layer type and create new layer
+    add_method = getattr(viewer, f"add_{layer_type}")
+    new_layer = add_method(data, name=layer_name, **layer_kwargs)
+    layers[layer_name] = new_layer
+    
+    # Log with appropriate count/info
+    if layer_type == "shapes":
+        count = len(data) if hasattr(data, '__len__') else 0
+        logger.info(f"🔬 NAPARI PROCESS: Created {layer_type} layer {layer_name} with {count} shapes")
+    elif layer_type == "points":
+        count = len(data) if hasattr(data, '__len__') else 0
+        logger.info(f"🔬 NAPARI PROCESS: Created {layer_type} layer {layer_name} with {count} points")
+    else:
+        logger.info(f"🔬 NAPARI PROCESS: Created {layer_type} layer {layer_name}")
+    
+    return new_layer
+
+
+# Convenience wrappers that call the unified function
+def _create_or_update_image_layer(
+    viewer, layers, layer_name, image_data, colormap, axis_labels=None
+):
+    """Create or update a Napari image layer."""
+    layer = _create_or_update_layer(
+        viewer, layers, layer_name, "image", image_data, colormap=colormap or "gray"
+    )
+    # Set axis labels on viewer.dims (add_image axis_labels parameter doesn't work)
+    if axis_labels is not None:
+        viewer.dims.axis_labels = axis_labels
+        logger.info(f"🔬 NAPARI PROCESS: Set viewer.dims.axis_labels={axis_labels}")
+    return layer
+
+
+def _create_or_update_shapes_layer(
+    viewer, layers, layer_name, shapes_data, shape_types, properties
+):
+    """Create or update a Napari shapes layer."""
+    return _create_or_update_layer(
+        viewer,
+        layers,
+        layer_name,
+        "shapes",
         shapes_data,
         shape_type=shape_types,
         properties=properties,
-        name=layer_name,
         edge_color="red",
         face_color="transparent",
         edge_width=2,
     )
-    layers[layer_name] = new_layer
-    logger.info(
-        f"🔬 NAPARI PROCESS: Created shapes layer {layer_name} with {len(shapes_data)} shapes"
-    )
-    return new_layer
 
 
-def _create_or_update_image_layer(
-    viewer, layers, layer_name, image_data, colormap, axis_labels=None
+def _create_or_update_points_layer(
+    viewer, layers, layer_name, points_data, properties
 ):
-    """
-    Create or update a Napari image layer.
-
-    Args:
-        viewer: Napari viewer
-        layers: Dict of existing layers
-        layer_name: Name for the layer
-        image_data: Image array
-        colormap: Colormap name
-        axis_labels: Optional tuple of axis label strings for dimension names
-
-    Returns:
-        The created or updated layer
-    """
-    # Check if layer exists
-    existing_layer = None
-    for layer in viewer.layers:
-        if layer.name == layer_name:
-            existing_layer = layer
-            break
-
-    if existing_layer is not None:
-        old_shape = existing_layer.data.shape
-        new_shape = image_data.shape
-        if old_shape != new_shape:
-            logger.info(
-                f"🔬 NAPARI PROCESS: Layer {layer_name} shape changing: {old_shape} → {new_shape}"
-            )
-        existing_layer.data = image_data
-        if colormap:
-            existing_layer.colormap = colormap
-        layers[layer_name] = existing_layer
-        logger.info(
-            f"🔬 NAPARI PROCESS: Updated existing image layer {layer_name} (shape: {new_shape})"
-        )
-        return existing_layer
-    else:
-        new_layer = viewer.add_image(
-            image_data, name=layer_name, colormap=colormap or "gray"
-        )
-
-        # Set axis labels on viewer.dims (add_image axis_labels parameter doesn't work)
-        # See: https://forum.image.sc/t/rename-napari-dimension-slider-labels/41974
-        if axis_labels is not None:
-            viewer.dims.axis_labels = axis_labels
-            logger.info(f"🔬 NAPARI PROCESS: Set viewer.dims.axis_labels={axis_labels}")
-
-        layers[layer_name] = new_layer
-        logger.info(f"🔬 NAPARI PROCESS: Created new image layer {layer_name}")
-        return new_layer
+    """Create or update a Napari points layer."""
+    return _create_or_update_layer(
+        viewer,
+        layers,
+        layer_name,
+        "points",
+        points_data,
+        properties=properties,
+        face_color="green",
+        size=3,
+    )
 
 
 # Populate registry now that helper functions are defined
@@ -356,6 +409,10 @@ _DATA_TYPE_HANDLERS = {
     StreamingDataType.SHAPES: {
         "build_nd_data": _build_nd_shapes,
         "create_layer": _create_or_update_shapes_layer,
+    },
+    StreamingDataType.POINTS: {
+        "build_nd_data": _build_nd_points,
+        "create_layer": _create_or_update_points_layer,
     },
 }
 
@@ -435,9 +492,12 @@ def _handle_component_aware_display(
         )
 
         # Add "_shapes" suffix for shapes layers to distinguish from image layers
+        # Add "_points" suffix for points layers to distinguish from image layers
         # MUST happen BEFORE reconciliation so we check the correct layer name
         if data_type == StreamingDataType.SHAPES:
             layer_key = f"{layer_key}_shapes"
+        elif data_type == StreamingDataType.POINTS:
+            layer_key = f"{layer_key}_points"
 
         # Log layer key and component info for debugging
         logger.info(
@@ -763,7 +823,7 @@ class NapariViewerServer(ZMQServer):
                 f"🔬 NAPARI PROCESS: layer_key='{layer_key}' has {len(layer_items)} items from wells: {sorted(wells_in_layer)}"
             )
 
-            # Determine if we should stack or use single item
+            # Determine stack components (axes) to use
             first_item = layer_items[0]
             component_info = first_item["components"]
             stack_components = [
@@ -772,19 +832,32 @@ class NapariViewerServer(ZMQServer):
                 if mode == "stack" and comp in component_info
             ]
 
+            logger.info(f"🔬 NAPARI PROCESS: Using stack components: {stack_components}")
+
             # Build and update the layer based on data type
-            if data_type == StreamingDataType.IMAGE:
-                self._update_image_layer(
-                    layer_key, layer_items, stack_components, component_modes
+            try:
+                if data_type == StreamingDataType.IMAGE:
+                    self._update_image_layer(
+                        layer_key, layer_items, stack_components, component_modes
+                    )
+                elif data_type == StreamingDataType.SHAPES:
+                    self._update_shapes_layer(
+                        layer_key, layer_items, stack_components, component_modes
+                    )
+                elif data_type == StreamingDataType.POINTS:
+                    self._update_points_layer(
+                        layer_key, layer_items, stack_components, component_modes
+                    )
+                else:
+                    logger.warning(
+                        f"🔬 NAPARI PROCESS: Unknown data type {data_type} for {layer_key}"
+                    )
+            except Exception as e:
+                logger.error(
+                    f"🔬 NAPARI PROCESS: Failed to update layer {layer_key}: {e}",
+                    exc_info=True
                 )
-            elif data_type == StreamingDataType.SHAPES:
-                self._update_shapes_layer(
-                    layer_key, layer_items, stack_components, component_modes
-                )
-            else:
-                logger.warning(
-                    f"🔬 NAPARI PROCESS: Unknown data type {data_type} for {layer_key}"
-                )
+                # Continue running - don't crash the viewer
 
     def _setup_dimension_label_handler(self, layer_key, stack_components):
         """
@@ -1005,6 +1078,44 @@ class NapariViewerServer(ZMQServer):
             f"🔬 NAPARI PROCESS: Created labels layer {layer_key} with shape {labels_data.shape}"
         )
 
+    def _update_points_layer(
+        self, layer_key, layer_items, stack_components, component_modes
+    ):
+        """Update a points layer (for skeleton tracings and point-based ROIs)."""
+        # Filter to only POINTS items (exclude IMAGE items that may share the same layer_key)
+        points_items = [
+            item for item in layer_items 
+            if item.get("data_type") == StreamingDataType.POINTS
+        ]
+        
+        if not points_items:
+            logger.warning(
+                f"🔬 NAPARI PROCESS: No POINTS items found for {layer_key}, skipping"
+            )
+            return
+            
+        logger.info(
+            f"🔬 NAPARI PROCESS: Building points layer for {layer_key} from {len(points_items)} items (filtered from {len(layer_items)} total)"
+        )
+
+        # Update global component tracker with ALL items (images + points) to stay in sync
+        self._update_global_component_values(stack_components, layer_items)
+        
+        # Get global component values (union of all layers with same stack_components)
+        global_component_values = self._get_global_component_values(stack_components)
+
+        # Build nD points data using ONLY the points items BUT with global component values
+        points_data, properties = _build_nd_points(points_items, stack_components, global_component_values)
+
+        # Create or update the points layer
+        _create_or_update_points_layer(
+            self.viewer, self.layers, layer_key, points_data, properties
+        )
+        
+        logger.info(
+            f"🔬 NAPARI PROCESS: Created points layer {layer_key} with {len(points_data)} points"
+        )
+
     def _shapes_to_labels(self, layer_items, stack_components, component_values):
         """Convert shapes data to label masks.
         
@@ -1027,7 +1138,8 @@ class NapariViewerServer(ZMQServer):
         # Get image shape from first item's shapes data
         first_shapes = layer_items[0]["data"]
         if not first_shapes:
-            # No shapes, return empty array
+            # No shapes, return empty array with reasonable default size
+            logger.warning("🔬 NAPARI PROCESS: No shapes data, creating default 512x512 array")
             return np.zeros((1, 1, 512, 512), dtype=np.uint16)
 
         # Estimate image size from shape coordinates
@@ -1037,6 +1149,26 @@ class NapariViewerServer(ZMQServer):
                 coords = np.array(shape_dict["coordinates"])
                 max_y = max(max_y, int(np.max(coords[:, 0])) + 1)
                 max_x = max(max_x, int(np.max(coords[:, 1])) + 1)
+            elif shape_dict["type"] == "path":
+                # Handle path (polyline) type - get bounding box
+                coords = np.array(shape_dict["coordinates"])
+                if len(coords) > 0:
+                    max_y = max(max_y, int(np.max(coords[:, 0])) + 1)
+                    max_x = max(max_x, int(np.max(coords[:, 1])) + 1)
+            elif shape_dict["type"] == "points":
+                # Handle points type - get bounding box
+                coords = np.array(shape_dict["coordinates"])
+                if len(coords) > 0:
+                    max_y = max(max_y, int(np.max(coords[:, 0])) + 1)
+                    max_x = max(max_x, int(np.max(coords[:, 1])) + 1)
+        
+        # Ensure minimum valid dimensions (avoid 0x0 shapes)
+        if max_y == 0 or max_x == 0:
+            logger.warning(
+                f"🔬 NAPARI PROCESS: Invalid shape dimensions (y={max_y}, x={max_x}), using default 512x512"
+            )
+            max_y = max(max_y, 512)
+            max_x = max(max_x, 512)
 
         # Build nD shape
         nd_shape = []
@@ -1072,6 +1204,26 @@ class NapariViewerServer(ZMQServer):
                     full_indices = tuple(indices) + (rr, cc)
                     labels_array[full_indices] = label_id
                     label_id += 1
+
+                elif shape_dict["type"] == "path":
+                    # Draw polyline (skeleton branches)
+                    # Skeleton paths from skan already contain every pixel in the branch,
+                    # so we just set the label at each coordinate directly (no line drawing needed)
+                    coords = np.array(shape_dict["coordinates"])
+                    if len(coords) >= 1:
+                        # Extract row and column indices
+                        rr = coords[:, 0].astype(int)
+                        cc = coords[:, 1].astype(int)
+
+                        # Clip to image bounds
+                        valid = (rr >= 0) & (rr < labels_array.shape[-2]) & \
+                               (cc >= 0) & (cc < labels_array.shape[-1])
+                        rr, cc = rr[valid], cc[valid]
+
+                        # Set label at the correct nD position
+                        full_indices = tuple(indices) + (rr, cc)
+                        labels_array[full_indices] = label_id
+                        label_id += 1
 
         logger.info(
             f"🔬 NAPARI PROCESS: Created labels array with shape {labels_array.shape} and {label_id-1} labels"
@@ -1213,7 +1365,7 @@ class NapariViewerServer(ZMQServer):
 
         path = image_info.get("path", "unknown")
         image_id = image_info.get("image_id")  # UUID for acknowledgment
-        data_type = image_info.get("data_type", "image")  # 'image' or 'shapes'
+        data_type = image_info.get("data_type", "image")  # 'image', 'shapes', or 'points'
         component_metadata = image_info.get("metadata", {})
 
         # Log incoming metadata to debug well filtering issues
@@ -1222,12 +1374,12 @@ class NapariViewerServer(ZMQServer):
         )
 
         try:
-            # Check if this is shapes data
-            if data_type == "shapes":
-                # Handle shapes/ROIs - just pass the shapes data directly
+            # Check if this is shapes or points data
+            if data_type == "shapes" or data_type == "points":
+                # Handle shapes/ROIs/points - just pass the shapes data directly
                 shapes_data = image_info.get("shapes", [])
                 data = shapes_data
-                colormap = None  # Shapes don't use colormap
+                colormap = None  # Shapes/points don't use colormap
             else:
                 # Handle image data - load from shared memory or direct data
                 shape = image_info.get("shape")
@@ -1314,11 +1466,12 @@ class NapariViewerServer(ZMQServer):
 
         except Exception as e:
             logger.error(
-                f"🔬 NAPARI PROCESS: Failed to process {data_type} {path}: {e}"
+                f"🔬 NAPARI PROCESS: Failed to process {data_type} {path}: {e}",
+                exc_info=True
             )
             if image_id:
                 self._send_ack(image_id, status="error", error=str(e))
-            raise  # Fail loud
+            # Don't re-raise - continue processing other messages instead of crashing
 
 
 def _napari_viewer_process(

@@ -14,6 +14,16 @@ import platform
 from pathlib import Path
 from typing import Optional
 
+# CRITICAL: Check for SILENT mode BEFORE any OpenHCS imports
+# This prevents logger output during module imports
+if '--log-level' in sys.argv:
+    log_level_idx = sys.argv.index('--log-level')
+    if log_level_idx + 1 < len(sys.argv) and sys.argv[log_level_idx + 1] == 'SILENT':
+        # Disable ALL logging before any imports
+        logging.disable(logging.CRITICAL)
+        root_logger = logging.getLogger()
+        root_logger.setLevel(logging.CRITICAL + 1)
+
 # Add OpenHCS to path if needed
 try:
     from openhcs.core.config import GlobalPipelineConfig
@@ -78,8 +88,25 @@ def setup_qt_platform():
         logging.debug(f"Platform {platform.system()} - using default Qt platform")
 
 
-def setup_logging(log_level: str = "INFO", log_file: Optional[Path] = None):
-    """Setup unified logging configuration for entire OpenHCS system - matches TUI exactly."""
+def setup_logging(log_level: str = "INFO", log_file: Optional[Path] = None, disable_all: bool = False):
+    """Setup unified logging configuration for entire OpenHCS system - matches TUI exactly.
+
+    Args:
+        log_level: Logging level (DEBUG, INFO, WARNING, ERROR)
+        log_file: Optional log file path
+        disable_all: If True, completely disable all logging (no console, no file)
+    """
+    if disable_all:
+        # Completely disable all logging
+        logging.disable(logging.CRITICAL)
+        # Set root logger to highest level to prevent any output
+        root_logger = logging.getLogger()
+        root_logger.handlers.clear()
+        root_logger.setLevel(logging.CRITICAL + 1)
+        # Disable openhcs logger
+        logging.getLogger("openhcs").setLevel(logging.CRITICAL + 1)
+        return
+
     log_level_obj = getattr(logging, log_level.upper())
 
     # Create logs directory
@@ -100,9 +127,11 @@ def setup_logging(log_level: str = "INFO", log_file: Optional[Path] = None):
     # Setup console + file logging (TUI only has file, GUI has both)
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+    console_handler.setLevel(log_level_obj)
 
     file_handler = logging.FileHandler(log_file)
     file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+    file_handler.setLevel(log_level_obj)
 
     root_logger.addHandler(console_handler)
     root_logger.addHandler(file_handler)
@@ -142,15 +171,15 @@ Examples:
     
     parser.add_argument(
         '--log-level',
-        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
+        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'SILENT'],
         default='INFO',
-        help='Set logging level (default: INFO)'
+        help='Set logging level (default: INFO). Use SILENT to disable all logging.'
     )
-    
+
     parser.add_argument(
         '--log-file',
         type=Path,
-        help='Log file path (default: console only)'
+        help='Log file path (default: auto-generated timestamped file)'
     )
     
     parser.add_argument(
@@ -257,9 +286,10 @@ def main():
     """
     # Parse command line arguments
     args = parse_arguments()
-    
+
     # Setup logging
-    setup_logging(args.log_level, args.log_file)
+    disable_all = (args.log_level == 'SILENT')
+    setup_logging(args.log_level if args.log_level != 'SILENT' else 'ERROR', args.log_file, disable_all=disable_all)
 
     logging.info("Starting OpenHCS PyQt6 GUI...")
     logging.info(f"Python version: {sys.version}")

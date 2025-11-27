@@ -95,15 +95,18 @@ def _merge_nested_dataclass(pipeline_value, global_value):
     # Both are dataclasses - merge field by field
     merged_values = {}
     for field in dataclass_fields(type(pipeline_value)):
-        pipeline_field_value = getattr(pipeline_value, field.name)
+        # CRITICAL FIX: Use __dict__.get() to get RAW stored value, not getattr()
+        # For lazy dataclasses, getattr() triggers resolution which falls back to class defaults
+        # We need the actual None value to know if it should inherit from global config
+        raw_pipeline_field = pipeline_value.__dict__.get(field.name)
         global_field_value = getattr(global_value, field.name)
 
-        if pipeline_field_value is not None:
-            # Pipeline has a value - check if it's a nested dataclass that needs merging
-            if is_dataclass(pipeline_field_value) and is_dataclass(global_field_value):
-                merged_values[field.name] = _merge_nested_dataclass(pipeline_field_value, global_field_value)
+        if raw_pipeline_field is not None:
+            # Pipeline has an explicitly set value - check if it's a nested dataclass that needs merging
+            if is_dataclass(raw_pipeline_field) and is_dataclass(global_field_value):
+                merged_values[field.name] = _merge_nested_dataclass(raw_pipeline_field, global_field_value)
             else:
-                merged_values[field.name] = pipeline_field_value
+                merged_values[field.name] = raw_pipeline_field
         else:
             # Pipeline value is None - use global value
             merged_values[field.name] = global_field_value
@@ -191,15 +194,23 @@ def _execute_axis_with_sequential_combinations(
     first_context_key, first_context = axis_contexts[0]
     axis_id = first_context.axis_id
 
-    logger.info(f"🔄 WORKER: Processing {len(axis_contexts)} combination(s) for axis {axis_id}")
 
     for combo_idx, (context_key, frozen_context) in enumerate(axis_contexts):
-        logger.info(f"🔄 WORKER: Processing combination {combo_idx + 1}/{len(axis_contexts)}: {context_key}")
 
         # Execute this combination
         result = _execute_single_axis_static(pipeline_definition, frozen_context, visualizer)
 
-        # Check if this combination failed
+        # Clear VFS after each combination to prevent memory accumulation
+        # This must happen REGARDLESS of success/failure to prevent memory leaks
+        # when worker processes handle multiple wells sequentially
+        from openhcs.io.base import reset_memory_backend
+        from openhcs.core.memory.gpu_cleanup import cleanup_all_gpu_frameworks
+
+        reset_memory_backend()
+        if cleanup_all_gpu_frameworks:
+            cleanup_all_gpu_frameworks()
+
+        # Check if this combination failed (after cleanup to prevent memory leaks)
         if not result.is_success():
             logger.error(f"🔄 WORKER: Combination {context_key} failed for axis {axis_id}")
             return ExecutionResult.error(
@@ -208,17 +219,6 @@ def _execute_axis_with_sequential_combinations(
                 error_message=result.error_message
             )
 
-        # Clear VFS after each combination to prevent memory accumulation
-        # This is critical when worker processes handle multiple wells sequentially
-        from openhcs.io.base import reset_memory_backend
-        from openhcs.core.memory.gpu_cleanup import cleanup_all_gpu_frameworks
-
-        logger.info(f"🔄 WORKER: Clearing VFS after combination {combo_idx + 1}/{len(axis_contexts)}")
-        reset_memory_backend()
-        if cleanup_all_gpu_frameworks:
-            cleanup_all_gpu_frameworks()
-
-    logger.info(f"🔄 WORKER: Completed all {len(axis_contexts)} combination(s) for axis {axis_id}")
     return ExecutionResult.success(axis_id=axis_id)
 
 
@@ -285,7 +285,6 @@ def _execute_single_axis_static(
                 else:
                     logger.warning(f"Step {step_index} in axis {axis_id} flagged for visualization but 'output_dir' is missing in its plan.")
 
-    logger.info(f"🔥 SINGLE_AXIS: Pipeline execution completed successfully for axis {axis_id}")
     return ExecutionResult.success(axis_id=axis_id)
 
 
@@ -430,6 +429,7 @@ class PipelineOrchestrator(ContextProvider):
 
         # Track executor for cancellation support
         self._executor = None
+        self._cancelled = False  # Track cancellation requests
 
         # Initialize auto-sync control for pipeline config
         self._pipeline_config = None
@@ -581,7 +581,6 @@ class PipelineOrchestrator(ContextProvider):
             from openhcs.runtime.queue_tracker import GlobalQueueTrackerRegistry
             registry = GlobalQueueTrackerRegistry()
             registry.get_or_create_tracker(config.port, config.viewer_type)
-            logger.info(f"🔬 ORCHESTRATOR: Pre-created queue tracker for {config.viewer_type} on port {config.port}")
 
             key = (config.viewer_type, config.port)
         else:
@@ -651,13 +650,11 @@ class PipelineOrchestrator(ContextProvider):
         Must be called before other processing methods.
         Returns self for chaining.
         """
-        logger.info(f"🔥 INIT: initialize() called for plate: {self.plate_path}")
         if self._initialized:
             logger.info("Orchestrator already initialized.")
             return self
 
         try:
-            logger.info(f"🔥 INIT: About to call initialize_microscope_handler()")
             self.initialize_microscope_handler()
 
             # Delegate workspace initialization to microscope handler
@@ -824,7 +821,6 @@ class PipelineOrchestrator(ContextProvider):
     ) -> Dict[str, Any]:
         """Executes the pipeline for a single well using its frozen context."""
         axis_id = frozen_context.axis_id
-        logger.info(f"🔥 SINGLE_AXIS: Starting execution for axis {axis_id}")
 
         # Send progress: axis started
         if self.progress_callback:
@@ -846,9 +842,6 @@ class PipelineOrchestrator(ContextProvider):
             logger.error(error_msg)
             raise RuntimeError(error_msg)
 
-        # Debug: Log sequential mode status
-        logger.info(f"🔍 DISPATCH: axis={axis_id}, pipeline_sequential_mode={frozen_context.pipeline_sequential_mode}, "
-                   f"combinations={frozen_context.pipeline_sequential_combinations}")
 
         # All execution goes through step-sequential now
         # Sequential combinations are handled by compiling separate contexts
@@ -862,11 +855,9 @@ class PipelineOrchestrator(ContextProvider):
     ) -> Dict[str, Any]:
         """Execute pipeline with step-wide sequential processing (current behavior)."""
         axis_id = frozen_context.axis_id
-        logger.info(f"🔥 SINGLE_AXIS: Processing {len(pipeline_definition)} steps for axis {axis_id} (step-wide sequential)")
 
         for step_index, step in enumerate(pipeline_definition):
             step_name = frozen_context.step_plans[step_index]["step_name"]
-            logger.info(f"🔥 SINGLE_AXIS: Executing step {step_index+1}/{len(pipeline_definition)} - {step_name} for axis {axis_id}")
 
             # Send progress: step started
             if self.progress_callback:
@@ -886,7 +877,6 @@ class PipelineOrchestrator(ContextProvider):
 
             # Call process method on step instance
             step.process(frozen_context, step_index)
-            logger.info(f"🔥 SINGLE_AXIS: Step {step_index+1}/{len(pipeline_definition)} - {step_name} completed for axis {axis_id}")
 
             # Send progress: step completed
             if self.progress_callback:
@@ -914,7 +904,6 @@ class PipelineOrchestrator(ContextProvider):
                     else:
                         logger.warning(f"Step {step_index} in axis {axis_id} flagged for visualization but 'output_dir' is missing in its plan.")
 
-        logger.info(f"🔥 SINGLE_AXIS: Pipeline execution completed successfully for axis {axis_id}")
 
         # Send progress: axis completed
         if self.progress_callback:
@@ -950,14 +939,10 @@ class PipelineOrchestrator(ContextProvider):
             for step_index, step in enumerate(pipeline_definition):
                 step.process(frozen_context, step_index)
         else:
-            logger.info(f"🔄 PIPELINE_SEQUENTIAL: {len(combinations)} combinations for axis {axis_id}")
 
             # Loop: combinations → steps
             for combo_idx, combo in enumerate(combinations):
                 frozen_context.current_sequential_combination = combo
-                logger.info(f"🔄 ORCHESTRATOR: Set current_sequential_combination = {combo}")
-                logger.info(f"🔄 ORCHESTRATOR: Verify frozen_context.current_sequential_combination = {frozen_context.current_sequential_combination}")
-                logger.info(f"🔄 Processing combination {combo_idx + 1}/{len(combinations)}: {combo}")
 
                 # Process all steps for this combination
                 for step_index, step in enumerate(pipeline_definition):
@@ -968,10 +953,8 @@ class PipelineOrchestrator(ContextProvider):
                     from openhcs.io.base import reset_memory_backend
                     from openhcs.core.memory.gpu_cleanup import cleanup_all_gpu_frameworks
 
-                    logger.info(f"🔄 SEQUENTIAL: Clearing VFS after combination {combo}")
                     reset_memory_backend()
                     cleanup_all_gpu_frameworks()
-                    logger.info(f"🔄 SEQUENTIAL: VFS cleared, ready for next combination")
                 except Exception as e:
                     logger.warning(f"Failed to clear VFS after combination {combo}: {e}")
 
@@ -992,11 +975,12 @@ class PipelineOrchestrator(ContextProvider):
         This gracefully cancels pending futures and shuts down worker processes
         without killing all child processes (preserving Napari viewers, etc.).
         """
+        # Set cancellation flag so that any waiting loops can detect cancellation
+        self._cancelled = True
+
         if self._executor:
             try:
-                logger.info("🔥 ORCHESTRATOR: Cancelling execution - shutting down executor")
                 self._executor.shutdown(wait=False, cancel_futures=True)
-                logger.info("🔥 ORCHESTRATOR: Executor shutdown initiated")
             except Exception as e:
                 logger.warning(f"🔥 ORCHESTRATOR: Failed to cancel executor: {e}")
 
@@ -1029,11 +1013,8 @@ class PipelineOrchestrator(ContextProvider):
         # For subprocess runner, use the parameter directly since it receives pre-compiled contexts
         resolved_pipeline = getattr(self, '_resolved_pipeline_definition', None)
         if resolved_pipeline is not None:
-            logger.info(f"🔥 EXECUTION: Using resolved pipeline definition with {len(resolved_pipeline)} steps (from compilation)")
             pipeline_definition = resolved_pipeline
-        else:
-            logger.info(f"🔥 EXECUTION: Using parameter pipeline definition with {len(pipeline_definition)} steps (subprocess mode)")
-            # In subprocess mode, the pipeline_definition parameter should already be resolved
+
         if not self.is_initialized():
              raise RuntimeError("Orchestrator must be initialized before executing.")
         if not pipeline_definition:
@@ -1068,15 +1049,17 @@ class PipelineOrchestrator(ContextProvider):
             # Wait for all streaming viewers to be ready before starting pipeline
             # This ensures viewers are available to receive images
             if visualizers:
-                logger.info(f"🔬 ORCHESTRATOR: Waiting for {len(visualizers)} streaming viewer(s) to be ready...")
                 import time
                 max_wait = 30.0  # Maximum wait time in seconds
                 start_time = time.time()
 
                 while time.time() - start_time < max_wait:
+                    # Check if execution was cancelled
+                    if self._cancelled:
+                        raise RuntimeError("Execution cancelled by user")
+
                     all_ready = all(v.is_running for v in visualizers)
                     if all_ready:
-                        logger.info("🔬 ORCHESTRATOR: All streaming viewers are ready!")
                         break
                     time.sleep(0.2)  # Check every 200ms
                 else:
@@ -1085,17 +1068,17 @@ class PipelineOrchestrator(ContextProvider):
                     logger.warning(f"🔬 ORCHESTRATOR: Timeout waiting for streaming viewers. Not ready: {not_ready}")
 
                 # Clear viewer state for new pipeline run to prevent accumulation
-                logger.info("🔬 ORCHESTRATOR: Clearing streaming viewer state for new pipeline run...")
                 for vis in visualizers:
                     if hasattr(vis, 'clear_viewer_state'):
                         success = vis.clear_viewer_state()
-                        if success:
-                            logger.info(f"🔬 ORCHESTRATOR: Cleared state for viewer on port {vis.port}")
-                        else:
+                        if not success:
                             logger.warning(f"🔬 ORCHESTRATOR: Failed to clear state for viewer on port {vis.port}")
 
             # For backwards compatibility, set visualizer to the first one
             visualizer = visualizers[0] if visualizers else None
+
+        # Reset cancellation flag at start of execution
+        self._cancelled = False
 
         self._state = OrchestratorState.EXECUTING
         logger.info(f"Starting execution for {len(compiled_contexts)} axis values with max_workers={actual_max_workers}.")
@@ -1108,186 +1091,170 @@ class PipelineOrchestrator(ContextProvider):
                 # Check if spawn method is available and set it if not already set
                 current_method = multiprocessing.get_start_method(allow_none=True)
                 if current_method != 'spawn':
-                    logger.info(f"🔥 CUDA: Setting multiprocessing start method from '{current_method}' to 'spawn' for CUDA compatibility")
                     multiprocessing.set_start_method('spawn', force=True)
-                else:
-                    logger.debug("🔥 CUDA: Multiprocessing start method already set to 'spawn'")
             except RuntimeError as e:
                 # Start method may already be set, which is fine
-                logger.debug(f"🔥 CUDA: Start method already configured: {e}")
+                pass
 
             # Choose executor type based on effective config for debugging support
             effective_config = self.get_effective_config()
             executor_type = "ThreadPoolExecutor" if effective_config.use_threading else "ProcessPoolExecutor"
-            logger.info(f"🔥 ORCHESTRATOR: Creating {executor_type} with {actual_max_workers} workers")
 
             # DEATH DETECTION: Mark executor creation
-            logger.info(f"🔥 DEATH_MARKER: BEFORE_{executor_type.upper()}_CREATION")
 
             # Choose appropriate executor class and configure worker logging
             if effective_config.use_threading:
-                logger.info("🔥 DEBUG MODE: Using ThreadPoolExecutor for easier debugging")
                 executor = concurrent.futures.ThreadPoolExecutor(max_workers=actual_max_workers)
             else:
-                logger.info("🔥 PRODUCTION MODE: Using ProcessPoolExecutor for true parallelism")
                 # CRITICAL FIX: Use _configure_worker_with_gpu to ensure workers have function registry
                 # Workers need the function registry to access decorated functions with memory types
                 global_config = get_current_global_config(GlobalPipelineConfig)
                 global_config_dict = global_config.__dict__ if global_config else {}
 
                 if log_file_base:
-                    logger.info("🔥 WORKER SETUP: Configuring worker processes with function registry and logging")
                     executor = concurrent.futures.ProcessPoolExecutor(
                         max_workers=actual_max_workers,
                         initializer=_configure_worker_with_gpu,
                         initargs=(log_file_base, global_config_dict)
                     )
                 else:
-                    logger.info("🔥 WORKER SETUP: Configuring worker processes with function registry (no logging)")
                     executor = concurrent.futures.ProcessPoolExecutor(
                         max_workers=actual_max_workers,
                         initializer=_configure_worker_with_gpu,
                         initargs=("", global_config_dict)  # Empty string for no logging
                     )
 
-            logger.info(f"🔥 DEATH_MARKER: ENTERING_{executor_type.upper()}_CONTEXT")
             # Store executor for cancellation support
             self._executor = executor
-            with executor:
-                logger.info(f"🔥 DEATH_MARKER: {executor_type.upper()}_CREATED_SUCCESSFULLY")
-                logger.info(f"🔥 ORCHESTRATOR: {executor_type} created, submitting {len(compiled_contexts)} tasks")
 
-                # NUCLEAR ERROR TRACING: Create snapshot of compiled_contexts to prevent iteration issues
-                contexts_snapshot = dict(compiled_contexts.items())
-                logger.info(f"🔥 ORCHESTRATOR: Created contexts snapshot with {len(contexts_snapshot)} items")
+            # Wrap executor context in try/except to handle BrokenProcessPool during exit
+            # This can happen if workers are killed externally (e.g., during cancellation)
+            try:
+                with executor:
 
-                # CRITICAL FIX: Resolve all lazy dataclass instances before multiprocessing
-                # This ensures that the contexts are safe for pickling in ProcessPoolExecutor
-                # Note: Don't resolve pipeline_definition as it may overwrite collision-resolved configs
-                logger.info("🔥 ORCHESTRATOR: Resolving lazy dataclasses for multiprocessing compatibility")
-                contexts_snapshot = resolve_lazy_configurations_for_serialization(contexts_snapshot)
-                logger.info("🔥 ORCHESTRATOR: Lazy dataclass resolution completed")
+                    # NUCLEAR ERROR TRACING: Create snapshot of compiled_contexts to prevent iteration issues
+                    contexts_snapshot = dict(compiled_contexts.items())
 
-                logger.info("🔥 DEATH_MARKER: BEFORE_TASK_SUBMISSION_LOOP")
-                future_to_axis_id = {}
-                config = get_openhcs_config()
-                if not config:
-                    raise RuntimeError("Component configuration is required for orchestrator execution")
-                axis_name = config.multiprocessing_axis.value
+                    # CRITICAL FIX: Resolve all lazy dataclass instances before multiprocessing
+                    # This ensures that the contexts are safe for pickling in ProcessPoolExecutor
+                    # Note: Don't resolve pipeline_definition as it may overwrite collision-resolved configs
+                    contexts_snapshot = resolve_lazy_configurations_for_serialization(contexts_snapshot)
 
-                # Group contexts by axis to detect sequential combinations
-                from collections import defaultdict
-                contexts_by_axis = defaultdict(list)
-                for context_key, context in contexts_snapshot.items():
-                    # Extract axis_id from context_key (either "axis_id" or "axis_id__combo_N")
-                    if "__combo_" in context_key:
-                        axis_id = context_key.split("__combo_")[0]
-                        contexts_by_axis[axis_id].append((context_key, context))
-                    else:
-                        contexts_by_axis[context_key].append((context_key, context))
+                    future_to_axis_id = {}
+                    config = get_openhcs_config()
+                    if not config:
+                        raise RuntimeError("Component configuration is required for orchestrator execution")
+                    axis_name = config.multiprocessing_axis.value
 
-                logger.info(f"🔄 ORCHESTRATOR: Processing {len(contexts_by_axis)} {axis_name}s with {len(contexts_snapshot)} total contexts")
+                    # Group contexts by axis to detect sequential combinations
+                    from collections import defaultdict
+                    contexts_by_axis = defaultdict(list)
+                    for context_key, context in contexts_snapshot.items():
+                        # Extract axis_id from context_key (either "axis_id" or "axis_id__combo_N")
+                        if "__combo_" in context_key:
+                            axis_id = context_key.split("__combo_")[0]
+                            contexts_by_axis[axis_id].append((context_key, context))
+                        else:
+                            contexts_by_axis[context_key].append((context_key, context))
 
-                # Submit one task per axis (each task handles its own sequential combinations)
-                for axis_id, axis_contexts in contexts_by_axis.items():
-                    logger.info(f"🔄 ORCHESTRATOR: Axis {axis_id} has {len(axis_contexts)} context(s)")
 
+                    # Submit one task per axis (each task handles its own sequential combinations)
+                    for axis_id, axis_contexts in contexts_by_axis.items():
+
+                        try:
+                            # Resolve all contexts for this axis
+                            resolved_axis_contexts = [
+                                (context_key, resolve_lazy_configurations_for_serialization(context))
+                                for context_key, context in axis_contexts
+                            ]
+
+
+                            # Submit task that will handle all combinations for this axis sequentially
+                            future = executor.submit(
+                                _execute_axis_with_sequential_combinations,
+                                pipeline_definition,
+                                resolved_axis_contexts,
+                                None  # visualizer
+                            )
+                            future_to_axis_id[future] = axis_id
+                        except Exception as submit_error:
+                            error_msg = f"🔥 ORCHESTRATOR ERROR: Failed to submit task for {axis_name} {axis_id}: {submit_error}"
+                            logger.error(error_msg, exc_info=True)
+                            # FAIL-FAST: Re-raise task submission errors immediately
+                            raise
+
+
+
+                    completed_count = 0
+                    for future in concurrent.futures.as_completed(future_to_axis_id):
+                        axis_id = future_to_axis_id[future]
+                        completed_count += 1
+
+                        try:
+                            result = future.result()
+                            execution_results[axis_id] = result
+                        except Exception as exc:
+                            import traceback
+                            full_traceback = traceback.format_exc()
+                            error_msg = f"{axis_name.title()} {axis_id} generated an exception during execution: {exc}"
+                            logger.error(f"🔥 ORCHESTRATOR ERROR: {error_msg}", exc_info=True)
+                            logger.error(f"🔥 ORCHESTRATOR FULL TRACEBACK for {axis_name} {axis_id}:\n{full_traceback}")
+
+                            # Send error to UI immediately via progress callback
+                            if self.progress_callback:
+                                try:
+                                    self.progress_callback(axis_id, 'pipeline', 'error', {
+                                        'error_message': str(exc),
+                                        'traceback': full_traceback
+                                    })
+                                except Exception as cb_error:
+                                    logger.warning(f"Progress callback failed for error reporting: {cb_error}")
+
+                            # FAIL-FAST: Re-raise immediately instead of storing error
+                            raise
+
+
+
+                    # Explicitly shutdown executor INSIDE the with block to avoid hang on context exit
+                    # Handle BrokenProcessPool in case workers were killed externally (e.g., during cancellation)
                     try:
-                        # Resolve all contexts for this axis
-                        resolved_axis_contexts = [
-                            (context_key, resolve_lazy_configurations_for_serialization(context))
-                            for context_key, context in axis_contexts
-                        ]
+                        executor.shutdown(wait=True, cancel_futures=False)
+                    except concurrent.futures.process.BrokenProcessPool as e:
+                        logger.warning(f"🔥 ORCHESTRATOR: Executor shutdown failed due to broken process pool (workers were killed externally): {e}")
+                        # Don't wait for broken workers - they're already dead
+                        # The with block exit will handle cleanup
+                    except Exception as e:
+                        logger.warning(f"🔥 ORCHESTRATOR: Executor shutdown failed: {e}")
 
-                        logger.info(f"🔥 DEATH_MARKER: SUBMITTING_TASK_FOR_{axis_name.upper()}_{axis_id}")
-                        logger.info(f"🔥 ORCHESTRATOR: Submitting task for {axis_name} {axis_id} with {len(resolved_axis_contexts)} combination(s)")
-
-                        # Submit task that will handle all combinations for this axis sequentially
-                        future = executor.submit(
-                            _execute_axis_with_sequential_combinations,
-                            pipeline_definition,
-                            resolved_axis_contexts,
-                            None  # visualizer
-                        )
-                        future_to_axis_id[future] = axis_id
-                        logger.info(f"🔥 ORCHESTRATOR: Task submitted for {axis_name} {axis_id}")
-                        logger.info(f"🔥 DEATH_MARKER: TASK_SUBMITTED_FOR_{axis_name.upper()}_{axis_id}")
-                    except Exception as submit_error:
-                        error_msg = f"🔥 ORCHESTRATOR ERROR: Failed to submit task for {axis_name} {axis_id}: {submit_error}"
-                        logger.error(error_msg, exc_info=True)
-                        # FAIL-FAST: Re-raise task submission errors immediately
-                        raise
-
-                logger.info("🔥 DEATH_MARKER: TASK_SUBMISSION_LOOP_COMPLETED")
-
-                logger.info(f"🔥 ORCHESTRATOR: All {len(future_to_axis_id)} tasks submitted, waiting for completion")
-                logger.info("🔥 DEATH_MARKER: BEFORE_COMPLETION_LOOP")
-
-                completed_count = 0
-                logger.info("🔥 DEATH_MARKER: ENTERING_AS_COMPLETED_LOOP")
-                for future in concurrent.futures.as_completed(future_to_axis_id):
-                    axis_id = future_to_axis_id[future]
-                    completed_count += 1
-                    logger.info(f"🔥 DEATH_MARKER: PROCESSING_COMPLETED_TASK_{completed_count}_{axis_name.upper()}_{axis_id}")
-                    logger.info(f"🔥 ORCHESTRATOR: Task {completed_count}/{len(future_to_axis_id)} completed for {axis_name} {axis_id}")
-
-                    try:
-                        logger.info(f"🔥 DEATH_MARKER: CALLING_FUTURE_RESULT_FOR_{axis_name.upper()}_{axis_id}")
-                        result = future.result()
-                        logger.info(f"🔥 DEATH_MARKER: FUTURE_RESULT_SUCCESS_FOR_{axis_name.upper()}_{axis_id}")
-                        logger.info(f"🔥 ORCHESTRATOR: {axis_name.title()} {axis_id} result: {result}")
-                        execution_results[axis_id] = result
-                        logger.info(f"🔥 DEATH_MARKER: RESULT_STORED_FOR_{axis_name.upper()}_{axis_id}")
-                    except Exception as exc:
-                        import traceback
-                        full_traceback = traceback.format_exc()
-                        error_msg = f"{axis_name.title()} {axis_id} generated an exception during execution: {exc}"
-                        logger.error(f"🔥 ORCHESTRATOR ERROR: {error_msg}", exc_info=True)
-                        logger.error(f"🔥 ORCHESTRATOR FULL TRACEBACK for {axis_name} {axis_id}:\n{full_traceback}")
-                        # FAIL-FAST: Re-raise immediately instead of storing error
-                        raise
-
-                logger.info("🔥 DEATH_MARKER: COMPLETION_LOOP_FINISHED")
-
-                logger.info(f"🔥 ORCHESTRATOR: All tasks completed, {len(execution_results)} results collected")
-
-                # Explicitly shutdown executor INSIDE the with block to avoid hang on context exit
-                logger.info("🔥 ORCHESTRATOR: Explicitly shutting down executor")
-                executor.shutdown(wait=True, cancel_futures=False)
-                logger.info("🔥 ORCHESTRATOR: Executor shutdown complete")
+            except concurrent.futures.process.BrokenProcessPool as e:
+                # Workers were killed externally (e.g., during cancellation)
+                # This is expected behavior when cancellation happens
+                logger.warning(f"🔥 ORCHESTRATOR: Executor context exit failed due to broken process pool (workers were killed externally): {e}")
+                # Continue execution - the workers are already dead, no cleanup needed
 
             # Determine if we're using multiprocessing (ProcessPoolExecutor) or threading
             effective_config = self.get_effective_config()
             use_multiprocessing = not effective_config.use_threading
-            logger.info(f"🔥 ORCHESTRATOR: About to start GPU cleanup (use_multiprocessing={use_multiprocessing})")
 
             # 🔥 GPU CLEANUP: Skip in multiprocessing mode - workers handle their own cleanup
             # In multiprocessing mode, GPU cleanup in the main process can hang because
             # GPU contexts are owned by worker processes, not the orchestrator process
             try:
                 if cleanup_all_gpu_frameworks and not use_multiprocessing:
-                    logger.info("🔥 ORCHESTRATOR: Running GPU cleanup...")
                     cleanup_all_gpu_frameworks()
-                    logger.info("🔥 GPU CLEANUP: Cleared all GPU frameworks after plate execution")
-                elif use_multiprocessing:
-                    logger.info("🔥 GPU CLEANUP: Skipped in multiprocessing mode (workers handle their own cleanup)")
             except Exception as cleanup_error:
                 logger.warning(f"Failed to cleanup GPU memory after plate execution: {cleanup_error}")
 
-            logger.info("🔥 ORCHESTRATOR: GPU cleanup section finished")
 
-            logger.info("🔥 ORCHESTRATOR: Plate execution completed, checking for analysis consolidation")
             # Run automatic analysis consolidation if enabled
             shared_context = get_current_global_config(GlobalPipelineConfig)
-            logger.info(f"🔥 ORCHESTRATOR: Analysis consolidation enabled={shared_context.analysis_consolidation_config.enabled}")
             if shared_context.analysis_consolidation_config.enabled:
                 try:
-                    logger.info("🔥 ORCHESTRATOR: Starting consolidation - finding results directory")
                     # Get results directory from compiled contexts (path planner already determined it)
                     results_dir = None
                     for axis_id, context in compiled_contexts.items():
                         # Check if context has step plans with special outputs
-                        for step_plan in context.step_plans:
+                        for step_plan in context.step_plans.values():
                             special_outputs = step_plan.get('special_outputs', {})
                             if special_outputs:
                                 # Extract results directory from first special output path
@@ -1297,25 +1264,18 @@ class PipelineOrchestrator(ContextProvider):
 
                                 if potential_results_dir.exists():
                                     results_dir = potential_results_dir
-                                    logger.info(f"🔍 CONSOLIDATION: Found results directory from special outputs: {results_dir}")
                                     break
 
                         if results_dir:
                             break
 
                     if results_dir and results_dir.exists():
-                        logger.info(f"🔥 ORCHESTRATOR: Results directory exists: {results_dir}")
                         # Check if there are actually CSV files (materialized results)
-                        logger.info("🔥 ORCHESTRATOR: Checking for CSV files...")
                         csv_files = list(results_dir.glob("*.csv"))
-                        logger.info(f"🔥 ORCHESTRATOR: Found {len(csv_files)} CSV files")
                         if csv_files:
-                            logger.info(f"🔄 CONSOLIDATION: Found {len(csv_files)} CSV files, running consolidation")
                             # Get well IDs from compiled contexts
                             axis_ids = list(compiled_contexts.keys())
-                            logger.info(f"🔄 CONSOLIDATION: Using well IDs: {axis_ids}")
 
-                            logger.info("🔥 ORCHESTRATOR: Calling consolidate_analysis_results()...")
                             consolidate_fn = _get_consolidate_analysis_results()
                             consolidate_fn(
                                 results_directory=str(results_dir),
@@ -1330,35 +1290,21 @@ class PipelineOrchestrator(ContextProvider):
                         logger.info("⏭️ CONSOLIDATION: No results directory found in compiled contexts")
                 except Exception as e:
                     logger.error(f"❌ CONSOLIDATION: Failed: {e}")
-            else:
-                logger.info("🔥 ORCHESTRATOR: Analysis consolidation disabled, skipping")
 
             # Update state based on execution results
-            logger.info("🔥 ORCHESTRATOR: Updating orchestrator state based on execution results")
             if all(result.is_success() for result in execution_results.values()):
                 self._state = OrchestratorState.COMPLETED
             else:
                 self._state = OrchestratorState.EXEC_FAILED
-            logger.info(f"🔥 ORCHESTRATOR: State updated to {self._state}")
 
             # 🔬 VISUALIZER CLEANUP: Stop all visualizers if they were auto-created and not persistent
-            logger.info(f"🔬 ORCHESTRATOR: Starting visualizer cleanup for {len(visualizers)} visualizers")
             for idx, vis in enumerate(visualizers):
                 try:
-                    logger.info(f"🔬 ORCHESTRATOR: Processing visualizer {idx+1}/{len(visualizers)}, persistent={vis.persistent}")
                     if not vis.persistent:
-                        logger.info(f"🔬 ORCHESTRATOR: Calling stop_viewer() for non-persistent visualizer {idx+1}")
                         vis.stop_viewer()
-                        logger.info(f"🔬 ORCHESTRATOR: Stopped non-persistent visualizer {idx+1}")
-                    else:
-                        logger.info("🔬 ORCHESTRATOR: Keeping persistent visualizer alive (no cleanup needed)")
-                        # Persistent visualizers stay alive across executions - no cleanup needed
-                        # The ZMQ connection will be reused for the next execution
                 except Exception as e:
                     logger.warning(f"🔬 ORCHESTRATOR: Failed to cleanup visualizer {idx+1}: {e}")
-            logger.info("🔬 ORCHESTRATOR: Visualizer cleanup complete")
 
-            logger.info(f"🔥 ORCHESTRATOR: Plate execution finished. Results: {execution_results}")
 
             return execution_results
         except Exception as e:

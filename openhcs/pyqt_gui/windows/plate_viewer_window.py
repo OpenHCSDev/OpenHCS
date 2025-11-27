@@ -329,32 +329,7 @@ class PlateViewerWindow(QDialog):
                 )
                 return
 
-            # Get well IDs from CSV filenames (same pattern as orchestrator uses axis_ids)
-            # CSV filenames have the actual well IDs as they appear in execution
-            parser = self.orchestrator.microscope_handler.parser
-            well_ids = set()
-
-            for results_dir in results_dirs:
-                csv_files = list(results_dir.glob("*.csv"))
-                for csv_file in csv_files:
-                    parsed = parser.parse_filename(csv_file.name)
-                    if parsed and 'well' in parsed:
-                        well_ids.add(parsed['well'])
-
-            well_ids = sorted(list(well_ids))
-
-            if not well_ids:
-                QMessageBox.warning(
-                    self,
-                    "No Wells Found",
-                    "No well IDs found in CSV filenames. Cannot consolidate."
-                )
-                return
-
-            # Import consolidation function
-            from openhcs.core.orchestrator.orchestrator import _get_consolidate_analysis_results
-
-            # Get configs from global config (same pattern as image browser)
+            # Get global config
             from openhcs.config_framework.global_config import get_current_global_config
             from openhcs.core.config import GlobalPipelineConfig
             global_config = get_current_global_config(GlobalPipelineConfig)
@@ -367,48 +342,31 @@ class PlateViewerWindow(QDialog):
                 )
                 return
 
-            # Consolidate each results directory
-            consolidate_fn = _get_consolidate_analysis_results()
-            total_csv_files = 0
-            successful_dirs = []
-            failed_dirs = []
+            # Use consolidated function that handles both per-directory and global consolidation
+            from openhcs.processing.backends.analysis.consolidate_analysis_results import consolidate_results_directories
 
-            for results_dir in results_dirs:
-                csv_files = list(results_dir.glob("*.csv"))
-                if not csv_files:
-                    logger.info(f"Skipping {results_dir} - no CSV files found")
-                    continue
+            successful_dirs, failed_dirs = consolidate_results_directories(
+                results_dirs=results_dirs,
+                plate_path=plate_path,
+                global_config=global_config,
+                filename_parser=self.orchestrator.microscope_handler.parser
+            )
 
-                total_csv_files += len(csv_files)
-                logger.info(f"Manual consolidation: {len(csv_files)} CSV files in {results_dir}")
-
-                try:
-                    consolidate_fn(
-                        results_directory=str(results_dir),
-                        well_ids=well_ids,
-                        consolidation_config=global_config.analysis_consolidation_config,
-                        plate_metadata_config=global_config.plate_metadata_config
-                    )
-                    successful_dirs.append(results_dir.name)
-                except Exception as e:
-                    logger.error(f"Failed to consolidate {results_dir}: {e}", exc_info=True)
-                    failed_dirs.append((results_dir.name, str(e)))
-
-            if total_csv_files == 0:
+            # Show results
+            if not successful_dirs and not failed_dirs:
                 QMessageBox.warning(
                     self,
                     "No CSV Files",
                     f"No CSV files found in any results directories. Nothing to consolidate."
                 )
-                return
-
-            # Show results
-            if successful_dirs and not failed_dirs:
+            elif successful_dirs and not failed_dirs:
+                msg = f"Successfully consolidated {len(successful_dirs)} results directories:\n" + "\n".join(f"  ✓ {d}" for d in successful_dirs)
+                if len(successful_dirs) > 1:
+                    msg += f"\n\n✅ Global summary created: {global_config.analysis_consolidation_config.global_summary_filename}"
                 QMessageBox.information(
                     self,
                     "Consolidation Complete",
-                    f"Successfully consolidated {total_csv_files} CSV files from {len(well_ids)} wells.\n\n"
-                    f"Processed {len(successful_dirs)} results directories:\n" + "\n".join(f"  ✓ {d}" for d in successful_dirs)
+                    msg
                 )
             elif successful_dirs and failed_dirs:
                 QMessageBox.warning(

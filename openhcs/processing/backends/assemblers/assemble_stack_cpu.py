@@ -201,6 +201,9 @@ def assemble_stack_cpu(
     num_tiles, tile_h, tile_w = image_tiles.shape
     tile_shape = (tile_h, tile_w)
 
+    # Remember input dtype to preserve it in output
+    input_dtype = image_tiles.dtype
+
     # Convert to float32
     image_tiles_float = image_tiles.astype(np.float32)
 
@@ -330,11 +333,16 @@ def assemble_stack_cpu(
     # --- 5. Normalize ---
     epsilon = 1e-7
     stitched = composite_accum / (weight_accum + epsilon)
-    
-    # Convert to uint16
-    stitched_uint16 = np.clip(stitched, 0, 65535).astype(np.uint16)
-    
-    return stitched_uint16.reshape(1, canvas_height, canvas_width)
+
+    # Convert back to input dtype, preserving the dtype
+    if np.issubdtype(input_dtype, np.integer):
+        dtype_info = np.iinfo(input_dtype)
+        stitched_output = np.clip(stitched, dtype_info.min, dtype_info.max).astype(input_dtype)
+    else:
+        # For float dtypes, just convert directly
+        stitched_output = stitched.astype(input_dtype)
+
+    return stitched_output.reshape(1, canvas_height, canvas_width)
 
 
 def to_numpy(tensor):

@@ -6,7 +6,7 @@ Configuration resolution requires tracking which configs are active at any point
 .. code-block:: python
 
    from openhcs.config_framework import config_context
-   
+
    with config_context(global_config):
        with config_context(pipeline_config):
            # Both configs available for resolution
@@ -23,30 +23,121 @@ Contexts stack via ``contextvars.ContextVar``:
 
    # openhcs/config_framework/context_manager.py
    _config_context_base: ContextVar[Optional[Dict[str, Any]]] = ContextVar(
-       'config_context_base', 
+       'config_context_base',
        default=None
    )
-   
+
+   # Track types pushed via config_context() for hierarchy queries
+   context_type_stack: ContextVar[Tuple[Type, ...]] = ContextVar(
+       'context_type_stack',
+       default=()
+   )
+
    @contextmanager
    def config_context(obj):
        """Stack a configuration context."""
        # Extract all dataclass fields from obj
        new_configs = extract_all_configs(obj)
-       
+
        # Get current context
        current = _config_context_base.get()
-       
+
        # Merge with current context
        merged = merge_configs(current, new_configs) if current else new_configs
-       
+
+       # Track type in stack for hierarchy queries
+       current_types = context_type_stack.get()
+       new_types = current_types + (type(obj),) if obj is not None else current_types
+
        # Set new context
        token = _config_context_base.set(merged)
+       type_token = context_type_stack.set(new_types)
        try:
            yield
        finally:
            _config_context_base.reset(token)
+           context_type_stack.reset(type_token)
 
 Each ``with config_context()`` block adds configs to the stack. On exit, the context is automatically restored.
+
+Context Type Stack
+------------------
+
+The ``context_type_stack`` ContextVar tracks which types have been pushed via ``config_context()``. This enables generic hierarchy queries without hardcoding type names:
+
+.. code-block:: python
+
+   from openhcs.config_framework import get_context_type_stack
+
+   with config_context(global_config):
+       with config_context(pipeline_config):
+           with config_context(step):
+               # Query the active type stack
+               stack = get_context_type_stack()
+               # Returns: (GlobalPipelineConfig, PipelineConfig, StepType)
+
+Hierarchy Registry
+------------------
+
+For cross-window updates (when parent config windows are open but not actively resolving),
+the system maintains a persistent hierarchy registry:
+
+.. code-block:: python
+
+   # Registry maps child_type → parent_type
+   _known_hierarchy: dict = {}
+
+   def register_hierarchy_relationship(parent_type, child_type):
+       """Register that parent_type is the parent of child_type in the config hierarchy."""
+       parent_base = _normalize_type(parent_type)
+       child_base = _normalize_type(child_type)
+       if parent_base != child_base and not _is_global_type(parent_base):
+           _known_hierarchy[child_base] = parent_base
+
+   def unregister_hierarchy_relationship(child_type):
+       """Remove hierarchy entry when form closes."""
+       child_base = _normalize_type(child_type)
+       _known_hierarchy.pop(child_base, None)
+
+Form managers register their hierarchy when they open:
+
+.. code-block:: python
+
+   # Step editor opens with context_obj=pipeline_config
+   register_hierarchy_relationship(type(context_obj), type(object_instance))
+   # Registers: PipelineConfig → Step
+
+This allows ``get_types_before_in_stack()`` to return correct ancestors even when
+the parent window isn't actively inside a ``config_context()`` call.
+
+Hierarchy Query Functions
+-------------------------
+
+The config framework provides generic functions to query the hierarchy:
+
+.. code-block:: python
+
+   from openhcs.config_framework import (
+       get_types_before_in_stack,
+       is_ancestor_in_context,
+       is_same_type_in_context,
+       get_ancestors_from_hierarchy
+   )
+
+   # Get all types that come before Step in the hierarchy
+   ancestors = get_types_before_in_stack(Step)
+   # Returns: [PipelineConfig] (uses active stack or registry fallback)
+
+   # Check if PipelineConfig is an ancestor of Step
+   is_ancestor = is_ancestor_in_context(PipelineConfig, Step)
+   # Returns: True
+
+   # Check if two types are equivalent (handles lazy wrappers)
+   is_same = is_same_type_in_context(LazyPipelineConfig, PipelineConfig)
+   # Returns: True
+
+These functions first check the active ``context_type_stack``, then fall back to
+the ``_known_hierarchy`` registry for cross-window scenarios.
 
 Context Extraction
 -----------------

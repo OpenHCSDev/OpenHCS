@@ -1369,7 +1369,7 @@ class OMEROLocalBackend(VirtualBackend, PicklableBackend):
         Returns:
             String describing where ROIs were saved
         """
-        from openhcs.core.roi import PolygonShape, MaskShape, PointShape, EllipseShape
+        from openhcs.core.roi import PolygonShape, PolylineShape, MaskShape, PointShape, EllipseShape
         import omero.model
         from omero.rtypes import rstring, rdouble, rint
 
@@ -1455,6 +1455,21 @@ class OMEROLocalBackend(VirtualBackend, PicklableBackend):
                             polygon.setTextValue(rstring(str(roi.metadata['label'])))
 
                         omero_roi.addShape(polygon)
+
+                    elif isinstance(shape, PolylineShape):
+                        # Create OMERO polyline
+                        polyline = omero.model.PolylineI()
+
+                        # Convert coordinates to OMERO format (comma-separated string)
+                        # OMERO expects "x1,y1 x2,y2 x3,y3 ..."
+                        points_str = " ".join([f"{x},{y}" for y, x in shape.coordinates])
+                        polyline.setPoints(rstring(points_str))
+
+                        # Set metadata
+                        if 'label' in roi.metadata:
+                            polyline.setTextValue(rstring(str(roi.metadata['label'])))
+
+                        omero_roi.addShape(polyline)
 
                     elif isinstance(shape, EllipseShape):
                         # Create OMERO ellipse

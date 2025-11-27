@@ -29,9 +29,9 @@ from openhcs.constants.constants import VariableComponents, GroupBy, get_default
 from openhcs.constants.input_source import InputSource
 
 # Import LazyStepMaterializationConfig for type hints
-from openhcs.core.config import LazyStepMaterializationConfig
+from openhcs.core.config import LazyStepMaterializationConfig, LazyStreamingDefaults, LazyNapariStreamingConfig, LazyFijiStreamingConfig
 from openhcs.core.config import LazyStepWellFilterConfig
-from openhcs.core.config import LazyProcessingConfig
+from openhcs.core.config import LazyProcessingConfig, LazyDtypeConfig
 
 # Import ContextProvider for automatic step context registration
 from openhcs.config_framework.lazy_factory import ContextProvider
@@ -122,11 +122,13 @@ class AbstractStep(abc.ABC, ContextProvider):
         name: str = None,
         description: str = None,
         enabled: bool = True,
+        dtype_config: 'LazyDtypeConfig' = LazyDtypeConfig(),
         processing_config: 'LazyProcessingConfig' = LazyProcessingConfig(),
         step_well_filter_config: 'LazyStepWellFilterConfig' = LazyStepWellFilterConfig(),
-        step_materialization_config: Optional['LazyStepMaterializationConfig'] = None,
-        napari_streaming_config: Optional['LazyNapariStreamingConfig'] = None,
-        fiji_streaming_config: Optional['LazyFijiStreamingConfig'] = None,
+        step_materialization_config: 'LazyStepMaterializationConfig' = LazyStepMaterializationConfig(),
+        streaming_defaults: 'LazyStreamingDefaults' = LazyStreamingDefaults(),
+        napari_streaming_config: 'LazyNapariStreamingConfig' = LazyNapariStreamingConfig(),
+        fiji_streaming_config: 'LazyFijiStreamingConfig' = LazyFijiStreamingConfig(),
     ) -> None:
         """
         Initialize a step. These attributes are primarily used during the
@@ -139,6 +141,7 @@ class AbstractStep(abc.ABC, ContextProvider):
             description: Optional description of what this step does.
             enabled: Whether this step is enabled. Disabled steps are filtered out
                     during pipeline compilation. Defaults to True.
+            dtype_config: LazyDtypeConfig for dtype conversion behavior in memory type decorators.
             processing_config: LazyProcessingConfig for variable_components, group_by, input_source, and sequential processing.
             step_well_filter_config: LazyStepWellFilterConfig for well filtering.
             step_materialization_config: Optional LazyStepMaterializationConfig for per-step materialized output.
@@ -153,9 +156,11 @@ class AbstractStep(abc.ABC, ContextProvider):
         self.name = name or self.__class__.__name__
         self.description = description
         self.enabled = enabled
+        self.dtype_config = dtype_config
         self.processing_config = processing_config
         self.step_well_filter_config = step_well_filter_config
         self.step_materialization_config = step_materialization_config
+        self.streaming_defaults = streaming_defaults
         self.napari_streaming_config = napari_streaming_config
         self.fiji_streaming_config = fiji_streaming_config
 
