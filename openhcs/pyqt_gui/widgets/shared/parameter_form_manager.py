@@ -189,9 +189,9 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
     # Args: (editing_object, context_object)
     context_refreshed = pyqtSignal(object, object)
 
-    # NOTE: _active_form_managers removed - replaced with ConfigTreeRegistry
-    # Use registry.get_scope_nodes(scope_id) to get all managers in a scope
-    # Use node.get_affected_nodes() to get nodes that should be notified
+    # Class-level list of all active form managers for cross-window updates
+    # Uses simpler list-based approach instead of tree registry
+    _active_form_managers = []
 
     # Class constants for UI preferences (moved from constructor parameters)
     DEFAULT_USE_SCROLL_AREA = False
@@ -301,23 +301,14 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
                 else set()
             )
 
-            # TREE REGISTRY: Register this form in the config tree
-            # This enables tree-based context resolution and cross-window updates
-            from openhcs.config_framework.config_tree_registry import ConfigTreeRegistry
-            import weakref
-
-            registry = ConfigTreeRegistry.instance()
-            parent_node = config.parent_node
-
-            # Register node in tree (node_id comes from field_id)
-            self._config_node = registry.register(
-                node_id=field_id,
-                obj=object_instance,
-                parent=parent_node
-            )
-
-            # Store weak reference to this manager in the node
-            self._config_node._form_manager = weakref.ref(self)
+            # CROSS-WINDOW: Register in active managers list (simpler than tree registry)
+            # This enables cross-window updates without complex tree structure
+            self._active_form_managers.append(self)
+            
+            # Register hierarchy relationship for cross-window placeholder resolution
+            if self.context_obj is not None and not self._parent_manager:
+                from openhcs.config_framework.context_manager import register_hierarchy_relationship
+                register_hierarchy_relationship(type(self.context_obj), type(self.object_instance))
 
             # Store backward compatibility attributes
             self.parameter_info = self.config.parameter_info
@@ -1224,57 +1215,37 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         logger.info(f"🔍 UNREGISTER: {self.field_id} (id={id(self)}) unregistering from cross-window updates")
 
         try:
-            # Get all managers in same scope from tree registry
-            from openhcs.config_framework.config_tree_registry import ConfigTreeRegistry
-            registry = ConfigTreeRegistry.instance()
-            scope_nodes = registry.get_scope_nodes(self.scope_id)
-
-            # Get affected nodes that should be notified when this form closes
-            affected_nodes = self._config_node.get_affected_nodes()
-
-            logger.info(f"🔍 UNREGISTER: Found {len(scope_nodes)} nodes in scope, {len(affected_nodes)} affected")
-
-            # CRITICAL FIX: Disconnect all signal connections BEFORE unregistering from tree
-            # This prevents the closed window from continuing to receive signals
-            for node in scope_nodes:
-                if node == self._config_node:
-                    continue
-                manager_ref = node._form_manager
-                if not manager_ref:
-                    continue
-                manager = manager_ref()
-                if manager and manager is not self:
+            # Disconnect all signal connections BEFORE removing from list
+            for manager in self._active_form_managers:
+                if manager is not self:
                     try:
-                        # Disconnect this manager's signals from other manager
                         self.context_value_changed.disconnect(manager._on_cross_window_context_changed)
                         self.context_refreshed.disconnect(manager._on_cross_window_context_refreshed)
-                        # Disconnect other manager's signals from this manager
                         manager.context_value_changed.disconnect(self._on_cross_window_context_changed)
                         manager.context_refreshed.disconnect(self._on_cross_window_context_refreshed)
                     except (TypeError, RuntimeError):
                         pass  # Signal already disconnected or object destroyed
 
-            # Unregister from tree registry
-            registry.unregister(self.field_id)
-            logger.info(f"🔍 UNREGISTER: Unregistered node {self.field_id} from tree")
+            # Remove from active managers list
+            if self in self._active_form_managers:
+                self._active_form_managers.remove(self)
+                logger.info(f"🔍 UNREGISTER: Removed from active managers list")
 
-            # CRITICAL: Trigger refresh in all affected windows
-            # They were using this window's live values, now they need to revert to saved values
+            # Unregister hierarchy relationship if this is a root manager
+            if self.context_obj is not None and not self._parent_manager:
+                from openhcs.config_framework.context_manager import unregister_hierarchy_relationship
+                unregister_hierarchy_relationship(type(self.object_instance))
+
+            # Trigger refresh in remaining managers that might be affected
             from .services.placeholder_refresh_service import PlaceholderRefreshService
             service = PlaceholderRefreshService()
-            for node in affected_nodes:
-                manager_ref = node._form_manager
-                if not manager_ref:
-                    continue
-                manager = manager_ref()
-                if manager:
-                    # Refresh immediately (not deferred) since we're in a controlled close event
+            for manager in self._active_form_managers:
+                if manager is not self:
                     service.refresh_with_live_context(manager, use_user_modified_only=False)
+
         except (ValueError, AttributeError) as e:
             logger.warning(f"🔍 UNREGISTER: Error during unregistration: {e}")
-            pass  # Already removed or registry doesn't exist
-
-
+            pass  # Already removed
 
     def _on_cross_window_event(self, editing_object: object, context_object: object, **kwargs):
         """REFACTORING: Unified handler for cross-window events - eliminates duplicate methods.

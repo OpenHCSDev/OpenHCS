@@ -87,26 +87,16 @@ class SignalConnectionService:
         manager.parameter_changed.connect(manager._emit_cross_window_change)
 
         # Connect this instance's signal to all existing instances (bidirectional)
-        # Use tree registry to find existing managers in same scope
-        from openhcs.config_framework.config_tree_registry import ConfigTreeRegistry
-        registry = ConfigTreeRegistry.instance()
-        scope_nodes = registry.get_scope_nodes(manager.scope_id)
-
+        # Use simpler _active_form_managers list instead of tree registry
         import logging
         logger = logging.getLogger(__name__)
-        logger.info(f"🔍 REGISTER: {manager.field_id} connecting to {len(scope_nodes)-1} existing managers in scope")
+        
+        existing_count = len(manager._active_form_managers) - 1  # -1 because we're already added
+        logger.info(f"🔍 REGISTER: {manager.field_id} connecting to {existing_count} existing managers")
 
-        for node in scope_nodes:
+        for existing_manager in manager._active_form_managers:
             # Skip self
-            if node == manager._config_node:
-                continue
-
-            # Get manager from weak reference
-            manager_ref = node._form_manager
-            if not manager_ref:
-                continue
-            existing_manager = manager_ref()
-            if not existing_manager:
+            if existing_manager is manager:
                 continue
 
             # Connect this instance to existing instance
@@ -117,5 +107,5 @@ class SignalConnectionService:
             existing_manager.context_value_changed.connect(manager._on_cross_window_context_changed)
             existing_manager.context_refreshed.connect(manager._on_cross_window_context_refreshed)
 
-        logger.info(f"🔍 REGISTER: {manager.field_id} (id={id(manager)}) registered. Total nodes in scope: {len(scope_nodes)}")
+        logger.info(f"🔍 REGISTER: {manager.field_id} (id={id(manager)}) registered. Total active managers: {len(manager._active_form_managers)}")
 
