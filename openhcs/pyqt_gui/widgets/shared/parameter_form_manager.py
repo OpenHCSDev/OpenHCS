@@ -1362,6 +1362,10 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
             editing_object: The object being edited in the other window
             context_object: The context object used by the other window
         """
+        # EARLY EXIT: Scope visibility check (cheapest check first)
+        if not self._is_scope_visible_static(editing_scope_id, self.scope_id):
+            return
+
         editing_type_name = type(editing_object).__name__ if editing_object else "None"
         context_type_name = type(context_object).__name__ if context_object else "None"
         logger.info(f"🔔 CROSS_WINDOW_RECV [{self.field_id}]: path={field_path}, value={repr(new_value)[:30]}, "
@@ -1567,7 +1571,6 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         # Also try in all nested managers (the field might be nested)
         for nested_manager in self.nested_managers.values():
             nested_manager._refresh_field_in_tree(field_name)
-
 
 
 

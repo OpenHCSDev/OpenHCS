@@ -193,18 +193,18 @@ class ParameterOpsService(ParameterServiceABC):
         from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
         from openhcs.config_framework.context_manager import build_context_stack
 
-        # Build context stack for resolution
-        live_context_snapshot = ParameterFormManager.collect_live_context(
-            scope_filter=manager.scope_id,
-            for_type=manager.dataclass_type
-        )
-        live_context = live_context_snapshot.values if live_context_snapshot else None
-
         # Find root manager to get complete form values (enables sibling inheritance)
         # Root form (GlobalPipelineConfig/PipelineConfig/Step) contains all nested configs
         root_manager = manager
         while getattr(root_manager, '_parent_manager', None) is not None:
             root_manager = root_manager._parent_manager
+
+        # Build context stack for resolution (use ROOT type for cache sharing)
+        live_context_snapshot = ParameterFormManager.collect_live_context(
+            scope_filter=manager.scope_id,
+            for_type=root_manager.dataclass_type
+        )
+        live_context = live_context_snapshot.values if live_context_snapshot else None
 
         # Use root manager's values and type for context (not just this nested manager's)
         root_values = root_manager.get_user_modified_values() if root_manager != manager else None
@@ -267,9 +267,14 @@ class ParameterOpsService(ParameterServiceABC):
             from openhcs.config_framework.context_manager import build_context_stack
 
             logger.debug(f"[PLACEHOLDER] {manager.field_id}: Building context stack")
+            # Find root manager to get complete form values (enables sibling inheritance)
+            root_manager = manager
+            while getattr(root_manager, '_parent_manager', None) is not None:
+                root_manager = root_manager._parent_manager
+
             live_context_snapshot = ParameterFormManager.collect_live_context(
                 scope_filter=manager.scope_id,
-                for_type=manager.dataclass_type
+                for_type=root_manager.dataclass_type
             )
             # Extract .values dict from LiveContextSnapshot for build_context_stack
             live_context = live_context_snapshot.values if live_context_snapshot else None
@@ -283,11 +288,6 @@ class ParameterOpsService(ParameterServiceABC):
                         overlay_dict[excluded_param] = getattr(manager.object_instance, excluded_param)
             else:
                 overlay_dict = None
-
-            # Find root manager to get complete form values (enables sibling inheritance)
-            root_manager = manager
-            while getattr(root_manager, '_parent_manager', None) is not None:
-                root_manager = root_manager._parent_manager
 
             root_values = root_manager.get_user_modified_values() if root_manager != manager else None
             root_type = getattr(root_manager, 'dataclass_type', None)

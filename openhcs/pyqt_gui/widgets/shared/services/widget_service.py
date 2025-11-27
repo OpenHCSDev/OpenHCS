@@ -226,9 +226,15 @@ class WidgetService:
             logger.info(f"        ✅ Value is None, computing placeholder...")
             from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
             from openhcs.config_framework.context_manager import config_context
+
+            # Use ROOT manager type for live context cache sharing
+            root_manager = manager
+            while getattr(root_manager, '_parent_manager', None) is not None:
+                root_manager = root_manager._parent_manager
+
             live_context = ParameterFormManager.collect_live_context(
                 scope_filter=manager.scope_id,
-                for_type=manager.dataclass_type
+                for_type=root_manager.dataclass_type
             )
 
             from contextlib import ExitStack
