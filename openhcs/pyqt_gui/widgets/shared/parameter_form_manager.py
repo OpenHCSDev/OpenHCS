@@ -1405,7 +1405,7 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         logger.info(f"🔔 CROSS_WINDOW_REFRESH [{self.field_id}]: from={editing_type_name}, ctx={context_type_name}, my_scope={self.scope_id}")
 
         # Don't refresh if this is the window that triggered the event
-        if editing_object is self.object_instance:
+        if editing_object is self.object_instance or editing_scope_id == self.scope_id:
             logger.info(f"  ⏭️  SKIP: same instance")
             return
 
