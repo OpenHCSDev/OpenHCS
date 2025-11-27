@@ -194,7 +194,10 @@ class ParameterOpsService(ParameterServiceABC):
         from openhcs.config_framework.context_manager import build_context_stack
 
         # Build context stack for resolution
-        live_context_snapshot = ParameterFormManager.collect_live_context(scope_filter=manager.scope_id)
+        live_context_snapshot = ParameterFormManager.collect_live_context(
+            scope_filter=manager.scope_id,
+            for_type=manager.dataclass_type
+        )
         live_context = live_context_snapshot.values if live_context_snapshot else None
 
         # Find root manager to get complete form values (enables sibling inheritance)
@@ -264,7 +267,10 @@ class ParameterOpsService(ParameterServiceABC):
             from openhcs.config_framework.context_manager import build_context_stack
 
             logger.debug(f"[PLACEHOLDER] {manager.field_id}: Building context stack")
-            live_context_snapshot = ParameterFormManager.collect_live_context(scope_filter=manager.scope_id)
+            live_context_snapshot = ParameterFormManager.collect_live_context(
+                scope_filter=manager.scope_id,
+                for_type=manager.dataclass_type
+            )
             # Extract .values dict from LiveContextSnapshot for build_context_stack
             live_context = live_context_snapshot.values if live_context_snapshot else None
             overlay = manager.get_user_modified_values() if use_user_modified_only else manager.parameters
@@ -321,4 +327,3 @@ class ParameterOpsService(ParameterServiceABC):
                             placeholder_text = manager.service.get_placeholder_text(param_name, dataclass_type_for_resolution)
                             if placeholder_text:
                                 PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
-

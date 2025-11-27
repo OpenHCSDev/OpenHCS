@@ -326,6 +326,11 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
             if self.context_obj is not None and not self._parent_manager:
                 from openhcs.config_framework.context_manager import register_hierarchy_relationship
                 register_hierarchy_relationship(type(self.context_obj), type(self.object_instance))
+            elif self._parent_manager is not None and self._parent_manager.dataclass_type and self.dataclass_type:
+                # Nested manager: register relationship from parent dataclass to this nested dataclass
+                # Needed so is_ancestor_in_context recognizes parent → child when filtering live context
+                from openhcs.config_framework.context_manager import register_hierarchy_relationship
+                register_hierarchy_relationship(self._parent_manager.dataclass_type, self.dataclass_type)
 
             # Store backward compatibility attributes
             self.parameter_info = self.config.parameter_info
@@ -1242,7 +1247,7 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
             cls._collect_from_manager_tree(nested, result, scoped_result)
 
     @classmethod
-    def collect_live_context(cls, scope_filter=None) -> 'LiveContextSnapshot':
+    def collect_live_context(cls, scope_filter=None, for_type: Optional[Type] = None) -> 'LiveContextSnapshot':
         """
         Collect live context from all active form managers INCLUDING nested managers.
 
@@ -1252,6 +1257,8 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         Args:
             scope_filter: Optional scope filter (e.g., 'plate_path' or 'x::y::z')
                          If None, collects from all scopes
+            for_type: Optional type for hierarchy filtering. Only collects from
+                      managers whose type is an ANCESTOR of for_type.
 
         Returns:
             LiveContextSnapshot with token and values dict
@@ -1262,25 +1269,37 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
             cls._live_context_cache = TokenCache(lambda: cls._live_context_token_counter)
 
         from openhcs.config_framework import CacheKey
-        cache_key = CacheKey.from_args(scope_filter)
+        from openhcs.config_framework.context_manager import is_ancestor_in_context
+
+        for_type_name = for_type.__name__ if for_type else None
+        cache_key = CacheKey.from_args(scope_filter, for_type_name)
 
         def compute_live_context() -> LiveContextSnapshot:
             """Recursively collect values from all managers and nested managers."""
-            logger.info(f"📦 collect_live_context: COMPUTING (token={cls._live_context_token_counter}, scope={scope_filter})")
+            logger.info(f"📦 collect_live_context: COMPUTING (token={cls._live_context_token_counter}, scope={scope_filter}, for_type={for_type_name})")
 
             live_context = {}
             scoped_live_context = {}
 
             for manager in cls._active_form_managers:
-                manager_type = type(manager.object_instance).__name__ if manager.object_instance else "None"
+                manager_type = type(manager.object_instance)
+                manager_type_name = manager_type.__name__
+
+                # HIERARCHY FILTER: Only collect from ancestors of for_type
+                # is_ancestor_in_context() handles all type relationships (dataclass, function, etc.)
+                if for_type is not None:
+                    if not is_ancestor_in_context(manager_type, for_type):
+                        logger.info(f"  📋 SKIP {manager.field_id}: {manager_type_name} not ancestor of {for_type_name}")
+                        continue
+
                 # Apply scope filter if provided
                 if scope_filter is not None and manager.scope_id is not None:
                     is_visible = cls._is_scope_visible_static(manager.scope_id, scope_filter)
-                    logger.info(f"  📋 MANAGER {manager.field_id}: type={manager_type}, scope={manager.scope_id}, visible={is_visible}")
+                    logger.info(f"  📋 MANAGER {manager.field_id}: type={manager_type_name}, scope={manager.scope_id}, visible={is_visible}")
                     if not is_visible:
                         continue
                 else:
-                    logger.info(f"  📋 MANAGER {manager.field_id}: type={manager_type}, scope={manager.scope_id}, no_filter_or_no_scope")
+                    logger.info(f"  📋 MANAGER {manager.field_id}: type={manager_type_name}, scope={manager.scope_id}, no_filter_or_no_scope")
 
                 # Collect from this manager AND all its nested managers
                 cls._collect_from_manager_tree(manager, live_context, scoped_live_context)
@@ -1548,8 +1567,6 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         # Also try in all nested managers (the field might be nested)
         for nested_manager in self.nested_managers.values():
             nested_manager._refresh_field_in_tree(field_name)
-
-
 
 
 
