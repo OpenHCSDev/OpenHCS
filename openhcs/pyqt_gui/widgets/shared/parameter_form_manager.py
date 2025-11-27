@@ -174,23 +174,23 @@ class _PlaceholderRefreshTask(QRunnable):
         self._live_context_snapshot = live_context_snapshot
         self.signals = _PlaceholderRefreshSignals()
 
-        # CRITICAL: Capture thread-local GlobalPipelineConfig from main thread
+        # CRITICAL: Capture thread-local global config from main thread
         # Worker threads don't inherit thread-local storage, so we need to capture it here
         # and restore it in the worker thread before resolving placeholders
         from openhcs.config_framework.context_manager import get_base_global_config
         self._global_config_snapshot = get_base_global_config()
+        self._global_config_type = manager.global_config_type  # Capture the type too
 
     def run(self):
         manager = self._manager_ref()
         if manager is None:
             return
         try:
-            # CRITICAL: Restore thread-local GlobalPipelineConfig in worker thread
+            # CRITICAL: Restore thread-local global config in worker thread
             # This ensures placeholder resolution sees the same global config as the main thread
-            if self._global_config_snapshot is not None:
+            if self._global_config_snapshot is not None and self._global_config_type is not None:
                 from openhcs.config_framework.global_config import set_global_config_for_editing
-                from openhcs.core.config import GlobalPipelineConfig
-                set_global_config_for_editing(GlobalPipelineConfig, self._global_config_snapshot)
+                set_global_config_for_editing(self._global_config_type, self._global_config_snapshot)
 
             placeholder_map = manager._compute_placeholder_map_async(
                 self._parameters_snapshot,
