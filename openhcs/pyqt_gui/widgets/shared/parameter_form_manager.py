@@ -118,7 +118,6 @@ class FormManagerConfig:
     read_only: bool = False
     scope_id: Optional[str] = None
     color_scheme: Optional[Any] = None
-    parent_node: Optional[Any] = None  # ConfigNode parent for tree registry
 
 
 class NoneAwareIntEdit(QLineEdit):
@@ -396,7 +395,7 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
                               force_show_all_fields: bool = False,
                               global_config_type: Optional[Type] = None,
                               context_event_coordinator=None, context_obj=None,
-                              scope_id: Optional[str] = None, parent_node=None):
+                              scope_id: Optional[str] = None):
         """
         SIMPLIFIED: Create ParameterFormManager using new generic constructor.
 
@@ -426,7 +425,6 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
             context_obj=context_obj,  # No default - None means inherit from thread-local global only
             scope_id=scope_id,
             color_scheme=color_scheme,
-            parent_node=parent_node  # Parent ConfigNode for tree registry
         )
         return cls(
             object_instance=dataclass_instance,
@@ -608,15 +606,13 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
             object_instance = actual_type() if dataclasses.is_dataclass(actual_type) else actual_type
 
         # DELEGATE TO NEW CONSTRUCTOR: Use simplified constructor with FormManagerConfig
-        # CRITICAL FIX: Pass parent_node so nested managers are registered as children in the tree
-        # Without this, nested managers create isolated root nodes and can't inherit from siblings
+        # Nested managers use parent manager's scope_id for cross-window grouping
         nested_config = FormManagerConfig(
             parent=self,
             context_obj=self.context_obj,
             parent_manager=self,  # Pass parent manager so setup_ui() can detect nested configs
             color_scheme=self.config.color_scheme,
-            scope_id=self.scope_id,
-            parent_node=self._config_node  # CRITICAL: Nested managers should be children of parent node
+            scope_id=self.scope_id
         )
         nested_manager = ParameterFormManager(
             object_instance=object_instance,
