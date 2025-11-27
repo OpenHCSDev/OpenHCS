@@ -192,6 +192,9 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
     # Class-level list of all active form managers for cross-window updates
     # Uses simpler list-based approach instead of tree registry
     _active_form_managers = []
+    
+    # External listeners (e.g., PipelineEditorWidget) that receive cross-window signals
+    _external_listeners = []
 
     # Class constants for UI preferences (moved from constructor parameters)
     DEFAULT_USE_SCROLL_AREA = False
@@ -1246,6 +1249,50 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         except (ValueError, AttributeError) as e:
             logger.warning(f"🔍 UNREGISTER: Error during unregistration: {e}")
             pass  # Already removed
+
+    @classmethod
+    def register_external_listener(cls, listener: object,
+                                   value_changed_handler,
+                                   refresh_handler):
+        """Register an external listener for cross-window signals.
+
+        External listeners are objects (like PipelineEditorWidget) that want to receive
+        cross-window signals but aren't ParameterFormManager instances.
+
+        Args:
+            listener: The listener object (for identification)
+            value_changed_handler: Handler for context_value_changed signal (required)
+            refresh_handler: Handler for context_refreshed signal (optional, can be None)
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        # Add to registry
+        cls._external_listeners.append((listener, value_changed_handler, refresh_handler))
+
+        # Connect all existing managers to this listener
+        for manager in cls._active_form_managers:
+            if value_changed_handler:
+                manager.context_value_changed.connect(value_changed_handler)
+            if refresh_handler:
+                manager.context_refreshed.connect(refresh_handler)
+
+        logger.debug(f"Registered external listener: {listener.__class__.__name__}")
+
+    @classmethod
+    def unregister_external_listener(cls, listener: object):
+        """Unregister an external listener.
+
+        Args:
+            listener: The listener object to unregister
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        # Find and remove from registry
+        cls._external_listeners = [
+            (l, vh, rh) for l, vh, rh in cls._external_listeners if l is not listener
+        ]
+
+        logger.debug(f"Unregistered external listener: {listener.__class__.__name__}")
 
     def _on_cross_window_event(self, editing_object: object, context_object: object, **kwargs):
         """REFACTORING: Unified handler for cross-window events - eliminates duplicate methods.
