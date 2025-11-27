@@ -200,7 +200,8 @@ class FieldChangeDispatcher:
             full_path,
             value,
             root_manager.object_instance,
-            root_manager.context_obj
+            root_manager.context_obj,
+            root_manager.scope_id
         )
 
     def _refresh_single_field(self, manager: 'ParameterFormManager', field_name: str) -> None:

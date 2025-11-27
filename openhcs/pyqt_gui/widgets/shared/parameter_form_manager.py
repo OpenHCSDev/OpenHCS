@@ -195,13 +195,13 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
     # Class-level signal for cross-window context changes
     # Emitted when a form changes a value that might affect other open windows
     # Args: (field_path, new_value, editing_object, context_object)
-    context_value_changed = pyqtSignal(str, object, object, object)
+    context_value_changed = pyqtSignal(str, object, object, object, str)  # field_path, new_value, editing_obj, context_obj, scope_id
 
     # Class-level signal for cascading placeholder refreshes
     # Emitted when a form's placeholders are refreshed due to upstream changes
     # This allows downstream windows to know they should re-collect live context
     # Args: (editing_object, context_object)
-    context_refreshed = pyqtSignal(object, object)
+    context_refreshed = pyqtSignal(object, object, str)  # editing_obj, context_obj, scope_id
 
     # Class-level list of all active form managers for cross-window updates
     # Uses simpler list-based approach instead of tree registry
@@ -317,9 +317,10 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
                 else set()
             )
 
-            # CROSS-WINDOW: Register in active managers list (simpler than tree registry)
-            # This enables cross-window updates without complex tree structure
-            self._active_form_managers.append(self)
+            # CROSS-WINDOW: Register in active managers list (only root managers)
+            # Nested managers are internal to their window and should not participate in cross-window updates
+            if self._parent_manager is None:
+                self._active_form_managers.append(self)
             
             # Register hierarchy relationship for cross-window placeholder resolution
             if self.context_obj is not None and not self._parent_manager:
@@ -1103,7 +1104,9 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
             # Remove from active managers list
             if self in self._active_form_managers:
                 self._active_form_managers.remove(self)
-                logger.info(f"🔍 UNREGISTER: Removed from active managers list")
+                # Invalidate live context cache since a manager was removed
+                self._live_context_token_counter += 1
+                logger.info(f"🔍 UNREGISTER: Removed {self.field_id} from active managers, token={self._live_context_token_counter}")
 
             # Unregister hierarchy relationship if this is a root manager
             if self.context_obj is not None and not self._parent_manager:
@@ -1111,10 +1114,13 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
                 unregister_hierarchy_relationship(type(self.object_instance))
 
             # Trigger refresh in remaining managers that might be affected
-            refresh_service = ParameterOpsService()
-            for manager in self._active_form_managers:
-                if manager is not self:
-                    refresh_service.refresh_with_live_context(manager, use_user_modified_only=False)
+            # Only root managers (no parent) trigger cross-window refresh on close
+            if not self._parent_manager:
+                logger.info(f"🔍 UNREGISTER: Triggering cross-window refresh for {len(self._active_form_managers)} remaining managers")
+                for manager in self._active_form_managers:
+                    if manager is not self and not manager._parent_manager:
+                        # Schedule refresh for root managers only (they propagate to nested)
+                        manager._schedule_cross_window_refresh(changed_field=None)
 
         except (ValueError, AttributeError) as e:
             logger.warning(f"🔍 UNREGISTER: Error during unregistration: {e}")
@@ -1165,6 +1171,39 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         logger.debug(f"Unregistered external listener: {listener.__class__.__name__}")
 
     @classmethod
+    def trigger_global_cross_window_refresh(cls):
+        """Trigger cross-window refresh for all active form managers.
+
+        Called when:
+        - Config window saves/cancels (restore to saved state)
+        - Code editor modifies config (apply code changes to UI)
+        - Any bulk operation that affects multiple windows
+
+        This refreshes all managers' placeholders and notifies external listeners
+        (like PipelineEditorWidget) that context has changed.
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.debug(f"🔄 GLOBAL_REFRESH: Triggering for {len(cls._active_form_managers)} managers")
+
+        refresh_service = ParameterOpsService()
+        for manager in cls._active_form_managers:
+            try:
+                refresh_service.refresh_with_live_context(manager, use_user_modified_only=False)
+                manager.context_refreshed.emit(manager.object_instance, manager.context_obj, manager.scope_id)
+            except Exception as e:
+                logger.warning(f"Failed to refresh manager {manager.field_id}: {e}")
+
+        # Notify external listeners (e.g., PipelineEditorWidget)
+        logger.debug(f"🔄 GLOBAL_REFRESH: Notifying {len(cls._external_listeners)} external listeners")
+        for listener, _, refresh_handler in cls._external_listeners:
+            if refresh_handler:
+                try:
+                    refresh_handler(None, None)
+                except Exception as e:
+                    logger.warning(f"Failed to notify {listener.__class__.__name__}: {e}")
+
+    @classmethod
     def _collect_from_manager_tree(cls, manager, result: dict, scoped_result: dict = None) -> None:
         """Recursively collect values from manager and all nested managers.
 
@@ -1172,13 +1211,33 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         LazyStepWellFilterConfig and LazyWellFilterConfig values,
         _find_live_values_for_type() can use issubclass matching to find
         StepWellFilterConfig values when resolving WellFilterConfig placeholders.
+
+        CRITICAL: For parent configs (like PipelineConfig), we need to include
+        the nested manager values in the parent's entry. Otherwise when we
+        instantiate PipelineConfig from live_context, we won't have step_well_filter_config.
         """
         if manager.dataclass_type:
-            result[manager.dataclass_type] = manager.get_user_modified_values()
+            # Start with the manager's own user-modified values
+            values = manager.get_user_modified_values()
+
+            # CRITICAL: Merge nested manager values into parent's entry
+            # This ensures PipelineConfig includes step_well_filter_config with live values
+            for field_name, nested in manager.nested_managers.items():
+                if nested.dataclass_type:
+                    nested_values = nested.get_user_modified_values()
+                    if nested_values:
+                        # Reconstruct nested dataclass from live values
+                        try:
+                            values[field_name] = nested.dataclass_type(**nested_values)
+                        except Exception:
+                            # Skip if reconstruction fails (missing required fields)
+                            pass
+
+            result[manager.dataclass_type] = values
             if scoped_result is not None and manager.scope_id:
                 scoped_result.setdefault(manager.scope_id, {})[manager.dataclass_type] = result[manager.dataclass_type]
 
-        # Recurse into nested managers
+        # Recurse into nested managers (still store them separately for type matching)
         for nested in manager.nested_managers.values():
             cls._collect_from_manager_tree(nested, result, scoped_result)
 
@@ -1207,20 +1266,27 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
 
         def compute_live_context() -> LiveContextSnapshot:
             """Recursively collect values from all managers and nested managers."""
-            logger.debug(f"❌ collect_live_context: CACHE MISS (token={cls._live_context_token_counter}, scope={scope_filter})")
+            logger.info(f"📦 collect_live_context: COMPUTING (token={cls._live_context_token_counter}, scope={scope_filter})")
 
             live_context = {}
             scoped_live_context = {}
 
             for manager in cls._active_form_managers:
+                manager_type = type(manager.object_instance).__name__ if manager.object_instance else "None"
                 # Apply scope filter if provided
                 if scope_filter is not None and manager.scope_id is not None:
-                    if not cls._is_scope_visible_static(manager.scope_id, scope_filter):
+                    is_visible = cls._is_scope_visible_static(manager.scope_id, scope_filter)
+                    logger.info(f"  📋 MANAGER {manager.field_id}: type={manager_type}, scope={manager.scope_id}, visible={is_visible}")
+                    if not is_visible:
                         continue
+                else:
+                    logger.info(f"  📋 MANAGER {manager.field_id}: type={manager_type}, scope={manager.scope_id}, no_filter_or_no_scope")
 
                 # Collect from this manager AND all its nested managers
                 cls._collect_from_manager_tree(manager, live_context, scoped_live_context)
 
+            collected_types = list(live_context.keys())
+            logger.info(f"  📦 COLLECTED {len(collected_types)} types: {[t.__name__ for t in collected_types]}")
             token = cls._live_context_token_counter
             return LiveContextSnapshot(token=token, values=live_context, scoped_values=scoped_live_context)
 
@@ -1235,50 +1301,101 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
     @staticmethod
     def _is_scope_visible_static(manager_scope: str, filter_scope) -> bool:
         """
-        Static version of _is_scope_visible for class method use.
+        Check if manager's scope is visible to the filter scope using root-based matching.
 
-        Check if scopes match (prefix matching for hierarchical scopes).
-        Supports generic hierarchical scope strings like 'x::y::z'.
+        Visibility rules:
+        - Empty root (global) is visible to all
+        - Same root = visible (e.g., "/plate1" sees "/plate1::step1")
+        - Different roots = isolated (e.g., "/plate1" doesn't see "/plate2")
 
         Args:
-            manager_scope: Scope ID from the manager (always str)
+            manager_scope: Scope ID from the manager (always str, can be empty)
             filter_scope: Scope filter (can be str or Path)
         """
+        from openhcs.config_framework.context_manager import get_root_from_scope_key
+
         # Convert filter_scope to string if it's a Path
         filter_scope_str = str(filter_scope) if not isinstance(filter_scope, str) else filter_scope
 
-        return (
-            manager_scope == filter_scope_str or
-            manager_scope.startswith(f"{filter_scope_str}::") or
-            filter_scope_str.startswith(f"{manager_scope}::")
-        )
+        # Extract roots from both scope keys
+        manager_root = get_root_from_scope_key(manager_scope)
+        filter_root = get_root_from_scope_key(filter_scope_str)
 
-    def _on_cross_window_event(self, editing_object: object, context_object: object, **kwargs):
-        """REFACTORING: Unified handler for cross-window events - eliminates duplicate methods.
+        # Empty root (global) is visible to all
+        if not manager_root:
+            return True
 
-        Handles both context_value_changed and context_refreshed signals with identical logic.
+        # Same root = visible
+        return manager_root == filter_root
+
+    def _on_cross_window_context_changed(self, field_path: str, new_value: object,
+                                          editing_object: object, context_object: object, editing_scope_id: str):
+        """Handle context_value_changed signal from another window.
+
+        Signal signature: (field_path, new_value, editing_object, context_object)
+
+        Uses targeted placeholder refresh for the specific field that changed,
+        rather than refreshing all placeholders.
+
+        Args:
+            field_path: The full path of the field that changed (e.g., "GlobalConfig.path_planning_config.well_filter")
+            new_value: The new value of the field
+            editing_object: The object being edited in the other window
+            context_object: The context object used by the other window
+        """
+        editing_type_name = type(editing_object).__name__ if editing_object else "None"
+        context_type_name = type(context_object).__name__ if context_object else "None"
+        logger.info(f"🔔 CROSS_WINDOW_RECV [{self.field_id}]: path={field_path}, value={repr(new_value)[:30]}, "
+                   f"from={editing_type_name}, ctx={context_type_name}, my_scope={self.scope_id}")
+
+        # Don't refresh if this is the window that triggered the event
+        if editing_object is self.object_instance:
+            logger.info(f"  ⏭️  SKIP: same instance")
+            return
+
+        # Check if the event affects this form based on context hierarchy
+        if not self._is_affected_by_context_change(editing_object, context_object, editing_scope_id):
+            logger.info(f"  ⏭️  SKIP: not affected by context change")
+            return
+
+        # Extract the leaf field name from the path
+        # e.g., "GlobalConfig.path_planning_config.well_filter" → "well_filter"
+        leaf_field = field_path.split(".")[-1] if field_path else None
+        logger.info(f"  ✅ AFFECTED: scheduling refresh for field={leaf_field}")
+
+        # Schedule targeted refresh for this specific field
+        self._schedule_cross_window_refresh(changed_field=leaf_field, emit_signal=True)
+
+    def _on_cross_window_context_refreshed(self, editing_object: object, context_object: object, editing_scope_id: str):
+        """Handle context_refreshed signal from another window.
+
+        Signal signature: (editing_object, context_object)
+
+        This is a bulk refresh (e.g., save/cancel), so refresh all placeholders.
 
         Args:
             editing_object: The object being edited/refreshed in the other window
             context_object: The context object used by the other window
-            **kwargs: Ignored extra args (field_path, new_value from context_value_changed)
         """
+        editing_type_name = type(editing_object).__name__ if editing_object else "None"
+        context_type_name = type(context_object).__name__ if context_object else "None"
+        logger.info(f"🔔 CROSS_WINDOW_REFRESH [{self.field_id}]: from={editing_type_name}, ctx={context_type_name}, my_scope={self.scope_id}")
+
         # Don't refresh if this is the window that triggered the event
         if editing_object is self.object_instance:
+            logger.info(f"  ⏭️  SKIP: same instance")
             return
 
         # Check if the event affects this form based on context hierarchy
-        if not self._is_affected_by_context_change(editing_object, context_object):
+        if not self._is_affected_by_context_change(editing_object, context_object, editing_scope_id):
+            logger.info(f"  ⏭️  SKIP: not affected by context change")
             return
 
-        # Debounce the refresh to avoid excessive updates
-        self._schedule_cross_window_refresh()
+        logger.info(f"  ✅ AFFECTED: scheduling BULK refresh")
+        # Bulk refresh - no specific field
+        self._schedule_cross_window_refresh(changed_field=None, emit_signal=False)
 
-    # Aliases for signal connections (Qt requires exact signature match)
-    _on_cross_window_context_changed = _on_cross_window_event
-    _on_cross_window_context_refreshed = _on_cross_window_event
-
-    def _is_affected_by_context_change(self, editing_object: object, context_object: object) -> bool:
+    def _is_affected_by_context_change(self, editing_object: object, context_object: object, editing_scope_id: str = "") -> bool:
         """Determine if a context change from another window affects this form.
 
         Hierarchical rules (GENERIC - uses config_framework hierarchy functions):
@@ -1300,30 +1417,52 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         from dataclasses import fields, is_dataclass
         import typing
 
+        # ROOT ISOLATION: Different plates should not affect each other
+        from openhcs.config_framework.context_manager import get_root_from_scope_key
+        my_root = get_root_from_scope_key(self.scope_id)
+        editing_root = get_root_from_scope_key(editing_scope_id)
+        # Non-empty different roots are isolated (global root "" is visible to all)
+        if editing_root and my_root and editing_root != my_root:
+            logger.info(f"    → ROOT ISOLATION: editing_root={editing_root} != my_root={my_root} → False")
+            return False
+
+        editing_type = type(editing_object)
+        my_ctx_type = type(self.context_obj).__name__ if self.context_obj else "None"
+        my_obj_type = type(self.object_instance).__name__ if self.object_instance else "None"
+
+        # Check if editing object is global config
+        is_editing_global = is_global_config_instance(editing_object)
+        has_global_marker = hasattr(editing_type, '_is_global_config') and editing_type._is_global_config
+        logger.info(f"  🔍 _is_affected: editing={editing_type.__name__}, my_ctx={my_ctx_type}, my_obj={my_obj_type}, is_global={is_editing_global}, has_marker={has_global_marker}")
+
         # GENERIC: If other window is editing a global config, check if we're affected
-        if is_global_config_instance(editing_object):
+        if is_editing_global:
             # We're affected if:
             # - Our context_obj is also a global config instance
             # - Our object_instance is a global config instance
             # - We have no context (relying on global context)
-            is_affected = (
-                (is_global_config_instance(self.context_obj) if self.context_obj else False) or
-                (is_global_config_instance(self.object_instance) if self.object_instance else False) or
-                self.context_obj is None  # No context means we use global context
-            )
+            ctx_is_global = is_global_config_instance(self.context_obj) if self.context_obj else False
+            obj_is_global = is_global_config_instance(self.object_instance) if self.object_instance else False
+            no_context = self.context_obj is None
+            is_affected = ctx_is_global or obj_is_global or no_context
+            logger.info(f"    → GLOBAL check: ctx_is_global={ctx_is_global}, obj_is_global={obj_is_global}, no_context={no_context} → {is_affected}")
             return is_affected
 
         # GENERIC: Check if editing_object is an ancestor in our hierarchy
-        editing_type = type(editing_object)
         if self.context_obj is not None:
             context_obj_type = type(self.context_obj)
             # Check if editing type is an ancestor of our context type
-            if is_ancestor_in_context(editing_type, context_obj_type):
+            is_ancestor = is_ancestor_in_context(editing_type, context_obj_type)
+            logger.info(f"    → ANCESTOR check: is_ancestor_in_context({editing_type.__name__}, {context_obj_type.__name__}) = {is_ancestor}")
+            if is_ancestor:
                 return True
             # Check if editing type is the same type as our context
-            if is_same_type_in_context(editing_type, context_obj_type):
+            is_same = is_same_type_in_context(editing_type, context_obj_type)
+            same_instance = self.context_obj is editing_object
+            logger.info(f"    → SAME_TYPE check: is_same_type={is_same}, same_instance={same_instance}")
+            if is_same:
                 # Same type - affected only if same instance
-                return self.context_obj is editing_object
+                return same_instance
 
         # Check if editing_object is a parent type in our inheritance hierarchy
         # This handles nested configs like WellFilterConfig that are inherited by other configs
@@ -1333,6 +1472,7 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
                 for field in fields(self.dataclass_type):
                     # Check if this field's type matches the editing type
                     if field.type == editing_type:
+                        logger.info(f"    → FIELD match: {self.dataclass_type.__name__}.{field.name} is {editing_type.__name__}")
                         return True
 
                     # Also check Optional[editing_type]
@@ -1340,31 +1480,74 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
                     if origin is typing.Union:
                         args = typing.get_args(field.type)
                         if editing_type in args:
+                            logger.info(f"    → OPTIONAL FIELD match: {self.dataclass_type.__name__}.{field.name} is Optional[{editing_type.__name__}]")
                             return True
 
         # Leaf node changes don't affect other windows
+        logger.info(f"    → NO MATCH: returning False")
         return False
 
-    def _schedule_cross_window_refresh(self):
-        """Schedule a debounced placeholder refresh for cross-window updates."""
+    def _schedule_cross_window_refresh(self, changed_field: Optional[str] = None, emit_signal: bool = True):
+        """Schedule a debounced placeholder refresh for cross-window updates.
+
+        Args:
+            changed_field: If specified, only refresh this field's placeholder (targeted).
+                          If None, refresh all placeholders (bulk refresh).
+            emit_signal: Whether to emit context_refreshed signal after refresh.
+                        Set to False when refresh is triggered by another window's
+                        context_refreshed to prevent infinite ping-pong loops.
+        """
+        logger.info(f"⏰ SCHEDULE_REFRESH [{self.field_id}]: field={changed_field}, emit_signal={emit_signal}, scope={self.scope_id}")
+
         # Cancel existing timer if any
         if self._cross_window_refresh_timer is not None:
             self._cross_window_refresh_timer.stop()
 
-        # Schedule new refresh after 200ms delay (debounce)
-        # REFACTORING: Inlined _do_cross_window_refresh (single-use method)
         def do_refresh():
-            # CRITICAL: Use refresh_with_live_context to build context stack from tree registry
-            # This ensures cross-window updates see the latest values from all forms
-            # REFACTORING: Inline delegate calls
-            self._parameter_ops_service.refresh_with_live_context(self, use_user_modified_only=False)
-            self._apply_to_nested_managers(lambda name, manager: manager._enabled_field_styling_service.refresh_enabled_styling(manager))
-            self.context_refreshed.emit(self.object_instance, self.context_obj)
+            logger.info(f"🔄 DO_REFRESH [{self.field_id}]: field={changed_field}, emit_signal={emit_signal}")
+            if changed_field is not None:
+                # Targeted refresh: only refresh the specific field that changed
+                # This field might exist in this manager OR in nested managers
+                self._refresh_field_in_tree(changed_field)
+            else:
+                # Bulk refresh: refresh all placeholders (save/cancel/code editor)
+                self._parameter_ops_service.refresh_with_live_context(self, use_user_modified_only=False)
+                self._apply_to_nested_managers(lambda _, manager: manager._enabled_field_styling_service.refresh_enabled_styling(manager))
+
+            # CRITICAL: Only emit context_refreshed signal if requested AND we're a root manager
+            # When emit_signal=False, this refresh was triggered by another window's context_refreshed,
+            # so we don't emit to prevent infinite ping-pong loops between windows
+            # Only root managers should emit cross-window signals - nested managers are internal to a window
+            # Example: GlobalPipelineConfig value change → emits signal → PipelineConfig (root) refreshes AND emits
+            #          → Step editor (root) refreshes (no emit) → stops
+            if emit_signal and self._parent_manager is None:
+                self.context_refreshed.emit(self.object_instance, self.context_obj, self.scope_id)
 
         self._cross_window_refresh_timer = QTimer()
         self._cross_window_refresh_timer.setSingleShot(True)
         self._cross_window_refresh_timer.timeout.connect(do_refresh)
-        self._cross_window_refresh_timer.start(200)  # 200ms debounce
+        self._cross_window_refresh_timer.start(10)  # 10ms debounce
+
+    def _refresh_field_in_tree(self, field_name: str):
+        """Refresh a specific field's placeholder in this manager and all nested managers.
+
+        The field might be in this manager directly, or in any nested manager.
+        We refresh it wherever it exists.
+
+        Args:
+            field_name: The leaf field name to refresh (e.g., "well_filter")
+        """
+        has_widget = field_name in self.widgets
+        nested_names = list(self.nested_managers.keys())
+        logger.info(f"  🌳 TREE [{self.field_id}]: field={field_name}, has_widget={has_widget}, nested={nested_names}")
+
+        # Try to refresh in this manager
+        if has_widget:
+            self._parameter_ops_service.refresh_single_placeholder(self, field_name)
+
+        # Also try in all nested managers (the field might be nested)
+        for nested_manager in self.nested_managers.values():
+            nested_manager._refresh_field_in_tree(field_name)
 
 
 

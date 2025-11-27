@@ -536,6 +536,10 @@ class LazyDataclassFactory:
         register_lazy_type_mapping(lazy_class, base_class)
 
         # Cache the created class to prevent duplicates
+
+        # CRITICAL: Lazy types are NOT global configs, even if their base is
+        # GlobalPipelineConfig is global, but PipelineConfig (lazy) is NOT
+        lazy_class._is_global_config = False
         _lazy_class_cache[cache_key] = lazy_class
 
         return lazy_class
@@ -1217,6 +1221,11 @@ def _inject_multiple_fields_into_dataclass(target_class: Type, configs: List[Dic
     # We need to set it to the target class's original module for correct import paths
     new_class.__module__ = target_class.__module__
 
+
+    # CRITICAL: Preserve _is_global_config marker for GlobalPipelineConfig
+    # This marker is set by @auto_create_decorator but lost when make_dataclass creates a new class
+    if hasattr(target_class, '_is_global_config') and target_class._is_global_config:
+        new_class._is_global_config = True
     # Sibling inheritance is now handled by the dual-axis resolver system
 
     # Direct module replacement

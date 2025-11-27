@@ -252,6 +252,21 @@ def _is_global_type(t):
 _known_hierarchy: dict = {}
 
 
+def get_root_from_scope_key(scope_key: str) -> str:
+    """Extract root (plate path) from scope_key for visibility checks.
+
+    scope_key format:
+    - Pipeline-level: just plate path (e.g., "/path/to/plate")
+    - Step-level: plate_path::step_token (e.g., "/path/to/plate::step_a")
+    - Global: empty string
+
+    Returns the portion before "::" (or the whole string if no "::" present).
+    """
+    if not scope_key:
+        return ""
+    return scope_key.split("::")[0]
+
+
 def register_hierarchy_relationship(context_obj_type, object_instance_type):
     """Register that context_obj_type is the parent of object_instance_type in the hierarchy.
 
@@ -261,6 +276,12 @@ def register_hierarchy_relationship(context_obj_type, object_instance_type):
     Args:
         context_obj_type: The parent/context type (e.g., PipelineConfig for Step editor)
         object_instance_type: The child type being edited (e.g., Step)
+
+    Note:
+        Types are normalized to base types here. This is correct for nested configs
+        (e.g., LazyPathPlanningConfig → PathPlanningConfig).
+        The GlobalPipelineConfig → PipelineConfig relationship is handled separately
+        by is_ancestor_in_context using get_base_type_for_lazy().
     """
     if context_obj_type is None or object_instance_type is None:
         return
@@ -268,7 +289,8 @@ def register_hierarchy_relationship(context_obj_type, object_instance_type):
     parent_base = _normalize_type(context_obj_type)
     child_base = _normalize_type(object_instance_type)
 
-    if parent_base != child_base and not _is_global_type(parent_base):
+    # Removed global type filter - GlobalPipelineConfig can be a parent too
+    if parent_base != child_base:
         _known_hierarchy[child_base] = parent_base
         logger.debug(f"Registered hierarchy: {parent_base.__name__} -> {child_base.__name__}")
 
@@ -373,17 +395,27 @@ def is_ancestor_in_context(ancestor_type, descendant_type):
     This determines whether changes to ancestor_type should affect descendant_type.
 
     Args:
-        ancestor_type: The potential ancestor type (will be normalized)
-        descendant_type: The potential descendant type (will be normalized)
+        ancestor_type: The potential ancestor type
+        descendant_type: The potential descendant type
 
     Returns:
         True if ancestor_type is an ancestor of descendant_type,
         False otherwise.
     """
-    ancestor_base = _normalize_type(ancestor_type)
-    descendant_base = _normalize_type(descendant_type)
+    from openhcs.config_framework.lazy_factory import get_base_type_for_lazy
 
-    # First try active context stack
+    # Check 1: Is ancestor_type the lazy base of descendant_type?
+    # This handles GlobalPipelineConfig → PipelineConfig relationship
+    # PipelineConfig is a lazy version of GlobalPipelineConfig
+    descendant_base = get_base_type_for_lazy(descendant_type)
+    if descendant_base is not None and descendant_base == ancestor_type:
+        return True
+
+    # Check 2: Normalize for comparison (handles nested lazy configs like LazyPathPlanningConfig)
+    ancestor_base = _normalize_type(ancestor_type)
+    descendant_normalized = _normalize_type(descendant_type)
+
+    # Check 3: Active context stack (uses normalized types)
     normalized_stack = get_normalized_stack()
     if normalized_stack:
         ancestor_index = -1
@@ -391,15 +423,16 @@ def is_ancestor_in_context(ancestor_type, descendant_type):
         for i, base_t in enumerate(normalized_stack):
             if base_t == ancestor_base:
                 ancestor_index = i
-            if base_t == descendant_base:
+            if base_t == descendant_normalized:
                 descendant_index = i
 
         if ancestor_index >= 0 and descendant_index >= 0:
             return ancestor_index < descendant_index
 
-    # Fall back to known hierarchy registry
+    # Check 4: Known hierarchy registry (uses actual types, not normalized)
     ancestors = get_ancestors_from_hierarchy(descendant_type)
-    return ancestor_base in ancestors
+    # Check if ancestor_type OR its normalized form is in the ancestor list
+    return ancestor_type in ancestors or ancestor_base in [_normalize_type(a) for a in ancestors]
 
 
 def is_same_type_in_context(type_a, type_b):
@@ -463,18 +496,41 @@ def build_context_stack(
 
     stack = ExitStack()
 
+    ctx_type_name = type(context_obj).__name__ if context_obj else "None"
+    dc_type_name = dataclass_type.__name__ if dataclass_type else "None"
+    live_ctx_types = [t.__name__ for t in live_context.keys()] if live_context else []
+    logger.info(f"🔧 build_context_stack: ctx={ctx_type_name}, dc={dc_type_name}, live_ctx={live_ctx_types[:5]}{'...' if len(live_ctx_types) > 5 else ''}")
+
     # 1. Global context layer
     global_layer = _get_global_context_layer(live_context, is_global_config_editing, global_config_type)
     if global_layer is not None:
         stack.enter_context(config_context(global_layer, mask_with_none=is_global_config_editing))
+        logger.info(f"  [1] GLOBAL layer: {type(global_layer).__name__}")
 
     # 2. Intermediate layers (ancestors of context_obj in hierarchy)
     if context_obj is not None and live_context:
         _inject_intermediate_layers(stack, type(context_obj), live_context)
 
-    # 3. Parent context from context_obj
+    # 3. Parent context from context_obj (prefer live values if available)
     if context_obj is not None:
-        stack.enter_context(config_context(context_obj))
+        context_type = type(context_obj)
+        live_values = _find_live_values_for_type(context_type, live_context) if live_context else None
+
+        if live_values:
+            # Use LIVE values from currently open forms instead of stored context_obj
+            # This ensures cross-window changes are immediately visible
+            try:
+                live_context_obj = context_type(**live_values)
+                stack.enter_context(config_context(live_context_obj))
+                logger.info(f"  [3] CONTEXT layer: {context_type.__name__} (LIVE: {list(live_values.keys())[:3]}...)")
+            except Exception as e:
+                # Fall back to stored context_obj if instantiation fails
+                stack.enter_context(config_context(context_obj))
+                logger.warning(f"  [3] CONTEXT layer: {context_type.__name__} (stored, live failed: {e})")
+        else:
+            # No live values, use stored context_obj
+            stack.enter_context(config_context(context_obj))
+            logger.info(f"  [3] CONTEXT layer: {context_type.__name__} (stored)")
 
     # 4. Root form layer (for sibling inheritance)
     # The root form can be ANY object (dataclass, class, function, etc.)
@@ -482,30 +538,35 @@ def build_context_stack(
     # For non-dataclass roots, use SimpleNamespace to mimic a dataclass structure.
     if root_form_values:
         from types import SimpleNamespace
+        root_type_name = root_form_type.__name__ if root_form_type else "None"
+        root_keys = list(root_form_values.keys())[:5]
+        logger.info(f"  [4] ROOT layer: type={root_type_name}, keys={root_keys}{'...' if len(root_form_values) > 5 else ''}")
 
         if root_form_type and is_dataclass(root_form_type):
             # Root is a dataclass - instantiate directly
             try:
                 root_instance = root_form_type(**root_form_values)
                 stack.enter_context(config_context(root_instance))
-                logger.info(f"build_context_stack: ✅ injected root form {root_form_type.__name__}")
+                logger.info(f"      ✅ injected root form {root_form_type.__name__}")
             except Exception as e:
-                logger.debug(f"build_context_stack: failed to inject root form: {e}")
+                logger.warning(f"      ❌ failed to inject root form: {e}")
         else:
             # Root is NOT a dataclass - wrap in SimpleNamespace to go through same path
             root_instance = SimpleNamespace(**root_form_values)
             stack.enter_context(config_context(root_instance))
-            logger.info(f"build_context_stack: ✅ injected root form as SimpleNamespace")
+            logger.info(f"      ✅ injected root form as SimpleNamespace")
 
     # 5. Overlay from current form values
     if dataclass_type and overlay:
+        overlay_keys = list(overlay.keys())[:5]
+        logger.info(f"  [5] OVERLAY layer: type={dataclass_type.__name__}, keys={overlay_keys}{'...' if len(overlay) > 5 else ''}")
         try:
             if is_dataclass(dataclass_type):
                 overlay_instance = dataclass_type(**overlay)
                 stack.enter_context(config_context(overlay_instance))
-        except Exception:
-            # Skip overlay if instantiation fails (missing required fields, etc.)
-            pass
+                logger.info(f"      ✅ injected overlay")
+        except Exception as e:
+            logger.warning(f"      ❌ failed to inject overlay: {e}")
 
     return stack
 
@@ -565,10 +626,13 @@ def _inject_intermediate_layers(stack, context_obj_type: type, live_context: dic
         live_context: Dict mapping types to their live values
     """
     ancestor_types = get_types_before_in_stack(context_obj_type)
+    logger.info(f"_inject_intermediate_layers: context_obj_type={context_obj_type.__name__}, ancestors={[t.__name__ for t in ancestor_types]}")
+    logger.info(f"_inject_intermediate_layers: live_context types={[t.__name__ for t in live_context.keys()]}")
 
     for ancestor_type in ancestor_types:
         # Skip global types (already handled)
         if _is_global_type(ancestor_type):
+            logger.info(f"  → SKIP {ancestor_type.__name__}: is global type")
             continue
 
         # Find live values for this ancestor type
@@ -577,9 +641,11 @@ def _inject_intermediate_layers(stack, context_obj_type: type, live_context: dic
             try:
                 ancestor_instance = ancestor_type(**live_values)
                 stack.enter_context(config_context(ancestor_instance))
-            except Exception:
-                # Skip if instantiation fails
-                pass
+                logger.info(f"  → INJECT {ancestor_type.__name__}: {list(live_values.keys())[:5]}...")
+            except Exception as e:
+                logger.warning(f"  → FAILED {ancestor_type.__name__}: {e}")
+        else:
+            logger.info(f"  → NO VALUES for {ancestor_type.__name__}")
 
 
 def _find_live_values_for_type(target_type: type, live_context: dict) -> dict | None:
