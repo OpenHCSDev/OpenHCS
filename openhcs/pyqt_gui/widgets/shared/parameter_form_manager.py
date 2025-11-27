@@ -6,7 +6,7 @@ by leveraging the comprehensive shared infrastructure we've built.
 """
 
 import dataclasses
-from dataclasses import dataclass, is_dataclass, fields as dataclass_fields
+from dataclasses import dataclass, field, is_dataclass, fields as dataclass_fields
 import logging
 from typing import Any, Dict, Type, Optional, Tuple, List
 from PyQt6.QtWidgets import (
@@ -152,6 +152,22 @@ ValueGettable.register(NoneAwareIntEdit)
 ValueSettable.register(NoneAwareIntEdit)
 
 
+@dataclass(frozen=True)
+class LiveContextSnapshot:
+    """Snapshot of live context values from all active form managers."""
+    token: int
+    values: Dict[type, Dict[str, Any]]
+    scoped_values: Dict[str, Dict[type, Dict[str, Any]]] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class LiveContextSnapshot:
+    """Snapshot of live context values from all active form managers."""
+    token: int
+    values: Dict[type, Dict[str, Any]]
+    scoped_values: Dict[str, Dict[type, Dict[str, Any]]] = field(default_factory=dict)
+
+
 class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_CombinedMeta):
     """
     React-quality reactive form manager for PyQt6.
@@ -194,6 +210,10 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
     
     # External listeners (e.g., PipelineEditorWidget) that receive cross-window signals
     _external_listeners = []
+
+    # Live context token and cache for cross-window placeholder resolution
+    _live_context_token_counter = 0
+    _live_context_cache: Optional['TokenCache'] = None  # Initialized on first use
 
     # Class constants for UI preferences (moved from constructor parameters)
     DEFAULT_USE_SCROLL_AREA = False
@@ -1289,6 +1309,110 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         ]
 
         logger.debug(f"Unregistered external listener: {listener.__class__.__name__}")
+
+    @classmethod
+    def collect_live_context(cls, scope_filter=None) -> 'LiveContextSnapshot':
+        """
+        Collect live context from all active form managers in scope.
+
+        This is a class method that can be called from anywhere (e.g., PipelineEditor)
+        to get the current live context for resolution.
+
+        PERFORMANCE: Caches the snapshot and only invalidates when token changes.
+        The token is incremented whenever any form value changes.
+
+        Args:
+            scope_filter: Optional scope filter (e.g., 'plate_path' or 'x::y::z')
+                         If None, collects from all scopes
+
+        Returns:
+            LiveContextSnapshot with token and values dict
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        # Initialize cache on first use
+        if cls._live_context_cache is None:
+            from openhcs.config_framework import TokenCache, CacheKey
+            cls._live_context_cache = TokenCache(lambda: cls._live_context_token_counter)
+
+        from openhcs.config_framework import CacheKey
+        cache_key = CacheKey.from_args(scope_filter)
+
+        def compute_live_context() -> LiveContextSnapshot:
+            """Compute live context from all active form managers."""
+            logger.debug(f"❌ collect_live_context: CACHE MISS (token={cls._live_context_token_counter}, scope={scope_filter})")
+
+            from openhcs.config_framework.lazy_factory import get_base_type_for_lazy
+            from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
+
+            live_context = {}
+            scoped_live_context = {}
+            alias_context = {}
+
+            for manager in cls._active_form_managers:
+                # Apply scope filter if provided
+                if scope_filter is not None and manager.scope_id is not None:
+                    if not cls._is_scope_visible_static(manager.scope_id, scope_filter):
+                        continue
+
+                # Collect values
+                live_values = manager.get_user_modified_values()
+                obj_type = type(manager.object_instance)
+
+                # Map by the actual type
+                live_context[obj_type] = live_values
+
+                # Track scope-specific mappings (for step-level overlays)
+                if manager.scope_id:
+                    scoped_live_context.setdefault(manager.scope_id, {})[obj_type] = live_values
+
+                # Also map by the base/lazy equivalent type for flexible matching
+                base_type = get_base_type_for_lazy(obj_type)
+                if base_type and base_type != obj_type:
+                    alias_context.setdefault(base_type, live_values)
+
+                lazy_type = LazyDefaultPlaceholderService._get_lazy_type_for_base(obj_type)
+                if lazy_type and lazy_type != obj_type:
+                    alias_context.setdefault(lazy_type, live_values)
+
+            # Apply alias mappings only where no direct mapping exists
+            for alias_type, values in alias_context.items():
+                if alias_type not in live_context:
+                    live_context[alias_type] = values
+
+            # Create snapshot with current token (don't increment - that happens on value change)
+            token = cls._live_context_token_counter
+            return LiveContextSnapshot(token=token, values=live_context, scoped_values=scoped_live_context)
+
+        # Use token cache to get or compute
+        snapshot = cls._live_context_cache.get_or_compute(cache_key, compute_live_context)
+
+        if snapshot.token == cls._live_context_token_counter:
+            logger.debug(f"✅ collect_live_context: CACHE HIT (token={cls._live_context_token_counter}, scope={scope_filter})")
+
+        return snapshot
+
+    @staticmethod
+    def _is_scope_visible_static(manager_scope: str, filter_scope) -> bool:
+        """
+        Static version of _is_scope_visible for class method use.
+
+        Check if scopes match (prefix matching for hierarchical scopes).
+        Supports generic hierarchical scope strings like 'x::y::z'.
+
+        Args:
+            manager_scope: Scope ID from the manager (always str)
+            filter_scope: Scope filter (can be str or Path)
+        """
+        # Convert filter_scope to string if it's a Path
+        filter_scope_str = str(filter_scope) if not isinstance(filter_scope, str) else filter_scope
+
+        return (
+            manager_scope == filter_scope_str or
+            manager_scope.startswith(f"{filter_scope_str}::") or
+            filter_scope_str.startswith(f"{manager_scope}::")
+        )
 
     def _on_cross_window_event(self, editing_object: object, context_object: object, **kwargs):
         """REFACTORING: Unified handler for cross-window events - eliminates duplicate methods.

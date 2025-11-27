@@ -76,8 +76,37 @@ class PlaceholderRefreshService:
 
             logger.debug(f"[PLACEHOLDER] {manager.field_id}: Building context stack (use_user_modified_only={use_user_modified_only})")
 
-            # Use tree-based context stack building - replaces context_layer_builders
-            with manager._config_node.build_context_stack(use_user_modified_only=use_user_modified_only):
+            # Get live context from all active form managers for placeholder resolution
+            from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+            from openhcs.config_framework.context_manager import config_context
+            live_context = ParameterFormManager.collect_live_context(scope_filter=manager.scope_id)
+            
+            # Build context with live values for placeholder resolution
+            overlay = manager.get_user_modified_values() if use_user_modified_only else manager.parameters
+            
+            # Simple context building: apply parent context + current overlay
+            from contextlib import ExitStack
+            with ExitStack() as stack:
+                # Apply parent context if available
+                if manager.context_obj is not None:
+                    stack.enter_context(config_context(manager.context_obj))
+                
+                # Apply overlay from current form values
+                if manager.dataclass_type and overlay:
+                    try:
+                        import dataclasses
+                        if dataclasses.is_dataclass(manager.dataclass_type):
+                            # Merge with object_instance to handle excluded params
+                            overlay_dict = overlay.copy()
+                            for excluded_param in getattr(manager, 'exclude_params', []):
+                                if excluded_param not in overlay_dict and hasattr(manager.object_instance, excluded_param):
+                                    overlay_dict[excluded_param] = getattr(manager.object_instance, excluded_param)
+                            overlay_instance = manager.dataclass_type(**overlay_dict)
+                            stack.enter_context(config_context(overlay_instance))
+                    except Exception:
+                        pass  # Continue without overlay on error
+                
+                # ORIGINAL CODE CONTINUES FROM HERE (inside the context)
                 monitor = get_monitor("Placeholder resolution per field")
 
                 # CRITICAL: Use lazy version of dataclass type for placeholder resolution

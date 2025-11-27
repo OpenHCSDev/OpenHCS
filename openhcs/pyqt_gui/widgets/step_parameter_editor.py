@@ -44,7 +44,7 @@ class StepParameterEditorWidget(QWidget):
     
     def __init__(self, step: FunctionStep, service_adapter=None, color_scheme: Optional[PyQt6ColorScheme] = None,
                  gui_config: Optional[PyQtGUIConfig] = None, parent=None, pipeline_config=None, scope_id: Optional[str] = None,
-                 step_index: Optional[int] = None, parent_node: Optional[Any] = None):
+                 step_index: Optional[int] = None):
         super().__init__(parent)
 
         # Initialize color scheme and GUI config
@@ -57,7 +57,6 @@ class StepParameterEditorWidget(QWidget):
         self.pipeline_config = pipeline_config  # Store pipeline config for context hierarchy
         self.scope_id = scope_id  # Store scope_id for cross-window update scoping
         self.step_index = step_index  # Step position index for tree registry
-        self.parent_node = parent_node  # Parent ConfigNode for tree registry
 
         # Live placeholder updates not yet ready - disable for now
         self._step_editor_coordinator = None
@@ -122,8 +121,7 @@ class StepParameterEditorWidget(QWidget):
             context_obj=self.pipeline_config,    # Pipeline config as parent context for inheritance
             exclude_params=['func'],             # Exclude func - it has its own dedicated tab
             scope_id=self.scope_id,              # Pass scope_id to limit cross-window updates to same orchestrator
-            color_scheme=self.color_scheme,      # Pass color scheme for consistent theming
-            parent_node=self.parent_node         # Parent ConfigNode for tree registry
+            color_scheme=self.color_scheme       # Pass color scheme for consistent theming
         )
 
         self.form_manager = ParameterFormManager(

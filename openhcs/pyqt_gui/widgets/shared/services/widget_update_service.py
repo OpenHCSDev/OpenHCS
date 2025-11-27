@@ -93,8 +93,33 @@ class WidgetUpdateService:
             return
         
         if value is None:
-            # Build context stack for placeholder resolution using tree registry
-            with manager._config_node.build_context_stack():
+            # Get live context from all active form managers for placeholder resolution
+            from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+            from openhcs.config_framework.context_manager import config_context
+            live_context = ParameterFormManager.collect_live_context(scope_filter=manager.scope_id)
+            
+            # Simple context building: apply parent context + current overlay
+            from contextlib import ExitStack
+            with ExitStack() as stack:
+                # Apply parent context if available
+                if manager.context_obj is not None:
+                    stack.enter_context(config_context(manager.context_obj))
+                
+                # Apply overlay from current form values
+                if manager.dataclass_type and manager.parameters:
+                    try:
+                        import dataclasses
+                        if dataclasses.is_dataclass(manager.dataclass_type):
+                            # Merge with object_instance to handle excluded params
+                            overlay_dict = manager.parameters.copy()
+                            for excluded_param in getattr(manager, 'exclude_params', []):
+                                if excluded_param not in overlay_dict and hasattr(manager.object_instance, excluded_param):
+                                    overlay_dict[excluded_param] = getattr(manager.object_instance, excluded_param)
+                            overlay_instance = manager.dataclass_type(**overlay_dict)
+                            stack.enter_context(config_context(overlay_instance))
+                    except Exception:
+                        pass  # Continue without overlay on error
+                
                 placeholder_text = manager.service.get_placeholder_text(param_name, manager.dataclass_type)
                 if placeholder_text:
                     self.widget_enhancer.apply_placeholder_text(widget, placeholder_text)
