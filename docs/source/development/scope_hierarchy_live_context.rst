@@ -288,25 +288,69 @@ The scope system enables selective cross-window synchronization:
 
 **Key insight**: Scope matching ensures only related windows refresh, preventing unnecessary updates.
 
+Recursive Live Context Collection
+==================================
+
+The ``collect_live_context()`` method recursively collects values from all managers
+AND their nested managers via ``_collect_from_manager_tree()``:
+
+.. code-block:: python
+
+   @classmethod
+   def _collect_from_manager_tree(cls, manager, result: dict, scoped_result: dict = None):
+       """Recursively collect values from manager and all nested managers."""
+       if manager.dataclass_type:
+           result[manager.dataclass_type] = manager.get_user_modified_values()
+           if scoped_result is not None and manager.scope_id:
+               scoped_result.setdefault(manager.scope_id, {})[manager.dataclass_type] = result[manager.dataclass_type]
+
+       # Recurse into nested managers
+       for nested in manager.nested_managers.values():
+           cls._collect_from_manager_tree(nested, result, scoped_result)
+
+This enables sibling inheritance: when ``live_context`` contains both
+``LazyStepWellFilterConfig`` and ``LazyWellFilterConfig`` values,
+``_find_live_values_for_type()`` can use ``issubclass()`` matching to find
+``StepWellFilterConfig`` values when resolving ``WellFilterConfig`` placeholders.
+
+**Example**: Step form has two nested config managers:
+
+- ``step_well_filter_config`` → ``LazyStepWellFilterConfig(well_filter=123)``
+- ``well_filter_config`` → ``LazyWellFilterConfig(well_filter=None)``
+
+Old behavior: Only root manager's values collected (nested values missed).
+
+New behavior: Both nested managers' values collected, enabling:
+
+1. ``well_filter_config.well_filter`` needs placeholder
+2. ``_find_live_values_for_type(LazyWellFilterConfig, live_context)`` called
+3. Finds ``LazyStepWellFilterConfig`` via ``issubclass(StepWellFilterConfig, WellFilterConfig)``
+4. Returns ``step_well_filter_config`` values with ``well_filter=123``
+5. Placeholder shows "Pipeline default: 123"
+
+See :doc:`../architecture/field_change_dispatcher` for how changes trigger sibling refresh.
+
 Implementation Notes
 ====================
 
-**🔬 Source Code**: 
+**🔬 Source Code**:
 
-- Scope matching: ``openhcs/pyqt_gui/widgets/shared/parameter_form_manager.py`` (line 2948)
-- Dual editor scope setup: ``openhcs/pyqt_gui/windows/dual_editor_window.py`` (line 244)
-- Function editor scope: ``openhcs/pyqt_gui/widgets/function_list_editor.py`` (line 36)
+- Scope matching: ``openhcs/pyqt_gui/widgets/shared/parameter_form_manager.py``
+- Recursive collection: ``_collect_from_manager_tree()`` in same file
+- Dual editor scope setup: ``openhcs/pyqt_gui/windows/dual_editor_window.py``
+- Function editor scope: ``openhcs/pyqt_gui/widgets/function_list_editor.py``
 
-**🏗️ Architecture**: 
+**🏗️ Architecture**:
 
-- :doc:`parameter_form_manager_live_context` - Live context collection
-- :doc:`../architecture/configuration-management-system` - Configuration hierarchy
+- :doc:`../architecture/field_change_dispatcher` - Unified field change handling
+- :doc:`../architecture/context_system` - Configuration context and inheritance
 
-**📊 Performance**: 
+**📊 Performance**:
 
 - Scope matching is O(n) where n = number of active form managers
 - Typically < 10 managers active, so overhead is negligible
 - Scope string comparison is fast (prefix matching)
+- Recursive collection adds minimal overhead (tree depth typically < 5)
 
 Key Design Decisions
 ====================
