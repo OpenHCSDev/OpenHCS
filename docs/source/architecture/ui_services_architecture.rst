@@ -43,6 +43,7 @@ Standalone services kept as-is:
 
 - ``EnabledFieldStylingService`` - Specific concern for enabled/disabled field styling
 - ``FlagContextManager`` - Clean context manager for manager flags
+- ``FieldChangeDispatcher`` - Unified event-driven field change handling (see :doc:`field_change_dispatcher`)
 - ``ParameterServiceABC``, ``EnumDispatchService`` - Base classes for type-safe dispatch
 
 WidgetService
@@ -232,6 +233,7 @@ The consolidated architecture provides:
 See Also
 --------
 
+- :doc:`field_change_dispatcher` - Unified event-driven field change handling
 - :doc:`service-layer-architecture` - Framework-agnostic service layer patterns
 - :doc:`parameter_form_service_architecture` - ParameterFormService architecture
 - :doc:`parameter_form_lifecycle` - Form lifecycle management
