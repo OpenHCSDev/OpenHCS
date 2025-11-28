@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QScrollArea, QSplitter, QTreeWidget, QTreeWidgetItem
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QPoint
 
 from openhcs.core.steps.function_step import FunctionStep
 from openhcs.introspection.signature_analyzer import SignatureAnalyzer
@@ -284,18 +284,33 @@ class StepParameterEditorWidget(QWidget):
             first_widget = nested_manager.widgets[first_param_name]
 
         if first_widget:
-            self.scroll_area.ensureWidgetVisible(first_widget, 100, 100)
+            self._scroll_to_widget(first_widget)
             return
 
         from PyQt6.QtWidgets import QGroupBox
         current = nested_manager.parentWidget()
         while current:
             if isinstance(current, QGroupBox):
-                self.scroll_area.ensureWidgetVisible(current, 50, 50)
+                self._scroll_to_widget(current, margin=50)
                 return
             current = current.parentWidget()
 
         logger.warning(f"Could not locate widget for '{field_name}' to scroll into view")
+
+    def _scroll_to_widget(self, widget: QWidget, margin: int = 100):
+        """Scroll the form scroll area so the widget becomes visible."""
+        if not widget or not self.scroll_area or not self.scroll_area.widget():
+            return
+
+        content = self.scroll_area.widget()
+        target_pos = widget.mapTo(content, QPoint(0, 0))
+
+        hbar = self.scroll_area.horizontalScrollBar()
+        vbar = self.scroll_area.verticalScrollBar()
+        hbar.setValue(max(target_pos.x() - margin, 0))
+        vbar.setValue(max(target_pos.y() - margin, 0))
+
+        self.scroll_area.ensureWidgetVisible(widget, margin, margin)
 
 
 

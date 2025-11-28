@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (
     QScrollArea, QWidget, QSplitter, QTreeWidget, QTreeWidgetItem,
     QLineEdit, QSpinBox, QDoubleSpinBox, QCheckBox, QComboBox
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QPoint
 from PyQt6.QtGui import QFont
 
 # Infrastructure classes removed - functionality migrated to ParameterFormManager service layer
@@ -325,8 +325,7 @@ class ConfigWindow(BaseFormDialog):
                 logger.info(f"Found first widget: {first_param_name}")
 
             if first_widget:
-                # Scroll to the first widget (this will show the section header too)
-                self.scroll_area.ensureWidgetVisible(first_widget, 100, 100)
+                self._scroll_to_widget(first_widget)
                 logger.info(f"✅ Scrolled to {field_name} via first widget")
             else:
                 # Fallback: try to find the GroupBox
@@ -334,7 +333,7 @@ class ConfigWindow(BaseFormDialog):
                 current = nested_manager.parentWidget()
                 while current:
                     if isinstance(current, QGroupBox):
-                        self.scroll_area.ensureWidgetVisible(current, 50, 50)
+                        self._scroll_to_widget(current, margin=50)
                         logger.info(f"✅ Scrolled to {field_name} via GroupBox")
                         return
                     current = current.parentWidget()
@@ -342,6 +341,23 @@ class ConfigWindow(BaseFormDialog):
                 logger.warning(f"⚠️ Could not find widget or GroupBox for {field_name}")
         else:
             logger.warning(f"❌ Field '{field_name}' not in nested_managers")
+
+    def _scroll_to_widget(self, widget: QWidget, margin: int = 100):
+        """Scroll the form scroll area so the widget becomes visible."""
+        if not widget or not self.scroll_area or not self.scroll_area.widget():
+            return
+
+        content = self.scroll_area.widget()
+        target_pos = widget.mapTo(content, QPoint(0, 0))
+
+        # Move scrollbars directly for reliability, then ensure visible
+        hbar = self.scroll_area.horizontalScrollBar()
+        vbar = self.scroll_area.verticalScrollBar()
+        hbar.setValue(max(target_pos.x() - margin, 0))
+        vbar.setValue(max(target_pos.y() - margin, 0))
+
+        # Use ensureWidgetVisible as a final nudge after manual positioning
+        self.scroll_area.ensureWidgetVisible(widget, margin, margin)
 
 
     
