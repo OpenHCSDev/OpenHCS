@@ -55,6 +55,7 @@ from openhcs.pyqt_gui.widgets.shared.services.form_init_service import (
     ParameterExtractionService, ConfigBuilderService, ServiceFactoryService
 )
 from openhcs.pyqt_gui.widgets.shared.services.field_change_dispatcher import FieldChangeDispatcher, FieldChangeEvent
+from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService, LiveContextSnapshot
 
 # ANTI-DUCK-TYPING: Removed ALL_INPUT_WIDGET_TYPES tuple
 # Widget discovery now uses ABC-based WidgetOperations.get_all_value_widgets()
@@ -151,22 +152,6 @@ ValueGettable.register(NoneAwareIntEdit)
 ValueSettable.register(NoneAwareIntEdit)
 
 
-@dataclass(frozen=True)
-class LiveContextSnapshot:
-    """Snapshot of live context values from all active form managers."""
-    token: int
-    values: Dict[type, Dict[str, Any]]
-    scoped_values: Dict[str, Dict[type, Dict[str, Any]]] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class LiveContextSnapshot:
-    """Snapshot of live context values from all active form managers."""
-    token: int
-    values: Dict[type, Dict[str, Any]]
-    scoped_values: Dict[str, Dict[type, Dict[str, Any]]] = field(default_factory=dict)
-
-
 class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_CombinedMeta):
     """
     React-quality reactive form manager for PyQt6.
@@ -203,16 +188,15 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
     # Args: (editing_object, context_object)
     context_refreshed = pyqtSignal(object, object, str)  # editing_obj, context_obj, scope_id
 
-    # Class-level list of all active form managers for cross-window updates
-    # Uses simpler list-based approach instead of tree registry
-    _active_form_managers = []
-    
-    # External listeners (e.g., PipelineEditorWidget) that receive cross-window signals
-    _external_listeners = []
-
-    # Live context token and cache for cross-window placeholder resolution
-    _live_context_token_counter = 0
-    _live_context_cache: Optional['TokenCache'] = None  # Initialized on first use
+    # NOTE: Class-level cross-cutting concerns moved to LiveContextService:
+    # - _active_form_managers -> LiveContextService._active_form_managers
+    # - _external_listeners -> LiveContextService._external_listeners
+    # - _live_context_token_counter -> LiveContextService._live_context_token_counter
+    # - _live_context_cache -> LiveContextService._live_context_cache
+    # - collect_live_context() -> LiveContextService.collect()
+    # - register_external_listener() -> LiveContextService.register_external_listener()
+    # - unregister_external_listener() -> LiveContextService.unregister_external_listener()
+    # - trigger_global_cross_window_refresh() -> LiveContextService.trigger_global_refresh()
 
     # Class constants for UI preferences (moved from constructor parameters)
     DEFAULT_USE_SCROLL_AREA = False
@@ -320,7 +304,7 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
             # CROSS-WINDOW: Register in active managers list (only root managers)
             # Nested managers are internal to their window and should not participate in cross-window updates
             if self._parent_manager is None:
-                self._active_form_managers.append(self)
+                LiveContextService.register(self)
             
             # Register hierarchy relationship for cross-window placeholder resolution
             if self.context_obj is not None and not self._parent_manager:
@@ -1085,267 +1069,43 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
             pass
 
     def unregister_from_cross_window_updates(self):
-        """Manually unregister this form manager from cross-window updates.
+        """Unregister from cross-window updates.
 
-        This should be called when the window is closing (before destruction) to ensure
-        other windows refresh their placeholders without this window's live values.
+        SIMPLIFIED: Just unregister from LiveContextService. The token increment
+        in unregister() notifies all listeners to refresh.
         """
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.info(f"🔍 UNREGISTER: {self.field_id} (id={id(self)}) unregistering from cross-window updates")
+        logger.info(f"🔍 UNREGISTER: {self.field_id}")
 
         try:
-            # Disconnect all signal connections BEFORE removing from list
-            for manager in self._active_form_managers:
-                if manager is not self:
-                    try:
-                        self.context_value_changed.disconnect(manager._on_cross_window_context_changed)
-                        self.context_refreshed.disconnect(manager._on_cross_window_context_refreshed)
-                        manager.context_value_changed.disconnect(self._on_cross_window_context_changed)
-                        manager.context_refreshed.disconnect(self._on_cross_window_context_refreshed)
-                    except (TypeError, RuntimeError):
-                        pass  # Signal already disconnected or object destroyed
-
-            # Remove from active managers list
-            if self in self._active_form_managers:
-                self._active_form_managers.remove(self)
-                # Invalidate live context cache since a manager was removed
-                type(self)._live_context_token_counter += 1
-                logger.info(f"🔍 UNREGISTER: Removed {self.field_id} from active managers, token={type(self)._live_context_token_counter}")
-
             # Unregister hierarchy relationship if this is a root manager
             if self.context_obj is not None and not self._parent_manager:
                 from openhcs.config_framework.context_manager import unregister_hierarchy_relationship
                 unregister_hierarchy_relationship(type(self.object_instance))
 
-            # Trigger refresh in remaining managers that might be affected
-            # Only root managers (no parent) trigger cross-window refresh on close
-            if not self._parent_manager:
-                logger.info(f"🔍 UNREGISTER: Triggering cross-window refresh for {len(self._active_form_managers)} remaining managers")
-                for manager in self._active_form_managers:
-                    if manager is not self and not manager._parent_manager:
-                        # Schedule refresh for root managers only (they propagate to nested)
-                        manager._schedule_cross_window_refresh(changed_field=None)
+            # Remove from registry (triggers token increment → notifies listeners)
+            LiveContextService.unregister(self)
 
-        except (ValueError, AttributeError) as e:
-            logger.warning(f"🔍 UNREGISTER: Error during unregistration: {e}")
-            pass  # Already removed
+        except Exception as e:
+            logger.warning(f"🔍 UNREGISTER: Error: {e}")
 
-    @classmethod
-    def register_external_listener(cls, listener: object,
-                                   value_changed_handler,
-                                   refresh_handler):
-        """Register an external listener for cross-window signals.
-
-        External listeners are objects (like PipelineEditorWidget) that want to receive
-        cross-window signals but aren't ParameterFormManager instances.
-
-        Args:
-            listener: The listener object (for identification)
-            value_changed_handler: Handler for context_value_changed signal (required)
-            refresh_handler: Handler for context_refreshed signal (optional, can be None)
-        """
-        import logging
-        logger = logging.getLogger(__name__)
-        # Add to registry
-        cls._external_listeners.append((listener, value_changed_handler, refresh_handler))
-
-        # Connect all existing managers to this listener
-        for manager in cls._active_form_managers:
-            if value_changed_handler:
-                manager.context_value_changed.connect(value_changed_handler)
-            if refresh_handler:
-                manager.context_refreshed.connect(refresh_handler)
-
-        logger.debug(f"Registered external listener: {listener.__class__.__name__}")
-
-    @classmethod
-    def unregister_external_listener(cls, listener: object):
-        """Unregister an external listener.
-
-        Args:
-            listener: The listener object to unregister
-        """
-        import logging
-        logger = logging.getLogger(__name__)
-        # Find and remove from registry
-        cls._external_listeners = [
-            (l, vh, rh) for l, vh, rh in cls._external_listeners if l is not listener
-        ]
-
-        logger.debug(f"Unregistered external listener: {listener.__class__.__name__}")
+    # ========== DELEGATION TO LiveContextService ==========
+    # These methods delegate to LiveContextService for backward compatibility.
+    # New code should use LiveContextService directly.
 
     @classmethod
     def trigger_global_cross_window_refresh(cls):
-        """Trigger cross-window refresh for all active form managers.
-
-        Called when:
-        - Config window saves/cancels (restore to saved state)
-        - Code editor modifies config (apply code changes to UI)
-        - Any bulk operation that affects multiple windows
-
-        This refreshes all managers' placeholders and notifies external listeners
-        (like PipelineEditorWidget) that context has changed.
-        """
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.debug(f"🔄 GLOBAL_REFRESH: Triggering for {len(cls._active_form_managers)} managers")
-
-        refresh_service = ParameterOpsService()
-        for manager in cls._active_form_managers:
-            try:
-                refresh_service.refresh_with_live_context(manager, use_user_modified_only=False)
-                manager.context_refreshed.emit(manager.object_instance, manager.context_obj, manager.scope_id)
-            except Exception as e:
-                logger.warning(f"Failed to refresh manager {manager.field_id}: {e}")
-
-        # Notify external listeners (e.g., PipelineEditorWidget)
-        logger.debug(f"🔄 GLOBAL_REFRESH: Notifying {len(cls._external_listeners)} external listeners")
-        for listener, _, refresh_handler in cls._external_listeners:
-            if refresh_handler:
-                try:
-                    refresh_handler(None, None)
-                except Exception as e:
-                    logger.warning(f"Failed to notify {listener.__class__.__name__}: {e}")
+        """DEPRECATED: Use LiveContextService.trigger_global_refresh() instead."""
+        LiveContextService.trigger_global_refresh()
 
     @classmethod
-    def _collect_from_manager_tree(cls, manager, result: dict, scoped_result: dict = None) -> None:
-        """Recursively collect values from manager and all nested managers.
-
-        This enables sibling inheritance: when live_context contains both
-        LazyStepWellFilterConfig and LazyWellFilterConfig values,
-        _find_live_values_for_type() can use issubclass matching to find
-        StepWellFilterConfig values when resolving WellFilterConfig placeholders.
-
-        CRITICAL: For parent configs (like PipelineConfig), we need to include
-        the nested manager values in the parent's entry. Otherwise when we
-        instantiate PipelineConfig from live_context, we won't have step_well_filter_config.
-        """
-        if manager.dataclass_type:
-            # Start with the manager's own user-modified values
-            values = manager.get_user_modified_values()
-
-            # CRITICAL: Merge nested manager values into parent's entry
-            # This ensures PipelineConfig includes step_well_filter_config with live values
-            for field_name, nested in manager.nested_managers.items():
-                if nested.dataclass_type:
-                    nested_values = nested.get_user_modified_values()
-                    if nested_values:
-                        # Reconstruct nested dataclass from live values
-                        try:
-                            values[field_name] = nested.dataclass_type(**nested_values)
-                        except Exception:
-                            # Skip if reconstruction fails (missing required fields)
-                            pass
-
-            result[manager.dataclass_type] = values
-            if scoped_result is not None and manager.scope_id:
-                scoped_result.setdefault(manager.scope_id, {})[manager.dataclass_type] = result[manager.dataclass_type]
-
-        # Recurse into nested managers (still store them separately for type matching)
-        for nested in manager.nested_managers.values():
-            cls._collect_from_manager_tree(nested, result, scoped_result)
-
-    @classmethod
-    def collect_live_context(cls, scope_filter=None, for_type: Optional[Type] = None) -> 'LiveContextSnapshot':
-        """
-        Collect live context from all active form managers INCLUDING nested managers.
-
-        Includes nested manager values to enable sibling inheritance via
-        _find_live_values_for_type()'s issubclass matching.
-
-        Args:
-            scope_filter: Optional scope filter (e.g., 'plate_path' or 'x::y::z')
-                         If None, collects from all scopes
-            for_type: Optional type for hierarchy filtering. Only collects from
-                      managers whose type is an ANCESTOR of for_type.
-
-        Returns:
-            LiveContextSnapshot with token and values dict
-        """
-        # Initialize cache on first use
-        if cls._live_context_cache is None:
-            from openhcs.config_framework import TokenCache, CacheKey
-            cls._live_context_cache = TokenCache(lambda: cls._live_context_token_counter)
-
-        from openhcs.config_framework import CacheKey
-        from openhcs.config_framework.context_manager import is_ancestor_in_context, is_same_type_in_context
-
-        for_type_name = for_type.__name__ if for_type else None
-        cache_key = CacheKey.from_args(scope_filter, for_type_name)
-
-        def compute_live_context() -> LiveContextSnapshot:
-            """Recursively collect values from all managers and nested managers."""
-            logger.info(f"📦 collect_live_context: COMPUTING (token={cls._live_context_token_counter}, scope={scope_filter}, for_type={for_type_name})")
-
-            live_context = {}
-            scoped_live_context = {}
-
-            for manager in cls._active_form_managers:
-                manager_type = type(manager.object_instance)
-                manager_type_name = manager_type.__name__
-
-                # HIERARCHY FILTER: Only collect from ancestors of for_type
-                # is_ancestor_in_context() handles all type relationships (dataclass, function, etc.)
-                if for_type is not None:
-                    if not (is_ancestor_in_context(manager_type, for_type) or is_same_type_in_context(manager_type, for_type)):
-                        logger.info(f"  📋 SKIP {manager.field_id}: {manager_type_name} not ancestor/same-type of {for_type_name}")
-                        continue
-
-                # Apply scope filter if provided
-                if scope_filter is not None and manager.scope_id is not None:
-                    is_visible = cls._is_scope_visible_static(manager.scope_id, scope_filter)
-                    logger.info(f"  📋 MANAGER {manager.field_id}: type={manager_type_name}, scope={manager.scope_id}, visible={is_visible}")
-                    if not is_visible:
-                        continue
-                else:
-                    logger.info(f"  📋 MANAGER {manager.field_id}: type={manager_type_name}, scope={manager.scope_id}, no_filter_or_no_scope")
-
-                # Collect from this manager AND all its nested managers
-                cls._collect_from_manager_tree(manager, live_context, scoped_live_context)
-
-            collected_types = list(live_context.keys())
-            logger.info(f"  📦 COLLECTED {len(collected_types)} types: {[t.__name__ for t in collected_types]}")
-            token = cls._live_context_token_counter
-            return LiveContextSnapshot(token=token, values=live_context, scoped_values=scoped_live_context)
-
-        # Use token cache to get or compute
-        snapshot = cls._live_context_cache.get_or_compute(cache_key, compute_live_context)
-
-        if snapshot.token == cls._live_context_token_counter:
-            logger.debug(f"✅ collect_live_context: CACHE HIT (token={cls._live_context_token_counter}, scope={scope_filter})")
-
-        return snapshot
+    def collect_live_context(cls, scope_filter=None, for_type: Optional[Type] = None) -> LiveContextSnapshot:
+        """DEPRECATED: Use LiveContextService.collect() instead."""
+        return LiveContextService.collect(scope_filter, for_type)
 
     @staticmethod
     def _is_scope_visible_static(manager_scope: str, filter_scope) -> bool:
-        """
-        Check if manager's scope is visible to the filter scope using root-based matching.
-
-        Visibility rules:
-        - Empty root (global) is visible to all
-        - Same root = visible (e.g., "/plate1" sees "/plate1::step1")
-        - Different roots = isolated (e.g., "/plate1" doesn't see "/plate2")
-
-        Args:
-            manager_scope: Scope ID from the manager (always str, can be empty)
-            filter_scope: Scope filter (can be str or Path)
-        """
-        from openhcs.config_framework.context_manager import get_root_from_scope_key
-
-        # Convert filter_scope to string if it's a Path
-        filter_scope_str = str(filter_scope) if not isinstance(filter_scope, str) else filter_scope
-
-        # Extract roots from both scope keys
-        manager_root = get_root_from_scope_key(manager_scope)
-        filter_root = get_root_from_scope_key(filter_scope_str)
-
-        # Empty root (global) is visible to all
-        if not manager_root:
-            return True
-
-        # Same root = visible
-        return manager_root == filter_root
+        """DEPRECATED: Use LiveContextService._is_scope_visible() instead."""
+        return LiveContextService._is_scope_visible(manager_scope, filter_scope)
 
     def _on_cross_window_context_changed(self, field_path: str, new_value: object,
                                           editing_object: object, context_object: object, editing_scope_id: str):

@@ -432,8 +432,8 @@ class ConfigWindow(BaseFormDialog):
                 self.form_manager.object_instance = new_config
 
                 # Increment token to invalidate caches
-                from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
-                ParameterFormManager._live_context_token_counter += 1
+                from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
+                LiveContextService.increment_token()
 
                 # Refresh this window's placeholders with new saved values as base
                 self.form_manager._refresh_with_live_context()

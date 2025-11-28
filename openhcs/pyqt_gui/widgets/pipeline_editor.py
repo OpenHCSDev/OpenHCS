@@ -108,11 +108,9 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         self._live_context_resolver = LiveContextResolver()
         self._preview_step_cache: Dict[int, FunctionStep] = {}
         self._preview_step_cache_token: Optional[int] = None
-        self._next_scope_token = 0
+        self._next_scope_token = 0  # Counter for generating unique step scope tokens
 
         self._init_cross_window_preview_mixin()
-        self._register_preview_scopes()
-        self._configure_step_preview_fields()
 
         # Import centralized config indicators (single source of truth)
         from openhcs.pyqt_gui.widgets.config_preview_formatters import CONFIG_INDICATORS
@@ -266,60 +264,6 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         self.status_message.connect(self.update_status)
         self.pipeline_changed.connect(self.on_pipeline_changed)
 
-        # Note: ParameterFormManager registration is handled by CrossWindowPreviewMixin._init_cross_window_preview_mixin()
-
-    def _register_preview_scopes(self) -> None:
-        """Configure scope resolvers for cross-window preview updates."""
-        from openhcs.core.steps.function_step import FunctionStep
-        from openhcs.core.config import PipelineConfig, GlobalPipelineConfig
-
-        self.register_preview_scope(
-            root_name='step',
-            editing_types=(FunctionStep,),
-            scope_resolver=lambda step, ctx: self._build_step_scope_id(step) or self.ALL_ITEMS_SCOPE,
-            aliases=('FunctionStep', 'step'),
-        )
-
-        self.register_preview_scope(
-            root_name='pipeline_config',
-            editing_types=(PipelineConfig,),
-            scope_resolver=lambda obj, ctx: self.ALL_ITEMS_SCOPE,
-            aliases=('PipelineConfig',),
-            process_all_fields=True,
-        )
-
-        self.register_preview_scope(
-            root_name='global_config',
-            editing_types=(GlobalPipelineConfig,),
-            scope_resolver=lambda obj, ctx: self.ALL_ITEMS_SCOPE,
-            aliases=('GlobalPipelineConfig',),
-            process_all_fields=True,
-        )
-
-    def _configure_step_preview_fields(self) -> None:
-        """Register step preview fields using reusable mixin helper."""
-        base_fields = ['func']
-        nested_configs = [('processing_config', ProcessingConfig)]
-        config_attrs = set(CONFIG_INDICATORS.keys()) | {'step_well_filter_config'}
-
-        self.enable_preview_fields_from_introspection(
-            base_fields=base_fields,
-            nested_configs=nested_configs,
-            config_attrs=config_attrs,
-            sample_object_factory=self._get_preview_sample_step,
-            scope_root='step',
-        )
-
-    _preview_sample_step = None
-
-    @classmethod
-    def _get_preview_sample_step(cls):
-        """Create a lightweight FunctionStep instance for introspection (cached)."""
-        if cls._preview_sample_step is None:
-            from openhcs.core.steps.function_step import FunctionStep
-            cls._preview_sample_step = FunctionStep(func=lambda *args, **kwargs: None)
-        return cls._preview_sample_step
-    
     def handle_button_action(self, action: str):
         """
         Handle button actions (extracted from Textual version).
@@ -1063,32 +1007,8 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         self._preview_step_cache[cache_key] = merged_step
         return merged_step
 
-    def _build_scope_index_map(self) -> Dict[str, int]:
-        scope_map: Dict[str, int] = {}
-        for idx, step in enumerate(self.pipeline_steps):
-            scope_id = self._build_step_scope_id(step)
-            if scope_id:
-                scope_map[scope_id] = idx
-        return scope_map
-
-    def _process_pending_preview_updates(self) -> None:
-        if not self._pending_preview_keys:
-            return
-
-        if not self.current_plate:
-            self._pending_preview_keys.clear()
-            return
-
-        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
-
-        live_context_snapshot = ParameterFormManager.collect_live_context(scope_filter=self.current_plate)
-        indices = sorted(
-            idx for idx in self._pending_preview_keys if isinstance(idx, int)
-        )
-        self._pending_preview_keys.clear()
-        self._refresh_step_items_by_index(indices, live_context_snapshot)
-
     def _handle_full_preview_refresh(self) -> None:
+        """Refresh all step preview labels."""
         self.update_step_list()
 
     def _refresh_step_items_by_index(self, indices: Iterable[int], live_context_snapshot=None) -> None:
@@ -1129,18 +1049,15 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
                 placeholder_item = QListWidgetItem("No plate selected - select a plate to view pipeline")
                 placeholder_item.setData(Qt.ItemDataRole.UserRole, None)
                 self.step_list.addItem(placeholder_item)
-                self.set_preview_scope_mapping({})
                 self.update_button_states()
                 return
 
             self._normalize_step_scope_tokens()
 
-            # OPTIMIZATION: Collect live context ONCE for all steps (instead of 20+ times)
+            # Collect live context ONCE for all steps
             from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
             with timer("  collect_live_context", threshold_ms=1.0):
                 live_context_snapshot = ParameterFormManager.collect_live_context(scope_filter=self.current_plate)
-
-            self.set_preview_scope_mapping(self._build_scope_index_map())
 
         def update_func():
             """Update function that updates existing items or rebuilds if structure changed."""
@@ -1379,8 +1296,8 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
     def closeEvent(self, event):
         """Handle widget close event to disconnect signals and prevent memory leaks."""
         # Unregister from cross-window refresh signals
-        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
-        ParameterFormManager.unregister_external_listener(self)
+        from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
+        LiveContextService.disconnect_listener(self._on_live_context_changed)
         logger.debug("Pipeline editor: Unregistered from cross-window refresh signals")
 
         # Call parent closeEvent

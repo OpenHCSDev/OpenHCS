@@ -120,6 +120,11 @@ class ParameterOpsService(ParameterServiceABC):
         manager.parameters[param_name] = reset_value
         self._update_reset_tracking(manager, param_name, reset_value)
 
+        # CRITICAL: Invalidate cache token BEFORE refreshing placeholder
+        # Otherwise refresh_single_placeholder will use stale cached values
+        from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
+        LiveContextService.increment_token()
+
         if param_name in manager.widgets:
             widget = manager.widgets[param_name]
 

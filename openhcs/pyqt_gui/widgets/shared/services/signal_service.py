@@ -128,36 +128,20 @@ class SignalService:
     def register_cross_window_signals(manager: Any) -> None:
         """Register manager for cross-window updates (only root managers).
 
-        DISPATCHER ARCHITECTURE: Cross-window emission moved to FieldChangeDispatcher.
-        This method now only handles:
-        - Initial values snapshot
-        - Connecting receivers (context_value_changed, context_refreshed)
+        SIMPLIFIED: No N×N signal wiring. LiveContextService.increment_token()
+        notifies all listeners via simple callbacks.
         """
         if manager._parent_manager is not None:
             return
 
-        from dataclasses import is_dataclass
+        # Snapshot initial values for change detection
         if hasattr(manager.config, '_resolve_field_value'):
             manager._initial_values_on_open = manager.get_user_modified_values()
         else:
             manager._initial_values_on_open = manager.get_current_values()
 
-        # DELETED: manager.parameter_changed.connect(manager._emit_cross_window_change)
-        # Now handled by FieldChangeDispatcher._emit_cross_window()
-
-        existing_count = len(manager._active_form_managers) - 1
-        logger.info(f"🔍 REGISTER: {manager.field_id} connecting to {existing_count} existing managers")
-
-        # Connect receivers for cross-window signals
-        for existing_manager in manager._active_form_managers:
-            if existing_manager is manager:
-                continue
-            manager.context_value_changed.connect(existing_manager._on_cross_window_context_changed)
-            manager.context_refreshed.connect(existing_manager._on_cross_window_context_refreshed)
-            existing_manager.context_value_changed.connect(manager._on_cross_window_context_changed)
-            existing_manager.context_refreshed.connect(manager._on_cross_window_context_refreshed)
-
-        logger.info(f"🔍 REGISTER: {manager.field_id} (id={id(manager)}) registered. Total: {len(manager._active_form_managers)}")
+        from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
+        logger.info(f"🔍 REGISTER: {manager.field_id} (total: {len(LiveContextService.get_active_managers())})")
 
     # ========== CROSS-WINDOW REGISTRATION (from CrossWindowRegistration) ==========
 

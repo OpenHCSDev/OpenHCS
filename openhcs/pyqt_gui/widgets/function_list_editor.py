@@ -556,23 +556,14 @@ class FunctionListEditorWidget(QWidget):
             return
 
         from openhcs.config_framework.context_manager import config_context
-        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+        from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
 
         try:
-            # CRITICAL: Collect live context from other open windows using the same mechanism as form managers
+            # CRITICAL: Collect live context from other open windows using LiveContextService
             # This ensures we see live PipelineConfig values, not just the saved ones
-            live_context = {}
-
-            # Iterate through all active form managers to collect live context
-            for manager in ParameterFormManager._active_form_managers:
-                # Only collect from managers in the same scope hierarchy
-                if hasattr(self, 'scope_id') and hasattr(manager, 'scope_id'):
-                    # Check scope visibility (same logic as form managers)
-                    if manager.scope_id is None or (self.scope_id and self.scope_id.startswith(manager.scope_id)):
-                        # Get user-modified values (concrete, non-None values only)
-                        live_values = manager.get_user_modified_values()
-                        obj_type = type(manager.object_instance)
-                        live_context[obj_type] = live_values
+            scope_filter = getattr(self, 'scope_id', None)
+            live_context_snapshot = LiveContextService.collect(scope_filter=scope_filter)
+            live_context = live_context_snapshot.values
 
             # Build context stack with live values
             from contextlib import ExitStack

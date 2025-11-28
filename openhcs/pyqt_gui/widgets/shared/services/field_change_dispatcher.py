@@ -74,10 +74,10 @@ class FieldChangeDispatcher:
                     logger.info(f"  ✅ Updated source.parameters[{event.field_name}], ADDED to _user_set_fields")
 
             # Invalidate live context cache so siblings see the new value
-            from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
-            ParameterFormManager._live_context_token_counter += 1
+            from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
+            LiveContextService.increment_token()
             if DEBUG_DISPATCHER:
-                logger.info(f"  🔄 Incremented live context token to {ParameterFormManager._live_context_token_counter}")
+                logger.info(f"  🔄 Incremented live context token to {LiveContextService.get_token()}")
 
             # 2. Mark parent chain as modified BEFORE refreshing siblings
             # This ensures root.get_user_modified_values() includes this field on first keystroke

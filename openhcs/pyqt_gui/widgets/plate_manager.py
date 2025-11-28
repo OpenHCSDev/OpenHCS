@@ -135,8 +135,7 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         self.plate_execution_ids: Dict[str, str] = {}  # plate_path -> execution_id
         self.plate_execution_states: Dict[str, str] = {}  # plate_path -> "queued" | "running" | "completed" | "failed"
 
-        # Configure preview routing + fields
-        self._register_preview_scopes()
+        # Configure preview fields
         self._configure_preview_fields()
         
         # UI components
@@ -194,130 +193,40 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
 
     # ========== CrossWindowPreviewMixin Configuration ==========
 
-    def _register_preview_scopes(self) -> None:
-        """Configure scope resolvers used by CrossWindowPreviewMixin."""
-        from openhcs.core.config import GlobalPipelineConfig, PipelineConfig
-        from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
-
-        self.register_preview_scope(
-            root_name='pipeline_config',
-            editing_types=(PipelineConfig,),
-            scope_resolver=self._resolve_pipeline_scope_from_config,
-            aliases=('PipelineConfig',),
-            process_all_fields=True,
-        )
-
-        self.register_preview_scope(
-            root_name='global_config',
-            editing_types=(GlobalPipelineConfig,),
-            scope_resolver=lambda obj, ctx: self.ALL_ITEMS_SCOPE,
-            aliases=('GlobalPipelineConfig',),
-            process_all_fields=True,
-        )
-
-        self.register_preview_scope(
-            root_name='orchestrator',
-            editing_types=(PipelineOrchestrator,),
-            scope_resolver=lambda obj, ctx: str(getattr(obj, 'plate_path', '')) or self.ALL_ITEMS_SCOPE,
-            aliases=('PipelineOrchestrator',),
-            process_all_fields=True,
-        )
-
     def _configure_preview_fields(self):
-        """Configure which config fields show preview labels in plate list.
-
-        Uses centralized formatters from config_preview_formatters module to ensure
-        consistency with PipelineEditor and other widgets.
-        """
-        # Streaming config previews (uses centralized CONFIG_INDICATORS: NAP, FIJI)
-        # Only shown if enabled=True
-        self.enable_preview_for_field(
-            'napari_streaming_config',
-            scope_root='pipeline_config'
-        )
-        self.enable_preview_for_field(
-            'fiji_streaming_config',
-            scope_root='pipeline_config'
-        )
-
-        # Materialization config preview (uses centralized CONFIG_INDICATORS: MAT)
-        # Only shown if enabled=True
-        self.enable_preview_for_field(
-            'step_materialization_config',
-            scope_root='pipeline_config'
-        )
-
-        # FILT should never be shown (per user requirement)
-        # self.enable_preview_for_field('well_filter_config', None)
-
-        # Execution config preview (plate-specific, not in pipeline editor)
-        self.enable_preview_for_field(
-            'num_workers',
-            lambda v: f'W:{v if v is not None else 0}',
-            scope_root='pipeline_config'
-        )
-
-        # Sequential processing preview (plate-specific, not in pipeline editor)
+        """Configure which config fields show preview labels in plate list."""
+        self.enable_preview_for_field('napari_streaming_config')
+        self.enable_preview_for_field('fiji_streaming_config')
+        self.enable_preview_for_field('step_materialization_config')
+        self.enable_preview_for_field('num_workers', lambda v: f'W:{v if v is not None else 0}')
         self.enable_preview_for_field(
             'sequential_processing_config.sequential_components',
-            lambda v: f'Seq:{",".join(c.value for c in v)}' if v else None,
-            scope_root='pipeline_config'
+            lambda v: f'Seq:{",".join(c.value for c in v)}' if v else None
         )
-
         self.enable_preview_for_field(
             'vfs_config.materialization_backend',
-            lambda v: f'{v.value.upper()}',
-            scope_root='pipeline_config'
+            lambda v: f'{v.value.upper()}'
         )
-
-        # Output directory (shows whenever a custom path is set)
         self.enable_preview_for_field(
             'path_planning_config.output_dir_suffix',
-            scope_root='pipeline_config',
             formatter=lambda p: f'output={p}',
             fallback_resolver=self._build_effective_config_fallback('path_planning_config.output_dir_suffix')
         )
-        
-        # Well filter (only show when the list is non-empty)
         self.enable_preview_for_field(
             'path_planning_config.well_filter',
-            scope_root='pipeline_config',
             formatter=lambda wf: f'wf={len(wf)}' if wf else None,
             fallback_resolver=self._build_effective_config_fallback('path_planning_config.well_filter')
         )
-        
-        # Subdir (only show when it differs from the default)
         self.enable_preview_for_field(
             'path_planning_config.sub_dir',
-            scope_root='pipeline_config',
             formatter=lambda sub: f'subdir={sub}',
             fallback_resolver=self._build_effective_config_fallback('path_planning_config.sub_dir')
         )
 
-
-    def _resolve_pipeline_scope_from_config(self, config_obj, context_obj) -> str:
-        """Return plate scope for a PipelineConfig instance."""
-        for plate_path, orchestrator in self.orchestrators.items():
-            if orchestrator.pipeline_config is config_obj:
-                return str(plate_path)
-        return self.ALL_ITEMS_SCOPE
-
     # ========== CrossWindowPreviewMixin Hooks ==========
 
-    def _process_pending_preview_updates(self) -> None:
-        """Apply incremental updates for pending plate keys."""
-        if not self._pending_preview_keys:
-            return
-
-        # Update only the affected plate items
-        for plate_path in self._pending_preview_keys:
-            self._update_single_plate_item(plate_path)
-
-        # Clear pending updates
-        self._pending_preview_keys.clear()
-
     def _handle_full_preview_refresh(self) -> None:
-        """Fallback when incremental updates not possible."""
+        """Refresh all preview labels."""
         self.update_plate_list()
 
     def _update_single_plate_item(self, plate_path: str):
@@ -410,14 +319,10 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
                 scope_filter=orchestrator.plate_path
             )
 
-            # Get the preview instance with live values merged (uses ABC method)
-            # This implements the pattern from docs/source/development/scope_hierarchy_live_context.rst
-            from openhcs.core.config import PipelineConfig
-            config_for_display = self._get_preview_instance(
-                obj=pipeline_config,
-                live_context_snapshot=live_context_snapshot,
-                scope_id=str(orchestrator.plate_path),  # Scope is just the plate path
-                obj_type=PipelineConfig
+            # Merge live values into pipeline config for display
+            config_for_display = self._merge_with_live_values(
+                pipeline_config,
+                live_context_snapshot.values if live_context_snapshot else {}
             )
 
             effective_config = orchestrator.get_effective_config()
@@ -2308,28 +2213,16 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
             """Update function that clears and rebuilds the list."""
             self.plate_list.clear()
 
-            # Build scope map for incremental updates
-            scope_map = {}
-
             for plate in self.plates:
-                # Use new preview formatting method
                 display_text = self._format_plate_item_with_preview(plate)
                 item = QListWidgetItem(display_text)
                 item.setData(Qt.ItemDataRole.UserRole, plate)
 
-                # Add tooltip
                 if plate['path'] in self.orchestrators:
                     orchestrator = self.orchestrators[plate['path']]
                     item.setToolTip(f"Status: {orchestrator.state.value}")
 
-                    # Register scope for incremental updates
-                    scope_map[str(plate['path'])] = plate['path']
-
                 self.plate_list.addItem(item)
-                # Height is automatically calculated by MultilinePreviewItemDelegate.sizeHint()
-
-            # Update scope mapping for CrossWindowPreviewMixin
-            self.set_preview_scope_mapping(scope_map)
 
             # Auto-select first plate if no selection and plates exist
             if self.plates and not self.selected_plate_path:
