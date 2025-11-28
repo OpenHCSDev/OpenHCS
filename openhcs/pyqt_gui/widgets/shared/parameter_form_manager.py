@@ -1110,8 +1110,8 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
             if self in self._active_form_managers:
                 self._active_form_managers.remove(self)
                 # Invalidate live context cache since a manager was removed
-                self._live_context_token_counter += 1
-                logger.info(f"🔍 UNREGISTER: Removed {self.field_id} from active managers, token={self._live_context_token_counter}")
+                type(self)._live_context_token_counter += 1
+                logger.info(f"🔍 UNREGISTER: Removed {self.field_id} from active managers, token={type(self)._live_context_token_counter}")
 
             # Unregister hierarchy relationship if this is a root manager
             if self.context_obj is not None and not self._parent_manager:
