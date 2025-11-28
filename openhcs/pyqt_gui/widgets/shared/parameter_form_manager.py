@@ -1127,6 +1127,15 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
                         # Schedule refresh for root managers only (they propagate to nested)
                         manager._schedule_cross_window_refresh(changed_field=None)
 
+                # Notify external listeners (e.g., PipelineEditorWidget) that context changed
+                logger.info(f"🔍 UNREGISTER: Notifying {len(self._external_listeners)} external listeners")
+                for listener, _, refresh_handler in self._external_listeners:
+                    if refresh_handler:
+                        try:
+                            refresh_handler(None, None)
+                        except Exception as e:
+                            logger.warning(f"Failed to notify {listener.__class__.__name__}: {e}")
+
         except (ValueError, AttributeError) as e:
             logger.warning(f"🔍 UNREGISTER: Error during unregistration: {e}")
             pass  # Already removed
