@@ -1127,15 +1127,6 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
                         # Schedule refresh for root managers only (they propagate to nested)
                         manager._schedule_cross_window_refresh(changed_field=None)
 
-                # Notify external listeners (e.g., PipelineEditorWidget) that context changed
-                logger.info(f"🔍 UNREGISTER: Notifying {len(self._external_listeners)} external listeners")
-                for listener, _, refresh_handler in self._external_listeners:
-                    if refresh_handler:
-                        try:
-                            refresh_handler(None, None)
-                        except Exception as e:
-                            logger.warning(f"Failed to notify {listener.__class__.__name__}: {e}")
-
         except (ValueError, AttributeError) as e:
             logger.warning(f"🔍 UNREGISTER: Error during unregistration: {e}")
             pass  # Already removed
@@ -1307,11 +1298,20 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
                     logger.info(f"  📋 MANAGER {manager.field_id}: type={manager_type_name}, scope={manager.scope_id}, visible={is_visible}")
                     if not is_visible:
                         continue
-                else:
-                    logger.info(f"  📋 MANAGER {manager.field_id}: type={manager_type_name}, scope={manager.scope_id}, no_filter_or_no_scope")
+            else:
+                logger.info(f"  📋 MANAGER {manager.field_id}: type={manager_type_name}, scope={manager.scope_id}, no_filter_or_no_scope")
 
                 # Collect from this manager AND all its nested managers
-                cls._collect_from_manager_tree(manager, live_context, scoped_live_context)
+                try:
+                    cls._collect_from_manager_tree(manager, live_context, scoped_live_context)
+                except RuntimeError as e:
+                    # Drop managers whose underlying widgets have been destroyed (window closed)
+                    logger.warning(f"  ⚠️  Removing {manager.field_id} from active managers (destroyed widgets?): {e}")
+                    try:
+                        cls._active_form_managers.remove(manager)
+                        cls._live_context_token_counter += 1
+                    except ValueError:
+                        pass
 
             collected_types = list(live_context.keys())
             logger.info(f"  📦 COLLECTED {len(collected_types)} types: {[t.__name__ for t in collected_types]}")
