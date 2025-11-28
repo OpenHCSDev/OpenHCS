@@ -1467,8 +1467,25 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
             ctx_is_global = is_global_config_instance(self.context_obj) if self.context_obj else False
             obj_is_global = is_global_config_instance(self.object_instance) if self.object_instance else False
             no_context = self.context_obj is None
-            is_affected = ctx_is_global or obj_is_global or no_context
-            logger.info(f"    → GLOBAL check: ctx_is_global={ctx_is_global}, obj_is_global={obj_is_global}, no_context={no_context} → {is_affected}")
+            # ALSO: Global config is an ancestor of PipelineConfig/steps, so include ancestor check
+            has_context_ancestor = False
+            if self.context_obj is not None:
+                has_context_ancestor = is_ancestor_in_context(editing_type, type(self.context_obj))
+            has_dataclass_ancestor = False
+            if self.dataclass_type is not None:
+                has_dataclass_ancestor = is_ancestor_in_context(editing_type, self.dataclass_type)
+
+            is_affected = (
+                ctx_is_global
+                or obj_is_global
+                or no_context
+                or has_context_ancestor
+                or has_dataclass_ancestor
+            )
+            logger.info(
+                f"    → GLOBAL check: ctx_is_global={ctx_is_global}, obj_is_global={obj_is_global}, "
+                f"no_context={no_context}, ctx_ancestor={has_context_ancestor}, dc_ancestor={has_dataclass_ancestor} → {is_affected}"
+            )
             return is_affected
 
         # GENERIC: Check if editing_object is an ancestor in our hierarchy
