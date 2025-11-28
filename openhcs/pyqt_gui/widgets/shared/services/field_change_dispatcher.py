@@ -62,22 +62,29 @@ class FieldChangeDispatcher:
 
             # 1. Update source's data model
             source.parameters[event.field_name] = event.value
-            if event.is_reset:
-                # Reset: remove from user_set_fields (allow placeholder to show)
-                source._user_set_fields.discard(event.field_name)
-                if DEBUG_DISPATCHER:
-                    logger.info(f"  ✅ Updated source.parameters[{event.field_name}], REMOVED from _user_set_fields (reset)")
-            else:
-                # Normal change: track as user-set
-                source._user_set_fields.add(event.field_name)
-                if DEBUG_DISPATCHER:
-                    logger.info(f"  ✅ Updated source.parameters[{event.field_name}], ADDED to _user_set_fields")
+            # CRITICAL: Always add to _user_set_fields, even for reset
+            # This ensures get_user_modified_values() includes None for reset fields,
+            # so live context has the override and preview labels show same as placeholders.
+            # Previously we discarded on reset, but that caused preview labels to show
+            # the saved-on-disk value instead of the reset (None) value.
+            source._user_set_fields.add(event.field_name)
+            if DEBUG_DISPATCHER:
+                reset_note = " (reset to None)" if event.is_reset else ""
+                logger.info(f"  ✅ Updated source.parameters[{event.field_name}], ADDED to _user_set_fields{reset_note}")
 
             # Invalidate live context cache so siblings see the new value
-            from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
-            LiveContextService.increment_token()
-            if DEBUG_DISPATCHER:
-                logger.info(f"  🔄 Incremented live context token to {LiveContextService.get_token()}")
+            # Block the ROOT manager from responding to its own change notification
+            root = source
+            while root._parent_manager is not None:
+                root = root._parent_manager
+            root._block_cross_window_updates = True
+            try:
+                from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
+                LiveContextService.increment_token()
+                if DEBUG_DISPATCHER:
+                    logger.info(f"  🔄 Incremented live context token to {LiveContextService.get_token()}")
+            finally:
+                root._block_cross_window_updates = False
 
             # 2. Mark parent chain as modified BEFORE refreshing siblings
             # This ensures root.get_user_modified_values() includes this field on first keystroke

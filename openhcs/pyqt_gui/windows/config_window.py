@@ -436,10 +436,11 @@ class ConfigWindow(BaseFormDialog):
                 LiveContextService.increment_token()
 
                 # Refresh this window's placeholders with new saved values as base
-                self.form_manager._refresh_with_live_context()
+                from openhcs.pyqt_gui.widgets.shared.services.parameter_ops_service import ParameterOpsService
+                ParameterOpsService().refresh_with_live_context(self.form_manager)
 
                 # Emit context_refreshed to notify other windows
-                self.form_manager.context_refreshed.emit(new_config, self.form_manager.context_obj)
+                self.form_manager.context_refreshed.emit(new_config, self.form_manager.context_obj, self.form_manager.scope_id or "")
 
         except Exception as e:
             logger.error(f"Failed to save configuration: {e}")
@@ -452,13 +453,14 @@ class ConfigWindow(BaseFormDialog):
         try:
             from openhcs.pyqt_gui.services.simple_code_editor import SimpleCodeEditorService
             from openhcs.debug.pickle_to_python import generate_config_code
+            from openhcs.pyqt_gui.widgets.shared.services.parameter_ops_service import ParameterOpsService
             import os
 
             # CRITICAL: Refresh with live context BEFORE getting current values
             # This ensures code editor shows unsaved changes from other open windows
             # Example: GlobalPipelineConfig editor open with unsaved zarr_config changes
             #          → PipelineConfig code editor should show those live zarr_config values
-            self.form_manager._refresh_with_live_context()
+            ParameterOpsService().refresh_with_live_context(self.form_manager)
 
             # Get current config from form (now includes live context values)
             current_values = self.form_manager.get_current_values()

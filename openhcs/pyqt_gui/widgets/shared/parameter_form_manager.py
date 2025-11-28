@@ -305,6 +305,8 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
             # Nested managers are internal to their window and should not participate in cross-window updates
             if self._parent_manager is None:
                 LiveContextService.register(self)
+                # Connect to change notifications to refresh placeholders when other forms change
+                LiveContextService.connect_listener(self._on_live_context_changed)
             
             # Register hierarchy relationship for cross-window placeholder resolution
             if self.context_obj is not None and not self._parent_manager:
@@ -1068,6 +1070,17 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
             # Don't fail the whole operation if this fails
             pass
 
+    def _on_live_context_changed(self):
+        """Handle notification that live context changed (another form edited a value).
+
+        Schedule a placeholder refresh so this form shows updated inherited values.
+        Uses emit_signal=False to prevent infinite ping-pong between forms.
+        """
+        # Skip if this form triggered the change
+        if getattr(self, '_block_cross_window_updates', False):
+            return
+        self._schedule_cross_window_refresh(changed_field=None, emit_signal=False)
+
     def unregister_from_cross_window_updates(self):
         """Unregister from cross-window updates.
 
@@ -1077,6 +1090,9 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         logger.info(f"🔍 UNREGISTER: {self.field_id}")
 
         try:
+            # Disconnect from change notifications
+            LiveContextService.disconnect_listener(self._on_live_context_changed)
+
             # Unregister hierarchy relationship if this is a root manager
             if self.context_obj is not None and not self._parent_manager:
                 from openhcs.config_framework.context_manager import unregister_hierarchy_relationship

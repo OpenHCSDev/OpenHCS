@@ -394,6 +394,7 @@ class LazyDataclassFactory:
 
             # Check if field type is a dataclass that should be made lazy
             field_type = field.type
+            lazy_nested_type = None  # Track if we created a lazy nested type
             if is_dataclass(field.type):
                 # SIMPLIFIED: Create lazy version using simple factory
                 lazy_nested_type = LazyDataclassFactory.make_lazy_simple(
@@ -409,21 +410,22 @@ class LazyDataclassFactory:
             else:
                 final_field_type = field_type
 
-            # CRITICAL FIX: For lazy configs, Optional dataclass fields should default to None
-            # This enables proper placeholder styling and inheritance from parent configs
-            # The UI will handle None values by showing placeholders
+            # CRITICAL FIX: For lazy configs, nested dataclass fields should use default_factory
+            # to provide lazy instances (e.g., LazyPathPlanningConfig), not None.
+            # This allows getattr(pipeline_config, 'path_planning_config') to return an instance.
+            # Non-dataclass fields still default to None for placeholder inheritance.
             # CRITICAL: Always preserve metadata from original field (e.g., ui_hidden flag)
-            if (is_already_optional or not has_default) and is_dataclass(field.type):
-                # For Optional dataclass fields in lazy configs, use None as default
-                # This ensures all fields show as placeholders initially
-                field_def = (field.name, final_field_type, dataclasses.field(default=None, metadata=field.metadata))
+            if lazy_nested_type is not None:
+                # Nested dataclass field: use default_factory so accessing returns an instance
+                # This matches AbstractStep pattern: napari_streaming_config = LazyNapariStreamingConfig()
+                field_def = (field.name, final_field_type, dataclasses.field(default_factory=lazy_nested_type, metadata=field.metadata))
             elif field.metadata:
-                # CRITICAL FIX: For lazy configs, ALL fields should default to None
+                # CRITICAL FIX: For lazy configs, ALL non-dataclass fields should default to None
                 # This enables proper inheritance from parent configs and placeholder styling
                 # We preserve metadata but override all defaults to None
                 field_def = (field.name, final_field_type, dataclasses.field(default=None, metadata=field.metadata))
             else:
-                # CRITICAL FIX: For lazy configs, ALL fields should default to None
+                # CRITICAL FIX: For lazy configs, ALL non-dataclass fields should default to None
                 # This enables proper inheritance from parent configs and placeholder styling
                 field_def = (field.name, final_field_type, dataclasses.field(default=None))
 

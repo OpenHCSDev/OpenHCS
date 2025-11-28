@@ -70,8 +70,13 @@ class LiveContextService:
     @classmethod
     def _notify_change(cls) -> None:
         """Notify all listeners that something changed."""
+        logger.info(f"🔔 _notify_change: notifying {len(cls._change_callbacks)} listeners")
         for callback in cls._change_callbacks:
             try:
+                callback_name = getattr(callback, '__name__', str(callback))
+                callback_self = getattr(callback, '__self__', None)
+                owner = type(callback_self).__name__ if callback_self else 'unknown'
+                logger.info(f"  📣 Calling listener: {owner}.{callback_name}")
                 callback()
             except Exception as e:
                 logger.warning(f"Change callback failed: {e}")

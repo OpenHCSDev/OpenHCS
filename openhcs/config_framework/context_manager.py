@@ -971,12 +971,14 @@ def extract_all_configs(context_obj) -> Dict[str, Any]:
                 try:
                     field_value = getattr(context_obj, field_name)
                     if field_value is not None:
-                        # Use the actual instance type, not the annotation type
-                        # This handles cases where field is annotated as base class but contains subclass
+                        # CRITICAL: Use base type for lazy configs so MRO matching works
+                        # LazyWellFilterConfig should be stored as WellFilterConfig
+                        from openhcs.config_framework.lazy_factory import get_base_type_for_lazy
                         instance_type = type(field_value)
-                        configs[instance_type.__name__] = field_value
+                        base_type = get_base_type_for_lazy(instance_type) or instance_type
+                        configs[base_type.__name__] = field_value
 
-                        logger.debug(f"Extracted config {instance_type.__name__} from field {field_name}")
+                        logger.debug(f"Extracted config {base_type.__name__} from field {field_name}")
 
                 except AttributeError:
                     # Field doesn't exist on instance (shouldn't happen with dataclasses)
@@ -1024,8 +1026,12 @@ def _extract_from_object_attributes_typed(obj, configs: Dict[str, Any]) -> None:
             try:
                 attr_value = getattr(obj, attr_name)
                 if attr_value is not None and is_dataclass(attr_value):
-                    configs[type(attr_value).__name__] = attr_value
-                    logger.debug(f"Extracted config {type(attr_value).__name__} from attribute {attr_name}")
+                    # CRITICAL: Use base type for lazy configs so MRO matching works
+                    from openhcs.config_framework.lazy_factory import get_base_type_for_lazy
+                    instance_type = type(attr_value)
+                    base_type = get_base_type_for_lazy(instance_type) or instance_type
+                    configs[base_type.__name__] = attr_value
+                    logger.debug(f"Extracted config {base_type.__name__} from attribute {attr_name}")
 
             except (AttributeError, TypeError):
                 # Skip attributes that can't be accessed or aren't relevant

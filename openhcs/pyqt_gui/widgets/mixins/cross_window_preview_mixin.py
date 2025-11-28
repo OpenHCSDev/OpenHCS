@@ -50,6 +50,7 @@ class CrossWindowPreviewMixin:
 
     def _on_live_context_changed(self) -> None:
         """Called when any live context value changes. Schedules debounced refresh."""
+        logger.info(f"🔔 {type(self).__name__}._on_live_context_changed: scheduling preview update")
         self._schedule_preview_update()
 
     # --- Preview field configuration -------------------------------------------
@@ -107,6 +108,8 @@ class CrossWindowPreviewMixin:
     def _schedule_preview_update(self) -> None:
         """Schedule a debounced full preview refresh."""
         from PyQt6.QtCore import QTimer
+
+        logger.info(f"⏰ {type(self).__name__}._schedule_preview_update: starting {self.PREVIEW_UPDATE_DEBOUNCE_MS}ms timer")
 
         # Cancel existing timer (trailing debounce - restart on each change)
         if self._preview_update_timer is not None:

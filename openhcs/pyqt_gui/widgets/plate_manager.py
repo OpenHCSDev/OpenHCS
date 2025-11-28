@@ -227,6 +227,7 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
 
     def _handle_full_preview_refresh(self) -> None:
         """Refresh all preview labels."""
+        logger.info("🔄 PlateManager._handle_full_preview_refresh: refreshing preview labels")
         self.update_plate_list()
 
     def _update_single_plate_item(self, plate_path: str):
@@ -304,6 +305,9 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
 
         Uses centralized formatters from config_preview_formatters module to ensure
         consistency with PipelineEditor.
+
+        Pattern matches PipelineEditor: access configs directly from the lazy pipeline_config
+        object (which provides defaults), then use _resolve_config_attr for attribute resolution.
         """
         from openhcs.pyqt_gui.widgets.config_preview_formatters import format_config_indicator
         from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
@@ -311,18 +315,14 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         labels = []
 
         try:
-            # Get the raw pipeline_config (like PipelineEditor gets the raw step)
+            # Get the raw pipeline_config directly (lazy - provides defaults for unset fields)
+            # This matches PipelineEditor pattern: use raw object, resolve attrs through live context
             pipeline_config = orchestrator.pipeline_config
+            logger.info(f"🔍 pipeline_config type: {type(pipeline_config).__name__}, path_planning_config={getattr(pipeline_config, 'path_planning_config', 'NO_ATTR')}")
 
             # Collect live context for resolving lazy values (same as PipelineEditor)
             live_context_snapshot = ParameterFormManager.collect_live_context(
                 scope_filter=orchestrator.plate_path
-            )
-
-            # Merge live values into pipeline config for display
-            config_for_display = self._merge_with_live_values(
-                pipeline_config,
-                live_context_snapshot.values if live_context_snapshot else {}
             )
 
             effective_config = orchestrator.get_effective_config()
@@ -330,14 +330,14 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
             # Check each enabled preview field
             for field_path in self.get_enabled_preview_fields():
                 value = self._resolve_preview_field_value(
-                    pipeline_config_for_display=config_for_display,
+                    pipeline_config_for_display=pipeline_config,  # Use raw lazy config
                     field_path=field_path,
                     live_context_snapshot=live_context_snapshot,
                     fallback_context={
                         'orchestrator': orchestrator,
                         'field_path': field_path,
                         'effective_config': effective_config,
-                        'pipeline_config': config_for_display,
+                        'pipeline_config': pipeline_config,
                         'live_context_snapshot': live_context_snapshot,
                     }
                 )
@@ -349,7 +349,7 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
                     # Config object - use centralized formatter with resolver
                     def resolve_attr(parent_obj, config_obj, attr_name, context):
                         return self._resolve_config_attr(
-                            config_for_display,
+                            pipeline_config,
                             config_obj,
                             attr_name,
                             live_context_snapshot
@@ -431,6 +431,18 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
                 pipeline_config_for_display
             ]
 
+            # Debug: log live context values for this config type
+            config_type = type(config).__name__
+            live_values = live_context_snapshot.values if live_context_snapshot else {}
+            if attr_name == 'well_filter':
+                logger.info(f"🔎 _resolve_config_attr: {config_type}.{attr_name}")
+                logger.info(f"  📋 live_context token={live_context_snapshot.token if live_context_snapshot else 'N/A'}")
+                # Log ALL live context values to see what's there
+                for lc_type, lc_vals in live_values.items():
+                    vals_dict = lc_vals if isinstance(lc_vals, dict) else getattr(lc_vals, '__dict__', {})
+                    if 'well_filter' in vals_dict:
+                        logger.info(f"  📦 {lc_type.__name__}: well_filter={vals_dict.get('well_filter')}")
+
             # Resolve using service
             resolved_value = self._live_context_resolver.resolve_config_attr(
                 config_obj=config,
@@ -457,23 +469,52 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         live_context_snapshot=None,
         fallback_context: Optional[Dict[str, Any]] = None,
     ):
-        """Resolve a preview field path using the live context resolver."""
+        """Resolve a preview field path using the live context resolver.
+
+        For dotted paths like 'path_planning_config.well_filter':
+        1. Use getattr to navigate to the config object (preserves lazy type)
+        2. Use _resolve_config_attr only for the final attribute (triggers MRO resolution)
+
+        This matches PipelineEditor's pattern where it uses getattr to get the config,
+        then _resolve_config_attr to resolve individual attributes.
+        """
         parts = field_path.split('.')
-        current_obj = pipeline_config_for_display
-        resolved_value = None
+        logger.info(f"🔍 _resolve_preview_field_value: field_path={field_path}, parts={parts}")
 
-        for part in parts:
-            if current_obj is None:
-                resolved_value = None
-                break
-
-            resolved_value = self._resolve_config_attr(
+        if len(parts) == 1:
+            # Simple field - resolve directly
+            result = self._resolve_config_attr(
                 pipeline_config_for_display,
-                current_obj,
-                part,
+                pipeline_config_for_display,
+                parts[0],
                 live_context_snapshot
             )
-            current_obj = resolved_value
+            logger.info(f"  ➡️ Simple field resolved: {result}")
+            return result
+
+        # Dotted path: navigate to parent config using getattr, then resolve final attr
+        # This preserves the lazy type (e.g., LazyPathPlanningConfig) so MRO resolution works
+        current_obj = pipeline_config_for_display
+        for part in parts[:-1]:
+            if current_obj is None:
+                logger.info(f"  ❌ current_obj is None at part={part}")
+                return self._apply_preview_field_fallback(field_path, fallback_context)
+            current_obj = getattr(current_obj, part, None)
+            logger.info(f"  📍 After getattr({part}): type={type(current_obj).__name__}")
+
+        if current_obj is None:
+            logger.info(f"  ❌ current_obj is None after navigation")
+            return self._apply_preview_field_fallback(field_path, fallback_context)
+
+        # Resolve final attribute using live context resolver (triggers MRO inheritance)
+        logger.info(f"  🎯 Resolving {parts[-1]} from {type(current_obj).__name__}")
+        resolved_value = self._resolve_config_attr(
+            pipeline_config_for_display,
+            current_obj,
+            parts[-1],
+            live_context_snapshot
+        )
+        logger.info(f"  ✅ Resolved value: {resolved_value}")
 
         if resolved_value is None:
             return self._apply_preview_field_fallback(field_path, fallback_context)
