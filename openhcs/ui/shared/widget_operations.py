@@ -131,7 +131,7 @@ class WidgetOperations:
     def get_all_value_widgets(container: Any) -> list:
         """
         Get all widgets that implement ValueGettable ABC.
-        
+
         Replaces findChildren() with explicit type lists.
         Uses ABC checking instead of duck typing.
         
@@ -140,21 +140,42 @@ class WidgetOperations:
         
         Returns:
             List of widgets implementing ValueGettable
-        
+
         Example:
             >>> ops = WidgetOperations()
             >>> form = MyFormWidget()
             >>> value_widgets = ops.get_all_value_widgets(form)
             >>> values = {w.objectName(): ops.get_value(w) for w in value_widgets}
         """
-        # Get all registered widget types
+        # Start with registered widget types
         widget_types = tuple(WIDGET_IMPLEMENTATIONS.values())
-        
-        # Find all children of registered types
-        all_widgets = container.findChildren(widget_types)
-        
-        # Filter to only those implementing ValueGettable
-        return [w for w in all_widgets if isinstance(w, ValueGettable)]
+        collected = []
+        if widget_types:
+            collected.extend(container.findChildren(widget_types))
+
+        # Fallback: also include any child that declares ValueGettable via ABC
+        # (e.g., NoneAwareLineEdit/CheckBox which are registered virtually, not in WIDGET_IMPLEMENTATIONS)
+        try:
+            from PyQt6.QtCore import QObject
+            for widget in container.findChildren(QObject):
+                if isinstance(widget, ValueGettable):
+                    collected.append(widget)
+        except Exception:
+            # If PyQt isn't available in a non-GUI context, gracefully return what we have
+            pass
+
+        # Deduplicate while preserving order
+        seen_ids = set()
+        value_widgets = []
+        for widget in collected:
+            wid = id(widget)
+            if wid in seen_ids:
+                continue
+            seen_ids.add(wid)
+            if isinstance(widget, ValueGettable):
+                value_widgets.append(widget)
+
+        return value_widgets
     
     @staticmethod
     def try_set_placeholder(widget: Any, text: str) -> bool:
@@ -215,4 +236,3 @@ class WidgetOperations:
                 exc_info=True
             )
             return False
-
