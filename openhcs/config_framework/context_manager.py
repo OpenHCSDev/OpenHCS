@@ -671,7 +671,13 @@ def _find_live_values_for_type(target_type: type, live_context: dict) -> dict | 
     logger.info(f"_find_live_values_for_type: target={target_type.__name__} -> base={target_base.__name__}")
     logger.info(f"_find_live_values_for_type: live_context has {len(live_context)} types")
 
-    # First pass: look for subclass match (more specific wins)
+    # Pass 0: exact type match without normalization (prefer most specific)
+    for config_type, config_values in live_context.items():
+        if config_type == target_type:
+            logger.info(f"_find_live_values_for_type: ✅ exact type match for {config_type.__name__}")
+            return config_values
+
+    # First pass: look for subclass match (more specific wins) after normalization
     # e.g., StepWellFilterConfig values for WellFilterConfig resolution
     for config_type, config_values in live_context.items():
         config_base = _normalize_type(config_type)
