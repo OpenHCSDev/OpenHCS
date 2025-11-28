@@ -237,7 +237,6 @@ class StepParameterEditorWidget(QWidget):
         tree = self.tree_helper.create_tree_widget()
         self.tree_helper.populate_from_mapping(tree, self._tree_dataclass_params)
 
-        tree.itemClicked.connect(self._on_tree_item_double_clicked)
         tree.itemDoubleClicked.connect(self._on_tree_item_double_clicked)
         return tree
 
