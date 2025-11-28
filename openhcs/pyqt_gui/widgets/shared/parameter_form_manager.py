@@ -1452,19 +1452,9 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
 
         editing_type = type(editing_object)
 
-        # Global config edits affect global, descendants, or same context
+        # Global config edits affect all (respecting root isolation above)
         if is_global_config_instance(editing_object):
-            ctx_type = type(self.context_obj) if self.context_obj else None
-            dc_type = self.dataclass_type
-            ctx_is_global = is_global_config_instance(self.context_obj) if self.context_obj else False
-            obj_is_global = is_global_config_instance(self.object_instance) if self.object_instance else False
-            return (
-                ctx_is_global
-                or obj_is_global
-                or self.context_obj is None
-                or (ctx_type and is_ancestor_in_context(editing_type, ctx_type))
-                or (dc_type and is_ancestor_in_context(editing_type, dc_type))
-            )
+            return True
 
         # Ancestor/same-type checks for context object
         if self.context_obj is not None:
@@ -1472,7 +1462,7 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
             if is_ancestor_in_context(editing_type, context_obj_type):
                 return True
             if is_same_type_in_context(editing_type, context_obj_type):
-                return self.context_obj is editing_object
+                return True
 
         # Check dataclass fields for direct type match (handles nested configs)
         if is_dataclass(editing_object) and is_dataclass(self.dataclass_type):
