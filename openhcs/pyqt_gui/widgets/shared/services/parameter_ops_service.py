@@ -249,6 +249,16 @@ class ParameterOpsService(ParameterServiceABC):
                 widget = manager.widgets[field_name]
                 PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
                 logger.info(f"        ✅ Applied placeholder to widget")
+
+                # Keep enabled-field styling in sync when placeholder changes the visual state
+                if field_name == 'enabled':
+                    try:
+                        resolved_value = manager._widget_ops.get_value(widget)
+                        manager._enabled_field_styling_service.on_enabled_field_changed(
+                            manager, 'enabled', resolved_value
+                        )
+                    except Exception:
+                        logger.exception("Failed to apply enabled styling after placeholder refresh")
             else:
                 logger.warning(f"        ⚠️  No placeholder text computed")
 
