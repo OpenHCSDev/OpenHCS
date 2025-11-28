@@ -235,7 +235,8 @@ class ConfigWindow(BaseFormDialog):
         tree = self.tree_helper.create_tree_widget()
         self.tree_helper.populate_from_root_dataclass(tree, self.config_class)
 
-        # Connect double-click to navigation
+        # Connect click/double-click to navigation
+        tree.itemClicked.connect(self._on_tree_item_double_clicked)
         tree.itemDoubleClicked.connect(self._on_tree_item_double_clicked)
 
         return tree
