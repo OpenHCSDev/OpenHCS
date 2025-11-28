@@ -402,10 +402,6 @@ def is_ancestor_in_context(ancestor_type, descendant_type):
         True if ancestor_type is an ancestor of descendant_type,
         False otherwise.
     """
-    # Global configs are considered ancestors of all context types
-    if _is_global_type(ancestor_type):
-        return True
-
     from openhcs.config_framework.lazy_factory import get_base_type_for_lazy
 
     # Check 1: Is ancestor_type the lazy base of descendant_type?

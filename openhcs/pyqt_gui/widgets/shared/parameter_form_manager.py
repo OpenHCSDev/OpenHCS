@@ -1269,7 +1269,7 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
             cls._live_context_cache = TokenCache(lambda: cls._live_context_token_counter)
 
         from openhcs.config_framework import CacheKey
-        from openhcs.config_framework.context_manager import is_ancestor_in_context
+        from openhcs.config_framework.context_manager import is_ancestor_in_context, is_same_type_in_context
 
         for_type_name = for_type.__name__ if for_type else None
         cache_key = CacheKey.from_args(scope_filter, for_type_name)
@@ -1288,8 +1288,8 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
                 # HIERARCHY FILTER: Only collect from ancestors of for_type
                 # is_ancestor_in_context() handles all type relationships (dataclass, function, etc.)
                 if for_type is not None:
-                    if not is_ancestor_in_context(manager_type, for_type):
-                        logger.info(f"  📋 SKIP {manager.field_id}: {manager_type_name} not ancestor of {for_type_name}")
+                    if not (is_ancestor_in_context(manager_type, for_type) or is_same_type_in_context(manager_type, for_type)):
+                        logger.info(f"  📋 SKIP {manager.field_id}: {manager_type_name} not ancestor/same-type of {for_type_name}")
                         continue
 
                 # Apply scope filter if provided
@@ -1405,7 +1405,7 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         logger.info(f"🔔 CROSS_WINDOW_REFRESH [{self.field_id}]: from={editing_type_name}, ctx={context_type_name}, my_scope={self.scope_id}")
 
         # Don't refresh if this is the window that triggered the event
-        if editing_object is self.object_instance or editing_scope_id == self.scope_id:
+        if editing_object is self.object_instance:
             logger.info(f"  ⏭️  SKIP: same instance")
             return
 
