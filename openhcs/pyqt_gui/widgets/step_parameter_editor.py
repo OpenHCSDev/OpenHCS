@@ -13,13 +13,14 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QScrollArea, QSplitter, QTreeWidget, QTreeWidgetItem
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QPoint
+from PyQt6.QtCore import Qt, pyqtSignal
 
 from openhcs.core.steps.function_step import FunctionStep
 from openhcs.introspection.signature_analyzer import SignatureAnalyzer
-from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager, FormManagerConfig
 from openhcs.pyqt_gui.widgets.shared.config_hierarchy_tree import ConfigHierarchyTreeHelper
 from openhcs.pyqt_gui.widgets.shared.collapsible_splitter_helper import CollapsibleSplitterHelper
+from openhcs.pyqt_gui.widgets.shared.scrollable_form_mixin import ScrollableFormMixin
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 from openhcs.pyqt_gui.config import PyQtGUIConfig, get_default_pyqt_gui_config
@@ -31,12 +32,14 @@ from openhcs.ui.shared.code_editor_form_updater import CodeEditorFormUpdater
 logger = logging.getLogger(__name__)
 
 
-class StepParameterEditorWidget(QWidget):
+class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
     """
     Step parameter editor using dynamic form generation.
-    
-    Mirrors Textual TUI implementation - builds forms based on FunctionStep 
+
+    Mirrors Textual TUI implementation - builds forms based on FunctionStep
     constructor signature with nested dataclass support.
+
+    Inherits from ScrollableFormMixin to provide scroll-to-section functionality.
     """
     
     # Signals
@@ -121,7 +124,8 @@ class StepParameterEditorWidget(QWidget):
             context_obj=self.pipeline_config,    # Pipeline config as parent context for inheritance
             exclude_params=['func'],             # Exclude func - it has its own dedicated tab
             scope_id=self.scope_id,              # Pass scope_id to limit cross-window updates to same orchestrator
-            color_scheme=self.color_scheme       # Pass color scheme for consistent theming
+            color_scheme=self.color_scheme,      # Pass color scheme for consistent theming
+            use_scroll_area=False                # Step editor manages its own scroll area
         )
 
         self.form_manager = ParameterFormManager(
@@ -266,51 +270,7 @@ class StepParameterEditorWidget(QWidget):
                 return field_name
         return None
 
-    def _scroll_to_section(self, field_name: str):
-        """Ensure the requested parameter section is visible."""
-        if not hasattr(self, 'scroll_area') or self.scroll_area is None:
-            logger.warning("Scroll area not initialized; cannot navigate to section")
-            return
-
-        nested_managers = getattr(self.form_manager, 'nested_managers', {})
-        nested_manager = nested_managers.get(field_name)
-        if not nested_manager:
-            logger.warning(f"Field '{field_name}' not found in nested managers")
-            return
-
-        first_widget = None
-        if hasattr(nested_manager, 'widgets') and nested_manager.widgets:
-            first_param_name = next(iter(nested_manager.widgets.keys()))
-            first_widget = nested_manager.widgets[first_param_name]
-
-        if first_widget:
-            self._scroll_to_widget(first_widget)
-            return
-
-        from PyQt6.QtWidgets import QGroupBox
-        current = nested_manager.parentWidget()
-        while current:
-            if isinstance(current, QGroupBox):
-                self._scroll_to_widget(current, margin=50)
-                return
-            current = current.parentWidget()
-
-        logger.warning(f"Could not locate widget for '{field_name}' to scroll into view")
-
-    def _scroll_to_widget(self, widget: QWidget, margin: int = 100):
-        """Scroll the form scroll area so the widget becomes visible."""
-        if not widget or not self.scroll_area or not self.scroll_area.widget():
-            return
-
-        content = self.scroll_area.widget()
-        target_pos = widget.mapTo(content, QPoint(0, 0))
-
-        hbar = self.scroll_area.horizontalScrollBar()
-        vbar = self.scroll_area.verticalScrollBar()
-        hbar.setValue(max(target_pos.x() - margin, 0))
-        vbar.setValue(max(target_pos.y() - margin, 0))
-
-        self.scroll_area.ensureWidgetVisible(widget, margin, margin)
+    # _scroll_to_section is provided by ScrollableFormMixin
 
 
 

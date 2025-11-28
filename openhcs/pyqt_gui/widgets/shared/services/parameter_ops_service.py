@@ -91,20 +91,17 @@ class ParameterOpsService(ParameterServiceABC):
             nested_manager.reset_all_parameters()
 
     def _reset_DirectDataclassInfo(self, info: DirectDataclassInfo, manager) -> None:
-        """Reset direct Dataclass field - reset nested manager only."""
+        """Reset direct Dataclass field - reset nested manager only.
+
+        NOTE: We do NOT call update_widget_value on the container widget here.
+        DirectDataclass fields use GroupBoxWithHelp containers which don't implement
+        ValueSettable (they're just containers, not value widgets). The nested manager's
+        reset_all_parameters() call handles resetting all the actual value widgets inside.
+        """
         param_name = info.name
         nested_manager = manager.nested_managers.get(param_name)
         if nested_manager:
             nested_manager.reset_all_parameters()
-
-        if param_name in manager.widgets:
-            manager._widget_service.update_widget_value(
-                manager.widgets[param_name],
-                manager.parameters.get(param_name),
-                param_name,
-                skip_context_behavior=False,
-                manager=manager
-            )
 
     def _reset_GenericInfo(self, info: GenericInfo, manager) -> None:
         """Reset generic field to signature default.

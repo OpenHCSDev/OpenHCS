@@ -207,12 +207,34 @@ def _auto_generate_builders():
 
         return ExtractedParameters(**extracted, **computed)
 
-    def _build_config(field_id, extracted, context_obj, color_scheme, parent_manager, service):
+    def _build_config(field_id, extracted, context_obj, color_scheme, parent_manager, service, form_manager_config=None):
+        # CRITICAL: Nested managers should NOT create scroll areas
+        # Only root managers (parent_manager is None) should have scroll areas
+        is_nested = parent_manager is not None
+
+        # Check for use_scroll_area override from FormManagerConfig or from_dataclass_instance
+        # This allows config window and step editor to disable scroll area creation
+        if form_manager_config:
+            # Check new API (FormManagerConfig.use_scroll_area field)
+            if hasattr(form_manager_config, 'use_scroll_area') and form_manager_config.use_scroll_area is not None:
+                use_scroll_area = form_manager_config.use_scroll_area
+            # Check old API (temporary _use_scroll_area_override attribute)
+            elif hasattr(form_manager_config, '_use_scroll_area_override'):
+                use_scroll_area = form_manager_config._use_scroll_area_override
+            else:
+                use_scroll_area = not is_nested  # Default: only root managers get scroll areas
+        else:
+            use_scroll_area = not is_nested  # Default: only root managers get scroll areas
+
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"🔧 Building config for {field_id}: is_nested={is_nested}, use_scroll_area={use_scroll_area}")
+
         config = pyqt_config(
             field_id=field_id,
             color_scheme=color_scheme or PyQt6ColorScheme(),
             function_target=extracted.dataclass_type,
-            use_scroll_area=True
+            use_scroll_area=use_scroll_area
         )
 
         ctx = DerivationContext(context_obj, extracted, color_scheme)

@@ -118,6 +118,7 @@ class FormManagerConfig:
     read_only: bool = False
     scope_id: Optional[str] = None
     color_scheme: Optional[Any] = None
+    use_scroll_area: Optional[bool] = None  # None = auto-detect (False for nested, True for root)
 
 
 class NoneAwareIntEdit(QLineEdit):
@@ -265,7 +266,7 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
 
                 self.service = ParameterFormService()
                 form_config = ConfigBuilderService.build(
-                    field_id, extracted, config.context_obj, config.color_scheme, config.parent_manager, self.service
+                    field_id, extracted, config.context_obj, config.color_scheme, config.parent_manager, self.service, config
                 )
                 # METAPROGRAMMING: Auto-unpack all fields to self
                 ValueCollectionService.unpack_to_self(self, form_config)
@@ -421,12 +422,21 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         # CRITICAL: Do NOT default context_obj to dataclass_instance
         # This creates circular context bug where form uses itself as parent
         # Caller must explicitly pass context_obj if needed (e.g., Step Editor passes pipeline_config)
+
+        # CRITICAL: Store use_scroll_area in a temporary attribute so ConfigBuilderService can use it
+        # This is a workaround because FormManagerConfig doesn't have use_scroll_area field
+        # but we need to pass it through to the config building process
         config = FormManagerConfig(
             parent=parent,
             context_obj=context_obj,  # No default - None means inherit from thread-local global only
             scope_id=scope_id,
             color_scheme=color_scheme,
         )
+
+        # Store use_scroll_area as a temporary attribute on the config object
+        # ConfigBuilderService will check for this and use it if present
+        config._use_scroll_area_override = use_scroll_area
+
         return cls(
             object_instance=dataclass_instance,
             field_id=field_id,
@@ -498,6 +508,7 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         # OPTIMIZATION: Never add scroll areas for nested configs
         # This saves ~2ms per nested config × 20 configs = 40ms
         with timer("    Add scroll area", threshold_ms=1.0):
+            logger.info(f"🔧 {self.field_id}: is_nested={is_nested}, use_scroll_area={self.config.use_scroll_area}, will_create_scroll={self.config.use_scroll_area and not is_nested}")
             if self.config.use_scroll_area and not is_nested:
                 scroll_area = QScrollArea()
                 scroll_area.setWidgetResizable(True)
@@ -505,8 +516,10 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
                 scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
                 scroll_area.setWidget(form_widget)
                 layout.addWidget(scroll_area)
+                logger.info(f"  ✅ Created scroll area for {self.field_id}")
             else:
                 layout.addWidget(form_widget)
+                logger.info(f"  ⏭️ Skipped scroll area for {self.field_id} (nested or disabled)")
 
     def build_form(self) -> QWidget:
         """Build form UI using orchestrator service."""
@@ -697,7 +710,10 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
             # PHASE 2A: Use FlagContextManager instead of manual flag management
             # This guarantees flags are restored even on exception
             with FlagContextManager.reset_context(self, block_cross_window=True):
-                param_names = list(self.parameters.keys())
+                # CRITICAL: Iterate over form_structure.parameters instead of self.parameters
+                # form_structure only contains visible (non-hidden) parameters,
+                # while self.parameters may include ui_hidden parameters that don't have widgets
+                param_names = [param_info.name for param_info in self.form_structure.parameters]
                 for param_name in param_names:
                     # Call reset_parameter directly to avoid nested context managers
                     self.reset_parameter(param_name)

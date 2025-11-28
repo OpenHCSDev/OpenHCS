@@ -15,12 +15,13 @@ from PyQt6.QtWidgets import (
     QScrollArea, QWidget, QSplitter, QTreeWidget, QTreeWidgetItem,
     QLineEdit, QSpinBox, QDoubleSpinBox, QCheckBox, QComboBox
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QPoint
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont
 
 # Infrastructure classes removed - functionality migrated to ParameterFormManager service layer
 from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
 from openhcs.pyqt_gui.widgets.shared.config_hierarchy_tree import ConfigHierarchyTreeHelper
+from openhcs.pyqt_gui.widgets.shared.scrollable_form_mixin import ScrollableFormMixin
 from openhcs.pyqt_gui.widgets.shared.collapsible_splitter_helper import CollapsibleSplitterHelper
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
@@ -39,7 +40,7 @@ logger = logging.getLogger(__name__)
 # Infrastructure classes removed - functionality migrated to ParameterFormManager service layer
 
 
-class ConfigWindow(BaseFormDialog):
+class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
     """
     PyQt6 Configuration Window.
 
@@ -48,6 +49,8 @@ class ConfigWindow(BaseFormDialog):
 
     Inherits from BaseFormDialog to automatically handle unregistration from
     cross-window placeholder updates when the dialog closes.
+
+    Inherits from ScrollableFormMixin to provide scroll-to-section functionality.
     """
 
     # Signals
@@ -305,59 +308,7 @@ class ConfigWindow(BaseFormDialog):
 
         return None
 
-    def _scroll_to_section(self, field_name: str):
-        """Scroll to a specific section in the form - type-driven, seamless."""
-        logger.info(f"🔍 Scrolling to section: {field_name}")
-        logger.info(f"Available nested managers: {list(self.form_manager.nested_managers.keys())}")
-
-        # Type-driven: nested_managers dict has exact field name as key
-        if field_name in self.form_manager.nested_managers:
-            nested_manager = self.form_manager.nested_managers[field_name]
-
-            # Strategy: Find the first parameter widget in this nested manager (like the test does)
-            # This is more reliable than trying to find the GroupBox
-            first_widget = None
-
-            if hasattr(nested_manager, 'widgets') and nested_manager.widgets:
-                # Get the first widget from the nested manager's widgets dict
-                first_param_name = next(iter(nested_manager.widgets.keys()))
-                first_widget = nested_manager.widgets[first_param_name]
-                logger.info(f"Found first widget: {first_param_name}")
-
-            if first_widget:
-                self._scroll_to_widget(first_widget)
-                logger.info(f"✅ Scrolled to {field_name} via first widget")
-            else:
-                # Fallback: try to find the GroupBox
-                from PyQt6.QtWidgets import QGroupBox
-                current = nested_manager.parentWidget()
-                while current:
-                    if isinstance(current, QGroupBox):
-                        self._scroll_to_widget(current, margin=50)
-                        logger.info(f"✅ Scrolled to {field_name} via GroupBox")
-                        return
-                    current = current.parentWidget()
-
-                logger.warning(f"⚠️ Could not find widget or GroupBox for {field_name}")
-        else:
-            logger.warning(f"❌ Field '{field_name}' not in nested_managers")
-
-    def _scroll_to_widget(self, widget: QWidget, margin: int = 100):
-        """Scroll the form scroll area so the widget becomes visible."""
-        if not widget or not self.scroll_area or not self.scroll_area.widget():
-            return
-
-        content = self.scroll_area.widget()
-        target_pos = widget.mapTo(content, QPoint(0, 0))
-
-        # Move scrollbars directly for reliability, then ensure visible
-        hbar = self.scroll_area.horizontalScrollBar()
-        vbar = self.scroll_area.verticalScrollBar()
-        hbar.setValue(max(target_pos.x() - margin, 0))
-        vbar.setValue(max(target_pos.y() - margin, 0))
-
-        # Use ensureWidgetVisible as a final nudge after manual positioning
-        self.scroll_area.ensureWidgetVisible(widget, margin, margin)
+    # _scroll_to_section is provided by ScrollableFormMixin
 
 
     
@@ -397,10 +348,9 @@ class ConfigWindow(BaseFormDialog):
         """Reset all parameters using centralized service with full sophistication."""
         # Service layer now contains ALL the sophisticated logic previously in infrastructure classes
         # This includes nested dataclass reset, lazy awareness, and recursive traversal
+        # NOTE: reset_all_parameters already handles placeholder refresh internally via
+        # refresh_with_live_context, so no additional call needed
         self.form_manager.reset_all_parameters()
-
-        # Refresh placeholder text to ensure UI shows correct defaults
-        self.form_manager._refresh_all_placeholders()
 
         logger.debug("Reset all parameters using enhanced ParameterFormManager service")
 
