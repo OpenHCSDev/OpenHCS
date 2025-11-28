@@ -1436,95 +1436,55 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
             True if this form should refresh placeholders due to the change
         """
         from openhcs.config_framework import is_global_config_instance
-        from openhcs.config_framework.context_manager import is_ancestor_in_context, is_same_type_in_context
+        from openhcs.config_framework.context_manager import (
+            is_ancestor_in_context,
+            is_same_type_in_context,
+            get_root_from_scope_key,
+        )
         from dataclasses import fields, is_dataclass
         import typing
 
-        # ROOT ISOLATION: Different plates should not affect each other
-        from openhcs.config_framework.context_manager import get_root_from_scope_key
+        # Root isolation: different plate roots don't affect each other
         my_root = get_root_from_scope_key(self.scope_id)
         editing_root = get_root_from_scope_key(editing_scope_id)
-        # Non-empty different roots are isolated (global root "" is visible to all)
         if editing_root and my_root and editing_root != my_root:
-            logger.info(f"    → ROOT ISOLATION: editing_root={editing_root} != my_root={my_root} → False")
             return False
 
         editing_type = type(editing_object)
-        my_ctx_type = type(self.context_obj).__name__ if self.context_obj else "None"
-        my_obj_type = type(self.object_instance).__name__ if self.object_instance else "None"
 
-        # Check if editing object is global config
-        is_editing_global = is_global_config_instance(editing_object)
-        has_global_marker = hasattr(editing_type, '_is_global_config') and editing_type._is_global_config
-        logger.info(f"  🔍 _is_affected: editing={editing_type.__name__}, my_ctx={my_ctx_type}, my_obj={my_obj_type}, is_global={is_editing_global}, has_marker={has_global_marker}")
-
-        # GENERIC: If other window is editing a global config, check if we're affected
-        if is_editing_global:
-            # We're affected if:
-            # - Our context_obj is also a global config instance
-            # - Our object_instance is a global config instance
-            # - We have no context (relying on global context)
+        # Global config edits affect global, descendants, or same context
+        if is_global_config_instance(editing_object):
+            ctx_type = type(self.context_obj) if self.context_obj else None
+            dc_type = self.dataclass_type
             ctx_is_global = is_global_config_instance(self.context_obj) if self.context_obj else False
             obj_is_global = is_global_config_instance(self.object_instance) if self.object_instance else False
-            no_context = self.context_obj is None
-            # ALSO: Global config is an ancestor of PipelineConfig/steps, so include ancestor check
-            has_context_ancestor = False
-            if self.context_obj is not None:
-                has_context_ancestor = is_ancestor_in_context(editing_type, type(self.context_obj))
-            has_dataclass_ancestor = False
-            if self.dataclass_type is not None:
-                has_dataclass_ancestor = is_ancestor_in_context(editing_type, self.dataclass_type)
-
-            is_affected = (
+            return (
                 ctx_is_global
                 or obj_is_global
-                or no_context
-                or has_context_ancestor
-                or has_dataclass_ancestor
+                or self.context_obj is None
+                or (ctx_type and is_ancestor_in_context(editing_type, ctx_type))
+                or (dc_type and is_ancestor_in_context(editing_type, dc_type))
             )
-            logger.info(
-                f"    → GLOBAL check: ctx_is_global={ctx_is_global}, obj_is_global={obj_is_global}, "
-                f"no_context={no_context}, ctx_ancestor={has_context_ancestor}, dc_ancestor={has_dataclass_ancestor} → {is_affected}"
-            )
-            return is_affected
 
-        # GENERIC: Check if editing_object is an ancestor in our hierarchy
+        # Ancestor/same-type checks for context object
         if self.context_obj is not None:
             context_obj_type = type(self.context_obj)
-            # Check if editing type is an ancestor of our context type
-            is_ancestor = is_ancestor_in_context(editing_type, context_obj_type)
-            logger.info(f"    → ANCESTOR check: is_ancestor_in_context({editing_type.__name__}, {context_obj_type.__name__}) = {is_ancestor}")
-            if is_ancestor:
+            if is_ancestor_in_context(editing_type, context_obj_type):
                 return True
-            # Check if editing type is the same type as our context
-            is_same = is_same_type_in_context(editing_type, context_obj_type)
-            same_instance = self.context_obj is editing_object
-            logger.info(f"    → SAME_TYPE check: is_same_type={is_same}, same_instance={same_instance}")
-            if is_same:
-                # Same type - affected only if same instance
-                return same_instance
+            if is_same_type_in_context(editing_type, context_obj_type):
+                return self.context_obj is editing_object
 
-        # Check if editing_object is a parent type in our inheritance hierarchy
-        # This handles nested configs like WellFilterConfig that are inherited by other configs
-        if is_dataclass(editing_object):
-            # Check if our dataclass type has a field of the editing type
-            if is_dataclass(self.dataclass_type):
-                for field in fields(self.dataclass_type):
-                    # Check if this field's type matches the editing type
-                    if field.type == editing_type:
-                        logger.info(f"    → FIELD match: {self.dataclass_type.__name__}.{field.name} is {editing_type.__name__}")
+        # Check dataclass fields for direct type match (handles nested configs)
+        if is_dataclass(editing_object) and is_dataclass(self.dataclass_type):
+            for field in fields(self.dataclass_type):
+                if field.type == editing_type:
+                    return True
+                origin = typing.get_origin(field.type)
+                if origin is typing.Union:
+                    args = typing.get_args(field.type)
+                    if editing_type in args:
                         return True
 
-                    # Also check Optional[editing_type]
-                    origin = typing.get_origin(field.type)
-                    if origin is typing.Union:
-                        args = typing.get_args(field.type)
-                        if editing_type in args:
-                            logger.info(f"    → OPTIONAL FIELD match: {self.dataclass_type.__name__}.{field.name} is Optional[{editing_type.__name__}]")
-                            return True
-
-        # Leaf node changes don't affect other windows
-        logger.info(f"    → NO MATCH: returning False")
         return False
 
     def _schedule_cross_window_refresh(self, changed_field: Optional[str] = None, emit_signal: bool = True):
