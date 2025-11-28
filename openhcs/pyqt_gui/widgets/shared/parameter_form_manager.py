@@ -1298,20 +1298,11 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
                     logger.info(f"  📋 MANAGER {manager.field_id}: type={manager_type_name}, scope={manager.scope_id}, visible={is_visible}")
                     if not is_visible:
                         continue
-            else:
-                logger.info(f"  📋 MANAGER {manager.field_id}: type={manager_type_name}, scope={manager.scope_id}, no_filter_or_no_scope")
+                else:
+                    logger.info(f"  📋 MANAGER {manager.field_id}: type={manager_type_name}, scope={manager.scope_id}, no_filter_or_no_scope")
 
                 # Collect from this manager AND all its nested managers
-                try:
-                    cls._collect_from_manager_tree(manager, live_context, scoped_live_context)
-                except RuntimeError as e:
-                    # Drop managers whose underlying widgets have been destroyed (window closed)
-                    logger.warning(f"  ⚠️  Removing {manager.field_id} from active managers (destroyed widgets?): {e}")
-                    try:
-                        cls._active_form_managers.remove(manager)
-                        cls._live_context_token_counter += 1
-                    except ValueError:
-                        pass
+                cls._collect_from_manager_tree(manager, live_context, scoped_live_context)
 
             collected_types = list(live_context.keys())
             logger.info(f"  📦 COLLECTED {len(collected_types)} types: {[t.__name__ for t in collected_types]}")
