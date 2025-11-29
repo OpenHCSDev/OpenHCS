@@ -789,13 +789,13 @@ class OpenHCSMainWindow(QMainWindow):
             if not pipeline_file.exists():
                 raise FileNotFoundError(f"Pipeline file not found: {pipeline_path}")
 
-            # For .py files, read code and use existing _handle_edited_pipeline_code
+            # For .py files, read code and use existing _handle_edited_code
             if pipeline_file.suffix == '.py':
                 with open(pipeline_file, 'r') as f:
                     code = f.read()
 
                 # Use existing infrastructure that already handles code execution
-                pipeline_editor._handle_edited_pipeline_code(code)
+                pipeline_editor._handle_edited_code(code)
                 logger.info(f"Loaded pipeline from Python file: {pipeline_path}")
             else:
                 # For pickled files, use existing infrastructure
