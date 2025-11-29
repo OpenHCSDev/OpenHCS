@@ -62,10 +62,17 @@ class LiveContextService:
         return cls._live_context_token_counter
 
     @classmethod
-    def increment_token(cls) -> None:
-        """Increment token to invalidate all caches and notify listeners."""
+    def increment_token(cls, notify: bool = True) -> None:
+        """Increment token to invalidate all caches.
+
+        Args:
+            notify: If True (default), notify all listeners of the change.
+                   Set to False when you need to invalidate caches but will
+                   notify listeners later (e.g., after sibling refresh completes).
+        """
         cls._live_context_token_counter += 1
-        cls._notify_change()
+        if notify:
+            cls._notify_change()
 
     @classmethod
     def _notify_change(cls) -> None:
@@ -164,15 +171,26 @@ class LiveContextService:
         Returns:
             LiveContextSnapshot with token and values dict
         """
-        # Initialize cache on first use
+        from openhcs.config_framework.context_manager import get_dispatch_cache, is_ancestor_in_context, is_same_type_in_context
+
+        for_type_name = for_type.__name__ if for_type else None
+
+        # PERFORMANCE OPTIMIZATION: Check dispatch cycle cache first
+        # This avoids redundant computation when refreshing multiple siblings
+        dispatch_cache = get_dispatch_cache()
+        if dispatch_cache is not None:
+            dispatch_cache_key = ('live_context', scope_filter, for_type_name)
+            if dispatch_cache_key in dispatch_cache:
+                logger.info(f"📦 collect_live_context: DISPATCH CACHE HIT (scope={scope_filter}, for_type={for_type_name})")
+                return dispatch_cache[dispatch_cache_key]
+
+        # Initialize token cache on first use (fallback when not in dispatch cycle)
         if cls._live_context_cache is None:
             from openhcs.config_framework import TokenCache, CacheKey
             cls._live_context_cache = TokenCache(lambda: cls._live_context_token_counter)
 
         from openhcs.config_framework import CacheKey
-        from openhcs.config_framework.context_manager import is_ancestor_in_context, is_same_type_in_context
 
-        for_type_name = for_type.__name__ if for_type else None
         cache_key = CacheKey.from_args(scope_filter, for_type_name)
 
         def compute_live_context() -> LiveContextSnapshot:
@@ -189,17 +207,17 @@ class LiveContextService:
                 # HIERARCHY FILTER: Only collect from ancestors of for_type
                 if for_type is not None:
                     if not (is_ancestor_in_context(manager_type, for_type) or is_same_type_in_context(manager_type, for_type)):
-                        logger.info(f"  📋 SKIP {manager.field_id}: {manager_type_name} not ancestor/same-type of {for_type_name}")
+                        logger.debug(f"  📋 SKIP {manager.field_id}: {manager_type_name} not ancestor/same-type of {for_type_name}")
                         continue
 
                 # Apply scope filter if provided
                 if scope_filter is not None and manager.scope_id is not None:
                     is_visible = cls._is_scope_visible(manager.scope_id, scope_filter)
-                    logger.info(f"  📋 MANAGER {manager.field_id}: type={manager_type_name}, scope={manager.scope_id}, visible={is_visible}")
+                    logger.debug(f"  📋 MANAGER {manager.field_id}: type={manager_type_name}, scope={manager.scope_id}, visible={is_visible}")
                     if not is_visible:
                         continue
                 else:
-                    logger.info(f"  📋 MANAGER {manager.field_id}: type={manager_type_name}, scope={manager.scope_id}, no_filter_or_no_scope")
+                    logger.debug(f"  📋 MANAGER {manager.field_id}: type={manager_type_name}, scope={manager.scope_id}, no_filter_or_no_scope")
 
                 # Collect from this manager AND all its nested managers
                 cls._collect_from_manager_tree(manager, live_context, scoped_live_context)
@@ -211,6 +229,12 @@ class LiveContextService:
 
         # Use token cache to get or compute
         snapshot = cls._live_context_cache.get_or_compute(cache_key, compute_live_context)
+
+        # Store in dispatch cache if available (for sibling refresh optimization)
+        if dispatch_cache is not None:
+            dispatch_cache_key = ('live_context', scope_filter, for_type_name)
+            dispatch_cache[dispatch_cache_key] = snapshot
+            logger.debug(f"📦 collect_live_context: cached in dispatch cycle")
 
         if snapshot.token == cls._live_context_token_counter:
             logger.debug(f"✅ collect_live_context: CACHE HIT (token={cls._live_context_token_counter}, scope={scope_filter})")

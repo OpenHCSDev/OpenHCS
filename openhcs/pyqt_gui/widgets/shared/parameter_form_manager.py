@@ -859,16 +859,24 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
 
             return result
 
+        # PERFORMANCE OPTIMIZATION: Only read values for user-set fields
+        # Instead of calling get_current_values() which reads ALL widgets,
+        # we only need values for fields in _user_set_fields
         user_modified = {}
-        current_values = self.get_current_values()
+
+        # Fast path: if no user-set fields, return empty dict
+        if not self._user_set_fields:
+            return user_modified
 
         # DEBUG: Log what fields are tracked as user-set
         logger.debug(f"🔍 GET_USER_MODIFIED: {self.field_id} - _user_set_fields = {self._user_set_fields}")
-        logger.debug(f"🔍 GET_USER_MODIFIED: {self.field_id} - current_values = {current_values}")
 
         # Only include fields that were explicitly set by the user
+        # PERFORMANCE: Read directly from self.parameters instead of calling get_current_values()
         for field_name in self._user_set_fields:
-            value = current_values.get(field_name)
+            # For user-set fields, self.parameters is always the source of truth
+            # (updated by FieldChangeDispatcher before any refresh happens)
+            value = self.parameters.get(field_name)
 
             # CRITICAL FIX: Include None values for user-set fields
             # When user clears a field (backspace/delete), the None value must propagate

@@ -209,8 +209,11 @@ class ParameterOpsService(ParameterServiceABC):
         live_context = live_context_snapshot.values if live_context_snapshot else None
 
         # Use root manager's values and type for context (not just this nested manager's)
-        root_values = root_manager.get_user_modified_values() if root_manager != manager else None
-        root_type = getattr(root_manager, 'dataclass_type', None)
+        # PERFORMANCE OPTIMIZATION: Get root_values from live_context instead of calling
+        # get_user_modified_values() again (which calls get_current_values())
+        root_type = root_manager.dataclass_type
+        is_nested = root_manager != manager
+        root_values = live_context.get(root_type) if live_context and is_nested else None
         if root_values:
             value_types = {k: type(v).__name__ for k, v in root_values.items()}
             logger.info(f"        🔍 ROOT: field_id={root_manager.field_id}, type={root_type}, values={value_types}")
@@ -307,8 +310,11 @@ class ParameterOpsService(ParameterServiceABC):
             else:
                 overlay_dict = None
 
-            root_values = root_manager.get_user_modified_values() if root_manager != manager else None
-            root_type = getattr(root_manager, 'dataclass_type', None)
+            # PERFORMANCE OPTIMIZATION: Get root_values from live_context instead of calling
+            # get_user_modified_values() again (which calls get_current_values())
+            root_type = root_manager.dataclass_type
+            is_nested = root_manager != manager
+            root_values = live_context.get(root_type) if live_context and is_nested else None
             if root_type:
                 from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
                 lazy_root_type = LazyDefaultPlaceholderService._get_lazy_type_for_base(root_type)

@@ -521,7 +521,13 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
         self._sync_global_context_with_current_values(param_name)
 
     def _sync_global_context_with_current_values(self, source_param: str = None):
-        """Rebuild global context from current form values once."""
+        """Rebuild global context from current form values once.
+
+        PERFORMANCE NOTE: Do NOT call trigger_global_cross_window_refresh() here.
+        The FieldChangeDispatcher already handles cross-window updates via sibling
+        refresh and context_value_changed signals. We only need to update the
+        thread-local global config so lazy placeholder resolution sees current values.
+        """
         if not is_global_config_type(self.config_class):
             return
         try:
@@ -531,7 +537,8 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
             from openhcs.config_framework.global_config import set_global_config_for_editing
             set_global_config_for_editing(self.config_class, updated_config)
             self._global_context_dirty = True
-            ParameterFormManager.trigger_global_cross_window_refresh()
+            # REMOVED: trigger_global_cross_window_refresh() - causes O(n) refresh on every keystroke
+            # Cross-window updates are already handled by FieldChangeDispatcher
             if source_param:
                 logger.debug(f"Synchronized {self.config_class.__name__} context after change ({source_param})")
         except Exception as exc:

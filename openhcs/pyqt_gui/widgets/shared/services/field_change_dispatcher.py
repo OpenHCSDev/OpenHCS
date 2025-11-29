@@ -41,6 +41,15 @@ class FieldChangeDispatcher:
 
     def dispatch(self, event: FieldChangeEvent) -> None:
         """Handle a field change event."""
+        # PERFORMANCE OPTIMIZATION: Wrap entire dispatch in dispatch_cycle
+        # This allows sibling refreshes to share cached GLOBAL layer in build_context_stack
+        from openhcs.config_framework.context_manager import dispatch_cycle
+
+        with dispatch_cycle():
+            self._dispatch_impl(event)
+
+    def _dispatch_impl(self, event: FieldChangeEvent) -> None:
+        """Implementation of dispatch (wrapped in dispatch_cycle)."""
         source = event.source_manager
 
         if DEBUG_DISPATCHER:
@@ -72,19 +81,18 @@ class FieldChangeDispatcher:
                 reset_note = " (reset to None)" if event.is_reset else ""
                 logger.info(f"  ✅ Updated source.parameters[{event.field_name}], ADDED to _user_set_fields{reset_note}")
 
-            # Invalidate live context cache so siblings see the new value
-            # Block the ROOT manager from responding to its own change notification
+            # PERFORMANCE OPTIMIZATION: Invalidate cache but DON'T notify listeners yet
+            # This allows sibling refreshes to share the cached live context
+            # (first sibling computes and caches, subsequent siblings get cache hits)
+            # We notify listeners AFTER sibling refresh is complete
             root = source
             while root._parent_manager is not None:
                 root = root._parent_manager
-            root._block_cross_window_updates = True
-            try:
-                from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
-                LiveContextService.increment_token()
-                if DEBUG_DISPATCHER:
-                    logger.info(f"  🔄 Incremented live context token to {LiveContextService.get_token()}")
-            finally:
-                root._block_cross_window_updates = False
+
+            from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
+            LiveContextService.increment_token(notify=False)  # Invalidate cache only
+            if DEBUG_DISPATCHER:
+                logger.info(f"  🔄 Incremented live context token to {LiveContextService.get_token()} (notify deferred)")
 
             # 2. Mark parent chain as modified BEFORE refreshing siblings
             # This ensures root.get_user_modified_values() includes this field on first keystroke
@@ -120,6 +128,16 @@ class FieldChangeDispatcher:
             else:
                 if DEBUG_DISPATCHER:
                     logger.info(f"  ℹ️  No parent manager (root-level field)")
+
+            # PERFORMANCE OPTIMIZATION: NOW notify listeners (after sibling refresh)
+            # This allows sibling refreshes to share the cached live context
+            root._block_cross_window_updates = True
+            try:
+                LiveContextService._notify_change()
+                if DEBUG_DISPATCHER:
+                    logger.info(f"  📣 Notified {len(LiveContextService._change_callbacks)} listeners")
+            finally:
+                root._block_cross_window_updates = False
 
             # 3. Handle 'enabled' field styling
             if event.field_name == 'enabled':

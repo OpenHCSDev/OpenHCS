@@ -743,14 +743,24 @@ class PyQt6WidgetEnhancer:
     @staticmethod
     def apply_placeholder_text(widget: Any, placeholder_text: str) -> None:
         """Apply placeholder using declarative widget-strategy mapping."""
+        # PERFORMANCE OPTIMIZATION: Skip if placeholder text is unchanged
+        # This avoids redundant widget updates during sibling refresh cascades
+        cached_placeholder = getattr(widget, '_cached_placeholder_text', None)
+        if cached_placeholder == placeholder_text:
+            return  # No change needed
+
         # Check for checkbox group (QGroupBox with _checkboxes attribute)
         if hasattr(widget, '_checkboxes'):
-            return _apply_checkbox_group_placeholder(widget, placeholder_text)
+            _apply_checkbox_group_placeholder(widget, placeholder_text)
+            widget._cached_placeholder_text = placeholder_text
+            return
 
         # Direct widget type mapping for enhanced placeholders
         widget_strategy = WIDGET_PLACEHOLDER_STRATEGIES.get(type(widget))
         if widget_strategy:
-            return widget_strategy(widget, placeholder_text)
+            widget_strategy(widget, placeholder_text)
+            widget._cached_placeholder_text = placeholder_text
+            return
 
         # Method-based fallback for standard widgets
         strategy = next(
@@ -759,6 +769,7 @@ class PyQt6WidgetEnhancer:
             lambda w, t: w.setToolTip(t) if hasattr(w, 'setToolTip') else None
         )
         strategy(widget, placeholder_text)
+        widget._cached_placeholder_text = placeholder_text
 
     @staticmethod
     def apply_global_config_placeholder(widget: Any, field_name: str, global_config: Any = None) -> None:

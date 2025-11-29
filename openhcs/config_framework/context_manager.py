@@ -36,6 +36,37 @@ current_temp_global = contextvars.ContextVar('current_temp_global')
 # The stack is a tuple of types, ordered from outermost to innermost context
 context_type_stack = contextvars.ContextVar('context_type_stack', default=())
 
+# Dispatch cycle cache - caches expensive computations within a single field change dispatch
+# This avoids redundant computation when refreshing multiple siblings
+_dispatch_cycle_cache: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
+    '_dispatch_cycle_cache', default=None
+)
+
+
+@contextmanager
+def dispatch_cycle():
+    """Context manager for a dispatch cycle. Enables caching of computed values.
+
+    Usage in field_change_dispatcher.py:
+        with dispatch_cycle():
+            # sibling refreshes can share cached GLOBAL layer
+            for sibling in siblings:
+                refresh_placeholder(sibling, field_name)
+
+    The cache is automatically cleared when the context manager exits.
+    """
+    cache: dict = {}
+    token = _dispatch_cycle_cache.set(cache)
+    try:
+        yield cache
+    finally:
+        _dispatch_cycle_cache.reset(token)
+
+
+def get_dispatch_cache() -> dict | None:
+    """Get the current dispatch cycle cache, or None if not in a cycle."""
+    return _dispatch_cycle_cache.get()
+
 
 def _merge_nested_dataclass(base, override, mask_with_none: bool = False):
     """
@@ -584,6 +615,9 @@ def _get_global_context_layer(
     2. If live_context has a global config, use that (from another open editor)
     3. Fall back to thread-local global config
 
+    PERFORMANCE OPTIMIZATION: Within a dispatch cycle, the GLOBAL layer is cached
+    since it's the same for all sibling refreshes.
+
     Args:
         live_context: Dict mapping types to their live values
         is_global_config_editing: True if editing a global config
@@ -592,6 +626,33 @@ def _get_global_context_layer(
     Returns:
         Global config instance to use, or None if not available
     """
+    # PERFORMANCE OPTIMIZATION: Check dispatch cycle cache first
+    # Use is_global_config_editing and global_config_type as cache key since
+    # live_context dict is recreated each call (different id each time)
+    cache = get_dispatch_cache()
+    cache_key = ('global_layer', is_global_config_editing, global_config_type)
+
+    if cache is not None and cache_key in cache:
+        logger.info(f"  🚀 GLOBAL layer CACHE HIT")
+        return cache[cache_key]
+
+    # Compute the global layer
+    result = _compute_global_context_layer(live_context, is_global_config_editing, global_config_type)
+
+    # Store in dispatch cache if available
+    if cache is not None:
+        cache[cache_key] = result
+        logger.info(f"  📦 GLOBAL layer cached")
+
+    return result
+
+
+def _compute_global_context_layer(
+    live_context: dict | None,
+    is_global_config_editing: bool,
+    global_config_type: type | None,
+) -> object | None:
+    """Compute the global context layer (uncached implementation)."""
     # When editing global config, return a fresh instance to mask thread-local
     if is_global_config_editing and global_config_type is not None:
         try:
