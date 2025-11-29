@@ -1132,6 +1132,7 @@ def _fix_dataclass_field_defaults_post_processing(cls: Type, fields_set_to_none:
     that fields we set to None actually use None as the default in the constructor.
     """
     import dataclasses
+    import copy
 
     # Store the original __init__ method
     original_init = cls.__init__
@@ -1155,9 +1156,15 @@ def _fix_dataclass_field_defaults_post_processing(cls: Type, fields_set_to_none:
             # Get the field object
             field_obj = cls.__dataclass_fields__[field_name]
 
-            # Update the field default to None (overriding any parent class default)
-            field_obj.default = None
-            field_obj.default_factory = dataclasses.MISSING
+            # CRITICAL: Create a copy of the field object to avoid modifying parent class fields
+            # When a child class inherits from a parent, they share the same field objects
+            # Modifying the field object directly would affect the parent class too!
+            field_copy = copy.copy(field_obj)
+            field_copy.default = None
+            field_copy.default_factory = dataclasses.MISSING
+
+            # Replace the field object in this class's __dataclass_fields__
+            cls.__dataclass_fields__[field_name] = field_copy
 
             # Also ensure the class attribute is None (should already be set, but double-check)
             setattr(cls, field_name, None)
