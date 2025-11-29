@@ -233,9 +233,15 @@ class FieldChangeDispatcher:
                 logger.warning(f"      ⏭️  Field {field_name} not in widgets, skipping")
             return
 
-        if field_name in manager._user_set_fields:
+        # FIX: Check current value instead of _user_set_fields.
+        # Even if a field is in _user_set_fields, if its value is None it should
+        # show a placeholder (inherited from parent). This is critical for code-mode
+        # which sets all fields (adding them to _user_set_fields) but many have None
+        # values that should display as placeholders.
+        current_value = manager.parameters.get(field_name)
+        if current_value is not None:
             if DEBUG_DISPATCHER:
-                logger.info(f"      ⏭️  Field {field_name} in _user_set_fields (user-set), skipping placeholder refresh")
+                logger.info(f"      ⏭️  Field {field_name} has concrete value ({type(current_value).__name__}), skipping placeholder refresh")
             return
 
         if DEBUG_DISPATCHER:

@@ -540,17 +540,16 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
 
     def _update_form_from_config(self, new_config):
         """Update form values from new config using the shared updater."""
-        self.form_manager._block_cross_window_updates = True
-        try:
-            CodeEditorFormUpdater.update_form_from_instance(
-                self.form_manager,
-                new_config,
-                broadcast_callback=self._broadcast_config_changed
-            )
-        finally:
-            self.form_manager._block_cross_window_updates = False
-
-        ParameterFormManager.trigger_global_cross_window_refresh()
+        # NOTE:
+        # Do NOT set _block_cross_window_updates here.
+        # We want code-mode edits to behave like a series of normal user edits,
+        # so FieldChangeDispatcher will emit parameter_changed and
+        # context_value_changed just like manual widget changes.
+        CodeEditorFormUpdater.update_form_from_instance(
+            self.form_manager,
+            new_config,
+            broadcast_callback=self._broadcast_config_changed,
+        )
 
     def reject(self):
         """Handle dialog rejection (Cancel button)."""

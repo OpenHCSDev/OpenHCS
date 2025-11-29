@@ -48,6 +48,17 @@ class CrossWindowPreviewMixin:
         from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
         LiveContextService.connect_listener(self._on_live_context_changed)
 
+        # CRITICAL: Disconnect when widget is destroyed to avoid accessing deleted C++ objects
+        # This is a mixin, so 'self' should be a QWidget with a destroyed signal
+        if hasattr(self, 'destroyed'):
+            self.destroyed.connect(self._cleanup_cross_window_preview_mixin)
+
+    def _cleanup_cross_window_preview_mixin(self) -> None:
+        """Disconnect from LiveContextService when widget is destroyed."""
+        from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
+        LiveContextService.disconnect_listener(self._on_live_context_changed)
+        logger.debug(f"{type(self).__name__}: disconnected from LiveContextService")
+
     def _on_live_context_changed(self) -> None:
         """Called when any live context value changes. Schedules debounced refresh."""
         logger.info(f"🔔 {type(self).__name__}._on_live_context_changed: scheduling preview update")

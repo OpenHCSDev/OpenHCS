@@ -512,10 +512,12 @@ class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
         try:
             from openhcs.pyqt_gui.services.simple_code_editor import SimpleCodeEditorService
             from openhcs.debug.pickle_to_python import generate_step_code
+            from openhcs.pyqt_gui.widgets.shared.services.parameter_ops_service import ParameterOpsService
             import os
 
             # CRITICAL: Refresh with live context BEFORE getting current values
-            self.form_manager._refresh_with_live_context()
+            # This ensures code editor shows unsaved changes from other open windows
+            ParameterOpsService().refresh_with_live_context(self.form_manager)
 
             # Get current step from form (includes live context values)
             current_values = self.form_manager.get_current_values()
@@ -575,16 +577,16 @@ class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
             # Update step object
             self.step = new_step
 
-            # OPTIMIZATION: Block cross-window updates during bulk update
-            self.form_manager._block_cross_window_updates = True
-            try:
-                CodeEditorFormUpdater.update_form_from_instance(
-                    self.form_manager,
-                    new_step,
-                    broadcast_callback=None
-                )
-            finally:
-                self.form_manager._block_cross_window_updates = False
+            # IMPORTANT:
+            # Do NOT block cross-window updates here. We want code-mode edits
+            # to behave like a sequence of normal widget edits so that
+            # FieldChangeDispatcher emits the same parameter_changed and
+            # context_value_changed signals as manual interaction.
+            CodeEditorFormUpdater.update_form_from_instance(
+                self.form_manager,
+                new_step,
+                broadcast_callback=None,
+            )
 
             # CRITICAL: Update function list editor if we're inside a dual editor window
             parent_window = self.window()
@@ -594,9 +596,7 @@ class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
                 func_editor._populate_function_list()
                 logger.debug(f"Updated function list editor with new func: {new_step.func}")
 
-            # CodeEditorFormUpdater already refreshes placeholders and emits context events
-
-            # Emit step parameter changed signal for parent window
+            # Notify parent window that step parameters changed
             self.step_parameter_changed.emit()
 
             logger.info(f"Updated step from code editor: {new_step.name}")

@@ -220,9 +220,15 @@ class ParameterOpsService(ParameterServiceABC):
             if lazy_root_type:
                 root_type = lazy_root_type
 
+        # CRITICAL: Exclude the field being resolved from the overlay.
+        # If we include it, the overlay's None value shadows the inherited value
+        # from parent configs (e.g., streaming_defaults.well_filter=None would
+        # shadow well_filter_config.well_filter=2).
+        overlay_without_field = {k: v for k, v in manager.parameters.items() if k != field_name}
+
         stack = build_context_stack(
             context_obj=manager.context_obj,
-            overlay=manager.parameters,
+            overlay=overlay_without_field,
             dataclass_type=manager.dataclass_type,
             live_context=live_context,
             is_global_config_editing=getattr(manager.config, 'is_global_config_editing', False),

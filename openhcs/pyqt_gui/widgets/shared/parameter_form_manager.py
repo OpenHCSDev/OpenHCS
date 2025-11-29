@@ -479,27 +479,18 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         """Set up the UI layout."""
         from openhcs.utils.performance_monitor import timer
 
-        # OPTIMIZATION: Skip expensive operations for nested configs
-        # ANTI-DUCK-TYPING: _parent_manager always exists (set in __init__)
         is_nested = self._parent_manager is not None
 
         with timer("    Layout setup", threshold_ms=1.0):
             layout = QVBoxLayout(self)
-            # Apply configurable layout settings
             layout.setSpacing(CURRENT_LAYOUT.main_layout_spacing)
             layout.setContentsMargins(*CURRENT_LAYOUT.main_layout_margins)
 
-        # OPTIMIZATION: Skip style generation for nested configs (inherit from parent)
-        # This saves ~1-2ms per nested config × 20 configs = 20-40ms
-        # ALSO: Skip if parent is a ConfigWindow (which handles styling itself)
-        qt_parent = self.parent()
-        parent_is_config_window = qt_parent is not None and qt_parent.__class__.__name__ == 'ConfigWindow'
-        should_apply_styling = not is_nested and not parent_is_config_window
-        if should_apply_styling:
-            with timer("    Style generation", threshold_ms=1.0):
-                from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
-                style_gen = StyleSheetGenerator(self.color_scheme)
-                self.setStyleSheet(style_gen.generate_config_window_style())
+        # Always apply styling
+        with timer("    Style generation", threshold_ms=1.0):
+            from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
+            style_gen = StyleSheetGenerator(self.color_scheme)
+            self.setStyleSheet(style_gen.generate_config_window_style())
 
         # Build form content
         with timer("    Build form", threshold_ms=5.0):
@@ -1286,6 +1277,16 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
             self._cross_window_refresh_timer.stop()
 
         def do_refresh():
+            # CRITICAL: Check if this manager was deleted before the timer fired
+            # This can happen when a window is closed while a refresh is scheduled
+            try:
+                from PyQt6 import sip
+                if sip.isdeleted(self):
+                    logger.debug(f"🔄 DO_REFRESH: manager was deleted, skipping")
+                    return
+            except (ImportError, TypeError):
+                pass  # sip not available or object not a Qt object
+
             logger.info(f"🔄 DO_REFRESH [{self.field_id}]: field={changed_field}, emit_signal={emit_signal}")
             if changed_field is not None:
                 # Targeted refresh: only refresh the specific field that changed

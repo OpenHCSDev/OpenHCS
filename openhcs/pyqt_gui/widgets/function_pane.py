@@ -242,15 +242,25 @@ class FunctionPaneWidget(QWidget):
         # CRITICAL: Pass step_instance as context_obj for lazy resolution hierarchy
         # Function parameters → Step → Pipeline → Global
         # CRITICAL: Pass scope_id for cross-window live context updates (real-time placeholder sync)
+        # IMPORTANT UI BEHAVIOR:
+        # - FunctionListWidget already wraps all FunctionPaneWidgets in a QScrollArea.
+        # - If we also enable a scroll area inside ParameterFormManager here, the
+        #   inner scroll will expand to fill the available height, making the
+        #   "Parameters" pane look like it stretches to consume all vertical
+        #   space even when only a few rows are present.
+        # - To keep each function pane only as tall as its content, we explicitly
+        #   disable the inner scroll area and let the outer FunctionListWidget
+        #   handle scrolling for long forms.
         self.form_manager = PyQtParameterFormManager(
             object_instance=self.func,       # Pass function as the object to build form for
             field_id=f"func_{self.index}",   # Use function index as field identifier
             config=FormManagerConfig(
-                parent=self,                     # Pass self as parent widget
-                context_obj=self.step_instance,  # Step instance for context hierarchy (Function → Step → Pipeline → Global)
-                initial_values=self.kwargs,      # Pass saved kwargs to populate form fields
-                scope_id=self.scope_id,          # Scope ID for cross-window live context (same as step editor)
-                color_scheme=self.color_scheme   # Pass color_scheme for consistent theming
+                parent=self,                      # Pass self as parent widget
+                context_obj=self.step_instance,   # Step instance for context hierarchy (Function → Step → Pipeline → Global)
+                initial_values=self.kwargs,       # Pass saved kwargs to populate form fields
+                scope_id=self.scope_id,           # Scope ID for cross-window live context (same as step editor)
+                color_scheme=self.color_scheme,   # Pass color_scheme for consistent theming
+                use_scroll_area=False,            # Let outer FunctionListWidget manage scrolling
             )
         )
 

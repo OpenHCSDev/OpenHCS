@@ -71,15 +71,39 @@ class LiveContextService:
     def _notify_change(cls) -> None:
         """Notify all listeners that something changed."""
         logger.info(f"🔔 _notify_change: notifying {len(cls._change_callbacks)} listeners")
+        dead_callbacks = []
         for callback in cls._change_callbacks:
             try:
                 callback_name = getattr(callback, '__name__', str(callback))
                 callback_self = getattr(callback, '__self__', None)
                 owner = type(callback_self).__name__ if callback_self else 'unknown'
+
+                # Check if bound method's object has been deleted (PyQt C++ side)
+                if callback_self is not None:
+                    try:
+                        from PyQt6 import sip
+                        if sip.isdeleted(callback_self):
+                            logger.debug(f"  ⚠️  Skipping deleted object: {owner}.{callback_name}")
+                            dead_callbacks.append(callback)
+                            continue
+                    except (ImportError, TypeError):
+                        pass  # sip not available or object not a Qt object
+
                 logger.info(f"  📣 Calling listener: {owner}.{callback_name}")
                 callback()
+            except RuntimeError as e:
+                # "wrapped C/C++ object has been deleted" - mark for removal
+                if "deleted" in str(e).lower():
+                    logger.debug(f"  ⚠️  Callback's object was deleted, removing: {e}")
+                    dead_callbacks.append(callback)
+                else:
+                    logger.warning(f"Change callback failed: {e}")
             except Exception as e:
                 logger.warning(f"Change callback failed: {e}")
+
+        # Clean up dead callbacks
+        for cb in dead_callbacks:
+            cls._change_callbacks.remove(cb)
 
     # ========== MANAGER REGISTRY ==========
 

@@ -98,11 +98,12 @@ def _create_optional_title_widget(manager, param_info, display_info, field_ids, 
     from PyQt6.QtGui import QFont
     from openhcs.pyqt_gui.widgets.shared.no_scroll_spinbox import NoneAwareCheckBox
     from openhcs.pyqt_gui.widgets.shared.clickable_help_components import HelpButton
+    from openhcs.pyqt_gui.widgets.shared.layout_constants import CURRENT_LAYOUT
 
     title_widget = QWidget()
     title_layout = QHBoxLayout(title_widget)
-    title_layout.setSpacing(5)
-    title_layout.setContentsMargins(10, 5, 10, 5)
+    title_layout.setSpacing(CURRENT_LAYOUT.parameter_row_spacing)
+    title_layout.setContentsMargins(*CURRENT_LAYOUT.parameter_row_margins)
 
     # Checkbox (compact, no text)
     checkbox = NoneAwareCheckBox()
@@ -203,7 +204,8 @@ def _create_regular_container(manager: ParameterFormManager, param_info: Paramet
                              QWidget=None, GroupBoxWithHelp=None, PyQt6ColorScheme=None) -> Any:
     """Create container for REGULAR widget type."""
     from PyQt6.QtWidgets import QWidget as QtWidget
-    return QtWidget()
+    container = QtWidget()
+    return container
 
 
 def _create_nested_container(manager: ParameterFormManager, param_info: ParameterInfo,
@@ -237,9 +239,13 @@ def _setup_regular_layout(manager: ParameterFormManager, param_info: ParameterIn
     We need to configure the layout, not the container.
     """
     layout = container.layout()
-    if layout:
-        layout.setSpacing(CURRENT_LAYOUT.parameter_row_spacing)
-        layout.setContentsMargins(*CURRENT_LAYOUT.parameter_row_margins)
+    # QLayout.__bool__ returns False even when the layout exists, so we do not
+    # use a truthiness check here. For REGULAR rows we *require* that a layout
+    # has already been set (create_widget_parametric installs a QHBoxLayout),
+    # so if this ever ends up being None it's a programmer error and should
+    # raise loudly.
+    layout.setSpacing(CURRENT_LAYOUT.parameter_row_spacing)
+    layout.setContentsMargins(*CURRENT_LAYOUT.parameter_row_margins)
 
 
 def _setup_optional_nested_layout(manager: ParameterFormManager, param_info: ParameterInfo,

@@ -359,6 +359,7 @@ class GroupBoxWithHelp(QGroupBox):
         self.setTitle("")  # Clear default title
 
         # Create main layout and add title widget at top
+        # NOTE: Let Qt use default spacing - matches main branch behavior
         main_layout = QVBoxLayout(self)
         main_layout.addWidget(title_widget)
 
