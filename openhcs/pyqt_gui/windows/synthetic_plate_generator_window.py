@@ -189,7 +189,7 @@ class SyntheticPlateGeneratorWindow(QDialog):
             self.output_dir = dir_path
             self.output_dir_label.setText(dir_path)
             self.output_dir_label.setStyleSheet(
-                f"color: {self.color_scheme.to_hex(self.color_scheme.text_normal)}; padding: 5px;"
+                f"color: {self.color_scheme.to_hex(self.color_scheme.text_primary)}; padding: 5px;"
             )
     
     def generate_plate(self):
