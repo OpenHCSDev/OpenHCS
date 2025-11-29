@@ -586,6 +586,12 @@ class PlateManagerWidget(AbstractManagerWidget):
                 self.orchestrators[plate_path]._state = new_state
                 self.orchestrator_state_changed.emit(plate_path, new_state.value)
 
+            # Reset execution state to idle and update button states
+            # This ensures Stop/Force Kill button returns to "Run" state
+            self.execution_state = "idle"
+            self.current_execution_id = None
+            self.update_button_states()
+
         except Exception as e:
             logger.error(f"Error handling execution completion: {e}", exc_info=True)
 
