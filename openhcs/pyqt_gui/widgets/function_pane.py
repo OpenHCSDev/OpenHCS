@@ -98,6 +98,8 @@ class FunctionPaneWidget(QWidget):
     
     def setup_ui(self):
         """Setup the user interface."""
+        from PyQt6.QtWidgets import QSizePolicy
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(5, 5, 5, 5)
         layout.setSpacing(5)
@@ -110,6 +112,11 @@ class FunctionPaneWidget(QWidget):
         if self.func and self.show_parameters:
             parameter_frame = self.create_parameter_form()
             layout.addWidget(parameter_frame)
+
+        # CRITICAL: Prevent vertical expansion - pane should only take space needed for content
+        # This mirrors Textual TUI behavior where panes have height="auto"
+        # When multiple panes don't fit, the scroll area shows scrollbars instead of expanding panes
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
 
         # Set styling
         self.setStyleSheet(f"""

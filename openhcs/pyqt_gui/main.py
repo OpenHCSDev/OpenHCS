@@ -754,12 +754,13 @@ class OpenHCSMainWindow(QMainWindow):
         if not plate_manager:
             raise RuntimeError("Plate manager widget not found after creation")
 
+        # CRITICAL: Load pipeline FIRST to create pipeline editor and establish signal connections
+        # THEN add plate so the plate_selected signal is received by the connected pipeline editor
+        self._load_pipeline_file(pipeline_path)
+
         # Add the generated plate - this triggers plate_selected signal
         # which automatically updates pipeline editor via existing connections
         plate_manager.add_plate_callback([Path(output_dir)])
-
-        # Load the test pipeline (this will create pipeline editor if needed)
-        self._load_pipeline_file(pipeline_path)
 
         logger.info(f"Added synthetic plate and loaded test pipeline: {output_dir}")
 
