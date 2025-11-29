@@ -16,14 +16,6 @@ Overview
 
 The image acknowledgment system provides real-time tracking of image processing progress in Napari and Fiji viewers. It uses a shared PUSH-PULL ZMQ pattern where all viewers send acknowledgments to a single port (7555) after processing each image.
 
-**Key Features**:
-
-- **Real-time progress**: Shows "Processing: 3/10 images" in UI
-- **Stuck detection**: Identifies images that timeout (>30s without ack)
-- **Scalable**: Handles multiple viewers simultaneously
-- **Non-blocking**: Acks sent asynchronously, don't block image display
-- **Shared port**: All viewers use port 7555 for acks (simpler than unique ports)
-
 Architecture
 ------------
 

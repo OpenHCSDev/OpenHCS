@@ -376,21 +376,6 @@ The system is designed to handle potential AbstractStep constructor changes auto
             # - Changes from multi-select to single dropdown
             # - No manual widget mapping updates needed
 
-Benefits
---------
-
-- **Evolution-Proof**: Adapts automatically when AbstractStep constructor changes
-- **Zero Maintenance**: Constructor changes don't require UI code updates
-- **Type Safety**: Uses actual Python type system rather than manual mappings
-- **Inheritance Support**: Automatic pipeline configuration inheritance for lazy dataclasses
-- **Fail-Loud**: Type mismatches surface immediately during development
-- **Code Reduction**: 60% reduction in step editor implementation code
-- **Extensibility**: Easy to add new parameter type handlers
-- **Consistency**: Same patterns work across PyQt6 and Textual frameworks
-- **Automatic Mapping**: Type-based parameter-to-pipeline field discovery
-- **Future-Proof**: Handles new parameter types without code changes
-- **Context Awareness**: Step-level configs with proper inheritance chains
-
 Actual Implementation Example
 ----------------------------
 

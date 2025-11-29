@@ -255,15 +255,6 @@ visual consistency in preview labels across different config states.
 
 This ensures that preview labels stay synchronized with the actual config state, even when users reset values to defaults.
 
-**Benefits of Configurable Preview Fields**
-
-- **Per-widget customization**: Each widget (PipelineEditor, PlateManager, etc.) can configure its own preview fields
-- **Declarative API**: Simple, readable configuration in ``__init__``
-- **Type-safe formatters**: Custom lambda functions for formatting values
-- **Graceful fallback**: If formatter fails, falls back to ``str()``
-- **Dynamic control**: Enable/disable fields at runtime based on user preferences or context
-- **Single source of truth**: Centralized formatters ensure consistency across widgets
-
 **Scope IDs**
 
 Hierarchical scope identifiers enable targeted updates:

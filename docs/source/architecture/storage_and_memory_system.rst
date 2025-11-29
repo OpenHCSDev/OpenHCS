@@ -120,13 +120,6 @@ Virtual Workspace Backend
    backend.load("images/A01_s001_w1_z001_t001.tif")
    # → Actually loads "TimePoint_1/ZStep_1/A01_s001_w1.tif"
 
-**Key Features**:
-
-- **Read-only**: Virtual workspace is only for reading original data, not writing outputs
-- **Plate-relative paths**: All paths in mapping are relative to plate root for portability
-- **Zero disk overhead**: No symlinks, no file copies, just metadata
-- **Transparent**: Processing code sees flattened structure, backend handles translation
-
 **Integration with Microscope Handlers**:
 
 Microscope handlers that need virtual workspace mapping (e.g., ImageXpress, Opera Phenix) implement ``_build_virtual_mapping()`` to generate the workspace mapping. This method is **optional** and only needed for handlers that use the base class ``initialize_workspace()`` implementation.

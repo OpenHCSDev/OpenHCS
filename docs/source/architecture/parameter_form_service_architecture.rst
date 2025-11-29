@@ -340,51 +340,6 @@ Opening a New Window
 
 **Result:** New window shows live values from other open windows.
 
-Benefits of Service Architecture
----------------------------------
-
-Testability
-~~~~~~~~~~~
-
-Services can be unit tested without UI dependencies:
-
-.. code-block:: python
-
-    def test_reset_optional_dataclass():
-        service = ParameterResetService()
-        manager = create_mock_manager()
-        
-        service.reset_parameter(manager, 'optional_field')
-        
-        assert manager.parameters['optional_field'] is None
-        assert 'optional_field' in manager.reset_fields
-
-Extensibility
-~~~~~~~~~~~~~
-
-Adding new layer types is trivial:
-
-.. code-block:: python
-
-    class CustomContextBuilder(ContextLayerBuilder):
-        _layer_type = ContextLayerType.CUSTOM  # Auto-registered!
-        
-        def can_build(self, manager, **kwargs):
-            return manager.custom_condition
-        
-        def build(self, manager, **kwargs):
-            return ContextLayer(self._layer_type, manager.custom_instance)
-
-Maintainability
-~~~~~~~~~~~~~~~
-
-Each service has a single, clear responsibility. Changes to reset logic don't affect placeholder refresh logic.
-
-Code Reuse
-~~~~~~~~~~
-
-Services can be reused across different UI frameworks (PyQt6, Textual) and contexts (step editor, pipeline editor, config editor).
-
 Live Context Structure
 ----------------------
 

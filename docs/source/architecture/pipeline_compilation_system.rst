@@ -405,18 +405,6 @@ VFS-Based Data Flow
 -  Location transparency: data can be in memory or on disk
 -  Automatic serialization/deserialization based on backend
 
-Benefits of This Architecture
------------------------------
-
-1. **Compile-Time Safety**: Catch errors before expensive execution
-2. **Resource Optimization**: Global view enables smart resource
-   allocation
-3. **Reproducibility**: Immutable contexts ensure consistent results
-4. **Scalability**: Stateless execution enables easy parallelization
-5. **Debuggability**: Can inspect and modify plans before execution
-6. **Flexibility**: VFS abstraction allows different storage strategies
-7. **Performance**: Memory-aware planning optimizes data movement
-
 Error Handling
 --------------
 

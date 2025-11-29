@@ -18,15 +18,6 @@ The ``AbstractManagerWidget`` is a PyQt6 ABC that eliminates duck-typing and cod
 between ``PlateManagerWidget`` and ``PipelineEditorWidget`` through declarative configuration
 and the template method pattern.
 
-**Key Benefits**:
-
-- Eliminates ~1000 lines of duplicated code
-- Replaces implicit duck-typed interfaces with explicit ABC contracts
-- Enables declarative configuration via class attributes
-- Provides unified CRUD operations with domain-specific hooks
-- Supports cross-window preview integration
-- Includes code editing with lazy constructor patching
-
 Architecture Pattern
 --------------------
 
