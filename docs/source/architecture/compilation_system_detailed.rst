@@ -7,6 +7,16 @@ OpenHCS Pipeline Compilation System - Complete Architecture
   system flow, function pattern storage, and metadata injection
   mechanisms.
 
+The Problem: Tracing Function Patterns Through Compilation
+-----------------------------------------------------------
+
+When debugging pipelines, developers need to understand where function patterns go during compilation. Are they stored in step plans? Modified by validators? How does metadata injection work? Without clear documentation of the complete compilation flow, it's hard to understand how patterns are transformed and where to find them during execution.
+
+The Solution: Complete Compilation Flow Documentation
+------------------------------------------------------
+
+This document traces the complete flow from function patterns to execution, solving the mystery of where and how function patterns (including metadata-injected patterns) are stored and retrieved. By documenting each phase and showing exactly where patterns are stored, developers can understand the complete compilation process.
+
 Overview
 --------
 

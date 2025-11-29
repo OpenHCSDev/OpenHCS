@@ -1,6 +1,16 @@
 Pipeline Compilation System Architecture
 ========================================
 
+The Problem: Runtime Errors in Image Processing Pipelines
+----------------------------------------------------------
+
+Image processing pipelines often fail at runtime with cryptic errors: "GPU out of memory", "incompatible array types", "file not found". These failures happen after hours of processing, wasting computational resources and researcher time. Without compile-time validation, users can't catch configuration errors until execution begins. Additionally, resource allocation decisions (which GPU, which backend) are scattered throughout the code, making optimization impossible.
+
+The Solution: Compile-Time Validation and Resource Planning
+-----------------------------------------------------------
+
+OpenHCS implements a declarative, compile-time pipeline system that treats configuration as a first-class compilation target. This architecture separates pipeline definition from execution, enabling compile-time validation, resource optimization, and reproducible execution. The compiler catches errors before execution begins and makes optimal resource allocation decisions upfront.
+
 Overview
 --------
 

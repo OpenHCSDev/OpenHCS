@@ -1,13 +1,20 @@
 Pattern Detection and Microscope Integration System
 ===================================================
 
+The Problem: Microscope Format Diversity
+-----------------------------------------
+
+High-content screening involves diverse microscope platforms (Opera Phenix, ImageXpress, MetaXpress, etc.), each with unique directory structures, filename patterns, and metadata formats. Without automatic pattern detection, users must manually specify how to find images for each microscope type, creating brittle pipelines that break when directory structures change or when switching between instruments.
+
+The Solution: Automatic Pattern Discovery
+------------------------------------------
+
+OpenHCS implements a pattern detection system that automatically discovers image file patterns across different microscope formats. This system coordinates filename parsing, directory structure analysis, and pattern grouping to enable flexible pipeline processing without manual configuration.
+
 Overview
 --------
 
-OpenHCS implements a pattern detection system that automatically
-discovers image file patterns across different microscope formats. This
-system coordinates filename parsing, directory structure analysis, and
-pattern grouping to enable flexible pipeline processing.
+The system works by analyzing directory structures, extracting component information from filenames, and automatically grouping images into logical units (wells, sites, channels) that match the pipeline's component configuration.
 
 Architecture Components
 -----------------------
