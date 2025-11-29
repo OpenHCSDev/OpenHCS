@@ -3,6 +3,16 @@ UI Services Architecture
 
 Consolidated service layer for ParameterFormManager operations.
 
+The Problem: Monolithic Form Manager
+-------------------------------------
+
+The ParameterFormManager class originally contained all logic for parameter forms in a single 2600+ line class: widget finding, value collection, signal management, parameter operations, form initialization, and styling. This monolithic design made the code hard to test, extend, and maintain. Changes to one concern (e.g., widget styling) required understanding the entire class.
+
+The Solution: Service-Oriented Architecture
+---------------------------------------------
+
+The UI services extract specialized responsibilities into focused service classes, each handling one concern. Services are grouped by related functionality (widget operations, value collection, signal management, parameter operations, form initialization) while maintaining clean interfaces. This enables testing individual services in isolation and makes the codebase easier to understand and extend.
+
 Overview
 --------
 

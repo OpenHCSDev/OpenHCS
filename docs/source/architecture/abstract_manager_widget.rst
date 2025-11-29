@@ -1,6 +1,16 @@
 AbstractManagerWidget Architecture
 ===================================
 
+The Problem: Duplicated Manager Widget Code
+--------------------------------------------
+
+PlateManagerWidget and PipelineEditorWidget implement nearly identical CRUD operations (add, delete, edit, list items) with only domain-specific differences. This duplication (~1000 lines) creates maintenance burden: bug fixes must be applied twice, and adding new features requires changes in multiple places. Additionally, both widgets use duck-typing (implicit interfaces), making it hard to understand what methods subclasses must implement.
+
+The Solution: Template Method Pattern with Declarative Configuration
+---------------------------------------------------------------------
+
+AbstractManagerWidget uses the template method pattern to define the CRUD workflow once, with declarative configuration via class attributes. Subclasses specify their domain-specific behavior (button configs, item hooks, preview fields) as class attributes rather than implementing methods. This eliminates duplication, makes the interface explicit (ABC contracts), and enables easy extension.
+
 Overview
 --------
 

@@ -1,6 +1,16 @@
 PlateManager Services Architecture
 ===================================
 
+The Problem: Widget-Embedded Business Logic
+--------------------------------------------
+
+The PlateManager widget originally contained all business logic: orchestrator initialization, pipeline compilation, ZMQ client lifecycle management, and execution polling. This made the widget hard to test (requires PyQt setup), hard to reuse (logic is tied to Qt), and hard to debug (business logic mixed with UI concerns).
+
+The Solution: Protocol-Based Service Extraction
+------------------------------------------------
+
+The PlateManager delegates business logic to two protocol-based services: CompilationService and ZMQExecutionService. These services implement clean interfaces (Protocols) that define what the widget needs without coupling to Qt. This enables testing services independently, reusing them in other contexts, and understanding business logic without Qt knowledge.
+
 Overview
 --------
 

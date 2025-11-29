@@ -6,6 +6,16 @@ Orchestrator Configuration Management
 *Status: STABLE*
 *Module: openhcs.core.orchestrator.orchestrator*
 
+The Problem: Configuration Synchronization Complexity
+------------------------------------------------------
+
+Pipelines need to override global configuration defaults (e.g., use a specific GPU, different memory backend) without affecting other pipelines. This requires synchronizing pipeline-specific config to thread-local context so that steps can access it. Without automatic synchronization, developers must manually call sync methods scattered throughout the code, leading to bugs where config changes aren't propagated. Additionally, serialization needs fully-resolved config (no None values), while UI operations need inheritance-preserving config (None values indicate "use parent default").
+
+The Solution: Automatic Context Sync with Dual-Mode Access
+-----------------------------------------------------------
+
+The PipelineOrchestrator implements automatic synchronization: whenever pipeline config changes, it immediately updates thread-local context. Additionally, it provides dual-mode configuration access: one mode preserves None values for inheritance, another resolves all values for serialization. This eliminates manual sync calls and provides the right config format for each use case.
+
 Overview
 --------
 
