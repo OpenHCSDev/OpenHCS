@@ -128,6 +128,8 @@ TUI architecture, UI development patterns, and form management systems.
    :maxdepth: 1
 
    tui_system
+   abstract_manager_widget
+   plate_manager_services
    parameter_form_lifecycle
    parameter_form_service_architecture
    ui_services_architecture
@@ -160,7 +162,7 @@ Quick Start Paths
 
 **External Integrations?** Start with :doc:`external_integrations_overview` → :doc:`napari_integration_architecture` → :doc:`fiji_streaming_system` → :doc:`omero_backend_system`
 
-**UI Development?** Start with :doc:`parameter_form_lifecycle` → :doc:`parameter_form_service_architecture` → :doc:`ui_services_architecture` → :doc:`field_change_dispatcher` → :doc:`service-layer-architecture` → :doc:`tui_system`
+**UI Development?** Start with :doc:`abstract_manager_widget` → :doc:`plate_manager_services` → :doc:`parameter_form_lifecycle` → :doc:`parameter_form_service_architecture` → :doc:`ui_services_architecture` → :doc:`field_change_dispatcher` → :doc:`service-layer-architecture` → :doc:`tui_system`
 
 **System Integration?** Jump to :doc:`system_integration` → :doc:`special_io_system` → :doc:`microscope_handler_integration`
 

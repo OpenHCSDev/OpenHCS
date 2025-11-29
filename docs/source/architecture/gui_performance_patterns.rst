@@ -202,6 +202,13 @@ This rule is enforced by the centralized formatters:
 
 This ensures that disabled configs don't clutter the UI with misleading preview labels.
 
+**Well Filter Handling**:
+
+The formatters correctly handle ``None`` values for ``well_filter`` fields. When a config
+has a specific indicator (e.g., ``'NAP'``, ``'FIJI'``, ``'MAT'``) and the ``enabled`` field
+is ``True``, the indicator is shown even if ``well_filter`` is ``None``. This preserves
+visual consistency in preview labels across different config states.
+
 **Reset Button Refresh Behavior**
 
 ``CrossWindowPreviewMixin`` automatically responds to reset button clicks via the ``refresh_handler``:
