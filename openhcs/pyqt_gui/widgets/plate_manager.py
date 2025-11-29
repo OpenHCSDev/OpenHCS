@@ -413,8 +413,16 @@ class PlateManagerWidget(AbstractManagerWidget):
                 await asyncio.get_event_loop().run_in_executor(None, do_init)
                 self.orchestrators[plate_path] = orchestrator
                 self.orchestrator_state_changed.emit(plate_path, "READY")
-                if not self.selected_plate_path:
+
+                # If this plate is currently selected, emit signal to update pipeline editor
+                # This ensures pipeline editor gets notified when the selected plate is initialized
+                if plate_path == self.selected_plate_path:
+                    logger.info(f"🔔 EMITTING plate_selected after init for currently selected plate: {plate_path}")
+                    self.plate_selected.emit(plate_path)
+                elif not self.selected_plate_path:
+                    # If no plate is selected, select this one
                     self.selected_plate_path = plate_path
+                    logger.info(f"🔔 EMITTING plate_selected after init (auto-selecting): {plate_path}")
                     self.plate_selected.emit(plate_path)
             except Exception as e:
                 logger.error(f"Failed to initialize plate {plate_path}: {e}", exc_info=True)
