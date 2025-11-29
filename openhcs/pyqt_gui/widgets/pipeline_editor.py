@@ -582,20 +582,23 @@ class PipelineEditorWidget(AbstractManagerWidget):
         Args:
             plate_path: Path of the current plate
         """
+        logger.info(f"🔔 RECEIVED set_current_plate signal: {plate_path}")
         self.current_plate = plate_path
 
         # Load pipeline for the new plate
         if plate_path:
             plate_pipeline = self.plate_pipelines.get(plate_path, [])
             self.pipeline_steps = plate_pipeline
+            logger.info(f"  → Loaded {len(plate_pipeline)} steps for plate")
         else:
             self.pipeline_steps = []
+            logger.info(f"  → No plate selected, cleared pipeline")
 
         self._normalize_step_scope_tokens()
 
         self.update_item_list()
         self.update_button_states()
-        logger.debug(f"Current plate changed: {plate_path}")
+        logger.info(f"  → Pipeline editor updated for plate: {plate_path}")
 
     # _broadcast_to_event_bus() REMOVED - now using ABC's generic _broadcast_to_event_bus(event_type, data)
 

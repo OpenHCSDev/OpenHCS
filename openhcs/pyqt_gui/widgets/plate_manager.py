@@ -355,6 +355,7 @@ class PlateManagerWidget(AbstractManagerWidget):
             # Select the last added plate to ensure pipeline assignment works correctly
             if last_added_path:
                 self.selected_plate_path = last_added_path
+                logger.info(f"🔔 EMITTING plate_selected signal for: {last_added_path}")
                 self.plate_selected.emit(last_added_path)
             self.status_message.emit(f"Added {len(added_plates)} plate(s): {', '.join(added_plates)}")
         else:

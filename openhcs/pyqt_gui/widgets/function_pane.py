@@ -9,8 +9,8 @@ import logging
 from typing import Any, Dict, Callable, Optional, Tuple
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, 
-    QFrame, QScrollArea, QGroupBox
+    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
+    QFrame, QScrollArea, QGroupBox, QSizePolicy
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
@@ -98,8 +98,6 @@ class FunctionPaneWidget(QWidget):
     
     def setup_ui(self):
         """Setup the user interface."""
-        from PyQt6.QtWidgets import QSizePolicy
-
         layout = QVBoxLayout(self)
         layout.setContentsMargins(5, 5, 5, 5)
         layout.setSpacing(5)
@@ -113,10 +111,11 @@ class FunctionPaneWidget(QWidget):
             parameter_frame = self.create_parameter_form()
             layout.addWidget(parameter_frame)
 
-        # CRITICAL: Prevent vertical expansion - pane should only take space needed for content
-        # This mirrors Textual TUI behavior where panes have height="auto"
-        # When multiple panes don't fit, the scroll area shows scrollbars instead of expanding panes
-        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+        # Set size policy to only take minimum vertical space needed
+        # This prevents function panes from expanding to fill all available space
+        # and allows the scroll area in function_list_editor to handle overflow
+        size_policy = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
+        self.setSizePolicy(size_policy)
 
         # Set styling
         self.setStyleSheet(f"""

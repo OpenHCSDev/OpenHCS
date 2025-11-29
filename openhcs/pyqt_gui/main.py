@@ -695,6 +695,7 @@ class OpenHCSMainWindow(QMainWindow):
 
             if pipeline_editor_widget:
                 # Connect plate selection signal to pipeline editor (mirrors Textual TUI)
+                logger.info(f"🔗 CONNECTING plate_selected signal to pipeline editor")
                 plate_manager_widget.plate_selected.connect(pipeline_editor_widget.set_current_plate)
 
                 # Connect orchestrator config changed signal for placeholder refresh
@@ -709,9 +710,10 @@ class OpenHCSMainWindow(QMainWindow):
 
                 # Set current plate if one is already selected
                 if plate_manager_widget.selected_plate_path:
+                    logger.info(f"🔗 Setting initial plate: {plate_manager_widget.selected_plate_path}")
                     pipeline_editor_widget.set_current_plate(plate_manager_widget.selected_plate_path)
 
-                logger.debug("Connected plate manager to pipeline editor")
+                logger.info("✅ Connected plate manager to pipeline editor")
             else:
                 logger.warning("Could not find pipeline editor widget to connect")
         else:
@@ -746,6 +748,11 @@ class OpenHCSMainWindow(QMainWindow):
         # Ensure plate manager exists (create if needed)
         self.show_plate_manager()
 
+        # Load the test pipeline FIRST (this will create pipeline editor if needed)
+        # This ensures the pipeline editor exists and is connected to plate_selected signal
+        # BEFORE we add the plate and emit the signal
+        self._load_pipeline_file(pipeline_path)
+
         # Get the plate manager widget
         plate_dialog = self.floating_windows["plate_manager"]
         from openhcs.pyqt_gui.widgets.plate_manager import PlateManagerWidget
@@ -754,12 +761,9 @@ class OpenHCSMainWindow(QMainWindow):
         if not plate_manager:
             raise RuntimeError("Plate manager widget not found after creation")
 
-        # CRITICAL: Load pipeline FIRST to create pipeline editor and establish signal connections
-        # THEN add plate so the plate_selected signal is received by the connected pipeline editor
-        self._load_pipeline_file(pipeline_path)
-
         # Add the generated plate - this triggers plate_selected signal
         # which automatically updates pipeline editor via existing connections
+        # (pipeline editor now exists and is connected, so it will receive the signal)
         plate_manager.add_plate_callback([Path(output_dir)])
 
         logger.info(f"Added synthetic plate and loaded test pipeline: {output_dir}")
