@@ -260,18 +260,11 @@ class PlateManagerWidget(AbstractManagerWidget):
             live_context_snapshot = ParameterFormManager.collect_live_context(
                 scope_filter=orchestrator.plate_path
             )
-            effective_config = orchestrator.get_effective_config()
 
             return self._build_preview_labels(
-                item=orchestrator,  # Semantic item for context stack
+                item=orchestrator,
                 config_source=pipeline_config,
                 live_context_snapshot=live_context_snapshot,
-                fallback_context={
-                    'orchestrator': orchestrator,
-                    'effective_config': effective_config,
-                    'pipeline_config': pipeline_config,
-                    'live_context_snapshot': live_context_snapshot,
-                }
             )
         except Exception as e:
             logger.error(f"Error building config preview labels: {e}\n{traceback.format_exc()}")
