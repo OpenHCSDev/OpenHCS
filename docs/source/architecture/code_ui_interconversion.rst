@@ -118,12 +118,6 @@ The system implements a strict **upward import encapsulation** pattern:
     ├── Imports: [GlobalPipelineConfig, ...] + [all pipeline imports]
     └── Code: plate_paths, global_config, pipeline_data
 
-**Benefits of Encapsulation:**
-- **No Import Duplication**: Each tier includes all imports from lower tiers
-- **Complete Executability**: Generated code runs without additional imports
-- **Dependency Tracking**: Clear visibility of all required modules
-- **Maintainability**: Changes to function patterns automatically propagate upward
-
 Bidirectional Conversion Workflow
 ---------------------------------
 

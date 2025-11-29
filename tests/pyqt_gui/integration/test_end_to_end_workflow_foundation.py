@@ -517,7 +517,9 @@ def _launch_application(context: WorkflowContext) -> WorkflowContext:
     # Safe close event that doesn't trigger aggressive cleanup (inlined single-use helper)
     main_window.closeEvent = lambda event: event.accept()
 
-    main_window.show()
+    # Use app.show_main_window() to properly schedule deferred initialization
+    # This schedules _deferred_initialization via QTimer.singleShot(100, ...)
+    app.show_main_window()
     _wait_for_gui(TIMING.WINDOW_DELAY)
 
     return context.with_updates(main_window=main_window)
@@ -528,9 +530,25 @@ def _launch_application(context: WorkflowContext) -> WorkflowContext:
 
 def _access_plate_manager(context: WorkflowContext) -> WorkflowContext:
     """Access default plate manager window (already open by default)."""
-    plate_manager_window = context.main_window.floating_windows.get("plate_manager")
-    if not plate_manager_window:
-        raise AssertionError("Plate manager window should be open by default")
+    # Wait for plate manager to be created by deferred initialization
+    # The QTimer.singleShot(100, ...) in app.py schedules _deferred_initialization
+    # We need to wait for it to complete
+    max_wait = 5.0  # Maximum 5 seconds to wait
+    elapsed = 0.0
+    check_interval = 0.1
+
+    while elapsed < max_wait:
+        plate_manager_window = context.main_window.floating_windows.get("plate_manager")
+        if plate_manager_window:
+            break
+        time.sleep(check_interval)
+        QApplication.processEvents()
+        elapsed += check_interval
+    else:
+        raise AssertionError(
+            f"Plate manager window not created after {max_wait}s. "
+            "Deferred initialization may have failed."
+        )
 
     plate_manager_widget = plate_manager_window.findChild(PlateManagerWidget)
     if not plate_manager_widget:

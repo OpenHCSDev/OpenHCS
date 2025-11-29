@@ -201,6 +201,7 @@ Benefits
 See Also
 --------
 
+- :doc:`parameter_form_service_architecture` - Service-oriented refactoring of parameter forms (in development)
 - :doc:`configuration_framework` - Configuration system architecture used by services
 - :doc:`step-editor-generalization` - Step editors that use service layer patterns
 - :doc:`code_ui_interconversion` - Code/UI interconversion patterns

@@ -15,12 +15,13 @@ from PyQt6.QtWidgets import (
     QScrollArea, QWidget, QSplitter, QTreeWidget, QTreeWidgetItem,
     QLineEdit, QSpinBox, QDoubleSpinBox, QCheckBox, QComboBox
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont
 
 # Infrastructure classes removed - functionality migrated to ParameterFormManager service layer
 from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
 from openhcs.pyqt_gui.widgets.shared.config_hierarchy_tree import ConfigHierarchyTreeHelper
+from openhcs.pyqt_gui.widgets.shared.scrollable_form_mixin import ScrollableFormMixin
 from openhcs.pyqt_gui.widgets.shared.collapsible_splitter_helper import CollapsibleSplitterHelper
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
@@ -39,7 +40,7 @@ logger = logging.getLogger(__name__)
 # Infrastructure classes removed - functionality migrated to ParameterFormManager service layer
 
 
-class ConfigWindow(BaseFormDialog):
+class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
     """
     PyQt6 Configuration Window.
 
@@ -48,6 +49,8 @@ class ConfigWindow(BaseFormDialog):
 
     Inherits from BaseFormDialog to automatically handle unregistration from
     cross-window placeholder updates when the dialog closes.
+
+    Inherits from ScrollableFormMixin to provide scroll-to-section functionality.
     """
 
     # Signals
@@ -305,43 +308,7 @@ class ConfigWindow(BaseFormDialog):
 
         return None
 
-    def _scroll_to_section(self, field_name: str):
-        """Scroll to a specific section in the form - type-driven, seamless."""
-        logger.info(f"🔍 Scrolling to section: {field_name}")
-        logger.info(f"Available nested managers: {list(self.form_manager.nested_managers.keys())}")
-
-        # Type-driven: nested_managers dict has exact field name as key
-        if field_name in self.form_manager.nested_managers:
-            nested_manager = self.form_manager.nested_managers[field_name]
-
-            # Strategy: Find the first parameter widget in this nested manager (like the test does)
-            # This is more reliable than trying to find the GroupBox
-            first_widget = None
-
-            if hasattr(nested_manager, 'widgets') and nested_manager.widgets:
-                # Get the first widget from the nested manager's widgets dict
-                first_param_name = next(iter(nested_manager.widgets.keys()))
-                first_widget = nested_manager.widgets[first_param_name]
-                logger.info(f"Found first widget: {first_param_name}")
-
-            if first_widget:
-                # Scroll to the first widget (this will show the section header too)
-                self.scroll_area.ensureWidgetVisible(first_widget, 100, 100)
-                logger.info(f"✅ Scrolled to {field_name} via first widget")
-            else:
-                # Fallback: try to find the GroupBox
-                from PyQt6.QtWidgets import QGroupBox
-                current = nested_manager.parentWidget()
-                while current:
-                    if isinstance(current, QGroupBox):
-                        self.scroll_area.ensureWidgetVisible(current, 50, 50)
-                        logger.info(f"✅ Scrolled to {field_name} via GroupBox")
-                        return
-                    current = current.parentWidget()
-
-                logger.warning(f"⚠️ Could not find widget or GroupBox for {field_name}")
-        else:
-            logger.warning(f"❌ Field '{field_name}' not in nested_managers")
+    # _scroll_to_section is provided by ScrollableFormMixin
 
 
     
@@ -381,10 +348,9 @@ class ConfigWindow(BaseFormDialog):
         """Reset all parameters using centralized service with full sophistication."""
         # Service layer now contains ALL the sophisticated logic previously in infrastructure classes
         # This includes nested dataclass reset, lazy awareness, and recursive traversal
+        # NOTE: reset_all_parameters already handles placeholder refresh internally via
+        # refresh_with_live_context, so no additional call needed
         self.form_manager.reset_all_parameters()
-
-        # Refresh placeholder text to ensure UI shows correct defaults
-        self.form_manager._refresh_all_placeholders()
 
         logger.debug("Reset all parameters using enhanced ParameterFormManager service")
 
@@ -432,14 +398,15 @@ class ConfigWindow(BaseFormDialog):
                 self.form_manager.object_instance = new_config
 
                 # Increment token to invalidate caches
-                from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
-                ParameterFormManager._live_context_token_counter += 1
+                from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
+                LiveContextService.increment_token()
 
                 # Refresh this window's placeholders with new saved values as base
-                self.form_manager._refresh_with_live_context()
+                from openhcs.pyqt_gui.widgets.shared.services.parameter_ops_service import ParameterOpsService
+                ParameterOpsService().refresh_with_live_context(self.form_manager)
 
                 # Emit context_refreshed to notify other windows
-                self.form_manager.context_refreshed.emit(new_config, self.form_manager.context_obj)
+                self.form_manager.context_refreshed.emit(new_config, self.form_manager.context_obj, self.form_manager.scope_id or "")
 
         except Exception as e:
             logger.error(f"Failed to save configuration: {e}")
@@ -452,13 +419,14 @@ class ConfigWindow(BaseFormDialog):
         try:
             from openhcs.pyqt_gui.services.simple_code_editor import SimpleCodeEditorService
             from openhcs.debug.pickle_to_python import generate_config_code
+            from openhcs.pyqt_gui.widgets.shared.services.parameter_ops_service import ParameterOpsService
             import os
 
             # CRITICAL: Refresh with live context BEFORE getting current values
             # This ensures code editor shows unsaved changes from other open windows
             # Example: GlobalPipelineConfig editor open with unsaved zarr_config changes
             #          → PipelineConfig code editor should show those live zarr_config values
-            self.form_manager._refresh_with_live_context()
+            ParameterOpsService().refresh_with_live_context(self.form_manager)
 
             # Get current config from form (now includes live context values)
             current_values = self.form_manager.get_current_values()
@@ -553,7 +521,13 @@ class ConfigWindow(BaseFormDialog):
         self._sync_global_context_with_current_values(param_name)
 
     def _sync_global_context_with_current_values(self, source_param: str = None):
-        """Rebuild global context from current form values once."""
+        """Rebuild global context from current form values once.
+
+        PERFORMANCE NOTE: Do NOT call trigger_global_cross_window_refresh() here.
+        The FieldChangeDispatcher already handles cross-window updates via sibling
+        refresh and context_value_changed signals. We only need to update the
+        thread-local global config so lazy placeholder resolution sees current values.
+        """
         if not is_global_config_type(self.config_class):
             return
         try:
@@ -563,7 +537,8 @@ class ConfigWindow(BaseFormDialog):
             from openhcs.config_framework.global_config import set_global_config_for_editing
             set_global_config_for_editing(self.config_class, updated_config)
             self._global_context_dirty = True
-            ParameterFormManager.trigger_global_cross_window_refresh()
+            # REMOVED: trigger_global_cross_window_refresh() - causes O(n) refresh on every keystroke
+            # Cross-window updates are already handled by FieldChangeDispatcher
             if source_param:
                 logger.debug(f"Synchronized {self.config_class.__name__} context after change ({source_param})")
         except Exception as exc:
@@ -572,17 +547,16 @@ class ConfigWindow(BaseFormDialog):
 
     def _update_form_from_config(self, new_config):
         """Update form values from new config using the shared updater."""
-        self.form_manager._block_cross_window_updates = True
-        try:
-            CodeEditorFormUpdater.update_form_from_instance(
-                self.form_manager,
-                new_config,
-                broadcast_callback=self._broadcast_config_changed
-            )
-        finally:
-            self.form_manager._block_cross_window_updates = False
-
-        ParameterFormManager.trigger_global_cross_window_refresh()
+        # NOTE:
+        # Do NOT set _block_cross_window_updates here.
+        # We want code-mode edits to behave like a series of normal user edits,
+        # so FieldChangeDispatcher will emit parameter_changed and
+        # context_value_changed just like manual widget changes.
+        CodeEditorFormUpdater.update_form_from_instance(
+            self.form_manager,
+            new_config,
+            broadcast_callback=self._broadcast_config_changed,
+        )
 
     def reject(self):
         """Handle dialog rejection (Cancel button)."""

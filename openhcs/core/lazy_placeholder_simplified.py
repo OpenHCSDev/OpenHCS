@@ -82,13 +82,16 @@ class LazyDefaultPlaceholderService:
         try:
             instance = dataclass_type()
             resolved_value = getattr(instance, field_name)
+            logger.info(f"[LAZY_RESOLVE] {dataclass_type.__name__}.{field_name}: resolved_value={resolved_value!r}")
 
             result = LazyDefaultPlaceholderService._format_placeholder_text(resolved_value, prefix)
+            logger.info(f"[LAZY_RESOLVE] {dataclass_type.__name__}.{field_name}: formatted -> '{result}'")
         except Exception as e:
             logger.debug(f"Failed to resolve {dataclass_type.__name__}.{field_name}: {e}")
             # Fallback to class default
             class_default = LazyDefaultPlaceholderService._get_class_default_value(dataclass_type, field_name)
             result = LazyDefaultPlaceholderService._format_placeholder_text(class_default, prefix)
+            logger.info(f"[LAZY_RESOLVE] {dataclass_type.__name__}.{field_name}: fallback class_default={class_default!r} -> '{result}'")
 
         return result
 

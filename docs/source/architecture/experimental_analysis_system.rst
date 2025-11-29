@@ -73,12 +73,6 @@ The main entry point for experimental analysis:
        heatmap_path="heatmaps.xlsx"
    )
 
-**Key Features**:
-- Automatic microscope format detection
-- Configuration-driven processing
-- Unified interface for all formats
-- Eliminates format-specific code duplication
-
 #### FormatRegistryService
 
 Automatic discovery and management of format handlers:

@@ -1,6 +1,16 @@
 GPU Resource Management System
 ==============================
 
+The Problem: GPU Allocation in Multi-Step Pipelines
+----------------------------------------------------
+
+Image processing pipelines often use multiple GPU-accelerated libraries (CuPy, PyTorch, TensorFlow) in sequence. Without coordination, each library tries to allocate GPU memory independently, leading to out-of-memory errors, inefficient resource usage, and unpredictable performance. Additionally, different GPUs may have different capabilities, and users need to ensure functions run on compatible hardware.
+
+The Solution: Compile-Time GPU Registry and Assignment
+-------------------------------------------------------
+
+OpenHCS implements a GPU resource management system that coordinates GPU device allocation during pipeline compilation. The system provides GPU detection, registry initialization, and compilation-time GPU assignment to ensure consistent GPU usage across pipeline steps. By making GPU allocation decisions at compile time rather than runtime, the system prevents resource conflicts and enables optimal hardware utilization.
+
 Overview
 --------
 

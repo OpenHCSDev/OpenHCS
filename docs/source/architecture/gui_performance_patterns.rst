@@ -202,6 +202,13 @@ This rule is enforced by the centralized formatters:
 
 This ensures that disabled configs don't clutter the UI with misleading preview labels.
 
+**Well Filter Handling**:
+
+The formatters correctly handle ``None`` values for ``well_filter`` fields. When a config
+has a specific indicator (e.g., ``'NAP'``, ``'FIJI'``, ``'MAT'``) and the ``enabled`` field
+is ``True``, the indicator is shown even if ``well_filter`` is ``None``. This preserves
+visual consistency in preview labels across different config states.
+
 **Reset Button Refresh Behavior**
 
 ``CrossWindowPreviewMixin`` automatically responds to reset button clicks via the ``refresh_handler``:
@@ -247,15 +254,6 @@ This ensures that disabled configs don't clutter the UI with misleading preview 
 3. **Cancel button**: User cancels a config editor → preview labels revert to saved values
 
 This ensures that preview labels stay synchronized with the actual config state, even when users reset values to defaults.
-
-**Benefits of Configurable Preview Fields**
-
-- **Per-widget customization**: Each widget (PipelineEditor, PlateManager, etc.) can configure its own preview fields
-- **Declarative API**: Simple, readable configuration in ``__init__``
-- **Type-safe formatters**: Custom lambda functions for formatting values
-- **Graceful fallback**: If formatter fails, falls back to ``str()``
-- **Dynamic control**: Enable/disable fields at runtime based on user preferences or context
-- **Single source of truth**: Centralized formatters ensure consistency across widgets
 
 **Scope IDs**
 
@@ -310,6 +308,261 @@ After registering scopes/fields, subclasses still implement the operational hook
 - Context resolution: 20+ operations → 1 operation (incremental update)
 - Widget updates: Full rebuild → Text-only update on existing widgets
 - Measured latency: 60ms → 1ms per keystroke
+
+Dispatch Cycle Caching System
+------------------------------
+
+**Problem**: When a user types a single character in a form field, the system triggers multiple expensive operations:
+
+1. Collect live context from all open forms (~2ms)
+2. Build context stack with GLOBAL layer resolution (~2ms)
+3. Refresh sibling placeholders (5-10 siblings × ~2ms each)
+4. Cross-window updates to other windows
+
+With 6 sibling refreshes per keystroke, this totals ~20-30ms per keystroke, making typing feel sluggish.
+
+**Solution**: Dispatch Cycle Caching
+
+The dispatch cycle caching system uses ``contextvars`` to cache expensive computations within a single keystroke's dispatch cycle:
+
+.. code-block:: python
+
+   from openhcs.config_framework.context_manager import dispatch_cycle
+
+   # In FieldChangeDispatcher.dispatch():
+   with dispatch_cycle():
+       # All operations within this cycle share the same cache
+       # First sibling refresh: computes and caches live_context + GLOBAL layer
+       # Subsequent siblings: get cache hits (O(1) lookup)
+       for sibling_manager in sibling_managers:
+           sibling_manager.refresh_with_live_context()
+
+**How It Works**
+
+1. **Context Variable Storage**: ``dispatch_cycle()`` creates a thread-local cache dict
+2. **Cache Keys**: Operations use deterministic keys like ``('live_context', scope, type)``
+3. **Automatic Invalidation**: Token increments on next keystroke, invalidating all caches
+4. **Zero Overhead**: Cache lookups are O(1) dict operations
+
+**Cache Layers**
+
+The system caches at multiple levels:
+
+1. **Live Context Cache** (``collect_live_context()``)
+   - Key: ``('live_context', scope_filter, for_type_name)``
+   - Value: Dict of all form values for the given scope/type
+   - Hit rate: ~90% (same scope/type queried multiple times per keystroke)
+
+2. **GLOBAL Layer Cache** (``build_context_stack()``)
+   - Key: ``('global_layer', is_global_config_editing, global_config_type)``
+   - Value: Resolved GLOBAL layer for lazy placeholder resolution
+   - Hit rate: ~95% (GLOBAL layer same for all siblings)
+
+3. **Placeholder Text Cache** (``apply_placeholder_text()``)
+   - Key: Widget instance + placeholder text
+   - Value: Cached placeholder text
+   - Hit rate: ~80% (same placeholder text for unchanged fields)
+
+**Usage Example**
+
+.. code-block:: python
+
+   from openhcs.config_framework.context_manager import dispatch_cycle, get_dispatch_cache
+
+   def my_operation():
+       # Check if we're in a dispatch cycle
+       cache = get_dispatch_cache()
+       if cache is not None:
+           # We're in a dispatch cycle - use the cache
+           cache_key = ('my_operation', param1, param2)
+           if cache_key in cache:
+               return cache[cache_key]  # Cache hit!
+
+           # Cache miss - compute and store
+           result = expensive_computation()
+           cache[cache_key] = result
+           return result
+       else:
+           # Not in a dispatch cycle - compute directly
+           return expensive_computation()
+
+**Performance Impact**
+
+Before dispatch cycle caching:
+- 94 keystrokes → 163 ``collect_live_context`` COMPUTING calls
+- Each keystroke: ~20-30ms (6 siblings × ~3-5ms each)
+
+After dispatch cycle caching:
+- 94 keystrokes → 47 ``collect_live_context`` COMPUTING calls (369 cache hits)
+- Each keystroke: ~3-5ms (6 siblings × ~0.5-1ms each)
+- **Improvement: 4-6x faster typing**
+
+**Implementation Details**
+
+The dispatch cycle is implemented in ``openhcs/config_framework/context_manager.py``:
+
+.. code-block:: python
+
+   from contextvars import ContextVar
+
+   _dispatch_cycle_cache: ContextVar[Optional[dict]] = ContextVar(
+       'dispatch_cycle_cache', default=None
+   )
+
+   @contextmanager
+   def dispatch_cycle():
+       """Context manager for a dispatch cycle. Enables caching of computed values."""
+       cache: dict = {}
+       token = _dispatch_cycle_cache.set(cache)
+       try:
+           yield cache
+       finally:
+           _dispatch_cycle_cache.reset(token)
+
+   def get_dispatch_cache() -> Optional[dict]:
+       """Get the current dispatch cycle cache, or None if not in a cycle."""
+       return _dispatch_cycle_cache.get()
+
+**Integration Points**
+
+The dispatch cycle is automatically entered at the top level:
+
+1. **FieldChangeDispatcher.dispatch()** - Wraps entire field change handling
+2. **LiveContextService.collect_live_context()** - Checks cache before computing
+3. **build_context_stack()** - Caches GLOBAL layer resolution
+4. **apply_placeholder_text()** - Caches placeholder text by string comparison
+
+**Thread Safety**
+
+``contextvars`` are thread-safe by design:
+
+- Each thread has its own context variable values
+- No locks needed
+- Safe to use in async code (each async task gets its own context)
+
+**When NOT to Use Dispatch Cycle Caching**
+
+Don't use dispatch cycle caching for:
+
+- Operations that must always reflect current state (e.g., file I/O)
+- Operations with side effects (e.g., database writes)
+- Long-running operations (cache should be short-lived)
+
+**Debugging Dispatch Cycle Issues**
+
+Enable debug logging to see cache hits/misses:
+
+.. code-block:: python
+
+   import logging
+   logging.getLogger('openhcs.config_framework.context_manager').setLevel(logging.DEBUG)
+   logging.getLogger('openhcs.pyqt_gui.widgets.shared.services.live_context_service').setLevel(logging.DEBUG)
+
+Log output will show:
+
+.. code-block:: text
+
+   📦 collect_live_context: DISPATCH CACHE HIT (token=76, scope=None, for_type=GlobalPipelineConfig)
+   📦 collect_live_context: COMPUTING (token=76, scope=/path/to/scope, for_type=PipelineConfig)
+   🚀 GLOBAL layer CACHE HIT
+
+Eliminating Redundant Cross-Window Refreshes
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Problem**: The ``config_window.py`` was calling ``trigger_global_cross_window_refresh()`` on every keystroke, which:
+
+1. Called ``refresh_with_live_context()`` for ALL active form managers
+2. Triggered full placeholder refresh for every manager
+3. Caused O(n) work where n = number of open windows
+
+This was completely redundant because ``FieldChangeDispatcher`` already handles cross-window updates via:
+
+- Sibling refresh (nested managers with same field name)
+- Cross-window signals (``context_value_changed``)
+- Listener notification (``LiveContextService._notify_change()``)
+
+**Solution**: Remove the redundant ``trigger_global_cross_window_refresh()`` call
+
+.. code-block:: python
+
+   # BEFORE (slow):
+   def _sync_global_context_with_current_values(self, source_param: str = None):
+       current_values = self.form_manager.get_current_values()
+       updated_config = self.config_class(**current_values)
+       self.current_config = updated_config
+       set_global_config_for_editing(self.config_class, updated_config)
+       self._global_context_dirty = True
+       ParameterFormManager.trigger_global_cross_window_refresh()  # ❌ REDUNDANT!
+
+   # AFTER (fast):
+   def _sync_global_context_with_current_values(self, source_param: str = None):
+       current_values = self.form_manager.get_current_values()
+       updated_config = self.config_class(**current_values)
+       self.current_config = updated_config
+       set_global_config_for_editing(self.config_class, updated_config)
+       self._global_context_dirty = True
+       # FieldChangeDispatcher already handles cross-window updates
+
+**Performance Impact**
+
+- Removed O(n) refresh of all managers per keystroke
+- Measured improvement: ~10-15ms per keystroke
+
+Optimizing get_user_modified_values()
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Problem**: ``get_user_modified_values()`` was calling ``get_current_values()`` which:
+
+1. Reads ALL widget values (expensive)
+2. Recursively collects nested manager values
+3. Happens on every keystroke during ``collect_live_context()``
+
+But for lazy dataclasses, we only need values for fields in ``_user_set_fields``, not all fields.
+
+**Solution**: Read directly from ``self.parameters`` instead of calling ``get_current_values()``
+
+.. code-block:: python
+
+   # BEFORE (slow):
+   def get_user_modified_values(self) -> Dict[str, Any]:
+       if not is_lazy_dataclass(self.object_instance):
+           return self.get_current_values()  # ❌ Reads ALL widgets
+
+       user_modified = {}
+       current_values = self.get_current_values()  # ❌ Expensive!
+
+       for field_name in self._user_set_fields:
+           value = current_values.get(field_name)
+           # ...
+
+   # AFTER (fast):
+   def get_user_modified_values(self) -> Dict[str, Any]:
+       if not is_lazy_dataclass(self.object_instance):
+           return self.get_current_values()
+
+       user_modified = {}
+
+       # Fast path: if no user-set fields, return empty dict
+       if not self._user_set_fields:
+           return user_modified
+
+       for field_name in self._user_set_fields:
+           # ✅ Read directly from self.parameters (already updated by FieldChangeDispatcher)
+           value = self.parameters.get(field_name)
+           # ...
+
+**Why This Works**
+
+- ``FieldChangeDispatcher`` updates ``self.parameters`` BEFORE calling any refresh
+- For user-set fields, ``self.parameters`` is always the source of truth
+- We only need values for fields in ``_user_set_fields``, not all fields
+- No need to read widgets or recursively collect nested values
+
+**Performance Impact**
+
+- Eliminated expensive ``get_current_values()`` calls from ``collect_live_context()`` path
+- Measured improvement: ~5-10ms per keystroke
+- Reduced from 109 ``get_current_values`` calls to ~20 calls per typing session
 
 Live Context Collection
 -----------------------

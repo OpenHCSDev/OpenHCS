@@ -121,6 +121,10 @@ class StyleSheetGenerator:
             }}
         """
 
+    def generate_list_widget_style(self) -> str:
+        """Alias for generate_tree_widget_style (includes QListWidget styling)."""
+        return self.generate_tree_widget_style()
+
     def generate_table_widget_style(self) -> str:
         """
         Generate QStyleSheet for table widgets.
@@ -356,7 +360,13 @@ class StyleSheetGenerator:
         Returns:
             str: Complete QStyleSheet for config window styling
         """
+        from openhcs.pyqt_gui.widgets.shared.layout_constants import CURRENT_LAYOUT
+
         cs = self.color_scheme
+        widget_padding = CURRENT_LAYOUT.widget_padding
+        groupbox_margin_top = CURRENT_LAYOUT.groupbox_margin_top
+        groupbox_padding_top = CURRENT_LAYOUT.groupbox_padding_top
+
         return f"""
             QDialog {{
                 background-color: {cs.to_hex(cs.window_bg)};
@@ -365,16 +375,16 @@ class StyleSheetGenerator:
             QGroupBox {{
                 font-weight: bold;
                 border: none;
-                border-radius: 5px;
-                margin-top: 5px;
-                padding-top: 5px;
+                border-radius: 3px;
+                margin-top: {groupbox_margin_top}px;
+                padding-top: {groupbox_padding_top}px;
                 background-color: {cs.to_hex(cs.panel_bg)};
                 color: {cs.to_hex(cs.text_primary)};
             }}
             QGroupBox::title {{
                 subcontrol-origin: margin;
                 left: 10px;
-                padding: 0 5px 0 5px;
+                padding: 0 3px 0 3px;
                 color: {cs.to_hex(cs.text_accent)};
             }}
             QLabel {{
@@ -385,7 +395,7 @@ class StyleSheetGenerator:
                 color: {cs.to_hex(cs.input_text)};
                 border: none;
                 border-radius: 3px;
-                padding: 5px;
+                padding: {widget_padding}px;
             }}
             QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {{
                 border: 1px solid {cs.to_hex(cs.input_focus_border)};
@@ -395,7 +405,7 @@ class StyleSheetGenerator:
                 color: {cs.to_hex(cs.button_text)};
                 border: none;
                 border-radius: 3px;
-                padding: 5px;
+                padding: {widget_padding}px;
             }}
             QPushButton:hover {{
                 background-color: {cs.to_hex(cs.button_hover_bg)};
@@ -414,7 +424,7 @@ class StyleSheetGenerator:
                 background-color: {cs.to_hex(cs.panel_bg)};
                 border: none;
                 border-radius: 3px;
-                padding: 5px;
+                padding: 0px;
             }}
         """
 

@@ -40,6 +40,41 @@ def get_base_type_for_lazy(lazy_type: Type) -> Optional[Type]:
     """Get the base type for a lazy dataclass type."""
     return _lazy_type_registry.get(lazy_type)
 
+
+def is_lazy_dataclass(obj_or_type) -> bool:
+    """
+    Check if an object or type is a lazy dataclass.
+
+    ANTI-DUCK-TYPING: Uses isinstance() check against LazyDataclass base class
+    instead of hasattr() attribute sniffing.
+
+    Works with both instances and types, and naturally handles Optional types
+    without unwrapping.
+
+    Args:
+        obj_or_type: Either a dataclass instance or a dataclass type
+
+    Returns:
+        True if the object/type is a lazy dataclass
+
+    Examples:
+        >>> is_lazy_dataclass(PipelineConfig)  # True (type check)
+        >>> is_lazy_dataclass(GlobalPipelineConfig)  # False
+        >>> is_lazy_dataclass(pipeline_config_instance)  # True (instance check)
+        >>> is_lazy_dataclass(LazyPathPlanningConfig)  # True
+        >>> is_lazy_dataclass(PathPlanningConfig)  # False
+
+        # Works with Optional without unwrapping!
+        >>> config: Optional[PipelineConfig] = PipelineConfig()
+        >>> is_lazy_dataclass(config)  # True - checks the instance, not the type annotation
+    """
+    if isinstance(obj_or_type, type):
+        # Type check: is it a subclass of LazyDataclass?
+        return issubclass(obj_or_type, LazyDataclass)
+    else:
+        # Instance check: is it an instance of LazyDataclass?
+        return isinstance(obj_or_type, LazyDataclass)
+
 # Optional imports (handled gracefully)
 try:
     from PyQt6.QtWidgets import QApplication
@@ -82,6 +117,25 @@ class GlobalConfigBase(metaclass=GlobalConfigMeta):
 
     Instead of:
         if isinstance(config, GlobalPipelineConfig):  # Hardcoded, breaks extensibility
+    """
+    pass
+
+
+class LazyDataclass:
+    """
+    Base class for all lazy dataclasses created by LazyDataclassFactory.
+
+    This enables isinstance() checks without duck typing or unwrapping:
+        isinstance(config, LazyDataclass)  # Works!
+        isinstance(optional_config, LazyDataclass)  # Works even for Optional!
+
+    All lazy dataclasses inherit from this, regardless of naming convention:
+    - PipelineConfig (lazy version of GlobalPipelineConfig)
+    - LazyPathPlanningConfig
+    - LazyWellFilterConfig
+    - etc.
+
+    ANTI-DUCK-TYPING: Use isinstance(obj, LazyDataclass) instead of hasattr() checks.
     """
     pass
 
@@ -340,6 +394,7 @@ class LazyDataclassFactory:
 
             # Check if field type is a dataclass that should be made lazy
             field_type = field.type
+            lazy_nested_type = None  # Track if we created a lazy nested type
             if is_dataclass(field.type):
                 # SIMPLIFIED: Create lazy version using simple factory
                 lazy_nested_type = LazyDataclassFactory.make_lazy_simple(
@@ -355,32 +410,24 @@ class LazyDataclassFactory:
             else:
                 final_field_type = field_type
 
-            # CRITICAL FIX: Create default factory for Optional dataclass fields
-            # This eliminates the need for field introspection and ensures UI always has instances to render
+            # CRITICAL FIX: For lazy configs, nested dataclass fields should use default_factory
+            # to provide lazy instances (e.g., LazyPathPlanningConfig), not None.
+            # This allows getattr(pipeline_config, 'path_planning_config') to return an instance.
+            # Non-dataclass fields still default to None for placeholder inheritance.
             # CRITICAL: Always preserve metadata from original field (e.g., ui_hidden flag)
-            if (is_already_optional or not has_default) and is_dataclass(field.type):
-                # For Optional dataclass fields, create default factory that creates lazy instances
-                # This ensures the UI always has nested lazy instances to render recursively
-                # CRITICAL: field_type is already the lazy type, so use it directly
-                field_def = (field.name, final_field_type, dataclasses.field(default_factory=field_type, metadata=field.metadata))
+            if lazy_nested_type is not None:
+                # Nested dataclass field: use default_factory so accessing returns an instance
+                # This matches AbstractStep pattern: napari_streaming_config = LazyNapariStreamingConfig()
+                field_def = (field.name, final_field_type, dataclasses.field(default_factory=lazy_nested_type, metadata=field.metadata))
             elif field.metadata:
-                # For fields with metadata but no dataclass default factory, create a Field object to preserve metadata
-                # We need to replicate the original field's default behavior
-                if field.default is not MISSING:
-                    field_def = (field.name, final_field_type, dataclasses.field(default=field.default, metadata=field.metadata))
-                elif field.default_factory is not MISSING:
-                    if is_dataclass(field.type):
-                        # Instantiate lazy dataclass instances instead of leaving field as None
-                        # so that consumers can inspect inherited values without materializing overrides.
-                        field_def = (field.name, final_field_type, dataclasses.field(default_factory=field_type, metadata=field.metadata))
-                    else:
-                        field_def = (field.name, final_field_type, dataclasses.field(default_factory=field.default_factory, metadata=field.metadata))
-                else:
-                    # Field has metadata but no default - use MISSING to indicate required field
-                    field_def = (field.name, final_field_type, dataclasses.field(default=MISSING, metadata=field.metadata))
+                # CRITICAL FIX: For lazy configs, ALL non-dataclass fields should default to None
+                # This enables proper inheritance from parent configs and placeholder styling
+                # We preserve metadata but override all defaults to None
+                field_def = (field.name, final_field_type, dataclasses.field(default=None, metadata=field.metadata))
             else:
-                # No metadata, no special handling needed
-                field_def = (field.name, final_field_type, None)
+                # CRITICAL FIX: For lazy configs, ALL non-dataclass fields should default to None
+                # This enables proper inheritance from parent configs and placeholder styling
+                field_def = (field.name, final_field_type, dataclasses.field(default=None))
 
             lazy_field_definitions.append(field_def)
 
@@ -435,27 +482,24 @@ class LazyDataclassFactory:
             not has_inherit_as_none_marker
         )
 
+        # Determine inheritance: always include LazyDataclass, optionally include base_class
         if has_unsafe_metaclass:
             # Base class has unsafe custom metaclass - don't inherit, just copy interface
             print(f"🔧 LAZY FACTORY: {base_class.__name__} has custom metaclass {base_metaclass.__name__}, avoiding inheritance")
-            lazy_class = make_dataclass(
-                lazy_class_name,
-                LazyDataclassFactory._introspect_dataclass_fields(
-                    base_class, debug_template, global_config_type, parent_field_path, parent_instance_provider
-                ),
-                bases=(),  # No inheritance to avoid metaclass conflicts
-                frozen=True
-            )
+            bases = (LazyDataclass,)  # Only inherit from LazyDataclass
         else:
             # Safe to inherit from regular dataclass
-            lazy_class = make_dataclass(
-                lazy_class_name,
-                LazyDataclassFactory._introspect_dataclass_fields(
-                    base_class, debug_template, global_config_type, parent_field_path, parent_instance_provider
-                ),
-                bases=(base_class,),
-                frozen=True
-            )
+            bases = (base_class, LazyDataclass)  # Inherit from both
+
+        # Single make_dataclass call - no duplication
+        lazy_class = make_dataclass(
+            lazy_class_name,
+            LazyDataclassFactory._introspect_dataclass_fields(
+                base_class, debug_template, global_config_type, parent_field_path, parent_instance_provider
+            ),
+            bases=bases,
+            frozen=True
+        )
 
         # Add constructor parameter tracking to detect user-set fields
         original_init = lazy_class.__init__
@@ -494,6 +538,10 @@ class LazyDataclassFactory:
         register_lazy_type_mapping(lazy_class, base_class)
 
         # Cache the created class to prevent duplicates
+
+        # CRITICAL: Lazy types are NOT global configs, even if their base is
+        # GlobalPipelineConfig is global, but PipelineConfig (lazy) is NOT
+        lazy_class._is_global_config = False
         _lazy_class_cache[cache_key] = lazy_class
 
         return lazy_class
@@ -1175,6 +1223,11 @@ def _inject_multiple_fields_into_dataclass(target_class: Type, configs: List[Dic
     # We need to set it to the target class's original module for correct import paths
     new_class.__module__ = target_class.__module__
 
+
+    # CRITICAL: Preserve _is_global_config marker for GlobalPipelineConfig
+    # This marker is set by @auto_create_decorator but lost when make_dataclass creates a new class
+    if hasattr(target_class, '_is_global_config') and target_class._is_global_config:
+        new_class._is_global_config = True
     # Sibling inheritance is now handled by the dual-axis resolver system
 
     # Direct module replacement

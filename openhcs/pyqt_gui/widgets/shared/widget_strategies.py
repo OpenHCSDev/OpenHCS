@@ -94,7 +94,7 @@ def _create_direct_bool_widget(current_value: Any = None):
     return widget
 
 
-def convert_widget_value_to_type(value: Any, param_type: Type, param_name: str = None) -> Any:
+def convert_widget_value_to_type(value: Any, param_type: Type) -> Any:
     """
     PyQt-specific type conversions for widget values.
 
@@ -104,7 +104,6 @@ def convert_widget_value_to_type(value: Any, param_type: Type, param_name: str =
     Args:
         value: The raw value from the widget
         param_type: The target parameter type
-        param_name: Optional parameter name for field-specific handling
 
     Returns:
         The converted value ready for the service layer
@@ -144,25 +143,6 @@ def convert_widget_value_to_type(value: Any, param_type: Type, param_name: str =
                 return parsed
     except Exception:
         pass
-
-    # Special handling for well_filter field (Union[List[str], str, int])
-    # Parse string list literals and numeric strings to proper types
-    if param_name == 'well_filter' and isinstance(value, str):
-        import ast
-        stripped = value.strip()
-
-        # Try parsing as list literal
-        if stripped.startswith('[') and stripped.endswith(']'):
-            try:
-                parsed = ast.literal_eval(stripped)
-                if isinstance(parsed, list):
-                    return parsed
-            except (ValueError, SyntaxError):
-                pass  # Fall through to return original string
-
-        # Try parsing as numeric string
-        if stripped.isdigit():
-            return int(stripped)
 
     return value
 
@@ -355,12 +335,29 @@ class MagicGuiWidgetFactory:
     def _create_checkbox_group_widget(self, param_name: str, param_type: Type, current_value: Any):
         """Create multi-selection checkbox group for List[Enum] parameters.
 
-        Uses CheckboxGroupWidget class for explicit type-based dispatch.
+        Uses CheckboxGroupAdapter to properly implement ValueGettable/ValueSettable ABCs.
+        This eliminates duck typing in favor of explicit ABC contracts.
         """
-        from openhcs.pyqt_gui.widgets.shared.checkbox_group_widget import CheckboxGroupWidget
+        from openhcs.pyqt_gui.widgets.shared.no_scroll_spinbox import NoneAwareCheckBox
+        from openhcs.ui.shared.widget_adapters import CheckboxGroupAdapter
 
         enum_type = get_enum_from_list(param_type)
-        return CheckboxGroupWidget(param_name, enum_type, current_value)
+        widget = CheckboxGroupAdapter()
+        widget.setTitle(param_name.replace('_', ' ').title())
+        layout = QVBoxLayout(widget)
+
+        # Populate checkboxes for each enum value
+        for enum_value in enum_type:
+            checkbox = NoneAwareCheckBox()
+            checkbox.setText(enum_value.value)
+            checkbox.setObjectName(f"{param_name}_{enum_value.value}")
+            widget._checkboxes[enum_value] = checkbox
+            layout.addWidget(checkbox)
+
+        # Set current value using ABC method
+        widget.set_value(current_value)
+
+        return widget
 
 
 # Registry pattern removed - use create_pyqt6_widget from widget_creation_registry.py instead
@@ -470,22 +467,13 @@ def _apply_placeholder_styling(widget: Any, interaction_hint: str, placeholder_t
         # Fallback to general styling
         style = PlaceholderConfig.PLACEHOLDER_STYLE
 
-    signature = f"{widget_type}:{placeholder_text}|{interaction_hint}"
-    if widget.property("placeholder_signature") == signature and widget.property("is_placeholder_state"):
-        return
-
     widget.setStyleSheet(style)
     widget.setToolTip(f"{placeholder_text} ({interaction_hint})")
     widget.setProperty("is_placeholder_state", True)
-    widget.setProperty("placeholder_signature", signature)
 
 
 def _apply_lineedit_placeholder(widget: Any, text: str) -> None:
     """Apply placeholder to line edit with proper state tracking."""
-    signature = f"lineedit:{text}"
-    if widget.property("placeholder_signature") == signature and widget.property("is_placeholder_state"):
-        return
-
     # Clear existing text so placeholder becomes visible
     widget.clear()
     widget.setPlaceholderText(text)
@@ -493,7 +481,6 @@ def _apply_lineedit_placeholder(widget: Any, text: str) -> None:
     widget.setProperty("is_placeholder_state", True)
     # Add tooltip for consistency
     widget.setToolTip(text)
-    widget.setProperty("placeholder_signature", signature)
 
 
 def _apply_spinbox_placeholder(widget: Any, text: str) -> None:
@@ -521,10 +508,6 @@ def _apply_checkbox_placeholder(widget: QCheckBox, placeholder_text: str) -> Non
     This gives users a visual preview of what the value will be if they don't override it.
     """
     try:
-        signature = f"checkbox:{placeholder_text}"
-        if widget.property("placeholder_signature") == signature and widget.property("is_placeholder_state"):
-            return
-
         default_value = _extract_default_value(placeholder_text).lower() == 'true'
 
         # Block signals to prevent checkbox state changes from triggering parameter updates
@@ -542,7 +525,6 @@ def _apply_checkbox_placeholder(widget: QCheckBox, placeholder_text: str) -> Non
         # Set tooltip and property to indicate this is a placeholder state
         widget.setToolTip(f"{placeholder_text} ({PlaceholderConfig.INTERACTION_HINTS['checkbox']})")
         widget.setProperty("is_placeholder_state", True)
-        widget.setProperty("placeholder_signature", signature)
 
         # Trigger repaint to show gray styling
         widget.update()
@@ -561,14 +543,16 @@ def _apply_checkbox_group_placeholder(widget: Any, placeholder_text: str) -> Non
     if not hasattr(widget, '_checkboxes'):
         return
 
-    signature = f"checkbox_group:{placeholder_text}"
-    if widget.property("placeholder_signature") == signature and widget.property("is_placeholder_state"):
-        return
+    import logging
+    logger = logging.getLogger(__name__)
 
     try:
+        logger.info(f"🔍 Applying checkbox group placeholder: {placeholder_text}")
+
         # Extract the list of enum values from placeholder text
         # Format: "Pipeline default: [SITE, CHANNEL]" or "Pipeline default: []"
         default_value_str = _extract_default_value(placeholder_text)
+        logger.info(f"📋 Extracted default value: {default_value_str}")
 
         # Parse the list - remove brackets and split by comma
         if default_value_str.startswith('[') and default_value_str.endswith(']'):
@@ -577,11 +561,15 @@ def _apply_checkbox_group_placeholder(widget: Any, placeholder_text: str) -> Non
         else:
             inherited_values = []
 
+        logger.info(f"✅ Parsed inherited values: {inherited_values}")
+
         # Apply placeholder to each checkbox in the group
         for enum_value, checkbox in widget._checkboxes.items():
             # Check if this enum value is in the inherited list
             # Compare using uppercase enum name (e.g., 'SITE') not lowercase value (e.g., 'site')
             is_checked = enum_value.name in inherited_values
+
+            logger.info(f"  📌 {enum_value.value}: is_checked={is_checked} (comparing {enum_value.name} in {inherited_values})")
 
             # Create individual placeholder text for this checkbox
             individual_placeholder = f"Pipeline default: {is_checked}"
@@ -592,7 +580,6 @@ def _apply_checkbox_group_placeholder(widget: Any, placeholder_text: str) -> Non
         # Mark the group widget itself as being in placeholder state
         widget.setProperty("is_placeholder_state", True)
         widget.setToolTip(f"{placeholder_text} (click any checkbox to set your own value)")
-        widget.setProperty("placeholder_signature", signature)
 
     except Exception as e:
         logger.error(f"❌ Failed to apply checkbox group placeholder: {e}", exc_info=True)
@@ -604,19 +591,14 @@ def _apply_path_widget_placeholder(widget: Any, placeholder_text: str) -> None:
     try:
         # Path widgets have a path_input attribute that's a QLineEdit
         if hasattr(widget, 'path_input'):
-            signature = f"path:{placeholder_text}"
-            if widget.path_input.property("placeholder_signature") == signature and widget.path_input.property("is_placeholder_state"):
-                return
             # Clear any existing text and apply placeholder to the inner QLineEdit
             widget.path_input.clear()
             widget.path_input.setPlaceholderText(placeholder_text)
             widget.path_input.setProperty("is_placeholder_state", True)
             widget.path_input.setToolTip(placeholder_text)
-            widget.path_input.setProperty("placeholder_signature", signature)
         else:
             # Fallback to tooltip if structure is different
             widget.setToolTip(placeholder_text)
-            widget.setProperty("placeholder_signature", f"path:{placeholder_text}")
     except Exception:
         widget.setToolTip(placeholder_text)
 
@@ -631,10 +613,6 @@ def _apply_combobox_placeholder(widget: QComboBox, placeholder_text: str) -> Non
     - Dropdown shows only real enum items (no duplicate placeholder item)
     """
     try:
-        signature = f"combobox:{placeholder_text}"
-        if widget.property("placeholder_signature") == signature and widget.property("is_placeholder_state"):
-            return
-
         default_value = _extract_default_value(placeholder_text)
 
         # Find matching item using robust enum matching to get display text
@@ -666,7 +644,6 @@ def _apply_combobox_placeholder(widget: QComboBox, placeholder_text: str) -> Non
         # Just set the tooltip
         widget.setToolTip(f"{placeholder_text} ({PlaceholderConfig.INTERACTION_HINTS['combobox']})")
         widget.setProperty("is_placeholder_state", True)
-        widget.setProperty("placeholder_signature", signature)
     except Exception:
         widget.setToolTip(placeholder_text)
 
@@ -753,9 +730,6 @@ SIGNAL_CONNECTION_REGISTRY: Dict[str, callable] = {
     # Magicgui-specific widget signals
     'changed': lambda widget, param_name, callback:
         widget.changed.connect(lambda: callback(param_name, widget.value)),
-    # Checkbox group signal (custom attribute for multi-selection widgets)
-    'get_selected_values': lambda widget, param_name, callback:
-        PyQt6WidgetEnhancer._connect_checkbox_group_signals(widget, param_name, callback),
 }
 
 
@@ -769,14 +743,24 @@ class PyQt6WidgetEnhancer:
     @staticmethod
     def apply_placeholder_text(widget: Any, placeholder_text: str) -> None:
         """Apply placeholder using declarative widget-strategy mapping."""
+        # PERFORMANCE OPTIMIZATION: Skip if placeholder text is unchanged
+        # This avoids redundant widget updates during sibling refresh cascades
+        cached_placeholder = getattr(widget, '_cached_placeholder_text', None)
+        if cached_placeholder == placeholder_text:
+            return  # No change needed
+
         # Check for checkbox group (QGroupBox with _checkboxes attribute)
         if hasattr(widget, '_checkboxes'):
-            return _apply_checkbox_group_placeholder(widget, placeholder_text)
+            _apply_checkbox_group_placeholder(widget, placeholder_text)
+            widget._cached_placeholder_text = placeholder_text
+            return
 
         # Direct widget type mapping for enhanced placeholders
         widget_strategy = WIDGET_PLACEHOLDER_STRATEGIES.get(type(widget))
         if widget_strategy:
-            return widget_strategy(widget, placeholder_text)
+            widget_strategy(widget, placeholder_text)
+            widget._cached_placeholder_text = placeholder_text
+            return
 
         # Method-based fallback for standard widgets
         strategy = next(
@@ -785,6 +769,7 @@ class PyQt6WidgetEnhancer:
             lambda w, t: w.setToolTip(t) if hasattr(w, 'setToolTip') else None
         )
         strategy(widget, placeholder_text)
+        widget._cached_placeholder_text = placeholder_text
 
     @staticmethod
     def apply_global_config_placeholder(widget: Any, field_name: str, global_config: Any = None) -> None:
@@ -842,6 +827,16 @@ class PyQt6WidgetEnhancer:
             )
             return
 
+        # Check for CheckboxGroupAdapter using isinstance (anti-duck-typing)
+        from openhcs.ui.shared.widget_adapters import CheckboxGroupAdapter
+        if isinstance(widget, CheckboxGroupAdapter):
+            placeholder_aware_callback = lambda pn, val: (
+                PyQt6WidgetEnhancer._clear_placeholder_state(widget),
+                callback(pn, val)
+            )[-1]
+            PyQt6WidgetEnhancer._connect_checkbox_group_signals(widget, param_name, placeholder_aware_callback)
+            return
+
         # Fallback to native PyQt6 signals
         connector = next(
             (connector for signal_name, connector in SIGNAL_CONNECTION_REGISTRY.items()
@@ -866,9 +861,10 @@ class PyQt6WidgetEnhancer:
         - When user clicks ANY checkbox, ALL checkboxes convert from placeholder to concrete
         - This ensures the entire list becomes concrete once the user starts editing
         """
-        from openhcs.pyqt_gui.widgets.shared.checkbox_group_widget import CheckboxGroupWidget
+        import logging
+        logger = logging.getLogger(__name__)
 
-        if isinstance(widget, CheckboxGroupWidget):
+        if hasattr(widget, '_checkboxes'):
             # Connect to each checkbox's stateChanged signal
             for checkbox in widget._checkboxes.values():
                 def make_handler(cb):
@@ -886,24 +882,26 @@ class PyQt6WidgetEnhancer:
                         # Clear placeholder state from the group widget itself
                         PyQt6WidgetEnhancer._clear_placeholder_state(widget)
 
-                        # Get selected values (now all concrete)
-                        callback(param_name, widget.get_selected_values())
+                        # Get selected values (now all concrete) using ABC method
+                        selected = widget.get_value()
+                        # Handle None (placeholder state) in logging
+                        selected_str = "None (inherit from parent)" if selected is None else [v.name for v in selected]
+                        logger.info(f"🔘 Checkbox {cb.text()} changed to {state}, selected values: {selected_str}")
+
+                        callback(param_name, selected)
                     return handler
 
                 checkbox.stateChanged.connect(make_handler(checkbox))
 
     @staticmethod
     def _clear_placeholder_state(widget: Any) -> None:
-        """Clear placeholder state using type-based dispatch."""
-        from openhcs.pyqt_gui.widgets.shared.checkbox_group_widget import CheckboxGroupWidget
-
+        """Clear placeholder state using functional approach."""
         # Handle checkbox groups by clearing each checkbox's placeholder state
-        if isinstance(widget, CheckboxGroupWidget):
+        if hasattr(widget, '_checkboxes'):
             for checkbox in widget._checkboxes.values():
                 if checkbox.property("is_placeholder_state"):
                     checkbox.setStyleSheet("")
                     checkbox.setProperty("is_placeholder_state", False)
-                    checkbox.setProperty("placeholder_signature", None)
                     if hasattr(checkbox, '_is_placeholder'):
                         checkbox._is_placeholder = False
                     # Clean checkbox tooltip
@@ -917,7 +915,6 @@ class PyQt6WidgetEnhancer:
                     checkbox.setToolTip(cleaned_tooltip)
             # Clear group widget's placeholder state
             widget.setProperty("is_placeholder_state", False)
-            widget.setProperty("placeholder_signature", None)
             widget.setToolTip("")
             return
 
@@ -926,7 +923,6 @@ class PyQt6WidgetEnhancer:
 
         widget.setStyleSheet("")
         widget.setProperty("is_placeholder_state", False)
-        widget.setProperty("placeholder_signature", None)
 
         # Clean tooltip using functional pattern
         current_tooltip = widget.toolTip()

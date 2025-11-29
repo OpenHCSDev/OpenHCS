@@ -102,13 +102,17 @@ class SyntheticPlateGeneratorWindow(QDialog):
         # Create form manager from SyntheticMicroscopyGenerator class
         # This automatically builds the UI from the __init__ signature (same pattern as function_pane.py)
         # CRITICAL: Pass color_scheme as parameter to ensure consistent theming with other parameter forms
+        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import FormManagerConfig
+
         self.form_manager = ParameterFormManager(
             object_instance=SyntheticMicroscopyGenerator,  # Pass the class itself, not __init__
             field_id="synthetic_plate_generator",
-            parent=self,
-            context_obj=None,
-            exclude_params=['output_dir', 'skip_files', 'include_all_components', 'random_seed'],  # Exclude advanced params (self is auto-excluded)
-            color_scheme=self.color_scheme  # Pass color_scheme as instance parameter, not class attribute
+            config=FormManagerConfig(
+                parent=self,
+                context_obj=None,
+                exclude_params=['output_dir', 'skip_files', 'include_all_components', 'random_seed'],  # Exclude advanced params (self is auto-excluded)
+                color_scheme=self.color_scheme  # Pass color_scheme as instance parameter, not class attribute
+            )
         )
 
         scroll_area.setWidget(self.form_manager)
@@ -185,7 +189,7 @@ class SyntheticPlateGeneratorWindow(QDialog):
             self.output_dir = dir_path
             self.output_dir_label.setText(dir_path)
             self.output_dir_label.setStyleSheet(
-                f"color: {self.color_scheme.to_hex(self.color_scheme.text_normal)}; padding: 5px;"
+                f"color: {self.color_scheme.to_hex(self.color_scheme.text_primary)}; padding: 5px;"
             )
     
     def generate_plate(self):

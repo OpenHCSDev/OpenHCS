@@ -89,7 +89,7 @@ def format_well_filter_config(config_attr: str, config: Any, resolve_attr: Optio
         resolve_attr: Optional function to resolve lazy config attributes
 
     Returns:
-        Formatted indicator string (e.g., 'FILT+5' or 'FILT-A01') or None if no filter
+        Formatted indicator string (e.g., 'NAP+5', 'FIJI', 'FILT+5') or None if disabled
     """
     from openhcs.core.config import WellFilterConfig, WellFilterMode
 
@@ -110,7 +110,16 @@ def format_well_filter_config(config_attr: str, config: Any, resolve_attr: Optio
         well_filter = getattr(config, 'well_filter', None)
         mode = getattr(config, 'well_filter_mode', WellFilterMode.INCLUDE)
 
+    # Get indicator (NAP, FIJI, MAT, or default FILT)
+    indicator = CONFIG_INDICATORS.get(config_attr, 'FILT')
+
+    # If well_filter is None, show just the indicator (for configs with specific indicators)
+    # or return None (for generic well filter configs)
     if well_filter is None:
+        # Configs with specific indicators (NAP/FIJI/MAT) show indicator even without well_filter
+        if config_attr in CONFIG_INDICATORS:
+            return indicator
+        # Generic well filter configs require well_filter to be set
         return None
 
     # Format well_filter for display
@@ -124,7 +133,6 @@ def format_well_filter_config(config_attr: str, config: Any, resolve_attr: Optio
     # Add +/- prefix for INCLUDE/EXCLUDE mode
     mode_prefix = '-' if mode == WellFilterMode.EXCLUDE else '+'
 
-    indicator = CONFIG_INDICATORS.get(config_attr, 'FILT')
     return f"{indicator}{mode_prefix}{wf_display}"
 
 

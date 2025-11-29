@@ -6,6 +6,16 @@ Dynamic Dataclass Factory System
 *Status: STABLE*
 *Module: openhcs.config_framework.lazy_factory*
 
+The Problem: Fixed Dataclass Behavior
+--------------------------------------
+
+Traditional dataclasses have fixed behavior at definition time: fields always return stored values. But lazy configuration requires runtime behavior customization based on context. For example, a step configuration field might need to return the global default when not explicitly set, but return the explicit value when the user has configured it. Without dynamic behavior, you need separate dataclass types for each context level, leading to code duplication and maintenance overhead.
+
+The Solution: Runtime Dataclass Generation with Context-Aware Resolution
+--------------------------------------------------------------------------
+
+The dynamic factory system generates dataclasses with custom resolution methods that use Python's contextvars to look up values from the current configuration context. This enables the same dataclass type to behave differently depending on which configuration context is active, eliminating the need for separate types.
+
 Overview
 --------
 Traditional dataclasses have fixed behavior at definition time, but lazy configuration requires runtime behavior customization based on context. The dynamic factory system generates dataclasses with custom resolution methods that use Python's contextvars to look up values from the current configuration context.

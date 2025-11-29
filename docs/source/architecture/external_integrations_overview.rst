@@ -1,6 +1,11 @@
 External Integrations Overview
 ===============================
 
+The Problem: Isolated Processing Pipelines
+-------------------------------------------
+
+Scientific image processing rarely happens in isolation. Researchers need to integrate OpenHCS pipelines with external tools: OMERO servers for data storage, Napari/Fiji for visualization, custom analysis tools, and cloud services. Without a unified integration approach, each external tool requires custom code, leading to duplicated logic, inconsistent error handling, and brittle connections that break when tools update.
+
 Executive Summary
 -----------------
 

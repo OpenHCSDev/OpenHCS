@@ -17,9 +17,10 @@ from PyQt6.QtCore import Qt, pyqtSignal
 
 from openhcs.core.steps.function_step import FunctionStep
 from openhcs.introspection.signature_analyzer import SignatureAnalyzer
-from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager, FormManagerConfig
 from openhcs.pyqt_gui.widgets.shared.config_hierarchy_tree import ConfigHierarchyTreeHelper
 from openhcs.pyqt_gui.widgets.shared.collapsible_splitter_helper import CollapsibleSplitterHelper
+from openhcs.pyqt_gui.widgets.shared.scrollable_form_mixin import ScrollableFormMixin
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 from openhcs.pyqt_gui.config import PyQtGUIConfig, get_default_pyqt_gui_config
@@ -31,19 +32,22 @@ from openhcs.ui.shared.code_editor_form_updater import CodeEditorFormUpdater
 logger = logging.getLogger(__name__)
 
 
-class StepParameterEditorWidget(QWidget):
+class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
     """
     Step parameter editor using dynamic form generation.
-    
-    Mirrors Textual TUI implementation - builds forms based on FunctionStep 
+
+    Mirrors Textual TUI implementation - builds forms based on FunctionStep
     constructor signature with nested dataclass support.
+
+    Inherits from ScrollableFormMixin to provide scroll-to-section functionality.
     """
     
     # Signals
     step_parameter_changed = pyqtSignal()
     
     def __init__(self, step: FunctionStep, service_adapter=None, color_scheme: Optional[PyQt6ColorScheme] = None,
-                 gui_config: Optional[PyQtGUIConfig] = None, parent=None, pipeline_config=None, scope_id: Optional[str] = None):
+                 gui_config: Optional[PyQtGUIConfig] = None, parent=None, pipeline_config=None, scope_id: Optional[str] = None,
+                 step_index: Optional[int] = None):
         super().__init__(parent)
 
         # Initialize color scheme and GUI config
@@ -55,6 +59,7 @@ class StepParameterEditorWidget(QWidget):
         self.service_adapter = service_adapter
         self.pipeline_config = pipeline_config  # Store pipeline config for context hierarchy
         self.scope_id = scope_id  # Store scope_id for cross-window update scoping
+        self.step_index = step_index  # Step position index for tree registry
 
         # Live placeholder updates not yet ready - disable for now
         self._step_editor_coordinator = None
@@ -105,13 +110,28 @@ class StepParameterEditorWidget(QWidget):
         # The step is the overlay (what's being edited), not the parent context
         # Context hierarchy: GlobalPipelineConfig (thread-local) -> PipelineConfig (context_obj) -> Step (overlay)
         # CRITICAL FIX: Exclude 'func' parameter - it's handled by the Function Pattern tab
-        self.form_manager = ParameterFormManager(
-            object_instance=self.step,           # Step instance being edited (overlay)
-            field_id="step",                     # Use "step" as field identifier
+        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import FormManagerConfig
+
+        # Construct unique field_id based on step index for tree registry
+        # Format: "{plate_node_id}.step_{index}" or fallback to "step" if no index provided
+        if self.step_index is not None and self.scope_id:
+            field_id = f"{self.scope_id}.step_{self.step_index}"
+        else:
+            field_id = "step"  # Fallback for backward compatibility
+
+        config = FormManagerConfig(
             parent=self,                         # Pass self as parent widget
             context_obj=self.pipeline_config,    # Pipeline config as parent context for inheritance
             exclude_params=['func'],             # Exclude func - it has its own dedicated tab
-            scope_id=self.scope_id               # Pass scope_id to limit cross-window updates to same orchestrator
+            scope_id=self.scope_id,              # Pass scope_id to limit cross-window updates to same orchestrator
+            color_scheme=self.color_scheme,      # Pass color scheme for consistent theming
+            use_scroll_area=False                # Step editor manages its own scroll area
+        )
+
+        self.form_manager = ParameterFormManager(
+            object_instance=self.step,           # Step instance being edited (overlay)
+            field_id=field_id,                   # Unique field_id based on step index
+            config=config                        # Pass configuration object
         )
         self.hierarchy_tree = None
         self.content_splitter = None
@@ -250,36 +270,7 @@ class StepParameterEditorWidget(QWidget):
                 return field_name
         return None
 
-    def _scroll_to_section(self, field_name: str):
-        """Ensure the requested parameter section is visible."""
-        if not hasattr(self, 'scroll_area') or self.scroll_area is None:
-            logger.warning("Scroll area not initialized; cannot navigate to section")
-            return
-
-        nested_managers = getattr(self.form_manager, 'nested_managers', {})
-        nested_manager = nested_managers.get(field_name)
-        if not nested_manager:
-            logger.warning(f"Field '{field_name}' not found in nested managers")
-            return
-
-        first_widget = None
-        if hasattr(nested_manager, 'widgets') and nested_manager.widgets:
-            first_param_name = next(iter(nested_manager.widgets.keys()))
-            first_widget = nested_manager.widgets[first_param_name]
-
-        if first_widget:
-            self.scroll_area.ensureWidgetVisible(first_widget, 100, 100)
-            return
-
-        from PyQt6.QtWidgets import QGroupBox
-        current = nested_manager.parentWidget()
-        while current:
-            if isinstance(current, QGroupBox):
-                self.scroll_area.ensureWidgetVisible(current, 50, 50)
-                return
-            current = current.parentWidget()
-
-        logger.warning(f"Could not locate widget for '{field_name}' to scroll into view")
+    # _scroll_to_section is provided by ScrollableFormMixin
 
 
 
@@ -380,35 +371,46 @@ class StepParameterEditorWidget(QWidget):
         self.form_manager.parameter_changed.connect(self._handle_parameter_change)
     
     def _handle_parameter_change(self, param_name: str, value: Any):
-        """Handle parameter change from form manager (mirrors Textual TUI)."""
+        """Handle parameter change from form manager (mirrors Textual TUI).
+
+        Args:
+            param_name: Full path like "FunctionStep.processing_config.group_by" or "FunctionStep.name"
+            value: New value
+        """
         try:
-            # Get the properly converted value from the form manager
-            # The form manager handles all type conversions including List[Enum]
-            final_value = self.form_manager.get_current_values().get(param_name, value)
+            # Extract leaf field name from full path
+            # "FunctionStep.processing_config.group_by" -> "group_by"
+            # "FunctionStep.name" -> "name"
+            path_parts = param_name.split('.')
+            if len(path_parts) > 1:
+                # Remove type name prefix
+                path_parts = path_parts[1:]
 
-            # Debug: Check what we're actually saving
-            if param_name == 'materialization_config':
-                print(f"DEBUG: Saving materialization_config, type: {type(final_value)}")
-                print(f"DEBUG: Raw value from form manager: {value}")
-                print(f"DEBUG: Final value from get_current_values(): {final_value}")
-                if hasattr(final_value, '__dataclass_fields__'):
-                    from dataclasses import fields
-                    for field_obj in fields(final_value):
-                        raw_value = object.__getattribute__(final_value, field_obj.name)
-                        print(f"DEBUG: Field {field_obj.name} = {raw_value}")
+            # For nested fields, the form manager already updated self.step via _mark_parents_modified
+            # For top-level fields, we need to update self.step
+            if len(path_parts) == 1:
+                leaf_field = path_parts[0]
 
-            # CRITICAL FIX: For function parameters, use fresh imports to avoid unpicklable registry wrappers
-            if param_name == 'func' and callable(final_value) and hasattr(final_value, '__module__'):
-                try:
-                    import importlib
-                    module = importlib.import_module(final_value.__module__)
-                    final_value = getattr(module, final_value.__name__)
-                except Exception:
-                    pass  # Use original if refresh fails
+                # Get the properly converted value from the form manager
+                # The form manager handles all type conversions including List[Enum]
+                final_value = self.form_manager.get_current_values().get(leaf_field, value)
 
-            # Update step attribute
-            setattr(self.step, param_name, final_value)
-            logger.debug(f"Updated step parameter {param_name}={final_value}")
+                # CRITICAL FIX: For function parameters, use fresh imports to avoid unpicklable registry wrappers
+                if leaf_field == 'func' and callable(final_value) and hasattr(final_value, '__module__'):
+                    try:
+                        import importlib
+                        module = importlib.import_module(final_value.__module__)
+                        final_value = getattr(module, final_value.__name__)
+                    except Exception:
+                        pass  # Use original if refresh fails
+
+                # Update step attribute
+                setattr(self.step, leaf_field, final_value)
+                logger.debug(f"Updated step parameter {leaf_field}={final_value}")
+            else:
+                # Nested field - already updated by _mark_parents_modified
+                logger.debug(f"Nested field {'.'.join(path_parts)} already updated by dispatcher")
+
             self.step_parameter_changed.emit()
 
         except Exception as e:
@@ -510,10 +512,12 @@ class StepParameterEditorWidget(QWidget):
         try:
             from openhcs.pyqt_gui.services.simple_code_editor import SimpleCodeEditorService
             from openhcs.debug.pickle_to_python import generate_step_code
+            from openhcs.pyqt_gui.widgets.shared.services.parameter_ops_service import ParameterOpsService
             import os
 
             # CRITICAL: Refresh with live context BEFORE getting current values
-            self.form_manager._refresh_with_live_context()
+            # This ensures code editor shows unsaved changes from other open windows
+            ParameterOpsService().refresh_with_live_context(self.form_manager)
 
             # Get current step from form (includes live context values)
             current_values = self.form_manager.get_current_values()
@@ -573,16 +577,16 @@ class StepParameterEditorWidget(QWidget):
             # Update step object
             self.step = new_step
 
-            # OPTIMIZATION: Block cross-window updates during bulk update
-            self.form_manager._block_cross_window_updates = True
-            try:
-                CodeEditorFormUpdater.update_form_from_instance(
-                    self.form_manager,
-                    new_step,
-                    broadcast_callback=None
-                )
-            finally:
-                self.form_manager._block_cross_window_updates = False
+            # IMPORTANT:
+            # Do NOT block cross-window updates here. We want code-mode edits
+            # to behave like a sequence of normal widget edits so that
+            # FieldChangeDispatcher emits the same parameter_changed and
+            # context_value_changed signals as manual interaction.
+            CodeEditorFormUpdater.update_form_from_instance(
+                self.form_manager,
+                new_step,
+                broadcast_callback=None,
+            )
 
             # CRITICAL: Update function list editor if we're inside a dual editor window
             parent_window = self.window()
@@ -592,9 +596,7 @@ class StepParameterEditorWidget(QWidget):
                 func_editor._populate_function_list()
                 logger.debug(f"Updated function list editor with new func: {new_step.func}")
 
-            # CodeEditorFormUpdater already refreshes placeholders and emits context events
-
-            # Emit step parameter changed signal for parent window
+            # Notify parent window that step parameters changed
             self.step_parameter_changed.emit()
 
             logger.info(f"Updated step from code editor: {new_step.name}")

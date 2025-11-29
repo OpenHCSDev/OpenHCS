@@ -9,8 +9,8 @@ import logging
 from typing import Any, Dict, Callable, Optional, Tuple
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, 
-    QFrame, QScrollArea, QGroupBox
+    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
+    QFrame, QScrollArea, QGroupBox, QSizePolicy
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
@@ -110,6 +110,12 @@ class FunctionPaneWidget(QWidget):
         if self.func and self.show_parameters:
             parameter_frame = self.create_parameter_form()
             layout.addWidget(parameter_frame)
+
+        # Set size policy to only take minimum vertical space needed
+        # This prevents function panes from expanding to fill all available space
+        # and allows the scroll area in function_list_editor to handle overflow
+        size_policy = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
+        self.setSizePolicy(size_policy)
 
         # Set styling
         self.setStyleSheet(f"""
@@ -230,20 +236,32 @@ class FunctionPaneWidget(QWidget):
 
         # Create the ParameterFormManager with help and reset functionality
         # Import the enhanced PyQt6 ParameterFormManager
-        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager as PyQtParameterFormManager
+        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager as PyQtParameterFormManager, FormManagerConfig
 
         # Create form manager with initial_values to load saved kwargs
         # CRITICAL: Pass step_instance as context_obj for lazy resolution hierarchy
         # Function parameters → Step → Pipeline → Global
         # CRITICAL: Pass scope_id for cross-window live context updates (real-time placeholder sync)
+        # IMPORTANT UI BEHAVIOR:
+        # - FunctionListWidget already wraps all FunctionPaneWidgets in a QScrollArea.
+        # - If we also enable a scroll area inside ParameterFormManager here, the
+        #   inner scroll will expand to fill the available height, making the
+        #   "Parameters" pane look like it stretches to consume all vertical
+        #   space even when only a few rows are present.
+        # - To keep each function pane only as tall as its content, we explicitly
+        #   disable the inner scroll area and let the outer FunctionListWidget
+        #   handle scrolling for long forms.
         self.form_manager = PyQtParameterFormManager(
             object_instance=self.func,       # Pass function as the object to build form for
             field_id=f"func_{self.index}",   # Use function index as field identifier
-            parent=self,                     # Pass self as parent widget
-            context_obj=self.step_instance,  # Step instance for context hierarchy (Function → Step → Pipeline → Global)
-            initial_values=self.kwargs,      # Pass saved kwargs to populate form fields
-            scope_id=self.scope_id,          # Scope ID for cross-window live context (same as step editor)
-            color_scheme=self.color_scheme   # Pass color_scheme for consistent theming
+            config=FormManagerConfig(
+                parent=self,                      # Pass self as parent widget
+                context_obj=self.step_instance,   # Step instance for context hierarchy (Function → Step → Pipeline → Global)
+                initial_values=self.kwargs,       # Pass saved kwargs to populate form fields
+                scope_id=self.scope_id,           # Scope ID for cross-window live context (same as step editor)
+                color_scheme=self.color_scheme,   # Pass color_scheme for consistent theming
+                use_scroll_area=False,            # Let outer FunctionListWidget manage scrolling
+            )
         )
 
         # Connect parameter changes
@@ -343,17 +361,21 @@ class FunctionPaneWidget(QWidget):
         Handle parameter value changes (extracted from Textual version).
 
         Args:
-            param_name: Name of the parameter
+            param_name: Full path like "func_0.sigma" or just "func_0.param_name"
             value: New parameter value
         """
+        # Extract leaf field name from full path
+        # "func_0.sigma" -> "sigma"
+        leaf_field = param_name.split('.')[-1]
+
         # Update internal kwargs without triggering reactive update
-        self._internal_kwargs[param_name] = value
+        self._internal_kwargs[leaf_field] = value
 
         # The form manager already has the updated value (it emitted this signal)
         # No need to call update_parameter() again - that would be redundant
 
         # Emit parameter changed signal to notify parent (function list editor)
-        self.parameter_changed.emit(self.index, param_name, value)
+        self.parameter_changed.emit(self.index, leaf_field, value)
 
         logger.debug(f"Parameter changed: {param_name} = {value}")
     

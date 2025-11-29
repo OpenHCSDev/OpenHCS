@@ -3,8 +3,11 @@ Parameter Form Lifecycle Management
 
 **Complete lifecycle of parameter forms from creation to context synchronization.**
 
-*Status: STABLE*
+*Status: STABLE (describes main branch implementation)*
 *Module: openhcs.pyqt_gui.widgets.shared.parameter_form_manager*
+
+.. note::
+   This document describes the **main branch** monolithic implementation. For the refactored service-oriented architecture currently in development, see :doc:`parameter_form_service_architecture`.
 
 Overview
 --------
@@ -235,6 +238,7 @@ This pattern ensures proper cleanup regardless of how the dialog closes (Save bu
 
 See Also
 --------
+- :doc:`parameter_form_service_architecture` - Refactored service-oriented architecture (in development)
 - :doc:`context_system` - Thread-local context management patterns
 - :doc:`service-layer-architecture` - Service layer integration with forms
 - :doc:`code_ui_interconversion` - Code/UI interconversion patterns

@@ -244,3 +244,74 @@ Contextvars automatically handle cleanup:
    # Context automatically restored to previous state
 
 No manual cleanup needed - Python's context manager protocol handles it.
+
+Framework-Agnostic Context Stack Building
+-----------------------------------------
+
+For UI placeholder resolution, the ``build_context_stack()`` function provides a
+framework-agnostic way to build complete context stacks:
+
+.. code-block:: python
+
+   from openhcs.config_framework import build_context_stack
+
+   # Build context stack for placeholder resolution
+   stack = build_context_stack(
+       context_obj=pipeline_config,           # Parent context
+       overlay=manager.parameters,            # Current form values
+       dataclass_type=manager.dataclass_type, # Type being edited
+       live_context=live_context_dict,        # Live values from other forms
+       root_form_values=root_values,          # Root form's values (for sibling inheritance)
+       root_form_type=root_type,              # Root form's dataclass type
+   )
+
+   with stack:
+       # Context layers are active
+       placeholder = resolve_placeholder(field_name)
+
+The stack builds layers in order:
+
+1. **Global context layer** - Thread-local global config or live editor values
+2. **Intermediate layers** - Ancestors from ``get_types_before_in_stack()``
+3. **Parent context** - The ``context_obj`` parameter
+4. **Root form layer** - For sibling inheritance (see below)
+5. **Overlay** - Current form values
+
+Sibling Inheritance via Root Form
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When nested configs need to inherit from siblings (e.g., ``well_filter_config``
+inheriting from ``step_well_filter_config``), the root form's values enable this:
+
+.. code-block:: python
+
+   # Root form (Step) contains both sibling configs
+   root_values = {
+       'step_well_filter_config': LazyStepWellFilterConfig(well_filter=123),
+       'well_filter_config': LazyWellFilterConfig(well_filter=None),
+       ...
+   }
+
+   # When resolving well_filter_config.well_filter:
+   # 1. stack includes root_values
+   # 2. LazyWellFilterConfig.well_filter resolution walks MRO
+   # 3. Finds StepWellFilterConfig (superclass) in context
+   # 4. Uses step_well_filter_config.well_filter = 123
+
+For non-dataclass roots (e.g., ``FunctionStep``), the function wraps values in
+``SimpleNamespace`` to maintain a unified code path:
+
+.. code-block:: python
+
+   if root_form_type and is_dataclass(root_form_type):
+       root_instance = root_form_type(**root_form_values)
+   else:
+       # Non-dataclass root - wrap in SimpleNamespace
+       from types import SimpleNamespace
+       root_instance = SimpleNamespace(**root_form_values)
+
+   stack.enter_context(config_context(root_instance))
+
+This enables sibling inheritance for any root type, including function step parameters.
+
+See :doc:`field_change_dispatcher` for how the UI uses this for live placeholder updates.

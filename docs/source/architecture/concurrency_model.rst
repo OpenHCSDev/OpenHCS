@@ -1,13 +1,20 @@
 OpenHCS Concurrency Model
 =========================
 
+The Problem: Thread Safety in Image Processing
+-----------------------------------------------
+
+Image processing pipelines need to process multiple wells in parallel to achieve reasonable throughput for high-content screening. However, parallel execution creates thread safety challenges: shared state, race conditions, and deadlocks. Traditional approaches use complex locking mechanisms that are hard to reason about and prone to bugs. For long-running microscopy workflows (hours or days), even rare race conditions become critical failures.
+
+The Solution: Immutable Compilation + Well-Level Parallelism
+-------------------------------------------------------------
+
+OpenHCS implements a well-level parallelism model with thread isolation and immutable compilation artifacts. This design provides performance while maintaining thread safety through architectural constraints rather than complex locking mechanisms. By compiling pipelines once (single-threaded) and then executing them immutably (multi-threaded), the system eliminates entire classes of concurrency bugs.
+
 Overview
 --------
 
-OpenHCS implements a well-level parallelism model with thread isolation
-and immutable compilation artifacts. This design provides performance
-while maintaining thread safety through architectural constraints rather
-than complex locking mechanisms.
+The system separates compilation (single-threaded, mutable) from execution (multi-threaded, immutable), ensuring thread safety through design rather than synchronization.
 
 **Note**: This document describes the actual concurrency implementation.
 Some advanced features like runtime GPU slot management are planned for

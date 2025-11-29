@@ -1,18 +1,20 @@
 Image Acknowledgment System
 ============================
 
+The Problem: Blind Image Processing
+------------------------------------
+
+When streaming images to external viewers (Napari, Fiji) during pipeline execution, the main process has no way to know if images are actually being displayed or if viewers have crashed. This creates a "blind" processing situation: the pipeline keeps sending images, but the user can't tell if visualization is working. Additionally, if a viewer crashes or becomes unresponsive, the pipeline continues sending images to a dead process, wasting resources.
+
+The Solution: Acknowledgment-Based Progress Tracking
+-----------------------------------------------------
+
+The image acknowledgment system provides real-time tracking of image processing progress in Napari and Fiji viewers. It uses a shared PUSH-PULL ZMQ pattern where all viewers send acknowledgments to a single port (7555) after processing each image. This enables the main process to detect stuck viewers, track progress, and respond to failures.
+
 Overview
 --------
 
 The image acknowledgment system provides real-time tracking of image processing progress in Napari and Fiji viewers. It uses a shared PUSH-PULL ZMQ pattern where all viewers send acknowledgments to a single port (7555) after processing each image.
-
-**Key Features**:
-
-- **Real-time progress**: Shows "Processing: 3/10 images" in UI
-- **Stuck detection**: Identifies images that timeout (>30s without ack)
-- **Scalable**: Handles multiple viewers simultaneously
-- **Non-blocking**: Acks sent asynchronously, don't block image display
-- **Shared port**: All viewers use port 7555 for acks (simpler than unique ports)
 
 Architecture
 ------------

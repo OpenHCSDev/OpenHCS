@@ -1,6 +1,16 @@
 TUI System Architecture
 =======================
 
+The Problem: GUI-Only Tools in Remote Environments
+---------------------------------------------------
+
+Many scientific computing tools only provide graphical interfaces, making them unusable on remote servers, HPC clusters, and SSH connections. Researchers working with high-content screening data often need to process images on remote machines where X11 forwarding is slow or unavailable. This forces users to either transfer large datasets locally (slow, error-prone) or use command-line tools that lack the visual feedback and interactive configuration that GUIs provide.
+
+The Solution: Full-Featured Terminal Interface
+-----------------------------------------------
+
+OpenHCS provides a terminal user interface (TUI) built with the Textual framework that offers complete feature parity with the PyQt6 GUI. The TUI works in terminal environments, including remote servers, containers, and SSH connections, enabling researchers to use the same interactive pipeline editor and configuration tools whether working locally or remotely.
+
 .. note::
    OpenHCS provides both a Textual TUI and PyQt6 GUI with complete feature parity. The TUI is specifically designed for remote/SSH environments, while the PyQt6 GUI provides enhanced desktop integration. Both interfaces are actively maintained.
 

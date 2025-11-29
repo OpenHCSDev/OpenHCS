@@ -15,14 +15,6 @@ registration, lazy discovery, and automatic configuration inference. This system
 eliminates boilerplate code while providing type-safe, self-documenting plugin
 architectures.
 
-**Key Features**:
-
-- **Zero-boilerplate registration**: Plugins auto-register on class definition
-- **Lazy discovery**: Plugins discovered only when first accessed
-- **Auto-inference**: Discovery packages and secondary registries auto-configured
-- **Subprocess-safe**: Works correctly in multiprocessing and ZMQ environments
-- **Fully generic**: No hardcoded imports, ready for PyPI packaging
-
 Why Automatic Plugin Registration
 ----------------------------------
 
@@ -467,13 +459,6 @@ Example 2: Storage Backend Registry (ZERO Boilerplate)
 - ``memory`` → ``MemoryStorageBackend`` (read-write)
 - ``virtual_workspace`` → ``VirtualWorkspaceBackend`` (read-only)
 
-**Key Benefits**:
-
-- ✅ No custom metaclasses needed
-- ✅ No manual ``RegistryConfig`` creation
-- ✅ Registry shared via inheritance (``StorageBackend`` and ``ReadOnlyBackend`` share ``BackendBase.__registry__``)
-- ✅ Clean interface hierarchy (no interface abuse)
-
 Example 3: Library Registry System
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -583,13 +568,6 @@ The discovery system uses a generic discovery module at the package root:
                discovered.append(subclass)
 
        return discovered
-
-**Key Features**:
-
-- **Generic**: Works with any base class and package
-- **Recursive**: Optionally searches subpackages
-- **Graceful**: Handles import errors without crashing
-- **Efficient**: Only imports modules once
 
 Subprocess Safety
 ~~~~~~~~~~~~~~~~~

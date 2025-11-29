@@ -1,6 +1,16 @@
 System Integration: VFS, Memory Types, and Compilation
 ======================================================
 
+The Problem: Fragmented Data Processing Systems
+------------------------------------------------
+
+Scientific image processing requires managing multiple concerns simultaneously: where data is stored (disk, OMERO, cloud), what format it's in (NumPy, PyTorch, CuPy), and how to process it efficiently (GPU allocation, memory staging). Without integration, these systems become isolated silos, forcing users to write glue code and manage conversions manually. This creates brittle pipelines that break when switching storage backends or computational libraries.
+
+The Solution: Integrated Three-Layer Architecture
+--------------------------------------------------
+
+OpenHCS integrates three core systems (VFS, Memory Types, Compilation) into a cohesive architecture where each layer handles one concern and passes results to the next. This enables the same pipeline code to work with different storage backends and computational libraries without modification.
+
 Overview
 --------
 

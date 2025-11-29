@@ -29,17 +29,14 @@ class LazyDefaultPlaceholderService:
 
     @staticmethod
     def has_lazy_resolution(dataclass_type: type) -> bool:
-        """Check if dataclass has lazy resolution methods (created by factory)."""
-        from typing import get_origin, get_args, Union
-        
-        # Unwrap Optional types (Union[Type, None])
-        if get_origin(dataclass_type) is Union:
-            args = get_args(dataclass_type)
-            if len(args) == 2 and type(None) in args:
-                dataclass_type = next(arg for arg in args if arg is not type(None))
-        
-        return (hasattr(dataclass_type, '_resolve_field_value') and
-                hasattr(dataclass_type, 'to_base_config'))
+        """
+        DEPRECATED: Use is_lazy_dataclass() from lazy_factory instead.
+
+        This method uses duck typing (hasattr checks). Use the isinstance-based
+        is_lazy_dataclass() for proper type checking.
+        """
+        from openhcs.config_framework.lazy_factory import is_lazy_dataclass
+        return is_lazy_dataclass(dataclass_type)
 
     @staticmethod
     def get_lazy_resolved_placeholder(

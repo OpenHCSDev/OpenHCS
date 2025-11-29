@@ -92,11 +92,17 @@ class OpenHCSPyQtApp(QApplication):
         from openhcs.config_framework.lazy_factory import ensure_global_config_context
         from openhcs.core.config import GlobalPipelineConfig
 
-        # Set for editing (UI placeholders)
+        # Set for editing (UI placeholders) - this uses threading.local() storage
         set_global_config_for_editing(GlobalPipelineConfig, self.global_config)
 
         # ALSO ensure context for orchestrator creation (required by orchestrator.__init__)
         ensure_global_config_context(GlobalPipelineConfig, self.global_config)
+
+        # ARCHITECTURAL FIX: Do NOT set contextvars at app startup
+        # contextvars is ONLY for temporary nested contexts (inside with config_context() blocks)
+        # threading.local() is the single source of truth for persistent global config
+        # Placeholder resolution will automatically fall back to threading.local() via get_base_global_config()
+        # This eliminates the dual storage architecture smell
 
         logger.info("Global configuration context established for lazy dataclass resolution")
 
