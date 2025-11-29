@@ -345,17 +345,21 @@ class FunctionPaneWidget(QWidget):
         Handle parameter value changes (extracted from Textual version).
 
         Args:
-            param_name: Name of the parameter
+            param_name: Full path like "func_0.sigma" or just "func_0.param_name"
             value: New parameter value
         """
+        # Extract leaf field name from full path
+        # "func_0.sigma" -> "sigma"
+        leaf_field = param_name.split('.')[-1]
+
         # Update internal kwargs without triggering reactive update
-        self._internal_kwargs[param_name] = value
+        self._internal_kwargs[leaf_field] = value
 
         # The form manager already has the updated value (it emitted this signal)
         # No need to call update_parameter() again - that would be redundant
 
         # Emit parameter changed signal to notify parent (function list editor)
-        self.parameter_changed.emit(self.index, param_name, value)
+        self.parameter_changed.emit(self.index, leaf_field, value)
 
         logger.debug(f"Parameter changed: {param_name} = {value}")
     

@@ -121,6 +121,10 @@ class StyleSheetGenerator:
             }}
         """
 
+    def generate_list_widget_style(self) -> str:
+        """Alias for generate_tree_widget_style (includes QListWidget styling)."""
+        return self.generate_tree_widget_style()
+
     def generate_table_widget_style(self) -> str:
         """
         Generate QStyleSheet for table widgets.

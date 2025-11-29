@@ -180,7 +180,6 @@ class OpenHCSMainWindow(QMainWindow):
             # Add widget to window
             layout = QVBoxLayout(window)
             plate_widget = PlateManagerWidget(
-                self.file_manager,
                 self.service_adapter,
                 self.service_adapter.get_current_color_scheme()
             )
@@ -237,7 +236,6 @@ class OpenHCSMainWindow(QMainWindow):
             # Add widget to window
             layout = QVBoxLayout(window)
             pipeline_widget = PipelineEditorWidget(
-                self.file_manager,
                 self.service_adapter,
                 self.service_adapter.get_current_color_scheme()
             )

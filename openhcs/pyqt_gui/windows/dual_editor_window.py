@@ -645,8 +645,10 @@ class DualEditorWindow(BaseFormDialog):
                     self._update_context_obj_recursively(self.step_editor.form_manager, self.orchestrator.pipeline_config)
 
                     # Refresh placeholders to show new inherited values
-                    self.step_editor.form_manager._refresh_all_placeholders()
-                    logger.debug("Refreshed step editor placeholders after pipeline config change")
+                    # Use the same pattern as on_config_changed (line 466)
+                    from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+                    ParameterFormManager.trigger_global_cross_window_refresh()
+                    logger.debug("Triggered global cross-window refresh after pipeline config change")
 
     def _update_context_obj_recursively(self, form_manager, new_context_obj):
         """Recursively update context_obj for a form manager and all its nested managers.
@@ -679,7 +681,10 @@ class DualEditorWindow(BaseFormDialog):
         Handles both top-level parameters (e.g., 'name', 'processing_config') and
         nested parameters from nested forms (e.g., 'group_by' from processing_config form).
         """
-        logger.debug(f"🔔 on_form_parameter_changed: param_name={param_name}, value type={type(value).__name__}")
+        logger.info(f"🔔 DUAL_EDITOR: on_form_parameter_changed called")
+        logger.info(f"  param_name={param_name}")
+        logger.info(f"  value type={type(value).__name__}")
+        logger.info(f"  value={repr(value)[:100]}")
 
         # Handle reset_all completion signal
         if param_name == "__reset_all_complete__":
@@ -687,61 +692,57 @@ class DualEditorWindow(BaseFormDialog):
             self._schedule_function_editor_sync()
             return
 
-        # CRITICAL: Check if this is a nested parameter (from a nested form manager)
-        # Nested parameters are fields within nested dataclasses (e.g., processing_config.group_by)
-        # They don't exist as direct attributes on FunctionStep
-        # Known nested parameters from processing_config: group_by, variable_components, input_source
-        NESTED_PARAMS = {'group_by', 'variable_components', 'input_source'}
+        # param_name is now a full path like "processing_config.group_by" or just "name"
+        # Parse the path to determine if it's a nested field
+        path_parts = param_name.split('.')
+        logger.info(f"  path_parts={path_parts}")
 
-        if param_name in NESTED_PARAMS:
-            # This is a nested parameter change - the nested form manager already updated
-            # the processing_config dataclass, so we just need to sync the function editor
-            # The step_editor.form_manager has a nested manager for processing_config that
-            # already updated self.editing_step.processing_config.{param_name}
-            logger.debug(f"🔄 Scheduling function editor sync after nested {param_name} change")
-            self._schedule_function_editor_sync()
-            return
+        # Skip the first part if it's the form manager's field_id (type name like "FunctionStep")
+        # The path format is: "TypeName.field" or "TypeName.nested.field"
+        if len(path_parts) > 1:
+            # Remove the type name prefix (e.g., "FunctionStep")
+            path_parts = path_parts[1:]
+            logger.info(f"  path_parts after removing type prefix={path_parts}")
 
-        # CRITICAL FIX: For function parameters, use fresh imports to avoid unpicklable registry wrappers
-        if param_name == 'func' and callable(value) and hasattr(value, '__module__'):
-            try:
-                import importlib
-                module = importlib.import_module(value.__module__)
-                value = getattr(module, value.__name__)
-            except Exception:
-                pass  # Use original if refresh fails
+        if len(path_parts) == 1:
+            # Top-level field (e.g., "name", "func", "processing_config")
+            field_name = path_parts[0]
 
-        # CRITICAL FIX: For nested dataclass parameters (like processing_config),
-        # don't replace the entire lazy dataclass - instead update individual fields
-        # This preserves lazy resolution for fields that weren't changed
-        from dataclasses import is_dataclass, fields
-        if is_dataclass(value) and not isinstance(value, type):
-            logger.debug(f"📦 {param_name} is a nested dataclass, updating fields individually")
-            # This is a nested dataclass - update fields individually
-            existing_config = getattr(self.editing_step, param_name, None)
-            if existing_config is not None and hasattr(existing_config, '_resolve_field_value'):
-                logger.debug(f"✅ {param_name} is lazy, preserving lazy resolution")
-                # Existing config is lazy - update fields individually to preserve lazy resolution
-                for field in fields(value):
-                    # Use object.__getattribute__ to get raw value (not lazy-resolved)
-                    raw_value = object.__getattribute__(value, field.name)
-                    # CRITICAL: Always update the field, even if None
-                    # When user resets a field, we MUST update it to None so lazy resolution can inherit from context
-                    # When user sets a concrete value, we update it to that value
-                    object.__setattr__(existing_config, field.name, raw_value)
-                    logger.debug(f"    ✏️  Updated {field.name} to {raw_value}")
-                logger.debug(f"✅ Updated lazy {param_name} fields individually to preserve lazy resolution")
+            # CRITICAL FIX: For function parameters, use fresh imports to avoid unpicklable registry wrappers
+            if field_name == 'func' and callable(value) and hasattr(value, '__module__'):
+                try:
+                    import importlib
+                    module = importlib.import_module(value.__module__)
+                    value = getattr(module, value.__name__)
+                except Exception:
+                    pass  # Use original if refresh fails
+
+            # CRITICAL FIX: For nested dataclass parameters (like processing_config),
+            # don't replace the entire lazy dataclass - instead update individual fields
+            # This preserves lazy resolution for fields that weren't changed
+            from dataclasses import is_dataclass, fields
+            if is_dataclass(value) and not isinstance(value, type):
+                logger.debug(f"📦 {field_name} is a nested dataclass, updating fields individually")
+                existing_config = getattr(self.editing_step, field_name, None)
+                if existing_config is not None and hasattr(existing_config, '_resolve_field_value'):
+                    logger.debug(f"✅ {field_name} is lazy, preserving lazy resolution")
+                    for field in fields(value):
+                        raw_value = object.__getattribute__(value, field.name)
+                        object.__setattr__(existing_config, field.name, raw_value)
+                        logger.debug(f"    ✏️  Updated {field.name} to {raw_value}")
+                else:
+                    setattr(self.editing_step, field_name, value)
             else:
-                logger.debug(f"⚠️  {param_name} is not lazy or doesn't exist, replacing entire config")
-                # Not lazy or doesn't exist - just replace it
-                setattr(self.editing_step, param_name, value)
+                setattr(self.editing_step, field_name, value)
         else:
-            logger.debug(f"📄 {param_name} is not a nested dataclass, setting normally")
-            # Not a nested dataclass - just set it normally
-            setattr(self.editing_step, param_name, value)
+            # Nested field (e.g., ["processing_config", "group_by"])
+            # The nested form manager already updated self.editing_step via _mark_parents_modified
+            # We just need to sync the function editor
+            logger.info(f"  🔄 Nested field change: {'.'.join(path_parts)}")
+            logger.info(f"  Nested field already updated by _mark_parents_modified")
 
         # SINGLE SOURCE OF TRUTH: Always sync function editor from step (batched)
-        logger.debug(f"🔄 Scheduling function editor sync after {param_name} change")
+        logger.info(f"  🔄 Scheduling function editor sync after {param_name} change")
         self._schedule_function_editor_sync()
     
     def on_tab_changed(self, index: int):
@@ -757,9 +758,17 @@ class DualEditorWindow(BaseFormDialog):
         baseline_snapshot = getattr(self, '_baseline_snapshot', None)
         has_changes = current_snapshot != baseline_snapshot
 
+        logger.info(f"🔍 DETECT_CHANGES:")
+        logger.info(f"  current_snapshot={current_snapshot}")
+        logger.info(f"  baseline_snapshot={baseline_snapshot}")
+        logger.info(f"  has_changes={has_changes}")
+
         if has_changes != self.has_changes:
             self.has_changes = has_changes
+            logger.info(f"  ✅ Emitting changes_detected({has_changes})")
             self.changes_detected.emit(has_changes)
+        else:
+            logger.info(f"  ⏭️  No change in has_changes state")
     
     def on_changes_detected(self, has_changes: bool):
         """Handle changes detection."""
@@ -902,6 +911,11 @@ class DualEditorWindow(BaseFormDialog):
         import copy
 
         temp_step = copy.deepcopy(self.editing_step)
+
+        # NOTE: We DON'T override func from func_editor.current_pattern here because:
+        # 1. current_pattern returns the pattern data structure (list of tuples), not the func value
+        # 2. editing_step.func should already be kept in sync by the function editor's signals
+        # 3. Using current_pattern would cause serialization mismatch with baseline
 
         for tab_index in range(self.tab_widget.count()):
             tab_widget = self.tab_widget.widget(tab_index)

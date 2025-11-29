@@ -129,14 +129,23 @@ class FieldChangeDispatcher:
                 if DEBUG_DISPATCHER:
                     logger.info(f"  ✅ Applied enabled styling")
 
-            # 4. Emit source's signal (for local listeners like ConfigWindow)
-            source.parameter_changed.emit(event.field_name, event.value)
-            if DEBUG_DISPATCHER:
-                logger.info(f"  📡 Emitted parameter_changed({event.field_name}, ...)")
-
-            # 5. Emit from ROOT with full path (cross-window)
+            # 4. Emit from ROOT with full path (for all listeners)
+            # This ensures listeners connected to root get notified of ALL changes
+            # (including nested) with full paths like "processing_config.group_by"
             root = self._get_root_manager(source)
             full_path = self._get_full_path(source, event.field_name)
+
+            logger.info(f"🔔 DISPATCHER: Emitting parameter_changed from root")
+            logger.info(f"  source.field_id={source.field_id}")
+            logger.info(f"  root.field_id={root.field_id}")
+            logger.info(f"  event.field_name={event.field_name}")
+            logger.info(f"  full_path={full_path}")
+            logger.info(f"  value type={type(event.value).__name__}")
+
+            root.parameter_changed.emit(full_path, event.value)
+            logger.info(f"  ✅ Emitted parameter_changed({full_path}, ...) from root")
+
+            # 5. Emit cross-window signal from ROOT
             self._emit_cross_window(root, full_path, event.value)
 
         finally:
@@ -148,27 +157,30 @@ class FieldChangeDispatcher:
         This ensures get_user_modified_values() on root includes nested changes.
         Also updates parent.parameters with the nested dataclass value.
         """
-        if DEBUG_DISPATCHER:
-            logger.info(f"  📝 Marking parent chain modified for {source.field_id}")
+        logger.info(f"  📝 MARK_PARENTS: Starting for {source.field_id}")
 
         current = source
         level = 0
         while current._parent_manager is not None:
             parent = current._parent_manager
             level += 1
+            logger.info(f"    L{level}: parent={parent.field_id}")
             # Find the field name in parent that points to current
             for field_name, nested_mgr in parent.nested_managers.items():
                 if nested_mgr is current:
+                    logger.info(f"    L{level}: Found field_name={field_name} in parent")
                     # Collect nested value and update parent's parameters
                     nested_value = parent._value_collection_service.collect_nested_value(
                         parent, field_name, nested_mgr
                     )
+                    logger.info(f"    L{level}: Collected nested_value type={type(nested_value).__name__}")
                     parent.parameters[field_name] = nested_value
                     parent._user_set_fields.add(field_name)
-                    if DEBUG_DISPATCHER:
-                        logger.info(f"    L{level}: {parent.field_id}.{field_name} marked modified")
+                    logger.info(f"    L{level}: ✅ {parent.field_id}.{field_name} marked modified")
                     break
             current = parent
+
+        logger.info(f"  ✅ MARK_PARENTS: Complete")
 
     def _get_root_manager(self, manager: 'ParameterFormManager') -> 'ParameterFormManager':
         """Walk up to root manager."""

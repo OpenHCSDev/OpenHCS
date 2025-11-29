@@ -371,35 +371,46 @@ class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
         self.form_manager.parameter_changed.connect(self._handle_parameter_change)
     
     def _handle_parameter_change(self, param_name: str, value: Any):
-        """Handle parameter change from form manager (mirrors Textual TUI)."""
+        """Handle parameter change from form manager (mirrors Textual TUI).
+
+        Args:
+            param_name: Full path like "FunctionStep.processing_config.group_by" or "FunctionStep.name"
+            value: New value
+        """
         try:
-            # Get the properly converted value from the form manager
-            # The form manager handles all type conversions including List[Enum]
-            final_value = self.form_manager.get_current_values().get(param_name, value)
+            # Extract leaf field name from full path
+            # "FunctionStep.processing_config.group_by" -> "group_by"
+            # "FunctionStep.name" -> "name"
+            path_parts = param_name.split('.')
+            if len(path_parts) > 1:
+                # Remove type name prefix
+                path_parts = path_parts[1:]
 
-            # Debug: Check what we're actually saving
-            if param_name == 'materialization_config':
-                print(f"DEBUG: Saving materialization_config, type: {type(final_value)}")
-                print(f"DEBUG: Raw value from form manager: {value}")
-                print(f"DEBUG: Final value from get_current_values(): {final_value}")
-                if hasattr(final_value, '__dataclass_fields__'):
-                    from dataclasses import fields
-                    for field_obj in fields(final_value):
-                        raw_value = object.__getattribute__(final_value, field_obj.name)
-                        print(f"DEBUG: Field {field_obj.name} = {raw_value}")
+            # For nested fields, the form manager already updated self.step via _mark_parents_modified
+            # For top-level fields, we need to update self.step
+            if len(path_parts) == 1:
+                leaf_field = path_parts[0]
 
-            # CRITICAL FIX: For function parameters, use fresh imports to avoid unpicklable registry wrappers
-            if param_name == 'func' and callable(final_value) and hasattr(final_value, '__module__'):
-                try:
-                    import importlib
-                    module = importlib.import_module(final_value.__module__)
-                    final_value = getattr(module, final_value.__name__)
-                except Exception:
-                    pass  # Use original if refresh fails
+                # Get the properly converted value from the form manager
+                # The form manager handles all type conversions including List[Enum]
+                final_value = self.form_manager.get_current_values().get(leaf_field, value)
 
-            # Update step attribute
-            setattr(self.step, param_name, final_value)
-            logger.debug(f"Updated step parameter {param_name}={final_value}")
+                # CRITICAL FIX: For function parameters, use fresh imports to avoid unpicklable registry wrappers
+                if leaf_field == 'func' and callable(final_value) and hasattr(final_value, '__module__'):
+                    try:
+                        import importlib
+                        module = importlib.import_module(final_value.__module__)
+                        final_value = getattr(module, final_value.__name__)
+                    except Exception:
+                        pass  # Use original if refresh fails
+
+                # Update step attribute
+                setattr(self.step, leaf_field, final_value)
+                logger.debug(f"Updated step parameter {leaf_field}={final_value}")
+            else:
+                # Nested field - already updated by _mark_parents_modified
+                logger.debug(f"Nested field {'.'.join(path_parts)} already updated by dispatcher")
+
             self.step_parameter_changed.emit()
 
         except Exception as e:

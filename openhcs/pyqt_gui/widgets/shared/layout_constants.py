@@ -51,7 +51,7 @@ ULTRA_COMPACT_LAYOUT = ParameterFormLayoutConfig(
     main_layout_margins=(2, 2, 2, 2),
     content_layout_spacing=0,
     content_layout_margins=(1, 1, 1, 1),
-    parameter_row_spacing=2,
+    parameter_row_spacing=1,
     parameter_row_margins=(0, 0, 0, 0),
     optional_layout_spacing=1,
     optional_layout_margins=(0, 0, 0, 0),
@@ -59,4 +59,4 @@ ULTRA_COMPACT_LAYOUT = ParameterFormLayoutConfig(
 )
 
 # Current active configuration - change this to switch layouts globally
-CURRENT_LAYOUT = COMPACT_LAYOUT
+CURRENT_LAYOUT = ULTRA_COMPACT_LAYOUT
