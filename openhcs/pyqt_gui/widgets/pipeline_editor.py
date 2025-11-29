@@ -507,6 +507,13 @@ class PipelineEditorWidget(AbstractManagerWidget):
         new_pipeline_steps = namespace['pipeline_steps']
         self.pipeline_steps = new_pipeline_steps
         self._normalize_step_scope_tokens()
+
+        # Save pipeline to plate_pipelines dict for current plate
+        # This ensures set_current_plate() can reload it later
+        if self.current_plate:
+            self.plate_pipelines[self.current_plate] = self.pipeline_steps
+            logger.debug(f"Saved pipeline ({len(self.pipeline_steps)} steps) for plate: {self.current_plate}")
+
         self.update_item_list()
         self.pipeline_changed.emit(self.pipeline_steps)
         self.status_message.emit(f"Pipeline updated with {len(new_pipeline_steps)} steps")
@@ -537,6 +544,13 @@ class PipelineEditorWidget(AbstractManagerWidget):
             if steps is not None:
                 self.pipeline_steps = steps
                 self._normalize_step_scope_tokens()
+
+                # Save pipeline to plate_pipelines dict for current plate
+                # This ensures set_current_plate() can reload it later
+                if self.current_plate:
+                    self.plate_pipelines[self.current_plate] = self.pipeline_steps
+                    logger.debug(f"Saved pipeline ({len(self.pipeline_steps)} steps) for plate: {self.current_plate}")
+
                 self.update_item_list()
                 self.pipeline_changed.emit(self.pipeline_steps)
                 self.status_message.emit(f"Loaded {len(steps)} steps from {file_path.name}")
