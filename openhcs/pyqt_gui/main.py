@@ -749,9 +749,9 @@ class OpenHCSMainWindow(QMainWindow):
         self.show_plate_manager()
 
         # Load the test pipeline FIRST (this will create pipeline editor if needed)
-        # This ensures the pipeline editor exists and is connected to plate_selected signal
-        # BEFORE we add the plate and emit the signal
-        self._load_pipeline_file(pipeline_path)
+        # Pass the plate path so pipeline editor knows which plate to save the pipeline for
+        # This ensures the pipeline is saved to plate_pipelines[plate_path]
+        self._load_pipeline_file(pipeline_path, plate_path=output_dir)
 
         # Get the plate manager widget
         plate_dialog = self.floating_windows["plate_manager"]
@@ -768,12 +768,13 @@ class OpenHCSMainWindow(QMainWindow):
 
         logger.info(f"Added synthetic plate and loaded test pipeline: {output_dir}")
 
-    def _load_pipeline_file(self, pipeline_path: str):
+    def _load_pipeline_file(self, pipeline_path: str, plate_path: str = None):
         """
         Load a pipeline file into the pipeline editor.
 
         Args:
             pipeline_path: Path to the pipeline file to load
+            plate_path: Optional plate path to associate the pipeline with
         """
         try:
             # Ensure pipeline editor exists (create if needed)
@@ -786,6 +787,12 @@ class OpenHCSMainWindow(QMainWindow):
 
             if not pipeline_editor:
                 raise RuntimeError("Pipeline editor widget not found after creation")
+
+            # If plate_path is provided, set it as current_plate BEFORE loading
+            # This ensures _apply_executed_code() can save to plate_pipelines[current_plate]
+            if plate_path:
+                pipeline_editor.current_plate = plate_path
+                logger.debug(f"Set current_plate to {plate_path} before loading pipeline")
 
             # Load the pipeline file
             from pathlib import Path
