@@ -6,7 +6,7 @@ and other widgets that display items with preview labels.
 """
 
 from PyQt6.QtWidgets import QStyledItemDelegate, QStyleOptionViewItem, QStyle
-from PyQt6.QtGui import QPainter, QColor, QFontMetrics
+from PyQt6.QtGui import QPainter, QColor, QFontMetrics, QPen
 from PyQt6.QtCore import Qt, QRect
 
 
@@ -41,6 +41,8 @@ class MultilinePreviewItemDelegate(QStyledItemDelegate):
     
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index) -> None:
         """Paint the item with multiline support and grey preview text."""
+        from PyQt6.QtGui import QBrush
+
         # Prepare a copy to let style draw backgrounds, hover, selection, borders, etc.
         opt = QStyleOptionViewItem(option)
         self.initStyleOption(opt, index)
@@ -49,7 +51,36 @@ class MultilinePreviewItemDelegate(QStyledItemDelegate):
         text = opt.text or ""
         opt.text = ""
 
-        # Let the style draw background, selection, hover, borders
+        # Check selection/hover state
+        is_selected = option.state & QStyle.StateFlag.State_Selected
+        is_hover = option.state & QStyle.StateFlag.State_MouseOver
+
+        # Draw scope-based background color from item's BackgroundRole
+        # This is set via QListWidgetItem.setBackground() in _apply_list_item_scope_color
+        item_bg = index.data(Qt.ItemDataRole.BackgroundRole)
+        if item_bg:
+            # Get the color from the brush
+            bg_color = item_bg.color()
+
+            # Invert opacity for selection: normal=30-40%, selected=70-80%
+            if is_selected:
+                # Invert: if alpha was 40% (102), make it 85% (217)
+                inverted_alpha = min(255, 255 - bg_color.alpha() + 50)
+                bg_color.setAlpha(inverted_alpha)
+            elif is_hover:
+                # Slight boost for hover
+                boosted_alpha = min(255, bg_color.alpha() + 30)
+                bg_color.setAlpha(boosted_alpha)
+
+            painter.fillRect(option.rect, bg_color)
+
+        # Clear style's background and selection drawing - we handle it ourselves
+        opt.backgroundBrush = QBrush()
+        if is_selected:
+            # Remove selected state so style doesn't draw blue
+            opt.state = opt.state & ~QStyle.StateFlag.State_Selected
+
+        # Let the style draw hover effects and borders (but not selection background)
         self.parent().style().drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, self.parent())
 
         # Now draw text manually with custom colors
@@ -130,6 +161,19 @@ class MultilinePreviewItemDelegate(QStyledItemDelegate):
             y_offset += line_height
 
         painter.restore()
+
+        # Draw scope border (stored in SCOPE_BORDER_ROLE = UserRole+10)
+        border_color = index.data(Qt.ItemDataRole.UserRole + 10)
+        if border_color and isinstance(border_color, QColor):
+            painter.save()
+            # Draw left border (2px wide) as scope indicator
+            pen = QPen(border_color)
+            pen.setWidth(3)
+            painter.setPen(pen)
+            rect = option.rect
+            # Draw on left edge
+            painter.drawLine(rect.left() + 1, rect.top(), rect.left() + 1, rect.bottom())
+            painter.restore()
     
     def sizeHint(self, option: QStyleOptionViewItem, index) -> 'QSize':
         """Calculate size hint based on number of lines in text."""

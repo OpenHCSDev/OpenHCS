@@ -42,6 +42,8 @@ from PyQt6.QtWidgets import QPushButton
 from typing import Callable
 from PyQt6.QtCore import Qt
 
+from openhcs.pyqt_gui.widgets.shared.scoped_border_mixin import ScopedBorderMixin
+
 logger = logging.getLogger(__name__)
 
 
@@ -50,7 +52,12 @@ class HasUnregisterMethod(Protocol):
     def unregister_from_cross_window_updates(self) -> None: ...
 
 
-class BaseFormDialog(QDialog):
+class BaseFormDialog(ScopedBorderMixin, QDialog):
+    """Base class for dialogs with form managers and scope-based borders.
+
+    Inherits from ScopedBorderMixin to provide automatic scope-based border rendering.
+    Subclasses should call self._init_scope_border() after setting self.scope_id.
+    """
 
     def _setup_save_button(self, button: 'QPushButton', save_callback: Callable):
         """

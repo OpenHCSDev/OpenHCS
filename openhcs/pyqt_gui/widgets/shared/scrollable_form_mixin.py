@@ -15,16 +15,19 @@ class ScrollableFormMixin:
     Mixin for widgets that have:
     - self.scroll_area: QScrollArea containing the form
     - self.form_manager: ParameterFormManager with nested_managers
-    
+
     Provides scroll-to-section functionality.
+
+    If the class also inherits from TreeFormFlashMixin, the GroupBox will be
+    flashed after scrolling to provide visual feedback.
     """
-    
+
     # Type hints for attributes that must be provided by the implementing class
     scroll_area: QScrollArea
     form_manager: 'ParameterFormManager'  # Forward reference
-    
+
     def _scroll_to_section(self, field_name: str):
-        """Scroll to a specific section in the form."""
+        """Scroll to a specific section in the form and flash it for visibility."""
         logger.info(f"🔍 Scrolling to section: {field_name}")
 
         if not hasattr(self, 'scroll_area') or self.scroll_area is None:
@@ -49,10 +52,14 @@ class ScrollableFormMixin:
         # Map widget position to scroll area coordinates and scroll to it
         widget_pos = first_widget.mapTo(self.scroll_area.widget(), first_widget.rect().topLeft())
         v_scroll_bar = self.scroll_area.verticalScrollBar()
-        
+
         # Scroll to widget position with offset to show context above
         target_scroll = max(0, widget_pos.y() - 50)
         v_scroll_bar.setValue(target_scroll)
-        
+
         logger.info(f"✅ Scrolled to {field_name}")
+
+        # Flash the GroupBox if TreeFormFlashMixin is available
+        if hasattr(self, '_flash_groupbox_for_field'):
+            self._flash_groupbox_for_field(field_name)
 

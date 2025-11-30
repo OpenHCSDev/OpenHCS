@@ -101,6 +101,11 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, ABC, metaclass=_Co
     #   'preserve_selection_pred': Callable[[self], bool] - Predicate for selection preservation
     #   'list_item_data': 'item' | 'index' - What to store in UserRole (default: 'item')
     #
+    #   # Scope coloring (optional - for visual feedback):
+    #   'scope_item_type': ListItemType | None - Enum value for item type (ORCHESTRATOR, STEP)
+    #   'scope_id_attr': str | None - Simple: scope_id = getattr(item, attr)
+    #   'scope_id_builder': Callable | None - Complex: scope_id = builder(item, index, widget)
+    #
     # Example (PlateManager):
     #   ITEM_HOOKS = {
     #       'id_accessor': 'path',
@@ -112,6 +117,8 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, ABC, metaclass=_Co
     #       'items_changed_signal': None,
     #       'preserve_selection_pred': lambda self: bool(self.orchestrators),
     #       'list_item_data': 'item',
+    #       'scope_item_type': ListItemType.ORCHESTRATOR,
+    #       'scope_id_attr': 'path',
     #   }
     ITEM_HOOKS: Dict[str, Any] = {}
 
@@ -830,6 +837,58 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, ABC, metaclass=_Co
         from openhcs.introspection import patch_lazy_constructors
         return patch_lazy_constructors()
 
+    # ========== Scope Coloring (Declarative via ITEM_HOOKS) ==========
+
+    def _get_list_item_scope(self, item: Any, index: int) -> Optional[Tuple[str, Any]]:
+        """Get scope info for item. Pure data-driven - no branching on item type.
+
+        Returns:
+            Tuple of (scope_id, item_type) or None if scope coloring not configured.
+        """
+        hooks = self.ITEM_HOOKS
+        item_type = hooks.get('scope_item_type')
+        if not item_type:
+            return None
+
+        # Two declarative options - builder takes precedence
+        builder = hooks.get('scope_id_builder')
+        if builder:
+            scope_id = builder(item, index, self)
+        else:
+            scope_id_attr = hooks.get('scope_id_attr')
+            if scope_id_attr:
+                # Use same pattern as _get_item_id for attribute resolution
+                if isinstance(item, dict):
+                    scope_id = item.get(scope_id_attr)
+                else:
+                    scope_id = getattr(item, scope_id_attr, None)
+            else:
+                scope_id = None
+
+        return (scope_id, item_type) if scope_id else None
+
+    # Custom data role for scope border color (UserRole+10 to avoid conflicts)
+    SCOPE_BORDER_ROLE = Qt.ItemDataRole.UserRole + 10
+
+    def _apply_list_item_scope_color(self, list_item: QListWidgetItem, item: Any, index: int) -> None:
+        """Apply scope-based background and border colors. Called by update_item_list()."""
+        scope_info = self._get_list_item_scope(item, index)
+        if not scope_info:
+            return
+
+        scope_id, item_type = scope_info
+        from openhcs.pyqt_gui.widgets.shared.scope_color_utils import get_scope_color_scheme
+        scheme = get_scope_color_scheme(scope_id)
+
+        # Set background color
+        bg_color = item_type.get_background_color(scheme)
+        if bg_color:
+            list_item.setBackground(bg_color)
+
+        # Set border color (stored in custom role, drawn by delegate)
+        border_color = scheme.to_qcolor_orchestrator_border()
+        list_item.setData(self.SCOPE_BORDER_ROLE, border_color)
+
     # ========== List Update Template ==========
 
     def update_item_list(self) -> None:
@@ -882,6 +941,9 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, ABC, metaclass=_Co
                     # Extra data (e.g., enabled flag)
                     for role_offset, value in self._get_list_item_extra_data(item_obj, index).items():
                         list_item.setData(Qt.ItemDataRole.UserRole + role_offset, value)
+
+                    # Apply scope-based background color (if configured via ITEM_HOOKS)
+                    self._apply_list_item_scope_color(list_item, item_obj, index)
             else:
                 # Structure changed - rebuild list
                 self.item_list.clear()
@@ -893,6 +955,9 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, ABC, metaclass=_Co
 
                     for role_offset, value in self._get_list_item_extra_data(item_obj, index).items():
                         list_item.setData(Qt.ItemDataRole.UserRole + role_offset, value)
+
+                    # Apply scope-based background color (if configured via ITEM_HOOKS)
+                    self._apply_list_item_scope_color(list_item, item_obj, index)
 
                     self.item_list.addItem(list_item)
 

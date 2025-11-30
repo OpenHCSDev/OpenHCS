@@ -21,6 +21,7 @@ from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterForm
 from openhcs.pyqt_gui.widgets.shared.config_hierarchy_tree import ConfigHierarchyTreeHelper
 from openhcs.pyqt_gui.widgets.shared.collapsible_splitter_helper import CollapsibleSplitterHelper
 from openhcs.pyqt_gui.widgets.shared.scrollable_form_mixin import ScrollableFormMixin
+from openhcs.pyqt_gui.widgets.shared.tree_form_flash_mixin import TreeFormFlashMixin
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 from openhcs.pyqt_gui.config import PyQtGUIConfig, get_default_pyqt_gui_config
@@ -32,7 +33,7 @@ from openhcs.ui.shared.code_editor_form_updater import CodeEditorFormUpdater
 logger = logging.getLogger(__name__)
 
 
-class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
+class StepParameterEditorWidget(TreeFormFlashMixin, ScrollableFormMixin, QWidget):
     """
     Step parameter editor using dynamic form generation.
 
@@ -40,6 +41,8 @@ class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
     constructor signature with nested dataclass support.
 
     Inherits from ScrollableFormMixin to provide scroll-to-section functionality.
+
+    Inherits from TreeFormFlashMixin for visual flash animations on cross-window updates.
     """
     
     # Signals
@@ -135,6 +138,9 @@ class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
         )
         self.hierarchy_tree = None
         self.content_splitter = None
+
+        # Connect flash callback for tree item visual feedback (TreeFormFlashMixin)
+        self.form_manager._notify_tree_flash = self._flash_tree_item
 
         self.setup_ui()
         self.setup_connections()

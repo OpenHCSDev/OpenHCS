@@ -36,6 +36,7 @@ from openhcs.core.config import ProcessingConfig
 
 # Import ABC base class (Phase 4 migration)
 from openhcs.pyqt_gui.widgets.shared.abstract_manager_widget import AbstractManagerWidget
+from openhcs.pyqt_gui.widgets.shared.scope_visual_config import ListItemType
 
 from openhcs.utils.performance_monitor import timer
 
@@ -81,19 +82,12 @@ class PipelineEditorWidget(AbstractManagerWidget):
         'items_changed_signal': 'pipeline_changed',  # emit on changes
         'preserve_selection_pred': lambda self: bool(self.pipeline_steps),
         'list_item_data': 'index',                # store index, not item
-    }
-
-    # Declarative item hooks (replaces 9 trivial method overrides)
-    ITEM_HOOKS = {
-        'id_accessor': ('attr', 'name'),          # getattr(item, 'name', '')
-        'backing_attr': 'pipeline_steps',         # self.pipeline_steps
-        'selection_attr': 'selected_step',        # self.selected_step = ...
-        'selection_signal': 'step_selected',      # self.step_selected.emit(...)
-        'selection_emit_id': False,               # emit the full step object
-        'selection_clear_value': None,            # emit None when cleared
-        'items_changed_signal': 'pipeline_changed',  # self.pipeline_changed.emit(...)
-        'preserve_selection_pred': lambda self: bool(self.pipeline_steps),
-        'list_item_data': 'index',                # store the step index
+        # Scope coloring - builder for composite scope_id
+        'scope_item_type': ListItemType.STEP,
+        'scope_id_builder': lambda item, idx, w: (
+            f"{orch.plate_path}::{getattr(item, '_pipeline_scope_token', f'step_{idx}')}@{idx}"
+            if (orch := w._get_current_orchestrator()) else None
+        ),
     }
 
     # Declarative preview field configuration (processed automatically in ABC.__init__)
@@ -390,6 +384,7 @@ class PipelineEditorWidget(AbstractManagerWidget):
             on_save_callback=handle_save,
             orchestrator=orchestrator,
             gui_config=self.gui_config,
+            step_position=len(self.pipeline_steps),  # New step will be at end
             parent=self
         )
         # Set original step for change detection
@@ -867,6 +862,13 @@ class PipelineEditorWidget(AbstractManagerWidget):
 
         from openhcs.pyqt_gui.windows.dual_editor_window import DualEditorWindow
 
+        # Find step position for scope-based border styling
+        step_position = None
+        for i, step in enumerate(self.pipeline_steps):
+            if step is step_to_edit:
+                step_position = i
+                break
+
         def handle_save(edited_step):
             """Handle step save from editor."""
             # Find and replace the step in the pipeline
@@ -889,6 +891,7 @@ class PipelineEditorWidget(AbstractManagerWidget):
             on_save_callback=handle_save,
             orchestrator=orchestrator,
             gui_config=self.gui_config,
+            step_position=step_position,
             parent=self
         )
         # Set original step for change detection

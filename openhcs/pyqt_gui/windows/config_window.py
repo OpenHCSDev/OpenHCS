@@ -23,6 +23,7 @@ from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterForm
 from openhcs.pyqt_gui.widgets.shared.config_hierarchy_tree import ConfigHierarchyTreeHelper
 from openhcs.pyqt_gui.widgets.shared.scrollable_form_mixin import ScrollableFormMixin
 from openhcs.pyqt_gui.widgets.shared.collapsible_splitter_helper import CollapsibleSplitterHelper
+from openhcs.pyqt_gui.widgets.shared.tree_form_flash_mixin import TreeFormFlashMixin
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.pyqt_gui.windows.base_form_dialog import BaseFormDialog
@@ -40,7 +41,7 @@ logger = logging.getLogger(__name__)
 # Infrastructure classes removed - functionality migrated to ParameterFormManager service layer
 
 
-class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
+class ConfigWindow(TreeFormFlashMixin, ScrollableFormMixin, BaseFormDialog):
     """
     PyQt6 Configuration Window.
 
@@ -51,6 +52,8 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
     cross-window placeholder updates when the dialog closes.
 
     Inherits from ScrollableFormMixin to provide scroll-to-section functionality.
+
+    Inherits from TreeFormFlashMixin for visual flash animations on cross-window updates.
     """
 
     # Signals
@@ -130,6 +133,9 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
 
         # Setup UI
         self.setup_ui()
+
+        # Register placeholder flash hook (TreeFormFlashMixin) - AFTER setup_ui so tree exists
+        self._register_placeholder_flash_hook()
 
         logger.debug(f"Config window initialized for {config_class.__name__}")
 
@@ -232,6 +238,9 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
             self.style_generator.generate_config_window_style() + "\n" +
             self.style_generator.generate_tree_widget_style()
         )
+
+        # Initialize scope-based border styling (ScopedBorderMixin)
+        self._init_scope_border()
 
     def _create_inheritance_tree(self) -> QTreeWidget:
         """Create tree widget showing inheritance hierarchy for navigation."""

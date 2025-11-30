@@ -44,6 +44,7 @@ from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterForm
 from openhcs.pyqt_gui.widgets.shared.services.zmq_execution_service import ZMQExecutionService
 from openhcs.pyqt_gui.widgets.shared.services.compilation_service import CompilationService
 from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
+from openhcs.pyqt_gui.widgets.shared.scope_visual_config import ListItemType
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +87,9 @@ class PlateManagerWidget(AbstractManagerWidget):
         'selection_emit_id': True, 'selection_clear_value': '',
         'items_changed_signal': None, 'list_item_data': 'item',
         'preserve_selection_pred': lambda self: bool(self.orchestrators),
+        # Scope coloring - simple attribute lookup
+        'scope_item_type': ListItemType.ORCHESTRATOR,
+        'scope_id_attr': 'path',
     }
 
     # Signals

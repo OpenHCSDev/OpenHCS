@@ -143,6 +143,7 @@ TUI architecture, UI development patterns, and form management systems.
    service-layer-architecture
    gui_performance_patterns
    cross_window_update_optimization
+   scope_visual_feedback_system
 
 Development Tools
 =================

@@ -253,6 +253,10 @@ class ParameterOpsService(ParameterServiceABC):
 
             if placeholder_text:
                 widget = manager.widgets[field_name]
+
+                # Get old placeholder to detect actual changes
+                old_placeholder = getattr(widget, 'placeholderText', lambda: None)()
+
                 PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
                 logger.info(f"        ✅ Applied placeholder to widget")
 
@@ -265,6 +269,14 @@ class ParameterOpsService(ParameterServiceABC):
                         )
                     except Exception:
                         logger.exception("Failed to apply enabled styling after placeholder refresh")
+
+                # Hook: notify listeners ONLY if placeholder actually changed
+                if old_placeholder != placeholder_text:
+                    for callback in getattr(manager, '_on_placeholder_changed_callbacks', []):
+                        try:
+                            callback(manager.field_id, field_name, manager.dataclass_type)
+                        except Exception:
+                            logger.exception("Failed to call placeholder changed callback")
             else:
                 logger.warning(f"        ⚠️  No placeholder text computed")
 

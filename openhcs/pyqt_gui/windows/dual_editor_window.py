@@ -46,7 +46,7 @@ class DualEditorWindow(BaseFormDialog):
     
     def __init__(self, step_data: Optional[FunctionStep] = None, is_new: bool = False,
                  on_save_callback: Optional[Callable] = None, color_scheme: Optional[PyQt6ColorScheme] = None,
-                 orchestrator=None, gui_config=None, parent=None):
+                 orchestrator=None, gui_config=None, step_position: Optional[int] = None, parent=None):
         """
         Initialize the dual editor window.
 
@@ -74,6 +74,7 @@ class DualEditorWindow(BaseFormDialog):
         self.is_new = is_new
         self.on_save_callback = on_save_callback
         self.orchestrator = orchestrator  # Store orchestrator for context management
+        self.step_position = step_position  # For scope-based border styling
         
         # Pattern management (extracted from Textual version)
         self.pattern_manager = PatternDataManager()
@@ -225,6 +226,11 @@ class DualEditorWindow(BaseFormDialog):
         self._function_sync_timer.timeout.connect(self._flush_function_editor_sync)
         self._pending_function_editor_sync = False
 
+        # Set scope_id for border styling (ScopedBorderMixin via BaseFormDialog)
+        step_name = getattr(self.editing_step, 'name', 'unknown_step')
+        self.scope_id = self._build_step_scope_id(step_name)
+        self._init_scope_border()
+
     def _update_window_title(self):
         title = "New Step" if getattr(self, 'is_new', False) else f"Edit Step: {getattr(self.editing_step, 'name', 'Unknown')}"
         self.setWindowTitle(title)
@@ -238,11 +244,14 @@ class DualEditorWindow(BaseFormDialog):
             self.save_button.setText(new_text)
 
     def _build_step_scope_id(self, fallback_name: str) -> str:
+        """Build scope_id for this step window.
+
+        Format: plate_path::step_token@position (matches PipelineEditorWidget scope_id_builder)
+        """
         plate_scope = getattr(self.orchestrator, 'plate_path', 'no_orchestrator')
-        token = getattr(self.editing_step, '_pipeline_scope_token', None)
-        if token:
-            return f"{plate_scope}::{token}"
-        return f"{plate_scope}::{fallback_name}"
+        token = getattr(self.editing_step, '_pipeline_scope_token', None) or fallback_name
+        position = self.step_position if self.step_position is not None else 0
+        return f"{plate_scope}::{token}@{position}"
     
     def create_step_tab(self):
         """Create the step settings tab (using dedicated widget)."""

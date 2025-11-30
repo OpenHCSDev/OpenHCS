@@ -8,7 +8,7 @@ by leveraging the comprehensive shared infrastructure we've built.
 import dataclasses
 from dataclasses import dataclass, field, is_dataclass, fields as dataclass_fields
 import logging
-from typing import Any, Dict, Type, Optional, Tuple, List
+from typing import Any, Dict, Type, Optional, Tuple, List, Callable
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QLabel, QPushButton,
     QLineEdit, QCheckBox, QComboBox, QGroupBox, QSpinBox, QDoubleSpinBox
@@ -356,6 +356,10 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
 
             # Debounce timer for cross-window placeholder refresh
             self._cross_window_refresh_timer = None
+
+            # Hook: callbacks invoked when a placeholder value changes
+            # Signature: callback(config_name: str, field_name: str)
+            self._on_placeholder_changed_callbacks: list[Callable[[str, str], None]] = []
 
             # STEP 8: _user_set_fields starts empty and is populated only when user edits widgets
             # (via _emit_parameter_change). Do NOT populate during initialization, as that would
@@ -1278,6 +1282,13 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
                         Set to False when refresh is triggered by another window's
                         context_refreshed to prevent infinite ping-pong loops.
         """
+        # CRITICAL: Only ROOT managers should handle cross-window refresh.
+        # Nested managers don't have the flash callback set, and letting them
+        # handle signals would cause duplicate refreshes and broken flash animation.
+        if self._parent_manager is not None:
+            logger.debug(f"⏭️ SKIP_SCHEDULE [{self.field_id}]: nested manager, root will handle")
+            return
+
         logger.info(f"⏰ SCHEDULE_REFRESH [{self.field_id}]: field={changed_field}, emit_signal={emit_signal}, scope={self.scope_id}")
 
         # Cancel existing timer if any
@@ -1318,19 +1329,11 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         """Refresh a specific field's placeholder in this manager and all nested managers.
 
         The field might be in this manager directly, or in any nested manager.
-        We refresh it wherever it exists.
-
-        Args:
-            field_name: The leaf field name to refresh (e.g., "well_filter")
+        We refresh it wherever it exists. Flash animation is handled via
+        _on_placeholder_changed_callbacks hook in ParameterOpsService.
         """
-        has_widget = field_name in self.widgets
-        nested_names = list(self.nested_managers.keys())
-        logger.info(f"  🌳 TREE [{self.field_id}]: field={field_name}, has_widget={has_widget}, nested={nested_names}")
-
-        # Try to refresh in this manager
-        if has_widget:
+        if field_name in self.widgets:
             self._parameter_ops_service.refresh_single_placeholder(self, field_name)
 
-        # Also try in all nested managers (the field might be nested)
         for nested_manager in self.nested_managers.values():
             nested_manager._refresh_field_in_tree(field_name)
