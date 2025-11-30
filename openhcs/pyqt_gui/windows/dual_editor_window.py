@@ -246,12 +246,13 @@ class DualEditorWindow(BaseFormDialog):
     def _build_step_scope_id(self, fallback_name: str) -> str:
         """Build scope_id for this step window.
 
-        Format: plate_path::step_token@position (matches PipelineEditorWidget scope_id_builder)
+        Format: plate_path::step_token (matches PipelineEditorWidget scope_id_builder)
+
+        REGISTRY REFACTOR: Removed @position suffix - scope_id identifies STEP, not position.
         """
         plate_scope = getattr(self.orchestrator, 'plate_path', 'no_orchestrator')
         token = getattr(self.editing_step, '_pipeline_scope_token', None) or fallback_name
-        position = self.step_position if self.step_position is not None else 0
-        return f"{plate_scope}::{token}@{position}"
+        return f"{plate_scope}::{token}"
     
     def create_step_tab(self):
         """Create the step settings tab (using dedicated widget)."""

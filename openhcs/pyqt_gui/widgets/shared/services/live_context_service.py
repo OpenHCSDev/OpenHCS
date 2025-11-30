@@ -54,6 +54,9 @@ class LiveContextService:
     _live_context_token_counter: int = 0
     _live_context_cache: Optional['TokenCache'] = None  # Initialized on first use
 
+    # Track which field changed for reactive updates
+    _last_changed_field: Optional[str] = None
+
     # ========== TOKEN MANAGEMENT ==========
 
     @classmethod
@@ -62,15 +65,27 @@ class LiveContextService:
         return cls._live_context_token_counter
 
     @classmethod
-    def increment_token(cls, notify: bool = True) -> None:
+    def get_last_changed_field(cls) -> Optional[str]:
+        """Get the field path that triggered the last token increment.
+
+        Returns:
+            Field path (e.g., "GlobalConfig.output_dir") or None if unknown.
+        """
+        return cls._last_changed_field
+
+    @classmethod
+    def increment_token(cls, notify: bool = True, changed_field: Optional[str] = None) -> None:
         """Increment token to invalidate all caches.
 
         Args:
             notify: If True (default), notify all listeners of the change.
                    Set to False when you need to invalidate caches but will
                    notify listeners later (e.g., after sibling refresh completes).
+            changed_field: Optional field path that triggered the change.
+                          Used by ResolvedItemStateService for targeted updates.
         """
         cls._live_context_token_counter += 1
+        cls._last_changed_field = changed_field
         if notify:
             cls._notify_change()
 

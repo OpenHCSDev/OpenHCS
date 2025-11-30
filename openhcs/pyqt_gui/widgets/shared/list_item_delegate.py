@@ -5,9 +5,12 @@ Single source of truth for list item rendering across PipelineEditor, PlateManag
 and other widgets that display items with preview labels.
 """
 
+import logging
 from PyQt6.QtWidgets import QStyledItemDelegate, QStyleOptionViewItem, QStyle
 from PyQt6.QtGui import QPainter, QColor, QFontMetrics, QPen
 from PyQt6.QtCore import Qt, QRect
+
+logger = logging.getLogger(__name__)
 
 
 class MultilinePreviewItemDelegate(QStyledItemDelegate):
@@ -163,16 +166,19 @@ class MultilinePreviewItemDelegate(QStyledItemDelegate):
         painter.restore()
 
         # Draw scope border (stored in SCOPE_BORDER_ROLE = UserRole+10)
-        border_color = index.data(Qt.ItemDataRole.UserRole + 10)
-        if border_color and isinstance(border_color, QColor):
-            painter.save()
-            # Draw left border (2px wide) as scope indicator
-            pen = QPen(border_color)
-            pen.setWidth(3)
-            painter.setPen(pen)
+        border_data = index.data(Qt.ItemDataRole.UserRole + 10)
+        if border_data is not None and isinstance(border_data, QColor):
             rect = option.rect
-            # Draw on left edge
-            painter.drawLine(rect.left() + 1, rect.top(), rect.left() + 1, rect.bottom())
+            # Check if there's any clipping set
+            clip_region = painter.clipRegion()
+            clip_rect = painter.clipBoundingRect()
+            logger.info(f"🎨 DELEGATE row={index.row()} rect=({rect.left()},{rect.top()},{rect.width()},{rect.height()}) "
+                       f"clip_empty={clip_region.isEmpty()} clip_rect={clip_rect} color={border_data.name()}")
+            painter.save()
+            painter.setClipping(False)  # Disable any clipping
+            # Draw left border (5px wide) as scope indicator - use fillRect for solid bar
+            border_rect = QRect(rect.left(), rect.top(), 5, rect.height())
+            painter.fillRect(border_rect, border_data)
             painter.restore()
     
     def sizeHint(self, option: QStyleOptionViewItem, index) -> 'QSize':

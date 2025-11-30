@@ -163,7 +163,8 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, ABC, metaclass=_Co
         self.status_label: Optional[QLabel] = None
         self.item_list: Optional[ReorderableListWidget] = None
 
-        # Live context resolver for config attribute resolution
+        # REGISTRY REFACTOR: Use ContextStackRegistry instead of LiveContextResolver
+        # (LiveContextResolver still used for _merge_with_live_values until that's refactored)
         self._live_context_resolver = LiveContextResolver()
 
         # Initialize CrossWindowPreviewMixin
@@ -171,6 +172,9 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, ABC, metaclass=_Co
 
         # Process declarative preview field configs (AFTER mixin init)
         self._process_preview_field_configs()
+
+        # Connect to ResolvedItemStateService for reactive updates
+        self._connect_resolved_item_state_service()
 
     def _get_default_gui_config(self):
         """Get default GUI config fallback."""
@@ -196,6 +200,120 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, ABC, metaclass=_Co
                 self.enable_preview_for_field(field_path, formatter)
             else:
                 logger.warning(f"Invalid PREVIEW_FIELD_CONFIGS entry: {config}")
+
+    def _connect_resolved_item_state_service(self) -> None:
+        """Connect to ResolvedItemStateService for reactive flash and dirty updates."""
+        from openhcs.pyqt_gui.widgets.shared.services.resolved_item_state_service import (
+            ResolvedItemStateService
+        )
+        service = ResolvedItemStateService.instance()
+        service.item_resolved_changed.connect(self._on_item_resolved_changed)
+        service.item_dirty_changed.connect(self._on_item_dirty_changed)
+        logger.info(f"🔗 Connected to ResolvedItemStateService: {type(self).__name__}")
+
+    def _on_item_resolved_changed(self, scope_id: str, field_name: str, new_value) -> None:
+        """Handle resolved value change - trigger flash animation.
+
+        Called by ResolvedItemStateService when a field's resolved value changes.
+        """
+        logger.info(f"⚡ _on_item_resolved_changed: scope_id={scope_id}, field={field_name}")
+        if self.item_list is None:
+            logger.info(f"  ⚠️ item_list is None")
+            return
+
+        # Find the row for this scope_id
+        row = self._find_row_for_scope_id(scope_id)
+        if row is None:
+            logger.info(f"  ⚠️ No row found for scope_id={scope_id}")
+            return
+
+        # Get scope info for flash animation
+        item = self._get_backing_items()[row]
+        scope_info = self._get_list_item_scope(item, row)
+        if scope_info is None:
+            logger.info(f"  ⚠️ No scope_info for row={row}")
+            return
+
+        scope_id_actual, item_type = scope_info
+        logger.info(f"  🎯 Triggering flash for row={row}, scope_id={scope_id_actual}")
+
+        # Trigger flash animation
+        from openhcs.pyqt_gui.widgets.shared.list_item_flash_animation import flash_list_item
+        flash_list_item(self.item_list, row, scope_id_actual, item_type)
+        logger.info(f"  ✅ Flash triggered for {scope_id}.{field_name}")
+
+    def _on_item_dirty_changed(self, scope_id: str, is_dirty: bool) -> None:
+        """Handle dirty status change - update display with unsaved marker.
+
+        Called by ResolvedItemStateService when item dirty status changes.
+        """
+        # Find the row for this scope_id
+        row = self._find_row_for_scope_id(scope_id)
+        if row is None:
+            return
+
+        # Update the list item text to show/hide dirty marker
+        list_item = self.item_list.item(row)
+        if list_item is None:
+            return
+
+        current_text = list_item.text()
+        has_marker = current_text.startswith("* ")
+
+        if is_dirty and not has_marker:
+            list_item.setText(f"* {current_text}")
+        elif not is_dirty and has_marker:
+            list_item.setText(current_text[2:])
+
+        logger.debug(f"Dirty marker updated for {scope_id}: {is_dirty}")
+
+    def _find_row_for_scope_id(self, scope_id: str) -> int | None:
+        """Find list row for a given scope_id."""
+        if self.item_list is None:
+            return None
+
+        backing_items = self._get_backing_items()
+        for row, item in enumerate(backing_items):
+            scope_info = self._get_list_item_scope(item, row)
+            if scope_info and scope_info[0] == scope_id:
+                return row
+        return None
+
+    def _register_items_with_state_service(self, items: list, _update_context) -> None:
+        """Register items with ResolvedItemStateService for flash/dirty tracking.
+
+        Called during update_item_list to ensure all items are tracked.
+        No field list needed - lazydataclass inheritance determines propagation.
+
+        REGISTRY REFACTOR: Also registers scopes with ContextStackRegistry and sets baseline.
+        """
+        from openhcs.config_framework import ContextStackRegistry
+        from openhcs.pyqt_gui.widgets.shared.services.resolved_item_state_service import (
+            ResolvedItemStateService
+        )
+
+        registry = ContextStackRegistry.instance()
+        service = ResolvedItemStateService.instance()
+
+        for index, item in enumerate(items):
+            scope_info = self._get_list_item_scope(item, index)
+            if scope_info is None:
+                continue
+
+            scope_id, _ = scope_info
+
+            # Register scope with ContextStackRegistry (for preview label resolution)
+            # This ensures scopes are registered BEFORE preview labels are built
+            # Use _get_config_source_for_item to get the context_obj (pipeline_config or step)
+            context_obj = self._get_config_source_for_item(item)
+            if context_obj:
+                dataclass_type = type(context_obj)
+                registry.register_scope(scope_id, context_obj, dataclass_type)
+
+            # Register with state service for dirty tracking
+            service.register_item(scope_id)
+            # Set baseline for dirty tracking (captures current resolved state)
+            service.set_baseline(scope_id)
 
     # ========== UI Infrastructure (Concrete) ==========
 
@@ -874,6 +992,7 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, ABC, metaclass=_Co
         """Apply scope-based background and border colors. Called by update_item_list()."""
         scope_info = self._get_list_item_scope(item, index)
         if not scope_info:
+            logger.info(f"🎨 No scope info for item {index}")
             return
 
         scope_id, item_type = scope_info
@@ -884,10 +1003,12 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, ABC, metaclass=_Co
         bg_color = item_type.get_background_color(scheme)
         if bg_color:
             list_item.setBackground(bg_color)
+            logger.info(f"🎨 Set background for item {index}: {bg_color.name()}")
 
         # Set border color (stored in custom role, drawn by delegate)
         border_color = scheme.to_qcolor_orchestrator_border()
         list_item.setData(self.SCOPE_BORDER_ROLE, border_color)
+        logger.info(f"🎨 Set border for item {index}: {border_color.name()} (role={self.SCOPE_BORDER_ROLE})")
 
     # ========== List Update Template ==========
 
@@ -921,6 +1042,10 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, ABC, metaclass=_Co
         def update_func():
             """Update with in-place optimization when structure unchanged."""
             backing_items = self._get_backing_items()
+
+            # REGISTRY REFACTOR: Register scopes BEFORE formatting (so preview labels can resolve)
+            self._register_items_with_state_service(backing_items, update_context)
+
             current_count = self.item_list.count()
             expected_count = len(backing_items)
 
@@ -1137,56 +1262,42 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, ABC, metaclass=_Co
         fallback_context: Optional[Dict[str, Any]] = None,
     ) -> Any:
         """
-        Resolve a preview field path using the live context resolver.
+        Resolve a preview field path using the registry.
 
-        For dotted paths like 'path_planning_config.well_filter':
-        1. Use getattr to navigate to the config object (preserves lazy type)
-        2. Use _resolve_config_attr only for the final attribute (triggers MRO resolution)
+        REGISTRY REFACTOR: Uses registry.resolve() instead of LiveContextResolver.
 
         Args:
             item: Semantic item for context stack (orchestrator/plate dict or step)
             config_source: Root config object to resolve from (pipeline_config or step)
             field_path: Dot-separated field path (e.g., 'napari_streaming_config' or 'vfs_config.backend')
-            live_context_snapshot: Optional live context for resolving lazy values
+            live_context_snapshot: DEPRECATED - not used (registry is single source of truth)
             fallback_context: Optional context dict for fallback resolver
 
         Returns:
             Resolved value or None
         """
-        parts = field_path.split('.')
+        from openhcs.config_framework import ContextStackRegistry
 
-        if len(parts) == 1:
-            # Simple field - resolve directly
-            return self._resolve_config_attr(
-                item,
-                config_source,
-                parts[0],
-                live_context_snapshot
-            )
+        # Get scope_id from item
+        scope_id = self._get_scope_id_for_item(item)
+        logger.debug(f"🔎 _resolve_preview_field_value: field_path={field_path}, scope_id={scope_id}")
+        if not scope_id:
+            logger.debug(f"  ❌ No scope_id, using fallback")
+            return self._apply_preview_field_fallback(field_path, fallback_context)
 
-        # Dotted path: navigate to parent config using getattr, then resolve final attr
-        # This preserves the lazy type (e.g., LazyPathPlanningConfig) so MRO resolution works
-        current_obj = config_source
-        for part in parts[:-1]:
-            if current_obj is None:
+        # Resolve via registry - uses stored dataclass_type for this scope
+        # field_path is the field_name (e.g., 'napari_streaming_config')
+        registry = ContextStackRegistry.instance()
+        try:
+            resolved_value = registry.resolve(scope_id, field_name=field_path)
+            logger.debug(f"  ✅ Resolved: {repr(resolved_value)[:50]}")
+            if resolved_value is None:
+                logger.debug(f"  ⚠️  Value is None, using fallback")
                 return self._apply_preview_field_fallback(field_path, fallback_context)
-            current_obj = getattr(current_obj, part, None)
-
-        if current_obj is None:
+            return resolved_value
+        except Exception as e:
+            logger.warning(f"Failed to resolve {field_path} via registry: {e}")
             return self._apply_preview_field_fallback(field_path, fallback_context)
-
-        # Resolve final attribute using live context resolver (triggers MRO inheritance)
-        resolved_value = self._resolve_config_attr(
-            item,
-            current_obj,
-            parts[-1],
-            live_context_snapshot
-        )
-
-        if resolved_value is None:
-            return self._apply_preview_field_fallback(field_path, fallback_context)
-
-        return resolved_value
 
     # === Config Preview Building (shared by both widgets) ===
 
@@ -1215,9 +1326,12 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, ABC, metaclass=_Co
         """
         from openhcs.pyqt_gui.widgets.config_preview_formatters import format_config_indicator
 
+        enabled_fields = self.get_enabled_preview_fields()
+        logger.debug(f"📋 _build_preview_labels: item={type(item).__name__}, enabled_fields={enabled_fields}")
+
         labels = []
 
-        for field_path in self.get_enabled_preview_fields():
+        for field_path in enabled_fields:
             value = self._resolve_preview_field_value(
                 item=item,
                 config_source=config_source,
@@ -1227,6 +1341,7 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, ABC, metaclass=_Co
             )
 
             if value is None:
+                logger.debug(f"  ⏭️  Skipping {field_path} (value is None)")
                 continue
 
             # Check if value is a dataclass config object
@@ -1344,11 +1459,34 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, ABC, metaclass=_Co
             signal = getattr(self, signal_name)
             signal.emit(self._get_backing_items())
 
-    # === Config Resolution Hook (subclass must implement) ===
+    # === Config Resolution Hooks (subclass must implement) ===
 
     @abstractmethod
     def _get_context_stack_for_resolution(self, item: Any) -> List[Any]:
         """Build context stack for config resolution. Subclass must implement."""
+        ...
+
+    @abstractmethod
+    def _get_config_source_for_item(self, item: Any) -> Any:
+        """Get config source for an item. Used for reactive state tracking.
+
+        PipelineEditor: return item (step is its own config source)
+        PlateManager: return orchestrator.pipeline_config
+        """
+        ...
+
+    @abstractmethod
+    def _get_scope_id_for_item(self, item: Any) -> Optional[str]:
+        """Get scope_id for an item for registry resolution.
+
+        REGISTRY REFACTOR: Required for preview field resolution via registry.
+
+        PipelineEditor: return step's scope_id (e.g., '/path/to/plate::step_token@index')
+        PlateManager: return plate path (e.g., '/path/to/plate')
+
+        Returns:
+            Scope ID string or None if item is invalid
+        """
         ...
 
     # === CrossWindowPreviewMixin Hook (declarative default) ===

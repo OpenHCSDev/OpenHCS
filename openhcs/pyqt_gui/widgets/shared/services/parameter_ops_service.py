@@ -164,9 +164,12 @@ class ParameterOpsService(ParameterServiceABC):
     # ========== PLACEHOLDER REFRESH (from PlaceholderRefreshService) ==========
 
     # DELETED: refresh_affected_siblings - moved to FieldChangeDispatcher
+    # DELETED: _build_full_field_path - registry now uses (dataclass_type, field_name) instead
 
     def refresh_single_placeholder(self, manager, field_name: str) -> None:
         """Refresh placeholder for a single field in a manager.
+
+        REGISTRY REFACTOR: Uses registry.resolve() instead of building context stack.
 
         Only updates if:
         1. The field exists as a widget in the manager
@@ -192,93 +195,53 @@ class ParameterOpsService(ParameterServiceABC):
         logger.info(f"        ✅ {field_name} value is None, computing placeholder...")
 
         from openhcs.pyqt_gui.widgets.shared.widget_strategies import PyQt6WidgetEnhancer
-        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
-        from openhcs.config_framework.context_manager import build_context_stack
+        from openhcs.config_framework import ContextStackRegistry
+        from openhcs.config_framework.placeholder import LazyDefaultPlaceholderService
 
-        # Find root manager to get complete form values (enables sibling inheritance)
-        # Root form (GlobalPipelineConfig/PipelineConfig/Step) contains all nested configs
-        root_manager = manager
-        while getattr(root_manager, '_parent_manager', None) is not None:
-            root_manager = root_manager._parent_manager
+        # REGISTRY REFACTOR: Use registry.resolve() with dataclass_type and field_name
+        # The registry handles lazy instance creation and context resolution
+        registry = ContextStackRegistry.instance()
+        resolved_value = registry.resolve(manager.scope_id, manager.dataclass_type, field_name)
 
-        # Build context stack for resolution (use ROOT type for cache sharing)
-        live_context_snapshot = ParameterFormManager.collect_live_context(
-            scope_filter=manager.scope_id,
-            for_type=root_manager.dataclass_type
-        )
-        live_context = live_context_snapshot.values if live_context_snapshot else None
+        logger.info(f"        Registry resolved: {manager.dataclass_type.__name__}.{field_name} = {repr(resolved_value)[:50]}")
 
-        # Use root manager's values and type for context (not just this nested manager's)
-        # PERFORMANCE OPTIMIZATION: Get root_values from live_context instead of calling
-        # get_user_modified_values() again (which calls get_current_values())
-        root_type = root_manager.dataclass_type
-        is_nested = root_manager != manager
-        root_values = live_context.get(root_type) if live_context and is_nested else None
-        if root_values:
-            value_types = {k: type(v).__name__ for k, v in root_values.items()}
-            logger.info(f"        🔍 ROOT: field_id={root_manager.field_id}, type={root_type}, values={value_types}")
-        if root_type:
-            from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
-            lazy_root_type = LazyDefaultPlaceholderService._get_lazy_type_for_base(root_type)
-            if lazy_root_type:
-                root_type = lazy_root_type
-
-        # CRITICAL: Exclude the field being resolved from the overlay.
-        # If we include it, the overlay's None value shadows the inherited value
-        # from parent configs (e.g., streaming_defaults.well_filter=None would
-        # shadow well_filter_config.well_filter=2).
-        overlay_without_field = {k: v for k, v in manager.parameters.items() if k != field_name}
-
-        stack = build_context_stack(
-            context_obj=manager.context_obj,
-            overlay=overlay_without_field,
-            dataclass_type=manager.dataclass_type,
-            live_context=live_context,
-            is_global_config_editing=getattr(manager.config, 'is_global_config_editing', False),
-            global_config_type=getattr(manager.config, 'global_config_type', None),
-            root_form_values=root_values,
-            root_form_type=root_type,
-        )
-
-        with stack:
-            from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
-            dataclass_type_for_resolution = manager.dataclass_type
-            if dataclass_type_for_resolution:
-                lazy_type = LazyDefaultPlaceholderService._get_lazy_type_for_base(dataclass_type_for_resolution)
-                if lazy_type:
-                    dataclass_type_for_resolution = lazy_type
-
-            placeholder_text = manager.service.get_placeholder_text(field_name, dataclass_type_for_resolution)
+        # Apply placeholder to widget
+        # NOTE: resolved_value can be None - that's a valid value meaning "no default"
+        # Use LazyDefaultPlaceholderService for consistent formatting (None -> "(none)")
+        widget = manager.widgets.get(field_name)
+        if widget:
+            # Format placeholder text using the same logic as the old code
+            placeholder_text = LazyDefaultPlaceholderService._format_placeholder_text(
+                resolved_value, LazyDefaultPlaceholderService.PLACEHOLDER_PREFIX
+            )
             logger.info(f"        📝 Computed placeholder: {repr(placeholder_text)[:50]}")
 
+            # Get old placeholder to detect actual changes
+            old_placeholder = getattr(widget, 'placeholderText', lambda: None)()
+
             if placeholder_text:
-                widget = manager.widgets[field_name]
-
-                # Get old placeholder to detect actual changes
-                old_placeholder = getattr(widget, 'placeholderText', lambda: None)()
-
                 PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
                 logger.info(f"        ✅ Applied placeholder to widget")
 
-                # Keep enabled-field styling in sync when placeholder changes the visual state
-                if field_name == 'enabled':
-                    try:
-                        resolved_value = manager._widget_ops.get_value(widget)
-                        manager._enabled_field_styling_service.on_enabled_field_changed(
-                            manager, 'enabled', resolved_value
-                        )
-                    except Exception:
-                        logger.exception("Failed to apply enabled styling after placeholder refresh")
+            # Keep enabled-field styling in sync when placeholder changes the visual state
+            if field_name == 'enabled':
+                try:
+                    resolved_value = manager._widget_ops.get_value(widget)
+                    manager._enabled_field_styling_service.on_enabled_field_changed(
+                        manager, 'enabled', resolved_value
+                    )
+                except Exception:
+                    logger.exception("Failed to apply enabled styling after placeholder refresh")
 
-                # Hook: notify listeners ONLY if placeholder actually changed
-                if old_placeholder != placeholder_text:
-                    for callback in getattr(manager, '_on_placeholder_changed_callbacks', []):
-                        try:
-                            callback(manager.field_id, field_name, manager.dataclass_type)
-                        except Exception:
-                            logger.exception("Failed to call placeholder changed callback")
-            else:
-                logger.warning(f"        ⚠️  No placeholder text computed")
+            # Hook: notify listeners ONLY if placeholder actually changed
+            if old_placeholder != placeholder_text:
+                for callback in getattr(manager, '_on_placeholder_changed_callbacks', []):
+                    try:
+                        callback(manager.field_id, field_name, manager.dataclass_type)
+                    except Exception:
+                        logger.exception("Failed to call placeholder changed callback")
+        else:
+            logger.warning(f"        ⚠️  No resolved value from registry")
 
     def refresh_with_live_context(self, manager, use_user_modified_only: bool = False) -> None:
         """Refresh placeholders using live values from tree registry."""
@@ -289,77 +252,36 @@ class ParameterOpsService(ParameterServiceABC):
         )
 
     def refresh_all_placeholders(self, manager, use_user_modified_only: bool = False) -> None:
-        """Refresh placeholder text for all widgets in a form."""
+        """Refresh placeholder text for all widgets in a form.
+
+        REGISTRY REFACTOR: Uses registry.resolve() instead of building context stack.
+        """
         with timer(f"_refresh_all_placeholders ({manager.field_id})", threshold_ms=5.0):
             if not manager.dataclass_type:
                 logger.debug(f"[PLACEHOLDER] {manager.field_id}: No dataclass_type, skipping")
                 return
 
             from openhcs.pyqt_gui.widgets.shared.widget_strategies import PyQt6WidgetEnhancer
-            from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
-            from openhcs.config_framework.context_manager import build_context_stack
+            from openhcs.config_framework import ContextStackRegistry
+            from openhcs.config_framework.placeholder import LazyDefaultPlaceholderService
 
-            logger.debug(f"[PLACEHOLDER] {manager.field_id}: Building context stack")
-            # Find root manager to get complete form values (enables sibling inheritance)
-            root_manager = manager
-            while getattr(root_manager, '_parent_manager', None) is not None:
-                root_manager = root_manager._parent_manager
+            logger.debug(f"[PLACEHOLDER] {manager.field_id}: Resolving via registry")
 
-            live_context_snapshot = ParameterFormManager.collect_live_context(
-                scope_filter=manager.scope_id,
-                for_type=root_manager.dataclass_type
-            )
-            # Extract .values dict from LiveContextSnapshot for build_context_stack
-            live_context = live_context_snapshot.values if live_context_snapshot else None
-            overlay = manager.get_user_modified_values() if use_user_modified_only else manager.parameters
+            registry = ContextStackRegistry.instance()
+            monitor = get_monitor("Placeholder resolution per field")
 
-            # Handle excluded params in overlay
-            if overlay:
-                overlay_dict = overlay.copy()
-                for excluded_param in getattr(manager, 'exclude_params', []):
-                    if excluded_param not in overlay_dict and hasattr(manager.object_instance, excluded_param):
-                        overlay_dict[excluded_param] = getattr(manager.object_instance, excluded_param)
-            else:
-                overlay_dict = None
+            for param_name, widget in manager.widgets.items():
+                current_value = manager.parameters.get(param_name)
+                should_apply_placeholder = (current_value is None)
 
-            # PERFORMANCE OPTIMIZATION: Get root_values from live_context instead of calling
-            # get_user_modified_values() again (which calls get_current_values())
-            root_type = root_manager.dataclass_type
-            is_nested = root_manager != manager
-            root_values = live_context.get(root_type) if live_context and is_nested else None
-            if root_type:
-                from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
-                lazy_root_type = LazyDefaultPlaceholderService._get_lazy_type_for_base(root_type)
-                if lazy_root_type:
-                    root_type = lazy_root_type
-
-            # Use framework-agnostic context stack building from config_framework
-            stack = build_context_stack(
-                context_obj=manager.context_obj,
-                overlay=overlay_dict,
-                dataclass_type=manager.dataclass_type,
-                live_context=live_context,
-                is_global_config_editing=getattr(manager.config, 'is_global_config_editing', False),
-                global_config_type=getattr(manager.config, 'global_config_type', None),
-                root_form_values=root_values,
-                root_form_type=root_type,
-            )
-
-            with stack:
-                monitor = get_monitor("Placeholder resolution per field")
-                from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
-                dataclass_type_for_resolution = manager.dataclass_type
-                if dataclass_type_for_resolution:
-                    lazy_type = LazyDefaultPlaceholderService._get_lazy_type_for_base(dataclass_type_for_resolution)
-                    if lazy_type:
-                        dataclass_type_for_resolution = lazy_type
-
-                for param_name, widget in manager.widgets.items():
-                    current_value = manager.parameters.get(param_name)
-                    should_apply_placeholder = (current_value is None)
-
-                    if should_apply_placeholder:
-                        with monitor.measure():
-                            placeholder_text = manager.service.get_placeholder_text(param_name, dataclass_type_for_resolution)
-                            if placeholder_text:
-                                PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
+                if should_apply_placeholder:
+                    with monitor.measure():
+                        # Resolve via registry using dataclass_type and field_name
+                        resolved_value = registry.resolve(manager.scope_id, manager.dataclass_type, param_name)
+                        # NOTE: resolved_value can be None - that's a valid value
+                        # Use LazyDefaultPlaceholderService for consistent formatting
+                        placeholder_text = LazyDefaultPlaceholderService._format_placeholder_text(
+                            resolved_value, LazyDefaultPlaceholderService.PLACEHOLDER_PREFIX
+                        )
+                        if placeholder_text:
+                            PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)

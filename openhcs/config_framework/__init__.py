@@ -97,6 +97,9 @@ from openhcs.config_framework.context_manager import (
     build_context_stack,
 )
 
+# Context Stack Registry (single source of truth for resolved values)
+from openhcs.config_framework.context_stack_registry import ContextStackRegistry
+
 # Placeholder
 from openhcs.config_framework.placeholder import LazyDefaultPlaceholderService
 

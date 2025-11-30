@@ -69,7 +69,7 @@ class FieldChangeDispatcher:
                     logger.warning(f"🚫 DISPATCH BLOCKED: {source.field_id} has _in_reset=True")
                 return
 
-            # 1. Update source's data model
+            # 1. Update source's data model AND registry
             source.parameters[event.field_name] = event.value
             # CRITICAL: Always add to _user_set_fields, even for reset
             # This ensures get_user_modified_values() includes None for reset fields,
@@ -77,9 +77,18 @@ class FieldChangeDispatcher:
             # Previously we discarded on reset, but that caused preview labels to show
             # the saved-on-disk value instead of the reset (None) value.
             source._user_set_fields.add(event.field_name)
+
+            # REGISTRY REFACTOR: Update registry (single source of truth)
+            # Skip if scope_id is None (can happen for unregistered managers)
+            if source.scope_id is not None:
+                from openhcs.config_framework import ContextStackRegistry
+                registry = ContextStackRegistry.instance()
+                registry.set(source.scope_id, event.field_name, event.value, source.dataclass_type)
+
             if DEBUG_DISPATCHER:
                 reset_note = " (reset to None)" if event.is_reset else ""
                 logger.info(f"  ✅ Updated source.parameters[{event.field_name}], ADDED to _user_set_fields{reset_note}")
+                logger.info(f"  ✅ Updated registry: {source.scope_id}.{event.field_name}")
 
             # PERFORMANCE OPTIMIZATION: Invalidate cache but DON'T notify listeners yet
             # This allows sibling refreshes to share the cached live context
@@ -90,9 +99,11 @@ class FieldChangeDispatcher:
                 root = root._parent_manager
 
             from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
-            LiveContextService.increment_token(notify=False)  # Invalidate cache only
+            # Build full field path for reactive updates (e.g., "GlobalConfig.output_dir")
+            full_field_path = f"{source.field_id}.{event.field_name}"
+            LiveContextService.increment_token(notify=False, changed_field=full_field_path)
             if DEBUG_DISPATCHER:
-                logger.info(f"  🔄 Incremented live context token to {LiveContextService.get_token()} (notify deferred)")
+                logger.info(f"  🔄 Incremented live context token to {LiveContextService.get_token()} (field={full_field_path}, notify deferred)")
 
             # 2. Mark parent chain as modified BEFORE refreshing siblings
             # This ensures root.get_user_modified_values() includes this field on first keystroke

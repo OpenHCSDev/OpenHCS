@@ -139,11 +139,11 @@ class StepParameterEditorWidget(TreeFormFlashMixin, ScrollableFormMixin, QWidget
         self.hierarchy_tree = None
         self.content_splitter = None
 
-        # Connect flash callback for tree item visual feedback (TreeFormFlashMixin)
-        self.form_manager._notify_tree_flash = self._flash_tree_item
-
         self.setup_ui()
         self.setup_connections()
+
+        # Register placeholder flash hook (TreeFormFlashMixin) - AFTER setup_ui so tree exists
+        self._register_placeholder_flash_hook()
 
         logger.debug(f"Step parameter editor initialized for step: {getattr(step, 'name', 'Unknown')}")
 
@@ -392,8 +392,11 @@ class StepParameterEditorWidget(TreeFormFlashMixin, ScrollableFormMixin, QWidget
                 # Remove type name prefix
                 path_parts = path_parts[1:]
 
-            # For nested fields, the form manager already updated self.step via _mark_parents_modified
-            # For top-level fields, we need to update self.step
+            # REGISTRY REFACTOR: Use registry.set() instead of setattr (immutable)
+            # Registry stores concrete values separately, never mutates context_obj
+            from openhcs.config_framework import ContextStackRegistry
+            registry = ContextStackRegistry.instance()
+
             if len(path_parts) == 1:
                 leaf_field = path_parts[0]
 
@@ -410,12 +413,14 @@ class StepParameterEditorWidget(TreeFormFlashMixin, ScrollableFormMixin, QWidget
                     except Exception:
                         pass  # Use original if refresh fails
 
-                # Update step attribute
-                setattr(self.step, leaf_field, final_value)
-                logger.debug(f"Updated step parameter {leaf_field}={final_value}")
+                # Store in registry (immutable - doesn't mutate self.step)
+                registry.set(self.form_manager.scope_id, leaf_field, final_value)
+                logger.debug(f"Registry set: {self.form_manager.scope_id}.{leaf_field}={final_value}")
             else:
-                # Nested field - already updated by _mark_parents_modified
-                logger.debug(f"Nested field {'.'.join(path_parts)} already updated by dispatcher")
+                # Nested field - store full path in registry
+                full_field_path = '.'.join(path_parts)
+                registry.set(self.form_manager.scope_id, full_field_path, value)
+                logger.debug(f"Registry set: {self.form_manager.scope_id}.{full_field_path}={value}")
 
             self.step_parameter_changed.emit()
 
@@ -582,6 +587,16 @@ class StepParameterEditorWidget(TreeFormFlashMixin, ScrollableFormMixin, QWidget
 
             # Update step object
             self.step = new_step
+
+            # REGISTRY REFACTOR: Re-register scope with new object (code mode replacement)
+            from openhcs.config_framework import ContextStackRegistry
+            registry = ContextStackRegistry.instance()
+            registry.register_scope(
+                self.form_manager.scope_id,
+                new_step,
+                self.form_manager.dataclass_type
+            )
+            logger.info(f"📦 Re-registered scope (code mode): {self.form_manager.scope_id}")
 
             # IMPORTANT:
             # Do NOT block cross-window updates here. We want code-mode edits

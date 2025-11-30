@@ -373,6 +373,17 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
                     lambda name, manager: setattr(manager, '_initial_load_complete', True)
                 )
 
+            # STEP 9.5: Register with ContextStackRegistry (ROOT MANAGERS ONLY)
+            # Nested managers share parent's scope_id and should NOT register
+            # (they would REPLACE the root's registration with their nested config)
+            is_nested = self._parent_manager is not None
+            if not is_nested:
+                with timer("  Register with registry", threshold_ms=1.0):
+                    from openhcs.config_framework import ContextStackRegistry
+                    registry = ContextStackRegistry.instance()
+                    registry.register_scope(self.scope_id, self.object_instance, self.dataclass_type)
+                    logger.info(f"📦 Registered scope with registry: {self.scope_id}")
+
             # STEP 10: Execute initial refresh strategy (enum dispatch)
             with timer("  Initial refresh", threshold_ms=10.0):
                 InitialRefreshStrategy.execute(self)
@@ -1105,6 +1116,8 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
 
         SIMPLIFIED: Just unregister from LiveContextService. The token increment
         in unregister() notifies all listeners to refresh.
+
+        REGISTRY REFACTOR: Also unregister from ContextStackRegistry.
         """
         logger.info(f"🔍 UNREGISTER: {self.field_id}")
 
@@ -1119,6 +1132,13 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
 
             # Remove from registry (triggers token increment → notifies listeners)
             LiveContextService.unregister(self)
+
+            # REGISTRY REFACTOR: Unregister from ContextStackRegistry (ROOT MANAGERS ONLY)
+            if not self._parent_manager:
+                from openhcs.config_framework import ContextStackRegistry
+                registry = ContextStackRegistry.instance()
+                registry.unregister_scope(self.scope_id)
+                logger.info(f"📦 Unregistered scope from registry: {self.scope_id}")
 
         except Exception as e:
             logger.warning(f"🔍 UNREGISTER: Error: {e}")

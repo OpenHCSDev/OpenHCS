@@ -83,9 +83,11 @@ class PipelineEditorWidget(AbstractManagerWidget):
         'preserve_selection_pred': lambda self: bool(self.pipeline_steps),
         'list_item_data': 'index',                # store index, not item
         # Scope coloring - builder for composite scope_id
+        # REGISTRY REFACTOR: Removed @idx suffix - scope_id identifies STEP, not position
+        # Visual feedback (border patterns) falls back to hashing token if no @index
         'scope_item_type': ListItemType.STEP,
         'scope_id_builder': lambda item, idx, w: (
-            f"{orch.plate_path}::{getattr(item, '_pipeline_scope_token', f'step_{idx}')}@{idx}"
+            f"{orch.plate_path}::{getattr(item, '_pipeline_scope_token', f'step_{idx}')}"
             if (orch := w._get_current_orchestrator()) else None
         ),
     }
@@ -431,6 +433,9 @@ class PipelineEditorWidget(AbstractManagerWidget):
                 self.update_item_list()
                 self.pipeline_changed.emit(self.pipeline_steps)
                 self.status_message.emit(f"Auto-loaded {len(new_pipeline_steps)} steps from basic_pipeline.py")
+
+                # Set baselines for all steps (marks them as "saved")
+                self._set_all_step_baselines()
             else:
                 raise ValueError("No 'pipeline_steps = [...]' assignment found in basic_pipeline.py")
 
@@ -515,6 +520,9 @@ class PipelineEditorWidget(AbstractManagerWidget):
 
         # Broadcast to global event bus for ALL windows to receive
         self._broadcast_to_event_bus('pipeline', new_pipeline_steps)
+
+        # Set baselines for all steps (marks them as "saved")
+        self._set_all_step_baselines()
         return True
 
     def _get_code_missing_error_message(self) -> str:
@@ -549,6 +557,9 @@ class PipelineEditorWidget(AbstractManagerWidget):
                 self.update_item_list()
                 self.pipeline_changed.emit(self.pipeline_steps)
                 self.status_message.emit(f"Loaded {len(steps)} steps from {file_path.name}")
+
+                # Set baselines for all steps (marks them as "saved")
+                self._set_all_step_baselines()
             else:
                 self.status_message.emit(f"Invalid pipeline format in {file_path.name}")
 
@@ -559,7 +570,7 @@ class PipelineEditorWidget(AbstractManagerWidget):
     def save_pipeline_to_file(self, file_path: Path):
         """
         Save pipeline to file (extracted from Textual version).
-        
+
         Args:
             file_path: Path to save pipeline
         """
@@ -568,7 +579,10 @@ class PipelineEditorWidget(AbstractManagerWidget):
             with open(file_path, 'wb') as f:
                 pickle.dump(list(self.pipeline_steps), f)
             self.status_message.emit(f"Saved pipeline to {file_path.name}")
-            
+
+            # Set baselines for all steps (marks them as "saved")
+            self._set_all_step_baselines()
+
         except Exception as e:
             logger.error(f"Failed to save pipeline: {e}")
             self.service_adapter.show_error_dialog(f"Failed to save pipeline: {e}")
@@ -583,7 +597,26 @@ class PipelineEditorWidget(AbstractManagerWidget):
         """
         self.plate_pipelines[plate_path] = pipeline
         logger.debug(f"Saved pipeline for plate: {plate_path}")
-    
+
+    def _set_all_step_baselines(self) -> None:
+        """Set baselines for all steps in ResolvedItemStateService.
+
+        Called after save/load to mark current resolved state as "saved".
+
+        REGISTRY REFACTOR: Uses registry.get_resolved_state() for dirty tracking.
+        """
+        from openhcs.pyqt_gui.widgets.shared.services.resolved_item_state_service import (
+            ResolvedItemStateService
+        )
+
+        service = ResolvedItemStateService.instance()
+
+        for step in self.pipeline_steps:
+            scope_id = self._build_step_scope_id(step)
+            if scope_id:
+                service.set_baseline(scope_id)
+                logger.debug(f"Set baseline for step: {scope_id}")
+
     def set_current_plate(self, plate_path: str):
         """
         Set current plate and load its pipeline (extracted from Textual version).
@@ -955,6 +988,21 @@ class PipelineEditorWidget(AbstractManagerWidget):
             orchestrator.pipeline_config,
             item  # step
         ]
+
+    def _get_config_source_for_item(self, item: Any) -> Any:
+        """Step is its own config source (required abstract method)."""
+        return item  # FunctionStep contains its own configs
+
+    def _get_scope_id_for_item(self, item: Any) -> Optional[str]:
+        """Get scope_id for a step item (required abstract method).
+
+        REGISTRY REFACTOR: Returns step's scope_id.
+
+        Item is a FunctionStep - build scope_id from current_plate and step token.
+        """
+        if isinstance(item, FunctionStep):
+            return self._build_step_scope_id(item)
+        return None
 
     # === CrossWindowPreviewMixin Hook ===
     # _get_current_orchestrator() is implemented above (line ~795) - does actual lookup from plate manager

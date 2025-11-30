@@ -124,6 +124,9 @@ class ConfigWindow(TreeFormFlashMixin, ScrollableFormMixin, BaseFormDialog):
             scope_id=self.scope_id  # Pass scope_id to limit cross-window updates to same orchestrator
         )
 
+        # REGISTRY REFACTOR: ResolvedItemStateService now connects directly to registry
+        # No need to connect to individual managers
+
         if is_global_config_type(self.config_class):
             self._original_global_config_snapshot = copy.deepcopy(current_config)
             self.form_manager.parameter_changed.connect(self._on_global_config_field_changed)

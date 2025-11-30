@@ -509,6 +509,24 @@ class PlateManagerWidget(AbstractManagerWidget):
         config_window.raise_()
         config_window.activateWindow()
 
+    def _set_all_orchestrator_baselines(self) -> None:
+        """Set baselines for all orchestrators in ResolvedItemStateService.
+
+        Called after config save to mark current resolved state as "saved".
+
+        REGISTRY REFACTOR: Uses registry.get_resolved_state() for dirty tracking.
+        """
+        from openhcs.pyqt_gui.widgets.shared.services.resolved_item_state_service import (
+            ResolvedItemStateService
+        )
+
+        service = ResolvedItemStateService.instance()
+
+        for plate_path in self.orchestrators.keys():
+            scope_id = str(plate_path)
+            service.set_baseline(scope_id)
+            logger.debug(f"Set baseline for orchestrator: {scope_id}")
+
     def action_edit_global_config(self):
         """Handle global configuration editing - affects all orchestrators."""
         current_global_config = self.service_adapter.get_global_config() or GlobalPipelineConfig()
@@ -520,6 +538,9 @@ class PlateManagerWidget(AbstractManagerWidget):
             for orchestrator in self.orchestrators.values():
                 self._update_orchestrator_global_config(orchestrator, new_config)
             self.service_adapter.show_info_dialog("Global configuration applied to all orchestrators")
+
+            # Set baselines for all orchestrators (marks them as "saved")
+            self._set_all_orchestrator_baselines()
 
         self._open_config_window(
             config_class=GlobalPipelineConfig,
@@ -1170,6 +1191,35 @@ class PlateManagerWidget(AbstractManagerWidget):
 
         # Return raw objects - LiveContextResolver handles merging live values internally
         return [get_current_global_config(GlobalPipelineConfig), pipeline_config]
+
+    def _get_config_source_for_item(self, item: Any) -> Any:
+        """Get pipeline_config for a plate item (required abstract method).
+
+        Item is a plate dict {'name': ..., 'path': ...}, so we look up
+        the orchestrator by path to get pipeline_config.
+        """
+        if isinstance(item, dict) and 'path' in item:
+            orchestrator = self.orchestrators.get(item['path'])
+            if orchestrator:
+                return orchestrator.pipeline_config
+        return None  # No config source if no orchestrator
+
+    def _get_scope_id_for_item(self, item: Any) -> Optional[str]:
+        """Get scope_id for a plate item (required abstract method).
+
+        REGISTRY REFACTOR: Returns plate path as scope_id.
+
+        Item can be:
+        - PipelineOrchestrator: return orchestrator.plate_path
+        - dict with 'path': return item['path']
+        """
+        from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
+
+        if isinstance(item, PipelineOrchestrator):
+            return str(item.plate_path)
+        elif isinstance(item, dict) and 'path' in item:
+            return str(item['path'])
+        return None
 
     # === CrossWindowPreviewMixin Hook ===
 
