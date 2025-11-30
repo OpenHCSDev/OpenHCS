@@ -90,6 +90,8 @@ gui = [
     "PyQt6-QScintilla>=2.14.1",
     "pyqtgraph>=0.13.7",  # Used for system monitor visualization
     "GPUtil>=1.4.0",
+    "distinctipy>=1.2.2",  # Perceptually distinct colors for scope-based visual feedback
+    "wcag-contrast-ratio>=0.9",  # WCAG AA compliance for scope colors
     # plotext removed - PyQt GUI now uses pyqtgraph instead
     # psutil moved to core dependencies (required by ui/shared/system_monitor_core.py)
 ]
@@ -173,6 +175,8 @@ all = [
     "PyQt6-QScintilla>=2.14.1",
     "pyqtgraph>=0.13.7",
     "GPUtil>=1.4.0",
+    "distinctipy>=1.2.2",  # Perceptually distinct colors for scope-based visual feedback
+    "wcag-contrast-ratio>=0.9",  # WCAG AA compliance for scope colors
     # plotext removed - PyQt GUI now uses pyqtgraph instead
     # psutil moved to core dependencies (required by ui/shared/system_monitor_core.py)
 
