@@ -326,21 +326,65 @@ def _refresh_single_placeholder(self, field_name):
 
 **Writes unchanged** - PFM still writes to LiveContext, Registry listens.
 
-#### 8. List Item Integration
+#### 8. List Item Integration (in AbstractManagerWidget)
+
+**Refactor `_resolve_preview_field_value()` to read from registry:**
 
 ```python
-# Read resolved value
-def _get_resolved_label(self, item) -> str:
+# AbstractManagerWidget - concrete classes get this automatically
+
+def _resolve_preview_field_value(
+    self,
+    item: Any,
+    config_source: Any,
+    field_path: str,
+    live_context_snapshot: Any = None,  # IGNORED after refactor
+    fallback_context: Optional[Dict[str, Any]] = None,
+) -> Any:
+    """Resolve a preview field value - reads from registry instead of building context."""
     registry = ResolvedValueRegistry.instance()
-    return registry.get_resolved(scope_id, "name") or "Unnamed"
+    scope_id = self._get_item_scope_id(item)  # Abstract method, implemented by subclass
 
-# React to changes
-registry.value_changed.connect(self._on_resolved_value_changed)
+    # Just read cached resolved value - no context stack needed
+    return registry.get_resolved(scope_id, field_path)
 
-def _on_resolved_value_changed(self, scope_id, field, old_val, new_val):
+@abstractmethod
+def _get_item_scope_id(self, item: Any) -> str:
+    """Get scope_id for an item. Subclass implements."""
+    # PipelineEditor: return self._build_step_scope_id(step)
+    # PlateManager: return plate['path']
+    ...
+```
+
+**Remove `_get_step_preview_instance()` complexity:**
+
+The current flow builds a merged step copy with live values. After refactor, registry has resolved values - no merging needed.
+
+**React to changes (in AbstractManagerWidget):**
+
+```python
+def _init_registry_connection(self):
+    """Connect to registry for list updates. Called in __init__."""
+    registry = ResolvedValueRegistry.instance()
+    registry.value_changed.connect(self._on_registry_value_changed)
+
+def _on_registry_value_changed(self, scope_id: str, field: str, old_val: Any, new_val: Any):
+    """Registry value changed - update affected list item."""
     if self._has_item_with_scope(scope_id):
-        self._flash_item(scope_id)
-        self.update_item_list()
+        self._refresh_item_by_scope(scope_id)
+        self._flash_item(scope_id)  # Optional: visual feedback
+```
+
+**Concrete classes just implement `_get_item_scope_id()`:**
+
+```python
+# PipelineEditor
+def _get_item_scope_id(self, step: FunctionStep) -> str:
+    return self._build_step_scope_id(step)
+
+# PlateManager
+def _get_item_scope_id(self, plate: Dict) -> str:
+    return plate['path']
 ```
 
 ### Findings
