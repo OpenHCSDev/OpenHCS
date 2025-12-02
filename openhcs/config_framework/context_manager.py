@@ -278,8 +278,16 @@ def _is_global_type(t):
 
 
 # Hierarchy registry - built from active form managers
-# Maps: child_type -> parent_type (normalized base types)
-# This is populated by ParameterFormManager when it registers
+# Maps: child_type -> parent_type (RAW types, not normalized)
+#
+# IMPORTANT: Hierarchy vs Equivalence separation
+# - Hierarchy relationships use RAW types: FunctionStep → PipelineConfig → GlobalPipelineConfig
+#   These are distinct levels that need separate context injection.
+# - Type equivalence uses normalization: LazyDtypeConfig ≡ DtypeConfig
+#   This is for matching values to types during resolution.
+#
+# We store raw types here so PipelineConfig remains distinct from GlobalPipelineConfig.
+# Normalization only happens at value-matching time in _find_live_values_for_type().
 _known_hierarchy: dict = {}
 
 
@@ -309,21 +317,22 @@ def register_hierarchy_relationship(context_obj_type, object_instance_type):
         object_instance_type: The child type being edited (e.g., Step)
 
     Note:
-        Types are normalized to base types here. This is correct for nested configs
-        (e.g., LazyPathPlanningConfig → PathPlanningConfig).
-        The GlobalPipelineConfig → PipelineConfig relationship is handled separately
-        by is_ancestor_in_context using get_base_type_for_lazy().
+        RAW TYPES: We store raw types without normalization here.
+        Normalization (lazy↔base equivalence) is only applied at lookup/matching time
+        in _find_live_values_for_type().
+
+        This keeps hierarchy relationships separate from type equivalence:
+        - Hierarchy: FunctionStep → PipelineConfig → GlobalPipelineConfig (distinct levels)
+        - Equivalence: LazyDtypeConfig ≡ DtypeConfig (same concept, different resolution)
     """
     if context_obj_type is None or object_instance_type is None:
         return
 
-    parent_base = _normalize_type(context_obj_type)
-    child_base = _normalize_type(object_instance_type)
-
-    # Removed global type filter - GlobalPipelineConfig can be a parent too
-    if parent_base != child_base:
-        _known_hierarchy[child_base] = parent_base
-        logger.debug(f"Registered hierarchy: {parent_base.__name__} -> {child_base.__name__}")
+    # Store RAW types - no normalization
+    # This preserves PipelineConfig as distinct from GlobalPipelineConfig
+    if context_obj_type != object_instance_type:
+        _known_hierarchy[object_instance_type] = context_obj_type
+        logger.debug(f"Registered hierarchy: {context_obj_type.__name__} -> {object_instance_type.__name__}")
 
 
 def unregister_hierarchy_relationship(object_instance_type):
@@ -332,10 +341,10 @@ def unregister_hierarchy_relationship(object_instance_type):
     Args:
         object_instance_type: The type to remove from the registry
     """
-    child_base = _normalize_type(object_instance_type)
-    if child_base in _known_hierarchy:
-        del _known_hierarchy[child_base]
-        logger.debug(f"Unregistered hierarchy for: {child_base.__name__}")
+    # Use raw type - no normalization (matches register_hierarchy_relationship)
+    if object_instance_type in _known_hierarchy:
+        del _known_hierarchy[object_instance_type]
+        logger.debug(f"Unregistered hierarchy for: {object_instance_type.__name__}")
 
 
 def get_ancestors_from_hierarchy(target_type):
@@ -349,11 +358,12 @@ def get_ancestors_from_hierarchy(target_type):
     Returns:
         List of ancestor types in hierarchy order (grandparent, parent, ...)
     """
-    target_base = _normalize_type(target_type)
+    # Use raw type - no normalization
+    # Hierarchy stores raw types, normalization happens at value matching time
     ancestors = []
 
-    # Walk up the hierarchy
-    current = target_base
+    # Walk up the hierarchy using raw types
+    current = target_type
     visited = set()
     while current in _known_hierarchy:
         if current in visited:
@@ -435,11 +445,15 @@ def is_ancestor_in_context(ancestor_type, descendant_type):
     """
     from openhcs.config_framework.lazy_factory import get_base_type_for_lazy
 
+    ancestor_name = ancestor_type.__name__ if ancestor_type else "None"
+    descendant_name = descendant_type.__name__ if descendant_type else "None"
+
     # Check 1: Is ancestor_type the lazy base of descendant_type?
     # This handles GlobalPipelineConfig → PipelineConfig relationship
     # PipelineConfig is a lazy version of GlobalPipelineConfig
     descendant_base = get_base_type_for_lazy(descendant_type)
     if descendant_base is not None and descendant_base == ancestor_type:
+        logger.debug(f"is_ancestor_in_context({ancestor_name}, {descendant_name}): TRUE via lazy-base check")
         return True
 
     # Check 2: Normalize for comparison (handles nested lazy configs like LazyPathPlanningConfig)
@@ -458,12 +472,18 @@ def is_ancestor_in_context(ancestor_type, descendant_type):
                 descendant_index = i
 
         if ancestor_index >= 0 and descendant_index >= 0:
-            return ancestor_index < descendant_index
+            result = ancestor_index < descendant_index
+            logger.debug(f"is_ancestor_in_context({ancestor_name}, {descendant_name}): {result} via stack (ancestor_idx={ancestor_index}, descendant_idx={descendant_index})")
+            return result
 
     # Check 4: Known hierarchy registry (uses actual types, not normalized)
     ancestors = get_ancestors_from_hierarchy(descendant_type)
+    ancestor_names = [a.__name__ for a in ancestors]
+    logger.debug(f"is_ancestor_in_context({ancestor_name}, {descendant_name}): checking hierarchy, ancestors={ancestor_names}")
     # Check if ancestor_type OR its normalized form is in the ancestor list
-    return ancestor_type in ancestors or ancestor_base in [_normalize_type(a) for a in ancestors]
+    result = ancestor_type in ancestors or ancestor_base in [_normalize_type(a) for a in ancestors]
+    logger.debug(f"is_ancestor_in_context({ancestor_name}, {descendant_name}): {result} via hierarchy")
+    return result
 
 
 def is_same_type_in_context(type_a, type_b):
@@ -541,24 +561,34 @@ def build_context_stack(
 
     # 2. Intermediate layers (ancestors of context_obj in hierarchy)
     if context_obj is not None and live_context:
+        logger.info(f"  [2] INTERMEDIATE layers check: context_obj={type(context_obj).__name__}")
+        logger.info(f"      live_context types: {[t.__name__ for t in live_context.keys()]}")
         _inject_intermediate_layers(stack, type(context_obj), live_context)
+    else:
+        logger.info(f"  [2] INTERMEDIATE layers SKIPPED: context_obj={type(context_obj).__name__ if context_obj else 'None'}, live_context={bool(live_context)}")
 
     # 3. Parent context from context_obj (prefer live values if available)
     if context_obj is not None:
+        from types import SimpleNamespace
         context_type = type(context_obj)
         live_values = _find_live_values_for_type(context_type, live_context) if live_context else None
+        logger.info(f"  [3] CONTEXT layer lookup: context_type={context_type.__name__}, found_live_values={live_values is not None}")
+        if live_values:
+            logger.info(f"      live_values keys: {list(live_values.keys())}")
+            # Check dtype_config specifically
+            if 'dtype_config' in live_values:
+                dc = live_values['dtype_config']
+                logger.info(f"      dtype_config type: {type(dc).__name__}, has default_dtype_conversion: {hasattr(dc, 'default_dtype_conversion')}")
+                if hasattr(dc, 'default_dtype_conversion'):
+                    logger.info(f"      dtype_config.default_dtype_conversion = {getattr(dc, 'default_dtype_conversion', 'N/A')}")
 
         if live_values:
             # Use LIVE values from currently open forms instead of stored context_obj
             # This ensures cross-window changes are immediately visible
-            try:
-                live_context_obj = context_type(**live_values)
-                stack.enter_context(config_context(live_context_obj))
-                logger.info(f"  [3] CONTEXT layer: {context_type.__name__} (LIVE: {list(live_values.keys())[:3]}...)")
-            except Exception as e:
-                # Fall back to stored context_obj if instantiation fails
-                stack.enter_context(config_context(context_obj))
-                logger.warning(f"  [3] CONTEXT layer: {context_type.__name__} (stored, live failed: {e})")
+            # Use SimpleNamespace to avoid reconstruction issues with non-dataclass types (e.g. FunctionStep)
+            live_context_obj = SimpleNamespace(**live_values)
+            stack.enter_context(config_context(live_context_obj))
+            logger.info(f"  [3] CONTEXT layer: {context_type.__name__} (LIVE via namespace: {list(live_values.keys())[:3]}...)")
         else:
             # No live values, use stored context_obj
             stack.enter_context(config_context(context_obj))

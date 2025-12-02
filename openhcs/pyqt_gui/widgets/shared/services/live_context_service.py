@@ -200,24 +200,30 @@ class LiveContextService:
             live_context = {}
             scoped_live_context = {}
 
+            logger.info(f"  🔍 ACTIVE MANAGERS: {len(cls._active_form_managers)}")
             for manager in cls._active_form_managers:
                 manager_type = type(manager.object_instance)
                 manager_type_name = manager_type.__name__
+                manager_ctx_type = type(manager.context_obj).__name__ if manager.context_obj else "None"
 
                 # HIERARCHY FILTER: Only collect from ancestors of for_type
                 if for_type is not None:
-                    if not (is_ancestor_in_context(manager_type, for_type) or is_same_type_in_context(manager_type, for_type)):
-                        logger.debug(f"  📋 SKIP {manager.field_id}: {manager_type_name} not ancestor/same-type of {for_type_name}")
+                    is_ancestor = is_ancestor_in_context(manager_type, for_type)
+                    is_same = is_same_type_in_context(manager_type, for_type)
+                    if not (is_ancestor or is_same):
+                        logger.info(f"  📋 SKIP {manager.field_id}: obj={manager_type_name}, ctx={manager_ctx_type} | is_ancestor={is_ancestor}, is_same={is_same} of {for_type_name}")
                         continue
+                    else:
+                        logger.info(f"  📋 PASS {manager.field_id}: obj={manager_type_name}, ctx={manager_ctx_type} | is_ancestor={is_ancestor}, is_same={is_same} of {for_type_name}")
 
                 # Apply scope filter if provided
                 if scope_filter is not None and manager.scope_id is not None:
                     is_visible = cls._is_scope_visible(manager.scope_id, scope_filter)
-                    logger.debug(f"  📋 MANAGER {manager.field_id}: type={manager_type_name}, scope={manager.scope_id}, visible={is_visible}")
+                    logger.info(f"  📋 SCOPE {manager.field_id}: scope={manager.scope_id}, visible={is_visible}")
                     if not is_visible:
                         continue
                 else:
-                    logger.debug(f"  📋 MANAGER {manager.field_id}: type={manager_type_name}, scope={manager.scope_id}, no_filter_or_no_scope")
+                    logger.info(f"  📋 SCOPE {manager.field_id}: no filter or no scope")
 
                 # Collect from this manager AND all its nested managers
                 cls._collect_from_manager_tree(manager, live_context, scoped_live_context)

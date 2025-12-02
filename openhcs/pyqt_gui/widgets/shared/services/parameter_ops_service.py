@@ -202,11 +202,36 @@ class ParameterOpsService(ParameterServiceABC):
             root_manager = root_manager._parent_manager
 
         # Build context stack for resolution (use ROOT type for cache sharing)
+        # Use context_obj's type for hierarchy filtering - it represents where this form sits
+        # in the hierarchy. Fall back to object_instance type for root-level forms (context_obj=None)
+        hierarchy_anchor = root_manager.context_obj or root_manager.object_instance
+        for_type = type(hierarchy_anchor) if hierarchy_anchor else None
+
+        # DEBUG: Log hierarchy resolution
+        root_ctx_type = type(root_manager.context_obj).__name__ if root_manager.context_obj else "None"
+        root_obj_type = type(root_manager.object_instance).__name__ if root_manager.object_instance else "None"
+        for_type_name = for_type.__name__ if for_type else "None"
+        logger.info(f"🔬 PLACEHOLDER DEBUG [{field_name}]:")
+        logger.info(f"   manager.field_id={manager.field_id}, manager.scope_id={manager.scope_id}")
+        logger.info(f"   root_manager.context_obj={root_ctx_type}, root_manager.object_instance={root_obj_type}")
+        logger.info(f"   hierarchy_anchor={type(hierarchy_anchor).__name__ if hierarchy_anchor else 'None'}, for_type={for_type_name}")
+
         live_context_snapshot = ParameterFormManager.collect_live_context(
             scope_filter=manager.scope_id,
-            for_type=type(root_manager.object_instance)
+            for_type=for_type
         )
         live_context = live_context_snapshot.values if live_context_snapshot else None
+
+        # DEBUG: Log what was collected
+        if live_context:
+            collected_types = [t.__name__ for t in live_context.keys()]
+            logger.info(f"   live_context collected types: {collected_types}")
+            for ctx_type, ctx_values in live_context.items():
+                if ctx_values:
+                    val_keys = list(ctx_values.keys())
+                    logger.info(f"      {ctx_type.__name__}: {val_keys}")
+        else:
+            logger.info(f"   live_context: EMPTY")
 
         # Use root manager's values and type for context (not just this nested manager's)
         # PERFORMANCE OPTIMIZATION: Get root_values from live_context instead of calling
@@ -216,7 +241,9 @@ class ParameterOpsService(ParameterServiceABC):
         root_values = live_context.get(root_type) if live_context and is_nested else None
         if root_values:
             value_types = {k: type(v).__name__ for k, v in root_values.items()}
-            logger.info(f"        🔍 ROOT: field_id={root_manager.field_id}, type={root_type}, values={value_types}")
+            logger.info(f"   root_values from live_context: {value_types}")
+        else:
+            logger.info(f"   root_values: None (is_nested={is_nested})")
         if root_type:
             from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
             lazy_root_type = LazyDefaultPlaceholderService._get_lazy_type_for_base(root_type)
@@ -228,6 +255,8 @@ class ParameterOpsService(ParameterServiceABC):
         # from parent configs (e.g., streaming_defaults.well_filter=None would
         # shadow well_filter_config.well_filter=2).
         overlay_without_field = {k: v for k, v in manager.parameters.items() if k != field_name}
+        logger.info(f"   overlay_without_field keys: {list(overlay_without_field.keys())}")
+        logger.info(f"   manager.context_obj={type(manager.context_obj).__name__ if manager.context_obj else 'None'}")
 
         stack = build_context_stack(
             context_obj=manager.context_obj,

@@ -84,20 +84,18 @@ the system maintains a persistent hierarchy registry:
 
 .. code-block:: python
 
-   # Registry maps child_type → parent_type
+   # Registry maps child_type → parent_type (RAW types)
    _known_hierarchy: dict = {}
 
-   def register_hierarchy_relationship(parent_type, child_type):
-       """Register that parent_type is the parent of child_type in the config hierarchy."""
-       parent_base = _normalize_type(parent_type)
-       child_base = _normalize_type(child_type)
-       if parent_base != child_base and not _is_global_type(parent_base):
-           _known_hierarchy[child_base] = parent_base
+   def register_hierarchy_relationship(context_obj_type, object_instance_type):
+       """Register that context_obj_type is the parent of object_instance_type."""
+       # Store RAW types - no normalization
+       if context_obj_type != object_instance_type:
+           _known_hierarchy[object_instance_type] = context_obj_type
 
-   def unregister_hierarchy_relationship(child_type):
+   def unregister_hierarchy_relationship(object_instance_type):
        """Remove hierarchy entry when form closes."""
-       child_base = _normalize_type(child_type)
-       _known_hierarchy.pop(child_base, None)
+       _known_hierarchy.pop(object_instance_type, None)
 
 Form managers register their hierarchy when they open:
 
@@ -105,10 +103,36 @@ Form managers register their hierarchy when they open:
 
    # Step editor opens with context_obj=pipeline_config
    register_hierarchy_relationship(type(context_obj), type(object_instance))
-   # Registers: PipelineConfig → Step
+   # Registers: PipelineConfig → FunctionStep
 
 This allows ``get_types_before_in_stack()`` to return correct ancestors even when
 the parent window isn't actively inside a ``config_context()`` call.
+
+Hierarchy vs Equivalence
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+The system separates two distinct concepts:
+
+**Hierarchy relationships** (raw types):
+  Distinct levels in the config tree that need separate context injection.
+  ``FunctionStep → PipelineConfig → GlobalPipelineConfig`` are three separate levels.
+
+**Type equivalence** (normalized types):
+  Lazy and base types that represent the same config concept.
+  ``LazyDtypeConfig ≡ DtypeConfig`` - same config, different resolution behavior.
+
+This separation is critical because ``PipelineConfig`` is the lazy version of
+``GlobalPipelineConfig``, but they are *distinct hierarchy levels*:
+
+- ``GlobalPipelineConfig``: The global defaults (edited in global settings)
+- ``PipelineConfig``: Pipeline-level overrides (edited in pipeline editor)
+
+If hierarchy used normalized types, ``PipelineConfig`` would collapse to
+``GlobalPipelineConfig``, breaking intermediate layer injection and causing
+live context updates to skip the pipeline level.
+
+**Implementation principle**: Store raw types in ``_known_hierarchy``, apply
+normalization only at value-matching time in ``_find_live_values_for_type()``.
 
 Hierarchy Query Functions
 -------------------------
