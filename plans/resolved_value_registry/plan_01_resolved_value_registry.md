@@ -150,103 +150,55 @@ def _compute_resolved(self, scope_id: str, field_name: str, exclude_scope: str =
 - `_on_context_value_changed(editing_scope_id)` → exclude `editing_scope_id`
 - `is_dirty()` check → exclude the scope being checked (compare saved vs committed-without-self)
 
-#### 4. Change Detection: Extract + Reuse PFM's Invalidation Logic
+#### 4. Change Detection: Scope Hierarchy from scope_id String
 
-**Current PFM approach:** Each PFM receives "something changed" callback and uses `_is_affected_by_context_change()` to decide whether to refresh.
+**Key insight:** scope_id format encodes the full hierarchy:
+- `""` (empty) → global scope
+- `"plate_path"` → pipeline scope (PipelineConfig)
+- `"plate_path::token"` → step scope (FunctionStep)
 
-**Extract to reusable function:** Move `_is_affected_by_context_change()` logic to a service function that both PFM and Registry can call.
+No type introspection needed. Just string prefix matching.
 
 ```python
-# NEW: openhcs/pyqt_gui/widgets/shared/services/scope_invalidation_service.py
+# openhcs/config_framework/context_manager.py (add to existing file)
 
-def is_scope_affected_by_change(
-    target_scope_id: str,
-    target_object_instance: Any,
-    target_context_obj: Any,
-    editing_object: Any,
-    editing_context_obj: Any,
-    editing_scope_id: str,
-) -> bool:
+def is_scope_affected(target_scope_id: str, editing_scope_id: str) -> bool:
+    """Check if target scope is affected by edit at editing scope.
+
+    Uses scope_id hierarchy - no type introspection needed:
+    - "" (global) → affects all
+    - "plate_path" (pipeline) → affects same plate + all its steps
+    - "plate_path::token" (step) → affects only that step
     """
-    Determine if a scope is affected by a context change.
-
-    EXTRACTED from PFM._is_affected_by_context_change() for reuse.
-    Uses existing config_framework hierarchy functions.
-    """
-    from openhcs.config_framework import is_global_config_instance
-    from openhcs.config_framework.context_manager import (
-        is_ancestor_in_context,
-        is_same_type_in_context,
-        get_root_from_scope_key,
-    )
-    from dataclasses import fields, is_dataclass
-    import typing
-
-    # Root isolation: different plate roots don't affect each other
-    my_root = get_root_from_scope_key(target_scope_id)
-    editing_root = get_root_from_scope_key(editing_scope_id)
-    if editing_root and my_root and editing_root != my_root:
-        return False
-
-    editing_type = type(editing_object)
-
-    # Global config edits affect all
-    if is_global_config_instance(editing_object):
+    # Global edit affects all
+    if not editing_scope_id:
         return True
 
-    # Ancestor/same-type checks for context object
-    if target_context_obj is not None:
-        context_obj_type = type(target_context_obj)
-        if is_ancestor_in_context(editing_type, context_obj_type):
-            return True
-        if is_same_type_in_context(editing_type, context_obj_type):
-            return True
+    # Different plate roots = not affected
+    target_root = get_root_from_scope_key(target_scope_id)
+    editing_root = get_root_from_scope_key(editing_scope_id)
+    if target_root != editing_root:
+        return False
 
-    # Check dataclass fields for direct type match (handles nested configs)
-    if is_dataclass(editing_object) and is_dataclass(target_object_instance):
-        for field in fields(type(target_object_instance)):
-            if field.type == editing_type:
-                return True
-            origin = typing.get_origin(field.type)
-            if origin is typing.Union:
-                args = typing.get_args(field.type)
-                if editing_type in args:
-                    return True
-
-    return False
+    # Same root: parent affects children, not vice versa
+    # editing="plate" affects target="plate::step" ✓
+    # editing="plate::step" affects target="plate" ✗
+    return (
+        target_scope_id == editing_scope_id or
+        target_scope_id.startswith(editing_scope_id + "::")
+    )
 ```
 
 **Registry uses this:**
 ```python
-def _on_live_context_changed(self, editing_object, editing_context_obj, editing_scope_id):
-    """LiveContext changed → recompute affected scopes only."""
-    from .scope_invalidation_service import is_scope_affected_by_change
-
-    for scope_id, reg in self._scopes.items():
-        if is_scope_affected_by_change(
-            target_scope_id=scope_id,
-            target_object_instance=reg.object_instance,
-            target_context_obj=reg.context_obj,
-            editing_object=editing_object,
-            editing_context_obj=editing_context_obj,
-            editing_scope_id=editing_scope_id,
-        ):
-            self._recompute_scope(scope_id)
+def _on_context_changed(self, editing_scope_id: str):
+    """LiveContext changed → recompute affected scopes."""
+    for target_scope_id in self._scopes:
+        if is_scope_affected(target_scope_id, editing_scope_id):
+            self._recompute_scope(target_scope_id)
 ```
 
-**PFM refactored to use same function:**
-```python
-def _is_affected_by_context_change(self, editing_object, context_object, editing_scope_id):
-    from .services.scope_invalidation_service import is_scope_affected_by_change
-    return is_scope_affected_by_change(
-        target_scope_id=self.scope_id,
-        target_object_instance=self.object_instance,
-        target_context_obj=self.context_obj,
-        editing_object=editing_object,
-        editing_context_obj=context_object,
-        editing_scope_id=editing_scope_id,
-    )
-```
+**PFM refactored:** Delete `_is_affected_by_context_change()`, call `is_scope_affected()` directly at call sites.
 
 **Two signals cover all change sources:**
 
@@ -261,23 +213,23 @@ def __init__(self):
     ParameterFormManager.context_refreshed.connect(self._on_context_refreshed)
 
 def _on_context_value_changed(self, field_path, new_value, editing_obj, context_obj, editing_scope_id):
-    """Per-field change: recompute affected scopes, excluding editing scope."""
-    for target_scope_id, reg in self._scopes.items():
-        if target_scope_id == editing_scope_id:
-            continue  # Don't recompute the scope being edited
-        if is_scope_affected_by_change(...):
-            self._recompute_scope(target_scope_id, exclude_scope=editing_scope_id)
+    """Per-field change: recompute affected scopes."""
+    self._recompute_affected_scopes(editing_scope_id)
 
 def _on_context_refreshed(self, editing_obj, context_obj, editing_scope_id):
-    """Bulk change (save/cancel): same filtering logic."""
-    for target_scope_id, reg in self._scopes.items():
+    """Bulk change (save/cancel): recompute affected scopes."""
+    self._recompute_affected_scopes(editing_scope_id)
+
+def _recompute_affected_scopes(self, editing_scope_id: str):
+    """Recompute all scopes affected by change at editing_scope_id."""
+    for target_scope_id in self._scopes:
         if target_scope_id == editing_scope_id:
-            continue
-        if is_scope_affected_by_change(...):
+            continue  # Don't recompute the scope being edited
+        if is_scope_affected(target_scope_id, editing_scope_id):
             self._recompute_scope(target_scope_id, exclude_scope=editing_scope_id)
 ```
 
-**Why no debouncing?** Each signal handler does O(n) scope iteration with O(1) `is_scope_affected_by_change()` check. Recomputation only happens for actually-affected scopes. This is already efficient.
+**Why no debouncing?** O(n) scope iteration with O(1) string prefix check. Recomputation only for affected scopes.
 
 **`_recompute_scope()` - emit only when value actually changed:**
 
