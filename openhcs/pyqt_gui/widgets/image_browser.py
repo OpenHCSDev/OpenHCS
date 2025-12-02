@@ -50,6 +50,10 @@ class ImageBrowserWidget(QWidget):
         # (e.g., virtual_workspace backend)
         self.filemanager = orchestrator.filemanager if orchestrator else FileManager(storage_registry)
 
+        # Scope ID for cross-window live context filtering (derived from orchestrator's plate path)
+        # All config forms in this widget use this scope to filter updates to same plate
+        self.scope_id: Optional[str] = str(orchestrator.plate_path) if orchestrator else None
+
         # Lazy config widgets (will be created in init_ui)
         self.napari_config_form = None
         self.lazy_napari_config = None
@@ -336,16 +340,11 @@ class ImageBrowserWidget(QWidget):
         # Create parameter form for the lazy config
         from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager, FormManagerConfig
 
-        # Set up context for placeholder resolution
-        if self.orchestrator:
-            context_obj = self.orchestrator.pipeline_config
-        else:
-            context_obj = None
-
-        # CRITICAL FIX: Use FormManagerConfig to wrap configuration parameters
+        context_obj = self.orchestrator.pipeline_config if self.orchestrator else None
         config = FormManagerConfig(
             parent=panel,
             context_obj=context_obj,
+            scope_id=self.scope_id,
             color_scheme=self.color_scheme
         )
         self.napari_config_form = ParameterFormManager(
@@ -386,16 +385,11 @@ class ImageBrowserWidget(QWidget):
         # Create parameter form for the lazy config
         from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager, FormManagerConfig
 
-        # Set up context for placeholder resolution
-        if self.orchestrator:
-            context_obj = self.orchestrator.pipeline_config
-        else:
-            context_obj = None
-
-        # CRITICAL FIX: Use FormManagerConfig to wrap configuration parameters
+        context_obj = self.orchestrator.pipeline_config if self.orchestrator else None
         config = FormManagerConfig(
             parent=panel,
             context_obj=context_obj,
+            scope_id=self.scope_id,
             color_scheme=self.color_scheme
         )
         self.fiji_config_form = ParameterFormManager(
@@ -468,20 +462,22 @@ class ImageBrowserWidget(QWidget):
     def set_orchestrator(self, orchestrator):
         """Set the orchestrator and load images."""
         self.orchestrator = orchestrator
+        self.scope_id = str(orchestrator.plate_path) if orchestrator else None
 
         # Use orchestrator's FileManager (has plate-specific backends like VirtualWorkspaceBackend)
         if orchestrator:
             self.filemanager = orchestrator.filemanager
             logger.debug("Image browser now using orchestrator's FileManager")
 
-        # Update config form contexts to use new pipeline_config
+        # Update config form contexts and scope_id to use new pipeline_config
         if self.napari_config_form and orchestrator:
             self.napari_config_form.context_obj = orchestrator.pipeline_config
-            # Refresh placeholders with new context (uses private method)
+            self.napari_config_form.scope_id = self.scope_id
             self.napari_config_form._refresh_all_placeholders()
 
         if self.fiji_config_form and orchestrator:
             self.fiji_config_form.context_obj = orchestrator.pipeline_config
+            self.fiji_config_form.scope_id = self.scope_id
             self.fiji_config_form._refresh_all_placeholders()
 
         self.load_images()
