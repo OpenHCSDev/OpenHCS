@@ -92,22 +92,32 @@ def register_scope(self, scope_id: str, context_obj: Any, object_instance: Any):
 
 #### 3. Resolution: Use Existing Services
 
+**IMPORTANT:** Registry represents COMMITTED state (saved values + live context from OTHER open forms). It does NOT include the current form's unsaved overlay - that's intentional. The overlay layer is for "live typing preview" which PFM handles separately.
+
 ```python
 def _compute_resolved(self, scope_id: str, field_name: str) -> Any:
-    """Compute resolved value using EXISTING infrastructure."""
+    """Compute resolved value using EXISTING infrastructure.
+
+    Uses scoped_values[scope_id] for per-scope isolation.
+    Two steps of the same type don't overwrite each other.
+    """
     from openhcs.config_framework.context_manager import build_context_stack
     from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
 
     reg = self._scopes[scope_id]
 
-    # Collect live context - use scoped_values for per-scope data
+    # Collect live context with scope filter
     live_snapshot = LiveContextService.collect(scope_filter=scope_id)
 
-    # Build context stack (same as ParameterOpsService does)
+    # CRITICAL: Use scoped_values[scope_id] for per-scope isolation
+    # .values is merged across all scopes - two steps of same type overwrite each other
+    scoped_live = live_snapshot.scoped_values.get(scope_id, {}) if live_snapshot else {}
+
+    # Build context stack
     stack = build_context_stack(
         context_obj=reg.context_obj,
         object_instance=reg.object_instance,
-        live_context=live_snapshot.values if live_snapshot else None,
+        live_context=scoped_live,
     )
 
     # getattr triggers lazy resolution
@@ -213,53 +223,67 @@ def _is_affected_by_context_change(self, editing_object, context_object, editing
     )
 ```
 
-**Two notification paths exist:**
+**Two notification paths exist - Registry uses ONLY the targeted path:**
 
 1. `LiveContextService.connect_listener(callback)` → callback with NO args → "something changed"
    - PFM uses this for bulk refresh (save/cancel/code editor)
-   - Registry uses this as fallback: recompute all scopes
+   - **Registry does NOT use this** - would double-work with targeted path
 
 2. `ParameterFormManager.context_value_changed` signal → HAS args (field_path, new_value, editing_obj, context_obj, scope_id)
    - PFM uses this for targeted refresh with `_is_affected_by_context_change()` filtering
-   - Registry can connect to this for smart invalidation (only affected scopes)
+   - **Registry uses this** for smart invalidation (only affected scopes)
 
-**Registry subscribes to BOTH:**
+**Registry subscribes to targeted path ONLY:**
 ```python
 def __init__(self):
-    # Bulk invalidation (something changed, don't know what)
-    LiveContextService.connect_listener(self._on_live_context_changed_bulk)
-
-    # Targeted invalidation (know exactly what changed)
+    # ONLY targeted invalidation - bulk path would recompute everything on every keystroke
     ParameterFormManager.context_value_changed.connect(self._on_context_value_changed)
-
-def _on_live_context_changed_bulk(self):
-    """Fallback: recompute all scopes."""
-    for scope_id in self._scopes:
-        self._recompute_scope(scope_id)
+    ParameterFormManager.context_refreshed.connect(self._on_context_refreshed)
 
 def _on_context_value_changed(self, field_path, new_value, editing_obj, context_obj, scope_id):
     """Targeted: only recompute affected scopes."""
     for target_scope_id, reg in self._scopes.items():
-        if is_scope_affected_by_change(...):
+        if is_scope_affected_by_change(
+            target_scope_id=target_scope_id,
+            target_object_instance=reg.object_instance,
+            target_context_obj=reg.context_obj,
+            editing_object=editing_obj,
+            editing_context_obj=context_obj,
+            editing_scope_id=scope_id,
+        ):
             self._recompute_scope(target_scope_id)
+
+def _on_context_refreshed(self, editing_obj, context_obj, scope_id):
+    """Bulk refresh (save/cancel) - same filtering logic."""
+    # Same as above - filter affected scopes
+    ...
 ```
 
-#### 5. Placeholder Text: Use Existing Service
+#### 5. Placeholder Text: Format Cached Value
+
+**CRITICAL:** Do NOT re-resolve via `LazyDefaultPlaceholderService` - that would do duplicate resolution and could drift from cached value. Instead, format the cached resolved value directly.
 
 ```python
 def get_placeholder_text(self, scope_id: str, field_name: str) -> str:
-    """Format resolved value using EXISTING LazyDefaultPlaceholderService."""
-    from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
+    """Format the CACHED resolved value as placeholder text.
 
+    Uses cached value from get_resolved() - NO re-resolution.
+    """
     resolved = self.get_resolved(scope_id, field_name)
-    reg = self._scopes[scope_id]
 
-    # Use existing service - it handles all formatting
-    return LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
-        dataclass_type=type(reg.object_instance),
-        field_name=field_name,
-    )
+    if resolved is None:
+        return ""  # No placeholder for None
+
+    # Format as "Default: <value>" or "Inherited: <value>"
+    # For now use "Default" prefix - can be enhanced later to detect inheritance
+    prefix = "Default"
+    return f"{prefix}: {resolved}"
 ```
+
+**Note:** This is simpler than calling `LazyDefaultPlaceholderService` because:
+1. We already have the resolved value cached
+2. No need to re-resolve (which requires context stack setup)
+3. The placeholder text is just a formatted string
 
 #### 6. Registration Points
 
@@ -301,11 +325,15 @@ def _on_resolved_value_changed(self, scope_id, field, old_val, new_val):
 
 ### Findings
 
-**Key Insight 1:** `LiveContextSnapshot.scoped_values` gives per-scope data, while `.values` is merged across all scopes. Use `scoped_values` for change detection.
+**Key Insight 1:** `LiveContextSnapshot.scoped_values[scope_id]` gives per-scope data, while `.values` is merged across all scopes (type-keyed). Two steps of the same type would overwrite each other in `.values`. **Must use `scoped_values[scope_id]`.**
 
-**Key Insight 2:** Token-based invalidation is simpler than diffing. If `snapshot.token` changed, recompute everything. The token increments on ANY LiveContext change.
+**Key Insight 2:** Registry represents COMMITTED state (saved + other forms' live context). It does NOT include the current form's unsaved overlay - that's for "live typing preview" which PFM handles separately via its own context stack.
 
-**Key Insight 3:** Child scopes automatically get correct values because `build_context_stack()` + lazy resolution already handles scope hierarchy. We just need to recompute when parent changes.
+**Key Insight 3:** Use targeted path (`context_value_changed` signal) ONLY. The bulk path (`LiveContextService.connect_listener`) fires on every keystroke and would recompute all scopes, making targeted invalidation useless.
+
+**Key Insight 4:** `get_placeholder_text()` must format the CACHED value, not re-resolve. Re-resolution requires context stack setup and can drift from cached value.
+
+**Key Insight 5:** Child scopes automatically get correct values because `build_context_stack()` + lazy resolution already handles scope hierarchy. We just need to recompute when parent changes.
 
 ### Implementation Draft
 
