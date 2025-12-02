@@ -142,9 +142,9 @@ class ParameterOpsService(ParameterServiceABC):
     @staticmethod
     def _get_reset_value(manager, param_name: str) -> Any:
         """Get reset value based on editing context."""
-        if manager.config.is_global_config_editing and manager.dataclass_type:
+        if manager.config.is_global_config_editing and manager.object_instance:
             try:
-                return object.__getattribute__(manager.dataclass_type, param_name)
+                return object.__getattribute__(type(manager.object_instance), param_name)
             except AttributeError:
                 pass
         return manager.param_defaults.get(param_name)
@@ -204,14 +204,14 @@ class ParameterOpsService(ParameterServiceABC):
         # Build context stack for resolution (use ROOT type for cache sharing)
         live_context_snapshot = ParameterFormManager.collect_live_context(
             scope_filter=manager.scope_id,
-            for_type=root_manager.dataclass_type
+            for_type=type(root_manager.object_instance)
         )
         live_context = live_context_snapshot.values if live_context_snapshot else None
 
         # Use root manager's values and type for context (not just this nested manager's)
         # PERFORMANCE OPTIMIZATION: Get root_values from live_context instead of calling
         # get_user_modified_values() again (which calls get_current_values())
-        root_type = root_manager.dataclass_type
+        root_type = type(root_manager.object_instance)
         is_nested = root_manager != manager
         root_values = live_context.get(root_type) if live_context and is_nested else None
         if root_values:
@@ -232,7 +232,7 @@ class ParameterOpsService(ParameterServiceABC):
         stack = build_context_stack(
             context_obj=manager.context_obj,
             overlay=overlay_without_field,
-            dataclass_type=manager.dataclass_type,
+            object_instance=manager.object_instance,
             live_context=live_context,
             is_global_config_editing=getattr(manager.config, 'is_global_config_editing', False),
             global_config_type=getattr(manager.config, 'global_config_type', None),
@@ -242,13 +242,13 @@ class ParameterOpsService(ParameterServiceABC):
 
         with stack:
             from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
-            dataclass_type_for_resolution = manager.dataclass_type
-            if dataclass_type_for_resolution:
-                lazy_type = LazyDefaultPlaceholderService._get_lazy_type_for_base(dataclass_type_for_resolution)
+            obj_type_for_resolution = type(manager.object_instance)
+            if obj_type_for_resolution:
+                lazy_type = LazyDefaultPlaceholderService._get_lazy_type_for_base(obj_type_for_resolution)
                 if lazy_type:
-                    dataclass_type_for_resolution = lazy_type
+                    obj_type_for_resolution = lazy_type
 
-            placeholder_text = manager.service.get_placeholder_text(field_name, dataclass_type_for_resolution)
+            placeholder_text = manager.service.get_placeholder_text(field_name, obj_type_for_resolution)
             logger.info(f"        📝 Computed placeholder: {repr(placeholder_text)[:50]}")
 
             if placeholder_text:
@@ -279,8 +279,8 @@ class ParameterOpsService(ParameterServiceABC):
     def refresh_all_placeholders(self, manager, use_user_modified_only: bool = False) -> None:
         """Refresh placeholder text for all widgets in a form."""
         with timer(f"_refresh_all_placeholders ({manager.field_id})", threshold_ms=5.0):
-            if not manager.dataclass_type:
-                logger.debug(f"[PLACEHOLDER] {manager.field_id}: No dataclass_type, skipping")
+            if not manager.object_instance:
+                logger.debug(f"[PLACEHOLDER] {manager.field_id}: No obj_type, skipping")
                 return
 
             from openhcs.pyqt_gui.widgets.shared.widget_strategies import PyQt6WidgetEnhancer
@@ -295,7 +295,7 @@ class ParameterOpsService(ParameterServiceABC):
 
             live_context_snapshot = ParameterFormManager.collect_live_context(
                 scope_filter=manager.scope_id,
-                for_type=root_manager.dataclass_type
+                for_type=type(root_manager.object_instance)
             )
             # Extract .values dict from LiveContextSnapshot for build_context_stack
             live_context = live_context_snapshot.values if live_context_snapshot else None
@@ -312,7 +312,7 @@ class ParameterOpsService(ParameterServiceABC):
 
             # PERFORMANCE OPTIMIZATION: Get root_values from live_context instead of calling
             # get_user_modified_values() again (which calls get_current_values())
-            root_type = root_manager.dataclass_type
+            root_type = type(root_manager.object_instance)
             is_nested = root_manager != manager
             root_values = live_context.get(root_type) if live_context and is_nested else None
             if root_type:
@@ -325,7 +325,7 @@ class ParameterOpsService(ParameterServiceABC):
             stack = build_context_stack(
                 context_obj=manager.context_obj,
                 overlay=overlay_dict,
-                dataclass_type=manager.dataclass_type,
+                object_instance=manager.object_instance,
                 live_context=live_context,
                 is_global_config_editing=getattr(manager.config, 'is_global_config_editing', False),
                 global_config_type=getattr(manager.config, 'global_config_type', None),
@@ -336,11 +336,11 @@ class ParameterOpsService(ParameterServiceABC):
             with stack:
                 monitor = get_monitor("Placeholder resolution per field")
                 from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
-                dataclass_type_for_resolution = manager.dataclass_type
-                if dataclass_type_for_resolution:
-                    lazy_type = LazyDefaultPlaceholderService._get_lazy_type_for_base(dataclass_type_for_resolution)
+                obj_type_for_resolution = type(manager.object_instance)
+                if obj_type_for_resolution:
+                    lazy_type = LazyDefaultPlaceholderService._get_lazy_type_for_base(obj_type_for_resolution)
                     if lazy_type:
-                        dataclass_type_for_resolution = lazy_type
+                        obj_type_for_resolution = lazy_type
 
                 for param_name, widget in manager.widgets.items():
                     current_value = manager.parameters.get(param_name)
@@ -348,6 +348,6 @@ class ParameterOpsService(ParameterServiceABC):
 
                     if should_apply_placeholder:
                         with monitor.measure():
-                            placeholder_text = manager.service.get_placeholder_text(param_name, dataclass_type_for_resolution)
+                            placeholder_text = manager.service.get_placeholder_text(param_name, obj_type_for_resolution)
                             if placeholder_text:
                                 PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)

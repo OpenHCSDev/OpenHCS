@@ -131,7 +131,7 @@ class ValueCollectionService(ParameterServiceABC):
         reconstructed = {}
         for field_name, value in live_values.items():
             if isinstance(value, tuple) and len(value) == 2:
-                dataclass_type, field_dict = value
+                obj_type, field_dict = value
                 
                 # Separate None and non-None fields
                 none_fields = {k for k, v in field_dict.items() if v is None}
@@ -145,11 +145,11 @@ class ValueCollectionService(ParameterServiceABC):
                         if base_nested is not None and is_dataclass(base_nested):
                             instance = dataclasses.replace(base_nested, **non_none_fields) if non_none_fields else base_nested
                         else:
-                            instance = dataclass_type(**non_none_fields) if non_none_fields else dataclass_type()
+                            instance = obj_type(**non_none_fields) if non_none_fields else obj_type()
                     else:
-                        instance = dataclass_type(**non_none_fields) if non_none_fields else dataclass_type()
+                        instance = obj_type(**non_none_fields) if non_none_fields else obj_type()
                 else:
-                    instance = dataclass_type(**non_none_fields) if non_none_fields else dataclass_type()
+                    instance = obj_type(**non_none_fields) if non_none_fields else obj_type()
                 
                 # Preserve None values using object.__setattr__
                 for none_field_name in none_fields:

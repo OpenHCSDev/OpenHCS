@@ -108,7 +108,7 @@ class ParameterTypeUtils:
         raise ValueError(f"Type {param_type} is not Optional")
     
     @staticmethod
-    def get_dataclass_type_for_param(param_name: str, parameter_types: Dict[str, Type]) -> Optional[Type]:
+    def get_obj_type_for_param(param_name: str, parameter_types: Dict[str, Type]) -> Optional[Type]:
         """
         Get the dataclass type for a parameter, handling Optional types.
         
@@ -124,7 +124,7 @@ class ParameterTypeUtils:
             
         Example:
             >>> types = {"config": Optional[MyConfig]}
-            >>> ParameterTypeUtils.get_dataclass_type_for_param("config", types)
+            >>> ParameterTypeUtils.get_obj_type_for_param("config", types)
             <class 'MyConfig'>
         """
         if param_name not in parameter_types:

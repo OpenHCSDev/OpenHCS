@@ -201,9 +201,9 @@ class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
             if field_name == 'func':
                 continue
 
-            dataclass_type = self._extract_dataclass_from_param_type(param_type)
-            if dataclass_type is not None:
-                dataclass_params[field_name] = dataclass_type
+            obj_type = self._extract_dataclass_from_param_type(param_type)
+            if obj_type is not None:
+                dataclass_params[field_name] = obj_type
 
         return dataclass_params
 
@@ -264,9 +264,9 @@ class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
 
     def _find_field_for_class(self, target_class) -> Optional[str]:
         """Locate the parameter field that edits the given dataclass."""
-        for field_name, dataclass_type in self._tree_dataclass_params.items():
-            base_type = self.tree_helper.get_base_type(dataclass_type)
-            if target_class in (dataclass_type, base_type):
+        for field_name, obj_type in self._tree_dataclass_params.items():
+            base_type = self.tree_helper.get_base_type(obj_type)
+            if target_class in (obj_type, base_type):
                 return field_name
         return None
 

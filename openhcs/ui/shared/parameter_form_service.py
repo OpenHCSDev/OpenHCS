@@ -35,7 +35,7 @@ class ParameterAnalysisInput:
     param_type: Dict[str, Type]
     field_id: str
     description: Optional[Dict[str, str]] = None
-    parent_dataclass_type: Optional[Type] = None
+    parent_obj_type: Optional[Type] = None
 
 
 @dataclass
@@ -113,7 +113,7 @@ class ParameterFormService:
             current_value = input.default_value.get(param_name)
 
             # Check if this parameter should be hidden from UI
-            if self._should_hide_from_ui(input.parent_dataclass_type, param_name, parameter_type):
+            if self._should_hide_from_ui(input.parent_obj_type, param_name, parameter_type):
                 debug_param("analyze_parameters", f"Hiding parameter {param_name} from UI (ui_hidden=True)")
                 continue
 
@@ -132,13 +132,13 @@ class ParameterFormService:
                 unwrapped_param_type = self._type_utils.get_optional_inner_type(parameter_type) if self._type_utils.is_optional_dataclass(parameter_type) else parameter_type
 
                 # For function parameters (no parent dataclass), use parameter name directly
-                if input.parent_dataclass_type is None:
+                if input.parent_obj_type is None:
                     nested_field_id = param_name
                 else:
-                    nested_field_id = self.get_field_path_with_fail_loud(input.parent_dataclass_type, unwrapped_param_type)
+                    nested_field_id = self.get_field_path_with_fail_loud(input.parent_obj_type, unwrapped_param_type)
 
                 nested_structure = self._analyze_nested_dataclass(
-                    param_name, parameter_type, current_value, nested_field_id, input.parent_dataclass_type
+                    param_name, parameter_type, current_value, nested_field_id, input.parent_obj_type
                 )
                 nested_forms[param_name] = nested_structure
 
@@ -153,12 +153,12 @@ class ParameterFormService:
             has_optional_dataclasses=has_optional_dataclasses
         )
 
-    def _should_hide_from_ui(self, parent_dataclass_type: Optional[Type], param_name: str, param_type: Type) -> bool:
+    def _should_hide_from_ui(self, parent_obj_type: Optional[Type], param_name: str, param_type: Type) -> bool:
         """
         Check if a parameter should be hidden from the UI.
 
         Args:
-            parent_dataclass_type: The parent dataclass type (None for function parameters)
+            parent_obj_type: The parent dataclass type (None for function parameters)
             param_name: Name of the parameter
             param_type: Type of the parameter
 
@@ -168,7 +168,7 @@ class ParameterFormService:
         import dataclasses
 
         # If no parent dataclass, can't check field metadata
-        if parent_dataclass_type is None:
+        if parent_obj_type is None:
             # Still check if the type itself has _ui_hidden
             unwrapped_type = self._type_utils.get_optional_inner_type(param_type) if self._type_utils.is_optional_dataclass(param_type) else param_type
             if hasattr(unwrapped_type, '__dict__') and '_ui_hidden' in unwrapped_type.__dict__ and unwrapped_type._ui_hidden:
@@ -177,7 +177,7 @@ class ParameterFormService:
 
         # Check field metadata for ui_hidden flag
         try:
-            field_obj = next(f for f in dataclasses.fields(parent_dataclass_type) if f.name == param_name)
+            field_obj = next(f for f in dataclasses.fields(parent_obj_type) if f.name == param_name)
             if field_obj.metadata.get('ui_hidden', False):
                 return True
         except (StopIteration, TypeError, AttributeError):
@@ -191,7 +191,7 @@ class ParameterFormService:
 
         return False
 
-    def convert_value_to_type(self, value: Any, param_type: Type, param_name: str, dataclass_type: Type = None) -> Any:
+    def convert_value_to_type(self, value: Any, param_type: Type, param_name: str, obj_type: Type = None) -> Any:
         """
         Convert a value to the appropriate type for a parameter.
 
@@ -202,7 +202,7 @@ class ParameterFormService:
             value: The value to convert
             param_type: The target parameter type
             param_name: The parameter name (for debugging)
-            dataclass_type: The dataclass type (for sibling inheritance checks)
+            obj_type: The dataclass type (for sibling inheritance checks)
 
         Returns:
             The converted value
@@ -276,9 +276,9 @@ class ParameterFormService:
             return None
 
         # Handle sibling-inheritable fields - allow None even for non-Optional types
-        if value is None and dataclass_type is not None:
+        if value is None and obj_type is not None:
             from openhcs.core.config import is_field_sibling_inheritable
-            if is_field_sibling_inheritable(dataclass_type, param_name):
+            if is_field_sibling_inheritable(obj_type, param_name):
                 return None
 
         return value
@@ -377,8 +377,8 @@ class ParameterFormService:
         
         return False
     
-    def extract_nested_parameters(self, dataclass_instance: Any, dataclass_type: Type,
-                                parent_dataclass_type: Optional[Type] = None) -> Tuple[Dict[str, Any], Dict[str, Type]]:
+    def extract_nested_parameters(self, dataclass_instance: Any, obj_type: Type,
+                                parent_obj_type: Optional[Type] = None) -> Tuple[Dict[str, Any], Dict[str, Type]]:
         """
         Extract parameters and types from a dataclass instance.
 
@@ -386,13 +386,13 @@ class ParameterFormService:
         regardless of parent context. Placeholder behavior is handled at the widget level,
         not by discarding concrete values during parameter extraction.
         """
-        if not dataclasses.is_dataclass(dataclass_type):
+        if not dataclasses.is_dataclass(obj_type):
             return {}, {}
 
         parameters = {}
         parameter_types = {}
 
-        for field in dataclasses.fields(dataclass_type):
+        for field in dataclasses.fields(obj_type):
             # Always extract actual field values when dataclass instance exists
             # This preserves concrete user-entered values in nested lazy dataclass forms
             if dataclass_instance is not None:
@@ -454,22 +454,22 @@ class ParameterFormService:
     _nested_param_info_cache = {}
 
     def _analyze_nested_dataclass(self, param_name: str, param_type: Type, current_value: Any,
-                                nested_field_id: str, parent_dataclass_type: Type = None) -> FormStructure:
+                                nested_field_id: str, parent_obj_type: Type = None) -> FormStructure:
         """Analyze a nested dataclass parameter."""
         # Get the actual dataclass type
         if self._type_utils.is_optional_dataclass(param_type):
-            dataclass_type = self._type_utils.get_optional_inner_type(param_type)
+            obj_type = self._type_utils.get_optional_inner_type(param_type)
         else:
-            dataclass_type = param_type
+            obj_type = param_type
 
         # Extract nested parameters using parent context
         nested_params, nested_types = self.extract_nested_parameters(
-            current_value, dataclass_type, parent_dataclass_type
+            current_value, obj_type, parent_obj_type
         )
 
         # OPTIMIZATION: Cache parameter info (descriptions) by dataclass type
         # We only need descriptions, not instance values, so analyze the type once and reuse
-        cache_key = dataclass_type
+        cache_key = obj_type
         if cache_key in self._nested_param_info_cache:
             nested_param_info = self._nested_param_info_cache[cache_key]
         else:
@@ -478,7 +478,7 @@ class ParameterFormService:
             from openhcs.introspection.unified_parameter_analyzer import UnifiedParameterAnalyzer
             # OPTIMIZATION: Always analyze the TYPE, not the instance
             # This allows caching and avoids extracting field values we don't need
-            nested_param_info = UnifiedParameterAnalyzer.analyze(dataclass_type)
+            nested_param_info = UnifiedParameterAnalyzer.analyze(obj_type)
             self._nested_param_info_cache[cache_key] = nested_param_info
 
         # Create type-safe input for recursive analysis
@@ -487,12 +487,12 @@ class ParameterFormService:
             param_type=nested_types,
             field_id=nested_field_id,
             description={name: info.description for name, info in nested_param_info.items()} if nested_param_info else None,
-            parent_dataclass_type=dataclass_type
+            parent_obj_type=obj_type
         )
 
         return self.analyze_parameters(nested_input)
 
-    def get_placeholder_text(self, param_name: str, dataclass_type: Type,
+    def get_placeholder_text(self, param_name: str, obj_type: Type,
                            placeholder_prefix: str = "Pipeline default") -> Optional[str]:
         """
         Get placeholder text using existing OpenHCS infrastructure.
@@ -503,7 +503,7 @@ class ParameterFormService:
 
         Args:
             param_name: Name of the parameter to get placeholder for
-            dataclass_type: The specific dataclass type (GlobalPipelineConfig or PipelineConfig)
+            obj_type: The specific dataclass type (GlobalPipelineConfig or PipelineConfig)
             placeholder_prefix: Prefix for the placeholder text
 
         Returns:
@@ -518,11 +518,11 @@ class ParameterFormService:
 
         # Service just resolves placeholders, caller manages context
         return LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
-            dataclass_type, param_name, placeholder_prefix
+            obj_type, param_name, placeholder_prefix
         )
 
     def reset_nested_managers(self, nested_managers: Dict[str, Any],
-                            dataclass_type: Type, current_config: Any) -> None:
+                            obj_type: Type, current_config: Any) -> None:
         """Reset all nested managers - fail loud, no defensive programming."""
         for nested_manager in nested_managers.values():
             # All nested managers must have reset_all_parameters method
@@ -531,14 +531,14 @@ class ParameterFormService:
 
 
     def get_reset_value_for_parameter(self, param_name: str, param_type: Type,
-                                    dataclass_type: Type, is_global_config_editing: Optional[bool] = None) -> Any:
+                                    obj_type: Type, is_global_config_editing: Optional[bool] = None) -> Any:
         """
         Get appropriate reset value using existing OpenHCS patterns.
 
         Args:
             param_name: Name of the parameter to reset
             param_type: Type of the parameter (int, str, bool, etc.)
-            dataclass_type: The specific dataclass type
+            obj_type: The specific dataclass type
             is_global_config_editing: Whether we're in global config editing mode (auto-detected if None)
 
         Returns:
@@ -553,20 +553,20 @@ class ParameterFormService:
         # Auto-detect editing mode if not explicitly provided
         if is_global_config_editing is None:
             # Fallback: Use existing lazy resolution detection for backward compatibility
-            is_global_config_editing = not LazyDefaultPlaceholderService.has_lazy_resolution(dataclass_type)
+            is_global_config_editing = not LazyDefaultPlaceholderService.has_lazy_resolution(obj_type)
 
         # Context-driven behavior: Reset behavior depends on editing context
         if is_global_config_editing:
             # Global config editing: Reset to actual default values
             # Users expect to see concrete defaults when editing global configuration
-            return self._get_actual_dataclass_field_default(param_name, dataclass_type)
+            return self._get_actual_dataclass_field_default(param_name, obj_type)
         else:
             # CRITICAL FIX: For lazy config editing, always return None
             # This ensures reset shows inheritance chain values (like compiler resolution)
             # instead of concrete values from thread-local context
             return None
 
-    def _get_actual_dataclass_field_default(self, param_name: str, dataclass_type: Type) -> Any:
+    def _get_actual_dataclass_field_default(self, param_name: str, obj_type: Type) -> Any:
         """
         Get the actual default value for a parameter.
 
@@ -583,20 +583,20 @@ class ParameterFormService:
         import inspect
 
         # For pure functions: get default from signature
-        if callable(dataclass_type) and not is_dataclass(dataclass_type) and not hasattr(dataclass_type, '__mro__'):
-            sig = inspect.signature(dataclass_type)
+        if callable(obj_type) and not is_dataclass(obj_type) and not hasattr(obj_type, '__mro__'):
+            sig = inspect.signature(obj_type)
             if param_name in sig.parameters:
                 default = sig.parameters[param_name].default
                 return None if default is inspect.Parameter.empty else default
             return None  # Dynamic property, not in signature
 
         # For all other types (dataclasses, ABCs, classes): check class attribute first
-        if hasattr(dataclass_type, param_name):
-            return getattr(dataclass_type, param_name)
+        if hasattr(obj_type, param_name):
+            return getattr(obj_type, param_name)
 
         # For dataclasses: check if it's a field(default_factory=...) field
-        if is_dataclass(dataclass_type):
-            dataclass_fields = {f.name: f for f in fields(dataclass_type)}
+        if is_dataclass(obj_type):
+            dataclass_fields = {f.name: f for f in fields(obj_type)}
             if param_name not in dataclass_fields:
                 return None  # Dynamic property, not a dataclass field
 

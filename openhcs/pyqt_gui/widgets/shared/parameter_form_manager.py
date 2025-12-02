@@ -313,11 +313,11 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
             if self.context_obj is not None and not self._parent_manager:
                 from openhcs.config_framework.context_manager import register_hierarchy_relationship
                 register_hierarchy_relationship(type(self.context_obj), type(self.object_instance))
-            elif self._parent_manager is not None and self._parent_manager.dataclass_type and self.dataclass_type:
-                # Nested manager: register relationship from parent dataclass to this nested dataclass
+            elif self._parent_manager is not None and self._parent_manager.object_instance and self.object_instance:
+                # Nested manager: register relationship from parent to this nested object
                 # Needed so is_ancestor_in_context recognizes parent → child when filtering live context
                 from openhcs.config_framework.context_manager import register_hierarchy_relationship
-                register_hierarchy_relationship(self._parent_manager.dataclass_type, self.dataclass_type)
+                register_hierarchy_relationship(type(self._parent_manager.object_instance), type(self.object_instance))
 
             # Store backward compatibility attributes
             self.parameter_info = self.config.parameter_info
@@ -599,8 +599,9 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         actual_type = ParameterTypeUtils.get_optional_inner_type(param_type) if ParameterTypeUtils.is_optional(param_type) else param_type
 
         # Get actual field path from FieldPathDetector (no artificial "nested_" prefix)
-        # For function parameters (no parent dataclass), use parameter name directly
-        field_path = param_name if self.dataclass_type is None else self.service.get_field_path_with_fail_loud(self.dataclass_type, param_type)
+        # For function parameters (no parent object), use parameter name directly
+        obj_type = type(self.object_instance) if self.object_instance else None
+        field_path = param_name if obj_type is None else self.service.get_field_path_with_fail_loud(obj_type, param_type)
 
         # Determine object instance (unified logic for current_value vs default)
         if current_value is not None:
@@ -680,7 +681,7 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         converted_value = convert_widget_value_to_type(value, param_type)
 
         # Then apply service layer conversion (enums, basic types, Union handling, etc.)
-        converted_value = self.service.convert_value_to_type(converted_value, param_type, param_name, self.dataclass_type)
+        converted_value = self.service.convert_value_to_type(converted_value, param_type, param_name, type(self.object_instance))
 
         return converted_value
 
@@ -725,7 +726,7 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
 
         # Convert value using service layer
         converted_value = self.service.convert_value_to_type(
-            value, self.parameter_types.get(param_name, type(value)), param_name, self.dataclass_type
+            value, self.parameter_types.get(param_name, type(value)), param_name, type(self.object_instance)
         )
 
         # Update corresponding widget if it exists
@@ -772,10 +773,10 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         For functions: Use signature defaults
         """
         # For global config editing, use static class defaults instead of None
-        if self.config.is_global_config_editing and self.dataclass_type:
+        if self.config.is_global_config_editing and self.object_instance:
             # Get static default from class attribute
             try:
-                static_default = object.__getattribute__(self.dataclass_type, param_name)
+                static_default = object.__getattribute__(type(self.object_instance), param_name)
                 return static_default
             except AttributeError:
                 # Fallback to signature default if no class attribute
@@ -1256,8 +1257,8 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
                 return True
 
         # Check dataclass fields for direct type match (handles nested configs)
-        if is_dataclass(editing_object) and is_dataclass(self.dataclass_type):
-            for field in fields(self.dataclass_type):
+        if is_dataclass(editing_object) and is_dataclass(self.object_instance):
+            for field in fields(type(self.object_instance)):
                 if field.type == editing_type:
                     return True
                 origin = typing.get_origin(field.type)

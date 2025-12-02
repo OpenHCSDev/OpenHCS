@@ -50,7 +50,7 @@ class ConfigHierarchyTreeHelper:
 
         self._add_ui_visible_dataclasses_to_tree(
             parent_item=tree,
-            dataclass_type=root_dataclass,
+            obj_type=root_dataclass,
             is_root=True,
             skip_root_ui_hidden=skip_root_ui_hidden,
         )
@@ -61,8 +61,8 @@ class ConfigHierarchyTreeHelper:
         dataclass_mapping: Dict[str, Type],
     ) -> None:
         """Populate the tree given a dict of field_name -> dataclass type."""
-        for field_name, dataclass_type in dataclass_mapping.items():
-            base_type = self.get_base_type(dataclass_type)
+        for field_name, obj_type in dataclass_mapping.items():
+            base_type = self.get_base_type(obj_type)
             label = getattr(base_type, "__name__", field_name)
 
             item = QTreeWidgetItem([label])
@@ -71,7 +71,7 @@ class ConfigHierarchyTreeHelper:
                 Qt.ItemDataRole.UserRole,
                 {
                     "type": "dataclass",
-                    "class": dataclass_type,
+                    "class": obj_type,
                     "field_name": field_name,
                     "ui_hidden": False,
                 },
@@ -86,20 +86,20 @@ class ConfigHierarchyTreeHelper:
     def _add_ui_visible_dataclasses_to_tree(
         self,
         parent_item,
-        dataclass_type: Type,
+        obj_type: Type,
         *,
         is_root: bool = False,
         skip_root_ui_hidden: bool = True,
     ) -> None:
         """Recursively add dataclass children that are shown in the UI."""
-        for field in fields(dataclass_type):
+        for field in fields(obj_type):
             field_type = field.type
             if not is_dataclass(field_type):
                 continue
 
             base_type = self.get_base_type(field_type)
             display_name = getattr(base_type, "__name__", field.name)
-            ui_hidden = self.is_field_ui_hidden(dataclass_type, field.name, field_type)
+            ui_hidden = self.is_field_ui_hidden(obj_type, field.name, field_type)
 
             if is_root and skip_root_ui_hidden and ui_hidden:
                 continue
@@ -133,20 +133,20 @@ class ConfigHierarchyTreeHelper:
             self.add_inheritance_info(item, base_type)
             self._add_ui_visible_dataclasses_to_tree(
                 parent_item=item,
-                dataclass_type=base_type,
+                obj_type=base_type,
                 is_root=False,
                 skip_root_ui_hidden=False,
             )
 
     def is_field_ui_hidden(
         self,
-        dataclass_type: Type,
+        obj_type: Type,
         field_name: str,
         field_type: Type,
     ) -> bool:
         """Return True if a field should be hidden in the tree."""
         try:
-            field_obj = next(f for f in fields(dataclass_type) if f.name == field_name)
+            field_obj = next(f for f in fields(obj_type) if f.name == field_name)
             if field_obj.metadata.get("ui_hidden", False):
                 return True
         except (StopIteration, TypeError):
@@ -162,26 +162,26 @@ class ConfigHierarchyTreeHelper:
 
         return False
 
-    def get_base_type(self, dataclass_type: Type) -> Type:
+    def get_base_type(self, obj_type: Type) -> Type:
         """Return the non-lazy base type for a dataclass."""
-        if LazyDefaultPlaceholderService.has_lazy_resolution(dataclass_type):
-            for base in dataclass_type.__bases__:
+        if LazyDefaultPlaceholderService.has_lazy_resolution(obj_type):
+            for base in obj_type.__bases__:
                 if (
                     base.__name__ != "object"
                     and not LazyDefaultPlaceholderService.has_lazy_resolution(base)
                 ):
                     return base
 
-        return dataclass_type
+        return obj_type
 
     def add_inheritance_info(
         self,
         parent_item: QTreeWidgetItem,
-        dataclass_type: Type,
+        obj_type: Type,
     ) -> None:
         """Append inheritance information beneath the provided tree item."""
         direct_bases = []
-        for cls in dataclass_type.__bases__:
+        for cls in obj_type.__bases__:
             if cls.__name__ == "object":
                 continue
             if not hasattr(cls, "__dataclass_fields__"):

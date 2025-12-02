@@ -190,13 +190,13 @@ class CodeEditorFormUpdater:
             return getattr(obj, field_name, None)
 
     @staticmethod
-    def _is_dataclass_type(field_type: Any) -> bool:
+    def _is_dataclass(field_type: Any) -> bool:
         """Check if a field type represents (or wraps) a dataclass."""
 
         origin = get_origin(field_type)
         if origin is not None:
             return any(
-                CodeEditorFormUpdater._is_dataclass_type(arg)
+                CodeEditorFormUpdater._is_dataclass(arg)
                 for arg in get_args(field_type)
                 if arg is not type(None)
             )
@@ -214,7 +214,7 @@ class CodeEditorFormUpdater:
         non-dataclass fields we fall back to normal ``getattr``.
         """
 
-        if CodeEditorFormUpdater._is_dataclass_type(field_obj.type):
+        if CodeEditorFormUpdater._is_dataclass(field_obj.type):
             return CodeEditorFormUpdater._get_raw_field_value(
                 instance, field_obj.name
             )

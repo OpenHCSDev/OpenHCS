@@ -218,8 +218,8 @@ class WidgetService:
         """Apply placeholder behavior based on value."""
         logger.info(f"        🎨 _apply_context_behavior: {manager.field_id}.{param_name}, value={repr(value)[:30]}")
 
-        if not param_name or not manager.dataclass_type:
-            logger.warning(f"        ⏭️  No param_name or dataclass_type, skipping")
+        if not param_name or not manager.object_instance:
+            logger.warning(f"        ⏭️  No param_name or object_instance, skipping")
             return
 
         if value is None:
@@ -234,7 +234,7 @@ class WidgetService:
 
             live_context = ParameterFormManager.collect_live_context(
                 scope_filter=manager.scope_id,
-                for_type=root_manager.dataclass_type
+                for_type=type(root_manager.object_instance)
             )
 
             from contextlib import ExitStack
@@ -242,20 +242,20 @@ class WidgetService:
                 if manager.context_obj is not None:
                     stack.enter_context(config_context(manager.context_obj))
 
-                if manager.dataclass_type and manager.parameters:
+                if manager.object_instance and manager.parameters:
                     try:
                         import dataclasses
-                        if dataclasses.is_dataclass(manager.dataclass_type):
+                        if dataclasses.is_dataclass(type(manager.object_instance)):
                             overlay_dict = manager.parameters.copy()
                             for excluded_param in getattr(manager, 'exclude_params', []):
                                 if excluded_param not in overlay_dict and hasattr(manager.object_instance, excluded_param):
                                     overlay_dict[excluded_param] = getattr(manager.object_instance, excluded_param)
-                            overlay_instance = manager.dataclass_type(**overlay_dict)
+                            overlay_instance = type(manager.object_instance)(**overlay_dict)
                             stack.enter_context(config_context(overlay_instance))
                     except Exception:
                         pass
 
-                placeholder_text = manager.service.get_placeholder_text(param_name, manager.dataclass_type)
+                placeholder_text = manager.service.get_placeholder_text(param_name, type(manager.object_instance))
                 logger.info(f"        📝 Placeholder text: {repr(placeholder_text)[:50]}")
                 if placeholder_text:
                     self.widget_enhancer.apply_placeholder_text(widget, placeholder_text)

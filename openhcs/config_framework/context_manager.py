@@ -489,7 +489,7 @@ def is_same_type_in_context(type_a, type_b):
 def build_context_stack(
     context_obj: object | None,
     overlay: dict | None = None,
-    dataclass_type: type | None = None,
+    object_instance: object | None = None,
     live_context: dict | None = None,
     is_global_config_editing: bool = False,
     global_config_type: type | None = None,
@@ -513,7 +513,7 @@ def build_context_stack(
     Args:
         context_obj: The parent context object (e.g., PipelineConfig for Step editor)
         overlay: Dict of current form values to apply as overlay
-        dataclass_type: The type of the dataclass being edited
+        object_instance: The object being edited (type derived internally)
         live_context: Dict mapping types to their live values from other forms
         is_global_config_editing: True if editing a global config (masks thread-local)
         global_config_type: The global config type (used when is_global_config_editing=True)
@@ -526,11 +526,12 @@ def build_context_stack(
     from contextlib import ExitStack
 
     stack = ExitStack()
+    obj_type = type(object_instance) if object_instance else None
 
     ctx_type_name = type(context_obj).__name__ if context_obj else "None"
-    dc_type_name = dataclass_type.__name__ if dataclass_type else "None"
+    obj_type_name = obj_type.__name__ if obj_type else "None"
     live_ctx_types = [t.__name__ for t in live_context.keys()] if live_context else []
-    logger.info(f"🔧 build_context_stack: ctx={ctx_type_name}, dc={dc_type_name}, live_ctx={live_ctx_types[:5]}{'...' if len(live_ctx_types) > 5 else ''}")
+    logger.info(f"🔧 build_context_stack: ctx={ctx_type_name}, obj={obj_type_name}, live_ctx={live_ctx_types[:5]}{'...' if len(live_ctx_types) > 5 else ''}")
 
     # 1. Global context layer
     global_layer = _get_global_context_layer(live_context, is_global_config_editing, global_config_type)
@@ -588,12 +589,12 @@ def build_context_stack(
             logger.info(f"      ✅ injected root form as SimpleNamespace")
 
     # 5. Overlay from current form values
-    if dataclass_type and overlay:
+    if obj_type and overlay:
         overlay_keys = list(overlay.keys())[:5]
-        logger.info(f"  [5] OVERLAY layer: type={dataclass_type.__name__}, keys={overlay_keys}{'...' if len(overlay) > 5 else ''}")
+        logger.info(f"  [5] OVERLAY layer: type={obj_type.__name__}, keys={overlay_keys}{'...' if len(overlay) > 5 else ''}")
         try:
-            if is_dataclass(dataclass_type):
-                overlay_instance = dataclass_type(**overlay)
+            if is_dataclass(obj_type):
+                overlay_instance = obj_type(**overlay)
                 stack.enter_context(config_context(overlay_instance))
                 logger.info(f"      ✅ injected overlay")
         except Exception as e:

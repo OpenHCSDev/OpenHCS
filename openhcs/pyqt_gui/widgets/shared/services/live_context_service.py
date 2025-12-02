@@ -244,23 +244,23 @@ class LiveContextService:
     @classmethod
     def _collect_from_manager_tree(cls, manager, result: dict, scoped_result: Optional[dict] = None) -> None:
         """Recursively collect values from manager and all nested managers."""
-        if manager.dataclass_type:
+        if manager.object_instance:
             # Start with the manager's own user-modified values
             values = manager.get_user_modified_values()
 
             # CRITICAL: Merge nested manager values into parent's entry
             for field_name, nested in manager.nested_managers.items():
-                if nested.dataclass_type:
+                if nested.object_instance:
                     nested_values = nested.get_user_modified_values()
                     if nested_values:
                         try:
-                            values[field_name] = nested.dataclass_type(**nested_values)
+                            values[field_name] = type(nested.object_instance)(**nested_values)
                         except Exception:
                             pass  # Skip if reconstruction fails
 
-            result[manager.dataclass_type] = values
+            result[type(manager.object_instance)] = values
             if scoped_result is not None and manager.scope_id:
-                scoped_result.setdefault(manager.scope_id, {})[manager.dataclass_type] = result[manager.dataclass_type]
+                scoped_result.setdefault(manager.scope_id, {})[type(manager.object_instance)] = result[type(manager.object_instance)]
 
         # Recurse into nested managers
         for nested in manager.nested_managers.values():

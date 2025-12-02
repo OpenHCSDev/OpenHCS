@@ -43,7 +43,7 @@ class ExtractedParameters:
     default_value: Dict[str, Any] = field(default_factory=dict, metadata={'initial_values': True})
     param_type: Dict[str, Type] = field(default_factory=dict)
     description: Dict[str, str] = field(default_factory=dict)
-    dataclass_type: Type = field(default=None, metadata={'computed': lambda obj, *_: type(obj)})
+    object_instance: Any = field(default=None, metadata={'computed': lambda obj, *_: obj})
 
 
 @dataclass
@@ -72,7 +72,8 @@ class DerivationContext:
 
     @property
     def is_lazy_dataclass(self) -> bool:
-        return self.extracted.dataclass_type and LazyDefaultPlaceholderService.has_lazy_resolution(self.extracted.dataclass_type)
+        obj_type = type(self.extracted.object_instance) if self.extracted.object_instance else None
+        return obj_type and LazyDefaultPlaceholderService.has_lazy_resolution(obj_type)
 
     @property
     def is_global_config_editing(self) -> bool:
@@ -230,10 +231,11 @@ def _auto_generate_builders():
         logger = logging.getLogger(__name__)
         logger.info(f"🔧 Building config for {field_id}: is_nested={is_nested}, use_scroll_area={use_scroll_area}")
 
+        obj_type = type(extracted.object_instance) if extracted.object_instance else None
         config = pyqt_config(
             field_id=field_id,
             color_scheme=color_scheme or PyQt6ColorScheme(),
-            function_target=extracted.dataclass_type,
+            function_target=obj_type,
             use_scroll_area=use_scroll_area
         )
 
@@ -243,7 +245,7 @@ def _auto_generate_builders():
         from openhcs.ui.shared.parameter_form_service import ParameterAnalysisInput
         analysis_input = ParameterAnalysisInput(
             field_id=field_id,
-            parent_dataclass_type=extracted.dataclass_type,
+            parent_obj_type=obj_type,
             **{k: getattr(extracted, k) for k in ['default_value', 'param_type', 'description']}
         )
         form_structure = service.analyze_parameters(analysis_input)
