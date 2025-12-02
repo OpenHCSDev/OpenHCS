@@ -165,9 +165,46 @@ def _on_resolved_value_changed(self, scope_id, field, old_val, new_val):
 - `ContextStackRegistry` - Tracks registered objects (can provide dataclass_type info)
 - `scope_id` format - Already encodes hierarchy via `::` separator
 - `_pipeline_scope_token` - Stable tokens per step (survives reordering)
-- `LazyDefaultPlaceholderService` - Can be called by registry for static defaults
+- `resolve_field_inheritance()` - MRO-based resolution (can be called directly by Registry)
+- `extract_all_configs()` - Builds available_configs dict from context object
 
-**Key Insight:** scope_id is identity-based (token assigned at creation), not position-based. Reordering steps does NOT change their scope_id, so snapshots/comparisons remain valid.
+**Key Insight 1:** scope_id is identity-based (token assigned at creation), not position-based. Reordering steps does NOT change their scope_id, so snapshots/comparisons remain valid.
+
+**Key Insight 2:** Resolution has TWO dimensions:
+1. **Scope hierarchy (vertical):** `plate_001::step_0` → `plate_001` → `None` (global)
+2. **MRO hierarchy (horizontal):** `StepWellFilterConfig` → `WellFilterConfig` (within same scope)
+
+Even at `scope_id=None` (GlobalPipelineConfig), MRO inheritance applies. When `well_filter_config.well_filter` changes, `step_well_filter_config.well_filter` must be recomputed if it inherits (is None).
+
+**Resolution Algorithm (existing, reuse):**
+```python
+# From dual_axis_resolver.py - resolve_field_inheritance()
+for mro_class in obj_type.__mro__:
+    for config_name, config_instance in available_configs.items():
+        if type(config_instance) == mro_class:
+            value = object.__getattribute__(config_instance, field_name)
+            if value is not None:
+                return value
+```
+
+The Registry can call this directly. It just needs to:
+1. Build `available_configs` from LiveContext for each scope
+2. Call `resolve_field_inheritance()`
+3. Track which scopes have types whose MRO includes the changed type → recompute those
+
+**Dependency Tracking for MRO:**
+
+When `WellFilterConfig.well_filter` changes (in any scope), we must recompute fields for types where:
+- `WellFilterConfig` is in their MRO (e.g., `StepWellFilterConfig`, `PathPlanningConfig`)
+- Their raw value for that field is `None` (they inherit)
+
+This can be computed once per type and cached:
+```python
+_mro_dependencies: Dict[str, Set[str]] = {
+    'WellFilterConfig': {'StepWellFilterConfig', 'PathPlanningConfig', 'StepMaterializationConfig'},
+    # ... auto-generated from class MRO at registration time
+}
+```
 
 ### Implementation Draft
 
