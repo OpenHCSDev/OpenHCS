@@ -205,23 +205,15 @@ def _on_context_changed(self, editing_scope_id: str):
 1. `context_value_changed` → per-field changes (user typing)
 2. `context_refreshed` → bulk changes (save/cancel, `trigger_global_refresh()`)
 
-No token-based fallback needed - both change types emit signals.
-
 ```python
 def __init__(self):
-    ParameterFormManager.context_value_changed.connect(self._on_context_value_changed)
-    ParameterFormManager.context_refreshed.connect(self._on_context_refreshed)
+    ParameterFormManager.context_value_changed.connect(self._on_context_changed)
+    ParameterFormManager.context_refreshed.connect(self._on_context_changed)
 
-def _on_context_value_changed(self, field_path, new_value, editing_obj, context_obj, editing_scope_id):
-    """Per-field change: recompute affected scopes."""
-    self._recompute_affected_scopes(editing_scope_id)
+def _on_context_changed(self, *args):
+    """Extract editing_scope_id (last arg) and recompute affected scopes."""
+    editing_scope_id = args[-1]  # Both signals have scope_id as last arg
 
-def _on_context_refreshed(self, editing_obj, context_obj, editing_scope_id):
-    """Bulk change (save/cancel): recompute affected scopes."""
-    self._recompute_affected_scopes(editing_scope_id)
-
-def _recompute_affected_scopes(self, editing_scope_id: str):
-    """Recompute all scopes affected by change at editing_scope_id."""
     for target_scope_id in self._scopes:
         if target_scope_id == editing_scope_id:
             continue  # Don't recompute the scope being edited
@@ -229,7 +221,7 @@ def _recompute_affected_scopes(self, editing_scope_id: str):
             self._recompute_scope(target_scope_id, exclude_scope=editing_scope_id)
 ```
 
-**Why no debouncing?** O(n) scope iteration with O(1) string prefix check. Recomputation only for affected scopes.
+**Why one handler?** Both signals have `editing_scope_id` as last arg. We only need that for affectedness check - the other args (`editing_obj`, `context_obj`) were for type introspection which is now gone.
 
 **`_recompute_scope()` - emit only when value actually changed:**
 
