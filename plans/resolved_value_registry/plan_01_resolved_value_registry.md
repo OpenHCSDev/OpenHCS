@@ -115,40 +115,133 @@ def _compute_resolved(self, scope_id: str, field_name: str) -> Any:
         return getattr(reg.object_instance, field_name)
 ```
 
-#### 4. Change Detection: Use scoped_values + Recompute Children
+#### 4. Change Detection: Extract + Reuse PFM's Invalidation Logic
 
-**Fix for review point 2:** Use `scoped_values` (per-scope) instead of `values` (merged).
-**Fix for review point 4:** When a scope changes, also recompute child scopes.
+**Current PFM approach:** Each PFM receives "something changed" callback and uses `_is_affected_by_context_change()` to decide whether to refresh.
+
+**Extract to reusable function:** Move `_is_affected_by_context_change()` logic to a service function that both PFM and Registry can call.
 
 ```python
+# NEW: openhcs/pyqt_gui/widgets/shared/services/scope_invalidation_service.py
+
+def is_scope_affected_by_change(
+    target_scope_id: str,
+    target_object_instance: Any,
+    target_context_obj: Any,
+    editing_object: Any,
+    editing_context_obj: Any,
+    editing_scope_id: str,
+) -> bool:
+    """
+    Determine if a scope is affected by a context change.
+
+    EXTRACTED from PFM._is_affected_by_context_change() for reuse.
+    Uses existing config_framework hierarchy functions.
+    """
+    from openhcs.config_framework import is_global_config_instance
+    from openhcs.config_framework.context_manager import (
+        is_ancestor_in_context,
+        is_same_type_in_context,
+        get_root_from_scope_key,
+    )
+    from dataclasses import fields, is_dataclass
+    import typing
+
+    # Root isolation: different plate roots don't affect each other
+    my_root = get_root_from_scope_key(target_scope_id)
+    editing_root = get_root_from_scope_key(editing_scope_id)
+    if editing_root and my_root and editing_root != my_root:
+        return False
+
+    editing_type = type(editing_object)
+
+    # Global config edits affect all
+    if is_global_config_instance(editing_object):
+        return True
+
+    # Ancestor/same-type checks for context object
+    if target_context_obj is not None:
+        context_obj_type = type(target_context_obj)
+        if is_ancestor_in_context(editing_type, context_obj_type):
+            return True
+        if is_same_type_in_context(editing_type, context_obj_type):
+            return True
+
+    # Check dataclass fields for direct type match (handles nested configs)
+    if is_dataclass(editing_object) and is_dataclass(target_object_instance):
+        for field in fields(type(target_object_instance)):
+            if field.type == editing_type:
+                return True
+            origin = typing.get_origin(field.type)
+            if origin is typing.Union:
+                args = typing.get_args(field.type)
+                if editing_type in args:
+                    return True
+
+    return False
+```
+
+**Registry uses this:**
+```python
+def _on_live_context_changed(self, editing_object, editing_context_obj, editing_scope_id):
+    """LiveContext changed → recompute affected scopes only."""
+    from .scope_invalidation_service import is_scope_affected_by_change
+
+    for scope_id, reg in self._scopes.items():
+        if is_scope_affected_by_change(
+            target_scope_id=scope_id,
+            target_object_instance=reg.object_instance,
+            target_context_obj=reg.context_obj,
+            editing_object=editing_object,
+            editing_context_obj=editing_context_obj,
+            editing_scope_id=editing_scope_id,
+        ):
+            self._recompute_scope(scope_id)
+```
+
+**PFM refactored to use same function:**
+```python
+def _is_affected_by_context_change(self, editing_object, context_object, editing_scope_id):
+    from .services.scope_invalidation_service import is_scope_affected_by_change
+    return is_scope_affected_by_change(
+        target_scope_id=self.scope_id,
+        target_object_instance=self.object_instance,
+        target_context_obj=self.context_obj,
+        editing_object=editing_object,
+        editing_context_obj=context_object,
+        editing_scope_id=editing_scope_id,
+    )
+```
+
+**Two notification paths exist:**
+
+1. `LiveContextService.connect_listener(callback)` → callback with NO args → "something changed"
+   - PFM uses this for bulk refresh (save/cancel/code editor)
+   - Registry uses this as fallback: recompute all scopes
+
+2. `ParameterFormManager.context_value_changed` signal → HAS args (field_path, new_value, editing_obj, context_obj, scope_id)
+   - PFM uses this for targeted refresh with `_is_affected_by_context_change()` filtering
+   - Registry can connect to this for smart invalidation (only affected scopes)
+
+**Registry subscribes to BOTH:**
+```python
 def __init__(self):
-    super().__init__()
-    self._previous_token: int = -1
-    LiveContextService.connect_listener(self._on_live_context_changed)
+    # Bulk invalidation (something changed, don't know what)
+    LiveContextService.connect_listener(self._on_live_context_changed_bulk)
 
-def _on_live_context_changed(self):
-    """LiveContext changed → recompute all scopes."""
-    # Use token to detect if anything actually changed
-    snapshot = LiveContextService.collect()
-    if snapshot.token == self._previous_token:
-        return
-    self._previous_token = snapshot.token
+    # Targeted invalidation (know exactly what changed)
+    ParameterFormManager.context_value_changed.connect(self._on_context_value_changed)
 
-    # Recompute all registered scopes
-    # (Token changed = something changed, recompute everything)
+def _on_live_context_changed_bulk(self):
+    """Fallback: recompute all scopes."""
     for scope_id in self._scopes:
         self._recompute_scope(scope_id)
 
-def _recompute_scope(self, scope_id: str):
-    """Recompute all cached fields for a scope."""
-    if scope_id not in self._current:
-        return
-
-    for field_name, old_value in list(self._current[scope_id].items()):
-        new_value = self._compute_resolved(scope_id, field_name)
-        if new_value != old_value:
-            self._current[scope_id][field_name] = new_value
-            self.value_changed.emit(scope_id, field_name, old_value, new_value)
+def _on_context_value_changed(self, field_path, new_value, editing_obj, context_obj, scope_id):
+    """Targeted: only recompute affected scopes."""
+    for target_scope_id, reg in self._scopes.items():
+        if is_scope_affected_by_change(...):
+            self._recompute_scope(target_scope_id)
 ```
 
 #### 5. Placeholder Text: Use Existing Service
