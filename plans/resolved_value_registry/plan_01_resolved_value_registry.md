@@ -279,6 +279,43 @@ def _on_context_refreshed(self, editing_obj, context_obj, editing_scope_id):
 
 **Why no debouncing?** Each signal handler does O(n) scope iteration with O(1) `is_scope_affected_by_change()` check. Recomputation only happens for actually-affected scopes. This is already efficient.
 
+**`_recompute_scope()` - emit only when value actually changed:**
+
+```python
+def _recompute_scope(self, scope_id: str, exclude_scope: str = None):
+    """Recompute all tracked fields for a scope, emit value_changed only if different.
+
+    CRITICAL: Only emits value_changed when old != new.
+    - Step with override (well_filter=3): resolved stays 3 → NO signal
+    - Step inheriting (well_filter=None): resolved changes 5→7 → EMIT signal
+    """
+    reg = self._scopes.get(scope_id)
+    if not reg:
+        return
+
+    old_values = self._current.get(scope_id, {})
+    new_values = {}
+
+    # Recompute all fields on the object
+    for field in fields(type(reg.object_instance)):
+        field_name = field.name
+        new_val = self._compute_resolved(scope_id, field_name, exclude_scope)
+        new_values[field_name] = new_val
+
+        old_val = old_values.get(field_name)
+
+        # Only emit if value actually changed
+        if old_val != new_val:
+            self.value_changed.emit(scope_id, field_name, old_val, new_val)
+
+    # Update cache
+    self._current[scope_id] = new_values
+```
+
+This means:
+- Step A (`well_filter=3` override): pipeline changes → resolved still 3 → **no flash**
+- Step B (`well_filter=None` inheriting): pipeline changes 5→7 → resolved changes → **flash**
+
 #### 5. Placeholder Text: Format Cached Value
 
 **CRITICAL:** Do NOT re-resolve via `LazyDefaultPlaceholderService` - that would do duplicate resolution and could drift from cached value. Instead, format the cached resolved value directly.
@@ -373,46 +410,7 @@ def _on_registry_value_changed(self, scope_id: str, field: str, old_val: Any, ne
     """Registry value changed - update affected list item."""
     if self._has_item_with_scope(scope_id):
         self._refresh_item_by_scope(scope_id)
-        self._flash_item(scope_id)  # Flash animation for visual feedback
-```
-
-**Flash animation (in AbstractManagerWidget):**
-
-```python
-def _flash_item(self, scope_id: str):
-    """Trigger flash animation on list item when resolved value changes."""
-    item = self._find_item_by_scope(scope_id)
-    if not item:
-        return
-
-    # Store scope_id in item data for delegate to read
-    # Delegate checks this and applies highlight color
-    row = self.item_list.row(item)
-    self._flashing_rows.add(row)
-
-    # Schedule flash removal
-    QTimer.singleShot(300, lambda: self._clear_flash(row))
-
-    # Force repaint
-    self.item_list.viewport().update()
-
-def _clear_flash(self, row: int):
-    """Remove flash highlight."""
-    self._flashing_rows.discard(row)
-    self.item_list.viewport().update()
-```
-
-**In ListItemDelegate (paint method):**
-
-```python
-def paint(self, painter, option, index):
-    # Check if row is flashing
-    manager = self._get_manager()  # Reference to AbstractManagerWidget
-    if index.row() in manager._flashing_rows:
-        # Draw flash highlight background
-        painter.fillRect(option.rect, QColor(255, 255, 150, 100))  # Yellow flash
-
-    # Continue with normal painting...
+        self._flash_item(scope_id)  # Optional: visual feedback
 
 def _on_scope_dirty_changed(self, scope_id: str, is_dirty: bool):
     """Scope dirty state changed - update list item visual."""
