@@ -367,12 +367,55 @@ def _init_registry_connection(self):
     """Connect to registry for list updates. Called in __init__."""
     registry = ResolvedValueRegistry.instance()
     registry.value_changed.connect(self._on_registry_value_changed)
+    registry.scope_dirty_changed.connect(self._on_scope_dirty_changed)
 
 def _on_registry_value_changed(self, scope_id: str, field: str, old_val: Any, new_val: Any):
     """Registry value changed - update affected list item."""
     if self._has_item_with_scope(scope_id):
         self._refresh_item_by_scope(scope_id)
         self._flash_item(scope_id)  # Optional: visual feedback
+
+def _on_scope_dirty_changed(self, scope_id: str, is_dirty: bool):
+    """Scope dirty state changed - update list item visual."""
+    if self._has_item_with_scope(scope_id):
+        self._update_item_dirty_state(scope_id, is_dirty)
+```
+
+**Dirty marking for list items (in AbstractManagerWidget):**
+
+```python
+def _update_item_dirty_state(self, scope_id: str, is_dirty: bool):
+    """Update visual dirty indicator for list item."""
+    # Find item by scope_id and update its visual state
+    # e.g., add/remove "•" prefix, change font style, etc.
+    item = self._find_item_by_scope(scope_id)
+    if item:
+        text = item.text()
+        if is_dirty and not text.startswith("• "):
+            item.setText(f"• {text}")
+        elif not is_dirty and text.startswith("• "):
+            item.setText(text[2:])
+
+def is_item_dirty(self, item: Any) -> bool:
+    """Check if item has unsaved changes (compared to last snapshot)."""
+    registry = ResolvedValueRegistry.instance()
+    scope_id = self._get_item_scope_id(item)
+    return registry.is_dirty(scope_id, snapshot_name="last_save")
+```
+
+**Snapshot lifecycle:**
+
+```python
+# In save handler (AbstractManagerWidget or subclass)
+def _on_save(self):
+    self._do_save()  # persist to disk
+
+    # Update snapshot after save - values are now "saved state"
+    registry = ResolvedValueRegistry.instance()
+    registry.save_snapshot("last_save")  # Captures current resolved values
+
+    # All items now clean (current == snapshot)
+    # scope_dirty_changed signals will fire for any that were dirty
 ```
 
 **Concrete classes just implement `_get_item_scope_id()`:**
