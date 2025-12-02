@@ -298,6 +298,41 @@ def get_root_from_scope_key(scope_key: str) -> str:
     return scope_key.split("::")[0]
 
 
+def is_scope_affected(target_scope_id: str | None, editing_scope_id: str | None) -> bool:
+    """Check if target scope is affected by edit at editing scope.
+
+    Uses scope_id hierarchy - no type introspection needed:
+    - None/"" (global) → affects all
+    - "plate_path" (pipeline) → affects same plate + all its steps
+    - "plate_path::token" (step) → affects only that step
+
+    Args:
+        target_scope_id: The scope being checked for affectedness (None = global)
+        editing_scope_id: The scope where the edit occurred (None = global)
+
+    Returns:
+        True if target should refresh when editing_scope changes
+    """
+    # Normalize None to empty string
+    target = target_scope_id or ""
+    editing = editing_scope_id or ""
+
+    # Global edit affects all
+    if not editing:
+        return True
+
+    # Different plate roots = not affected
+    target_root = get_root_from_scope_key(target)
+    editing_root = get_root_from_scope_key(editing)
+    if target_root != editing_root:
+        return False
+
+    # Same root: parent affects children, not vice versa
+    # editing="plate" affects target="plate::step" ✓
+    # editing="plate::step" affects target="plate" ✗
+    return target == editing or target.startswith(editing + "::")
+
+
 def _normalize_type_for_hierarchy(t):
     """Normalize a type for hierarchy registry, but preserve lazy-global distinction.
 

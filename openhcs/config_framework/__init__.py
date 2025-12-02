@@ -93,6 +93,7 @@ from openhcs.config_framework.context_manager import (
     get_ancestors_from_hierarchy,
     # Scope key utilities
     get_root_from_scope_key,
+    is_scope_affected,
     # Context stack building (framework-agnostic)
     build_context_stack,
 )
@@ -151,6 +152,7 @@ __all__ = [
     'get_base_global_config',
     'get_context_type_stack',
     'get_root_from_scope_key',
+    'is_scope_affected',
     'build_context_stack',
     # Placeholder
     'LazyDefaultPlaceholderService',
