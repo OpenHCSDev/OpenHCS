@@ -81,38 +81,50 @@ Lazy resolution applies to:
 
 ```python
 from openhcs.config_framework.lazy_factory import LazyDataclass
+from dataclasses import fields, is_dataclass
 
-def _discover_trackable_attrs(self, object_instance) -> List[Tuple[str, object]]:
+def _discover_lazy_instances(self, object_instance) -> List[Tuple[str, LazyDataclass]]:
     """
-    Get attrs that support lazy resolution.
+    Find all LazyDataclass instances to track.
 
-    Returns list of (dotted_path, lazy_instance) tuples.
-    E.g., for FunctionStep: [("streaming_defaults", lazy_sd), ("dtype_config", lazy_dc), ...]
+    Returns list of (prefix_path, lazy_instance) tuples.
+    - prefix_path is "" for root, "streaming_defaults" for nested
+    - Each lazy_instance has all its fields trackable
     """
-    trackable = []
+    result = []
 
-    # Check if object itself is a LazyDataclass
+    # Check if root object is a LazyDataclass
     if isinstance(object_instance, LazyDataclass):
-        # All fields on this object support lazy resolution
-        trackable.append(("", object_instance))  # Empty path = root object
+        result.append(("", object_instance))
 
     # Check nested attrs that are LazyDataclass
-    for attr_name in dir(object_instance):
-        if attr_name.startswith('_'):
-            continue
-        try:
-            val = getattr(object_instance, attr_name)
+    if is_dataclass(object_instance):
+        for f in fields(object_instance):
+            val = getattr(object_instance, f.name)
             if isinstance(val, LazyDataclass):
-                trackable.append((attr_name, val))
-        except Exception:
-            pass
+                result.append((f.name, val))
 
-    return trackable
+    return result
+
+def _get_trackable_fields(self, lazy_instance: LazyDataclass) -> List[str]:
+    """Get all field names on a LazyDataclass (all support lazy resolution)."""
+    return [f.name for f in fields(lazy_instance)]
 ```
 
-**Example results:**
-- `PipelineConfig` → `[("", pipeline_config)]` (all fields trackable)
-- `FunctionStep` → `[("streaming_defaults", sd), ("dtype_config", dc), ("step_well_filter_config", swfc)]`
+**Example:**
+```python
+# PipelineConfig (is LazyDataclass)
+lazy_instances = [("", pipeline_config)]  # root is lazy
+fields_for_root = ["num_workers", "well_filter_config", "streaming_defaults", ...]
+
+# FunctionStep (NOT LazyDataclass, but has nested ones)
+lazy_instances = [
+    ("streaming_defaults", lazy_sd),      # nested lazy
+    ("dtype_config", lazy_dc),            # nested lazy
+    ("step_well_filter_config", lazy_swfc) # nested lazy
+]
+fields_for_sd = ["well_filter", "enabled", "host", ...]
+```
 
 #### 3. Resolution: REUSE ParameterOpsService Pattern
 
