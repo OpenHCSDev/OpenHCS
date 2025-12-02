@@ -248,60 +248,36 @@ def _is_affected_by_context_change(self, editing_object, context_object, editing
     )
 ```
 
-**Two notification paths exist - Registry uses BOTH (with different strategies):**
+**Two signals cover all change sources:**
 
-1. `ParameterFormManager.context_value_changed` signal → HAS args → targeted refresh
-   - Registry uses for smart invalidation (only affected scopes)
-   - Excludes editing scope from live context
+1. `context_value_changed` → per-field changes (user typing)
+2. `context_refreshed` → bulk changes (save/cancel, `trigger_global_refresh()`)
 
-2. `LiveContextService.connect_listener(callback)` → callback with NO args → "something changed"
-   - Catches changes that DON'T emit targeted signals:
-     - `trigger_global_refresh()` (code editor saves)
-     - Manager unregister
-     - Save/cancel operations
-   - **Debounced + differential** to avoid recomputing everything on every keystroke
+No token-based fallback needed - both change types emit signals.
 
-**Registry subscribes to BOTH:**
 ```python
 def __init__(self):
-    # Targeted invalidation (per-field changes with editing info)
     ParameterFormManager.context_value_changed.connect(self._on_context_value_changed)
     ParameterFormManager.context_refreshed.connect(self._on_context_refreshed)
 
-    # Token-based fallback (catches trigger_global_refresh, unregister, etc.)
-    # DEBOUNCED to avoid recomputing on every keystroke
-    LiveContextService.connect_listener(self._on_token_changed)
-    self._last_processed_token = -1
-    self._token_refresh_timer = None  # QTimer for 50ms debounce
-
 def _on_context_value_changed(self, field_path, new_value, editing_obj, context_obj, editing_scope_id):
-    """Targeted: recompute affected scopes, excluding editing scope."""
+    """Per-field change: recompute affected scopes, excluding editing scope."""
     for target_scope_id, reg in self._scopes.items():
         if target_scope_id == editing_scope_id:
-            continue  # Don't recompute the scope that's being edited
+            continue  # Don't recompute the scope being edited
         if is_scope_affected_by_change(...):
             self._recompute_scope(target_scope_id, exclude_scope=editing_scope_id)
 
-def _on_token_changed(self):
-    """Debounced fallback for non-signal changes."""
-    if self._token_refresh_timer is None:
-        self._token_refresh_timer = QTimer()
-        self._token_refresh_timer.setSingleShot(True)
-        self._token_refresh_timer.timeout.connect(self._do_token_refresh)
-    self._token_refresh_timer.start(50)  # 50ms debounce
-
-def _do_token_refresh(self):
-    """Actual token-based refresh (debounced)."""
-    current_token = LiveContextService.get_token()
-    if current_token == self._last_processed_token:
-        return
-    self._last_processed_token = current_token
-
-    # Recompute all scopes - we don't know what changed
-    # This is the fallback for trigger_global_refresh, unregister, etc.
-    for scope_id in self._scopes:
-        self._recompute_scope(scope_id)
+def _on_context_refreshed(self, editing_obj, context_obj, editing_scope_id):
+    """Bulk change (save/cancel): same filtering logic."""
+    for target_scope_id, reg in self._scopes.items():
+        if target_scope_id == editing_scope_id:
+            continue
+        if is_scope_affected_by_change(...):
+            self._recompute_scope(target_scope_id, exclude_scope=editing_scope_id)
 ```
+
+**Why no debouncing?** Each signal handler does O(n) scope iteration with O(1) `is_scope_affected_by_change()` check. Recomputation only happens for actually-affected scopes. This is already efficient.
 
 #### 5. Placeholder Text: Format Cached Value
 
@@ -375,9 +351,9 @@ def _on_resolved_value_changed(self, scope_id, field, old_val, new_val):
 
 **Key Insight 2:** `LiveContextService.collect(scope_filter=scope_id)` includes the active manager's unsaved values. Must exclude editing scope when computing resolved values, otherwise registry drifts as user types.
 
-**Key Insight 3:** Use BOTH notification paths:
-- Targeted (`context_value_changed`) for smart invalidation with scope exclusion
-- Token-based (debounced) as fallback for `trigger_global_refresh()`, manager unregister, etc.
+**Key Insight 3:** Two signals cover all changes - no token-based fallback needed:
+- `context_value_changed` for per-field changes
+- `context_refreshed` for bulk changes (save/cancel, `trigger_global_refresh()`)
 
 **Key Insight 4:** `get_placeholder_text()` must format the CACHED value, not re-resolve. Re-resolution requires context stack setup and can drift from cached value.
 
