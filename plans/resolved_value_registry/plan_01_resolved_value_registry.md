@@ -373,7 +373,46 @@ def _on_registry_value_changed(self, scope_id: str, field: str, old_val: Any, ne
     """Registry value changed - update affected list item."""
     if self._has_item_with_scope(scope_id):
         self._refresh_item_by_scope(scope_id)
-        self._flash_item(scope_id)  # Optional: visual feedback
+        self._flash_item(scope_id)  # Flash animation for visual feedback
+```
+
+**Flash animation (in AbstractManagerWidget):**
+
+```python
+def _flash_item(self, scope_id: str):
+    """Trigger flash animation on list item when resolved value changes."""
+    item = self._find_item_by_scope(scope_id)
+    if not item:
+        return
+
+    # Store scope_id in item data for delegate to read
+    # Delegate checks this and applies highlight color
+    row = self.item_list.row(item)
+    self._flashing_rows.add(row)
+
+    # Schedule flash removal
+    QTimer.singleShot(300, lambda: self._clear_flash(row))
+
+    # Force repaint
+    self.item_list.viewport().update()
+
+def _clear_flash(self, row: int):
+    """Remove flash highlight."""
+    self._flashing_rows.discard(row)
+    self.item_list.viewport().update()
+```
+
+**In ListItemDelegate (paint method):**
+
+```python
+def paint(self, painter, option, index):
+    # Check if row is flashing
+    manager = self._get_manager()  # Reference to AbstractManagerWidget
+    if index.row() in manager._flashing_rows:
+        # Draw flash highlight background
+        painter.fillRect(option.rect, QColor(255, 255, 150, 100))  # Yellow flash
+
+    # Continue with normal painting...
 
 def _on_scope_dirty_changed(self, scope_id: str, is_dirty: bool):
     """Scope dirty state changed - update list item visual."""
