@@ -92,38 +92,63 @@ def register_scope(self, scope_id: str, context_obj: Any, object_instance: Any):
 
 #### 3. Resolution: Use Existing Services
 
-**IMPORTANT:** Registry represents COMMITTED state (saved values + live context from OTHER open forms). It does NOT include the current form's unsaved overlay - that's intentional. The overlay layer is for "live typing preview" which PFM handles separately.
+**IMPORTANT:** Registry represents COMMITTED state (saved values + live context from OTHER open forms). It must EXCLUDE the editing scope's unsaved values to avoid drift as user types.
+
+**Two-layer approach:**
+1. `.values` (root-filtered) for ancestor scopes (pipeline/global) - so child sees parent's live edits
+2. `.scoped_values[scope_id]` EXCLUDED when computing that scope - so we don't include our own unsaved values
 
 ```python
-def _compute_resolved(self, scope_id: str, field_name: str) -> Any:
+def _compute_resolved(self, scope_id: str, field_name: str, exclude_scope: str = None) -> Any:
     """Compute resolved value using EXISTING infrastructure.
 
-    Uses scoped_values[scope_id] for per-scope isolation.
-    Two steps of the same type don't overwrite each other.
+    Two-layer live context:
+    1. .values (root-filtered) - sees ancestor edits (pipeline/global)
+    2. Exclude the editing scope to avoid including unsaved values
+
+    Args:
+        exclude_scope: Scope to exclude from live context (typically the scope being computed
+                       or the scope that triggered the change)
     """
-    from openhcs.config_framework.context_manager import build_context_stack
+    from openhcs.config_framework.context_manager import build_context_stack, get_root_from_scope_key
     from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
 
     reg = self._scopes[scope_id]
+    my_root = get_root_from_scope_key(scope_id)
 
-    # Collect live context with scope filter
+    # Collect live context with root filter (sees ancestor edits)
     live_snapshot = LiveContextService.collect(scope_filter=scope_id)
 
-    # CRITICAL: Use scoped_values[scope_id] for per-scope isolation
-    # .values is merged across all scopes - two steps of same type overwrite each other
-    scoped_live = live_snapshot.scoped_values.get(scope_id, {}) if live_snapshot else {}
+    # Build merged live context:
+    # 1. Start with .values (type-keyed, has ancestor data)
+    # 2. Filter to same root (plate isolation)
+    # 3. EXCLUDE the editing scope's values to get "committed" state
+    merged_live = {}
+    if live_snapshot:
+        for type_key, val in live_snapshot.values.items():
+            merged_live[type_key] = val
+
+        # Remove the excluded scope's contributions
+        if exclude_scope and exclude_scope in live_snapshot.scoped_values:
+            excluded_types = set(live_snapshot.scoped_values[exclude_scope].keys())
+            for t in excluded_types:
+                merged_live.pop(t, None)
 
     # Build context stack
     stack = build_context_stack(
         context_obj=reg.context_obj,
         object_instance=reg.object_instance,
-        live_context=scoped_live,
+        live_context=merged_live,
     )
 
     # getattr triggers lazy resolution
     with stack:
         return getattr(reg.object_instance, field_name)
 ```
+
+**When to exclude:**
+- `_on_context_value_changed(editing_scope_id)` → exclude `editing_scope_id`
+- `is_dirty()` check → exclude the scope being checked (compare saved vs committed-without-self)
 
 #### 4. Change Detection: Extract + Reuse PFM's Invalidation Logic
 
@@ -223,40 +248,59 @@ def _is_affected_by_context_change(self, editing_object, context_object, editing
     )
 ```
 
-**Two notification paths exist - Registry uses ONLY the targeted path:**
+**Two notification paths exist - Registry uses BOTH (with different strategies):**
 
-1. `LiveContextService.connect_listener(callback)` → callback with NO args → "something changed"
-   - PFM uses this for bulk refresh (save/cancel/code editor)
-   - **Registry does NOT use this** - would double-work with targeted path
+1. `ParameterFormManager.context_value_changed` signal → HAS args → targeted refresh
+   - Registry uses for smart invalidation (only affected scopes)
+   - Excludes editing scope from live context
 
-2. `ParameterFormManager.context_value_changed` signal → HAS args (field_path, new_value, editing_obj, context_obj, scope_id)
-   - PFM uses this for targeted refresh with `_is_affected_by_context_change()` filtering
-   - **Registry uses this** for smart invalidation (only affected scopes)
+2. `LiveContextService.connect_listener(callback)` → callback with NO args → "something changed"
+   - Catches changes that DON'T emit targeted signals:
+     - `trigger_global_refresh()` (code editor saves)
+     - Manager unregister
+     - Save/cancel operations
+   - **Debounced + differential** to avoid recomputing everything on every keystroke
 
-**Registry subscribes to targeted path ONLY:**
+**Registry subscribes to BOTH:**
 ```python
 def __init__(self):
-    # ONLY targeted invalidation - bulk path would recompute everything on every keystroke
+    # Targeted invalidation (per-field changes with editing info)
     ParameterFormManager.context_value_changed.connect(self._on_context_value_changed)
     ParameterFormManager.context_refreshed.connect(self._on_context_refreshed)
 
-def _on_context_value_changed(self, field_path, new_value, editing_obj, context_obj, scope_id):
-    """Targeted: only recompute affected scopes."""
-    for target_scope_id, reg in self._scopes.items():
-        if is_scope_affected_by_change(
-            target_scope_id=target_scope_id,
-            target_object_instance=reg.object_instance,
-            target_context_obj=reg.context_obj,
-            editing_object=editing_obj,
-            editing_context_obj=context_obj,
-            editing_scope_id=scope_id,
-        ):
-            self._recompute_scope(target_scope_id)
+    # Token-based fallback (catches trigger_global_refresh, unregister, etc.)
+    # DEBOUNCED to avoid recomputing on every keystroke
+    LiveContextService.connect_listener(self._on_token_changed)
+    self._last_processed_token = -1
+    self._token_refresh_timer = None  # QTimer for 50ms debounce
 
-def _on_context_refreshed(self, editing_obj, context_obj, scope_id):
-    """Bulk refresh (save/cancel) - same filtering logic."""
-    # Same as above - filter affected scopes
-    ...
+def _on_context_value_changed(self, field_path, new_value, editing_obj, context_obj, editing_scope_id):
+    """Targeted: recompute affected scopes, excluding editing scope."""
+    for target_scope_id, reg in self._scopes.items():
+        if target_scope_id == editing_scope_id:
+            continue  # Don't recompute the scope that's being edited
+        if is_scope_affected_by_change(...):
+            self._recompute_scope(target_scope_id, exclude_scope=editing_scope_id)
+
+def _on_token_changed(self):
+    """Debounced fallback for non-signal changes."""
+    if self._token_refresh_timer is None:
+        self._token_refresh_timer = QTimer()
+        self._token_refresh_timer.setSingleShot(True)
+        self._token_refresh_timer.timeout.connect(self._do_token_refresh)
+    self._token_refresh_timer.start(50)  # 50ms debounce
+
+def _do_token_refresh(self):
+    """Actual token-based refresh (debounced)."""
+    current_token = LiveContextService.get_token()
+    if current_token == self._last_processed_token:
+        return
+    self._last_processed_token = current_token
+
+    # Recompute all scopes - we don't know what changed
+    # This is the fallback for trigger_global_refresh, unregister, etc.
+    for scope_id in self._scopes:
+        self._recompute_scope(scope_id)
 ```
 
 #### 5. Placeholder Text: Format Cached Value
@@ -325,11 +369,15 @@ def _on_resolved_value_changed(self, scope_id, field, old_val, new_val):
 
 ### Findings
 
-**Key Insight 1:** `LiveContextSnapshot.scoped_values[scope_id]` gives per-scope data, while `.values` is merged across all scopes (type-keyed). Two steps of the same type would overwrite each other in `.values`. **Must use `scoped_values[scope_id]`.**
+**Key Insight 1:** Two-layer live context needed:
+- `.values` (type-keyed) for ancestor data - so children see parent's live edits
+- EXCLUDE the editing scope's contributions to get "committed" state without own unsaved values
 
-**Key Insight 2:** Registry represents COMMITTED state (saved + other forms' live context). It does NOT include the current form's unsaved overlay - that's for "live typing preview" which PFM handles separately via its own context stack.
+**Key Insight 2:** `LiveContextService.collect(scope_filter=scope_id)` includes the active manager's unsaved values. Must exclude editing scope when computing resolved values, otherwise registry drifts as user types.
 
-**Key Insight 3:** Use targeted path (`context_value_changed` signal) ONLY. The bulk path (`LiveContextService.connect_listener`) fires on every keystroke and would recompute all scopes, making targeted invalidation useless.
+**Key Insight 3:** Use BOTH notification paths:
+- Targeted (`context_value_changed`) for smart invalidation with scope exclusion
+- Token-based (debounced) as fallback for `trigger_global_refresh()`, manager unregister, etc.
 
 **Key Insight 4:** `get_placeholder_text()` must format the CACHED value, not re-resolve. Re-resolution requires context stack setup and can drift from cached value.
 
