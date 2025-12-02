@@ -73,7 +73,31 @@ class ResolvedValueRegistry(QObject):
 - `diff_from_snapshot(name) -> Dict[str, Set[str]]` - Find differences
 - `is_dirty(scope_id, snapshot_name) -> bool` - Check if scope has unsaved changes
 
-#### 2. Resolution: REUSE ParameterOpsService Pattern
+#### 2. Field Discovery on Registration
+
+When a scope is registered, discover which fields to track:
+
+```python
+from dataclasses import fields, is_dataclass
+from typing import get_origin, get_args, Union
+
+def _discover_fields(self, object_instance) -> List[str]:
+    """Get all Optional fields (can inherit) from a dataclass."""
+    if not is_dataclass(object_instance):
+        return []
+
+    trackable_fields = []
+    for field_info in fields(object_instance):
+        # Check if field is Optional (Union with None)
+        origin = get_origin(field_info.type)
+        if origin is Union:
+            args = get_args(field_info.type)
+            if type(None) in args:
+                trackable_fields.append(field_info.name)
+    return trackable_fields
+```
+
+#### 3. Resolution: REUSE ParameterOpsService Pattern
 
 The Registry computes resolved values **exactly like `ParameterOpsService.resolve_single_placeholder()`** already does:
 
@@ -88,15 +112,17 @@ def _compute_resolved(self, scope_id: str, field_name: str) -> Any:
     from openhcs.config_framework.context_manager import build_context_stack
     from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
 
-    # Get registered info for this scope
     scope_info = self._registered_scopes[scope_id]
     context_obj = scope_info.context_obj
     object_instance = scope_info.object_instance
 
+    # Determine if this is global config editing
+    is_global = context_obj is None  # Root scope has no parent context
+
     # Collect live context (REUSE existing)
     live_snapshot = LiveContextService.collect(
         scope_filter=scope_id,
-        for_type=type(context_obj) if context_obj else None
+        for_type=type(context_obj) if context_obj else type(object_instance)
     )
 
     # Build context stack (REUSE existing)
@@ -105,34 +131,56 @@ def _compute_resolved(self, scope_id: str, field_name: str) -> Any:
         overlay=None,  # No overlay - we want resolved value
         object_instance=object_instance,
         live_context=live_snapshot.values if live_snapshot else None,
+        is_global_config_editing=is_global,
     )
 
-    # Resolve within context (REUSE existing)
+    # Resolve within context (REUSE existing lazy __getattribute__)
     with stack:
         return getattr(object_instance, field_name)
 ```
 
 #### 3. Registry Subscribes to LiveContext
 
+**NOTE:** `LiveContextService._notify_change()` calls `callback()` with NO arguments.
+The Registry must detect changes by comparing with previous state.
+
 ```python
 def __init__(self):
     super().__init__()
+    # Track previous raw values for change detection
+    self._previous_raw: Dict[str, Dict[str, Any]] = {}
     # Subscribe to ALL LiveContext changes
     LiveContextService.connect_listener(self._on_live_context_changed)
 
-def _on_live_context_changed(self, scope_id: str, field_name: str, raw_value: Any):
-    """LiveContext changed → recompute affected resolved values."""
-    # 1. Recompute this scope's field
-    self._recompute_field(scope_id, field_name)
+def _on_live_context_changed(self):
+    """LiveContext changed → detect what changed and recompute."""
+    # 1. Collect current state for each registered scope
+    for scope_id, scope_info in self._registered_scopes.items():
+        current_raw = self._collect_raw_values(scope_id, scope_info)
+        previous_raw = self._previous_raw.get(scope_id, {})
 
-    # 2. Cascade to children (REUSE existing scope parsing)
-    from openhcs.config_framework.context_manager import get_root_from_scope_key
+        # 2. Diff to find changed fields
+        changed_fields = set()
+        all_fields = set(current_raw.keys()) | set(previous_raw.keys())
+        for field in all_fields:
+            if current_raw.get(field) != previous_raw.get(field):
+                changed_fields.add(field)
 
-    for child_scope_id in self._registered_scopes:
-        if child_scope_id.startswith(f"{scope_id}::"):
-            # Check if child inherits this field (raw value is None)
-            if self._get_raw_value(child_scope_id, field_name) is None:
-                self._recompute_field(child_scope_id, field_name)
+        # 3. Recompute resolved values for changed fields
+        for field_name in changed_fields:
+            self._recompute_field(scope_id, field_name)
+
+        # 4. Update previous state
+        self._previous_raw[scope_id] = current_raw
+
+def _collect_raw_values(self, scope_id: str, scope_info) -> Dict[str, Any]:
+    """Collect raw values from LiveContext for a scope."""
+    snapshot = LiveContextService.collect(
+        scope_filter=scope_id,
+        for_type=type(scope_info.context_obj) if scope_info.context_obj else None
+    )
+    obj_type = type(scope_info.object_instance)
+    return snapshot.values.get(obj_type, {}) if snapshot else {}
 ```
 
 #### 4. Hierarchy: REUSE Existing Parsing
