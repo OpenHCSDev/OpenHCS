@@ -19,6 +19,25 @@ Create a centralized registry that:
 
 This plan inverts the dependency: Registry owns computation, PFM becomes a consumer.
 
+### ⚠️ ZERO REIMPLEMENTATION POLICY
+
+**ALL resolution logic already exists.** The Registry is a THIN COORDINATION LAYER that:
+1. Caches results from existing infrastructure
+2. Tracks what needs recomputing when LiveContext changes
+3. Emits signals for UI updates
+
+**Existing infrastructure to CALL (not reimplement):**
+
+| Component | Location | What it does |
+|-----------|----------|--------------|
+| `build_context_stack()` | `config_framework.context_manager` | Builds complete context stack for resolution |
+| `LiveContextService.collect()` | `services.live_context_service` | Collects live values from all managers with scope filtering |
+| `resolve_field_inheritance()` | `config_framework.dual_axis_resolver` | MRO-based resolution within a scope |
+| `LazyDefaultPlaceholderService` | `config_framework.placeholder` | Formats resolved value as placeholder text |
+| `get_ancestors_from_hierarchy()` | `config_framework.context_manager` | Walks type hierarchy |
+| `_is_scope_visible()` | `services.live_context_service` | Scope visibility filtering |
+| `get_root_from_scope_key()` | `config_framework.context_manager` | Parses scope_id hierarchy |
+
 ### Plan
 
 #### 1. Create ResolvedValueRegistry Service
@@ -27,30 +46,73 @@ This plan inverts the dependency: Registry owns computation, PFM becomes a consu
 
 ```python
 class ResolvedValueRegistry(QObject):
-    """Single source of truth for all resolved values across all scopes."""
-    
+    """
+    Thin coordination layer over existing resolution infrastructure.
+
+    DOES NOT reimplement resolution - calls existing functions.
+    """
+
     # Signals
     value_changed = pyqtSignal(str, str, object, object)  # scope_id, field, old_resolved, new_resolved
     scope_dirty_changed = pyqtSignal(str, bool)  # scope_id, is_dirty
-    
-    # State
+
+    # Cache (computed via existing infrastructure)
     _current: Dict[str, Dict[str, Any]]      # scope_id -> field -> resolved_value
     _snapshots: Dict[str, Dict[str, Dict[str, Any]]]  # snapshot_name -> scope_id -> field -> value
-    
+
     # Singleton
     _instance: Optional['ResolvedValueRegistry'] = None
 ```
 
 **Key Methods:**
-- `register_scope(scope_id, dataclass_type, parent_scope_id)` - Register object for tracking
+- `register_scope(scope_id, context_obj, object_instance)` - Register object for tracking
 - `unregister_scope(scope_id)` - Remove from tracking
-- `get_resolved(scope_id, field_name) -> Any` - O(1) lookup
+- `get_resolved(scope_id, field_name) -> Any` - O(1) cache lookup
 - `get_placeholder_text(scope_id, field_name) -> str` - Formatted for display
 - `save_snapshot(name)` - Capture current state
 - `diff_from_snapshot(name) -> Dict[str, Set[str]]` - Find differences
 - `is_dirty(scope_id, snapshot_name) -> bool` - Check if scope has unsaved changes
 
-#### 2. Registry Subscribes to LiveContext
+#### 2. Resolution: REUSE ParameterOpsService Pattern
+
+The Registry computes resolved values **exactly like `ParameterOpsService.resolve_single_placeholder()`** already does:
+
+```python
+def _compute_resolved(self, scope_id: str, field_name: str) -> Any:
+    """
+    Compute resolved value using EXISTING infrastructure.
+
+    This is the same pattern as ParameterOpsService.resolve_single_placeholder()
+    but without requiring a form manager.
+    """
+    from openhcs.config_framework.context_manager import build_context_stack
+    from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
+
+    # Get registered info for this scope
+    scope_info = self._registered_scopes[scope_id]
+    context_obj = scope_info.context_obj
+    object_instance = scope_info.object_instance
+
+    # Collect live context (REUSE existing)
+    live_snapshot = LiveContextService.collect(
+        scope_filter=scope_id,
+        for_type=type(context_obj) if context_obj else None
+    )
+
+    # Build context stack (REUSE existing)
+    stack = build_context_stack(
+        context_obj=context_obj,
+        overlay=None,  # No overlay - we want resolved value
+        object_instance=object_instance,
+        live_context=live_snapshot.values if live_snapshot else None,
+    )
+
+    # Resolve within context (REUSE existing)
+    with stack:
+        return getattr(object_instance, field_name)
+```
+
+#### 3. Registry Subscribes to LiveContext
 
 ```python
 def __init__(self):
@@ -62,75 +124,53 @@ def _on_live_context_changed(self, scope_id: str, field_name: str, raw_value: An
     """LiveContext changed → recompute affected resolved values."""
     # 1. Recompute this scope's field
     self._recompute_field(scope_id, field_name)
-    
-    # 2. Cascade to children that inherit (scope_id prefix match)
-    for child_scope_id in self._get_inheriting_children(scope_id, field_name):
-        self._recompute_field(child_scope_id, field_name)
+
+    # 2. Cascade to children (REUSE existing scope parsing)
+    from openhcs.config_framework.context_manager import get_root_from_scope_key
+
+    for child_scope_id in self._registered_scopes:
+        if child_scope_id.startswith(f"{scope_id}::"):
+            # Check if child inherits this field (raw value is None)
+            if self._get_raw_value(child_scope_id, field_name) is None:
+                self._recompute_field(child_scope_id, field_name)
 ```
 
-#### 3. Hierarchy via scope_id Parsing
+#### 4. Hierarchy: REUSE Existing Parsing
+
+**NO new hierarchy logic.** Use existing:
+
+```python
+def _get_parent_scope_id(self, scope_id: str) -> Optional[str]:
+    """REUSE: Same logic as get_root_from_scope_key but for immediate parent."""
+    if "::" in scope_id:
+        return scope_id.rsplit("::", 1)[0]
+    return None  # Root scope
+```
 
 Scope IDs already encode hierarchy:
 - `plate_001` → orchestrator (root)
 - `plate_001::step_0` → step (child of plate_001)
 
-```python
-def _get_parent_scope_id(self, scope_id: str) -> Optional[str]:
-    if "::" in scope_id:
-        return scope_id.rsplit("::", 1)[0]
-    return None  # Root scope
-
-def _get_inheriting_children(self, parent_scope_id: str, field_name: str) -> List[str]:
-    """Find children whose resolved value depends on parent."""
-    children = []
-    for child_id in self._current:
-        if child_id.startswith(f"{parent_scope_id}::"):
-            # Check if child has explicit value (doesn't inherit)
-            if self._raw_values.get(child_id, {}).get(field_name) is None:
-                children.append(child_id)
-    return children
-```
-
-#### 4. Resolution Logic
-
-```python
-def _compute_resolved(self, scope_id: str, field_name: str) -> Any:
-    """Walk up hierarchy until non-None value found."""
-    # Check this scope's raw value
-    raw = self._raw_values.get(scope_id, {}).get(field_name)
-    if raw is not None:
-        return raw
-    
-    # Inherit from parent
-    parent = self._get_parent_scope_id(scope_id)
-    if parent and parent in self._current:
-        return self._compute_resolved(parent, field_name)
-    
-    # Fall back to global config default
-    return self._get_static_default(scope_id, field_name)
-```
-
 #### 5. Registration Points (Existing Code Hooks)
 
 | Event | Location | Action |
 |-------|----------|--------|
-| Orchestrator loaded | `PlateManager._load_orchestrator()` | `registry.register_scope(plate_path, PipelineConfig, None)` |
-| Step added | `PipelineEditor.add_step()` | `registry.register_scope(step_scope_id, step_type, plate_scope)` |
+| Orchestrator loaded | `PlateManager._load_orchestrator()` | `registry.register_scope(plate_path, pipeline_config, pipeline_config)` |
+| Step added | `PipelineEditor.add_step()` | `registry.register_scope(step_scope_id, pipeline_config, step)` |
 | Step deleted | `PipelineEditor._perform_delete()` | `registry.unregister_scope(step_scope_id)` |
 | Pipeline loaded | `PipelineEditor.load_pipeline()` | Register all steps |
 | Plate closed | `PlateManager.close_orchestrator()` | Unregister orchestrator + all steps |
 
 #### 6. Refactor ParameterFormManager
 
-**Before (computes placeholders):**
+**Before (computes placeholders via ParameterOpsService):**
 ```python
 def _refresh_single_placeholder(self, field_name):
-    with build_context_stack(...):
-        placeholder = LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(...)
-    PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder)
+    # ParameterOpsService builds context stack, collects live context, resolves
+    self._ops_service.resolve_single_placeholder(self, field_name, ...)
 ```
 
-**After (reads from registry):**
+**After (reads from registry cache):**
 ```python
 def _refresh_single_placeholder(self, field_name):
     registry = ResolvedValueRegistry.instance()
@@ -140,7 +180,24 @@ def _refresh_single_placeholder(self, field_name):
 
 **Writes unchanged** - PFM still writes to LiveContext, registry listens.
 
-#### 7. List Item Integration (AbstractManagerWidget)
+#### 7. Placeholder Text: REUSE Existing
+
+```python
+def get_placeholder_text(self, scope_id: str, field_name: str) -> str:
+    """Format resolved value as placeholder text using EXISTING service."""
+    from openhcs.config_framework.placeholder import LazyDefaultPlaceholderService
+
+    resolved = self.get_resolved(scope_id, field_name)
+    scope_info = self._registered_scopes[scope_id]
+
+    # REUSE existing placeholder formatting
+    return LazyDefaultPlaceholderService.format_placeholder_value(
+        resolved,
+        prefix="Inherited" if self._is_inherited(scope_id, field_name) else None
+    )
+```
+
+#### 8. List Item Integration (AbstractManagerWidget)
 
 ```python
 # In _build_item_label() or similar
@@ -160,13 +217,17 @@ def _on_resolved_value_changed(self, scope_id, field, old_val, new_val):
 
 ### Findings
 
-**Existing Infrastructure (reuse):**
-- `LiveContextService` - Already handles cross-window change propagation
-- `ContextStackRegistry` - Tracks registered objects (can provide dataclass_type info)
-- `scope_id` format - Already encodes hierarchy via `::` separator
-- `_pipeline_scope_token` - Stable tokens per step (survives reordering)
-- `resolve_field_inheritance()` - MRO-based resolution (can be called directly by Registry)
-- `extract_all_configs()` - Builds available_configs dict from context object
+**Existing Infrastructure (MUST REUSE - NO REIMPLEMENTATION):**
+
+| What | Where | Reuse How |
+|------|-------|-----------|
+| Context stack building | `build_context_stack()` | Call directly for resolution |
+| Live context collection | `LiveContextService.collect()` | Call with scope_filter |
+| MRO resolution | `resolve_field_inheritance()` | Called implicitly via `getattr()` on lazy objects |
+| Placeholder formatting | `LazyDefaultPlaceholderService` | Call for UI display |
+| Scope parsing | `get_root_from_scope_key()` | Already uses `::` separator |
+| Type hierarchy | `get_ancestors_from_hierarchy()` | For MRO dependency tracking |
+| Scope visibility | `_is_scope_visible()` | Already in LiveContextService |
 
 **Key Insight 1:** scope_id is identity-based (token assigned at creation), not position-based. Reordering steps does NOT change their scope_id, so snapshots/comparisons remain valid.
 
@@ -174,37 +235,15 @@ def _on_resolved_value_changed(self, scope_id, field, old_val, new_val):
 1. **Scope hierarchy (vertical):** `plate_001::step_0` → `plate_001` → `None` (global)
 2. **MRO hierarchy (horizontal):** `StepWellFilterConfig` → `WellFilterConfig` (within same scope)
 
-Even at `scope_id=None` (GlobalPipelineConfig), MRO inheritance applies. When `well_filter_config.well_filter` changes, `step_well_filter_config.well_filter` must be recomputed if it inherits (is None).
+Both are ALREADY HANDLED by existing infrastructure:
+- Scope hierarchy: `build_context_stack()` + `LiveContextService.collect(scope_filter=...)`
+- MRO hierarchy: `resolve_field_inheritance()` (called implicitly by lazy `__getattribute__`)
 
-**Resolution Algorithm (existing, reuse):**
-```python
-# From dual_axis_resolver.py - resolve_field_inheritance()
-for mro_class in obj_type.__mro__:
-    for config_name, config_instance in available_configs.items():
-        if type(config_instance) == mro_class:
-            value = object.__getattribute__(config_instance, field_name)
-            if value is not None:
-                return value
-```
-
-The Registry can call this directly. It just needs to:
-1. Build `available_configs` from LiveContext for each scope
-2. Call `resolve_field_inheritance()`
-3. Track which scopes have types whose MRO includes the changed type → recompute those
-
-**Dependency Tracking for MRO:**
-
-When `WellFilterConfig.well_filter` changes (in any scope), we must recompute fields for types where:
-- `WellFilterConfig` is in their MRO (e.g., `StepWellFilterConfig`, `PathPlanningConfig`)
-- Their raw value for that field is `None` (they inherit)
-
-This can be computed once per type and cached:
-```python
-_mro_dependencies: Dict[str, Set[str]] = {
-    'WellFilterConfig': {'StepWellFilterConfig', 'PathPlanningConfig', 'StepMaterializationConfig'},
-    # ... auto-generated from class MRO at registration time
-}
-```
+**Key Insight 3:** `ParameterOpsService.resolve_single_placeholder()` already does exactly what we need. The Registry just:
+1. Calls the same functions without requiring a form manager
+2. Caches results
+3. Tracks what to recompute on change
+4. Emits signals
 
 ### Implementation Draft
 
