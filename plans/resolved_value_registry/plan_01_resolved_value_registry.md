@@ -73,99 +73,44 @@ class ResolvedValueRegistry(QObject):
 - `diff_from_snapshot(name) -> Dict[str, Set[str]]` - Find differences
 - `is_dirty(scope_id, snapshot_name) -> bool` - Check if scope has unsaved changes
 
-#### 2. Field Discovery on Registration
+#### 2. Registration: Caller Specifies What to Track
 
-Lazy resolution applies to:
-1. **All fields** on a LazyDataclass (e.g., `PipelineConfig.num_workers: int` can inherit)
-2. **Nested LazyDataclass attrs** on non-lazy objects (e.g., `FunctionStep.streaming_defaults.well_filter`)
+**No field discovery.** The caller (widget) knows what it displays and registers explicitly:
 
 ```python
-from openhcs.config_framework.lazy_factory import LazyDataclass
-from dataclasses import fields, is_dataclass
+# Register a specific field to track
+registry.register(scope_id, lazy_object, field_name)
 
-def _discover_lazy_instances(self, object_instance) -> List[Tuple[str, LazyDataclass]]:
-    """
-    Find all LazyDataclass instances to track.
-
-    Returns list of (prefix_path, lazy_instance) tuples.
-    - prefix_path is "" for root, "streaming_defaults" for nested
-    - Each lazy_instance has all its fields trackable
-    """
-    result = []
-
-    # Check if root object is a LazyDataclass
-    if isinstance(object_instance, LazyDataclass):
-        result.append(("", object_instance))
-
-    # Check nested attrs that are LazyDataclass
-    if is_dataclass(object_instance):
-        for f in fields(object_instance):
-            val = getattr(object_instance, f.name)
-            if isinstance(val, LazyDataclass):
-                result.append((f.name, val))
-
-    return result
-
-def _get_trackable_fields(self, lazy_instance: LazyDataclass) -> List[str]:
-    """Get all field names on a LazyDataclass (all support lazy resolution)."""
-    return [f.name for f in fields(lazy_instance)]
+# Examples:
+registry.register("plate_001", pipeline_config, "num_workers")
+registry.register("plate_001::step_0", step.streaming_defaults, "well_filter")
 ```
 
-**Example:**
-```python
-# PipelineConfig (is LazyDataclass)
-lazy_instances = [("", pipeline_config)]  # root is lazy
-fields_for_root = ["num_workers", "well_filter_config", "streaming_defaults", ...]
+Resolution uses existing lazy `__getattribute__` - just call `getattr()` within context.
 
-# FunctionStep (NOT LazyDataclass, but has nested ones)
-lazy_instances = [
-    ("streaming_defaults", lazy_sd),      # nested lazy
-    ("dtype_config", lazy_dc),            # nested lazy
-    ("step_well_filter_config", lazy_swfc) # nested lazy
-]
-fields_for_sd = ["well_filter", "enabled", "host", ...]
-```
-
-#### 3. Resolution: REUSE ParameterOpsService Pattern
-
-The Registry computes resolved values **exactly like `ParameterOpsService.resolve_single_placeholder()`** already does:
+#### 3. Resolution: Just Use getattr
 
 ```python
-def _compute_resolved(self, scope_id: str, field_name: str) -> Any:
-    """
-    Compute resolved value using EXISTING infrastructure.
-
-    This is the same pattern as ParameterOpsService.resolve_single_placeholder()
-    but without requiring a form manager.
-    """
+def _compute_resolved(self, scope_id: str, lazy_obj, field_name: str) -> Any:
+    """Resolution = getattr within context. Lazy __getattribute__ does the rest."""
     from openhcs.config_framework.context_manager import build_context_stack
     from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
 
-    scope_info = self._registered_scopes[scope_id]
-    context_obj = scope_info.context_obj
-    object_instance = scope_info.object_instance
+    reg = self._registered[scope_id]
 
-    # Determine if this is global config editing
-    is_global = context_obj is None  # Root scope has no parent context
+    # Collect live context
+    live_snapshot = LiveContextService.collect(scope_filter=scope_id)
 
-    # Collect live context (REUSE existing)
-    live_snapshot = LiveContextService.collect(
-        scope_filter=scope_id,
-        for_type=type(context_obj) if context_obj else type(object_instance)
-    )
-
-    # Build context stack (REUSE existing)
+    # Build context stack
     stack = build_context_stack(
-        context_obj=context_obj,
-        overlay=None,  # No overlay - we want resolved value
-        object_instance=object_instance,
+        context_obj=reg.context_obj,
+        object_instance=lazy_obj,
         live_context=live_snapshot.values if live_snapshot else None,
-        is_global_config_editing=is_global,
     )
 
-    # Resolve within context (REUSE existing lazy __getattribute__)
+    # getattr triggers lazy resolution
     with stack:
-        return getattr(object_instance, field_name)
+        return getattr(lazy_obj, field_name)
 ```
 
 #### 3. Registry Subscribes to LiveContext
