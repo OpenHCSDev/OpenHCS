@@ -48,6 +48,9 @@ from openhcs.pyqt_gui.widgets.shared.services.widget_service import WidgetServic
 from openhcs.pyqt_gui.widgets.shared.services.value_collection_service import ValueCollectionService
 from openhcs.pyqt_gui.widgets.shared.services.signal_service import SignalService
 from openhcs.pyqt_gui.widgets.shared.services.parameter_ops_service import ParameterOpsService
+
+# Scope utilities
+from openhcs.config_framework.context_manager import is_scope_affected
 from openhcs.pyqt_gui.widgets.shared.services.enabled_field_styling_service import EnabledFieldStylingService
 from openhcs.pyqt_gui.widgets.shared.services.flag_context_manager import FlagContextManager, ManagerFlag
 from openhcs.pyqt_gui.widgets.shared.services.form_init_service import (
@@ -1168,9 +1171,9 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
             logger.info(f"  ⏭️  SKIP: same instance")
             return
 
-        # Check if the event affects this form based on context hierarchy
-        if not self._is_affected_by_context_change(editing_object, context_object, editing_scope_id):
-            logger.info(f"  ⏭️  SKIP: not affected by context change")
+        # Check if the event affects this form based on scope hierarchy
+        if not is_scope_affected(self.scope_id, editing_scope_id):
+            logger.info(f"  ⏭️  SKIP: not affected by scope change")
             return
 
         # Extract the leaf field name from the path
@@ -1201,73 +1204,14 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
             logger.info(f"  ⏭️  SKIP: same instance")
             return
 
-        # Check if the event affects this form based on context hierarchy
-        if not self._is_affected_by_context_change(editing_object, context_object, editing_scope_id):
-            logger.info(f"  ⏭️  SKIP: not affected by context change")
+        # Check if the event affects this form based on scope hierarchy
+        if not is_scope_affected(self.scope_id, editing_scope_id):
+            logger.info(f"  ⏭️  SKIP: not affected by scope change")
             return
 
         logger.info(f"  ✅ AFFECTED: scheduling BULK refresh")
         # Bulk refresh - no specific field
         self._schedule_cross_window_refresh(changed_field=None, emit_signal=False)
-
-    def _is_affected_by_context_change(self, editing_object: object, context_object: object, editing_scope_id: str = "") -> bool:
-        """Determine if a context change from another window affects this form.
-
-        Hierarchical rules (GENERIC - uses config_framework hierarchy functions):
-        - Global config changes affect: all forms using global context or descendants
-        - Ancestor config changes affect: descendants in the hierarchy
-        - Same-type config changes affect: forms with same context instance
-        - Nested config changes (via fields) affect: configs that inherit from them
-        - Leaf node changes affect: nothing
-
-        Args:
-            editing_object: The object being edited in the other window
-            context_object: The context object used by the other window
-
-        Returns:
-            True if this form should refresh placeholders due to the change
-        """
-        from openhcs.config_framework import is_global_config_instance
-        from openhcs.config_framework.context_manager import (
-            is_ancestor_in_context,
-            is_same_type_in_context,
-            get_root_from_scope_key,
-        )
-        from dataclasses import fields, is_dataclass
-        import typing
-
-        # Root isolation: different plate roots don't affect each other
-        my_root = get_root_from_scope_key(self.scope_id)
-        editing_root = get_root_from_scope_key(editing_scope_id)
-        if editing_root and my_root and editing_root != my_root:
-            return False
-
-        editing_type = type(editing_object)
-
-        # Global config edits affect all (respecting root isolation above)
-        if is_global_config_instance(editing_object):
-            return True
-
-        # Ancestor/same-type checks for context object
-        if self.context_obj is not None:
-            context_obj_type = type(self.context_obj)
-            if is_ancestor_in_context(editing_type, context_obj_type):
-                return True
-            if is_same_type_in_context(editing_type, context_obj_type):
-                return True
-
-        # Check dataclass fields for direct type match (handles nested configs)
-        if is_dataclass(editing_object) and is_dataclass(self.object_instance):
-            for field in fields(type(self.object_instance)):
-                if field.type == editing_type:
-                    return True
-                origin = typing.get_origin(field.type)
-                if origin is typing.Union:
-                    args = typing.get_args(field.type)
-                    if editing_type in args:
-                        return True
-
-        return False
 
     def _schedule_cross_window_refresh(self, changed_field: Optional[str] = None, emit_signal: bool = True):
         """Schedule a debounced placeholder refresh for cross-window updates.
