@@ -75,27 +75,44 @@ class ResolvedValueRegistry(QObject):
 
 #### 2. Field Discovery on Registration
 
-When a scope is registered, discover which fields to track:
+Lazy resolution applies to:
+1. **All fields** on a LazyDataclass (e.g., `PipelineConfig.num_workers: int` can inherit)
+2. **Nested LazyDataclass attrs** on non-lazy objects (e.g., `FunctionStep.streaming_defaults.well_filter`)
 
 ```python
-from dataclasses import fields, is_dataclass
-from typing import get_origin, get_args, Union
+from openhcs.config_framework.lazy_factory import LazyDataclass
 
-def _discover_fields(self, object_instance) -> List[str]:
-    """Get all Optional fields (can inherit) from a dataclass."""
-    if not is_dataclass(object_instance):
-        return []
+def _discover_trackable_attrs(self, object_instance) -> List[Tuple[str, object]]:
+    """
+    Get attrs that support lazy resolution.
 
-    trackable_fields = []
-    for field_info in fields(object_instance):
-        # Check if field is Optional (Union with None)
-        origin = get_origin(field_info.type)
-        if origin is Union:
-            args = get_args(field_info.type)
-            if type(None) in args:
-                trackable_fields.append(field_info.name)
-    return trackable_fields
+    Returns list of (dotted_path, lazy_instance) tuples.
+    E.g., for FunctionStep: [("streaming_defaults", lazy_sd), ("dtype_config", lazy_dc), ...]
+    """
+    trackable = []
+
+    # Check if object itself is a LazyDataclass
+    if isinstance(object_instance, LazyDataclass):
+        # All fields on this object support lazy resolution
+        trackable.append(("", object_instance))  # Empty path = root object
+
+    # Check nested attrs that are LazyDataclass
+    for attr_name in dir(object_instance):
+        if attr_name.startswith('_'):
+            continue
+        try:
+            val = getattr(object_instance, attr_name)
+            if isinstance(val, LazyDataclass):
+                trackable.append((attr_name, val))
+        except Exception:
+            pass
+
+    return trackable
 ```
+
+**Example results:**
+- `PipelineConfig` → `[("", pipeline_config)]` (all fields trackable)
+- `FunctionStep` → `[("streaming_defaults", sd), ("dtype_config", dc), ("step_well_filter_config", swfc)]`
 
 #### 3. Resolution: REUSE ParameterOpsService Pattern
 
