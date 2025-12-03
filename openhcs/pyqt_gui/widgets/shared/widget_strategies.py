@@ -899,6 +899,11 @@ class PyQt6WidgetEnhancer:
         # Handle checkbox groups by clearing each checkbox's placeholder state
         if hasattr(widget, '_checkboxes'):
             for checkbox in widget._checkboxes.values():
+                # CRITICAL FIX: Always clear cached placeholder text first, even if
+                # the checkbox is not in placeholder state. This ensures resetting to
+                # None will properly reapply the placeholder (not skip due to cache hit).
+                if hasattr(checkbox, '_cached_placeholder_text'):
+                    del checkbox._cached_placeholder_text
                 if checkbox.property("is_placeholder_state"):
                     checkbox.setStyleSheet("")
                     checkbox.setProperty("is_placeholder_state", False)
@@ -913,10 +918,19 @@ class PyQt6WidgetEnhancer:
                         current_tooltip
                     )
                     checkbox.setToolTip(cleaned_tooltip)
-            # Clear group widget's placeholder state
+            # Clear group widget's placeholder state and cache
             widget.setProperty("is_placeholder_state", False)
             widget.setToolTip("")
+            if hasattr(widget, '_cached_placeholder_text'):
+                del widget._cached_placeholder_text
             return
+
+        # CRITICAL FIX: Always clear cached placeholder text when exiting placeholder state.
+        # This ensures that resetting to None will properly reapply the placeholder
+        # (not skip due to cache hit). The cache must be cleared even if the widget
+        # is already in non-placeholder state (e.g., user clicked checkbox).
+        if hasattr(widget, '_cached_placeholder_text'):
+            del widget._cached_placeholder_text
 
         if not widget.property("is_placeholder_state"):
             return
