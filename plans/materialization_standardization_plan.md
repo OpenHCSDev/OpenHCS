@@ -74,3 +74,49 @@ Single, enforced materializer API; registered, name-resolved materializers (buil
    - Full cutover: remove acceptance of non-canonical materializer signatures and raw-callable storage in step plans.
    - Add migration notes + changelog entry (signature change, registry usage, helper names).
    - Validation: add a guard in planning/execution to error if a materialization_function is a callable (legacy) or an unknown name.
+
+## Mermaid diagrams
+
+### Registration and execution flow (sequence)
+```mermaid
+sequenceDiagram
+    participant UserCode as User code / built-ins
+    participant MatRegistry as Materializer registry
+    participant Compiler as Compiler/PathPlanner
+    participant StepPlan as step_plan
+    participant Executor as FunctionStep
+    participant Helper as Helpers (csv/rois/image)
+    participant Backends as disk/zarr/stream
+
+    UserCode->>MatRegistry: register_materializer(name, func)<br/>validate signature
+    MatRegistry-->>UserCode: stored under name
+
+    Compiler->>MatRegistry: (optional) resolve name for validation
+    Compiler->>StepPlan: store materialization_function = name
+
+    Executor->>StepPlan: read materialization_function (name)
+    Executor->>MatRegistry: get_materializer(name)
+    MatRegistry-->>Executor: callable (canonical signature)
+    Executor->>Helper: mat_func(data, path, filemanager,<br/>backends, backend_kwargs)
+    Helper->>Backends: fan-out writes per backend
+    Backends-->>Helper: paths written
+    Helper-->>Executor: primary path
+```
+
+### Components and data flow (flowchart)
+```mermaid
+flowchart LR
+    A[@special_outputs declares materializer name]
+    B[Compiler/PathPlanner<br/>stores name in step_plan]
+    C[Materializer registry<br/>name -> callable]
+    D[FunctionStep execution]
+    E[Helper layer<br/>(csv/rois/image fan-out)]
+    F[Backends<br/>(disk/zarr/omero_local/stream)]
+
+    A --> B
+    B --> D
+    D --> C
+    C --> D
+    D --> E
+    E --> F
+```
