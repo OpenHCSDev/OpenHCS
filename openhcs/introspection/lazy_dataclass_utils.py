@@ -47,9 +47,9 @@ def patch_lazy_constructors():
     during construction, making it impossible to distinguish between explicitly set
     values and inherited values.
     
-    The patched constructor only sets fields that are explicitly provided in kwargs,
-    leaving all other fields as None. This preserves the None vs concrete distinction
-    needed for proper hierarchical inheritance.
+    The patched constructor sets fields provided in kwargs and otherwise uses the
+    dataclass defaults/default_factory (or None if none exist). This preserves the
+    None vs concrete distinction while still instantiating nested lazy configs.
     
     Usage:
         with patch_lazy_constructors():
@@ -79,11 +79,28 @@ def patch_lazy_constructors():
         def create_patched_init(original_init, dataclass_type):
             def patched_init(self, **kwargs):
                 # Use raw value approach instead of calling original constructor
-                # This prevents lazy resolution during code execution
+                # This prevents lazy resolution during code execution, while still
+                # honoring default_factory for nested lazy configs so attributes
+                # are not left as None (e.g., path_planning_config).
                 for field in dataclasses.fields(dataclass_type):
-                    value = kwargs.get(field.name, None)
+                    if field.name in kwargs:
+                        value = kwargs[field.name]
+                    else:
+                        try:
+                            if field.default_factory is not dataclasses.MISSING:  # type: ignore
+                                value = field.default_factory()  # Preserve lazy placeholder objects
+                            elif field.default is not dataclasses.MISSING:
+                                value = field.default
+                            else:
+                                value = None
+                        except Exception:
+                            value = None
+
                     object.__setattr__(self, field.name, value)
-                
+
+                # Track explicit fields for downstream logic that inspects this flag
+                object.__setattr__(self, '_explicitly_set_fields', set(kwargs.keys()))
+
                 # Initialize any required lazy dataclass attributes
                 if hasattr(dataclass_type, '_is_lazy_dataclass'):
                     object.__setattr__(self, '_is_lazy_dataclass', True)
@@ -99,4 +116,3 @@ def patch_lazy_constructors():
         # Restore original constructors
         for lazy_type, original_init in original_constructors.items():
             lazy_type.__init__ = original_init
-
