@@ -29,13 +29,61 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _compute_overlay(
+    manager,
+    use_user_modified_only: bool = False,
+    exclude_field: str | None = None,
+) -> dict | None:
+    """
+    Compute overlay dict for context stack building.
+
+    Consolidates overlay computation for both bulk and targeted refresh:
+    - Selects base values (user-modified or full parameters)
+    - Excludes specified field if needed (for single-field refresh)
+    - Includes exclude_params from object_instance (for hidden fields)
+
+    Args:
+        manager: The parameter form manager
+        use_user_modified_only: If True, use only user-modified values
+        exclude_field: Field name to exclude from overlay (prevents self-shadowing)
+
+    Returns:
+        Dict of overlay values, or None if no values
+    """
+    from dataclasses import is_dataclass, fields
+
+    base = manager.get_user_modified_values() if use_user_modified_only else manager.parameters
+    if not base:
+        return None
+
+    overlay = base.copy()
+
+    # Exclude field being resolved (prevents None value from shadowing inherited value)
+    if exclude_field:
+        overlay.pop(exclude_field, None)
+
+    # Include exclude_params from object_instance (hidden fields not in form)
+    obj = manager.object_instance
+    exclude_params = getattr(manager, 'exclude_params', None) or []
+    if obj and exclude_params:
+        if is_dataclass(obj):
+            allowed = {f.name for f in fields(obj)}
+        else:
+            allowed = set(dir(obj))
+        for excluded in exclude_params:
+            if excluded not in overlay and excluded in allowed:
+                overlay[excluded] = getattr(obj, excluded)
+
+    return overlay
+
+
 class ParameterOpsService(ParameterServiceABC):
     """
     Consolidated service for parameter reset and placeholder refresh.
 
     Examples:
         service = ParameterOpsService()
-        
+
         # Reset parameter:
         service.reset_parameter(manager, param_name)
         
@@ -223,15 +271,9 @@ class ParameterOpsService(ParameterServiceABC):
             if lazy_root_type:
                 root_type = lazy_root_type
 
-        # CRITICAL: Exclude the field being resolved from the overlay.
-        # If we include it, the overlay's None value shadows the inherited value
-        # from parent configs (e.g., streaming_defaults.well_filter=None would
-        # shadow well_filter_config.well_filter=2).
-        overlay_without_field = {k: v for k, v in manager.parameters.items() if k != field_name}
-
         stack = build_context_stack(
             context_obj=manager.context_obj,
-            overlay=overlay_without_field,
+            overlay=_compute_overlay(manager, exclude_field=field_name),
             object_instance=manager.object_instance,
             live_context=live_context,
             is_global_config_editing=getattr(manager.config, 'is_global_config_editing', False),
@@ -297,18 +339,7 @@ class ParameterOpsService(ParameterServiceABC):
                 scope_filter=manager.scope_id,
                 for_type=type(root_manager.object_instance)
             )
-            # Extract .values dict from LiveContextSnapshot for build_context_stack
             live_context = live_context_snapshot.values if live_context_snapshot else None
-            overlay = manager.get_user_modified_values() if use_user_modified_only else manager.parameters
-
-            # Handle excluded params in overlay
-            if overlay:
-                overlay_dict = overlay.copy()
-                for excluded_param in getattr(manager, 'exclude_params', []):
-                    if excluded_param not in overlay_dict and hasattr(manager.object_instance, excluded_param):
-                        overlay_dict[excluded_param] = getattr(manager.object_instance, excluded_param)
-            else:
-                overlay_dict = None
 
             # PERFORMANCE OPTIMIZATION: Get root_values from live_context instead of calling
             # get_user_modified_values() again (which calls get_current_values())
@@ -321,10 +352,9 @@ class ParameterOpsService(ParameterServiceABC):
                 if lazy_root_type:
                     root_type = lazy_root_type
 
-            # Use framework-agnostic context stack building from config_framework
             stack = build_context_stack(
                 context_obj=manager.context_obj,
-                overlay=overlay_dict,
+                overlay=_compute_overlay(manager, use_user_modified_only=use_user_modified_only),
                 object_instance=manager.object_instance,
                 live_context=live_context,
                 is_global_config_editing=getattr(manager.config, 'is_global_config_editing', False),
