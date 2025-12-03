@@ -17,12 +17,13 @@ Single, enforced materializer API; registered, name-resolved materializers (buil
      - `REGISTRY = {"csv_table": csv_table, "rois": rois, "image_stack": image_stack, ...}`.
    - Add tests: `tests/materialization/test_helpers.py` to cover fan-out, capability guards, and per-writer behavior.
 
-2) **Materializer registry (parallel to processing registry)**
-   - New module `openhcs/processing/materialization/registry.py`:
-     - `register_materializer(name, func)` (enforces canonical signature).
-     - `get_materializer(name)` (for runtime resolution).
-     - Pre-register built-in helpers on import.
-   - Wire registration in library bootstrap (e.g., `openhcs/processing/backends/lib_registry/unified_registry.py` or a dedicated init) so built-ins are available before planning.
+2) **Materializer registry (mirror FunctionReference pattern)**
+   - New module `openhcs/processing/materialization/registry.py` using the same structure as the processing registry:
+     - Key = namespace + name (e.g., `builtins/materialization::csv_table`, `custom/<file>::my_csv`) to prevent collisions.
+     - Entry stores: callable, module/qualname (for debugging), signature-checked flag, and preserved attrs (if needed).
+     - API: `register_materializer(key, func)`, `get_materializer(key)`, `list_materializers()`.
+     - Pre-register built-in helpers on import; reject duplicate keys; compiler errors on unknown or ambiguous keys.
+   - Wire registration in library bootstrap (e.g., `openhcs/processing/backends/lib_registry/unified_registry.py` or a dedicated init) so built-ins are available before planning; custom registrations go through the same API.
 
 3) **Compiler/Planner: store names, not raw callables**
    - `openhcs/core/pipeline/function_contracts.py`: allow `@special_outputs(("my_output", "csv_table"))` in addition to callables; normalize strings to registry names.
