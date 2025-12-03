@@ -581,13 +581,8 @@ def _inject_context_layer(
 
 def build_context_stack(
     context_obj: object | None,
-    overlay: dict | None = None,
-    object_instance: object | None = None,
-    live_context: dict | None = None,
-    is_global_config_editing: bool = False,
-    global_config_type: type | None = None,
-    root_form_values: dict | None = None,
-    root_form_type: type | None = None,
+    object_instance: object,
+    live_values: dict[type, dict] | None = None,
 ):
     """
     Build a complete context stack for placeholder resolution.
@@ -598,58 +593,56 @@ def build_context_stack(
 
     Layer order (innermost to outermost when entered):
     1. Global context layer (live from editor OR thread-local)
-    2. Intermediate layers from live_context (via get_types_before_in_stack())
+    2. Intermediate layers from live_values (via get_types_before_in_stack())
     3. Parent context from context_obj
-    4. Root form layer (for sibling inheritance)
-    5. Overlay from current form values
+    4. Overlay from current form values (included in live_values)
 
     Args:
-        context_obj: The parent context object (e.g., PipelineConfig for Step editor)
-        overlay: Dict of current form values to apply as overlay
-        object_instance: The object being edited (type derived internally)
-        live_context: Dict mapping types to their live values from other forms
-        is_global_config_editing: True if editing a global config (masks thread-local)
-        global_config_type: The global config type (used when is_global_config_editing=True)
-        root_form_values: Dict of root form's values (for sibling inheritance)
-        root_form_type: Type of the root form's dataclass
+        context_obj: Parent context object (e.g., PipelineConfig for Step editor), or None for root
+        object_instance: The object being edited (type used to infer global editing mode)
+        live_values: Dict mapping types to their current field values.
+                     Merges cross-window live context + current form overlay.
+                     Caller is responsible for merging these before calling.
 
     Returns:
         ExitStack with all context layers entered. Caller must manage the stack lifecycle.
     """
     from contextlib import ExitStack
+    from openhcs.config_framework.lazy_factory import GlobalConfigBase
 
     stack = ExitStack()
-    obj_type = type(object_instance) if object_instance else None
+    obj_type = type(object_instance)
+
+    # Infer global editing mode from object_instance type
+    is_global_config_editing = isinstance(object_instance, GlobalConfigBase)
+    global_config_type = obj_type if is_global_config_editing else None
 
     ctx_type_name = type(context_obj).__name__ if context_obj else "None"
-    obj_type_name = obj_type.__name__ if obj_type else "None"
-    live_ctx_types = [t.__name__ for t in live_context.keys()] if live_context else []
-    logger.info(f"🔧 build_context_stack: ctx={ctx_type_name}, obj={obj_type_name}, live_ctx={live_ctx_types[:5]}{'...' if len(live_ctx_types) > 5 else ''}")
+    obj_type_name = obj_type.__name__
+    live_val_types = [t.__name__ for t in live_values.keys()] if live_values else []
+    logger.info(f"🔧 build_context_stack: ctx={ctx_type_name}, obj={obj_type_name}, live_values={live_val_types[:5]}{'...' if len(live_val_types) > 5 else ''}")
 
     # 1. Global context layer
-    global_layer = _get_global_context_layer(live_context, is_global_config_editing, global_config_type)
+    global_layer = _get_global_context_layer(live_values, is_global_config_editing, global_config_type)
     if global_layer is not None:
         stack.enter_context(config_context(global_layer, mask_with_none=is_global_config_editing))
 
     # 2-3. Unified parent chain (ancestors + immediate parent)
     if context_obj is not None:
         context_type = type(context_obj)
-        ancestor_types = get_types_before_in_stack(context_type) if live_context else []
+        ancestor_types = get_types_before_in_stack(context_type) if live_values else []
         parent_chain = ancestor_types + [context_type]
 
         for t in parent_chain:
             if _is_global_type(t):
                 continue
-            live_values = _find_live_values_for_type(t, live_context) if live_context else None
+            layer_values = _find_live_values_for_type(t, live_values) if live_values else None
             stored = context_obj if t == context_type else None
-            _inject_context_layer(stack, t, live_values, stored)
+            _inject_context_layer(stack, t, layer_values, stored)
 
-    # 4. Root form layer (for sibling inheritance)
-    if root_form_values:
-        _inject_context_layer(stack, root_form_type, root_form_values, None)
-
-    # 5. Overlay from current form values
-    if obj_type and overlay is not None:
+    # 4. Overlay from current form values (included in live_values under obj_type)
+    overlay = _find_live_values_for_type(obj_type, live_values) if live_values else None
+    if overlay is not None:
         _inject_context_layer(stack, obj_type, overlay, None)
 
     return stack

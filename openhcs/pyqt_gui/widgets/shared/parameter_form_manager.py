@@ -711,7 +711,7 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
             # CRITICAL: Use refresh_with_live_context to build context stack from tree registry
             # Even when resetting to defaults, we need live context for sibling inheritance
             # REFACTORING: Inline delegate calls
-            self._parameter_ops_service.refresh_with_live_context(self, use_user_modified_only=False)
+            self._parameter_ops_service.refresh_with_live_context(self)
 
 
 
@@ -1169,7 +1169,7 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
                 self._refresh_field_in_tree(changed_field)
             else:
                 # Bulk refresh: refresh all placeholders (save/cancel/code editor)
-                self._parameter_ops_service.refresh_with_live_context(self, use_user_modified_only=False)
+                self._parameter_ops_service.refresh_with_live_context(self)
                 self._apply_to_nested_managers(lambda _, manager: manager._enabled_field_styling_service.refresh_enabled_styling(manager))
 
             # CRITICAL: Only root managers emit signals to avoid nested ping-pong

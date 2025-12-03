@@ -411,9 +411,9 @@ class InitialRefreshStrategy:
 
         if is_root_global_config:
             with timer("  Root global config sibling inheritance refresh", threshold_ms=10.0):
-                manager._parameter_ops_service.refresh_with_live_context(manager, use_user_modified_only=False)
+                manager._parameter_ops_service.refresh_with_live_context(manager)
         else:
             with timer("  Initial live context refresh", threshold_ms=10.0):
                 service = parameter_ops_service.ParameterOpsService()
-                service.refresh_with_live_context(manager, use_user_modified_only=False)
+                service.refresh_with_live_context(manager)
 

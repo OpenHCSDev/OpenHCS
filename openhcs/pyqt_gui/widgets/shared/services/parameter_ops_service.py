@@ -31,20 +31,18 @@ logger = logging.getLogger(__name__)
 
 def _compute_overlay(
     manager,
-    use_user_modified_only: bool = False,
     exclude_field: str | None = None,
 ) -> dict | None:
     """
     Compute overlay dict for context stack building.
 
     Consolidates overlay computation for both bulk and targeted refresh:
-    - Selects base values (user-modified or full parameters)
+    - Selects base values from manager.parameters
     - Excludes specified field if needed (for single-field refresh)
     - Includes exclude_params from object_instance (for hidden fields)
 
     Args:
         manager: The parameter form manager
-        use_user_modified_only: If True, use only user-modified values
         exclude_field: Field name to exclude from overlay (prevents self-shadowing)
 
     Returns:
@@ -52,7 +50,7 @@ def _compute_overlay(
     """
     from dataclasses import is_dataclass, fields
 
-    base = manager.get_user_modified_values() if use_user_modified_only else manager.parameters
+    base = manager.parameters
     if not base:
         return None
 
@@ -75,6 +73,41 @@ def _compute_overlay(
                 overlay[excluded] = getattr(obj, excluded)
 
     return overlay
+
+
+def _build_live_values(
+    manager,
+    live_context: dict[type, dict] | None,
+    exclude_field: str | None = None,
+) -> dict[type, dict] | None:
+    """
+    Build unified live_values dict for build_context_stack.
+
+    Merges cross-window live context with current manager's overlay values.
+    The overlay is keyed by manager's object_instance type.
+
+    Args:
+        manager: The parameter form manager
+        live_context: Dict from collect_live_context (type → values)
+        exclude_field: Field to exclude from overlay (prevents self-shadowing)
+
+    Returns:
+        Merged dict[type, dict] for build_context_stack, or None if empty
+    """
+    overlay = _compute_overlay(manager, exclude_field=exclude_field)
+    mgr_type = type(manager.object_instance)
+
+    if live_context is None and overlay is None:
+        return None
+
+    # Start with live_context copy or empty dict
+    live_values = dict(live_context) if live_context else {}
+
+    # Merge overlay into live_values under manager's type
+    if overlay is not None:
+        live_values[mgr_type] = overlay
+
+    return live_values if live_values else None
 
 
 class ParameterOpsService(ParameterServiceABC):
@@ -243,43 +276,25 @@ class ParameterOpsService(ParameterServiceABC):
         from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
         from openhcs.config_framework.context_manager import build_context_stack
 
-        # Find root manager to get complete form values (enables sibling inheritance)
-        # Root form (GlobalPipelineConfig/PipelineConfig/Step) contains all nested configs
+        # Find root manager for scope-filtered collection
         root_manager = manager
-        while getattr(root_manager, '_parent_manager', None) is not None:
+        while root_manager._parent_manager is not None:
             root_manager = root_manager._parent_manager
 
-        # Build context stack for resolution (use ROOT type for cache sharing)
+        # Collect live context from other windows (scope-filtered)
         live_context_snapshot = ParameterFormManager.collect_live_context(
             scope_filter=manager.scope_id,
             for_type=type(root_manager.object_instance)
         )
         live_context = live_context_snapshot.values if live_context_snapshot else None
 
-        # Use root manager's values and type for context (not just this nested manager's)
-        # PERFORMANCE OPTIMIZATION: Get root_values from live_context instead of calling
-        # get_user_modified_values() again (which calls get_current_values())
-        root_type = type(root_manager.object_instance)
-        is_nested = root_manager != manager
-        root_values = live_context.get(root_type) if live_context and is_nested else None
-        if root_values:
-            value_types = {k: type(v).__name__ for k, v in root_values.items()}
-            logger.info(f"        🔍 ROOT: field_id={root_manager.field_id}, type={root_type}, values={value_types}")
-        if root_type:
-            from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
-            lazy_root_type = LazyDefaultPlaceholderService._get_lazy_type_for_base(root_type)
-            if lazy_root_type:
-                root_type = lazy_root_type
+        # Build unified live_values (merges live_context + current overlay)
+        live_values = _build_live_values(manager, live_context, exclude_field=field_name)
 
         stack = build_context_stack(
             context_obj=manager.context_obj,
-            overlay=_compute_overlay(manager, exclude_field=field_name),
             object_instance=manager.object_instance,
-            live_context=live_context,
-            is_global_config_editing=getattr(manager.config, 'is_global_config_editing', False),
-            global_config_type=getattr(manager.config, 'global_config_type', None),
-            root_form_values=root_values,
-            root_form_type=root_type,
+            live_values=live_values,
         )
 
         with stack:
@@ -310,15 +325,15 @@ class ParameterOpsService(ParameterServiceABC):
             else:
                 logger.warning(f"        ⚠️  No placeholder text computed")
 
-    def refresh_with_live_context(self, manager, use_user_modified_only: bool = False) -> None:
+    def refresh_with_live_context(self, manager) -> None:
         """Refresh placeholders using live values from tree registry."""
         logger.debug(f"🔍 REFRESH: {manager.field_id} (id={id(manager)}) refreshing placeholders")
-        self.refresh_all_placeholders(manager, use_user_modified_only)
+        self.refresh_all_placeholders(manager)
         manager._apply_to_nested_managers(
-            lambda _, nested_manager: self.refresh_with_live_context(nested_manager, use_user_modified_only)
+            lambda _, nested_manager: self.refresh_with_live_context(nested_manager)
         )
 
-    def refresh_all_placeholders(self, manager, use_user_modified_only: bool = False) -> None:
+    def refresh_all_placeholders(self, manager) -> None:
         """Refresh placeholder text for all widgets in a form."""
         with timer(f"_refresh_all_placeholders ({manager.field_id})", threshold_ms=5.0):
             if not manager.object_instance:
@@ -330,37 +345,25 @@ class ParameterOpsService(ParameterServiceABC):
             from openhcs.config_framework.context_manager import build_context_stack
 
             logger.debug(f"[PLACEHOLDER] {manager.field_id}: Building context stack")
-            # Find root manager to get complete form values (enables sibling inheritance)
+            # Find root manager for scope-filtered collection
             root_manager = manager
-            while getattr(root_manager, '_parent_manager', None) is not None:
+            while root_manager._parent_manager is not None:
                 root_manager = root_manager._parent_manager
 
+            # Collect live context from other windows (scope-filtered)
             live_context_snapshot = ParameterFormManager.collect_live_context(
                 scope_filter=manager.scope_id,
                 for_type=type(root_manager.object_instance)
             )
             live_context = live_context_snapshot.values if live_context_snapshot else None
 
-            # PERFORMANCE OPTIMIZATION: Get root_values from live_context instead of calling
-            # get_user_modified_values() again (which calls get_current_values())
-            root_type = type(root_manager.object_instance)
-            is_nested = root_manager != manager
-            root_values = live_context.get(root_type) if live_context and is_nested else None
-            if root_type:
-                from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
-                lazy_root_type = LazyDefaultPlaceholderService._get_lazy_type_for_base(root_type)
-                if lazy_root_type:
-                    root_type = lazy_root_type
+            # Build unified live_values (merges live_context + current overlay)
+            live_values = _build_live_values(manager, live_context)
 
             stack = build_context_stack(
                 context_obj=manager.context_obj,
-                overlay=_compute_overlay(manager, use_user_modified_only=use_user_modified_only),
                 object_instance=manager.object_instance,
-                live_context=live_context,
-                is_global_config_editing=getattr(manager.config, 'is_global_config_editing', False),
-                global_config_type=getattr(manager.config, 'global_config_type', None),
-                root_form_values=root_values,
-                root_form_type=root_type,
+                live_values=live_values,
             )
 
             with stack:

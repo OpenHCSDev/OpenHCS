@@ -299,7 +299,7 @@ class LiveContextService:
         refresh_service = ParameterOpsService()
         for manager in cls._active_form_managers:
             try:
-                refresh_service.refresh_with_live_context(manager, use_user_modified_only=False)
+                refresh_service.refresh_with_live_context(manager)
             except Exception as e:
                 logger.warning(f"Failed to refresh manager {manager.field_id}: {e}")
 
