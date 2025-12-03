@@ -405,8 +405,8 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
                 from openhcs.pyqt_gui.widgets.shared.services.parameter_ops_service import ParameterOpsService
                 ParameterOpsService().refresh_with_live_context(self.form_manager)
 
-                # Emit context_refreshed to notify other windows
-                self.form_manager.context_refreshed.emit(new_config, self.form_manager.context_obj, self.form_manager.scope_id or "")
+                # Emit context_changed to notify other windows (bulk refresh, no specific field)
+                self.form_manager.context_changed.emit(self.form_manager.scope_id or "", "")
 
         except Exception as e:
             logger.error(f"Failed to save configuration: {e}")

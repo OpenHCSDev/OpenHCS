@@ -181,16 +181,9 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
 
     parameter_changed = pyqtSignal(str, object)  # param_name, value
 
-    # Class-level signal for cross-window context changes
-    # Emitted when a form changes a value that might affect other open windows
-    # Args: (field_path, new_value, editing_object, context_object)
-    context_value_changed = pyqtSignal(str, object, object, object, str)  # field_path, new_value, editing_obj, context_obj, scope_id
-
-    # Class-level signal for cascading placeholder refreshes
-    # Emitted when a form's placeholders are refreshed due to upstream changes
-    # This allows downstream windows to know they should re-collect live context
-    # Args: (editing_object, context_object)
-    context_refreshed = pyqtSignal(object, object, str)  # editing_obj, context_obj, scope_id
+    # Cross-window context change signal (simplified API)
+    # Args: (scope_id, field_path) - field_path is None for bulk refresh
+    context_changed = pyqtSignal(str, str)  # scope_id, field_path
 
     # NOTE: Class-level cross-cutting concerns moved to LiveContextService:
     # - _active_form_managers -> LiveContextService._active_form_managers
@@ -1142,77 +1135,6 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         """DEPRECATED: Use LiveContextService._is_scope_visible() instead."""
         return LiveContextService._is_scope_visible(manager_scope, filter_scope)
 
-    def _on_cross_window_context_changed(self, field_path: str, new_value: object,
-                                          editing_object: object, context_object: object, editing_scope_id: str):
-        """Handle context_value_changed signal from another window.
-
-        Signal signature: (field_path, new_value, editing_object, context_object)
-
-        Uses targeted placeholder refresh for the specific field that changed,
-        rather than refreshing all placeholders.
-
-        Args:
-            field_path: The full path of the field that changed (e.g., "GlobalConfig.path_planning_config.well_filter")
-            new_value: The new value of the field
-            editing_object: The object being edited in the other window
-            context_object: The context object used by the other window
-        """
-        # EARLY EXIT: Scope visibility check (cheapest check first)
-        if not self._is_scope_visible_static(editing_scope_id, self.scope_id):
-            return
-
-        editing_type_name = type(editing_object).__name__ if editing_object else "None"
-        context_type_name = type(context_object).__name__ if context_object else "None"
-        logger.info(f"🔔 CROSS_WINDOW_RECV [{self.field_id}]: path={field_path}, value={repr(new_value)[:30]}, "
-                   f"from={editing_type_name}, ctx={context_type_name}, my_scope={self.scope_id}")
-
-        # Don't refresh if this is the window that triggered the event
-        if editing_object is self.object_instance:
-            logger.info(f"  ⏭️  SKIP: same instance")
-            return
-
-        # Check if the event affects this form based on scope hierarchy
-        if not is_scope_affected(self.scope_id, editing_scope_id):
-            logger.info(f"  ⏭️  SKIP: not affected by scope change")
-            return
-
-        # Extract the leaf field name from the path
-        # e.g., "GlobalConfig.path_planning_config.well_filter" → "well_filter"
-        leaf_field = field_path.split(".")[-1] if field_path else None
-        logger.info(f"  ✅ AFFECTED: scheduling refresh for field={leaf_field}")
-
-        # Schedule targeted refresh for this specific field
-        self._schedule_cross_window_refresh(changed_field=leaf_field, emit_signal=True)
-
-    def _on_cross_window_context_refreshed(self, editing_object: object, context_object: object, editing_scope_id: str):
-        """Handle context_refreshed signal from another window.
-
-        Signal signature: (editing_object, context_object)
-
-        This is a bulk refresh (e.g., save/cancel), so refresh all placeholders.
-
-        Args:
-            editing_object: The object being edited/refreshed in the other window
-            context_object: The context object used by the other window
-        """
-        editing_type_name = type(editing_object).__name__ if editing_object else "None"
-        context_type_name = type(context_object).__name__ if context_object else "None"
-        logger.info(f"🔔 CROSS_WINDOW_REFRESH [{self.field_id}]: from={editing_type_name}, ctx={context_type_name}, my_scope={self.scope_id}")
-
-        # Don't refresh if this is the window that triggered the event
-        if editing_object is self.object_instance:
-            logger.info(f"  ⏭️  SKIP: same instance")
-            return
-
-        # Check if the event affects this form based on scope hierarchy
-        if not is_scope_affected(self.scope_id, editing_scope_id):
-            logger.info(f"  ⏭️  SKIP: not affected by scope change")
-            return
-
-        logger.info(f"  ✅ AFFECTED: scheduling BULK refresh")
-        # Bulk refresh - no specific field
-        self._schedule_cross_window_refresh(changed_field=None, emit_signal=False)
-
     def _schedule_cross_window_refresh(self, changed_field: Optional[str] = None, emit_signal: bool = True):
         """Schedule a debounced placeholder refresh for cross-window updates.
 
@@ -1252,7 +1174,7 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
 
             # CRITICAL: Only root managers emit signals to avoid nested ping-pong
             if emit_signal and self._parent_manager is None:
-                self.context_refreshed.emit(self.object_instance, self.context_obj, self.scope_id)
+                self.context_changed.emit(self.scope_id or "", changed_field or "")
 
         self._cross_window_refresh_timer = QTimer()
         self._cross_window_refresh_timer.setSingleShot(True)

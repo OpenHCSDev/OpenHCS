@@ -269,8 +269,8 @@ class DualEditorWindow(BaseFormDialog):
         # Connect parameter changes - use form manager signal for immediate response
         self.step_editor.form_manager.parameter_changed.connect(self.on_form_parameter_changed)
 
-        # CRITICAL: Connect context_refreshed signal for cross-window updates from code editor
-        self.step_editor.form_manager.context_refreshed.connect(self._on_step_context_refreshed)
+        # CRITICAL: Connect context_changed signal for cross-window updates from code editor
+        self.step_editor.form_manager.context_changed.connect(self._on_step_context_changed)
 
         self.tab_widget.addTab(self.step_editor, "Step Settings")
 
@@ -326,8 +326,8 @@ class DualEditorWindow(BaseFormDialog):
         self.detect_changes()
         logger.debug(f"Function pattern changed: {current_pattern}")
 
-    def _on_step_context_refreshed(self, object_instance, context_obj):
-        """Handle context refresh from step editor.
+    def _on_step_context_changed(self, scope_id: str, field_path: str):
+        """Handle context change from step editor.
 
         CRITICAL: This is called when:
         1. Code editor saves (updates step instance)
@@ -342,7 +342,7 @@ class DualEditorWindow(BaseFormDialog):
 
         # Detect changes
         self.detect_changes()
-        logger.debug("Step context refreshed - updated function editor component button")
+        logger.debug(f"Step context changed - scope={scope_id}, field={field_path}")
 
     def _get_event_bus(self):
         """Get the global event bus from the service adapter.

@@ -220,7 +220,7 @@ class FieldChangeDispatcher:
         return ".".join(parts)
 
     def _emit_cross_window(self, root_manager: 'ParameterFormManager', full_path: str, value: Any) -> None:
-        """Emit context_value_changed from root with full field path."""
+        """Emit context_changed from root with scope_id and field path."""
         if root_manager._should_skip_updates():
             if DEBUG_DISPATCHER:
                 logger.warning(f"  🚫 Cross-window BLOCKED: _should_skip_updates()=True for {root_manager.field_id}")
@@ -231,15 +231,9 @@ class FieldChangeDispatcher:
                 logger.info(f"  🌐 Updated thread-local global config")
 
         if DEBUG_DISPATCHER:
-            logger.info(f"  📡 Emitting cross-window: path={full_path}")
+            logger.info(f"  📡 Emitting cross-window: scope={root_manager.scope_id}, path={full_path}")
 
-        root_manager.context_value_changed.emit(
-            full_path,
-            value,
-            root_manager.object_instance,
-            root_manager.context_obj,
-            root_manager.scope_id
-        )
+        root_manager.context_changed.emit(root_manager.scope_id or "", full_path)
 
     def _refresh_single_field(self, manager: 'ParameterFormManager', field_name: str) -> None:
         """Refresh just one field's placeholder in a sibling manager."""
