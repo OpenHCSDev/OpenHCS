@@ -298,6 +298,22 @@ def get_root_from_scope_key(scope_key: str) -> str:
     return scope_key.split("::")[0]
 
 
+def _normalize_type_for_hierarchy(t):
+    """Normalize a type for hierarchy registry, but preserve lazy-global distinction.
+
+    Normalization maps lazy types to their base types (e.g., LazyPathPlanningConfig → PathPlanningConfig).
+    However, PipelineConfig → GlobalPipelineConfig is a special case: they represent DISTINCT
+    hierarchy levels (pipeline overrides vs global defaults), so we must NOT collapse them.
+
+    Rule: If normalization would produce a global type from a non-global type, keep the original.
+    """
+    normalized = _normalize_type(t)
+    # Don't collapse lazy-to-global - they're distinct hierarchy levels
+    if _is_global_type(normalized) and not _is_global_type(t):
+        return t
+    return normalized
+
+
 def register_hierarchy_relationship(context_obj_type, object_instance_type):
     """Register that context_obj_type is the parent of object_instance_type in the hierarchy.
 
@@ -309,18 +325,16 @@ def register_hierarchy_relationship(context_obj_type, object_instance_type):
         object_instance_type: The child type being edited (e.g., Step)
 
     Note:
-        Types are normalized to base types here. This is correct for nested configs
-        (e.g., LazyPathPlanningConfig → PathPlanningConfig).
-        The GlobalPipelineConfig → PipelineConfig relationship is handled separately
-        by is_ancestor_in_context using get_base_type_for_lazy().
+        Types are normalized to base types (e.g., LazyPathPlanningConfig → PathPlanningConfig),
+        but lazy-to-global normalization is prevented to preserve distinct hierarchy levels
+        (PipelineConfig stays as PipelineConfig, not collapsed to GlobalPipelineConfig).
     """
     if context_obj_type is None or object_instance_type is None:
         return
 
-    parent_base = _normalize_type(context_obj_type)
-    child_base = _normalize_type(object_instance_type)
+    parent_base = _normalize_type_for_hierarchy(context_obj_type)
+    child_base = _normalize_type_for_hierarchy(object_instance_type)
 
-    # Removed global type filter - GlobalPipelineConfig can be a parent too
     if parent_base != child_base:
         _known_hierarchy[child_base] = parent_base
         logger.debug(f"Registered hierarchy: {parent_base.__name__} -> {child_base.__name__}")
@@ -332,7 +346,7 @@ def unregister_hierarchy_relationship(object_instance_type):
     Args:
         object_instance_type: The type to remove from the registry
     """
-    child_base = _normalize_type(object_instance_type)
+    child_base = _normalize_type_for_hierarchy(object_instance_type)
     if child_base in _known_hierarchy:
         del _known_hierarchy[child_base]
         logger.debug(f"Unregistered hierarchy for: {child_base.__name__}")
@@ -349,7 +363,7 @@ def get_ancestors_from_hierarchy(target_type):
     Returns:
         List of ancestor types in hierarchy order (grandparent, parent, ...)
     """
-    target_base = _normalize_type(target_type)
+    target_base = _normalize_type_for_hierarchy(target_type)
     ancestors = []
 
     # Walk up the hierarchy
@@ -545,6 +559,7 @@ def build_context_stack(
 
     # 3. Parent context from context_obj (prefer live values if available)
     if context_obj is not None:
+        from types import SimpleNamespace
         context_type = type(context_obj)
         live_values = _find_live_values_for_type(context_type, live_context) if live_context else None
 
@@ -556,9 +571,14 @@ def build_context_stack(
                 stack.enter_context(config_context(live_context_obj))
                 logger.info(f"  [3] CONTEXT layer: {context_type.__name__} (LIVE: {list(live_values.keys())[:3]}...)")
             except Exception as e:
-                # Fall back to stored context_obj if instantiation fails
+                # Non-dataclass types (e.g., FunctionStep) can't be reconstructed with just form values
+                # (they need constructor args like 'func' that aren't in the form).
+                # Solution: inject BOTH the original (for type tracking) AND SimpleNamespace (for live values).
+                # Value resolution searches newest-to-oldest, so live values win.
                 stack.enter_context(config_context(context_obj))
-                logger.warning(f"  [3] CONTEXT layer: {context_type.__name__} (stored, live failed: {e})")
+                live_ns = SimpleNamespace(**live_values)
+                stack.enter_context(config_context(live_ns))
+                logger.info(f"  [3] CONTEXT layer: {context_type.__name__} (stored + live SimpleNamespace)")
         else:
             # No live values, use stored context_obj
             stack.enter_context(config_context(context_obj))
@@ -590,13 +610,19 @@ def build_context_stack(
 
     # 5. Overlay from current form values
     if obj_type and overlay:
+        from types import SimpleNamespace
         overlay_keys = list(overlay.keys())[:5]
         logger.info(f"  [5] OVERLAY layer: type={obj_type.__name__}, keys={overlay_keys}{'...' if len(overlay) > 5 else ''}")
         try:
             if is_dataclass(obj_type):
                 overlay_instance = obj_type(**overlay)
                 stack.enter_context(config_context(overlay_instance))
-                logger.info(f"      ✅ injected overlay")
+                logger.info(f"      ✅ injected overlay as {obj_type.__name__}")
+            else:
+                # Non-dataclass types (e.g., FunctionStep) - use SimpleNamespace
+                overlay_instance = SimpleNamespace(**overlay)
+                stack.enter_context(config_context(overlay_instance))
+                logger.info(f"      ✅ injected overlay as SimpleNamespace")
         except Exception as e:
             logger.warning(f"      ❌ failed to inject overlay: {e}")
 
