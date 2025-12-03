@@ -535,6 +535,50 @@ def is_same_type_in_context(type_a, type_b):
 # Context Stack Building (for UI placeholder resolution)
 # ============================================================================
 
+
+def _inject_context_layer(
+    stack,
+    t: type | None,
+    values: dict | None,
+    stored: object | None,
+) -> None:
+    """
+    Inject a context layer into the stack.
+
+    Handles dataclass instantiation with SimpleNamespace fallback.
+    For types that can't be reconstructed (e.g., FunctionStep needs 'func' arg),
+    injects stored object + SimpleNamespace so type tracking works and live values win.
+
+    Args:
+        stack: ExitStack to inject into
+        t: Type to instantiate (None = use SimpleNamespace)
+        values: Dict of values to use (None = use stored only)
+        stored: Stored object to fall back to (None = no fallback)
+    """
+    from types import SimpleNamespace
+
+    if values is None:
+        if stored is not None:
+            stack.enter_context(config_context(stored))
+        return
+
+    # Have values - try to instantiate as dataclass, fall back to SimpleNamespace
+    if t is not None and is_dataclass(t):
+        try:
+            stack.enter_context(config_context(t(**values)))
+            return
+        except Exception:
+            # Dataclass ctor failed (e.g., missing required args not in form)
+            # Inject stored (for type tracking) + SimpleNamespace (for values)
+            if stored is not None:
+                stack.enter_context(config_context(stored))
+            stack.enter_context(config_context(SimpleNamespace(**values)))
+            return
+
+    # Non-dataclass or no type - use SimpleNamespace
+    stack.enter_context(config_context(SimpleNamespace(**values)))
+
+
 def build_context_stack(
     context_obj: object | None,
     overlay: dict | None = None,
@@ -586,80 +630,27 @@ def build_context_stack(
     global_layer = _get_global_context_layer(live_context, is_global_config_editing, global_config_type)
     if global_layer is not None:
         stack.enter_context(config_context(global_layer, mask_with_none=is_global_config_editing))
-        logger.info(f"  [1] GLOBAL layer: {type(global_layer).__name__}")
 
-    # 2. Intermediate layers (ancestors of context_obj in hierarchy)
-    if context_obj is not None and live_context:
-        _inject_intermediate_layers(stack, type(context_obj), live_context)
-
-    # 3. Parent context from context_obj (prefer live values if available)
+    # 2-3. Unified parent chain (ancestors + immediate parent)
     if context_obj is not None:
-        from types import SimpleNamespace
         context_type = type(context_obj)
-        live_values = _find_live_values_for_type(context_type, live_context) if live_context else None
+        ancestor_types = get_types_before_in_stack(context_type) if live_context else []
+        parent_chain = ancestor_types + [context_type]
 
-        if live_values:
-            # Use LIVE values from currently open forms instead of stored context_obj
-            # This ensures cross-window changes are immediately visible
-            try:
-                live_context_obj = context_type(**live_values)
-                stack.enter_context(config_context(live_context_obj))
-                logger.info(f"  [3] CONTEXT layer: {context_type.__name__} (LIVE: {list(live_values.keys())[:3]}...)")
-            except Exception as e:
-                # Non-dataclass types (e.g., FunctionStep) can't be reconstructed with just form values
-                # (they need constructor args like 'func' that aren't in the form).
-                # Solution: inject BOTH the original (for type tracking) AND SimpleNamespace (for live values).
-                # Value resolution searches newest-to-oldest, so live values win.
-                stack.enter_context(config_context(context_obj))
-                live_ns = SimpleNamespace(**live_values)
-                stack.enter_context(config_context(live_ns))
-                logger.info(f"  [3] CONTEXT layer: {context_type.__name__} (stored + live SimpleNamespace)")
-        else:
-            # No live values, use stored context_obj
-            stack.enter_context(config_context(context_obj))
-            logger.info(f"  [3] CONTEXT layer: {context_type.__name__} (stored)")
+        for t in parent_chain:
+            if _is_global_type(t):
+                continue
+            live_values = _find_live_values_for_type(t, live_context) if live_context else None
+            stored = context_obj if t == context_type else None
+            _inject_context_layer(stack, t, live_values, stored)
 
     # 4. Root form layer (for sibling inheritance)
-    # The root form can be ANY object (dataclass, class, function, etc.)
-    # We use ONE path: create/use a dataclass-like object and inject via config_context.
-    # For non-dataclass roots, use SimpleNamespace to mimic a dataclass structure.
     if root_form_values:
-        from types import SimpleNamespace
-        root_type_name = root_form_type.__name__ if root_form_type else "None"
-        root_keys = list(root_form_values.keys())[:5]
-        logger.info(f"  [4] ROOT layer: type={root_type_name}, keys={root_keys}{'...' if len(root_form_values) > 5 else ''}")
-
-        if root_form_type and is_dataclass(root_form_type):
-            # Root is a dataclass - instantiate directly
-            try:
-                root_instance = root_form_type(**root_form_values)
-                stack.enter_context(config_context(root_instance))
-                logger.info(f"      ✅ injected root form {root_form_type.__name__}")
-            except Exception as e:
-                logger.warning(f"      ❌ failed to inject root form: {e}")
-        else:
-            # Root is NOT a dataclass - wrap in SimpleNamespace to go through same path
-            root_instance = SimpleNamespace(**root_form_values)
-            stack.enter_context(config_context(root_instance))
-            logger.info(f"      ✅ injected root form as SimpleNamespace")
+        _inject_context_layer(stack, root_form_type, root_form_values, None)
 
     # 5. Overlay from current form values
-    if obj_type and overlay:
-        from types import SimpleNamespace
-        overlay_keys = list(overlay.keys())[:5]
-        logger.info(f"  [5] OVERLAY layer: type={obj_type.__name__}, keys={overlay_keys}{'...' if len(overlay) > 5 else ''}")
-        try:
-            if is_dataclass(obj_type):
-                overlay_instance = obj_type(**overlay)
-                stack.enter_context(config_context(overlay_instance))
-                logger.info(f"      ✅ injected overlay as {obj_type.__name__}")
-            else:
-                # Non-dataclass types (e.g., FunctionStep) - use SimpleNamespace
-                overlay_instance = SimpleNamespace(**overlay)
-                stack.enter_context(config_context(overlay_instance))
-                logger.info(f"      ✅ injected overlay as SimpleNamespace")
-        except Exception as e:
-            logger.warning(f"      ❌ failed to inject overlay: {e}")
+    if obj_type and overlay is not None:
+        _inject_context_layer(stack, obj_type, overlay, None)
 
     return stack
 
@@ -688,87 +679,53 @@ def _get_global_context_layer(
     Returns:
         Global config instance to use, or None if not available
     """
-    # PERFORMANCE OPTIMIZATION: Check dispatch cycle cache first
-    # Use is_global_config_editing and global_config_type as cache key since
-    # live_context dict is recreated each call (different id each time)
     cache = get_dispatch_cache()
     cache_key = ('global_layer', is_global_config_editing, global_config_type)
-
     if cache is not None and cache_key in cache:
         logger.info(f"  🚀 GLOBAL layer CACHE HIT")
         return cache[cache_key]
 
-    # Compute the global layer
-    result = _compute_global_context_layer(live_context, is_global_config_editing, global_config_type)
+    layer = None
 
-    # Store in dispatch cache if available
-    if cache is not None:
-        cache[cache_key] = result
-        logger.info(f"  📦 GLOBAL layer cached")
-
-    return result
-
-
-def _compute_global_context_layer(
-    live_context: dict | None,
-    is_global_config_editing: bool,
-    global_config_type: type | None,
-) -> object | None:
-    """Compute the global context layer (uncached implementation)."""
-    # When editing global config, return a fresh instance to mask thread-local
+    # 1) Global config editing → fresh instance (mask thread-local when entering)
     if is_global_config_editing and global_config_type is not None:
         try:
-            return global_config_type()
+            layer = global_config_type()
         except Exception:
-            pass
+            layer = None
 
-    # Try to find global config in live_context
-    if live_context:
-        from openhcs.config_framework.lazy_factory import is_global_config_type
-        for config_type, config_values in live_context.items():
-            if is_global_config_type(config_type):
-                try:
-                    return config_type(**config_values)
-                except Exception:
-                    pass
+    # 2) Live global from other window
+    if layer is None:
+        layer = _find_live_global(live_context)
 
-    # Fall back to thread-local global config
-    return get_base_global_config()
+    # 3) Fallback to thread-local base
+    if layer is None:
+        layer = get_base_global_config()
+
+    if cache is not None:
+        cache[cache_key] = layer
+        logger.info(f"  📦 GLOBAL layer cached")
+
+    return layer
 
 
-def _inject_intermediate_layers(stack, context_obj_type: type, live_context: dict):
-    """
-    Inject intermediate context layers between global and context_obj.
+def _find_live_global(live_context: dict | None) -> object | None:
+    """Find and instantiate a global config from live_context if present."""
+    if not live_context:
+        return None
 
-    Uses get_types_before_in_stack() to find ancestor types, then injects
-    each one from live_context if available.
+    from openhcs.config_framework.lazy_factory import is_global_config_type
 
-    Args:
-        stack: ExitStack to add layers to
-        context_obj_type: The type of the context object
-        live_context: Dict mapping types to their live values
-    """
-    ancestor_types = get_types_before_in_stack(context_obj_type)
-    logger.info(f"_inject_intermediate_layers: context_obj_type={context_obj_type.__name__}, ancestors={[t.__name__ for t in ancestor_types]}")
-    logger.info(f"_inject_intermediate_layers: live_context types={[t.__name__ for t in live_context.keys()]}")
-
-    for ancestor_type in ancestor_types:
-        # Skip global types (already handled)
-        if _is_global_type(ancestor_type):
-            logger.info(f"  → SKIP {ancestor_type.__name__}: is global type")
-            continue
-
-        # Find live values for this ancestor type
-        live_values = _find_live_values_for_type(ancestor_type, live_context)
-        if live_values is not None:
+    for config_type, config_values in live_context.items():
+        if is_global_config_type(config_type):
             try:
-                ancestor_instance = ancestor_type(**live_values)
-                stack.enter_context(config_context(ancestor_instance))
-                logger.info(f"  → INJECT {ancestor_type.__name__}: {list(live_values.keys())[:5]}...")
-            except Exception as e:
-                logger.warning(f"  → FAILED {ancestor_type.__name__}: {e}")
-        else:
-            logger.info(f"  → NO VALUES for {ancestor_type.__name__}")
+                return config_type(**config_values)
+            except Exception:
+                continue
+    return None
+
+
+
 
 
 def _find_live_values_for_type(target_type: type, live_context: dict) -> dict | None:
