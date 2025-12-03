@@ -106,12 +106,12 @@ sequenceDiagram
 ### Components and data flow (flowchart)
 ```mermaid
 flowchart LR
-    A[@special_outputs declares materializer name]
-    B[Compiler/PathPlanner<br/>stores name in step_plan]
-    C[Materializer registry<br/>name -> callable]
-    D[FunctionStep execution]
-    E[Helper layer<br/>(csv/rois/image fan-out)]
-    F[Backends<br/>(disk/zarr/omero_local/stream)]
+    A["@special_outputs declares materializer name"]
+    B["Compiler/PathPlanner\nstores name in step_plan"]
+    C["Materializer registry\nname -> callable"]
+    D["FunctionStep execution"]
+    E["Helper layer\n(csv/rois/image fan-out)"]
+    F["Backends\n(disk/zarr/omero_local/stream)"]
 
     A --> B
     B --> D
