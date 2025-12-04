@@ -727,12 +727,16 @@ class PipelineOrchestrator(ContextProvider):
         # Create context using SAME logic as create_context() to get full metadata
         context = self.create_context(axis_id="metadata_init")
 
+        # Determine correct backend using handler's logic (virtual_workspace for ImageXpress/Opera, disk for others)
+        backend = self.microscope_handler.get_primary_backend(self.plate_path, self.filemanager)
+        logger.debug(f"Using backend '{backend}' for metadata extraction")
+
         # Create metadata (will skip if already complete)
         generator = OpenHCSMetadataGenerator(self.filemanager)
         generator.create_metadata(
             context,
             str(self.input_dir),
-            "disk",
+            backend,
             is_main=True,
             plate_root=str(self.plate_path),
             sub_dir=subdir_name,

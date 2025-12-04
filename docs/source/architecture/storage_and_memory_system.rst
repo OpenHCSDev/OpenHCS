@@ -197,6 +197,12 @@ The virtual workspace backend is automatically selected when:
 2. FileManager registers VirtualWorkspaceBackend in local registry
 3. ``get_primary_backend()`` returns ``"virtual_workspace"`` for reading original data (if zarr not available)
 
+**Metadata emission (centralized helper)**:
+
+- Virtual workspace handlers now use a shared helper to write ``openhcs_metadata.json`` so all metadata fields stay consistent.
+- The helper records the workspace mapping plus handler/parser names and optional grid/pixel metadata if available.
+- Orchestrator metadata extraction respects the handler's chosen primary backend (e.g., virtual workspace for ImageXpress/Opera), instead of forcing ``disk``.
+
 **Materialization Compatibility**:
 
 Virtual workspace works seamlessly with materialization backends:

@@ -14,7 +14,6 @@ from typing import Any, Dict, List, Optional, Union, Type, Tuple
 from openhcs.constants.constants import Backend
 from openhcs.microscopes.opera_phenix_xml_parser import OperaPhenixXmlParser
 from openhcs.io.filemanager import FileManager
-from openhcs.io.metadata_writer import AtomicMetadataWriter
 from openhcs.microscopes.microscope_base import MicroscopeHandler
 from openhcs.microscopes.microscope_interfaces import (FilenameParser,
                                                             MetadataHandler)
@@ -158,17 +157,8 @@ class OperaPhenixHandler(MicroscopeHandler):
 
         logger.info(f"Built {len(workspace_mapping)} virtual path mappings for Opera Phenix")
 
-        # Save virtual workspace mapping to metadata using root_dir as subdirectory key
-        metadata_path = plate_path / "openhcs_metadata.json"
-        writer = AtomicMetadataWriter()
-        writer.merge_subdirectory_metadata(metadata_path, {
-            self.root_dir: {
-                "workspace_mapping": workspace_mapping,  # Plate-relative paths
-                "available_backends": {"disk": True, "virtual_workspace": True}
-            }
-        })
-
-        logger.info(f"✅ Saved virtual workspace mapping to {metadata_path}")
+        # Save virtual workspace mapping and all available metadata
+        self._save_virtual_workspace_metadata(plate_path, workspace_mapping)
 
         return image_dir
 

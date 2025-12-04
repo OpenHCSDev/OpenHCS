@@ -208,6 +208,48 @@ class MicroscopeHandler(ABC, metaclass=AutoRegisterMeta):
         logger.info(f"⚠️ Using backend '{available_backends[0].value}' from compatible backends (virtual workspace not registered)")
         return available_backends[0].value
 
+    def _save_virtual_workspace_metadata(self, plate_path: Path, workspace_mapping: dict) -> None:
+        """
+        Save virtual workspace mapping and handler metadata to openhcs_metadata.json.
+
+        This is a helper method for subclasses to call from _build_virtual_mapping().
+        It writes all available metadata fields including handler name and parser name.
+
+        Args:
+            plate_path: Path to plate directory
+            workspace_mapping: Dict mapping virtual paths to real paths
+        """
+        from openhcs.io.metadata_writer import AtomicMetadataWriter
+
+        metadata_path = plate_path / "openhcs_metadata.json"
+        writer = AtomicMetadataWriter()
+
+        # Build metadata dict with all available fields
+        metadata_dict = {
+            "workspace_mapping": workspace_mapping,
+            "available_backends": {"disk": True, "virtual_workspace": True},
+            "microscope_handler_name": self.microscope_type,
+            "source_filename_parser_name": self.parser.__class__.__name__
+        }
+
+        # Add grid_dimensions and pixel_size if available
+        try:
+            grid_dimensions = self.metadata_handler._get_with_fallback('get_grid_dimensions', plate_path)
+            if grid_dimensions is not None:
+                metadata_dict["grid_dimensions"] = grid_dimensions
+        except Exception:
+            pass
+
+        try:
+            pixel_size = self.metadata_handler._get_with_fallback('get_pixel_size', plate_path)
+            if pixel_size is not None:
+                metadata_dict["pixel_size"] = pixel_size
+        except Exception:
+            pass
+
+        writer.merge_subdirectory_metadata(metadata_path, {self.root_dir: metadata_dict})
+        logger.info(f"✅ Saved virtual workspace metadata to {metadata_path}")
+
     def _register_virtual_workspace_backend(self, plate_path: Union[str, Path], filemanager: FileManager) -> None:
         """
         Register virtual workspace backend for this plate.
