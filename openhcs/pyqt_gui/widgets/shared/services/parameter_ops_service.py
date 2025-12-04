@@ -133,6 +133,24 @@ class ParameterOpsService(ParameterServiceABC):
         from openhcs.ui.shared.widget_operations import WidgetOperations
         self.widget_ops = WidgetOperations
 
+    @staticmethod
+    def _get_effective_context_obj(manager):
+        """
+        Get the context object to use when building the context stack.
+
+        Falls back to the parent manager's object_instance when this manager
+        has no explicit context_obj so nested configs still see their parent
+        layer for sibling inheritance.
+        """
+        if manager.context_obj is not None:
+            return manager.context_obj
+
+        parent = manager._parent_manager
+        if parent is not None:
+            return parent.object_instance
+
+        return None
+
     def _get_handler_prefix(self) -> str:
         """Return handler method prefix for auto-discovery."""
         return '_reset_'
@@ -291,8 +309,9 @@ class ParameterOpsService(ParameterServiceABC):
         # Build unified live_values (merges live_context + current overlay)
         live_values = _build_live_values(manager, live_context, exclude_field=field_name)
 
+        effective_context_obj = self._get_effective_context_obj(manager)
         stack = build_context_stack(
-            context_obj=manager.context_obj,
+            context_obj=effective_context_obj,
             object_instance=manager.object_instance,
             live_values=live_values,
         )
@@ -360,8 +379,9 @@ class ParameterOpsService(ParameterServiceABC):
             # Build unified live_values (merges live_context + current overlay)
             live_values = _build_live_values(manager, live_context)
 
+            effective_context_obj = self._get_effective_context_obj(manager)
             stack = build_context_stack(
-                context_obj=manager.context_obj,
+                context_obj=effective_context_obj,
                 object_instance=manager.object_instance,
                 live_values=live_values,
             )
