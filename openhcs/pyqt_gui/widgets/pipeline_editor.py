@@ -422,22 +422,9 @@ class PipelineEditorWidget(AbstractManagerWidget):
             # Get the source code from the module
             python_code = inspect.getsource(basic_pipeline_module)
 
-            # Execute the code to get pipeline_steps (same as _handle_edited_pipeline_code)
-            namespace = {}
-            with self._patch_lazy_constructors():
-                exec(python_code, namespace)
-
-            # Get the pipeline_steps from the namespace
-            if 'pipeline_steps' in namespace:
-                new_pipeline_steps = namespace['pipeline_steps']
-                # Update the pipeline with new steps
-                self.pipeline_steps = new_pipeline_steps
-                self._normalize_step_scope_tokens()
-                self.update_item_list()
-                self.pipeline_changed.emit(self.pipeline_steps)
-                self.status_message.emit(f"Auto-loaded {len(new_pipeline_steps)} steps from basic_pipeline.py")
-            else:
-                raise ValueError("No 'pipeline_steps = [...]' assignment found in basic_pipeline.py")
+            # Use ABC template for unified code execution (handles registration sync)
+            self._handle_edited_code(python_code)
+            self.status_message.emit(f"Auto-loaded {len(self.pipeline_steps)} steps from basic_pipeline.py")
 
         except Exception as e:
             import traceback
