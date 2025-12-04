@@ -794,9 +794,11 @@ Registration belongs in the ABC, not scattered in concrete classes. Code mode fl
 ```mermaid
 flowchart TB
     subgraph ABC["AbstractManagerWidget (handles registration)"]
+        Ensure["_ensure_item_registered(item)"]
         Add["_on_item_added(item)"]
         Del["_on_item_deleted(item)"]
-        Add -->|"register"| RVC
+        Add -->|"delegates"| Ensure
+        Ensure -->|"if info not None"| RVC
         Del -->|"unregister"| RVC
     end
 
@@ -807,8 +809,9 @@ flowchart TB
 
     RVC[ResolvedValueCache]
 
-    PE -->|"implements _get_item_scope_id()"| ABC
-    PM -->|"implements _get_item_scope_id()"| ABC
+    PE -->|"_get_item_registration_info() → tuple"| ABC
+    PM -->|"_get_item_registration_info() → Optional"| ABC
+    PM -->|"calls _ensure_item_registered() after init"| ABC
 
     style ABC stroke:#00cc00,stroke-width:2px
     style Concrete stroke:#66aaff,stroke-width:2px
@@ -816,13 +819,19 @@ flowchart TB
 
 **AbstractManagerWidget changes:**
 
-1. Add hook methods (concrete with default behavior):
+1. Add hook methods (ABC handles all registration logic):
 ```python
+def _ensure_item_registered(self, item: Any) -> None:
+    """Register item if registration info available. Idempotent - safe to call multiple times."""
+    reg_info = self._get_item_registration_info(item)
+    if reg_info is not None:
+        scope_id = self._get_item_scope_id(item)
+        context_obj, obj = reg_info
+        ResolvedValueCache.register(scope_id, context_obj, obj)
+
 def _on_item_added(self, item: Any) -> None:
-    """Called after item added. Registers with cache. Override for custom timing."""
-    scope_id = self._get_item_scope_id(item)
-    context_obj, obj = self._get_item_registration_info(item)
-    ResolvedValueCache.register(scope_id, context_obj, obj)
+    """Called after item added. Delegates to _ensure_item_registered()."""
+    self._ensure_item_registered(item)
 
 def _on_item_deleted(self, item: Any) -> None:
     """Called before item deleted. Unregisters from cache."""
@@ -830,11 +839,19 @@ def _on_item_deleted(self, item: Any) -> None:
     ResolvedValueCache.unregister(scope_id)
 ```
 
-2. Add abstract methods for scope info:
+2. Add abstract methods for scope info (return Optional to control registration):
 ```python
 @abstractmethod
 def _get_item_scope_id(self, item: Any) -> str:
     """Return scope_id for item. e.g., 'plate_path::step_0'"""
+
+@abstractmethod
+def _get_item_registration_info(self, item: Any) -> Optional[tuple]:
+    """Return (context_obj, object_instance) for registration, or None to skip.
+
+    Return None when item isn't ready for registration yet (e.g., PlateManager
+    returns None at add time because orchestrator doesn't exist yet).
+    """
     ...
 
 @abstractmethod
@@ -882,32 +899,31 @@ def handle_save(edited_step):
 
 **Concrete classes provide scope info:**
 ```python
-# PipelineEditor - steps exist immediately on add
+# PipelineEditor - steps exist immediately on add, always returns tuple
 def _get_item_scope_id(self, step: FunctionStep) -> str:
     return self._build_step_scope_id(step)  # existing method
 
-def _get_item_registration_info(self, step: FunctionStep) -> tuple:
-    return (self._get_pipeline_config(), step)
+def _get_item_registration_info(self, step: FunctionStep) -> Optional[tuple]:
+    return (self._get_pipeline_config(), step)  # Always has info at add time
 
-# PlateManager - special case: orchestrator created in init, not add
+# PlateManager - returns None at add time (orchestrator doesn't exist yet)
 def _get_item_scope_id(self, plate: dict) -> str:
     return str(plate['path'])
 
-def _get_item_registration_info(self, plate: dict) -> tuple:
-    return (None, self.orchestrators[plate['path']].pipeline_config)
+def _get_item_registration_info(self, plate: dict) -> Optional[tuple]:
+    """Return registration info if orchestrator exists, else None."""
+    orchestrator = self.orchestrators.get(plate['path'])
+    if orchestrator:
+        return (None, orchestrator.pipeline_config)
+    return None  # Orchestrator doesn't exist yet - skip registration
 
-def _on_item_added(self, item: Any) -> None:
-    """Override: plates don't have orchestrator until init - skip registration."""
-    pass  # Registration happens in init_plate_orchestrators() instead
+# No override needed! ABC's _on_item_added() calls _ensure_item_registered(),
+# which calls _get_item_registration_info() → returns None → skips registration.
 
-# In init_plate_orchestrators(), after orchestrator creation:
+# In action_init_plate(), after orchestrator creation:
 self.orchestrators[plate_path] = orchestrator
-# Register with cache now that pipeline_config exists
-ResolvedValueCache.register(
-    scope_id=str(plate_path),
-    context_obj=None,
-    object_instance=orchestrator.pipeline_config
-)
+# Now _get_item_registration_info() will return non-None
+self._ensure_item_registered(plate)  # ABC method handles registration
 ```
 
 **Code mode sync via ABC hook:** The ABC's `_post_code_execution()` calls `_sync_cache_registrations()`:
@@ -1257,19 +1273,18 @@ self.orchestrators[plate_path] = orchestrator  # ← Line 414
 **Exact insertion point:**
 ```python
 self.orchestrators[plate_path] = orchestrator
-# NEW: Register with ResolvedValueCache now that pipeline_config exists
-ResolvedValueCache.register(
-    scope_id=str(plate_path),
-    context_obj=None,  # PipelineConfig has no parent context
-    object_instance=orchestrator.pipeline_config
-)
+# Now _get_item_registration_info() will return non-None
+self._ensure_item_registered(plate)  # ABC method handles registration
 self.orchestrator_state_changed.emit(plate_path, "READY")
 ```
 
-**Override in ABC:** PlateManager's `_on_item_added()` must be a no-op because:
-1. `add_plate_callback()` (line 322) adds plate dict to `self.plates`
-2. But orchestrator doesn't exist yet - created later in `action_init_plate()`
-3. So ABC hook can't register at add time - must register after init
+**No override needed:** ABC's `_on_item_added()` calls `_ensure_item_registered()`, which:
+1. Calls `_get_item_registration_info(plate)` → returns `None` (no orchestrator yet)
+2. Skips registration automatically
+
+After init, `_ensure_item_registered(plate)` is called again:
+1. Calls `_get_item_registration_info(plate)` → returns `(None, pipeline_config)`
+2. Registers with cache
 
 ---
 
