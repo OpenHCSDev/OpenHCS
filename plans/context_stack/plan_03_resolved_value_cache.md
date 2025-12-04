@@ -1349,17 +1349,149 @@ def _sync_cache_registrations(self):
 
 ---
 
-#### Investigation 6: Confidence Assessment (FINAL)
+#### Investigation 6: LiveContextService → RVC Notification (VERIFIED)
+
+**Question:** How does RVC subscribe to context changes?
+
+**Answer:** LiveContextService has a callback-based listener API:
+
+```python
+# In live_context_service.py
+@classmethod
+def connect_listener(cls, callback: Callable[[], None]) -> None:
+    """Connect a listener callback that's called on any change."""
+    if callback not in cls._change_callbacks:
+        cls._change_callbacks.append(callback)
+
+@classmethod
+def disconnect_listener(cls, callback: Callable[[], None]) -> None:
+    """Disconnect a change listener."""
+    if callback in cls._change_callbacks:
+        cls._change_callbacks.remove(callback)
+
+# When token increments, all listeners are notified:
+@classmethod
+def increment_token(cls, notify: bool = True) -> None:
+    cls._live_context_token_counter += 1
+    if notify:
+        cls._notify_change()  # Calls all registered callbacks
+```
+
+**RVC integration:**
+```python
+class ResolvedValueCache(QObject):
+    @classmethod
+    def _initialize(cls):
+        """One-time initialization - connect to LiveContextService."""
+        LiveContextService.connect_listener(cls._on_context_changed)
+
+    @classmethod
+    def _on_context_changed(cls):
+        """Called when any form value changes. Recompute all scopes."""
+        for scope_id in cls._registrations:
+            cls._recompute_scope(scope_id)
+```
+
+---
+
+#### Investigation 7: Recursive Flattening - Lazy Detection (VERIFIED)
+
+**Question:** How to detect if a field value is a nested lazy dataclass?
+
+**Answer:** Use `is_lazy_dataclass()` from `lazy_factory.py`:
+
+```python
+from openhcs.config_framework.lazy_factory import is_lazy_dataclass
+
+def is_lazy_dataclass(obj_or_type) -> bool:
+    """Check if an object or type is a lazy dataclass."""
+    if isinstance(obj_or_type, type):
+        return issubclass(obj_or_type, LazyDataclass)
+    else:
+        return isinstance(obj_or_type, LazyDataclass)
+```
+
+**RVC recursive flattening:**
+```python
+def _flatten_with_dots(obj, prefix: str = "") -> dict:
+    """Recursively flatten nested lazy dataclasses into dotted keys."""
+    result = {}
+    for f in fields(obj):
+        key = f"{prefix}{f.name}" if prefix else f.name
+        value = getattr(obj, f.name)  # triggers lazy resolution
+
+        if value is not None and is_lazy_dataclass(value):
+            # Recurse into nested lazy dataclass
+            result.update(_flatten_with_dots(value, f"{key}."))
+        else:
+            result[key] = value
+    return result
+```
+
+**Edge cases:**
+- `value is None`: Store as-is, don't recurse (None means "inherit from context")
+- Lists of lazy objects: Not currently used in configs, can handle later if needed
+
+---
+
+#### Investigation 8: build_context_stack Signature (VERIFIED)
+
+**Question:** What parameters does `build_context_stack()` take?
+
+**Answer:** From `context_manager.py`:
+
+```python
+def build_context_stack(
+    context_obj: object | None,      # Parent context (e.g., PipelineConfig for Step)
+    object_instance: object,          # The object being resolved
+    live_values: dict[type, dict] | None = None,  # Merged live context
+) -> ExitStack:
+```
+
+**RVC usage in `_recompute_scope()`:**
+```python
+def _recompute_scope(cls, scope_id: str):
+    reg = cls._registrations[scope_id]
+
+    # Collect live context with scope filtering
+    snapshot = LiveContextService.collect(scope_filter=scope_id)
+
+    # Build context stack
+    stack = build_context_stack(
+        context_obj=reg.context_obj,
+        object_instance=reg.object_instance,
+        live_values=snapshot.values,
+    )
+
+    with stack:
+        new_values = cls._flatten_with_dots(reg.object_instance)
+
+    # Compare with cached values, emit signals for changes
+    old_values = cls._cache.get(scope_id, {})
+    for field, new_val in new_values.items():
+        old_val = old_values.get(field)
+        if new_val != old_val:
+            cls.instance().value_changed.emit(scope_id, field, old_val, new_val)
+
+    cls._cache[scope_id] = new_values
+```
+
+---
+
+#### Investigation 9: Confidence Assessment (FINAL)
 
 | Area | Before | After | Notes |
 |------|--------|-------|-------|
-| Lazy field enumeration | 70% | **95%** | `dataclasses.fields()` works |
+| Lazy field enumeration | 70% | **98%** | `dataclasses.fields()` verified |
 | PFM method changes | 75% | **95%** | Clear what moves vs stays |
-| ABC hook wiring | 85% | **95%** | Verified template location |
+| ABC hook wiring | 85% | **98%** | Verified template location |
 | PlateManager init timing | 85% | **98%** | Exact line 414 identified |
-| Code mode sync | 70% | **95%** | Exact line 508 identified |
+| Code mode sync | 70% | **98%** | `_post_code_execution()` hook exists |
+| LCS → RVC notification | 60% | **98%** | `connect_listener()` API verified |
+| Recursive flattening | 65% | **95%** | `is_lazy_dataclass()` verified |
+| `build_context_stack` | 70% | **98%** | Signature and usage verified |
 
-**Overall confidence: 95%** — Ready to implement.
+**Overall confidence: 97%** — Ready to implement.
 
 ### Implementation Draft
 
