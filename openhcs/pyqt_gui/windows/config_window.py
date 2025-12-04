@@ -26,7 +26,7 @@ from openhcs.pyqt_gui.widgets.shared.collapsible_splitter_helper import Collapsi
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.pyqt_gui.windows.base_form_dialog import BaseFormDialog
-from openhcs.core.config import GlobalPipelineConfig
+from openhcs.core.config import GlobalPipelineConfig, PipelineConfig
 from openhcs.config_framework import is_global_config_type
 from openhcs.ui.shared.code_editor_form_updater import CodeEditorFormUpdater
 # ❌ REMOVED: require_config_context decorator - enhanced decorator events system handles context automatically

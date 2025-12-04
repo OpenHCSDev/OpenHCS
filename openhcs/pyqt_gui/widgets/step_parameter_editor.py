@@ -139,6 +139,11 @@ class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
         self.setup_ui()
         self.setup_connections()
 
+        # Ensure placeholders pick up live context (e.g., PipelineConfig edits) after registration.
+        from openhcs.pyqt_gui.widgets.shared.services import parameter_ops_service
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(0, lambda: parameter_ops_service.ParameterOpsService().refresh_with_live_context(self.form_manager))
+
         logger.debug(f"Step parameter editor initialized for step: {getattr(step, 'name', 'Unknown')}")
 
     def _is_optional_lazy_dataclass_in_pipeline(self, param_type, param_name):

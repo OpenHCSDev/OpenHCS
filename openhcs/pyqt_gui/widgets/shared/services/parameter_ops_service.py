@@ -107,6 +107,27 @@ def _build_live_values(
     if overlay is not None:
         live_values[mgr_type] = overlay
 
+    # NEW: Inject parent overlay for nested managers so sibling inheritance works on initial load.
+    # Without this, nested configs (e.g., StepMaterializationConfig) don't see the FunctionStep
+    # container in the context stack until the user edits a field, causing placeholders to show
+    # "(none)" on first open.
+    parent_manager = manager._parent_manager
+    if parent_manager is not None:
+        parent_obj = parent_manager.object_instance
+        parent_overlay = _compute_overlay(parent_manager)
+
+        if parent_obj is not None and parent_overlay:
+            parent_type = type(parent_obj)
+            existing = live_values.get(parent_type)
+            if existing is None:
+                live_values[parent_type] = parent_overlay
+            else:
+                # Merge without overwriting any live values already collected for the parent type
+                merged = existing.copy()
+                for key, value in parent_overlay.items():
+                    merged.setdefault(key, value)
+                live_values[parent_type] = merged
+
     return live_values if live_values else None
 
 

@@ -118,6 +118,8 @@ class LiveContextService:
     def register(cls, manager: 'ParameterFormManager') -> None:
         """Register a form manager for cross-window updates."""
         cls._active_form_managers.add(manager)
+        # Invalidate live context cache so newly opened windows build fresh snapshots
+        cls.increment_token(notify=False)
         logger.debug(f"Registered manager: {manager.field_id} (total: {len(cls._active_form_managers)})")
 
     @classmethod
@@ -210,14 +212,12 @@ class LiveContextService:
                         logger.debug(f"  📋 SKIP {manager.field_id}: {manager_type_name} not ancestor/same-type of {for_type_name}")
                         continue
 
-                # Apply scope filter if provided
-                if scope_filter is not None and manager.scope_id is not None:
-                    is_visible = cls._is_scope_visible(manager.scope_id, scope_filter)
-                    logger.debug(f"  📋 MANAGER {manager.field_id}: type={manager_type_name}, scope={manager.scope_id}, visible={is_visible}")
-                    if not is_visible:
-                        continue
-                else:
-                    logger.debug(f"  📋 MANAGER {manager.field_id}: type={manager_type_name}, scope={manager.scope_id}, no_filter_or_no_scope")
+                # Scope visibility (hierarchical prefix check)
+                filter_scope = scope_filter if scope_filter is not None else ""
+                is_visible = cls._is_scope_visible(manager.scope_id, filter_scope)
+                logger.debug(f"  📋 MANAGER {manager.field_id}: type={manager_type_name}, scope={manager.scope_id}, visible={is_visible}")
+                if not is_visible:
+                    continue
 
                 # Collect from this manager AND all its nested managers
                 cls._collect_from_manager_tree(manager, live_context, scoped_live_context)
@@ -268,18 +268,29 @@ class LiveContextService:
 
     @staticmethod
     def _is_scope_visible(manager_scope: str, filter_scope) -> bool:
-        """Check if manager's scope is visible to the filter scope using root-based matching."""
-        from openhcs.config_framework.context_manager import get_root_from_scope_key
+        """Hierarchical scope visibility: allow same-or-less-specific scopes only.
 
-        filter_scope_str = str(filter_scope) if not isinstance(filter_scope, str) else filter_scope
-        manager_root = get_root_from_scope_key(manager_scope)
-        filter_root = get_root_from_scope_key(filter_scope_str)
+        Rules:
+        - Compare full scope segments (split on "::")
+        - Candidate scope must be a prefix of the filter scope (or equal)
+        - Global/empty scope ("") only sees other global scopes
+        """
+        def _segments(scope):
+            if scope is None:
+                return []
+            scope_str = str(scope)
+            return scope_str.split("::") if scope_str else []
 
-        # Empty root (global) is visible to all
-        if not manager_root:
-            return True
+        candidate_parts = _segments(manager_scope)
+        filter_parts = _segments(filter_scope)
 
-        return manager_root == filter_root
+        logger.debug(f"    🔍 Scope check: candidate={manager_scope} ({candidate_parts}), filter={filter_scope} ({filter_parts})")
+        # Candidate is more specific than filter -> not visible
+        if len(candidate_parts) > len(filter_parts):
+            return False
+
+        # All candidate segments must match the start of filter segments
+        return candidate_parts == filter_parts[: len(candidate_parts)]
 
     # ========== GLOBAL REFRESH ==========
 
@@ -305,4 +316,3 @@ class LiveContextService:
 
         # Notify listeners via token increment
         cls.increment_token()
-
