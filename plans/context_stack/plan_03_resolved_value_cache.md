@@ -1430,7 +1430,6 @@ def _flatten_with_dots(obj, prefix: str = "") -> dict:
 
 **Edge cases:**
 - `value is None`: Store as-is, don't recurse (None means "inherit from context")
-- Lists of lazy objects: Not currently used in configs, can handle later if needed
 
 ---
 
