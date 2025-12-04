@@ -628,6 +628,7 @@ def build_context_stack(
         stack.enter_context(config_context(global_layer, mask_with_none=is_global_config_editing))
 
     # 2-3. Unified parent chain (ancestors + immediate parent)
+    injected_bases = set()  # Track normalized types we've already injected
     if context_obj is not None:
         context_type = type(context_obj)
         ancestor_types = get_types_before_in_stack(context_type) if live_values else []
@@ -639,6 +640,31 @@ def build_context_stack(
             layer_values = _find_live_values_for_type(t, live_values) if live_values else None
             stored = context_obj if t == context_type else None
             _inject_context_layer(stack, t, layer_values, stored)
+            injected_bases.add(_normalize_type(t))
+
+    # 3b. Inject container types from live_values not in parent chain
+    # This handles intermediate forms like FunctionStep between context_obj (PipelineConfig)
+    # and the nested config being resolved. FunctionStep has fields like step_well_filter_config
+    # that need to be merged into GlobalPipelineConfig for sibling inheritance to work.
+    if live_values:
+        from dataclasses import is_dataclass as is_dc
+
+        for live_type, values in live_values.items():
+            live_base = _normalize_type(live_type)
+            if live_base in injected_bases:
+                continue
+            if _is_global_type(live_type):
+                continue
+            # Only inject if overlay has nested dataclass values (container types like FunctionStep)
+            # Skip if all values are primitives/None (leaf config types like LazyStepWellFilterConfig)
+            has_nested_configs = values and any(
+                v is not None and is_dc(type(v))
+                for v in values.values()
+            )
+            if has_nested_configs:
+                logger.debug(f"  🔧 Injecting intermediate container: {live_type.__name__}")
+                _inject_context_layer(stack, live_type, values, None)
+                injected_bases.add(live_base)
 
     # 4. Overlay from current form values (included in live_values under obj_type)
     overlay = _find_live_values_for_type(obj_type, live_values) if live_values else None
