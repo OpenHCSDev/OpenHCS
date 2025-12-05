@@ -35,6 +35,7 @@ class ObjectStateRegistry:
     Thread safety: Not thread-safe (all operations expected on main thread).
     """
     _states: Dict[str, 'ObjectState'] = {}
+    _token: int = 0  # Cache invalidation token
 
     @classmethod
     def register(cls, state: 'ObjectState') -> None:
@@ -106,7 +107,63 @@ class ObjectStateRegistry:
     def clear(cls) -> None:
         """Clear all registered states. For testing only."""
         cls._states.clear()
+        cls._token = 0
         logger.debug("Cleared all ObjectStates from registry")
+
+    # ========== TOKEN MANAGEMENT ==========
+
+    @classmethod
+    def get_token(cls) -> int:
+        """Get current cache invalidation token."""
+        return cls._token
+
+    @classmethod
+    def increment_token(cls) -> None:
+        """Increment token to invalidate all resolved caches."""
+        cls._token += 1
+
+    # ========== LIVE VALUES COLLECTION ==========
+
+    @classmethod
+    def collect_live_values(
+        cls,
+        scope_id: Optional[str] = None,
+        exclude_field: Optional[str] = None,
+    ) -> Dict[type, Dict[str, Any]]:
+        """Collect live values from all registered ObjectStates.
+
+        This replaces LiveContextService.collect() + merge_ancestor_values().
+
+        Args:
+            scope_id: If provided, only include values from visible scopes.
+            exclude_field: Field to exclude from current overlay (prevents self-shadowing).
+
+        Returns:
+            Dict mapping type -> field -> value, suitable for build_context_stack().
+        """
+        from openhcs.config_framework.context_manager import is_scope_affected
+
+        result: Dict[type, Dict[str, Any]] = {}
+
+        for state in cls._states.values():
+            # Filter by scope visibility if scope_id provided
+            if scope_id and state.scope_id:
+                if not is_scope_affected(scope_id, state.scope_id):
+                    continue
+
+            # Get object type
+            obj_type = type(state.object_instance)
+            if obj_type not in result:
+                result[obj_type] = {}
+
+            # Collect user-modified values from this state
+            for field_name, value in state.get_user_modified_values().items():
+                # Exclude the field being resolved (prevents self-shadowing)
+                if exclude_field and field_name == exclude_field:
+                    continue
+                result[obj_type][field_name] = value
+
+        return result
 
 
 class ObjectState:
@@ -215,20 +272,22 @@ class ObjectState:
         if user_set:
             self._user_set_fields.add(param_name)
 
-    def get_resolved(self, param_name: str, token: int, resolver: Callable[[str], Any]) -> Any:
-        """Get resolved value for a field, using cache if valid.
+    def get_resolved(self, param_name: str, placeholder_prefix: str = "Pipeline default") -> Optional[str]:
+        """Get resolved placeholder text for a field, using cache if valid.
 
-        This is the MODEL's responsibility - caching resolved values.
-        The resolver callable is provided by the VIEW (PFM) which knows how to resolve.
+        This is the MODEL's responsibility - ObjectState owns resolution logic.
+        Uses ObjectStateRegistry for sibling values and builds context stack.
 
         Args:
             param_name: Field name to resolve
-            token: Current cache token from LiveContextService
-            resolver: Callable that resolves the placeholder value
+            placeholder_prefix: Prefix for placeholder text
 
         Returns:
-            Cached or freshly resolved value
+            Resolved placeholder text or None
         """
+        # Get current token for cache validation
+        token = ObjectStateRegistry.get_token()
+
         # Check cache validity
         if param_name in self._resolved_cache:
             cached_token, cached_value = self._resolved_cache[param_name]
@@ -236,9 +295,46 @@ class ObjectState:
                 return cached_value
 
         # Cache miss or stale - resolve and cache
-        resolved = resolver(param_name)
+        resolved = self._resolve_placeholder(param_name, placeholder_prefix)
         self._resolved_cache[param_name] = (token, resolved)
         return resolved
+
+    def _resolve_placeholder(self, param_name: str, placeholder_prefix: str) -> Optional[str]:
+        """Internal resolver - builds context stack and resolves placeholder.
+
+        Args:
+            param_name: Field name to resolve
+            placeholder_prefix: Prefix for placeholder text
+
+        Returns:
+            Resolved placeholder text or None
+        """
+        from openhcs.config_framework.context_manager import build_context_stack
+        from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
+
+        # Collect live values from registry (replaces LiveContextService.collect())
+        live_values = ObjectStateRegistry.collect_live_values(
+            scope_id=self.scope_id,
+            exclude_field=param_name
+        )
+
+        # Build context stack
+        stack = build_context_stack(
+            context_obj=self.context_obj,
+            object_instance=self.object_instance,
+            live_values=live_values,
+        )
+
+        with stack:
+            # Get the lazy type for resolution
+            obj_type = type(self.object_instance)
+            lazy_type = LazyDefaultPlaceholderService._get_lazy_type_for_base(obj_type)
+            if lazy_type:
+                obj_type = lazy_type
+
+            return LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
+                obj_type, param_name, placeholder_prefix
+            )
 
     def invalidate_cache(self, param_name: Optional[str] = None) -> None:
         """Invalidate resolved cache.
