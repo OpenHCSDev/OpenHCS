@@ -103,15 +103,22 @@ class SyntheticPlateGeneratorWindow(QDialog):
         # This automatically builds the UI from the __init__ signature (same pattern as function_pane.py)
         # CRITICAL: Pass color_scheme as parameter to ensure consistent theming with other parameter forms
         from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import FormManagerConfig
+        from openhcs.config_framework.object_state import ObjectState
 
-        self.form_manager = ParameterFormManager(
+        # Standalone tool - create local ObjectState (not registered in registry)
+        state = ObjectState(
             object_instance=SyntheticMicroscopyGenerator,  # Pass the class itself, not __init__
             field_id="synthetic_plate_generator",
+            scope_id=None,
+            context_obj=None,
+            exclude_params=['output_dir', 'skip_files', 'include_all_components', 'random_seed'],
+        )
+
+        self.form_manager = ParameterFormManager(
+            state=state,
             config=FormManagerConfig(
                 parent=self,
-                context_obj=None,
-                exclude_params=['output_dir', 'skip_files', 'include_all_components', 'random_seed'],  # Exclude advanced params (self is auto-excluded)
-                color_scheme=self.color_scheme  # Pass color_scheme as instance parameter, not class attribute
+                color_scheme=self.color_scheme  # Pass color_scheme as instance parameter
             )
         )
 

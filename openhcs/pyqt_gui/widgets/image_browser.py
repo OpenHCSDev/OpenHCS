@@ -339,17 +339,24 @@ class ImageBrowserWidget(QWidget):
 
         # Create parameter form for the lazy config
         from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager, FormManagerConfig
+        from openhcs.config_framework.object_state import ObjectState
 
         context_obj = self.orchestrator.pipeline_config if self.orchestrator else None
+
+        # Create local ObjectState for napari config (not registered - internal to ImageBrowser)
+        napari_state = ObjectState(
+            object_instance=self.lazy_napari_config,
+            field_id="napari_config",
+            scope_id=self.scope_id,
+            context_obj=context_obj,
+        )
+
         config = FormManagerConfig(
             parent=panel,
-            context_obj=context_obj,
-            scope_id=self.scope_id,
             color_scheme=self.color_scheme
         )
         self.napari_config_form = ParameterFormManager(
-            object_instance=self.lazy_napari_config,
-            field_id="napari_config",
+            state=napari_state,
             config=config
         )
 
@@ -384,17 +391,24 @@ class ImageBrowserWidget(QWidget):
 
         # Create parameter form for the lazy config
         from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager, FormManagerConfig
+        from openhcs.config_framework.object_state import ObjectState
 
         context_obj = self.orchestrator.pipeline_config if self.orchestrator else None
+
+        # Create local ObjectState for fiji config (not registered - internal to ImageBrowser)
+        fiji_state = ObjectState(
+            object_instance=self.lazy_fiji_config,
+            field_id="fiji_config",
+            scope_id=self.scope_id,
+            context_obj=context_obj,
+        )
+
         config = FormManagerConfig(
             parent=panel,
-            context_obj=context_obj,
-            scope_id=self.scope_id,
             color_scheme=self.color_scheme
         )
         self.fiji_config_form = ParameterFormManager(
-            object_instance=self.lazy_fiji_config,
-            field_id="fiji_config",
+            state=fiji_state,
             config=config
         )
 

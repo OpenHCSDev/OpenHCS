@@ -6,7 +6,7 @@ Uses hybrid approach: extracted business logic + clean PyQt6 UI.
 """
 
 import logging
-from typing import Any, Dict, Callable, Optional, Tuple
+from typing import Any, Dict, Callable, Optional, Tuple, List
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
@@ -251,14 +251,22 @@ class FunctionPaneWidget(QWidget):
         # - To keep each function pane only as tall as its content, we explicitly
         #   disable the inner scroll area and let the outer FunctionListWidget
         #   handle scrolling for long forms.
+        from openhcs.config_framework.object_state import ObjectState
+
+        # Create local ObjectState for function (not registered - internal to FunctionPaneWidget)
+        # TODO: In future, register function ObjectStates for full lifecycle management
+        func_state = ObjectState(
+            object_instance=self.func,
+            field_id=f"func_{self.index}",
+            scope_id=self.scope_id,
+            context_obj=self.step_instance,
+            initial_values=self.kwargs,
+        )
+
         self.form_manager = PyQtParameterFormManager(
-            object_instance=self.func,       # Pass function as the object to build form for
-            field_id=f"func_{self.index}",   # Use function index as field identifier
+            state=func_state,
             config=FormManagerConfig(
                 parent=self,                      # Pass self as parent widget
-                context_obj=self.step_instance,   # Step instance for context hierarchy (Function → Step → Pipeline → Global)
-                initial_values=self.kwargs,       # Pass saved kwargs to populate form fields
-                scope_id=self.scope_id,           # Scope ID for cross-window live context (same as step editor)
                 color_scheme=self.color_scheme,   # Pass color_scheme for consistent theming
                 use_scroll_area=False,            # Let outer FunctionListWidget manage scrolling
             )

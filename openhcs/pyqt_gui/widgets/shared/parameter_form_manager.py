@@ -52,11 +52,11 @@ from openhcs.pyqt_gui.widgets.shared.services.parameter_ops_service import Param
 # Scope utilities
 from openhcs.config_framework.context_manager import is_scope_affected
 from openhcs.pyqt_gui.widgets.shared.services.enabled_field_styling_service import EnabledFieldStylingService
-from openhcs.pyqt_gui.widgets.shared.services.flag_context_manager import FlagContextManager, ManagerFlag
+from openhcs.pyqt_gui.widgets.shared.services.flag_context_manager import FlagContextManager
 from openhcs.pyqt_gui.widgets.shared.services.form_init_service import (
-    FormBuildOrchestrator, InitialRefreshStrategy,
-    ParameterExtractionService, ConfigBuilderService, ServiceFactoryService
+    FormBuildOrchestrator, InitialRefreshStrategy
 )
+# Note: ConfigBuilderService is imported locally where needed (metaprogrammed class)
 from openhcs.pyqt_gui.widgets.shared.services.field_change_dispatcher import FieldChangeDispatcher, FieldChangeEvent
 from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService, LiveContextSnapshot
 
@@ -122,6 +122,7 @@ class FormManagerConfig:
     scope_id: Optional[str] = None
     color_scheme: Optional[Any] = None
     use_scroll_area: Optional[bool] = None  # None = auto-detect (False for nested, True for root)
+    state: Optional[Any] = None  # ObjectState instance - if provided, PFM delegates to it
 
 
 class NoneAwareIntEdit(QLineEdit):
@@ -220,75 +221,79 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         """
         return cls.ASYNC_WIDGET_CREATION and param_count > cls.ASYNC_THRESHOLD
 
-    def __init__(self, object_instance: Any, field_id: str, config: Optional[FormManagerConfig] = None):
+    def __init__(self, state: 'ObjectState', config: Optional[FormManagerConfig] = None):
         """
-        Initialize PyQt parameter form manager with generic object introspection.
+        Initialize PyQt parameter form manager with ObjectState (MODEL).
+
+        PFM is purely VIEW - it receives ObjectState and delegates all MODEL
+        concerns to it. ObjectState must be created by the lifecycle owner
+        (or looked up from ObjectStateRegistry) before calling PFM.
 
         Args:
-            object_instance: Any object to build form for (dataclass, ABC constructor, step, etc.)
-            field_id: Unique identifier for the form
-            config: Optional configuration object (consolidates 8 optional parameters)
+            state: ObjectState instance containing parameters, types, defaults, user_set_fields.
+                   Created by lifecycle owner or looked up from ObjectStateRegistry.
+            config: Optional configuration object for UI settings
         """
+        # Import here to avoid circular dependency
+        from openhcs.config_framework.object_state import ObjectState
+
         # Unpack config or use defaults
         config = config or FormManagerConfig()
 
-        with timer(f"ParameterFormManager.__init__ ({field_id})", threshold_ms=5.0):
+        with timer(f"ParameterFormManager.__init__ ({state.field_id})", threshold_ms=5.0):
             QWidget.__init__(self, config.parent)
 
-            # Store core configuration (5 lines - down from 8)
-            self.object_instance = object_instance
-            self.field_id = field_id
-            self.context_obj = config.context_obj
+            # Store ObjectState reference - PFM delegates MODEL to state
+            self.state = state
+
+            # Derive core attributes from state (backward compatibility properties)
+            self.object_instance = state.object_instance
+            self.field_id = state.field_id
+            self.context_obj = state.context_obj
+            self.scope_id = state.scope_id
             self.read_only = config.read_only
             self._parent_manager = config.parent_manager
-            self.scope_id = config.parent_manager.scope_id if config.parent_manager else config.scope_id
 
             # Track completion callbacks for async widget creation
             self._on_build_complete_callbacks = []
             self._on_placeholder_refresh_complete_callbacks = []
 
-            # STEP 1: Extract parameters (metaprogrammed service + auto-unpack)
-            with timer("  Extract parameters", threshold_ms=2.0):
-                extracted = ParameterExtractionService.build(
-                    object_instance, config.exclude_params, config.initial_values
-                )
-                # METAPROGRAMMING: Auto-unpack all fields to self
-                # Field names match UnifiedParameterInfo for auto-extraction
-                ValueCollectionService.unpack_to_self(self, extracted, {'_parameter_descriptions': 'description', 'parameters': 'default_value', 'parameter_types': 'param_type'})
+            # STEP 1: Get parameters from ObjectState (no extraction needed)
+            with timer("  Get parameters from state", threshold_ms=1.0):
+                self.parameters = state.parameters
+                self.parameter_types = state.parameter_types
+                self.param_defaults = state.param_defaults
+                self._parameter_descriptions = getattr(state, '_parameter_descriptions', {})
+                logger.debug(f"🔄 PFM: Using ObjectState for {state.field_id} (scope={state.scope_id})")
 
-            # STEP 2: Build config (metaprogrammed service + auto-unpack)
+            # STEP 2: Build UI config (still needed for widget creation)
             with timer("  Build config", threshold_ms=5.0):
                 from openhcs.ui.shared.parameter_form_service import ParameterFormService
+                from openhcs.pyqt_gui.widgets.shared.services.form_init_service import (
+                    ExtractedParameters, ConfigBuilderService
+                )
 
                 self.service = ParameterFormService()
+                # Create ExtractedParameters structure for ConfigBuilderService
+                # Field names must match ExtractedParameters dataclass: default_value, param_type, description
+                extracted = ExtractedParameters(
+                    default_value=self.parameters,
+                    param_type=self.parameter_types,
+                    description=self._parameter_descriptions,
+                    object_instance=state.object_instance,
+                )
                 form_config = ConfigBuilderService.build(
-                    field_id, extracted, config.context_obj, config.color_scheme, config.parent_manager, self.service, config
+                    state.field_id, extracted, state.context_obj, config.color_scheme, config.parent_manager, self.service, config
                 )
                 # METAPROGRAMMING: Auto-unpack all fields to self
                 ValueCollectionService.unpack_to_self(self, form_config)
 
-            # STEP 3: Extract parameter defaults for reset functionality
-            with timer("  Extract parameter defaults", threshold_ms=1.0):
-                from openhcs.introspection.unified_parameter_analyzer import UnifiedParameterAnalyzer
-                analysis_target = (
-                    type(object_instance)
-                    if dataclasses.is_dataclass(object_instance) or (hasattr(object_instance, '__class__') and not callable(object_instance))
-                    else object_instance
-                )
-                defaults_info = UnifiedParameterAnalyzer.analyze(analysis_target, exclude_params=config.exclude_params or [])
-                self.param_defaults = {name: info.default_value for name, info in defaults_info.items()}
-
-            # STEP 4: Initialize tracking attributes (consolidated)
+            # STEP 3: Initialize VIEW-only attributes
             self.widgets, self.reset_buttons, self.nested_managers = {}, {}, {}
-            self.reset_fields, self._user_set_fields = set(), set()
 
-            # CRITICAL FIX: Initialize _user_set_fields from _explicitly_set_fields if present
-            # This preserves which fields were user-set when reloading a saved config
-            if hasattr(object_instance, '_explicitly_set_fields'):
-                explicitly_set = getattr(object_instance, '_explicitly_set_fields')
-                if isinstance(explicitly_set, set):
-                    self._user_set_fields = explicitly_set.copy()
-                    logger.debug(f"🔍 INIT: Loaded _user_set_fields from _explicitly_set_fields: {self._user_set_fields}")
+            # STEP 4: Bind to ObjectState tracking (share reference, don't copy)
+            self.reset_fields = state.reset_fields
+            self._user_set_fields = state._user_set_fields
 
             # ANTI-DUCK-TYPING: Initialize ALL flags so FlagContextManager doesn't need getattr defaults
             self._initial_load_complete, self._block_cross_window_updates, self._in_reset = False, False, False
@@ -323,6 +328,7 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
 
             # STEP 5: Initialize services (metaprogrammed service + auto-unpack)
             with timer("  Initialize services", threshold_ms=1.0):
+                from openhcs.pyqt_gui.widgets.shared.services.form_init_service import ServiceFactoryService
                 services = ServiceFactoryService.build()
                 # METAPROGRAMMING: Auto-unpack all services to self with _ prefix
                 ValueCollectionService.unpack_to_self(self, services, prefix="_")
@@ -395,10 +401,10 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
                               context_event_coordinator=None, context_obj=None,
                               scope_id: Optional[str] = None):
         """
-        SIMPLIFIED: Create ParameterFormManager using new generic constructor.
+        Create ParameterFormManager for a dataclass instance.
 
-        This method now simply delegates to the simplified constructor that handles
-        all object types automatically through generic introspection.
+        If scope_id is provided and an ObjectState exists in the registry, uses it.
+        Otherwise creates a local ObjectState (not registered - for standalone tools).
 
         Args:
             dataclass_instance: The dataclass instance to edit
@@ -408,66 +414,80 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
             **kwargs: Legacy parameters (ignored - handled automatically)
 
         Returns:
-            ParameterFormManager configured for any object type
+            ParameterFormManager configured for the dataclass
         """
+        from openhcs.config_framework.object_state import ObjectState, ObjectStateRegistry
+
         # Validate input
         if not is_dataclass(dataclass_instance):
             raise ValueError(f"{type(dataclass_instance)} is not a dataclass")
 
-        # Use simplified constructor with automatic parameter extraction
-        # CRITICAL: Do NOT default context_obj to dataclass_instance
-        # This creates circular context bug where form uses itself as parent
-        # Caller must explicitly pass context_obj if needed (e.g., Step Editor passes pipeline_config)
+        # Try to look up ObjectState from registry if scope_id provided
+        state = None
+        if scope_id:
+            state = ObjectStateRegistry.get_by_scope(scope_id)
 
-        # CRITICAL: Store use_scroll_area in a temporary attribute so ConfigBuilderService can use it
-        # This is a workaround because FormManagerConfig doesn't have use_scroll_area field
-        # but we need to pass it through to the config building process
+        # If not found in registry, create local ObjectState (standalone tool)
+        if state is None:
+            state = ObjectState(
+                object_instance=dataclass_instance,
+                field_id=field_id,
+                scope_id=scope_id,
+                context_obj=context_obj,
+            )
+            # NOTE: Not registered - this is for standalone tools like SyntheticPlateGeneratorWindow
+            # State lives only as long as the PFM
+
+        # Build config for UI settings
         config = FormManagerConfig(
             parent=parent,
-            context_obj=context_obj,  # No default - None means inherit from thread-local global only
             scope_id=scope_id,
             color_scheme=color_scheme,
         )
-
         # Store use_scroll_area as a temporary attribute on the config object
-        # ConfigBuilderService will check for this and use it if present
         config._use_scroll_area_override = use_scroll_area
 
-        return cls(
-            object_instance=dataclass_instance,
-            field_id=field_id,
-            config=config
-        )
+        return cls(state=state, config=config)
 
     @classmethod
-    def from_object(cls, object_instance: Any, field_id: str, parent=None, context_obj=None):
+    def from_object(cls, object_instance: Any, field_id: str, parent=None, context_obj=None,
+                   scope_id: Optional[str] = None):
         """
-        NEW: Create ParameterFormManager for any object type using generic introspection.
+        Create ParameterFormManager for any object type using generic introspection.
 
-        This is the new primary factory method that works with:
-        - Dataclass instances and types
-        - ABC constructors and functions
-        - Step objects with config attributes
-        - Any object with parameters
+        If scope_id is provided and an ObjectState exists in the registry, uses it.
+        Otherwise creates a local ObjectState (not registered).
 
         Args:
             object_instance: Any object to build form for
             field_id: Unique identifier for the form
             parent: Optional parent widget
             context_obj: Context object for placeholder resolution
+            scope_id: Optional scope identifier
 
         Returns:
             ParameterFormManager configured for the object type
         """
+        from openhcs.config_framework.object_state import ObjectState, ObjectStateRegistry
+
+        # Try to look up ObjectState from registry if scope_id provided
+        state = None
+        if scope_id:
+            state = ObjectStateRegistry.get_by_scope(scope_id)
+
+        # If not found in registry, create local ObjectState
+        if state is None:
+            state = ObjectState(
+                object_instance=object_instance,
+                field_id=field_id,
+                scope_id=scope_id,
+                context_obj=context_obj,
+            )
+
         config = FormManagerConfig(
             parent=parent,
-            context_obj=context_obj
         )
-        return cls(
-            object_instance=object_instance,
-            field_id=field_id,
-            config=config
-        )
+        return cls(state=state, config=config)
 
 
 
@@ -607,18 +627,26 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
             # Create a default instance of the dataclass type for parameter extraction
             object_instance = actual_type() if dataclasses.is_dataclass(actual_type) else actual_type
 
+        # Create nested ObjectState with parent reference
+        from openhcs.config_framework.object_state import ObjectState
+
+        nested_state = ObjectState(
+            object_instance=object_instance,
+            field_id=field_path,
+            scope_id=None,  # Inherits from parent_state
+            context_obj=self.context_obj,
+            parent_state=self.state,  # Link to parent state
+        )
+
         # DELEGATE TO NEW CONSTRUCTOR: Use simplified constructor with FormManagerConfig
         # Nested managers use parent manager's scope_id for cross-window grouping
         nested_config = FormManagerConfig(
             parent=self,
-            context_obj=self.context_obj,
             parent_manager=self,  # Pass parent manager so setup_ui() can detect nested configs
             color_scheme=self.config.color_scheme,
-            scope_id=self.scope_id
         )
         nested_manager = ParameterFormManager(
-            object_instance=object_instance,
-            field_id=field_path,
+            state=nested_state,
             config=nested_config
         )
 

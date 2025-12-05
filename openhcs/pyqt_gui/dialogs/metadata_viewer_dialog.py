@@ -174,15 +174,27 @@ class MetadataViewerDialog(QDialog):
 
     def _create_single_metadata_form(self, metadata_instance: OpenHCSMetadata):
         """Create a single metadata form for one OpenHCSMetadata instance."""
+        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import FormManagerConfig
+        from openhcs.config_framework.object_state import ObjectState
+
         form_layout = QVBoxLayout(self.form_container)
         form_layout.setContentsMargins(5, 5, 5, 5)
 
-        # Create ParameterFormManager with the metadata instance in read-only mode
-        metadata_form = ParameterFormManager(
+        # Create local ObjectState for metadata viewer
+        state = ObjectState(
             object_instance=metadata_instance,
             field_id="metadata_viewer",
-            parent=self.form_container,
-            read_only=True
+            scope_id=None,
+            context_obj=None,
+        )
+
+        # Create ParameterFormManager with the metadata instance in read-only mode
+        metadata_form = ParameterFormManager(
+            state=state,
+            config=FormManagerConfig(
+                parent=self.form_container,
+                read_only=True
+            )
         )
 
         form_layout.addWidget(metadata_form)
@@ -190,6 +202,9 @@ class MetadataViewerDialog(QDialog):
 
     def _create_multi_subdirectory_forms(self, subdirs_instances: dict):
         """Create separate forms for each subdirectory in multi-subdirectory plates."""
+        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import FormManagerConfig
+        from openhcs.config_framework.object_state import ObjectState
+
         form_layout = QVBoxLayout(self.form_container)
         form_layout.setContentsMargins(5, 5, 5, 5)
 
@@ -220,12 +235,21 @@ class MetadataViewerDialog(QDialog):
             group_layout = QVBoxLayout(group_box)
             group_layout.setContentsMargins(10, 10, 10, 10)
 
-            # Create ParameterFormManager for this subdirectory's metadata in read-only mode
-            metadata_form = ParameterFormManager(
+            # Create local ObjectState for this subdirectory's metadata
+            state = ObjectState(
                 object_instance=metadata_instance,
                 field_id=f"metadata_viewer_{subdir_name}",
-                parent=group_box,
-                read_only=True
+                scope_id=None,
+                context_obj=None,
+            )
+
+            # Create ParameterFormManager for this subdirectory's metadata in read-only mode
+            metadata_form = ParameterFormManager(
+                state=state,
+                config=FormManagerConfig(
+                    parent=group_box,
+                    read_only=True
+                )
             )
 
             group_layout.addWidget(metadata_form)

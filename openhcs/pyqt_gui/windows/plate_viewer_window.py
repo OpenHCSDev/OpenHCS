@@ -255,32 +255,52 @@ class PlateViewerWindow(QDialog):
     
     def _create_single_metadata_form(self, layout, metadata_instance):
         """Create a single metadata form."""
-        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager, FormManagerConfig
+        from openhcs.config_framework.object_state import ObjectState
 
-        metadata_form = ParameterFormManager(
+        # Create local ObjectState for metadata viewer
+        state = ObjectState(
             object_instance=metadata_instance,
             field_id="metadata_viewer",
-            parent=None,
-            read_only=True,
-            color_scheme=self.color_scheme
+            scope_id=None,
+            context_obj=None,
+        )
+
+        metadata_form = ParameterFormManager(
+            state=state,
+            config=FormManagerConfig(
+                parent=None,
+                read_only=True,
+                color_scheme=self.color_scheme
+            )
         )
         layout.addWidget(metadata_form)
-    
+
     def _create_multi_subdirectory_forms(self, layout, subdirs_instances):
         """Create forms for multiple subdirectories."""
         from PyQt6.QtWidgets import QGroupBox
-        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager, FormManagerConfig
+        from openhcs.config_framework.object_state import ObjectState
 
         for subdir_name, metadata_instance in subdirs_instances.items():
             group_box = QGroupBox(f"Subdirectory: {subdir_name}")
             group_layout = QVBoxLayout(group_box)
 
-            metadata_form = ParameterFormManager(
+            # Create local ObjectState for this subdirectory's metadata
+            state = ObjectState(
                 object_instance=metadata_instance,
                 field_id=f"metadata_{subdir_name}",
-                parent=None,
-                read_only=True,
-                color_scheme=self.color_scheme
+                scope_id=None,
+                context_obj=None,
+            )
+
+            metadata_form = ParameterFormManager(
+                state=state,
+                config=FormManagerConfig(
+                    parent=None,
+                    read_only=True,
+                    color_scheme=self.color_scheme
+                )
             )
             group_layout.addWidget(metadata_form)
 

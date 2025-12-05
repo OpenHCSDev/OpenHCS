@@ -109,28 +109,32 @@ class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
         # CRITICAL FIX: Use pipeline_config as context_obj (parent for inheritance)
         # The step is the overlay (what's being edited), not the parent context
         # Context hierarchy: GlobalPipelineConfig (thread-local) -> PipelineConfig (context_obj) -> Step (overlay)
-        # CRITICAL FIX: Exclude 'func' parameter - it's handled by the Function Pattern tab
         from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import FormManagerConfig
+        from openhcs.config_framework.object_state import ObjectState, ObjectStateRegistry
 
-        # Construct unique field_id based on step index for tree registry
-        # Format: "{plate_node_id}.step_{index}" or fallback to "step" if no index provided
-        if self.step_index is not None and self.scope_id:
-            field_id = f"{self.scope_id}.step_{self.step_index}"
-        else:
-            field_id = "step"  # Fallback for backward compatibility
+        # Look up ObjectState from registry using scope_id
+        # ObjectState was registered by PipelineEditorWidget when step was added
+        state = ObjectStateRegistry.get_by_scope(self.scope_id) if self.scope_id else None
+
+        if state is None:
+            # Fallback: create local ObjectState (for backward compatibility)
+            field_id = f"{self.scope_id}.step_{self.step_index}" if self.step_index is not None and self.scope_id else "step"
+            state = ObjectState(
+                object_instance=self.step,
+                field_id=field_id,
+                scope_id=self.scope_id,
+                context_obj=self.pipeline_config,
+                exclude_params=['func'],
+            )
 
         config = FormManagerConfig(
             parent=self,                         # Pass self as parent widget
-            context_obj=self.pipeline_config,    # Pipeline config as parent context for inheritance
-            exclude_params=['func'],             # Exclude func - it has its own dedicated tab
-            scope_id=self.scope_id,              # Pass scope_id to limit cross-window updates to same orchestrator
             color_scheme=self.color_scheme,      # Pass color scheme for consistent theming
             use_scroll_area=False                # Step editor manages its own scroll area
         )
 
         self.form_manager = ParameterFormManager(
-            object_instance=self.step,           # Step instance being edited (overlay)
-            field_id=field_id,                   # Unique field_id based on step index
+            state=state,                         # ObjectState (MODEL) from registry
             config=config                        # Pass configuration object
         )
         self.hierarchy_tree = None
