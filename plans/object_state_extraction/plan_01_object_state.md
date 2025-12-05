@@ -374,12 +374,172 @@ def _format_list_item(self, item, index, context):
 - [ ] All existing tests pass
 - [ ] No breaking changes to public API
 
+### Phase 5: Update LiveContextService to Use ObjectStateRegistry
+
+**Critical change:** LiveContextService currently queries `_active_form_managers` (WeakSet of PFMs). After migration, it must query `ObjectStateRegistry.get_all()` instead.
+
+**Current (PFM-based):**
+```python
+class LiveContextService:
+    _active_form_managers: WeakSet['ParameterFormManager'] = WeakSet()
+
+    @classmethod
+    def collect(cls) -> Dict[str, Dict[Type, Dict[str, Any]]]:
+        for manager in cls._active_form_managers:
+            values = manager.get_user_modified_values()
+            # ... aggregate by scope
+```
+
+**Target (ObjectStateRegistry-based):**
+```python
+class LiveContextService:
+    @classmethod
+    def collect(cls) -> Dict[str, Dict[Type, Dict[str, Any]]]:
+        for state in ObjectStateRegistry.get_all():
+            values = state.get_user_modified_values()
+            # ... aggregate by scope (same logic, different source)
+```
+
+This means:
+- `LiveContextService._active_form_managers` is **deleted**
+- `ObjectStateRegistry` becomes the **single source of truth**
+- Cross-window resolution works for ANY ObjectState, not just open PFMs
+
+### Phase 6: Root Object Requirements for All PFM Users
+
+**Key insight:** Every PFM must have a root object that owns its nested configs. This ensures all configs are reachable via ObjectStateRegistry.
+
+#### Current PFM Usage Patterns
+
+| UI Component | Root Object | Nested Fields | Status |
+|--------------|-------------|---------------|--------|
+| Config Window | `PipelineConfig` | napari_config, fiji_config, path_planning, etc. | ✅ Has root |
+| Config Window | `GlobalPipelineConfig` | same | ✅ Has root |
+| Step Editor | `Step` instance | step's config dataclass | ✅ Has root |
+| Function Pane | `Callable` (function) | dataclass params (e.g., `dtype_config: LazyDtypeConfig`) | ✅ Has root (function itself) |
+| **ImageBrowser** | ❌ **None** | napari_config, fiji_config | ❌ **REGRESSION RISK** |
+
+#### ImageBrowser Fix: Create Namespace Container
+
+**Problem:** ImageBrowser creates two standalone PFMs (`napari_config_form`, `fiji_config_form`) without a parent object. If we switch to ObjectStateRegistry, these would be **invisible** to LiveContextService.
+
+**Solution:** Create a namespace dataclass to contain both configs:
+
+```python
+# openhcs/core/config.py (or wherever appropriate)
+@dataclass
+class ImageBrowserConfig:
+    """Container for ImageBrowser's streaming configs.
+
+    This is a namespace that groups related configs under one ObjectState.
+    Not decorated with @global_pipeline_config since it's browser-specific.
+    """
+    napari_config: LazyNapariStreamingConfig = field(default_factory=LazyNapariStreamingConfig)
+    fiji_config: LazyFijiStreamingConfig = field(default_factory=LazyFijiStreamingConfig)
+```
+
+**ImageBrowser changes:**
+
+```python
+# Before (two separate PFMs, no root)
+self.lazy_napari_config = LazyNapariStreamingConfig()
+self.napari_config_form = ParameterFormManager(object_instance=self.lazy_napari_config, ...)
+
+self.lazy_fiji_config = LazyFijiStreamingConfig()
+self.fiji_config_form = ParameterFormManager(object_instance=self.lazy_fiji_config, ...)
+
+# After (one root ObjectState with nested states)
+self.browser_config = ImageBrowserConfig()
+self.browser_state = ObjectState(
+    object_instance=self.browser_config,
+    field_id="image_browser",
+    scope_id=self.scope_id,
+    context_obj=orchestrator.pipeline_config,
+)
+ObjectStateRegistry.register(self.browser_state)
+
+# PFM for entire config (or just access nested states directly)
+self.config_form = ParameterFormManager(state=self.browser_state, ...)
+# Nested forms for napari/fiji created automatically from nested ObjectStates
+```
+
+**Hierarchy:**
+```
+ImageBrowser
+└── ObjectState(ImageBrowserConfig, scope="plate::image_browser")
+    ├── nested: ObjectState(napari_config)
+    └── nested: ObjectState(fiji_config)
+```
+
+#### Function Pane Pattern (Already Correct)
+
+Function panes already work correctly because they use the **callable as the root object**:
+
+```python
+# function_pane.py
+self.form_manager = PyQtParameterFormManager(
+    object_instance=self.func,       # ← Function IS the root
+    field_id=f"func_{self.index}",
+    config=FormManagerConfig(
+        context_obj=self.step_instance,  # Step for resolution hierarchy
+        scope_id=self.scope_id,
+        ...
+    )
+)
+```
+
+When the function has a dataclass parameter like:
+```python
+def my_step_function(image, dtype_config: LazyDtypeConfig = None):
+    ...
+```
+
+`SignatureAnalyzer` extracts parameters, and `dtype_config` becomes a nested ObjectState.
+
+### Updated Implementation Steps
+
+1. **Create `object_state.py`** ✅ (done)
+   - Pure Python state class
+   - No PyQt dependencies
+
+2. **Add `ObjectStateRegistry`** to `object_state.py`
+   - Singleton registry
+   - `register()`, `unregister()`, `get_by_scope()`, `get_all()`
+
+3. **Create `ImageBrowserConfig`** namespace
+   - Container for napari_config + fiji_config
+   - Allows ImageBrowser to have single root ObjectState
+
+4. **Modify PFM constructor**
+   - Accept ObjectState
+   - Add property delegates for backward compat
+
+5. **Update ImageBrowser**
+   - Create ImageBrowserConfig instance
+   - Create single ObjectState with nested states
+   - Single root PFM (or access nested directly)
+
+6. **Wire up PipelineEditor**
+   - Create ObjectState on step add
+   - Pass to PFM on edit
+   - Remove on step delete
+
+7. **Update LiveContextService**
+   - Replace `_active_form_managers` with `ObjectStateRegistry.get_all()`
+   - Delete PFM registration/unregistration code
+
+8. **Update list item formatting**
+   - Use ObjectState.get_resolved()
+   - No PFM required for preview
+
 ### Risks & Mitigations
 
 | Risk | Mitigation |
 |------|------------|
 | Nested managers complexity | ObjectState has `nested_states` dict, mirrors existing pattern |
-| LiveContextService integration | ObjectState registers with LiveContextService like PFM does |
+| LiveContextService integration | ObjectStateRegistry replaces `_active_form_managers` entirely |
 | Resolution cache invalidation | Use existing token-based cache pattern |
 | Backward compatibility | Property delegates maintain old attribute access |
+| **ImageBrowser regression** | Create `ImageBrowserConfig` namespace to ensure single root ObjectState |
+| **Function pane regression** | Already works - callable is root object, dataclass params become nested states |
 
