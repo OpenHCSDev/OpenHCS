@@ -57,8 +57,15 @@ Orchestrator.pipeline_steps[]
 
 ### Plan
 
-#### Phase 1: ObjectState Creation Points (new code)
+#### Phase 1: ObjectState Creation Points ✅ COMPLETE
 Add ObjectState creation to lifecycle owners:
+
+**Status:** Implemented in commit 0816e7a1
+- GlobalPipelineConfig: `OpenHCSApp.setup_application()`
+- PipelineConfig: `PlateManagerWidget.init_single_plate()`
+- Step: `PipelineEditorWidget._register_step_state()` / `_unregister_step_state()`
+- ObjectState constructor enhanced with `exclude_params` and `initial_values`
+- Uses `UnifiedParameterAnalyzer` for parameter extraction (handles dataclasses + callables)
 
 **1a. GlobalPipelineConfig (singleton)**
 ```python
@@ -227,10 +234,35 @@ def __init__(self, pipeline_config, ...):
     self.form_manager = ParameterFormManager(state=self.state, config=...)
 ```
 
-#### Phase 8: Replace LiveContextService with ObjectStateRegistry
-- `LiveContextService.collect()` → `ObjectStateRegistry.collect_live_values()`
-- `LiveContextService.get_active_managers()` → `ObjectStateRegistry.get_all()`
-- Token management already in ObjectStateRegistry
+#### Phase 8: LiveContextService uses ObjectStateRegistry for discovery
+LiveContextService stays but switches discovery from tracking PFMs to using ObjectStateRegistry.
+ObjectState has the same interface LiveContextService needs (extracted MODEL from PFM).
+
+**Before:**
+```python
+class LiveContextService:
+    _active_form_managers: Dict[str, PFM] = {}  # Manual PFM registration
+
+    def collect(self):
+        for pfm in self._active_form_managers.values():
+            pfm.get_user_modified_values()  # PFM had MODEL
+```
+
+**After:**
+```python
+class LiveContextService:
+    # No more _active_form_managers tracking
+
+    def collect(self):
+        for state in ObjectStateRegistry.get_all():  # Discovery via registry
+            state.get_user_modified_values()  # ObjectState has MODEL
+```
+
+Changes:
+1. Remove `_active_form_managers` dict
+2. Remove PFM registration/unregistration calls
+3. Change `self._active_form_managers.values()` → `ObjectStateRegistry.get_all()`
+4. Keep cross-window refresh coordination, signals, debouncing
 
 #### Phase 9: Cleanup ObjectState on object removal
 ```python
@@ -244,6 +276,45 @@ def _on_step_removed(self, step):
 def _on_function_removed(self, func):
     # Similar pattern
 ```
+
+#### Phase 10: Simplify PFM - remove pass-through properties
+With ObjectState handling all MODEL concerns, PFM becomes a thin VIEW layer.
+Remove temporary scaffolding and delete duplicated logic.
+
+**Remove from PFM:**
+| Attribute/Method | Reason |
+|------------------|--------|
+| `self.parameters` property | Use `state.parameters` directly |
+| `self.parameter_types` property | Use `state.parameter_types` directly |
+| `self._user_set_fields` property | Use `state._user_set_fields` directly |
+| `self.object_instance` property | Use `state.object_instance` directly |
+| `self.scope_id` property | Use `state.scope_id` directly |
+| `self.context_obj` property | Use `state.context_obj` directly |
+| `get_user_modified_values()` | Delegate to `state.get_user_modified_values()` |
+| `get_current_values()` | Delegate to `state.get_current_values()` |
+| Parameter extraction logic | ObjectState does this on creation |
+
+**Simplified PFM (final form):**
+```python
+class ParameterFormManager(QWidget):
+    """Pure VIEW - renders ObjectState as widgets."""
+
+    def __init__(self, state: ObjectState, config: FormManagerConfig):
+        QWidget.__init__(self, config.parent)
+        self.state = state  # Single source of truth
+
+        # VIEW-only attributes
+        self.widgets: Dict[str, QWidget] = {}
+        self.reset_buttons: Dict[str, QWidget] = {}
+        self.nested_managers: Dict[str, 'ParameterFormManager'] = {}
+
+        self.setup_ui()
+```
+
+**Update all callers:**
+- Change `manager.parameters` → `manager.state.parameters`
+- Change `manager._user_set_fields` → `manager.state._user_set_fields`
+- Change `manager.object_instance` → `manager.state.object_instance`
 
 ### Nested ObjectState Flow
 
@@ -290,14 +361,37 @@ Step removed from pipeline
 1. ✅ ObjectState class (done)
 2. ✅ ObjectStateRegistry (done)
 3. ✅ Resolution in ObjectState (done)
-4. ⬜ Phase 1: Add ObjectState creation points
-5. ⬜ Phase 2-3: Update PFM constructor + properties
-6. ⬜ Phase 4: Update FieldChangeDispatcher
-7. ⬜ Phase 5: Update placeholder resolution
-8. ⬜ Phase 6: Nested ObjectState creation
-9. ⬜ Phase 7: Update callers
-10. ⬜ Phase 8: Replace LiveContextService
-11. ⬜ Phase 9: Cleanup on removal
+4. ✅ Phase 1: Add ObjectState creation points (commit 0816e7a1)
+5. ✅ Phase 2-3: Update PFM constructor + properties (commit ae5c3dbd)
+6. ✅ Phase 4: Update FieldChangeDispatcher (uses state.update_parameter())
+7. ✅ Phase 5: Update placeholder resolution (uses state.get_resolved_value())
+8. ✅ Phase 6: Nested ObjectState creation (ObjectState.__init__ creates nested states, PFM just consumes)
+9. ✅ Phase 7: Update callers (done with Phase 2-3)
+10. ⬜ Phase 8: LiveContextService uses ObjectStateRegistry for discovery
+11. ⬜ Phase 9: Cleanup on removal (step done, function TODO)
+12. ⬜ Phase 10: Simplify PFM - remove pass-through properties
+13. ✅ Bugfix: Nested ObjectState context + live overlay caching (ObjectState context uses parent object; live context collects cached container overlays)
+
+### Bugfix: Nested Context Visibility
+
+- **Problem:** Nested lazy dataclass placeholders were resolving without the immediate container (e.g., FunctionStep), because nested ObjectStates inherited the parent context_obj (PipelineConfig) instead of the parent object. LiveContextService also dropped container layers after the “eliminate values dict” refactor.
+- **Fix:** Nested ObjectStates now set `context_obj=parent.object_instance`, guaranteeing the container layer is present in the resolution stack. ObjectState now exposes `get_user_modified_overlay()` (token-cached) that reconstructs nested dataclass containers; LiveContextService uses this overlay directly when collecting, so container layers survive into `build_context_stack` without per-collect rebuilding.
+
+### Baseline/Cancel Behavior (Why concrete defaults returned)
+
+```mermaid
+flowchart TD
+  A[Step instance with lazy config defaults] --> B[ObjectState init]
+  B -->|Analyze| C[UnifiedParameterAnalyzer captures instance values]
+  C -->|Normalize lazy fields?| D[ObjectState parameters]
+  D -->|Baseline capture| E[saved_parameters from backing defaults]
+  D --> F[PFM opens widgets]
+  F --> G[User hits Cancel]
+  G -->|restore_saved| H[parameters from saved_parameters]
+  H --> I[PFM reopen sees concrete instead of placeholder]
+```
+
+Root cause: `saved_parameters` captured from backing object defaults. Fix: capture baseline from normalized `parameters` so Cancel restores placeholders/None.
 
 ### Signal Handlers - Changes Required
 
@@ -332,4 +426,3 @@ Property delegation ensures existing code works during migration:
 2. **ObjectStateRegistry.collect_live_values()** already implemented
 3. **Token-based caching** already works in ObjectState
 4. **Phase-by-phase** approach allows rollback at each step
-
