@@ -676,8 +676,8 @@ class PipelineEditorWidget(AbstractManagerWidget):
             self._preview_step_cache[cache_key] = step
             return step
 
-        scoped_values = getattr(live_context_snapshot, 'scoped_values', {}) or {}
-        scope_entries = scoped_values.get(scope_id)
+        scopes = getattr(live_context_snapshot, 'scopes', {}) or {}
+        scope_entries = scopes.get(scope_id)
         if not scope_entries:
             self._preview_step_cache[cache_key] = step
             return step
@@ -704,7 +704,7 @@ class PipelineEditorWidget(AbstractManagerWidget):
 
             if not self.current_plate:
                 return
-            live_context_snapshot = ParameterFormManager.collect_live_context(scope_filter=self.current_plate)
+            live_context_snapshot = ParameterFormManager.collect_live_context()
 
         for step_index in sorted(set(indices)):
             if step_index < 0 or step_index >= len(self.pipeline_steps):
@@ -913,10 +913,15 @@ class PipelineEditorWidget(AbstractManagerWidget):
         return None
 
     def _pre_update_list(self) -> Any:
-        """Normalize scope tokens and collect live context."""
+        """Normalize scope tokens and collect live context.
+
+        collect_live_context() collects ALL active managers. The step preview
+        isolation is handled in _get_step_preview_instance() which looks up
+        the exact step scope in snapshot.scopes - this prevents cross-step pollution.
+        """
         self._normalize_step_scope_tokens()
         from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
-        return ParameterFormManager.collect_live_context(scope_filter=self.current_plate)
+        return ParameterFormManager.collect_live_context()
 
     def _post_reorder(self) -> None:
         """Additional cleanup after reorder - normalize tokens and emit signal."""
@@ -939,6 +944,10 @@ class PipelineEditorWidget(AbstractManagerWidget):
             orchestrator.pipeline_config,
             item  # step
         ]
+
+    def _get_scope_for_item(self, item: Any) -> str:
+        """PipelineEditor: scope = plate::step_token."""
+        return self._build_step_scope_id(item) or ''
 
     # === CrossWindowPreviewMixin Hook ===
     # _get_current_orchestrator() is implemented above (line ~795) - does actual lookup from plate manager

@@ -458,11 +458,18 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, ABC, metaclass=_Co
             # Subclass builds full context stack from semantic item
             context_stack = self._get_context_stack_for_resolution(item)
 
+            from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
+            # Get scope from item via subclass hook, then merge ancestor values
+            item_scope = self._get_scope_for_item(item) or ''
+            live_context = LiveContextService.merge_ancestor_values(
+                live_context_snapshot.scopes, item_scope
+            ) if live_context_snapshot else {}
+
             resolved_value = self._live_context_resolver.resolve_config_attr(
                 config_obj=config,
                 attr_name=attr_name,
                 context_stack=context_stack,
-                live_context=live_context_snapshot.values if live_context_snapshot else {},
+                live_context=live_context,
                 cache_token=live_context_snapshot.token if live_context_snapshot else 0
             )
             return resolved_value
@@ -1284,6 +1291,11 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, ABC, metaclass=_Co
     @abstractmethod
     def _get_context_stack_for_resolution(self, item: Any) -> List[Any]:
         """Build context stack for config resolution. Subclass must implement."""
+        ...
+
+    @abstractmethod
+    def _get_scope_for_item(self, item: Any) -> str:
+        """Get scope_id for an item (for live context merging). Subclass must implement."""
         ...
 
     # === CrossWindowPreviewMixin Hook (declarative default) ===

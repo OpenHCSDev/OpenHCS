@@ -3,14 +3,12 @@ Consolidated Value Collection Service.
 
 Merges:
 - NestedValueCollectionService: Type-safe discriminated union dispatch for nested values
-- DataclassReconstructionUtils: Reconstructing nested dataclasses from tuple format  
 - DataclassUnpacker: Auto-unpack dataclass fields to instance attributes
 
 Key features:
 1. Type-safe dispatch using ParameterInfo discriminated unions
 2. Auto-discovery of handlers via ParameterServiceABC
-3. Proper dataclass reconstruction from tuple format
-4. Auto-unpacking of dataclass fields
+3. Auto-unpacking of dataclass fields
 """
 
 from __future__ import annotations
@@ -34,17 +32,14 @@ logger = logging.getLogger(__name__)
 
 class ValueCollectionService(ParameterServiceABC):
     """
-    Consolidated service for value collection, dataclass reconstruction, and unpacking.
+    Consolidated service for value collection and unpacking.
 
     Examples:
         service = ValueCollectionService()
-        
+
         # Collect nested value with type-safe dispatch:
         value = service.collect_nested_value(manager, "some_param", nested_manager)
-        
-        # Reconstruct nested dataclasses from tuple format:
-        reconstructed = service.reconstruct_nested_dataclasses(live_values, base_instance)
-        
+
         # Unpack dataclass fields to instance attributes:
         service.unpack_to_self(target, source, prefix="config_")
     """
@@ -123,42 +118,12 @@ class ValueCollectionService(ParameterServiceABC):
     @staticmethod
     def reconstruct_nested_dataclasses(live_values: dict, base_instance=None) -> dict:
         """
-        Reconstruct nested dataclasses from tuple format (type, dict) to instances.
+        Return live values unchanged (already instances from get_user_modified_values).
 
-        get_user_modified_values() returns nested dataclasses as (type, dict) tuples
-        to preserve only user-modified fields. This function reconstructs them as instances.
+        Previously handled (type, dict) tuple format, but get_user_modified_values()
+        now returns fully reconstructed instances directly.
         """
-        reconstructed = {}
-        for field_name, value in live_values.items():
-            if isinstance(value, tuple) and len(value) == 2:
-                obj_type, field_dict = value
-                
-                # Separate None and non-None fields
-                none_fields = {k for k, v in field_dict.items() if v is None}
-                non_none_fields = {k: v for k, v in field_dict.items() if v is not None}
-                
-                # Merge with base instance if available
-                if base_instance and is_dataclass(base_instance):
-                    field_names = {f.name for f in dataclasses.fields(base_instance)}
-                    if field_name in field_names:
-                        base_nested = getattr(base_instance, field_name)
-                        if base_nested is not None and is_dataclass(base_nested):
-                            instance = dataclasses.replace(base_nested, **non_none_fields) if non_none_fields else base_nested
-                        else:
-                            instance = obj_type(**non_none_fields) if non_none_fields else obj_type()
-                    else:
-                        instance = obj_type(**non_none_fields) if non_none_fields else obj_type()
-                else:
-                    instance = obj_type(**non_none_fields) if non_none_fields else obj_type()
-                
-                # Preserve None values using object.__setattr__
-                for none_field_name in none_fields:
-                    object.__setattr__(instance, none_field_name, None)
-
-                reconstructed[field_name] = instance
-            else:
-                reconstructed[field_name] = value
-        return reconstructed
+        return dict(live_values) if live_values else {}
 
     # ========== DATACLASS UNPACKING (from DataclassUnpacker) ==========
 

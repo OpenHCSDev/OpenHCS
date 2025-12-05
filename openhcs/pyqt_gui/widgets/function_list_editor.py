@@ -559,11 +559,12 @@ class FunctionListEditorWidget(QWidget):
         from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
 
         try:
-            # CRITICAL: Collect live context from other open windows using LiveContextService
-            # This ensures we see live PipelineConfig values, not just the saved ones
-            scope_filter = getattr(self, 'scope_id', None)
-            live_context_snapshot = LiveContextService.collect(scope_filter=scope_filter)
-            live_context = live_context_snapshot.values
+            # Collect all live context, then filter at consumption time
+            my_scope = getattr(self, 'scope_id', '') or ''
+            live_context_snapshot = LiveContextService.collect()
+            live_context = LiveContextService.merge_ancestor_values(
+                live_context_snapshot.scopes, my_scope
+            )
 
             # Build context stack with live values
             from contextlib import ExitStack

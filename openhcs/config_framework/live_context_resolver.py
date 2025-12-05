@@ -82,14 +82,8 @@ class LiveContextResolver:
         self._resolved_value_cache.clear()
 
     def reconstruct_live_values(self, live_values: Dict[str, Any]) -> Dict[str, Any]:
-        """Materialize live values by reconstructing nested dataclasses."""
-        if not live_values:
-            return {}
-
-        return {
-            field_name: self._reconstruct_value(field_value)
-            for field_name, field_value in live_values.items()
-        }
+        """Return live values unchanged (already instances from get_user_modified_values)."""
+        return live_values if live_values else {}
 
     def _resolve_uncached(
         self,
@@ -151,32 +145,3 @@ class LiveContextResolver:
             return dataclass_replace(base_obj, **reconstructed_values)  # type: ignore[arg-type]
         else:
             return base_obj
-
-    def _reconstruct_value(self, value: Any) -> Any:
-        """
-        Recursively reconstruct nested dataclasses from (type, dict) tuples.
-
-        Handles arbitrary nesting depth without nested if statements.
-        """
-        # Base case: not a tuple
-        if not isinstance(value, tuple):
-            return value
-
-        # Base case: not a (type, dict) tuple
-        if len(value) != 2:
-            return value
-
-        dataclass_type, field_dict = value
-
-        # Base case: not a dataclass type
-        if not is_dataclass(dataclass_type):
-            return value
-
-        # Recursive case: reconstruct nested fields
-        reconstructed_fields = {
-            field_name: self._reconstruct_value(field_value)
-            for field_name, field_value in field_dict.items()
-        }
-
-        # Create dataclass instance
-        return dataclass_type(**reconstructed_fields)  # type: ignore[misc]

@@ -313,19 +313,14 @@ class ParameterOpsService(ParameterServiceABC):
 
         from openhcs.pyqt_gui.widgets.shared.widget_strategies import PyQt6WidgetEnhancer
         from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+        from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
         from openhcs.config_framework.context_manager import build_context_stack
 
-        # Find root manager for scope-filtered collection
-        root_manager = manager
-        while root_manager._parent_manager is not None:
-            root_manager = root_manager._parent_manager
-
-        # Collect live context from other windows (scope-filtered)
-        live_context_snapshot = ParameterFormManager.collect_live_context(
-            scope_filter=manager.scope_id,
-            for_type=type(root_manager.object_instance)
-        )
-        live_context = live_context_snapshot.values if live_context_snapshot else None
+        # Collect all live context, then filter at consumption time
+        live_context_snapshot = ParameterFormManager.collect_live_context()
+        live_context = LiveContextService.merge_ancestor_values(
+            live_context_snapshot.scopes, manager.scope_id or ""
+        ) if live_context_snapshot else None
 
         # Build unified live_values (merges live_context + current overlay)
         live_values = _build_live_values(manager, live_context, exclude_field=field_name)
@@ -382,20 +377,16 @@ class ParameterOpsService(ParameterServiceABC):
 
             from openhcs.pyqt_gui.widgets.shared.widget_strategies import PyQt6WidgetEnhancer
             from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+            from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
             from openhcs.config_framework.context_manager import build_context_stack
 
             logger.debug(f"[PLACEHOLDER] {manager.field_id}: Building context stack")
-            # Find root manager for scope-filtered collection
-            root_manager = manager
-            while root_manager._parent_manager is not None:
-                root_manager = root_manager._parent_manager
 
-            # Collect live context from other windows (scope-filtered)
-            live_context_snapshot = ParameterFormManager.collect_live_context(
-                scope_filter=manager.scope_id,
-                for_type=type(root_manager.object_instance)
-            )
-            live_context = live_context_snapshot.values if live_context_snapshot else None
+            # Collect all live context, then filter at consumption time
+            live_context_snapshot = ParameterFormManager.collect_live_context()
+            live_context = LiveContextService.merge_ancestor_values(
+                live_context_snapshot.scopes, manager.scope_id or ""
+            ) if live_context_snapshot else None
 
             # Build unified live_values (merges live_context + current overlay)
             live_values = _build_live_values(manager, live_context)

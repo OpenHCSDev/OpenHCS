@@ -13,7 +13,7 @@ form management while this service handles the cross-cutting coordination.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Type, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 from weakref import WeakSet
 import logging
 
@@ -26,10 +26,15 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class LiveContextSnapshot:
-    """Snapshot of live context values from all active form managers."""
+    """Snapshot of live context values from all active form managers.
+
+    Contains a single `scopes` dict organized by scope_id → type → values.
+    Consumers apply their own filtering at consumption time:
+    - Exact lookup: scopes.get(my_scope_id)
+    - Ancestor merge: merge_ancestor_values(scopes, my_scope_id)
+    """
     token: int
-    values: Dict[type, Dict[str, Any]]
-    scoped_values: Dict[str, Dict[type, Dict[str, Any]]] = field(default_factory=dict)
+    scopes: Dict[str, Dict[type, Dict[str, Any]]] = field(default_factory=dict)
 
 
 class LiveContextService:
@@ -157,140 +162,115 @@ class LiveContextService:
     # ========== LIVE CONTEXT COLLECTION ==========
 
     @classmethod
-    def collect(cls, scope_filter=None, for_type: Optional[Type] = None) -> LiveContextSnapshot:
+    def collect(cls) -> LiveContextSnapshot:
         """
-        Collect live context from all active form managers INCLUDING nested managers.
+        Collect live context from ALL active form managers.
 
-        Includes nested manager values to enable sibling inheritance via
-        _find_live_values_for_type()'s issubclass matching.
-
-        Args:
-            scope_filter: Optional scope filter (e.g., 'plate_path' or 'x::y::z')
-                         If None, collects from all scopes
-            for_type: Optional type for hierarchy filtering. Only collects from
-                      managers whose type is an ANCESTOR of for_type.
+        No filtering at collection time - consumers apply their own filtering:
+        - Exact lookup: snapshot.scopes.get(my_scope_id)
+        - Ancestor merge: merge_ancestor_values(snapshot.scopes, my_scope_id)
 
         Returns:
-            LiveContextSnapshot with token and values dict
+            LiveContextSnapshot with token and scopes dict
         """
-        from openhcs.config_framework.context_manager import get_dispatch_cache, is_ancestor_in_context, is_same_type_in_context
-
-        for_type_name = for_type.__name__ if for_type else None
+        from openhcs.config_framework.context_manager import get_dispatch_cache
 
         # PERFORMANCE OPTIMIZATION: Check dispatch cycle cache first
-        # This avoids redundant computation when refreshing multiple siblings
         dispatch_cache = get_dispatch_cache()
         if dispatch_cache is not None:
-            dispatch_cache_key = ('live_context', scope_filter, for_type_name)
+            dispatch_cache_key = ('live_context',)
             if dispatch_cache_key in dispatch_cache:
-                logger.info(f"📦 collect_live_context: DISPATCH CACHE HIT (scope={scope_filter}, for_type={for_type_name})")
+                logger.info("📦 collect_live_context: DISPATCH CACHE HIT")
                 return dispatch_cache[dispatch_cache_key]
 
-        # Initialize token cache on first use (fallback when not in dispatch cycle)
+        # Initialize token cache on first use
         if cls._live_context_cache is None:
             from openhcs.config_framework import TokenCache, CacheKey
             cls._live_context_cache = TokenCache(lambda: cls._live_context_token_counter)
 
         from openhcs.config_framework import CacheKey
-
-        cache_key = CacheKey.from_args(scope_filter, for_type_name)
+        cache_key = CacheKey.from_args()  # No params = single cache entry
 
         def compute_live_context() -> LiveContextSnapshot:
-            """Recursively collect values from all managers and nested managers."""
-            logger.info(f"📦 collect_live_context: COMPUTING (token={cls._live_context_token_counter}, scope={scope_filter}, for_type={for_type_name})")
+            """Collect values from all managers and nested managers."""
+            logger.info(f"📦 collect_live_context: COMPUTING (token={cls._live_context_token_counter})")
 
-            live_context = {}
-            scoped_live_context = {}
+            scopes: Dict[str, Dict[type, Dict[str, Any]]] = {}
 
             for manager in cls._active_form_managers:
-                manager_type = type(manager.object_instance)
-                manager_type_name = manager_type.__name__
+                logger.debug(f"  📋 MANAGER {manager.field_id}: scope={manager.scope_id}")
+                cls._collect_from_manager_tree(manager, scopes)
 
-                # HIERARCHY FILTER: Only collect from ancestors of for_type
-                if for_type is not None:
-                    if not (is_ancestor_in_context(manager_type, for_type) or is_same_type_in_context(manager_type, for_type)):
-                        logger.debug(f"  📋 SKIP {manager.field_id}: {manager_type_name} not ancestor/same-type of {for_type_name}")
-                        continue
-
-                # Scope visibility (hierarchical prefix check)
-                filter_scope = scope_filter if scope_filter is not None else ""
-                is_visible = cls._is_scope_visible(manager.scope_id, filter_scope)
-                logger.debug(f"  📋 MANAGER {manager.field_id}: type={manager_type_name}, scope={manager.scope_id}, visible={is_visible}")
-                if not is_visible:
-                    continue
-
-                # Collect from this manager AND all its nested managers
-                cls._collect_from_manager_tree(manager, live_context, scoped_live_context)
-
-            collected_types = list(live_context.keys())
-            logger.info(f"  📦 COLLECTED {len(collected_types)} types: {[t.__name__ for t in collected_types]}")
-            token = cls._live_context_token_counter
-            return LiveContextSnapshot(token=token, values=live_context, scoped_values=scoped_live_context)
+            scope_count = len(scopes)
+            logger.info(f"  📦 COLLECTED {scope_count} scopes: {list(scopes.keys())}")
+            return LiveContextSnapshot(token=cls._live_context_token_counter, scopes=scopes)
 
         # Use token cache to get or compute
         snapshot = cls._live_context_cache.get_or_compute(cache_key, compute_live_context)
 
-        # Store in dispatch cache if available (for sibling refresh optimization)
+        # Store in dispatch cache if available
         if dispatch_cache is not None:
-            dispatch_cache_key = ('live_context', scope_filter, for_type_name)
-            dispatch_cache[dispatch_cache_key] = snapshot
-            logger.debug(f"📦 collect_live_context: cached in dispatch cycle")
+            dispatch_cache[('live_context',)] = snapshot
+            logger.debug("📦 collect_live_context: cached in dispatch cycle")
 
         if snapshot.token == cls._live_context_token_counter:
-            logger.debug(f"✅ collect_live_context: CACHE HIT (token={cls._live_context_token_counter}, scope={scope_filter})")
+            logger.debug(f"✅ collect_live_context: CACHE HIT (token={cls._live_context_token_counter})")
 
         return snapshot
 
     @classmethod
-    def _collect_from_manager_tree(cls, manager, result: dict, scoped_result: Optional[dict] = None) -> None:
-        """Recursively collect values from manager and all nested managers."""
+    def _collect_from_manager_tree(cls, manager, scopes: Dict[str, Dict[type, Dict[str, Any]]]) -> None:
+        """Recursively collect values from manager and all nested managers.
+
+        Populates scopes dict: scope_id → type → values
+        """
         if manager.object_instance:
-            # Start with the manager's own user-modified values
             values = manager.get_user_modified_values()
-
-            # CRITICAL: Merge nested manager values into parent's entry
-            for field_name, nested in manager.nested_managers.items():
-                if nested.object_instance:
-                    nested_values = nested.get_user_modified_values()
-                    if nested_values:
-                        try:
-                            values[field_name] = type(nested.object_instance)(**nested_values)
-                        except Exception:
-                            pass  # Skip if reconstruction fails
-
-            result[type(manager.object_instance)] = values
-            if scoped_result is not None and manager.scope_id:
-                scoped_result.setdefault(manager.scope_id, {})[type(manager.object_instance)] = result[type(manager.object_instance)]
+            scope_id = manager.scope_id or ""
+            scopes.setdefault(scope_id, {})[type(manager.object_instance)] = values
 
         # Recurse into nested managers
         for nested in manager.nested_managers.values():
-            cls._collect_from_manager_tree(nested, result, scoped_result)
+            cls._collect_from_manager_tree(nested, scopes)
+
+    # ========== CONSUMPTION-TIME HELPERS ==========
 
     @staticmethod
-    def _is_scope_visible(manager_scope: str, filter_scope) -> bool:
-        """Hierarchical scope visibility: allow same-or-less-specific scopes only.
+    def merge_ancestor_values(
+        scopes: Dict[str, Dict[type, Dict[str, Any]]],
+        my_scope: str,
+    ) -> Dict[type, Dict[str, Any]]:
+        """Merge values from ancestor scopes for placeholder resolution.
 
-        Rules:
-        - Compare full scope segments (split on "::")
-        - Candidate scope must be a prefix of the filter scope (or equal)
-        - Global/empty scope ("") only sees other global scopes
+        Walks scopes from least-specific to most-specific, merging values.
+        More-specific values overwrite less-specific ones (proper precedence).
+
+        Args:
+            scopes: The scopes dict from LiveContextSnapshot
+            my_scope: The consumer's scope_id (e.g., "/path/to/plate::step_0")
+
+        Returns:
+            Dict[type, Dict[str, Any]] merged values for context stack building
         """
-        def _segments(scope):
-            if scope is None:
-                return []
-            scope_str = str(scope)
-            return scope_str.split("::") if scope_str else []
+        result: Dict[type, Dict[str, Any]] = {}
 
-        candidate_parts = _segments(manager_scope)
-        filter_parts = _segments(filter_scope)
+        # Build list of ancestor scopes (least-specific to most-specific)
+        # e.g., "/path/to/plate::step_0" -> ["", "/path/to/plate", "/path/to/plate::step_0"]
+        ancestors = [""]  # Global scope always included
+        if my_scope:
+            parts = my_scope.split("::")
+            for i in range(len(parts)):
+                ancestors.append("::".join(parts[:i+1]))
 
-        logger.debug(f"    🔍 Scope check: candidate={manager_scope} ({candidate_parts}), filter={filter_scope} ({filter_parts})")
-        # Candidate is more specific than filter -> not visible
-        if len(candidate_parts) > len(filter_parts):
-            return False
+        # Merge in order (less-specific first, more-specific overwrites)
+        for ancestor_scope in ancestors:
+            scope_data = scopes.get(ancestor_scope, {})
+            for config_type, values in scope_data.items():
+                if config_type not in result:
+                    result[config_type] = {}
+                result[config_type].update(values)
 
-        # All candidate segments must match the start of filter segments
-        return candidate_parts == filter_parts[: len(candidate_parts)]
+        return result
 
     # ========== GLOBAL REFRESH ==========
 

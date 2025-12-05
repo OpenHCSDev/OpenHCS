@@ -910,6 +910,17 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
                 # Include it so live context updates propagate to other windows
                 user_modified[field_name] = None
 
+        # Also include nested manager edits even if parent field not in _user_set_fields
+        # This ensures nested edits are captured without requiring the parent to track them
+        for field_name, nested_manager in self.nested_managers.items():
+            if field_name not in user_modified:  # Not already included from _user_set_fields
+                nested_values = nested_manager.get_user_modified_values()
+                if nested_values and nested_manager.object_instance:
+                    try:
+                        user_modified[field_name] = type(nested_manager.object_instance)(**nested_values)
+                    except Exception:
+                        pass  # Skip if reconstruction fails
+
         # DEBUG: Log what's being returned
         logger.debug(f"🔍 GET_USER_MODIFIED: {self.field_id} - returning user_modified = {user_modified}")
 
@@ -1126,14 +1137,9 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         LiveContextService.trigger_global_refresh()
 
     @classmethod
-    def collect_live_context(cls, scope_filter=None, for_type: Optional[Type] = None) -> LiveContextSnapshot:
+    def collect_live_context(cls) -> LiveContextSnapshot:
         """DEPRECATED: Use LiveContextService.collect() instead."""
-        return LiveContextService.collect(scope_filter, for_type)
-
-    @staticmethod
-    def _is_scope_visible_static(manager_scope: str, filter_scope) -> bool:
-        """DEPRECATED: Use LiveContextService._is_scope_visible() instead."""
-        return LiveContextService._is_scope_visible(manager_scope, filter_scope)
+        return LiveContextService.collect()
 
     def _schedule_cross_window_refresh(self, changed_field: Optional[str] = None, emit_signal: bool = True):
         """Schedule a debounced placeholder refresh for cross-window updates.

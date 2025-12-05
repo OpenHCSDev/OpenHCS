@@ -257,9 +257,7 @@ class PlateManagerWidget(AbstractManagerWidget):
         """Build preview labels for orchestrator config using ABC template."""
         try:
             pipeline_config = orchestrator.pipeline_config
-            live_context_snapshot = ParameterFormManager.collect_live_context(
-                scope_filter=orchestrator.plate_path
-            )
+            live_context_snapshot = ParameterFormManager.collect_live_context()
 
             return self._build_preview_labels(
                 item=orchestrator,
@@ -1144,7 +1142,14 @@ class PlateManagerWidget(AbstractManagerWidget):
         if self.plates and not self.selected_plate_path:
             self.item_list.setCurrentRow(0)
 
-    # === Config Resolution Hook ===
+    # === Config Resolution Hooks ===
+
+    def _get_scope_for_item(self, item: Any) -> str:
+        """PlateManager: scope = plate_path (from orchestrator or dict)."""
+        from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
+        if isinstance(item, PipelineOrchestrator):
+            return str(item.plate_path)
+        return item.get('path', '') if isinstance(item, dict) else ''
 
     def _get_context_stack_for_resolution(self, item: Any) -> List[Any]:
         """Build 2-element context stack for PlateManager.

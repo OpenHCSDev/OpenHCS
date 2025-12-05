@@ -227,15 +227,11 @@ class WidgetService:
             from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
             from openhcs.config_framework.context_manager import config_context
 
-            # Use ROOT manager type for live context cache sharing
-            root_manager = manager
-            while getattr(root_manager, '_parent_manager', None) is not None:
-                root_manager = root_manager._parent_manager
-
-            live_context = ParameterFormManager.collect_live_context(
-                scope_filter=manager.scope_id,
-                for_type=type(root_manager.object_instance)
-            )
+            from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
+            live_context_snapshot = ParameterFormManager.collect_live_context()
+            live_context = LiveContextService.merge_ancestor_values(
+                live_context_snapshot.scopes, manager.scope_id or ""
+            ) if live_context_snapshot else {}
 
             from contextlib import ExitStack
             with ExitStack() as stack:
