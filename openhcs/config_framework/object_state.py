@@ -12,6 +12,7 @@ import dataclasses
 from dataclasses import is_dataclass, fields as dataclass_fields
 import logging
 from typing import Any, Dict, List, Optional, Set, Callable, TYPE_CHECKING
+import copy
 
 if TYPE_CHECKING:
     pass  # Forward references if needed
@@ -32,21 +33,19 @@ class ObjectStateRegistry:
 
     Thread safety: Not thread-safe (all operations expected on main thread).
     """
-    _states: Dict[str, 'ObjectState'] = {}
-    _token: int = 0  # Cache invalidation token
+    _states: Dict[Optional[str], 'ObjectState'] = {}
 
     @classmethod
     def register(cls, state: 'ObjectState') -> None:
         """Register an ObjectState in the registry.
 
         Args:
-            state: The ObjectState to register. Must have a scope_id.
-
-        Raises:
-            ValueError: If state has no scope_id.
+            state: The ObjectState to register.
+                   scope_id=None is valid for GlobalPipelineConfig (global scope).
+                   scope_id=plate_path for PipelineConfig.
+                   scope_id=plate_path::step_N for steps.
         """
-        if not state.scope_id:
-            raise ValueError(f"Cannot register ObjectState without scope_id: {state.field_id}")
+        # Use scope_id as key (None is valid for global scope)
 
         if state.scope_id in cls._states:
             logger.warning(f"Overwriting existing ObjectState for scope: {state.scope_id}")
@@ -61,16 +60,17 @@ class ObjectStateRegistry:
         Args:
             state: The ObjectState to unregister.
         """
-        if state.scope_id and state.scope_id in cls._states:
+        # scope_id can be None (global scope) - use 'in' check directly
+        if state.scope_id in cls._states:
             del cls._states[state.scope_id]
             logger.debug(f"Unregistered ObjectState: scope={state.scope_id}")
 
     @classmethod
-    def get_by_scope(cls, scope_id: str) -> Optional['ObjectState']:
+    def get_by_scope(cls, scope_id: Optional[str]) -> Optional['ObjectState']:
         """Get ObjectState by scope_id.
 
         Args:
-            scope_id: The scope identifier (e.g., "/path::step_0").
+            scope_id: The scope identifier (e.g., "/path::step_0", or None for global scope).
 
         Returns:
             ObjectState if found, None otherwise.
@@ -90,63 +90,18 @@ class ObjectStateRegistry:
     def clear(cls) -> None:
         """Clear all registered states. For testing only."""
         cls._states.clear()
-        cls._token = 0
         logger.debug("Cleared all ObjectStates from registry")
 
     # ========== TOKEN MANAGEMENT ==========
+    # Delegate to LiveContextService - single source of truth for cache invalidation
 
     @classmethod
     def get_token(cls) -> int:
-        """Get current cache invalidation token."""
-        return cls._token
+        """Get current cache invalidation token from LiveContextService."""
+        from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
+        return LiveContextService.get_token()
 
-    @classmethod
-    def increment_token(cls) -> None:
-        """Increment token to invalidate all resolved caches."""
-        cls._token += 1
 
-    # ========== LIVE VALUES COLLECTION ==========
-
-    @classmethod
-    def collect_live_values(
-        cls,
-        scope_id: Optional[str] = None,
-        exclude_field: Optional[str] = None,
-    ) -> Dict[type, Dict[str, Any]]:
-        """Collect live values from all registered ObjectStates.
-
-        This replaces LiveContextService.collect() + merge_ancestor_values().
-
-        Args:
-            scope_id: If provided, only include values from visible scopes.
-            exclude_field: Field to exclude from current overlay (prevents self-shadowing).
-
-        Returns:
-            Dict mapping type -> field -> value, suitable for build_context_stack().
-        """
-        from openhcs.config_framework.context_manager import is_scope_affected
-
-        result: Dict[type, Dict[str, Any]] = {}
-
-        for state in cls._states.values():
-            # Filter by scope visibility if scope_id provided
-            if scope_id and state.scope_id:
-                if not is_scope_affected(scope_id, state.scope_id):
-                    continue
-
-            # Get object type
-            obj_type = type(state.object_instance)
-            if obj_type not in result:
-                result[obj_type] = {}
-
-            # Collect user-modified values from this state
-            for field_name, value in state.get_user_modified_values().items():
-                # Exclude the field being resolved (prevents self-shadowing)
-                if exclude_field and field_name == exclude_field:
-                    continue
-                result[obj_type][field_name] = value
-
-        return result
 
 
 class ObjectState:
@@ -222,19 +177,93 @@ class ObjectState:
             if isinstance(explicitly_set, set):
                 self._user_set_fields = explicitly_set.copy()
 
-        # Nested states (for nested dataclasses)
+        # Nested states (for nested dataclasses) - recursively created
         self.nested_states: Dict[str, 'ObjectState'] = {}
+        self._create_nested_states()
 
         # Resolved value cache with token-based invalidation
         # Key: field_name, Value: (token, resolved_value)
         # Token is from ObjectStateRegistry - when it changes, cache is stale
         self._resolved_cache: Dict[str, tuple] = {}
+        # Live-context overlay cache (token -> reconstructed overlay with nested dataclasses)
+        self._overlay_cache: tuple[int | None, Dict[str, Any]] = (None, {})
+        # Saved state baselines
+        self.saved_parameters: Dict[str, Any] = self._snapshot_object_instance()
+        self.saved_resolved_state: Dict[str, Any] = {}
+        self.saved_user_set_fields: Set[str] = set(self._user_set_fields)
+        self.saved_reset_fields: Set[str] = set(self.reset_fields)
+        self._dirty = False
 
         # Flags
         self._in_reset = False
         self._block_cross_window_updates = False
 
+        # Initialize saved_resolved_state baseline
+        self.saved_resolved_state = self._compute_resolved_snapshot()
 
+    def _create_nested_states(self) -> None:
+        """Recursively create nested ObjectStates for nested dataclass parameters.
+
+        This is a MODEL concern - ObjectState manages its own nested structure.
+        PFM just traverses nested_states to create VIEW components.
+        """
+        for param_name, param_type in self.parameter_types.items():
+            # Detect nested dataclass (direct or Optional[dataclass])
+            nested_type = self._get_nested_dataclass_type(param_type)
+            if nested_type is None:
+                continue
+
+            # Get current value for this parameter
+            current_value = self.parameters.get(param_name)
+
+            # Determine object instance for nested state
+            if current_value is not None:
+                # If current_value is a dict (saved config), convert to dataclass
+                if isinstance(current_value, dict) and is_dataclass(nested_type):
+                    object_instance = nested_type(**current_value)
+                else:
+                    object_instance = current_value
+            else:
+                # Create default instance
+                object_instance = nested_type() if is_dataclass(nested_type) else nested_type
+
+            # Create nested ObjectState (recursive - it will create its own nested states)
+            # Nested states inherit parent's scope_id for proper live context collection
+            nested_state = ObjectState(
+                object_instance=object_instance,
+                field_id=f"{self.field_id}.{param_name}",
+                scope_id=self.scope_id,  # Inherit parent's scope_id
+                # CRITICAL: use the parent object as context so nested lazy fields
+                # see the immediate container (e.g., FunctionStep) during resolution
+                context_obj=self.object_instance,
+                parent_state=self,
+            )
+            self.nested_states[param_name] = nested_state
+
+    def _get_nested_dataclass_type(self, param_type: Any) -> Optional[type]:
+        """Get the nested dataclass type if param_type is a nested dataclass.
+
+        Args:
+            param_type: The parameter type to check
+
+        Returns:
+            The dataclass type if nested, None otherwise
+        """
+        from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
+
+        # Check Optional[dataclass]
+        if ParameterTypeUtils.is_optional_dataclass(param_type):
+            return ParameterTypeUtils.get_optional_inner_type(param_type)
+
+        # Check direct dataclass (but not the type itself)
+        if is_dataclass(param_type) and not isinstance(param_type, type):
+            # param_type is an instance, not a type - shouldn't happen but handle it
+            return type(param_type)
+
+        if is_dataclass(param_type):
+            return param_type
+
+        return None
 
     def reset_all_parameters(self) -> None:
         """Reset all parameters to defaults."""
@@ -255,6 +284,11 @@ class ObjectState:
         """
         if param_name not in self.parameters:
             return
+
+        # Capture baseline resolved state on first mutation to support cancel/dirty tracking
+        if not self._dirty:
+            self.saved_resolved_state = self._compute_resolved_snapshot()
+            self._dirty = True
 
         # Update state directly (no type conversion - that's VIEW responsibility)
         self.parameters[param_name] = value
@@ -303,12 +337,19 @@ class ObjectState:
         """
         from openhcs.config_framework.context_manager import build_context_stack
         from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
+        from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
 
-        # Collect live values from registry (replaces LiveContextService.collect())
-        live_values = ObjectStateRegistry.collect_live_values(
-            scope_id=self.scope_id,
-            exclude_field=param_name
+        logger.info(f"🔍 _resolve_value: {self.field_id}.{param_name} (scope={self.scope_id})")
+
+        # Collect live values via LiveContextService (single source of truth)
+        snapshot = LiveContextService.collect()
+        live_values = LiveContextService.merge_ancestor_values(
+            snapshot.scopes,
+            self.scope_id
         )
+        logger.info(f"🔍 live_values collected: {len(live_values)} types")
+        for obj_type, values in live_values.items():
+            logger.info(f"  {obj_type.__name__}: {values}")
 
         # Build context stack
         stack = build_context_stack(
@@ -316,22 +357,28 @@ class ObjectState:
             object_instance=self.object_instance,
             live_values=live_values,
         )
+        logger.info(f"🔍 Built context stack with context_obj={type(self.context_obj).__name__ if self.context_obj else None}")
 
         with stack:
             # Get the lazy type for resolution
             obj_type = type(self.object_instance)
             lazy_type = LazyDefaultPlaceholderService._get_lazy_type_for_base(obj_type)
             if lazy_type:
+                logger.info(f"🔍 Using lazy type {lazy_type.__name__} instead of {obj_type.__name__}")
                 obj_type = lazy_type
 
             # Create instance and get raw resolved value
             try:
                 instance = obj_type()
-                return getattr(instance, param_name)
+                resolved = getattr(instance, param_name)
+                logger.info(f"🔍 Resolved {obj_type.__name__}.{param_name} = {repr(resolved)[:50]}")
+                return resolved
             except Exception as e:
                 logger.debug(f"Failed to resolve {obj_type.__name__}.{param_name}: {e}")
                 # Fallback to class default
-                return LazyDefaultPlaceholderService._get_class_default_value(obj_type, param_name)
+                fallback = LazyDefaultPlaceholderService._get_class_default_value(obj_type, param_name)
+                logger.info(f"🔍 Fallback to class default: {repr(fallback)[:50]}")
+                return fallback
 
     def invalidate_cache(self, param_name: Optional[str] = None) -> None:
         """Invalidate resolved cache.
@@ -390,10 +437,13 @@ class ObjectState:
         # ANTI-DUCK-TYPING: Use isinstance check against LazyDataclass base class
         # Lazy import to avoid circular dependency
         from openhcs.config_framework.lazy_factory import is_lazy_dataclass
-        if not is_lazy_dataclass(self.object_instance):
+        is_lazy = is_lazy_dataclass(self.object_instance)
+        logger.info(f"🔍 GET_USER_MODIFIED: {self.field_id} is_lazy={is_lazy}, type={type(self.object_instance).__name__}")
+
+        if not is_lazy:
             # For non-lazy dataclasses, return all current values
             result = self.get_current_values()
-
+            logger.info(f"🔍 GET_USER_MODIFIED: {self.field_id} returning ALL values: {list(result.keys())}")
             return result
 
         # PERFORMANCE OPTIMIZATION: Only read values for user-set fields
@@ -406,7 +456,7 @@ class ObjectState:
             return user_modified
 
         # DEBUG: Log what fields are tracked as user-set
-        logger.debug(f"🔍 GET_USER_MODIFIED: {self.field_id} - _user_set_fields = {self._user_set_fields}")
+        logger.info(f"🔍 GET_USER_MODIFIED: {self.field_id} - _user_set_fields = {self._user_set_fields}")
 
         # Only include fields that were explicitly set by the user
         # PERFORMANCE: Read directly from self.parameters instead of calling get_current_values()
@@ -488,6 +538,94 @@ class ObjectState:
         # (current values are tracked in self.parameters)
         return self.object_instance
 
+    # ==================== LIVE CONTEXT OVERLAY ====================
+
+    def get_user_modified_overlay(self) -> Dict[str, Any]:
+        """
+        Get user-modified values plus reconstructed nested dataclasses for live context.
+
+        This keeps container layers (e.g., FunctionStep) visible to build_context_stack
+        without rebuilding them in the collector on every call.
+        """
+        token = ObjectStateRegistry.get_token()
+        cached_token, cached_overlay = self._overlay_cache
+        if cached_token == token:
+            return cached_overlay
+
+        overlay = dict(self.get_user_modified_values() or {})
+
+        for field_name, nested_state in self.nested_states.items():
+            nested_overlay = nested_state.get_user_modified_overlay()
+            if not nested_overlay:
+                continue
+
+            if is_dataclass(nested_state.object_instance):
+                try:
+                    overlay[field_name] = type(nested_state.object_instance)(**nested_overlay)
+                except Exception:
+                    overlay[field_name] = nested_overlay
+            else:
+                overlay[field_name] = nested_overlay
+
+        self._overlay_cache = (token, overlay)
+        return overlay
+
+    # ==================== SAVED STATE / DIRTY TRACKING ====================
+
+    def _snapshot_object_instance(self) -> Dict[str, Any]:
+        """Capture raw parameters from the backing object (pre-edit baseline)."""
+        if is_dataclass(self.object_instance) and not isinstance(self.object_instance, type):
+            raw = {}
+            for f in dataclass_fields(self.object_instance):
+                try:
+                    raw[f.name] = object.__getattribute__(self.object_instance, f.name)
+                except AttributeError:
+                    raw[f.name] = None
+            return raw
+        if isinstance(self.object_instance, dict):
+            return dict(self.object_instance)
+        return dict(self.parameters)
+
+    def _compute_resolved_snapshot(self) -> Dict[str, Any]:
+        """Resolve all fields for this state and nested states into a snapshot dict."""
+        snapshot: Dict[str, Any] = {}
+        for name in self.parameters.keys():
+            snapshot[name] = self.get_resolved_value(name)
+
+        for nested_name, nested_state in self.nested_states.items():
+            snapshot[nested_name] = nested_state._compute_resolved_snapshot()
+
+        return snapshot
+
+    def mark_saved(self) -> None:
+        """Mark current state as saved baseline."""
+        self.saved_parameters = copy.deepcopy(self.get_current_values())
+        self.saved_resolved_state = self._compute_resolved_snapshot()
+        self.saved_user_set_fields = set(self._user_set_fields)
+        self.saved_reset_fields = set(self.reset_fields)
+        self._dirty = False
+        self.invalidate_cache()
+        self._overlay_cache = (None, {})
+
+        for nested_state in self.nested_states.values():
+            nested_state.mark_saved()
+
+    def restore_saved(self) -> None:
+        """Restore parameters to the last saved baseline."""
+        self.parameters = copy.deepcopy(self.saved_parameters)
+        self._user_set_fields = set(self.saved_user_set_fields)
+        self.reset_fields = set(self.saved_reset_fields)
+        self._dirty = False
+        self.invalidate_cache()
+        self._overlay_cache = (None, {})
+
+        for nested_state in self.nested_states.values():
+            nested_state.restore_saved()
+
+    def is_dirty(self) -> bool:
+        """Return True if state has been modified since last saved baseline."""
+        return self._dirty
+
     def get_user_modified_instance(self) -> Any:
         """
         Get instance with only user-edited fields.
@@ -563,4 +701,3 @@ class ObjectState:
 
 
     # DELETED: _emit_cross_window_change - moved to FieldChangeDispatcher
-

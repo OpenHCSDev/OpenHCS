@@ -166,6 +166,33 @@ class BaseFormDialog(QDialog):
                 # Handle single widget
                 else:
                     self._collect_form_managers_recursive(attr_value, managers, visited)
+
+    def _apply_state_action(self, action: str) -> None:
+        """Apply a state-level action (mark_saved/restore_saved) to all discovered managers."""
+        if action not in ("mark_saved", "restore_saved"):
+            return
+
+        seen_states = set()
+        for manager in self._get_form_managers():
+            try:
+                state = manager.state
+            except AttributeError:
+                continue
+
+            state_id = id(state)
+            if state_id in seen_states:
+                continue
+
+            try:
+                if action == "mark_saved":
+                    state.mark_saved()
+                else:
+                    state.restore_saved()
+            except Exception as e:
+                field_id = getattr(state, 'field_id', '?')
+                logger.warning(f"{self.__class__.__name__}: failed to {action} for state {field_id}: {e}")
+
+            seen_states.add(state_id)
     
     def _get_event_bus(self):
         """Get the global event bus from the service adapter.
@@ -240,12 +267,16 @@ class BaseFormDialog(QDialog):
     def accept(self):
         """Override accept to unregister before closing."""
         logger.info(f"🔍 {self.__class__.__name__}: accept() called")
+        # Persist current form values as the new saved baseline
+        self._apply_state_action('mark_saved')
         self._unregister_all_form_managers()
         super().accept()
         
     def reject(self):
         """Override reject to unregister before closing."""
         logger.info(f"🔍 {self.__class__.__name__}: reject() called")
+        # Revert to last saved baseline before closing
+        self._apply_state_action('restore_saved')
         self._unregister_all_form_managers()
         super().reject()
         
@@ -254,4 +285,3 @@ class BaseFormDialog(QDialog):
         logger.info(f"🔍 {self.__class__.__name__}: closeEvent() called")
         self._unregister_all_form_managers()
         super().closeEvent(a0)
-

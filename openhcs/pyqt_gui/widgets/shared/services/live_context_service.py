@@ -164,7 +164,10 @@ class LiveContextService:
     @classmethod
     def collect(cls) -> LiveContextSnapshot:
         """
-        Collect live context from ALL active form managers.
+        Collect live context from ALL registered ObjectStates.
+
+        Uses ObjectStateRegistry for discovery (not _active_form_managers).
+        ObjectState has the same interface needed (get_user_modified_values, scope_id, etc.)
 
         No filtering at collection time - consumers apply their own filtering:
         - Exact lookup: snapshot.scopes.get(my_scope_id)
@@ -174,6 +177,7 @@ class LiveContextService:
             LiveContextSnapshot with token and scopes dict
         """
         from openhcs.config_framework.context_manager import get_dispatch_cache
+        from openhcs.config_framework.object_state import ObjectStateRegistry
 
         # PERFORMANCE OPTIMIZATION: Check dispatch cycle cache first
         dispatch_cache = get_dispatch_cache()
@@ -192,14 +196,15 @@ class LiveContextService:
         cache_key = CacheKey.from_args()  # No params = single cache entry
 
         def compute_live_context() -> LiveContextSnapshot:
-            """Collect values from all managers and nested managers."""
+            """Collect values from all ObjectStates (not PFMs)."""
             logger.info(f"📦 collect_live_context: COMPUTING (token={cls._live_context_token_counter})")
 
             scopes: Dict[str, Dict[type, Dict[str, Any]]] = {}
 
-            for manager in cls._active_form_managers:
-                logger.debug(f"  📋 MANAGER {manager.field_id}: scope={manager.scope_id}")
-                cls._collect_from_manager_tree(manager, scopes)
+            # Use ObjectStateRegistry for discovery instead of _active_form_managers
+            for state in ObjectStateRegistry.get_all():
+                logger.debug(f"  📋 STATE {state.field_id}: scope={state.scope_id}")
+                cls._collect_from_state_tree(state, scopes)
 
             scope_count = len(scopes)
             logger.info(f"  📦 COLLECTED {scope_count} scopes: {list(scopes.keys())}")
@@ -219,26 +224,31 @@ class LiveContextService:
         return snapshot
 
     @classmethod
-    def _collect_from_manager_tree(cls, manager, scopes: Dict[str, Dict[type, Dict[str, Any]]]) -> None:
-        """Recursively collect values from manager and all nested managers.
+    def _collect_from_state_tree(cls, state, scopes: Dict[str, Dict[type, Dict[str, Any]]]) -> None:
+        """Recursively collect values from ObjectState and all nested states.
 
         Populates scopes dict: scope_id → type → values
         """
-        if manager.object_instance:
-            values = manager.get_user_modified_values()
-            scope_id = manager.scope_id or ""
-            scopes.setdefault(scope_id, {})[type(manager.object_instance)] = values
+        if state.object_instance:
+            # Use ObjectState-provided overlay (includes nested dataclasses)
+            values = state.get_user_modified_overlay()
 
-        # Recurse into nested managers
-        for nested in manager.nested_managers.values():
-            cls._collect_from_manager_tree(nested, scopes)
+            scope_id = state.scope_id or ""
+            obj_type = type(state.object_instance)
+            logger.info(f"🔍 COLLECT: {state.field_id} -> scope={scope_id}, type={obj_type.__name__}, values={list(values.keys())}")
+            scopes.setdefault(scope_id, {})[obj_type] = values
+
+        # Recurse into nested states (ObjectState.nested_states, not PFM.nested_managers)
+        logger.info(f"🔍 COLLECT: {state.field_id} has {len(state.nested_states)} nested states: {list(state.nested_states.keys())}")
+        for nested in state.nested_states.values():
+            cls._collect_from_state_tree(nested, scopes)
 
     # ========== CONSUMPTION-TIME HELPERS ==========
 
     @staticmethod
     def merge_ancestor_values(
         scopes: Dict[str, Dict[type, Dict[str, Any]]],
-        my_scope: str,
+        my_scope: Optional[str],
     ) -> Dict[type, Dict[str, Any]]:
         """Merge values from ancestor scopes for placeholder resolution.
 
@@ -247,7 +257,7 @@ class LiveContextService:
 
         Args:
             scopes: The scopes dict from LiveContextSnapshot
-            my_scope: The consumer's scope_id (e.g., "/path/to/plate::step_0")
+            my_scope: The consumer's scope_id (e.g., "/path/to/plate::step_0"), or None for global
 
         Returns:
             Dict[type, Dict[str, Any]] merged values for context stack building
@@ -256,20 +266,27 @@ class LiveContextService:
 
         # Build list of ancestor scopes (least-specific to most-specific)
         # e.g., "/path/to/plate::step_0" -> ["", "/path/to/plate", "/path/to/plate::step_0"]
-        ancestors = [""]  # Global scope always included
+        # None scope = global scope, only looks at "" key
+        ancestors = [""]  # Global scope always included (stored as "" in scopes dict)
         if my_scope:
             parts = my_scope.split("::")
             for i in range(len(parts)):
                 ancestors.append("::".join(parts[:i+1]))
 
+        logger.info(f"🔍 MERGE: my_scope={my_scope} -> ancestors={ancestors}")
+        logger.info(f"🔍 MERGE: scopes has keys: {list(scopes.keys())}")
+
         # Merge in order (less-specific first, more-specific overwrites)
         for ancestor_scope in ancestors:
             scope_data = scopes.get(ancestor_scope, {})
+            logger.info(f"🔍 MERGE: ancestor={ancestor_scope} has types: {[t.__name__ for t in scope_data.keys()]}")
             for config_type, values in scope_data.items():
                 if config_type not in result:
                     result[config_type] = {}
                 result[config_type].update(values)
+                logger.info(f"🔍 MERGE: {config_type.__name__} += {list(values.keys())}")
 
+        logger.info(f"🔍 MERGE: result has {len(result)} types")
         return result
 
     # ========== GLOBAL REFRESH ==========

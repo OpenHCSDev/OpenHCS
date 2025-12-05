@@ -265,6 +265,18 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
                 self.param_defaults = state.param_defaults
                 self._parameter_descriptions = getattr(state, '_parameter_descriptions', {})
                 logger.debug(f"🔄 PFM: Using ObjectState for {state.field_id} (scope={state.scope_id})")
+                # Debug specific field for traceability across reopen
+                if 'fiji_streaming_config' in self.parameters:
+                    port_val = None
+                    try:
+                        cfg = self.parameters.get('fiji_streaming_config')
+                        port_val = getattr(cfg, 'port', None) if cfg is not None else None
+                    except Exception:
+                        port_val = "ERROR"
+                    logger.debug(
+                        f"🔍 PFM INIT [{state.field_id}]: fiji_streaming_config.port initial={port_val}, "
+                        f"is_lazy={getattr(type(self.parameters.get('fiji_streaming_config')), '__name__', '')}"
+                    )
 
             # STEP 2: Build UI config (still needed for widget creation)
             with timer("  Build config", threshold_ms=5.0):
@@ -290,6 +302,7 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
 
             # STEP 3: Initialize VIEW-only attributes
             self.widgets, self.reset_buttons, self.nested_managers = {}, {}, {}
+            self._pending_nested_managers: Dict[str, 'ParameterFormManager'] = {}  # Async completion tracking
 
             # STEP 4: Bind to ObjectState tracking (share reference, don't copy)
             self.reset_fields = state.reset_fields
@@ -297,6 +310,7 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
 
             # ANTI-DUCK-TYPING: Initialize ALL flags so FlagContextManager doesn't need getattr defaults
             self._initial_load_complete, self._block_cross_window_updates, self._in_reset = False, False, False
+            self._dispatching = False  # Reentrancy guard for FieldChangeDispatcher
             self.shared_reset_fields = (
                 config.parent.shared_reset_fields
                 if hasattr(config.parent, 'shared_reset_fields')
@@ -609,40 +623,26 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         # Start creating widgets
         QTimer.singleShot(0, create_next_batch)
 
-    def _create_nested_form_inline(self, param_name: str, param_type: Type, current_value: Any) -> Any:
-        """Create nested form - simplified to let constructor handle parameter extraction"""
-        # REFACTORING PRINCIPLE: Extract duplicate type unwrapping (was repeated 3 times)
-        actual_type = ParameterTypeUtils.get_optional_inner_type(param_type) if ParameterTypeUtils.is_optional(param_type) else param_type
+    def _create_nested_form_inline(self, param_name: str, unwrapped_type: Type = None, current_value: Any = None) -> Any:
+        """Create nested PFM for an existing nested ObjectState.
 
-        # Get actual field path from FieldPathDetector (no artificial "nested_" prefix)
-        # For function parameters (no parent object), use parameter name directly
-        obj_type = type(self.object_instance) if self.object_instance else None
-        field_path = param_name if obj_type is None else self.service.get_field_path_with_fail_loud(obj_type, param_type)
+        ObjectState already created nested_states during __init__ - this is pure VIEW creation.
+        No type introspection needed - we just consume state.nested_states.
 
-        # Determine object instance (unified logic for current_value vs default)
-        if current_value is not None:
-            # If current_value is a dict (saved config), convert it back to dataclass instance
-            object_instance = actual_type(**current_value) if isinstance(current_value, dict) and dataclasses.is_dataclass(actual_type) else current_value
-        else:
-            # Create a default instance of the dataclass type for parameter extraction
-            object_instance = actual_type() if dataclasses.is_dataclass(actual_type) else actual_type
+        Args:
+            param_name: Name of the nested parameter
+            unwrapped_type: Ignored (kept for ABC compatibility, ObjectState has the type info)
+            current_value: Ignored (kept for ABC compatibility, ObjectState has the value)
+        """
+        # ObjectState already created the nested state - just use it
+        nested_state = self.state.nested_states.get(param_name)
+        if nested_state is None:
+            raise ValueError(f"No nested ObjectState for {param_name} - ObjectState should have created it")
 
-        # Create nested ObjectState with parent reference
-        from openhcs.config_framework.object_state import ObjectState
-
-        nested_state = ObjectState(
-            object_instance=object_instance,
-            field_id=field_path,
-            scope_id=None,  # Inherits from parent_state
-            context_obj=self.context_obj,
-            parent_state=self.state,  # Link to parent state
-        )
-
-        # DELEGATE TO NEW CONSTRUCTOR: Use simplified constructor with FormManagerConfig
-        # Nested managers use parent manager's scope_id for cross-window grouping
+        # Create nested PFM (VIEW) for the nested ObjectState (MODEL)
         nested_config = FormManagerConfig(
             parent=self,
-            parent_manager=self,  # Pass parent manager so setup_ui() can detect nested configs
+            parent_manager=self,
             color_scheme=self.config.color_scheme,
         )
         nested_manager = ParameterFormManager(
@@ -650,41 +650,25 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
             config=nested_config
         )
 
-        # Inherit lazy/global editing context from parent so resets behave correctly in nested forms
-        # CRITICAL FIX: Nested forms must inherit is_global_config_editing from parent
-        # This ensures GLOBAL_STATIC_DEFAULTS layer is applied to nested forms when editing GlobalPipelineConfig
-        # Without this, reset fields show stale loaded values instead of static defaults
+        # Inherit lazy/global editing context from parent
         try:
             nested_manager.config.is_lazy_dataclass = self.config.is_lazy_dataclass
             nested_manager.config.is_global_config_editing = self.config.is_global_config_editing
         except Exception:
             pass
 
-        # DISPATCHER ARCHITECTURE: No signal connection needed here.
-        # The FieldChangeDispatcher handles all nested changes:
-        # - Sibling refresh via isinstance() check
-        # - Cross-window via full path construction
-        # - Parent doesn't need to listen to nested changes
-
         # Store nested manager
         self.nested_managers[param_name] = nested_manager
 
-        # CRITICAL: Register with root manager if it's tracking async completion
-        # Only register if this nested manager will use async widget creation
-        if dataclasses.is_dataclass(actual_type):
-            param_count = len(dataclasses.fields(actual_type))
+        # Register with root manager for async completion tracking
+        param_count = len(nested_state.parameters)
+        root_manager = self
+        while root_manager._parent_manager is not None:
+            root_manager = root_manager._parent_manager
 
-            # Find root manager
-            root_manager = self
-            while root_manager._parent_manager is not None:
-                root_manager = root_manager._parent_manager
-
-            # Register with root if it's tracking and this will use async (centralized logic)
-            # ANTI-DUCK-TYPING: root_manager always has _pending_nested_managers
-            if self.should_use_async(param_count):
-                # Use a unique key that includes the full path to avoid duplicates
-                unique_key = f"{self.field_id}.{param_name}"
-                root_manager._pending_nested_managers[unique_key] = nested_manager
+        if self.should_use_async(param_count):
+            unique_key = f"{self.field_id}.{param_name}"
+            root_manager._pending_nested_managers[unique_key] = nested_manager
 
         return nested_manager
 

@@ -69,17 +69,14 @@ class FieldChangeDispatcher:
                     logger.warning(f"🚫 DISPATCH BLOCKED: {source.field_id} has _in_reset=True")
                 return
 
-            # 1. Update source's data model
-            source.parameters[event.field_name] = event.value
-            # CRITICAL: Always add to _user_set_fields, even for reset
+            # 1. Update source's data model via ObjectState
+            # CRITICAL: Always mark as user_set=True, even for reset
             # This ensures get_user_modified_values() includes None for reset fields,
             # so live context has the override and preview labels show same as placeholders.
-            # Previously we discarded on reset, but that caused preview labels to show
-            # the saved-on-disk value instead of the reset (None) value.
-            source._user_set_fields.add(event.field_name)
+            source.state.update_parameter(event.field_name, event.value, user_set=True)
             if DEBUG_DISPATCHER:
                 reset_note = " (reset to None)" if event.is_reset else ""
-                logger.info(f"  ✅ Updated source.parameters[{event.field_name}], ADDED to _user_set_fields{reset_note}")
+                logger.info(f"  ✅ Updated state.parameters[{event.field_name}], ADDED to _user_set_fields{reset_note}")
 
             # PERFORMANCE OPTIMIZATION: Invalidate cache but DON'T notify listeners yet
             # This allows sibling refreshes to share the cached live context
@@ -192,8 +189,7 @@ class FieldChangeDispatcher:
                         parent, field_name, nested_mgr
                     )
                     logger.info(f"    L{level}: Collected nested_value type={type(nested_value).__name__}")
-                    parent.parameters[field_name] = nested_value
-                    parent._user_set_fields.add(field_name)
+                    parent.state.update_parameter(field_name, nested_value, user_set=True)
                     logger.info(f"    L{level}: ✅ {parent.field_id}.{field_name} marked modified")
                     break
             current = parent

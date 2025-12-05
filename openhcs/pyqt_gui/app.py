@@ -101,10 +101,11 @@ class OpenHCSPyQtApp(QApplication):
 
         # Register GlobalPipelineConfig ObjectState (singleton, persists for app lifetime)
         # This is the root of the ObjectState hierarchy
+        # scope_id=None for global scope - visible to all orchestrators
         global_state = ObjectState(
             object_instance=self.global_config,
             field_id="GlobalPipelineConfig",
-            scope_id="global",
+            scope_id=None,  # None = global scope
             context_obj=None,  # No parent context for global config
         )
         ObjectStateRegistry.register(global_state)

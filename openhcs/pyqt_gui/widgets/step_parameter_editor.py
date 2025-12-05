@@ -114,10 +114,14 @@ class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
 
         # Look up ObjectState from registry using scope_id
         # ObjectState was registered by PipelineEditorWidget when step was added
+        logger.info(f"🔍 STEP_EDITOR: Looking up ObjectState for scope_id={self.scope_id}")
+        logger.info(f"🔍 STEP_EDITOR: Registry has scopes: {[s.scope_id for s in ObjectStateRegistry.get_all()]}")
         state = ObjectStateRegistry.get_by_scope(self.scope_id) if self.scope_id else None
+        logger.info(f"🔍 STEP_EDITOR: Found state={state is not None}, object_instance={type(state.object_instance).__name__ if state else 'N/A'}")
 
         if state is None:
             # Fallback: create local ObjectState (for backward compatibility)
+            logger.info(f"🔍 STEP_EDITOR: Creating LOCAL ObjectState (not in registry)")
             field_id = f"{self.scope_id}.step_{self.step_index}" if self.step_index is not None and self.scope_id else "step"
             state = ObjectState(
                 object_instance=self.step,
@@ -126,6 +130,8 @@ class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
                 context_obj=self.pipeline_config,
                 exclude_params=['func'],
             )
+        else:
+            logger.info(f"🔍 STEP_EDITOR: Using REGISTERED ObjectState, params={list(state.parameters.keys())}")
 
         config = FormManagerConfig(
             parent=self,                         # Pass self as parent widget

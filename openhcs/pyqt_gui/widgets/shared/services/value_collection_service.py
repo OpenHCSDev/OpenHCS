@@ -73,6 +73,7 @@ class ValueCollectionService(ParameterServiceABC):
     ) -> Optional[Any]:
         """Collect value for Optional[Dataclass] parameter."""
         from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
+        from openhcs.config_framework.lazy_factory import is_lazy_dataclass
 
         param_name = info.name
         param_type = info.type
@@ -80,12 +81,17 @@ class ValueCollectionService(ParameterServiceABC):
         checkbox = WidgetService.find_nested_checkbox(manager, param_name)
         if checkbox and not checkbox.isChecked():
             return None
-        
-        nested_values = nested_manager.get_current_values()
+
+        # For lazy dataclasses, only persist user-set fields so untouched placeholders stay None
+        if is_lazy_dataclass(nested_manager.object_instance):
+            nested_values = nested_manager.get_user_modified_values()
+        else:
+            nested_values = nested_manager.get_current_values()
+
         if not nested_values:
-            inner_type = ParameterTypeUtils.get_optional_inner_type(param_type)
-            return inner_type()
-        
+            logger.debug(f"[ValueCollection] Optional {param_name}: no nested edits, returning default")
+            return manager.param_defaults.get(info.name)
+
         inner_type = ParameterTypeUtils.get_optional_inner_type(param_type)
         return inner_type(**nested_values)
     
@@ -97,11 +103,19 @@ class ValueCollectionService(ParameterServiceABC):
     ) -> Any:
         """Collect value for direct Dataclass parameter."""
         param_type = info.type
-        
-        nested_values = nested_manager.get_current_values()
+
+        from openhcs.config_framework.lazy_factory import is_lazy_dataclass
+
+        # For lazy/placeholder-driven dataclasses, only persist user-set fields
+        if is_lazy_dataclass(nested_manager.object_instance):
+            nested_values = nested_manager.get_user_modified_values()
+        else:
+            nested_values = nested_manager.get_current_values()
+
         if not nested_values:
-            return param_type()
-        
+            logger.debug(f"[ValueCollection] Direct {info.name}: no nested edits, returning default")
+            return manager.param_defaults.get(info.name)
+
         return param_type(**nested_values)
     
     def _collect_GenericInfo(
@@ -150,4 +164,3 @@ class ValueCollectionService(ParameterServiceABC):
                 f"{prefix}{src_name}"
             )
             setattr(target, tgt_name, getattr(source, src_name))
-
