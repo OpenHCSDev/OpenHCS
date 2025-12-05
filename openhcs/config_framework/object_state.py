@@ -283,29 +283,6 @@ class ObjectState:
         self._resolved_cache[param_name] = (token, resolved)
         return resolved
 
-    def get_placeholder_text(self, param_name: str, prefix: str = "Pipeline default") -> Optional[str]:
-        """Get formatted placeholder text for widget display.
-
-        This is a formatting helper - the raw value comes from get_resolved_value().
-
-        Args:
-            param_name: Field name to resolve
-            prefix: Prefix for placeholder text (e.g., "Pipeline default")
-
-        Returns:
-            Formatted placeholder text like "Pipeline default: /some/path", or None
-        """
-        resolved = self.get_resolved_value(param_name)
-        if resolved is None:
-            return None
-        return self._format_placeholder_text(resolved, prefix)
-
-    @staticmethod
-    def _format_placeholder_text(value: Any, prefix: str) -> Optional[str]:
-        """Format a value as placeholder text."""
-        from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
-        return LazyDefaultPlaceholderService._format_placeholder_text(value, prefix)
-
     def _resolve_value(self, param_name: str) -> Any:
         """Internal resolver - builds context stack and resolves raw value.
 
