@@ -31,6 +31,7 @@ from openhcs.config_framework.global_config import (
     get_current_global_config
 )
 from openhcs.config_framework.context_manager import config_context
+from openhcs.config_framework.object_state import ObjectState, ObjectStateRegistry
 from openhcs.core.config_cache import _sync_save_config
 from openhcs.core.xdg_paths import get_config_file_path
 from openhcs.debug.pickle_to_python import generate_complete_orchestrator_code
@@ -402,6 +403,16 @@ class PlateManagerWidget(AbstractManagerWidget):
             saved_config = self.plate_configs.get(str(plate_path))
             if saved_config:
                 orchestrator.apply_pipeline_config(saved_config)
+
+            # Register PipelineConfig ObjectState (one per orchestrator)
+            # Context is GlobalPipelineConfig for inheritance resolution
+            pipeline_config_state = ObjectState(
+                object_instance=orchestrator.pipeline_config,
+                field_id="PipelineConfig",
+                scope_id=str(plate_path),
+                context_obj=self.global_config,
+            )
+            ObjectStateRegistry.register(pipeline_config_state)
 
             def do_init():
                 self._ensure_context()

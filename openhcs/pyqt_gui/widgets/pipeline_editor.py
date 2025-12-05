@@ -27,6 +27,7 @@ from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.pyqt_gui.config import PyQtGUIConfig, get_default_pyqt_gui_config
 from openhcs.config_framework import LiveContextResolver
+from openhcs.config_framework.object_state import ObjectState, ObjectStateRegistry
 
 # Import shared list widget components (single source of truth)
 from openhcs.pyqt_gui.widgets.shared.reorderable_list_widget import ReorderableListWidget
@@ -584,6 +585,11 @@ class PipelineEditorWidget(AbstractManagerWidget):
             plate_path: Path of the current plate
         """
         logger.info(f"🔔 RECEIVED set_current_plate signal: {plate_path}")
+
+        # Unregister ObjectStates for old plate's steps before switching
+        for step in self.pipeline_steps:
+            self._unregister_step_state(step)
+
         self.current_plate = plate_path
 
         # Load pipeline for the new plate
@@ -650,6 +656,43 @@ class PipelineEditorWidget(AbstractManagerWidget):
     def _normalize_step_scope_tokens(self) -> None:
         for step in self.pipeline_steps:
             self._ensure_step_scope_token(step)
+            self._register_step_state(step)
+
+    def _register_step_state(self, step: FunctionStep) -> None:
+        """Register ObjectState for a step (creates if not exists)."""
+        scope_id = self._build_step_scope_id(step)
+        if not scope_id:
+            return
+
+        # Check if already registered
+        existing = ObjectStateRegistry.get_by_scope(scope_id)
+        if existing:
+            return
+
+        # Get context (PipelineConfig from orchestrator)
+        orchestrator = self._get_current_orchestrator()
+        context_obj = orchestrator.pipeline_config if orchestrator else None
+
+        state = ObjectState(
+            object_instance=step,
+            field_id=f"step_{step.name}",
+            scope_id=scope_id,
+            context_obj=context_obj,
+            exclude_params=['func'],  # Exclude func - handled separately by FunctionPane
+        )
+        ObjectStateRegistry.register(state)
+        logger.debug(f"Registered ObjectState for step: {scope_id}")
+
+    def _unregister_step_state(self, step: FunctionStep) -> None:
+        """Unregister ObjectState for a step."""
+        scope_id = self._build_step_scope_id(step)
+        if not scope_id:
+            return
+
+        existing = ObjectStateRegistry.get_by_scope(scope_id)
+        if existing:
+            ObjectStateRegistry.unregister(existing)
+            logger.debug(f"Unregistered ObjectState for step: {scope_id}")
 
     # _merge_with_live_values() DELETED - use _merge_with_live_values() from base class
 
@@ -840,6 +883,10 @@ class PipelineEditorWidget(AbstractManagerWidget):
 
     def _perform_delete(self, items: List[Any]) -> None:
         """Remove steps from backing list (required abstract method)."""
+        # Unregister ObjectStates for deleted steps
+        for step in items:
+            self._unregister_step_state(step)
+
         # Build set of steps to delete (by identity, not equality)
         steps_to_delete = set(id(step) for step in items)
         self.pipeline_steps = [s for s in self.pipeline_steps if id(s) not in steps_to_delete]

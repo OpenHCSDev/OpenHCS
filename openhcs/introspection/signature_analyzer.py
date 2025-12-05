@@ -483,7 +483,7 @@ class SignatureAnalyzer:
 
 
             # Get parameter description from docstring
-            param_description = docstring_info.parameters.get(param_name) if docstring_info else None
+            param_description = docstring_info.parameters.get(param_name) if docstring_info and docstring_info.parameters else None
 
             parameters[param_name] = ParameterInfo(
                 name=param_name,

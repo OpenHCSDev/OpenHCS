@@ -13,8 +13,6 @@ from dataclasses import is_dataclass, fields as dataclass_fields
 import logging
 from typing import Any, Dict, List, Optional, Set, Callable, TYPE_CHECKING
 
-from openhcs.config_framework.lazy_factory import is_lazy_dataclass
-
 if TYPE_CHECKING:
     pass  # Forward references if needed
 
@@ -174,16 +172,20 @@ class ObjectState:
         scope_id: Optional[str] = None,
         context_obj: Optional[Any] = None,
         parent_state: Optional['ObjectState'] = None,
+        exclude_params: Optional[List[str]] = None,
+        initial_values: Optional[Dict[str, Any]] = None,
     ):
         """
         Initialize ObjectState with extracted MODEL from ParameterFormManager.
 
         Args:
-            object_instance: The object being edited (dataclass instance, etc.)
+            object_instance: The object being edited (dataclass, callable, etc.)
             field_id: Unique identifier for this state
             scope_id: Scope identifier for filtering (e.g., "/path::step_0")
             context_obj: Parent object for inheritance resolution
             parent_state: Parent ObjectState for nested forms
+            exclude_params: Parameters to exclude from extraction (e.g., ['func'] for FunctionStep)
+            initial_values: Initial values to override extracted defaults (e.g., saved kwargs)
         """
         # Core identity
         self.object_instance = object_instance
@@ -192,16 +194,23 @@ class ObjectState:
         self.context_obj = context_obj
         self._parent_state: Optional['ObjectState'] = parent_state
 
-        # Extract parameters from object instance
+        # Extract parameters using UnifiedParameterAnalyzer (handles dataclasses, callables, etc.)
+        # Lazy import to avoid circular dependency
+        from openhcs.introspection.unified_parameter_analyzer import UnifiedParameterAnalyzer
+
         self.parameters: Dict[str, Any] = {}
         self.parameter_types: Dict[str, Any] = {}  # Can be Type or str (forward ref)
         self.param_defaults: Dict[str, Any] = {}
 
-        if is_dataclass(object_instance) and not isinstance(object_instance, type):
-            for f in dataclass_fields(object_instance):
-                self.parameters[f.name] = getattr(object_instance, f.name)
-                self.parameter_types[f.name] = f.type
-                self.param_defaults[f.name] = f.default if f.default is not dataclasses.MISSING else None
+        param_info_dict = UnifiedParameterAnalyzer.analyze(object_instance, exclude_params=exclude_params or [])
+        for name, info in param_info_dict.items():
+            self.parameters[name] = info.default_value
+            self.parameter_types[name] = info.param_type
+            self.param_defaults[name] = info.default_value
+
+        # Apply initial_values overrides (e.g., saved kwargs for functions)
+        if initial_values:
+            self.parameters.update(initial_values)
 
         # Tracking
         self._user_set_fields: Set[str] = set()
@@ -218,7 +227,7 @@ class ObjectState:
 
         # Resolved value cache with token-based invalidation
         # Key: field_name, Value: (token, resolved_value)
-        # Token is from LiveContextService - when it changes, cache is stale
+        # Token is from ObjectStateRegistry - when it changes, cache is stale
         self._resolved_cache: Dict[str, tuple] = {}
 
         # Flags
@@ -379,6 +388,8 @@ class ObjectState:
         2. Values that were inherited from parent or set during initialization (not in _user_set_fields)
         """
         # ANTI-DUCK-TYPING: Use isinstance check against LazyDataclass base class
+        # Lazy import to avoid circular dependency
+        from openhcs.config_framework.lazy_factory import is_lazy_dataclass
         if not is_lazy_dataclass(self.object_instance):
             # For non-lazy dataclasses, return all current values
             result = self.get_current_values()
