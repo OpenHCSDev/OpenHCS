@@ -50,9 +50,9 @@ class ImageBrowserWidget(QWidget):
         # (e.g., virtual_workspace backend)
         self.filemanager = orchestrator.filemanager if orchestrator else FileManager(storage_registry)
 
-        # Scope ID for cross-window live context filtering (derived from orchestrator's plate path)
-        # All config forms in this widget use this scope to filter updates to same plate
-        self.scope_id: Optional[str] = str(orchestrator.plate_path) if orchestrator else None
+        # Scope ID for cross-window live context filtering (make distinct from PipelineConfig window)
+        # Append a suffix so image browser uses a separate scope per plate
+        self.scope_id: Optional[str] = f"{orchestrator.plate_path}::image_browser" if orchestrator else None
 
         # Lazy config widgets (will be created in init_ui)
         self.napari_config_form = None
@@ -2277,4 +2277,3 @@ class ImageBrowserWidget(QWidget):
     def _update_status_label(self, message: str):
         """Update status label (called on main thread via signal)."""
         self.info_label.setText(message)
-
