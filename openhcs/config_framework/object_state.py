@@ -174,6 +174,11 @@ class ObjectState:
         # Nested states (for nested dataclasses)
         self.nested_states: Dict[str, 'ObjectState'] = {}
 
+        # Resolved value cache with token-based invalidation
+        # Key: field_name, Value: (token, resolved_value)
+        # Token is from LiveContextService - when it changes, cache is stale
+        self._resolved_cache: Dict[str, tuple] = {}
+
         # Flags
         self._in_reset = False
         self._block_cross_window_updates = False
@@ -203,9 +208,48 @@ class ObjectState:
         # Update state directly (no type conversion - that's VIEW responsibility)
         self.parameters[param_name] = value
 
+        # Invalidate cache for this field (resolved value may change)
+        self._resolved_cache.pop(param_name, None)
+
         # Track user modification
         if user_set:
             self._user_set_fields.add(param_name)
+
+    def get_resolved(self, param_name: str, token: int, resolver: Callable[[str], Any]) -> Any:
+        """Get resolved value for a field, using cache if valid.
+
+        This is the MODEL's responsibility - caching resolved values.
+        The resolver callable is provided by the VIEW (PFM) which knows how to resolve.
+
+        Args:
+            param_name: Field name to resolve
+            token: Current cache token from LiveContextService
+            resolver: Callable that resolves the placeholder value
+
+        Returns:
+            Cached or freshly resolved value
+        """
+        # Check cache validity
+        if param_name in self._resolved_cache:
+            cached_token, cached_value = self._resolved_cache[param_name]
+            if cached_token == token:
+                return cached_value
+
+        # Cache miss or stale - resolve and cache
+        resolved = resolver(param_name)
+        self._resolved_cache[param_name] = (token, resolved)
+        return resolved
+
+    def invalidate_cache(self, param_name: Optional[str] = None) -> None:
+        """Invalidate resolved cache.
+
+        Args:
+            param_name: If provided, invalidate only this field. Otherwise invalidate all.
+        """
+        if param_name:
+            self._resolved_cache.pop(param_name, None)
+        else:
+            self._resolved_cache.clear()
 
     def reset_parameter(self, param_name: str) -> None:
         """Reset parameter to signature default."""
