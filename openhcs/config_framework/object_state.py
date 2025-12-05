@@ -89,21 +89,6 @@ class ObjectStateRegistry:
         return list(cls._states.values())
 
     @classmethod
-    def get_by_scope_prefix(cls, prefix: str) -> List['ObjectState']:
-        """Get all ObjectStates whose scope_id starts with prefix.
-
-        Useful for collecting all states for a specific plate, e.g.:
-        get_by_scope_prefix("/plate_path") → all states for that plate
-
-        Args:
-            prefix: Scope prefix to match.
-
-        Returns:
-            List of matching ObjectState instances.
-        """
-        return [state for scope_id, state in cls._states.items() if scope_id.startswith(prefix)]
-
-    @classmethod
     def clear(cls) -> None:
         """Clear all registered states. For testing only."""
         cls._states.clear()
@@ -272,18 +257,17 @@ class ObjectState:
         if user_set:
             self._user_set_fields.add(param_name)
 
-    def get_resolved(self, param_name: str, placeholder_prefix: str = "Pipeline default") -> Optional[str]:
-        """Get resolved placeholder text for a field, using cache if valid.
+    def get_resolved_value(self, param_name: str) -> Any:
+        """Get raw resolved value for a field, using cache if valid.
 
         This is the MODEL's responsibility - ObjectState owns resolution logic.
         Uses ObjectStateRegistry for sibling values and builds context stack.
 
         Args:
             param_name: Field name to resolve
-            placeholder_prefix: Prefix for placeholder text
 
         Returns:
-            Resolved placeholder text or None
+            Raw resolved value (e.g., '/some/path'), not formatted text
         """
         # Get current token for cache validation
         token = ObjectStateRegistry.get_token()
@@ -295,19 +279,41 @@ class ObjectState:
                 return cached_value
 
         # Cache miss or stale - resolve and cache
-        resolved = self._resolve_placeholder(param_name, placeholder_prefix)
+        resolved = self._resolve_value(param_name)
         self._resolved_cache[param_name] = (token, resolved)
         return resolved
 
-    def _resolve_placeholder(self, param_name: str, placeholder_prefix: str) -> Optional[str]:
-        """Internal resolver - builds context stack and resolves placeholder.
+    def get_placeholder_text(self, param_name: str, prefix: str = "Pipeline default") -> Optional[str]:
+        """Get formatted placeholder text for widget display.
+
+        This is a formatting helper - the raw value comes from get_resolved_value().
 
         Args:
             param_name: Field name to resolve
-            placeholder_prefix: Prefix for placeholder text
+            prefix: Prefix for placeholder text (e.g., "Pipeline default")
 
         Returns:
-            Resolved placeholder text or None
+            Formatted placeholder text like "Pipeline default: /some/path", or None
+        """
+        resolved = self.get_resolved_value(param_name)
+        if resolved is None:
+            return None
+        return self._format_placeholder_text(resolved, prefix)
+
+    @staticmethod
+    def _format_placeholder_text(value: Any, prefix: str) -> Optional[str]:
+        """Format a value as placeholder text."""
+        from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
+        return LazyDefaultPlaceholderService._format_placeholder_text(value, prefix)
+
+    def _resolve_value(self, param_name: str) -> Any:
+        """Internal resolver - builds context stack and resolves raw value.
+
+        Args:
+            param_name: Field name to resolve
+
+        Returns:
+            Raw resolved value
         """
         from openhcs.config_framework.context_manager import build_context_stack
         from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
@@ -332,9 +338,14 @@ class ObjectState:
             if lazy_type:
                 obj_type = lazy_type
 
-            return LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
-                obj_type, param_name, placeholder_prefix
-            )
+            # Create instance and get raw resolved value
+            try:
+                instance = obj_type()
+                return getattr(instance, param_name)
+            except Exception as e:
+                logger.debug(f"Failed to resolve {obj_type.__name__}.{param_name}: {e}")
+                # Fallback to class default
+                return LazyDefaultPlaceholderService._get_class_default_value(obj_type, param_name)
 
     def invalidate_cache(self, param_name: Optional[str] = None) -> None:
         """Invalidate resolved cache.
