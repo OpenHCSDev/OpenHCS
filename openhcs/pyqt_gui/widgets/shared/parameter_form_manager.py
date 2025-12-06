@@ -436,10 +436,10 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         if not is_dataclass(dataclass_instance):
             raise ValueError(f"{type(dataclass_instance)} is not a dataclass")
 
-        # Try to look up ObjectState from registry if scope_id provided
-        state = None
-        if scope_id:
-            state = ObjectStateRegistry.get_by_scope(scope_id)
+        # Try to look up ObjectState from registry
+        # CRITICAL FIX: None is a VALID scope_id (for GlobalPipelineConfig)
+        # So we always try registry lookup first, then fall back to local creation
+        state = ObjectStateRegistry.get_by_scope(scope_id)
 
         # If not found in registry, create local ObjectState (standalone tool)
         if state is None:
@@ -484,10 +484,9 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         """
         from openhcs.config_framework.object_state import ObjectState, ObjectStateRegistry
 
-        # Try to look up ObjectState from registry if scope_id provided
-        state = None
-        if scope_id:
-            state = ObjectStateRegistry.get_by_scope(scope_id)
+        # Try to look up ObjectState from registry
+        # CRITICAL FIX: None is a VALID scope_id (for GlobalPipelineConfig)
+        state = ObjectStateRegistry.get_by_scope(scope_id)
 
         # If not found in registry, create local ObjectState
         if state is None:
