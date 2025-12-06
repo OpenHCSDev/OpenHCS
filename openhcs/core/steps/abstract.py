@@ -33,9 +33,6 @@ from openhcs.core.config import LazyStepMaterializationConfig, LazyStreamingDefa
 from openhcs.core.config import LazyStepWellFilterConfig
 from openhcs.core.config import LazyProcessingConfig, LazyDtypeConfig
 
-# Import ContextProvider for automatic step context registration
-from openhcs.config_framework.lazy_factory import ContextProvider
-
 # ProcessingContext is used in type hints
 if TYPE_CHECKING:
     from openhcs.core.context.processing_context import ProcessingContext
@@ -63,12 +60,9 @@ if TYPE_CHECKING:
 #    return str(id(step))
 
 
-class AbstractStep(abc.ABC, ContextProvider):
+class AbstractStep(abc.ABC):
     """
     Abstract base class for all steps in the OpenHCS pipeline.
-
-    Inherits from ContextProvider to enable automatic context injection
-    for lazy configuration resolution.
 
     This class defines the interface that all steps must implement.
     Steps are stateful during pipeline definition and compilation (holding attributes
@@ -111,7 +105,6 @@ class AbstractStep(abc.ABC, ContextProvider):
     ```
 
     """
-    _context_type = "step"  # Register as step context provider
 
     # Attributes like input_memory_type, output_memory_type, etc.,
     # are defined in concrete subclasses (e.g., FunctionStep) as needed.

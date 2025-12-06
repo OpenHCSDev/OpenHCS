@@ -3,7 +3,7 @@ Generic metaclass infrastructure for automatic plugin registration.
 
 This module provides reusable metaclass infrastructure for Pattern A registry systems
 (1:1 class-to-plugin mapping with automatic discovery). It eliminates code duplication
-across MicroscopeHandlerMeta, StorageBackendMeta, and ContextProviderMeta.
+across MicroscopeHandlerMeta and StorageBackendMeta.
 
 Pattern Selection Guide:
 -----------------------
@@ -363,13 +363,6 @@ class RegistryConfig:
             registry_name='storage backend'
         )
 
-        # Context providers with simple explicit key
-        RegistryConfig(
-            registry_dict=CONTEXT_PROVIDERS,
-            key_attribute='_context_type',
-            skip_if_no_key=True,
-            registry_name='context provider'
-        )
     """
     registry_dict: RegistryDict
     key_attribute: str

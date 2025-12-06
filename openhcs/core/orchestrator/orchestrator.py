@@ -23,7 +23,7 @@ from openhcs.constants.constants import Backend, DEFAULT_IMAGE_EXTENSIONS, Group
 from openhcs.constants import Microscope
 from openhcs.core.config import GlobalPipelineConfig
 from openhcs.config_framework.global_config import get_current_global_config
-from openhcs.config_framework.lazy_factory import ContextProvider
+
 
 
 from openhcs.core.metadata_cache import get_metadata_cache, MetadataCache
@@ -395,7 +395,7 @@ _worker_log_file_base = None
 
 
 
-class PipelineOrchestrator(ContextProvider):
+class PipelineOrchestrator:
     """
     Updated orchestrator supporting both global and per-orchestrator configuration.
 
@@ -407,7 +407,6 @@ class PipelineOrchestrator(ContextProvider):
     Then, it executes the (now stateless) pipeline definition against these contexts,
     potentially in parallel, using `execute_compiled_plate()`.
     """
-    _context_type = "orchestrator"  # Register as orchestrator context provider
 
     def __init__(
         self,

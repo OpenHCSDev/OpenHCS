@@ -382,12 +382,9 @@ class ObjectState:
         logger.info(f"🔍 Built context stack with context_obj={type(self.context_obj).__name__ if self.context_obj else None}")
 
         with stack:
-            # Get the lazy type for resolution
+            # Concrete classes now have __getattribute__ via bind_lazy_resolution_to_class()
+            # No need to lookup lazy type - just use the concrete type directly
             obj_type = type(self.object_instance)
-            lazy_type = LazyDefaultPlaceholderService._get_lazy_type_for_base(obj_type)
-            if lazy_type:
-                logger.info(f"🔍 Using lazy type {lazy_type.__name__} instead of {obj_type.__name__}")
-                obj_type = lazy_type
 
             # Create instance and get raw resolved value
             try:

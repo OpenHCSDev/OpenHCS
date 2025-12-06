@@ -5,13 +5,10 @@ import dataclasses
 import logging
 import re
 import sys
-from abc import ABCMeta
+
 from dataclasses import dataclass, fields, is_dataclass, make_dataclass, MISSING, field
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar, Union
 
-# OpenHCS imports
-from openhcs.config_framework.placeholder import LazyDefaultPlaceholderService
-from openhcs.core.auto_register_meta import AutoRegisterMeta, RegistryConfig
 # Note: dual_axis_resolver_recursive and lazy_placeholder imports kept inline to avoid circular imports
 
 
@@ -74,14 +71,6 @@ def is_lazy_dataclass(obj_or_type) -> bool:
     else:
         # Instance check: is it an instance of LazyDataclass?
         return isinstance(obj_or_type, LazyDataclass)
-
-# Optional imports (handled gracefully)
-try:
-    from PyQt6.QtWidgets import QApplication
-    HAS_PYQT = True
-except ImportError:
-    QApplication = None
-    HAS_PYQT = False
 
 logger = logging.getLogger(__name__)
 
@@ -225,6 +214,27 @@ def _get_raw_field_value(obj: Any, field_name: str) -> Any:
         return None
 
 
+def bind_lazy_resolution_to_class(cls: Type) -> None:
+    """
+    Add lazy __getattribute__ to an existing class.
+
+    This enables concrete classes (like WellFilterConfig stored in
+    GlobalPipelineConfig) to resolve None values via MRO without
+    changing their static defaults.
+
+    Args:
+        cls: The class to add lazy resolution to
+    """
+    # Don't double-bind
+    if getattr(cls, '_has_lazy_resolution', False):
+        return
+
+    # Create and bind the __getattribute__ method
+    lazy_getattribute = LazyMethodBindings.create_getattribute()
+    cls.__getattribute__ = lazy_getattribute
+    cls._has_lazy_resolution = True
+
+
 @dataclass(frozen=True)
 class LazyMethodBindings:
     """Declarative method bindings for lazy dataclasses."""
@@ -261,28 +271,6 @@ class LazyMethodBindings:
             """Extract common MRO traversal pattern."""
             return next((getattr(cls, name) for cls in base_class.__mro__
                         if _has_concrete_field_override(cls, name)), None)
-
-        def _try_global_context_value(self, base_class, name):
-            """Extract global context resolution logic using new pure function interface."""
-            if not hasattr(self, '_global_config_type'):
-                return None
-
-            # Get current context from contextvars
-            try:
-                current_context = current_temp_global.get()
-                # Extract available configs from current context
-                available_configs = extract_all_configs(current_context)
-
-                # Use pure function for resolution
-                resolved_value = resolve_field_inheritance(self, name, available_configs)
-                if resolved_value is not None:
-                    return resolved_value
-            except LookupError:
-                # No context available - fall back to MRO
-                pass
-
-            # Fallback to MRO concrete value
-            return _find_mro_concrete_value(base_class, name)
 
         def __getattribute__(self: Any, name: str) -> Any:
             """
@@ -335,7 +323,9 @@ class LazyMethodBindings:
 
             except LookupError:
                 # No context available - fallback to MRO concrete values
-                return _find_mro_concrete_value(get_base_type_for_lazy(self.__class__), name)
+                # For LazyDataclass types, get the base type; for concrete types, use self.__class__ directly
+                base_type = get_base_type_for_lazy(self.__class__) or self.__class__
+                return _find_mro_concrete_value(base_type, name)
         return __getattribute__
 
     @staticmethod
@@ -478,7 +468,6 @@ class LazyDataclassFactory:
         has_inherit_as_none_marker = hasattr(base_class, '_inherit_as_none') and base_class._inherit_as_none
         has_unsafe_metaclass = (
             (hasattr(base_class, '__metaclass__') or base_metaclass != type) and
-            base_metaclass != InheritAsNoneMeta and
             not has_inherit_as_none_marker
         )
 
@@ -598,54 +587,7 @@ def ensure_global_config_context(global_config_type: Type, global_config_instanc
     set_global_config_for_editing(global_config_type, global_config_instance)
 
 
-# Context provider registry and metaclass for automatic registration
-CONTEXT_PROVIDERS = {}
-
-
-# Configuration for context provider registration
-_CONTEXT_PROVIDER_REGISTRY_CONFIG = RegistryConfig(
-    registry_dict=CONTEXT_PROVIDERS,
-    key_attribute='_context_type',
-    key_extractor=None,  # Requires explicit _context_type
-    skip_if_no_key=True,  # Skip if no _context_type set
-    secondary_registries=None,
-    log_registration=True,
-    registry_name='context provider'
-)
-
-
-class ContextProviderMeta(AutoRegisterMeta):
-    """Metaclass for automatic registration of context provider classes."""
-
-    def __new__(mcs, name, bases, attrs):
-        return super().__new__(mcs, name, bases, attrs,
-                              registry_config=_CONTEXT_PROVIDER_REGISTRY_CONFIG)
-
-
-class ContextProvider(metaclass=ContextProviderMeta):
-    """Base class for objects that can provide context for lazy resolution."""
-    _context_type: Optional[str] = None  # Override in subclasses
-
-
-def _detect_context_type(obj: Any) -> Optional[str]:
-    """
-    Detect what type of context object this is using registered providers.
-
-    Returns the context type name or None if not a recognized context type.
-    """
-    # Check for functions first (simple callable check)
-    if callable(obj) and hasattr(obj, '__name__'):
-        return "function"
-
-    # Check if object is an instance of any registered context provider
-    for context_type, provider_class in CONTEXT_PROVIDERS.items():
-        if isinstance(obj, provider_class):
-            return context_type
-
-    return None
-
-
-# ContextInjector removed - replaced with contextvars-based context system
+# ContextProvider infrastructure removed - was dead code feeding broken frame.f_locals manipulation
 
 
 
@@ -685,78 +627,16 @@ def resolve_lazy_configurations_for_serialization(data: Any) -> Any:
         # Not a lazy dataclass
         resolved_data = data
 
-    # CRITICAL FIX: Handle step objects (non-dataclass objects with dataclass attributes)
-    step_context_type = _detect_context_type(resolved_data)
-    if step_context_type:
-        # This is a context object - inject it for its dataclass attributes
-        import inspect
-        frame = inspect.currentframe()
-        context_var_name = f"__{step_context_type}_context__"
-        frame.f_locals[context_var_name] = resolved_data
-        logger.debug(f"Injected {context_var_name} = {type(resolved_data).__name__}")
-
-        try:
-            # Process step attributes recursively
-            resolved_attrs = {}
-            for attr_name in dir(resolved_data):
-                if attr_name.startswith('_'):
-                    continue
-                try:
-                    attr_value = getattr(resolved_data, attr_name)
-                    if not callable(attr_value):  # Skip methods
-                        logger.debug(f"Resolving {type(resolved_data).__name__}.{attr_name} = {type(attr_value).__name__}")
-                        resolved_attrs[attr_name] = resolve_lazy_configurations_for_serialization(attr_value)
-                except (AttributeError, Exception):
-                    continue
-
-            # Handle function objects specially - they can't be recreated with __new__
-            if step_context_type == "function":
-                # For functions, just process attributes for resolution but return original function
-                # The resolved config values will be stored in func plan by compiler
-                return resolved_data
-
-            # Create new step object with resolved attributes
-            # CRITICAL FIX: Copy all original attributes using __dict__ to preserve everything
-            new_step = type(resolved_data).__new__(type(resolved_data))
-
-            # Copy all attributes from the original object's __dict__
-            if hasattr(resolved_data, '__dict__'):
-                new_step.__dict__.update(resolved_data.__dict__)
-
-            # Update with resolved config attributes (these override the originals)
-            for attr_name, attr_value in resolved_attrs.items():
-                setattr(new_step, attr_name, attr_value)
-            return new_step
-        finally:
-            if context_var_name in frame.f_locals:
-                del frame.f_locals[context_var_name]
-            del frame
-
     # Recursively process nested structures based on type
-    elif is_dataclass(resolved_data) and not isinstance(resolved_data, type):
-        # Process dataclass fields recursively - inline field processing pattern
-        # CRITICAL FIX: Inject parent object as context for sibling config inheritance
-        context_type = _detect_context_type(resolved_data) or "dataclass"  # Default to "dataclass" for generic dataclasses
-        import inspect
-        frame = inspect.currentframe()
-        context_var_name = f"__{context_type}_context__"
-        frame.f_locals[context_var_name] = resolved_data
-        logger.debug(f"Injected {context_var_name} = {type(resolved_data).__name__}")
-
-        # Add debug to see which fields are being resolved
+    if is_dataclass(resolved_data) and not isinstance(resolved_data, type):
+        # Process dataclass fields recursively
         logger.debug(f"Resolving fields for {type(resolved_data).__name__}: {[f.name for f in fields(resolved_data)]}")
-
-        try:
-            resolved_fields = {}
-            for f in fields(resolved_data):
-                field_value = getattr(resolved_data, f.name)
-                logger.debug(f"Resolving {type(resolved_data).__name__}.{f.name} = {type(field_value).__name__}")
-                resolved_fields[f.name] = resolve_lazy_configurations_for_serialization(field_value)
-            return type(resolved_data)(**resolved_fields)
-        finally:
-            if context_var_name in frame.f_locals:
-                del frame.f_locals[context_var_name]
-            del frame
+        resolved_fields = {}
+        for f in fields(resolved_data):
+            field_value = getattr(resolved_data, f.name)
+            logger.debug(f"Resolving {type(resolved_data).__name__}.{f.name} = {type(field_value).__name__}")
+            resolved_fields[f.name] = resolve_lazy_configurations_for_serialization(field_value)
+        return type(resolved_data)(**resolved_fields)
 
     elif isinstance(resolved_data, dict):
         # Process dictionary values recursively
@@ -841,31 +721,8 @@ def rebuild_lazy_config_with_new_global_reference(
 
         if raw_value is not None and hasattr(raw_value, '__dataclass_fields__'):
             try:
-                # Check if this is a concrete dataclass that should be converted to lazy
-                is_lazy = LazyDefaultPlaceholderService.has_lazy_resolution(type(raw_value))
-
-                if not is_lazy:
-                    lazy_type = LazyDefaultPlaceholderService._get_lazy_type_for_base(type(raw_value))
-
-                    if lazy_type:
-                        # Convert concrete dataclass to lazy version while preserving ONLY non-default field values
-                        # This allows fields that match class defaults to inherit from context
-                        concrete_field_values = {}
-                        for f in fields(raw_value):
-                            field_value = object.__getattribute__(raw_value, f.name)
-
-                            # Get the class default for this field
-                            class_default = getattr(type(raw_value), f.name, None)
-
-                            # Only preserve values that differ from class defaults
-                            # This allows default values to be inherited from context
-                            if field_value != class_default:
-                                concrete_field_values[f.name] = field_value
-
-                        logger.debug(f"Converting concrete {type(raw_value).__name__} to lazy version {lazy_type.__name__} for placeholder resolution")
-                        return lazy_type(**concrete_field_values)
-
-                # If already lazy or no lazy version available, rebuild recursively
+                # Rebuild nested dataclass recursively
+                # All @global_pipeline_config types now have lazy resolution via _has_lazy_resolution
                 nested_result = rebuild_lazy_config_with_new_global_reference(raw_value, new_global_config, global_config_type)
                 return nested_result
             except Exception as e:
@@ -887,79 +744,6 @@ LAZY_CONFIG_PREFIX = "Lazy"
 
 # Registry to accumulate all decorations before injection
 _pending_injections = {}
-
-
-
-class InheritAsNoneMeta(ABCMeta):
-    """
-    Metaclass that applies inherit_as_none modifications during class creation.
-
-    This runs BEFORE @dataclass and modifies the class definition to add
-    field overrides with None defaults for inheritance.
-    """
-
-    def __new__(mcs, name, bases, namespace, **kwargs):
-        # Create the class first
-        cls = super().__new__(mcs, name, bases, namespace)
-
-        # Check if this class should have inherit_as_none applied
-        if hasattr(cls, '_inherit_as_none') and cls._inherit_as_none:
-            # Add multiprocessing safety marker
-            cls._multiprocessing_safe = True
-            # Get explicitly defined fields (in this class's namespace)
-            explicitly_defined_fields = set()
-            if '__annotations__' in namespace:
-                for field_name in namespace['__annotations__']:
-                    if field_name in namespace:
-                        explicitly_defined_fields.add(field_name)
-
-            # Process parent classes to find fields that need None overrides
-            processed_fields = set()
-            for base in bases:
-                if hasattr(base, '__annotations__'):
-                    for field_name, field_type in base.__annotations__.items():
-                        if field_name in processed_fields:
-                            continue
-
-                        # Check if parent has concrete default
-                        parent_has_concrete_default = False
-                        if hasattr(base, field_name):
-                            parent_value = getattr(base, field_name)
-                            parent_has_concrete_default = parent_value is not None
-
-                        # Add None override if needed
-                        if (field_name not in explicitly_defined_fields and parent_has_concrete_default):
-                            # Set the class attribute to None
-                            setattr(cls, field_name, None)
-
-                            # Ensure annotation exists
-                            if not hasattr(cls, '__annotations__'):
-                                cls.__annotations__ = {}
-                            cls.__annotations__[field_name] = field_type
-
-                            processed_fields.add(field_name)
-                        else:
-                            processed_fields.add(field_name)
-
-        return cls
-
-    def __reduce__(cls):
-        """Make classes with this metaclass pickle-safe for multiprocessing."""
-        # Filter out problematic descriptors that cause conflicts during pickle/unpickle
-        safe_dict = {}
-        for key, value in cls.__dict__.items():
-            # Skip descriptors that cause conflicts
-            if hasattr(value, '__get__') and hasattr(value, '__set__'):
-                continue  # Skip data descriptors
-            if hasattr(value, '__dict__') and hasattr(value, '__class__'):
-                # Skip complex objects that might have descriptor conflicts
-                if 'descriptor' in str(type(value)).lower():
-                    continue
-            # Include safe attributes
-            safe_dict[key] = value
-
-        # Return reconstruction using the base type (not the metaclass)
-        return (type, (cls.__name__, cls.__bases__, safe_dict))
 
 
 def create_global_default_decorator(target_config_class: Type):
@@ -1109,6 +893,11 @@ def create_global_default_decorator(target_config_class: Type):
                 else:
                     # _decorator_logger.warning(f"🔍 WARNING: {lazy_class.__name__} does not have __dataclass_fields__!")
                     pass
+
+            # PHASE 2 FIX: Add lazy resolution to the CONCRETE class
+            # This allows GlobalPipelineConfig's nested configs to auto-resolve None values
+            # without needing to look up the lazy type. Static defaults are preserved.
+            bind_lazy_resolution_to_class(actual_cls)
 
             return actual_cls
 
