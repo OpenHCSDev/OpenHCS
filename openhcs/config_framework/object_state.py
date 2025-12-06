@@ -152,6 +152,7 @@ class ObjectState:
         # Extract parameters using UnifiedParameterAnalyzer (handles dataclasses, callables, etc.)
         # Lazy import to avoid circular dependency
         from openhcs.introspection.unified_parameter_analyzer import UnifiedParameterAnalyzer
+        from openhcs.introspection.signature_analyzer import SignatureAnalyzer
 
         self.parameters: Dict[str, Any] = {}
         self.parameter_types: Dict[str, Any] = {}  # Can be Type or str (forward ref)
@@ -161,7 +162,12 @@ class ObjectState:
         for name, info in param_info_dict.items():
             self.parameters[name] = info.default_value
             self.parameter_types[name] = info.param_type
-            self.param_defaults[name] = info.default_value
+
+        # param_defaults = SIGNATURE defaults (analyze TYPE, not instance)
+        sig_info = SignatureAnalyzer.analyze(type(object_instance))
+        for name in self.parameters:
+            if name in sig_info:
+                self.param_defaults[name] = sig_info[name].default_value
 
         # Apply initial_values overrides (e.g., saved kwargs for functions)
         if initial_values:
@@ -314,16 +320,26 @@ class ObjectState:
         """
         # Get current token for cache validation
         token = ObjectStateRegistry.get_token()
+        logger.info(f"🔬 RESET_TRACE: get_resolved_value({param_name}) token={token}")
+        logger.info(f"🔬 RESET_TRACE: _user_set_fields={self._user_set_fields}")
 
         # Check cache validity
         if param_name in self._resolved_cache:
             cached_token, cached_value = self._resolved_cache[param_name]
+            logger.info(f"🔬 RESET_TRACE: cache entry exists: cached_token={cached_token}, cached_value={repr(cached_value)[:50]}")
             if cached_token == token:
+                logger.info(f"🔬 RESET_TRACE: CACHE HIT - returning cached value")
                 return cached_value
+            else:
+                logger.info(f"🔬 RESET_TRACE: CACHE STALE - token mismatch")
+        else:
+            logger.info(f"🔬 RESET_TRACE: CACHE MISS - no entry for {param_name}")
 
         # Cache miss or stale - resolve and cache
+        logger.info(f"🔬 RESET_TRACE: Calling _resolve_value...")
         resolved = self._resolve_value(param_name)
         self._resolved_cache[param_name] = (token, resolved)
+        logger.info(f"🔬 RESET_TRACE: Cached resolved={repr(resolved)[:50]} with token={token}")
         return resolved
 
     def _resolve_value(self, param_name: str) -> Any:
@@ -339,17 +355,23 @@ class ObjectState:
         from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
         from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
 
-        logger.info(f"🔍 _resolve_value: {self.field_id}.{param_name} (scope={self.scope_id})")
+
+
+        logger.info(f"� RESET_TRACE: _resolve_value: {self.field_id}.{param_name} (scope={self.scope_id})")
+        logger.info(f"🔬 RESET_TRACE: _user_set_fields={self._user_set_fields}")
 
         # Collect live values via LiveContextService (single source of truth)
+        logger.info(f"🔬 RESET_TRACE: Calling LiveContextService.collect()...")
         snapshot = LiveContextService.collect()
+        logger.info(f"🔬 RESET_TRACE: snapshot.token={snapshot.token}, scopes={list(snapshot.scopes.keys())}")
+
         live_values = LiveContextService.merge_ancestor_values(
             snapshot.scopes,
             self.scope_id
         )
-        logger.info(f"🔍 live_values collected: {len(live_values)} types")
+        logger.info(f"� RESET_TRACE: live_values after merge: {len(live_values)} types")
         for obj_type, values in live_values.items():
-            logger.info(f"  {obj_type.__name__}: {values}")
+            logger.info(f"🔬 RESET_TRACE:   {obj_type.__name__}: {list(values.keys())} = {values}")
 
         # Build context stack
         stack = build_context_stack(
@@ -549,10 +571,15 @@ class ObjectState:
         """
         token = ObjectStateRegistry.get_token()
         cached_token, cached_overlay = self._overlay_cache
+        logger.info(f"🔬 RESET_TRACE: get_user_modified_overlay({self.field_id}): token={token}, cached_token={cached_token}")
         if cached_token == token:
+            logger.info(f"🔬 RESET_TRACE: OVERLAY CACHE HIT: {list(cached_overlay.keys())}")
             return cached_overlay
 
+        logger.info(f"🔬 RESET_TRACE: OVERLAY CACHE MISS - computing...")
+        logger.info(f"🔬 RESET_TRACE: _user_set_fields={self._user_set_fields}")
         overlay = dict(self.get_user_modified_values() or {})
+        logger.info(f"🔬 RESET_TRACE: get_user_modified_values returned: {list(overlay.keys())}")
 
         for field_name, nested_state in self.nested_states.items():
             nested_overlay = nested_state.get_user_modified_overlay()
@@ -568,6 +595,7 @@ class ObjectState:
                 overlay[field_name] = nested_overlay
 
         self._overlay_cache = (token, overlay)
+        logger.info(f"🔬 RESET_TRACE: Cached overlay: {list(overlay.keys())}")
         return overlay
 
     # ==================== SAVED STATE / DIRTY TRACKING ====================

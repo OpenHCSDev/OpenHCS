@@ -69,11 +69,15 @@ class FieldChangeDispatcher:
                     logger.warning(f"🚫 DISPATCH BLOCKED: {source.field_id} has _in_reset=True")
                 return
 
+            logger.info(f"🔬 RESET_TRACE: DISPATCHER: is_reset={event.is_reset}, field={event.field_name}, value={repr(event.value)[:50]}")
+            logger.info(f"🔬 RESET_TRACE: DISPATCHER BEFORE: _user_set_fields={source._user_set_fields}")
+
             # 1. Update source's data model via ObjectState
             # CRITICAL: Always mark as user_set=True, even for reset
             # This ensures get_user_modified_values() includes None for reset fields,
             # so live context has the override and preview labels show same as placeholders.
             source.state.update_parameter(event.field_name, event.value, user_set=True)
+            logger.info(f"🔬 RESET_TRACE: DISPATCHER AFTER update_parameter: _user_set_fields={source._user_set_fields}")
             if DEBUG_DISPATCHER:
                 reset_note = " (reset to None)" if event.is_reset else ""
                 logger.info(f"  ✅ Updated state.parameters[{event.field_name}], ADDED to _user_set_fields{reset_note}")

@@ -750,15 +750,17 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
 
     def reset_parameter(self, param_name: str) -> None:
         """Reset parameter to signature default."""
-        logger.info(f"🔄 RESET_PARAMETER: {self.field_id}.{param_name}")
+        logger.info(f"� RESET_TRACE: ========== START reset_parameter ==========")
+        logger.info(f"🔬 RESET_TRACE: field_id={self.field_id}, param={param_name}")
 
         if param_name not in self.parameters:
-            logger.warning(f"  ⏭️  {param_name} not in parameters, skipping")
+            logger.warning(f"🔬 RESET_TRACE: param not in parameters, skipping")
             return
 
         old_value = self.parameters.get(param_name)
         was_user_set = param_name in self._user_set_fields
-        logger.info(f"  📊 Before reset: value={repr(old_value)[:30]}, user_set={was_user_set}")
+        logger.info(f"� RESET_TRACE: BEFORE: value={repr(old_value)[:50]}, user_set={was_user_set}")
+        logger.info(f"🔬 RESET_TRACE: BEFORE: _user_set_fields={self._user_set_fields}")
 
         # PHASE 2A: Use FlagContextManager + ParameterOpsService
         with FlagContextManager.reset_context(self, block_cross_window=False):
@@ -766,33 +768,16 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
 
         reset_value = self.parameters.get(param_name)
         is_user_set_after = param_name in self._user_set_fields
-        logger.info(f"  📊 After reset: value={repr(reset_value)[:30]}, user_set={is_user_set_after}")
+        logger.info(f"🔬 RESET_TRACE: AFTER OPS: value={repr(reset_value)[:50]}, user_set={is_user_set_after}")
+        logger.info(f"🔬 RESET_TRACE: AFTER OPS: _user_set_fields={self._user_set_fields}")
 
         # Route through dispatcher with is_reset=True (don't re-add to _user_set_fields)
+        logger.info(f"🔬 RESET_TRACE: Dispatching event with is_reset=True")
         event = FieldChangeEvent(param_name, reset_value, self, is_reset=True)
         FieldChangeDispatcher.instance().dispatch(event)
 
-    def _get_reset_value(self, param_name: str) -> Any:
-        """Get reset value based on editing context.
-
-        For global config editing: Use static class defaults (not None)
-        For lazy config editing: Use signature defaults (None for inheritance)
-        For functions: Use signature defaults
-        """
-        # For global config editing, use static class defaults instead of None
-        if self.config.is_global_config_editing and self.object_instance:
-            # Get static default from class attribute
-            try:
-                static_default = object.__getattribute__(type(self.object_instance), param_name)
-                return static_default
-            except AttributeError:
-                # Fallback to signature default if no class attribute
-                pass
-
-        # For everything else, use signature defaults
-        return self.param_defaults.get(param_name)
-
-
+        logger.info(f"🔬 RESET_TRACE: AFTER DISPATCH: _user_set_fields={self._user_set_fields}")
+        logger.info(f"🔬 RESET_TRACE: ========== END reset_parameter ==========")
 
     def get_current_values(self) -> Dict[str, Any]:
         """

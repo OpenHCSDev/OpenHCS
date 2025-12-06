@@ -129,16 +129,26 @@ class ParameterOpsService(ParameterServiceABC):
         """
         param_name = info.name
         reset_value = self._get_reset_value(manager, param_name)
-        logger.info(f"      🔧 _reset_GenericInfo: {manager.field_id}.{param_name} -> {repr(reset_value)[:30]}")
+        logger.info(f"🔬 RESET_TRACE: _reset_GenericInfo: {manager.field_id}.{param_name}")
+        logger.info(f"🔬 RESET_TRACE: reset_value={repr(reset_value)[:50]}")
 
         # Update parameters and tracking
+        old_value = manager.parameters.get(param_name)
+        logger.info(f"🔬 RESET_TRACE: old_value={repr(old_value)[:50]}")
         manager.parameters[param_name] = reset_value
+        logger.info(f"🔬 RESET_TRACE: Set parameters[{param_name}] = {repr(reset_value)[:50]}")
+
+        logger.info(f"🔬 RESET_TRACE: BEFORE _update_reset_tracking: _user_set_fields={manager._user_set_fields}")
         self._update_reset_tracking(manager, param_name, reset_value)
+        logger.info(f"🔬 RESET_TRACE: AFTER _update_reset_tracking: _user_set_fields={manager._user_set_fields}")
 
         # CRITICAL: Invalidate cache token BEFORE refreshing placeholder
         # Otherwise refresh_single_placeholder will use stale cached values
         from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
+        old_token = LiveContextService.get_token()
         LiveContextService.increment_token()
+        new_token = LiveContextService.get_token()
+        logger.info(f"🔬 RESET_TRACE: Incremented token: {old_token} -> {new_token}")
 
         if param_name in manager.widgets:
             widget = manager.widgets[param_name]
@@ -153,18 +163,15 @@ class ParameterOpsService(ParameterServiceABC):
             # Refresh placeholder with proper context (same as reset_all_parameters does)
             # This builds context stack with root values for sibling inheritance
             if reset_value is None:
+                logger.info(f"🔬 RESET_TRACE: Calling refresh_single_placeholder for {param_name}")
                 self.refresh_single_placeholder(manager, param_name)
+                logger.info(f"🔬 RESET_TRACE: Done refresh_single_placeholder")
 
-            logger.info(f"      ✅ Reset complete")
+            logger.info(f"🔬 RESET_TRACE: _reset_GenericInfo complete")
 
     @staticmethod
     def _get_reset_value(manager, param_name: str) -> Any:
-        """Get reset value based on editing context."""
-        if manager.config.is_global_config_editing and manager.object_instance:
-            try:
-                return object.__getattribute__(type(manager.object_instance), param_name)
-            except AttributeError:
-                pass
+        """Get reset value from param_defaults (signature defaults)."""
         return manager.param_defaults.get(param_name)
 
     @staticmethod
@@ -196,27 +203,29 @@ class ParameterOpsService(ParameterServiceABC):
             manager: The manager containing the field
             field_name: Name of the field to refresh
         """
-        logger.info(f"        🔄 refresh_single_placeholder: {manager.field_id}.{field_name}")
+        logger.info(f"🔬 RESET_TRACE: refresh_single_placeholder: {manager.field_id}.{field_name}")
 
         # Check if field exists in this manager's widgets
         if field_name not in manager.widgets:
-            logger.warning(f"        ⏭️  {field_name} not in widgets")
+            logger.warning(f"🔬 RESET_TRACE: {field_name} not in widgets, skipping")
             return
 
         # Only refresh if value is None (needs placeholder)
         current_value = manager.state.parameters.get(field_name)
+        logger.info(f"🔬 RESET_TRACE: current_value={repr(current_value)[:50]}")
         if current_value is not None:
-            logger.info(f"        ⏭️  {field_name} has value={repr(current_value)[:30]}, no placeholder needed")
+            logger.info(f"🔬 RESET_TRACE: value is not None, no placeholder needed")
             return
 
-        logger.info(f"        ✅ {field_name} value is None, computing placeholder...")
+        logger.info(f"🔬 RESET_TRACE: value is None, calling get_resolved_value...")
+        logger.info(f"🔬 RESET_TRACE: _user_set_fields BEFORE resolution={manager._user_set_fields}")
 
         from openhcs.pyqt_gui.widgets.shared.widget_strategies import PyQt6WidgetEnhancer
         from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
 
         # Get raw resolved value from ObjectState (handles context building internally)
         resolved_value = manager.state.get_resolved_value(field_name)
-        logger.info(f"        📝 Resolved value: {repr(resolved_value)[:50]}")
+        logger.info(f"🔬 RESET_TRACE: resolved_value={repr(resolved_value)[:50]}")
 
         # Format for display (VIEW responsibility)
         placeholder_text = LazyDefaultPlaceholderService._format_placeholder_text(
