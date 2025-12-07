@@ -99,12 +99,23 @@ class ObjectStateRegistry:
 
     # ========== TOKEN MANAGEMENT ==========
     # Delegate to LiveContextService - single source of truth for cache invalidation
+    # Deferred imports required to avoid circular dependency (config_framework → pyqt_gui)
 
     @classmethod
     def get_token(cls) -> int:
         """Get current cache invalidation token from LiveContextService."""
         from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
         return LiveContextService.get_token()
+
+    @classmethod
+    def increment_token(cls, notify: bool = False) -> None:
+        """Increment cache invalidation token.
+
+        Args:
+            notify: If True, notify listeners. Default False (caller handles notification).
+        """
+        from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
+        LiveContextService.increment_token(notify=notify)
 
 
 
@@ -286,6 +297,9 @@ class ObjectState:
     def update_parameter(self, param_name: str, value: Any) -> None:
         """Update parameter value in state.
 
+        Enforces invariant: state mutation → global cache invalidation.
+        Controllers don't need to remember to invalidate - ObjectState handles it.
+
         Args:
             param_name: Name of parameter to update
             value: New value
@@ -296,8 +310,13 @@ class ObjectState:
         # Update state directly (no type conversion - that's VIEW responsibility)
         self.parameters[param_name] = value
 
-        # Invalidate live resolved cache (will be recomputed on next access)
+        # Invalidate local cache (will be recomputed on next access)
         self._live_token = -1
+
+        # Enforce invariant: state mutation → global cache invalidation
+        # This ensures all other ObjectStates know to recompute their resolved values
+        # notify=False: Controller handles when/how to trigger UI refresh
+        ObjectStateRegistry.increment_token(notify=False)
 
     def get_resolved_value(self, param_name: str) -> Any:
         """Get resolved value for a field from the bulk snapshot.

@@ -72,23 +72,12 @@ class FieldChangeDispatcher:
             logger.info(f"🔬 RESET_TRACE: DISPATCHER: is_reset={event.is_reset}, field={event.field_name}, value={repr(event.value)[:50]}")
 
             # 1. Update source's data model via ObjectState
+            # ObjectState.update_parameter() enforces the invariant: state mutation → global cache invalidation
+            # (calls LiveContextService.increment_token(notify=False) internally)
             source.state.update_parameter(event.field_name, event.value)
             if DEBUG_DISPATCHER:
                 reset_note = " (reset to None)" if event.is_reset else ""
                 logger.info(f"  ✅ Updated state.parameters[{event.field_name}]{reset_note}")
-
-            # PERFORMANCE OPTIMIZATION: Invalidate cache but DON'T notify listeners yet
-            # This allows sibling refreshes to share the cached live context
-            # (first sibling computes and caches, subsequent siblings get cache hits)
-            # We notify listeners AFTER sibling refresh is complete
-            root = source
-            while root._parent_manager is not None:
-                root = root._parent_manager
-
-            from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
-            LiveContextService.increment_token(notify=False)  # Invalidate cache only
-            if DEBUG_DISPATCHER:
-                logger.info(f"  🔄 Incremented live context token to {LiveContextService.get_token()} (notify deferred)")
 
             # 2. Mark parent chain as modified BEFORE refreshing siblings
             # This ensures root.state.parameters includes this field on first keystroke
@@ -125,10 +114,13 @@ class FieldChangeDispatcher:
                 if DEBUG_DISPATCHER:
                     logger.info(f"  ℹ️  No parent manager (root-level field)")
 
-            # PERFORMANCE OPTIMIZATION: NOW notify listeners (after sibling refresh)
+            # 4. Notify listeners (after sibling refresh)
             # This allows sibling refreshes to share the cached live context
+            # (first sibling computes and caches, subsequent siblings get cache hits)
+            root = self._get_root_manager(source)
             root._block_cross_window_updates = True
             try:
+                from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
                 LiveContextService._notify_change()
                 if DEBUG_DISPATCHER:
                     logger.info(f"  📣 Notified {len(LiveContextService._change_callbacks)} listeners")
