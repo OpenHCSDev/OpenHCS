@@ -631,12 +631,15 @@ class OpenHCSMainWindow(QMainWindow):
             self._save_config_to_cache(new_config)
 
         # Use concrete GlobalPipelineConfig for global config editing (static context)
+        # CRITICAL: Pass scope_id="" to match the ObjectState registered in app.py
+        # This ensures ConfigWindow reuses the existing ObjectState instead of creating a new one
         config_window = ConfigWindow(
             GlobalPipelineConfig,  # config_class (concrete class for static context)
             self.service_adapter.get_global_config(),  # current_config (concrete instance)
             handle_config_save,    # on_save_callback
             self.service_adapter.get_current_color_scheme(),  # color_scheme
-            self                   # parent
+            self,                  # parent
+            scope_id=""            # Global scope - matches app.py registration
         )
         # Show as non-modal window (like plate manager and pipeline editor)
         config_window.show()

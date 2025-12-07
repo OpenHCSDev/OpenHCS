@@ -33,7 +33,12 @@ class ObjectStateRegistry:
 
     Thread safety: Not thread-safe (all operations expected on main thread).
     """
-    _states: Dict[Optional[str], 'ObjectState'] = {}
+    _states: Dict[str, 'ObjectState'] = {}  # Keys are always strings (None normalized to "")
+
+    @classmethod
+    def _normalize_scope_id(cls, scope_id: Optional[str]) -> str:
+        """Normalize scope_id: None and "" both represent global scope."""
+        return scope_id if scope_id is not None else ""
 
     @classmethod
     def register(cls, state: 'ObjectState') -> None:
@@ -41,17 +46,17 @@ class ObjectStateRegistry:
 
         Args:
             state: The ObjectState to register.
-                   scope_id=None is valid for GlobalPipelineConfig (global scope).
+                   scope_id=None/"" for GlobalPipelineConfig (global scope).
                    scope_id=plate_path for PipelineConfig.
                    scope_id=plate_path::step_N for steps.
         """
-        # Use scope_id as key (None is valid for global scope)
+        key = cls._normalize_scope_id(state.scope_id)
 
-        if state.scope_id in cls._states:
-            logger.warning(f"Overwriting existing ObjectState for scope: {state.scope_id}")
+        if key in cls._states:
+            logger.warning(f"Overwriting existing ObjectState for scope: {key}")
 
-        cls._states[state.scope_id] = state
-        logger.debug(f"Registered ObjectState: scope={state.scope_id}, type={type(state.object_instance).__name__}")
+        cls._states[key] = state
+        logger.debug(f"Registered ObjectState: scope={key}, type={type(state.object_instance).__name__}")
 
     @classmethod
     def unregister(cls, state: 'ObjectState') -> None:
@@ -60,22 +65,22 @@ class ObjectStateRegistry:
         Args:
             state: The ObjectState to unregister.
         """
-        # scope_id can be None (global scope) - use 'in' check directly
-        if state.scope_id in cls._states:
-            del cls._states[state.scope_id]
-            logger.debug(f"Unregistered ObjectState: scope={state.scope_id}")
+        key = cls._normalize_scope_id(state.scope_id)
+        if key in cls._states:
+            del cls._states[key]
+            logger.debug(f"Unregistered ObjectState: scope={key}")
 
     @classmethod
     def get_by_scope(cls, scope_id: Optional[str]) -> Optional['ObjectState']:
         """Get ObjectState by scope_id.
 
         Args:
-            scope_id: The scope identifier (e.g., "/path::step_0", or None for global scope).
+            scope_id: The scope identifier (e.g., "/path::step_0", or None/"" for global scope).
 
         Returns:
             ObjectState if found, None otherwise.
         """
-        return cls._states.get(scope_id)
+        return cls._states.get(cls._normalize_scope_id(scope_id))
 
     @classmethod
     def get_all(cls) -> List['ObjectState']:

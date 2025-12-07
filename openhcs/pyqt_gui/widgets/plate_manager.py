@@ -505,7 +505,16 @@ class PlateManagerWidget(AbstractManagerWidget):
 
     def _open_config_window(self, config_class, current_config, on_save_callback, orchestrator=None):
         """Open configuration window with specified config class and current config."""
-        scope_id = str(orchestrator.plate_path) if orchestrator else None
+        from openhcs.config_framework.lazy_factory import is_global_config_type
+        # CRITICAL: GlobalPipelineConfig uses scope_id="" (empty string), not None
+        # The ObjectState is registered with scope_id="" in app.py, so we must match it
+        # to reuse the existing ObjectState instead of creating a new one
+        if orchestrator:
+            scope_id = str(orchestrator.plate_path)
+        elif is_global_config_type(config_class):
+            scope_id = ""  # Global scope - matches app.py registration
+        else:
+            scope_id = None
         config_window = ConfigWindow(
             config_class, current_config, on_save_callback,
             self.color_scheme, self, scope_id=scope_id
