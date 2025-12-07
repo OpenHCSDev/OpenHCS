@@ -70,17 +70,12 @@ class FieldChangeDispatcher:
                 return
 
             logger.info(f"🔬 RESET_TRACE: DISPATCHER: is_reset={event.is_reset}, field={event.field_name}, value={repr(event.value)[:50]}")
-            logger.info(f"🔬 RESET_TRACE: DISPATCHER BEFORE: _user_set_fields={source._user_set_fields}")
 
             # 1. Update source's data model via ObjectState
-            # CRITICAL: Always mark as user_set=True, even for reset
-            # This ensures get_user_modified_values() includes None for reset fields,
-            # so live context has the override and preview labels show same as placeholders.
-            source.state.update_parameter(event.field_name, event.value, user_set=True)
-            logger.info(f"🔬 RESET_TRACE: DISPATCHER AFTER update_parameter: _user_set_fields={source._user_set_fields}")
+            source.state.update_parameter(event.field_name, event.value)
             if DEBUG_DISPATCHER:
                 reset_note = " (reset to None)" if event.is_reset else ""
-                logger.info(f"  ✅ Updated state.parameters[{event.field_name}], ADDED to _user_set_fields{reset_note}")
+                logger.info(f"  ✅ Updated state.parameters[{event.field_name}]{reset_note}")
 
             # PERFORMANCE OPTIMIZATION: Invalidate cache but DON'T notify listeners yet
             # This allows sibling refreshes to share the cached live context
@@ -96,7 +91,7 @@ class FieldChangeDispatcher:
                 logger.info(f"  🔄 Incremented live context token to {LiveContextService.get_token()} (notify deferred)")
 
             # 2. Mark parent chain as modified BEFORE refreshing siblings
-            # This ensures root.get_user_modified_values() includes this field on first keystroke
+            # This ensures root.state.parameters includes this field on first keystroke
             self._mark_parents_modified(source)
 
             # 3. Refresh siblings that have the same field
@@ -173,7 +168,7 @@ class FieldChangeDispatcher:
     def _mark_parents_modified(self, source: 'ParameterFormManager') -> None:
         """Mark parent chain as having modified nested config.
 
-        This ensures get_user_modified_values() on root includes nested changes.
+        This ensures root.state.parameters includes nested changes.
         Also updates parent.parameters with the nested dataclass value.
         """
         logger.info(f"  📝 MARK_PARENTS: Starting for {source.field_id}")
@@ -193,8 +188,8 @@ class FieldChangeDispatcher:
                         parent, field_name, nested_mgr
                     )
                     logger.info(f"    L{level}: Collected nested_value type={type(nested_value).__name__}")
-                    parent.state.update_parameter(field_name, nested_value, user_set=True)
-                    logger.info(f"    L{level}: ✅ {parent.field_id}.{field_name} marked modified")
+                    parent.state.update_parameter(field_name, nested_value)
+                    logger.info(f"    L{level}: ✅ {parent.field_id}.{field_name} updated")
                     break
             current = parent
 
@@ -221,7 +216,7 @@ class FieldChangeDispatcher:
 
     def _emit_cross_window(self, root_manager: 'ParameterFormManager', full_path: str, value: Any) -> None:
         """Emit context_changed from root with scope_id and field path."""
-        if root_manager.state._should_skip_updates():
+        if root_manager.state.should_skip_updates():
             if DEBUG_DISPATCHER:
                 logger.warning(f"  🚫 Cross-window BLOCKED: _should_skip_updates()=True for {root_manager.field_id}")
             return

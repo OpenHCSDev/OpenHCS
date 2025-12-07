@@ -82,7 +82,7 @@ class LiveContextResolver:
         self._resolved_value_cache.clear()
 
     def reconstruct_live_values(self, live_values: Dict[str, Any]) -> Dict[str, Any]:
-        """Return live values unchanged (already instances from get_user_modified_values)."""
+        """Return live values unchanged."""
         return live_values if live_values else {}
 
     def _resolve_uncached(

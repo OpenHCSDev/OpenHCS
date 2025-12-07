@@ -13,8 +13,7 @@ Key features:
 
 from __future__ import annotations
 from typing import Any, Optional, Dict, TYPE_CHECKING
-from dataclasses import fields as dataclass_fields, is_dataclass
-import dataclasses
+from dataclasses import fields as dataclass_fields
 import logging
 
 from .parameter_service_abc import ParameterServiceABC
@@ -24,7 +23,6 @@ if TYPE_CHECKING:
     from openhcs.ui.shared.parameter_info_types import (
         OptionalDataclassInfo,
         DirectDataclassInfo,
-        GenericInfo
     )
 
 logger = logging.getLogger(__name__)
@@ -73,7 +71,6 @@ class ValueCollectionService(ParameterServiceABC):
     ) -> Optional[Any]:
         """Collect value for Optional[Dataclass] parameter."""
         from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
-        from openhcs.config_framework.lazy_factory import is_lazy_dataclass
 
         param_name = info.name
         param_type = info.type
@@ -82,11 +79,8 @@ class ValueCollectionService(ParameterServiceABC):
         if checkbox and not checkbox.isChecked():
             return None
 
-        # For lazy dataclasses, only persist user-set fields so untouched placeholders stay None
-        if is_lazy_dataclass(nested_manager.object_instance):
-            nested_values = nested_manager.state.get_user_modified_values()
-        else:
-            nested_values = nested_manager.state.get_current_values()
+        # Filter to non-None (user-set) fields so untouched placeholders stay None
+        nested_values = {k: v for k, v in nested_manager.state.parameters.items() if v is not None}
 
         if not nested_values:
             logger.debug(f"[ValueCollection] Optional {param_name}: no nested edits, returning default")
@@ -104,13 +98,8 @@ class ValueCollectionService(ParameterServiceABC):
         """Collect value for direct Dataclass parameter."""
         param_type = info.type
 
-        from openhcs.config_framework.lazy_factory import is_lazy_dataclass
-
-        # For lazy/placeholder-driven dataclasses, only persist user-set fields
-        if is_lazy_dataclass(nested_manager.object_instance):
-            nested_values = nested_manager.state.get_user_modified_values()
-        else:
-            nested_values = nested_manager.state.get_current_values()
+        # Filter to non-None (user-set) fields so untouched placeholders stay None
+        nested_values = {k: v for k, v in nested_manager.state.parameters.items() if v is not None}
 
         if not nested_values:
             logger.debug(f"[ValueCollection] Direct {info.name}: no nested edits, returning default")
@@ -118,25 +107,17 @@ class ValueCollectionService(ParameterServiceABC):
 
         return param_type(**nested_values)
     
-    def _collect_GenericInfo(
-        self,
-        info: 'GenericInfo',
-        manager,
-        nested_manager
-    ) -> Dict[str, Any]:
+    def _collect_GenericInfo(self, info, manager, nested_manager) -> Dict[str, Any]:
         """Collect value as raw dict (fallback for non-dataclass types)."""
+        # Uses all 3 params - info/manager kept for interface consistency with other _collect_* methods
+        _ = info, manager  # Silence unused warnings - interface requires these params
         return nested_manager.state.get_current_values()
 
     # ========== DATACLASS RECONSTRUCTION (from DataclassReconstructionUtils) ==========
 
     @staticmethod
-    def reconstruct_nested_dataclasses(live_values: dict, base_instance=None) -> dict:
-        """
-        Return live values unchanged (already instances from get_user_modified_values).
-
-        Previously handled (type, dict) tuple format, but get_user_modified_values()
-        now returns fully reconstructed instances directly.
-        """
+    def reconstruct_nested_dataclasses(live_values: dict) -> dict:
+        """Return live values unchanged."""
         return dict(live_values) if live_values else {}
 
     # ========== DATACLASS UNPACKING (from DataclassUnpacker) ==========

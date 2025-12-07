@@ -134,11 +134,8 @@ class SignalService:
         if manager._parent_manager is not None:
             return
 
-        # Snapshot initial values for change detection
-        if hasattr(manager.config, '_resolve_field_value'):
-            manager._initial_values_on_open = manager.state.get_user_modified_values()
-        else:
-            manager._initial_values_on_open = manager.state.get_current_values()
+        # Snapshot initial values for change detection (non-None only)
+        manager._initial_values_on_open = {k: v for k, v in manager.state.parameters.items() if v is not None}
 
         from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
         logger.info(f"🔍 REGISTER: {manager.field_id} (total: {len(LiveContextService.get_active_managers())})")

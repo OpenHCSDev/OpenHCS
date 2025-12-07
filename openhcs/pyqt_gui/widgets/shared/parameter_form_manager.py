@@ -109,23 +109,20 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
 
     @property
     def parameter_types(self) -> Dict[str, Any]:
-        """Delegate to ObjectState.parameter_types."""
-        return self.state.parameter_types
+        """Derive parameter types from object_instance using UnifiedParameterAnalyzer.
+
+        Single code path for all object types - that's the point of UnifiedParameterAnalyzer.
+        """
+        from openhcs.introspection.unified_parameter_analyzer import UnifiedParameterAnalyzer
+        param_info_dict = UnifiedParameterAnalyzer.analyze(self.state.object_instance)
+        return {name: info.param_type for name, info in param_info_dict.items() if name in self.state.parameters}
 
     @property
     def param_defaults(self) -> Dict[str, Any]:
-        """Delegate to ObjectState.param_defaults."""
-        return self.state.param_defaults
-
-    @property
-    def reset_fields(self) -> Set[str]:
-        """Delegate to ObjectState.reset_fields."""
-        return self.state.reset_fields
-
-    @property
-    def _user_set_fields(self) -> Set[str]:
-        """Delegate to ObjectState._user_set_fields."""
-        return self.state._user_set_fields
+        """Derive defaults from object_instance (the saved baseline)."""
+        return {name: object.__getattribute__(self.state.object_instance, name)
+                for name in self.state.parameters.keys()
+                if hasattr(self.state.object_instance, name)}
 
     @property
     def _parameter_descriptions(self) -> Dict[str, str]:
@@ -151,7 +148,10 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         # Unpack config or use defaults
         config = config or FormManagerConfig()
 
-        with timer(f"ParameterFormManager.__init__ ({state.field_id})", threshold_ms=5.0):
+        # Derive field_id from object type (was stored in ObjectState, now derived)
+        derived_field_id = type(state.object_instance).__name__
+
+        with timer(f"ParameterFormManager.__init__ ({derived_field_id})", threshold_ms=5.0):
             QWidget.__init__(self, config.parent)
 
             # Store ObjectState reference - PFM delegates MODEL to state
@@ -159,7 +159,7 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
 
             # Derive core attributes from state (backward compatibility properties)
             self.object_instance = state.object_instance
-            self.field_id = state.field_id
+            self.field_id = derived_field_id  # Derived from type, not stored
             self.context_obj = state.context_obj
             self.scope_id = state.scope_id
             self.read_only = config.read_only
@@ -180,15 +180,20 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
                 )
 
                 self.service = ParameterFormService()
+                # Single code path for all object types - that's the point of UnifiedParameterAnalyzer
+                from openhcs.introspection.unified_parameter_analyzer import UnifiedParameterAnalyzer
+                param_info_dict = UnifiedParameterAnalyzer.analyze(state.object_instance)
+                derived_param_types = {name: info.param_type for name, info in param_info_dict.items() if name in state.parameters}
+
                 # Access state data directly - ObjectState is single source of truth
                 extracted = ExtractedParameters(
                     default_value=state.parameters,
-                    param_type=state.parameter_types,
+                    param_type=derived_param_types,
                     description=getattr(state, '_parameter_descriptions', {}),
                     object_instance=state.object_instance,
                 )
                 form_config = ConfigBuilderService.build(
-                    state.field_id, extracted, state.context_obj, config.color_scheme, config.parent_manager, self.service, config
+                    derived_field_id, extracted, state.context_obj, config.color_scheme, config.parent_manager, self.service, config
                 )
                 # METAPROGRAMMING: Auto-unpack all fields to self
                 ValueCollectionService.unpack_to_self(self, form_config)

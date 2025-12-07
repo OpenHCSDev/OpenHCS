@@ -183,7 +183,6 @@ class ParameterOpsService(ParameterServiceABC):
             return
 
         logger.info(f"🔬 RESET_TRACE: value is None, calling get_resolved_value...")
-        logger.info(f"🔬 RESET_TRACE: _user_set_fields BEFORE resolution={manager._user_set_fields}")
 
         from openhcs.pyqt_gui.widgets.shared.widget_strategies import PyQt6WidgetEnhancer
         from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService

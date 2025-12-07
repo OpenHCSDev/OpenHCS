@@ -662,9 +662,8 @@ class PipelineEditorWidget(AbstractManagerWidget):
 
         state = ObjectState(
             object_instance=step,
-            field_id=ScopeTokenService.ensure_token(self.current_plate or "no_plate", step),
             scope_id=scope_id,
-            context_obj=context_obj,
+            parent_state=ObjectStateRegistry.get_by_scope(str(self.current_plate)) if self.current_plate else None,
             exclude_params=['func'],  # Exclude func - handled separately by FunctionPane
         )
         ObjectStateRegistry.register(state)
@@ -892,7 +891,8 @@ class PipelineEditorWidget(AbstractManagerWidget):
             for i, step in enumerate(self.pipeline_steps):
                 if step is step_to_edit:
                     # Transfer scope token from old to new step
-                    ScopeTokenService.get_generator(plate_scope).transfer(step_to_edit, edited_step)
+                    prefix = ScopeTokenService._get_prefix(step_to_edit)
+                    ScopeTokenService.get_generator(plate_scope, prefix).transfer(step_to_edit, edited_step)
                     self.pipeline_steps[i] = edited_step
                     break
 

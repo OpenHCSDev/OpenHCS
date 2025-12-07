@@ -346,11 +346,12 @@ class ImageBrowserWidget(QWidget):
         context_obj = self.orchestrator.pipeline_config if self.orchestrator else None
 
         # Create local ObjectState for napari config (not registered - internal to ImageBrowser)
+        # Get parent state from registry for context inheritance
+        parent_state = ObjectStateRegistry.get_by_scope(self.scope_id) if self.scope_id else None
         self.napari_config_state = ObjectState(
             object_instance=self.lazy_napari_config,
-            field_id="napari_config",
             scope_id=self.scope_id,
-            context_obj=context_obj,
+            parent_state=parent_state,
         )
 
         config = FormManagerConfig(
@@ -395,14 +396,13 @@ class ImageBrowserWidget(QWidget):
         from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager, FormManagerConfig
         from openhcs.config_framework.object_state import ObjectState
 
-        context_obj = self.orchestrator.pipeline_config if self.orchestrator else None
-
         # Create local ObjectState for fiji config (not registered - internal to ImageBrowser)
+        # Get parent state from registry for context inheritance
+        parent_state = ObjectStateRegistry.get_by_scope(self.scope_id) if self.scope_id else None
         self.fiji_config_state = ObjectState(
             object_instance=self.lazy_fiji_config,
-            field_id="fiji_config",
             scope_id=self.scope_id,
-            context_obj=context_obj,
+            parent_state=parent_state,
         )
 
         config = FormManagerConfig(

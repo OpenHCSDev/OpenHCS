@@ -406,12 +406,11 @@ class PlateManagerWidget(AbstractManagerWidget):
                 orchestrator.apply_pipeline_config(saved_config)
 
             # Register PipelineConfig ObjectState (one per orchestrator)
-            # Context is GlobalPipelineConfig for inheritance resolution
+            # Parent is GlobalPipelineConfig state for inheritance resolution
             pipeline_config_state = ObjectState(
                 object_instance=orchestrator.pipeline_config,
-                field_id="PipelineConfig",
                 scope_id=str(plate_path),
-                context_obj=self.global_config,
+                parent_state=ObjectStateRegistry.get_by_scope(""),  # Global scope
             )
             ObjectStateRegistry.register(pipeline_config_state)
 

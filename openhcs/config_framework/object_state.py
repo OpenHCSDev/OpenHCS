@@ -11,7 +11,7 @@ Replaces LiveContextService._active_form_managers as the single source of truth.
 import dataclasses
 from dataclasses import is_dataclass, fields as dataclass_fields
 import logging
-from typing import Any, Dict, List, Optional, Set, Callable, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 import copy
 
 if TYPE_CHECKING:
@@ -51,7 +51,7 @@ class ObjectStateRegistry:
             logger.warning(f"Overwriting existing ObjectState for scope: {state.scope_id}")
 
         cls._states[state.scope_id] = state
-        logger.debug(f"Registered ObjectState: scope={state.scope_id}, field_id={state.field_id}")
+        logger.debug(f"Registered ObjectState: scope={state.scope_id}, type={type(state.object_instance).__name__}")
 
     @classmethod
     def unregister(cls, state: 'ObjectState') -> None:
@@ -113,109 +113,111 @@ class ObjectState:
     - Persists until object removed from pipeline
     - PFM attaches to ObjectState when editor opens, detaches when closed
 
-    Responsibilities:
-    - Store parameter values (self.parameters)
-    - Track user modifications (self._user_set_fields)
-    - Manage nested states (self.nested_states)
-    - Provide scope_id for filtering
+    Core Attributes (8 total):
+    - object_instance: Backing object (updated on Save)
+    - parameters: Mutable working copy (None = unset, value = user-set)
+    - _saved_resolved: Resolved snapshot at save time
+    - _live_resolved: Resolved snapshot using live hierarchy
+    - _live_token: Token when _live_resolved was computed
+    - nested_states: Recursive containment
+    - _parent_state: Parent for context derivation
+    - scope_id: Scope for registry lookup
+
+    Everything else is derived:
+    - context_obj → _parent_state.object_instance
+    - is_dirty() → _saved_resolved != _live_resolved
+    - user_set_fields → {k for k,v in parameters.items() if v is not None}
     """
 
     def __init__(
         self,
         object_instance: Any,
-        field_id: str,
         scope_id: Optional[str] = None,
-        context_obj: Optional[Any] = None,
         parent_state: Optional['ObjectState'] = None,
         exclude_params: Optional[List[str]] = None,
         initial_values: Optional[Dict[str, Any]] = None,
     ):
         """
-        Initialize ObjectState with extracted MODEL from ParameterFormManager.
+        Initialize ObjectState with minimal attributes.
 
         Args:
             object_instance: The object being edited (dataclass, callable, etc.)
-            field_id: Unique identifier for this state
             scope_id: Scope identifier for filtering (e.g., "/path::step_0")
-            context_obj: Parent object for inheritance resolution
             parent_state: Parent ObjectState for nested forms
             exclude_params: Parameters to exclude from extraction (e.g., ['func'] for FunctionStep)
             initial_values: Initial values to override extracted defaults (e.g., saved kwargs)
         """
-        # Core identity
+        # === Core State (3 attributes) ===
         self.object_instance = object_instance
-        self.field_id = field_id
-        self.scope_id = parent_state.scope_id if parent_state else scope_id
-        self.context_obj = context_obj
-        self._parent_state: Optional['ObjectState'] = parent_state
+        # Use passed scope_id if provided, otherwise inherit from parent
+        # FunctionPane passes explicit scope_id for functions (step_scope::function_N)
+        # Nested dataclass configs may omit scope_id and inherit from parent
+        self.scope_id = scope_id if scope_id is not None else (parent_state.scope_id if parent_state else None)
 
-        # Extract parameters using UnifiedParameterAnalyzer (handles dataclasses, callables, etc.)
-        # Lazy import to avoid circular dependency
+        # Extract parameters using UnifiedParameterAnalyzer
+        # UnifiedParameterAnalyzer uses object.__getattribute__ to get raw values
+        # (bypasses lazy resolution - returns None for unset lazy fields)
         from openhcs.introspection.unified_parameter_analyzer import UnifiedParameterAnalyzer
-        from openhcs.introspection.signature_analyzer import SignatureAnalyzer
-
-        self.parameters: Dict[str, Any] = {}
-        self.parameter_types: Dict[str, Any] = {}  # Can be Type or str (forward ref)
-        self.param_defaults: Dict[str, Any] = {}
 
         param_info_dict = UnifiedParameterAnalyzer.analyze(object_instance, exclude_params=exclude_params or [])
-        for name, info in param_info_dict.items():
-            self.parameters[name] = info.default_value
-            self.parameter_types[name] = info.param_type
+        self.parameters: Dict[str, Any] = {name: info.default_value for name, info in param_info_dict.items()}
 
-        # param_defaults = SIGNATURE defaults (analyze TYPE, not instance)
-        sig_info = SignatureAnalyzer.analyze(type(object_instance))
-        for name in self.parameters:
-            if name in sig_info:
-                self.param_defaults[name] = sig_info[name].default_value
+        # Store signature defaults for reset (separate from current instance values)
+        # Use use_signature_defaults=True to get CLASS defaults, not instance values
+        signature_info = UnifiedParameterAnalyzer.analyze(object_instance, exclude_params=exclude_params or [], use_signature_defaults=True)
+        self._signature_defaults: Dict[str, Any] = {name: info.default_value for name, info in signature_info.items()}
 
         # Apply initial_values overrides (e.g., saved kwargs for functions)
         if initial_values:
             self.parameters.update(initial_values)
 
-        # Tracking
-        self._user_set_fields: Set[str] = set()
-        self.reset_fields: Set[str] = set()
-
-        # Load user-set fields from object if present
-        if hasattr(object_instance, '_explicitly_set_fields'):
-            explicitly_set = getattr(object_instance, '_explicitly_set_fields')
-            if isinstance(explicitly_set, set):
-                self._user_set_fields = explicitly_set.copy()
-
-        # Nested states (for nested dataclasses) - recursively created
+        # === Structure (2 attributes) ===
+        self._parent_state: Optional['ObjectState'] = parent_state
         self.nested_states: Dict[str, 'ObjectState'] = {}
         self._create_nested_states()
 
-        # Resolved value cache with token-based invalidation
-        # Key: field_name, Value: (token, resolved_value)
-        # Token is from ObjectStateRegistry - when it changes, cache is stale
-        self._resolved_cache: Dict[str, tuple] = {}
-        # Live-context overlay cache (token -> reconstructed overlay with nested dataclasses)
-        self._overlay_cache: tuple[int | None, Dict[str, Any]] = (None, {})
-        # Saved state baselines
-        self.saved_parameters: Dict[str, Any] = self._snapshot_object_instance()
-        self.saved_resolved_state: Dict[str, Any] = {}
-        self.saved_user_set_fields: Set[str] = set(self._user_set_fields)
-        self.saved_reset_fields: Set[str] = set(self.reset_fields)
-        self._dirty = False
+        # === Cache (2 attributes) ===
+        self._live_resolved: Dict[str, Any] = {}
+        self._live_token: int = -1  # Force recompute on first access
 
-        # Flags
+        # === Saved baseline (1 attribute) ===
+        self._saved_resolved: Dict[str, Any] = {}
+
+        # === Flags (kept for batch operations) ===
         self._in_reset = False
         self._block_cross_window_updates = False
 
-        # Initialize saved_resolved_state baseline
-        self.saved_resolved_state = self._compute_resolved_snapshot()
+        # Initialize baselines
+        self._ensure_live_resolved()
+        self._saved_resolved = copy.deepcopy(self._live_resolved)
+
+    @property
+    def context_obj(self) -> Optional[Any]:
+        """Derive context_obj from parent_state (no separate attribute needed)."""
+        return self._parent_state.object_instance if self._parent_state else None
+
+    def _ensure_live_resolved(self) -> None:
+        """Recompute _live_resolved if cache is stale."""
+        token = ObjectStateRegistry.get_token()
+        if self._live_token != token:
+            self._live_resolved = self._compute_resolved_snapshot()
+            self._live_token = token
 
     def _create_nested_states(self) -> None:
         """Recursively create nested ObjectStates for nested dataclass parameters.
 
-        This is a MODEL concern - ObjectState manages its own nested structure.
-        PFM just traverses nested_states to create VIEW components.
+        Uses UnifiedParameterAnalyzer to get param info - works for ANY object type.
         """
-        for param_name, param_type in self.parameter_types.items():
-            # Detect nested dataclass (direct or Optional[dataclass])
-            nested_type = self._get_nested_dataclass_type(param_type)
+        from openhcs.introspection.unified_parameter_analyzer import UnifiedParameterAnalyzer
+
+        param_info_dict = UnifiedParameterAnalyzer.analyze(self.object_instance)
+
+        for param_name, info in param_info_dict.items():
+            if param_name not in self.parameters:
+                continue
+
+            # Detect nested dataclass type
+            nested_type = self._get_nested_dataclass_type(info.param_type)
             if nested_type is None:
                 continue
 
@@ -226,22 +228,18 @@ class ObjectState:
             if current_value is not None:
                 # If current_value is a dict (saved config), convert to dataclass
                 if isinstance(current_value, dict) and is_dataclass(nested_type):
-                    object_instance = nested_type(**current_value)
+                    nested_instance = nested_type(**current_value)
                 else:
-                    object_instance = current_value
+                    nested_instance = current_value
             else:
                 # Create default instance
-                object_instance = nested_type() if is_dataclass(nested_type) else nested_type
+                nested_instance = nested_type() if is_dataclass(nested_type) else nested_type
 
-            # Create nested ObjectState (recursive - it will create its own nested states)
+            # Create nested ObjectState (recursive)
             # Nested states inherit parent's scope_id for proper live context collection
             nested_state = ObjectState(
-                object_instance=object_instance,
-                field_id=f"{self.field_id}.{param_name}",
+                object_instance=nested_instance,
                 scope_id=self.scope_id,  # Inherit parent's scope_id
-                # CRITICAL: use the parent object as context so nested lazy fields
-                # see the immediate container (e.g., FunctionStep) during resolution
-                context_obj=self.object_instance,
                 parent_state=self,
             )
             self.nested_states[param_name] = nested_state
@@ -280,67 +278,33 @@ class ObjectState:
         finally:
             self._in_reset = False
 
-    def update_parameter(self, param_name: str, value: Any, user_set: bool = True) -> None:
+    def update_parameter(self, param_name: str, value: Any) -> None:
         """Update parameter value in state.
 
         Args:
             param_name: Name of parameter to update
             value: New value
-            user_set: If True, mark as user-modified (default). If False, don't track as user edit.
         """
         if param_name not in self.parameters:
             return
 
-        # Capture baseline resolved state on first mutation to support cancel/dirty tracking
-        if not self._dirty:
-            self.saved_resolved_state = self._compute_resolved_snapshot()
-            self._dirty = True
-
         # Update state directly (no type conversion - that's VIEW responsibility)
         self.parameters[param_name] = value
 
-        # Invalidate cache for this field (resolved value may change)
-        self._resolved_cache.pop(param_name, None)
-
-        # Track user modification
-        if user_set:
-            self._user_set_fields.add(param_name)
+        # Invalidate live resolved cache (will be recomputed on next access)
+        self._live_token = -1
 
     def get_resolved_value(self, param_name: str) -> Any:
-        """Get raw resolved value for a field, using cache if valid.
-
-        This is the MODEL's responsibility - ObjectState owns resolution logic.
-        Uses ObjectStateRegistry for sibling values and builds context stack.
+        """Get resolved value for a field from the bulk snapshot.
 
         Args:
             param_name: Field name to resolve
 
         Returns:
-            Raw resolved value (e.g., '/some/path'), not formatted text
+            Resolved value from _live_resolved snapshot
         """
-        # Get current token for cache validation
-        token = ObjectStateRegistry.get_token()
-        logger.info(f"🔬 RESET_TRACE: get_resolved_value({param_name}) token={token}")
-        logger.info(f"🔬 RESET_TRACE: _user_set_fields={self._user_set_fields}")
-
-        # Check cache validity
-        if param_name in self._resolved_cache:
-            cached_token, cached_value = self._resolved_cache[param_name]
-            logger.info(f"🔬 RESET_TRACE: cache entry exists: cached_token={cached_token}, cached_value={repr(cached_value)[:50]}")
-            if cached_token == token:
-                logger.info(f"🔬 RESET_TRACE: CACHE HIT - returning cached value")
-                return cached_value
-            else:
-                logger.info(f"🔬 RESET_TRACE: CACHE STALE - token mismatch")
-        else:
-            logger.info(f"🔬 RESET_TRACE: CACHE MISS - no entry for {param_name}")
-
-        # Cache miss or stale - resolve and cache
-        logger.info(f"🔬 RESET_TRACE: Calling _resolve_value...")
-        resolved = self._resolve_value(param_name)
-        self._resolved_cache[param_name] = (token, resolved)
-        logger.info(f"🔬 RESET_TRACE: Cached resolved={repr(resolved)[:50]} with token={token}")
-        return resolved
+        self._ensure_live_resolved()
+        return self._live_resolved.get(param_name)
 
     def _resolve_value(self, param_name: str) -> Any:
         """Internal resolver - builds context stack and resolves raw value.
@@ -355,23 +319,12 @@ class ObjectState:
         from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
         from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
 
-
-
-        logger.info(f"� RESET_TRACE: _resolve_value: {self.field_id}.{param_name} (scope={self.scope_id})")
-        logger.info(f"🔬 RESET_TRACE: _user_set_fields={self._user_set_fields}")
-
         # Collect live values via LiveContextService (single source of truth)
-        logger.info(f"🔬 RESET_TRACE: Calling LiveContextService.collect()...")
         snapshot = LiveContextService.collect()
-        logger.info(f"🔬 RESET_TRACE: snapshot.token={snapshot.token}, scopes={list(snapshot.scopes.keys())}")
-
         live_values = LiveContextService.merge_ancestor_values(
             snapshot.scopes,
             self.scope_id
         )
-        logger.info(f"� RESET_TRACE: live_values after merge: {len(live_values)} types")
-        for obj_type, values in live_values.items():
-            logger.info(f"🔬 RESET_TRACE:   {obj_type.__name__}: {list(values.keys())} = {values}")
 
         # Build context stack
         stack = build_context_stack(
@@ -379,49 +332,30 @@ class ObjectState:
             object_instance=self.object_instance,
             live_values=live_values,
         )
-        logger.info(f"🔍 Built context stack with context_obj={type(self.context_obj).__name__ if self.context_obj else None}")
 
         with stack:
-            # Concrete classes now have __getattribute__ via bind_lazy_resolution_to_class()
-            # No need to lookup lazy type - just use the concrete type directly
             obj_type = type(self.object_instance)
-
-            # Create instance and get raw resolved value
             try:
                 instance = obj_type()
-                resolved = getattr(instance, param_name)
-                logger.info(f"🔍 Resolved {obj_type.__name__}.{param_name} = {repr(resolved)[:50]}")
-                return resolved
-            except Exception as e:
-                logger.debug(f"Failed to resolve {obj_type.__name__}.{param_name}: {e}")
+                return getattr(instance, param_name)
+            except Exception:
                 # Fallback to class default
-                fallback = LazyDefaultPlaceholderService._get_class_default_value(obj_type, param_name)
-                logger.info(f"🔍 Fallback to class default: {repr(fallback)[:50]}")
-                return fallback
+                return LazyDefaultPlaceholderService._get_class_default_value(obj_type, param_name)
 
-    def invalidate_cache(self, param_name: Optional[str] = None) -> None:
-        """Invalidate resolved cache.
-
-        Args:
-            param_name: If provided, invalidate only this field. Otherwise invalidate all.
-        """
-        if param_name:
-            self._resolved_cache.pop(param_name, None)
-        else:
-            self._resolved_cache.clear()
+    def invalidate_cache(self) -> None:
+        """Invalidate resolved cache by resetting token."""
+        self._live_token = -1
 
     def reset_parameter(self, param_name: str) -> None:
-        """Reset parameter to signature default."""
+        """Reset parameter to signature default (None for lazy dataclasses)."""
         if param_name not in self.parameters:
             return
 
-        # Reset to default value
-        default_value = self.param_defaults.get(param_name)
+        # Use signature defaults (CLASS defaults), not instance values
+        # This ensures reset goes back to None for lazy fields, not saved concrete values
+        default_value = self._signature_defaults.get(param_name)
         self.parameters[param_name] = default_value
-
-        # Remove from user-set tracking
-        self._user_set_fields.discard(param_name)
-        self.reset_fields.add(param_name)
+        self._live_token = -1  # Invalidate cache
 
 
 
@@ -431,191 +365,38 @@ class ObjectState:
 
         For ObjectState, this reads directly from self.parameters.
         PFM overrides this to also read from widgets.
+
+        For nested configs, returns reconstructed dataclass instances (not stale instances
+        from self.parameters) so that None values in nested_state.parameters are preserved.
         """
         current_values = dict(self.parameters)
 
-        # Include nested state values
+        # Replace nested values with properly reconstructed dataclass instances
         for name, nested_state in self.nested_states.items():
-            current_values[name] = nested_state.get_current_values()
+            nested_vals = nested_state.get_current_values()
+            # Get the nested type from the original instance
+            original_instance = self.parameters.get(name)
+            if original_instance is not None and is_dataclass(original_instance):
+                # Filter to non-None values to preserve lazy resolution
+                filtered_vals = {k: v for k, v in nested_vals.items() if v is not None}
+                # Reconstruct dataclass with current values
+                nested_type = type(original_instance)
+                current_values[name] = nested_type(**filtered_vals) if filtered_vals else nested_type()
+            else:
+                # Fallback to dict if no original instance
+                current_values[name] = nested_vals
 
         return current_values
 
-    def get_user_modified_values(self) -> Dict[str, Any]:
-        """
-        Get only values that were explicitly set by the user.
 
-        For lazy dataclasses, this preserves lazy resolution for unmodified fields
-        by only returning fields that are in self._user_set_fields (tracked when user edits widgets).
-
-        For nested dataclasses, only include them if they have user-modified fields inside.
-
-        CRITICAL: This method uses self._user_set_fields to distinguish between:
-        1. Values that were explicitly set by the user (in _user_set_fields)
-        2. Values that were inherited from parent or set during initialization (not in _user_set_fields)
-        """
-        # ANTI-DUCK-TYPING: Use isinstance check against LazyDataclass base class
-        # Lazy import to avoid circular dependency
-        from openhcs.config_framework.lazy_factory import is_lazy_dataclass
-        is_lazy = is_lazy_dataclass(self.object_instance)
-        logger.info(f"🔍 GET_USER_MODIFIED: {self.field_id} is_lazy={is_lazy}, type={type(self.object_instance).__name__}")
-
-        if not is_lazy:
-            # For non-lazy dataclasses, return all current values
-            result = self.get_current_values()
-            logger.info(f"🔍 GET_USER_MODIFIED: {self.field_id} returning ALL values: {list(result.keys())}")
-            return result
-
-        # PERFORMANCE OPTIMIZATION: Only read values for user-set fields
-        # Instead of calling get_current_values() which reads ALL widgets,
-        # we only need values for fields in _user_set_fields
-        user_modified = {}
-
-        # Fast path: if no user-set fields, return empty dict
-        if not self._user_set_fields:
-            return user_modified
-
-        # DEBUG: Log what fields are tracked as user-set
-        logger.info(f"🔍 GET_USER_MODIFIED: {self.field_id} - _user_set_fields = {self._user_set_fields}")
-
-        # Only include fields that were explicitly set by the user
-        # PERFORMANCE: Read directly from self.parameters instead of calling get_current_values()
-        for field_name in self._user_set_fields:
-            # For user-set fields, self.parameters is always the source of truth
-            # (updated by FieldChangeDispatcher before any refresh happens)
-            value = self.parameters.get(field_name)
-
-            # CRITICAL FIX: Include None values for user-set fields
-            # When user clears a field (backspace/delete), the None value must propagate
-            # to live context so other windows can update their placeholders
-            if value is not None:
-                # CRITICAL: For nested dataclasses, we need to extract only user-modified fields
-                # by recursively calling get_user_modified_values() on the nested manager
-                if is_dataclass(value) and not isinstance(value, type):
-                    # Check if there's a nested manager for this field
-                    nested_state = self.nested_states.get(field_name)
-                    if nested_state and hasattr(nested_state, 'get_user_modified_values'):
-                        # Recursively get user-modified values from nested manager
-                        nested_user_modified = nested_state.get_user_modified_values()
-
-                        if nested_user_modified:
-                            # Reconstruct nested dataclass instance from user-modified values
-                            user_modified[field_name] = type(value)(**nested_user_modified)
-                    else:
-                        # No nested manager, extract raw field values from nested dataclass
-                        nested_user_modified = {}
-                        for field in dataclass_fields(value):
-                            raw_value = object.__getattribute__(value, field.name)
-                            if raw_value is not None:
-                                nested_user_modified[field.name] = raw_value
-
-                        # Only include if nested dataclass has user-modified fields
-                        if nested_user_modified:
-                            user_modified[field_name] = type(value)(**nested_user_modified)
-                else:
-                    # Non-dataclass field, include if user set it
-                    user_modified[field_name] = value
-            else:
-                # User explicitly set this field to None (cleared it)
-                # Include it so live context updates propagate to other windows
-                user_modified[field_name] = None
-
-        # Also include nested manager edits even if parent field not in _user_set_fields
-        # This ensures nested edits are captured without requiring the parent to track them
-        for field_name, nested_state in self.nested_states.items():
-            if field_name not in user_modified:  # Not already included from _user_set_fields
-                nested_values = nested_state.get_user_modified_values()
-                if nested_values and nested_state.object_instance:
-                    try:
-                        user_modified[field_name] = type(nested_state.object_instance)(**nested_values)
-                    except Exception:
-                        pass  # Skip if reconstruction fails
-
-        # DEBUG: Log what's being returned
-        logger.debug(f"🔍 GET_USER_MODIFIED: {self.field_id} - returning user_modified = {user_modified}")
-
-        return user_modified
-
-    # ==================== TREE REGISTRY INTEGRATION ====================
-
-    def get_current_values_as_instance(self) -> Any:
-        """
-        Get current form values reconstructed as an instance.
-
-        Used by ConfigNode.get_live_instance() for context stack building.
-        Returns the object instance with current form values applied.
-
-        Returns:
-            Instance with current form values
-        """
-        current_values = self.get_current_values()
-
-        # For dataclasses, reconstruct instance with current values
-        if is_dataclass(self.object_instance) and not isinstance(self.object_instance, type):
-            return dataclasses.replace(self.object_instance, **current_values)
-
-        # For non-dataclass objects, return object_instance as-is
-        # (current values are tracked in self.parameters)
-        return self.object_instance
-
-    # ==================== LIVE CONTEXT OVERLAY ====================
-
-    def get_user_modified_overlay(self) -> Dict[str, Any]:
-        """
-        Get user-modified values plus reconstructed nested dataclasses for live context.
-
-        This keeps container layers (e.g., FunctionStep) visible to build_context_stack
-        without rebuilding them in the collector on every call.
-        """
-        token = ObjectStateRegistry.get_token()
-        cached_token, cached_overlay = self._overlay_cache
-        logger.info(f"🔬 RESET_TRACE: get_user_modified_overlay({self.field_id}): token={token}, cached_token={cached_token}")
-        if cached_token == token:
-            logger.info(f"🔬 RESET_TRACE: OVERLAY CACHE HIT: {list(cached_overlay.keys())}")
-            return cached_overlay
-
-        logger.info(f"🔬 RESET_TRACE: OVERLAY CACHE MISS - computing...")
-        logger.info(f"🔬 RESET_TRACE: _user_set_fields={self._user_set_fields}")
-        overlay = dict(self.get_user_modified_values() or {})
-        logger.info(f"🔬 RESET_TRACE: get_user_modified_values returned: {list(overlay.keys())}")
-
-        for field_name, nested_state in self.nested_states.items():
-            nested_overlay = nested_state.get_user_modified_overlay()
-            if not nested_overlay:
-                continue
-
-            if is_dataclass(nested_state.object_instance):
-                try:
-                    overlay[field_name] = type(nested_state.object_instance)(**nested_overlay)
-                except Exception:
-                    overlay[field_name] = nested_overlay
-            else:
-                overlay[field_name] = nested_overlay
-
-        self._overlay_cache = (token, overlay)
-        logger.info(f"🔬 RESET_TRACE: Cached overlay: {list(overlay.keys())}")
-        return overlay
 
     # ==================== SAVED STATE / DIRTY TRACKING ====================
-
-    def _snapshot_object_instance(self) -> Dict[str, Any]:
-        """Capture raw parameters from the backing object (pre-edit baseline)."""
-        if is_dataclass(self.object_instance) and not isinstance(self.object_instance, type):
-            raw = {}
-            for f in dataclass_fields(self.object_instance):
-                try:
-                    raw[f.name] = object.__getattribute__(self.object_instance, f.name)
-                except AttributeError:
-                    raw[f.name] = None
-            return raw
-        if isinstance(self.object_instance, dict):
-            return dict(self.object_instance)
-        return dict(self.parameters)
 
     def _compute_resolved_snapshot(self) -> Dict[str, Any]:
         """Resolve all fields for this state and nested states into a snapshot dict."""
         snapshot: Dict[str, Any] = {}
         for name in self.parameters.keys():
-            snapshot[name] = self.get_resolved_value(name)
+            snapshot[name] = self._resolve_value(name)
 
         for nested_name, nested_state in self.nested_states.items():
             snapshot[nested_name] = nested_state._compute_resolved_snapshot()
@@ -623,109 +404,50 @@ class ObjectState:
         return snapshot
 
     def mark_saved(self) -> None:
-        """Mark current state as saved baseline."""
-        self.saved_parameters = copy.deepcopy(self.get_current_values())
-        self.saved_resolved_state = self._compute_resolved_snapshot()
-        self.saved_user_set_fields = set(self._user_set_fields)
-        self.saved_reset_fields = set(self.reset_fields)
-        self._dirty = False
-        self.invalidate_cache()
-        self._overlay_cache = (None, {})
+        """Mark current state as saved baseline.
 
+        CRITICAL: Save nested states FIRST, then collect their updated object_instance values.
+        """
+        # Save nested states first (they update their object_instance)
         for nested_state in self.nested_states.values():
             nested_state.mark_saved()
 
-    def restore_saved(self) -> None:
-        """Restore parameters to the last saved baseline."""
-        self.parameters = copy.deepcopy(self.saved_parameters)
-        self._user_set_fields = set(self.saved_user_set_fields)
-        self.reset_fields = set(self.saved_reset_fields)
-        self._dirty = False
-        self.invalidate_cache()
-        self._overlay_cache = (None, {})
+        # Now update our object_instance with current parameters
+        if is_dataclass(self.object_instance) and not isinstance(self.object_instance, type):
+            current_values = self.get_current_values()
+            self.object_instance = dataclasses.replace(self.object_instance, **current_values)
 
+        # Capture resolved snapshot as baseline
+        self._ensure_live_resolved()
+        self._saved_resolved = copy.deepcopy(self._live_resolved)
+
+    def restore_saved(self) -> None:
+        """Restore parameters to the last saved baseline (from object_instance)."""
+        # Restore nested states first
         for nested_state in self.nested_states.values():
             nested_state.restore_saved()
 
-    def is_dirty(self) -> bool:
-        """Return True if state has been modified since last saved baseline."""
-        return self._dirty
-
-    def get_user_modified_instance(self) -> Any:
-        """
-        Get instance with only user-edited fields.
-
-        Used by ConfigNode.get_user_modified_instance() for reset logic.
-        Only includes fields that the user has explicitly edited.
-
-        Returns:
-            Instance with only user-modified fields
-        """
-        user_modified = self.get_user_modified_values()
-
-        # For dataclasses, create instance with only user-modified fields
+        # Restore parameters from object_instance (the saved baseline)
         if is_dataclass(self.object_instance) and not isinstance(self.object_instance, type):
-            # Start with None for all fields, only set user-modified ones
-            all_fields = {f.name: None for f in dataclass_fields(self.object_instance)}
-            all_fields.update(user_modified)
-            return dataclasses.replace(self.object_instance, **all_fields)
+            for field in dataclass_fields(self.object_instance):
+                if field.name in self.parameters:
+                    self.parameters[field.name] = object.__getattribute__(self.object_instance, field.name)
 
-        # For non-dataclass objects, return object_instance
-        return self.object_instance
+        self.invalidate_cache()
 
-    # ==================== UPDATE CHECKING ====================
+    def is_dirty(self) -> bool:
+        """Return True if resolved state differs from saved baseline."""
+        self._ensure_live_resolved()
+        return self._live_resolved != self._saved_resolved
 
-    def _should_skip_updates(self) -> bool:
-        """
-        Check if updates should be skipped due to batch operations.
-
-        REFACTORING: Consolidates duplicate flag checking logic.
-        Returns True if in reset mode or blocking cross-window updates.
-        """
-        # ANTI-DUCK-TYPING: Use direct attribute access (all flags initialized in __init__)
-        # Check self flags
-        if self._in_reset:
-            logger.info(f"🚫 SKIP_CHECK: {self.field_id} has _in_reset=True")
+    def should_skip_updates(self) -> bool:
+        """Check if updates should be skipped due to batch operations."""
+        if self._in_reset or self._block_cross_window_updates:
             return True
-        if self._block_cross_window_updates:
-            logger.info(f"🚫 SKIP_CHECK: {self.field_id} has _block_cross_window_updates=True")
-            return True
-
-        # Check nested manager flags (nested managers are also ParameterFormManager instances)
-        for nested_name, nested_state in self.nested_states.items():
-            if nested_state._in_reset:
-                logger.info(f"🚫 SKIP_CHECK: {self.field_id} nested manager {nested_name} has _in_reset=True")
-                return True
-            if nested_state._block_cross_window_updates:
-                logger.info(f"🚫 SKIP_CHECK: {self.field_id} nested manager {nested_name} has _block_cross_window_updates=True")
-                return True
-
-        return False
-
-    # DELETED: _on_nested_parameter_changed - replaced by FieldChangeDispatcher
-
-    def _apply_to_nested_states(self, operation_func: Callable[[str, 'ObjectState'], None]) -> None:
-        """Apply operation to all nested states."""
-        for param_name, nested_state in self.nested_states.items():
-            operation_func(param_name, nested_state)
-
-    def _apply_callbacks_recursively(self, callback_list_name: str) -> None:
-        """REFACTORING: Unified recursive callback application - eliminates duplicate methods.
-
-        Args:
-            callback_list_name: Name of the callback list attribute (e.g., '_on_build_complete_callbacks')
-        """
-        callback_list = getattr(self, callback_list_name)
-        for callback in callback_list:
-            callback()
-        callback_list.clear()
-
-        # Recursively apply nested managers' callbacks
         for nested_state in self.nested_states.values():
-            nested_state._apply_callbacks_recursively(callback_list_name)
-
-
-    # DELETED: _emit_cross_window_change - moved to FieldChangeDispatcher
+            if nested_state._in_reset or nested_state._block_cross_window_updates:
+                return True
+        return False
 
     def update_thread_local_global_config(self):
         """Update thread-local GlobalPipelineConfig with current form values.
@@ -743,7 +465,7 @@ class ObjectState:
 
         current_values = self.get_current_values()
         base_config = get_base_global_config()
-        reconstructed_values = ValueCollectionService.reconstruct_nested_dataclasses(current_values, base_config)
+        reconstructed_values = ValueCollectionService.reconstruct_nested_dataclasses(current_values)
 
         try:
             new_config = dataclasses.replace(base_config, **reconstructed_values)

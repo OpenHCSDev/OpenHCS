@@ -167,7 +167,7 @@ class LiveContextService:
         Collect live context from ALL registered ObjectStates.
 
         Uses ObjectStateRegistry for discovery (not _active_form_managers).
-        ObjectState has the same interface needed (get_user_modified_values, scope_id, etc.)
+        ObjectState has the interface needed (parameters, scope_id, etc.)
 
         No filtering at collection time - consumers apply their own filtering:
         - Exact lookup: snapshot.scopes.get(my_scope_id)
@@ -203,7 +203,7 @@ class LiveContextService:
 
             # Use ObjectStateRegistry for discovery instead of _active_form_managers
             for state in ObjectStateRegistry.get_all():
-                logger.debug(f"  📋 STATE {state.field_id}: scope={state.scope_id}")
+                logger.debug(f"  📋 STATE {type(state.object_instance).__name__}: scope={state.scope_id}")
                 cls._collect_from_state_tree(state, scopes)
 
             scope_count = len(scopes)
@@ -230,16 +230,14 @@ class LiveContextService:
         Populates scopes dict: scope_id → type → values
         """
         if state.object_instance:
-            # Use ObjectState-provided overlay (includes nested dataclasses)
-            values = state.get_user_modified_overlay()
+            # Filter to non-None for sibling inheritance (None = inherit from parent)
+            values = {k: v for k, v in state.parameters.items() if v is not None}
 
             scope_id = state.scope_id or ""
             obj_type = type(state.object_instance)
-            logger.info(f"🔍 COLLECT: {state.field_id} -> scope={scope_id}, type={obj_type.__name__}, values={list(values.keys())}")
             scopes.setdefault(scope_id, {})[obj_type] = values
 
         # Recurse into nested states (ObjectState.nested_states, not PFM.nested_managers)
-        logger.info(f"🔍 COLLECT: {state.field_id} has {len(state.nested_states)} nested states: {list(state.nested_states.keys())}")
         for nested in state.nested_states.values():
             cls._collect_from_state_tree(nested, scopes)
 
@@ -277,13 +275,22 @@ class LiveContextService:
         logger.info(f"🔍 MERGE: scopes has keys: {list(scopes.keys())}")
 
         # Merge in order (less-specific first, more-specific overwrites)
+        # Normalize types so LazyWellFilterConfig and WellFilterConfig merge together
+        from openhcs.config_framework.lazy_factory import get_base_type_for_lazy
         for ancestor_scope in ancestors:
             scope_data = scopes.get(ancestor_scope, {})
             logger.info(f"🔍 MERGE: ancestor={ancestor_scope} has types: {[t.__name__ for t in scope_data.keys()]}")
             for config_type, values in scope_data.items():
-                if config_type not in result:
-                    result[config_type] = {}
-                result[config_type].update(values)
+                # Normalize to base type so Lazy* and concrete types merge together
+                base_type = get_base_type_for_lazy(config_type) or config_type
+                if base_type not in result:
+                    result[base_type] = {}
+                # Log what we're overwriting for debugging
+                if 'well_filter_mode' in values:
+                    old_val = result[base_type].get('well_filter_mode', 'N/A')
+                    new_val = values['well_filter_mode']
+                    logger.info(f"🔍 MERGE: {config_type.__name__}.well_filter_mode: {old_val} -> {new_val}")
+                result[base_type].update(values)
                 logger.info(f"🔍 MERGE: {config_type.__name__} += {list(values.keys())}")
 
         logger.info(f"🔍 MERGE: result has {len(result)} types")

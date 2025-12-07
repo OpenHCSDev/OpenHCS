@@ -261,9 +261,7 @@ class PlateViewerWindow(QDialog):
         # Create local ObjectState for metadata viewer
         state = ObjectState(
             object_instance=metadata_instance,
-            field_id="metadata_viewer",
             scope_id=None,
-            context_obj=None,
         )
 
         metadata_form = ParameterFormManager(
@@ -289,9 +287,7 @@ class PlateViewerWindow(QDialog):
             # Create local ObjectState for this subdirectory's metadata
             state = ObjectState(
                 object_instance=metadata_instance,
-                field_id=f"metadata_{subdir_name}",
                 scope_id=None,
-                context_obj=None,
             )
 
             metadata_form = ParameterFormManager(

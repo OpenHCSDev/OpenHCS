@@ -108,9 +108,7 @@ class SyntheticPlateGeneratorWindow(QDialog):
         # Standalone tool - create local ObjectState (not registered in registry)
         self.state = ObjectState(
             object_instance=SyntheticMicroscopyGenerator,  # Pass the class itself, not __init__
-            field_id="synthetic_plate_generator",
             scope_id=None,
-            context_obj=None,
             exclude_params=['output_dir', 'skip_files', 'include_all_components', 'random_seed'],
         )
 

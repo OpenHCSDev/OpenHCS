@@ -257,13 +257,13 @@ class FunctionPaneWidget(QWidget):
         # Build function-specific scope: step_scope::func_N
         step_scope = self.scope_id or "no_scope"
         func_scope_id = ScopeTokenService.build_scope_id(step_scope, self.func)
-        func_token = ScopeTokenService.ensure_token(step_scope, self.func)
 
+        # Get parent state (step state) from registry for context inheritance
+        parent_state = ObjectStateRegistry.get_by_scope(step_scope)
         func_state = ObjectState(
             object_instance=self.func,
-            field_id=func_token,
             scope_id=func_scope_id,
-            context_obj=self.step_instance,
+            parent_state=parent_state,
             initial_values=self.kwargs,
         )
         ObjectStateRegistry.register(func_state)

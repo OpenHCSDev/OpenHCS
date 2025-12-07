@@ -113,25 +113,20 @@ class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
         from openhcs.config_framework.object_state import ObjectState, ObjectStateRegistry
 
         # Look up ObjectState from registry using scope_id
-        # ObjectState was registered by PipelineEditorWidget when step was added
+        # ObjectState MUST be registered by PipelineEditorWidget when step was added
         logger.info(f"🔍 STEP_EDITOR: Looking up ObjectState for scope_id={self.scope_id}")
         logger.info(f"🔍 STEP_EDITOR: Registry has scopes: {[s.scope_id for s in ObjectStateRegistry.get_all()]}")
         self.state = ObjectStateRegistry.get_by_scope(self.scope_id) if self.scope_id else None
-        logger.info(f"🔍 STEP_EDITOR: Found state={self.state is not None}, object_instance={type(self.state.object_instance).__name__ if self.state else 'N/A'}")
 
         if self.state is None:
-            # Fallback: create local ObjectState (for backward compatibility)
-            logger.info(f"🔍 STEP_EDITOR: Creating LOCAL ObjectState (not in registry)")
-            field_id = f"{self.scope_id}.step_{self.step_index}" if self.step_index is not None and self.scope_id else "step"
-            self.state = ObjectState(
-                object_instance=self.step,
-                field_id=field_id,
-                scope_id=self.scope_id,
-                context_obj=self.pipeline_config,
-                exclude_params=['func'],
+            # FAIL LOUD: The step MUST be registered by PipelineEditor before opening the editor
+            raise RuntimeError(
+                f"ObjectState not found for scope_id={self.scope_id}. "
+                f"PipelineEditor must register the step before opening the editor. "
+                f"Registry has: {[s.scope_id for s in ObjectStateRegistry.get_all()]}"
             )
-        else:
-            logger.info(f"🔍 STEP_EDITOR: Using REGISTERED ObjectState, params={list(self.state.parameters.keys())}")
+
+        logger.info(f"🔍 STEP_EDITOR: Using REGISTERED ObjectState, params={list(self.state.parameters.keys())}")
 
         config = FormManagerConfig(
             parent=self,                         # Pass self as parent widget

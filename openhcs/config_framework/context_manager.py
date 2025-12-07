@@ -647,22 +647,17 @@ def build_context_stack(
     # and the nested config being resolved. FunctionStep has fields like step_well_filter_config
     # that need to be merged into GlobalPipelineConfig for sibling inheritance to work.
     if live_values:
-        from dataclasses import is_dataclass as is_dc
-
         for live_type, values in live_values.items():
             live_base = _normalize_type(live_type)
             if live_base in injected_bases:
                 continue
             if _is_global_type(live_type):
                 continue
-            # Only inject if overlay has nested dataclass values (container types like FunctionStep)
-            # Skip if all values are primitives/None (leaf config types like LazyStepWellFilterConfig)
-            has_nested_configs = values and any(
-                v is not None and is_dc(type(v))
-                for v in values.values()
-            )
-            if has_nested_configs:
-                logger.debug(f"  🔧 Injecting intermediate container: {live_type.__name__}")
+            # Inject ALL live types with values (not just containers)
+            # Leaf configs like LazyWellFilterConfig with {well_filter_mode: EXCLUDE}
+            # must be injected for MRO inheritance to find them
+            if values:
+                logger.debug(f"  🔧 Injecting live overlay: {live_type.__name__} with {list(values.keys())}")
                 _inject_context_layer(stack, live_type, values, None)
                 injected_bases.add(live_base)
 

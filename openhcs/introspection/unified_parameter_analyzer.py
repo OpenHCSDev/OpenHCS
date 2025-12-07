@@ -49,12 +49,15 @@ class UnifiedParameterAnalyzer:
     """
     
     @staticmethod
-    def analyze(target: Union[Callable, Type, object], exclude_params: Optional[list] = None) -> Dict[str, UnifiedParameterInfo]:
+    def analyze(target: Union[Callable, Type, object], exclude_params: Optional[list] = None,
+                use_signature_defaults: bool = False) -> Dict[str, UnifiedParameterInfo]:
         """Analyze parameters from any source.
 
         Args:
             target: Function, method, dataclass type, or instance to analyze
             exclude_params: Optional list of parameter names to exclude from analysis
+            use_signature_defaults: If True, use CLASS signature defaults instead of instance values.
+                                   Used for reset functionality to get back to original defaults.
 
         Returns:
             Dictionary mapping parameter names to UnifiedParameterInfo objects
@@ -71,6 +74,9 @@ class UnifiedParameterAnalyzer:
 
             # Instance analysis with exclusions (e.g., exclude 'func' from FunctionStep)
             param_info = UnifiedParameterAnalyzer.analyze(step_instance, exclude_params=['func'])
+
+            # Get signature defaults for reset (not current instance values)
+            param_info = UnifiedParameterAnalyzer.analyze(step_instance, use_signature_defaults=True)
         """
         if target is None:
             return {}
@@ -93,14 +99,18 @@ class UnifiedParameterAnalyzer:
                     result = UnifiedParameterAnalyzer._analyze_callable(target.__init__)
         elif dataclasses.is_dataclass(target):
             # Instance of dataclass
-            result = UnifiedParameterAnalyzer._analyze_dataclass_instance(target)
+            if use_signature_defaults:
+                # Get CLASS signature defaults (for reset), not instance values
+                result = UnifiedParameterAnalyzer._analyze_dataclass_type(type(target))
+            else:
+                result = UnifiedParameterAnalyzer._analyze_dataclass_instance(target)
         else:
             # Try to analyze as callable
             if callable(target):
                 result = UnifiedParameterAnalyzer._analyze_callable(target)
             else:
                 # For regular object instances (like step instances), analyze their class constructor
-                result = UnifiedParameterAnalyzer._analyze_object_instance(target)
+                result = UnifiedParameterAnalyzer._analyze_object_instance(target, use_signature_defaults=use_signature_defaults)
 
         # Apply exclusions if specified
         if exclude_params:
@@ -213,24 +223,14 @@ class UnifiedParameterAnalyzer:
             dataclass_type = type(instance)
             unified_params = UnifiedParameterAnalyzer._analyze_dataclass_type(dataclass_type)
 
-        # Check if this specific instance is a lazy config - if so, use raw field values
-        with timer("      Check lazy config", threshold_ms=1.0):
-            from openhcs.config_framework.lazy_factory import get_base_type_for_lazy
-            # CRITICAL FIX: Don't check class name - PipelineConfig is lazy but doesn't start with "Lazy"
-            # get_base_type_for_lazy() is the authoritative check for lazy dataclasses
-            is_lazy_config = get_base_type_for_lazy(dataclass_type) is not None
-
         # Update default values with current instance values
+        # Always use object.__getattribute__ to get raw values:
+        # - For lazy dataclasses: returns None if unset (bypasses resolution)
+        # - For non-lazy objects: same as getattr (no resolution to bypass)
         with timer(f"      Extract {len(unified_params)} field values from instance", threshold_ms=5.0):
             for name, param_info in unified_params.items():
                 if hasattr(instance, name):
-                    if is_lazy_config:
-                        # For lazy configs, get raw field value to avoid triggering resolution
-                        # Use object.__getattribute__() to bypass lazy property getters
-                        current_value = object.__getattribute__(instance, name)
-                    else:
-                        # For regular dataclasses, use normal getattr
-                        current_value = getattr(instance, name)
+                    current_value = object.__getattribute__(instance, name)
 
                     # Create new UnifiedParameterInfo with current value as default
                     unified_params[name] = UnifiedParameterInfo(

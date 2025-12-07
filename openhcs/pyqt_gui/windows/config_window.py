@@ -115,9 +115,7 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
         if self.state is None:
             self.state = ObjectState(
                 object_instance=current_config,
-                field_id=root_field_id,
                 scope_id=self.scope_id,
-                context_obj=None,  # Inherit from thread-local GlobalPipelineConfig only
             )
 
         # CRITICAL: Config window manages its own scroll area, so tell form_manager NOT to create one
@@ -365,18 +363,11 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
     def save_config(self, *, close_window=True):
         """Save the configuration preserving lazy behavior for unset fields. If close_window is True, close after saving; else, keep open."""
         try:
-            if LazyDefaultPlaceholderService.has_lazy_resolution(self.config_class):
-                # BETTER APPROACH: For lazy dataclasses, only save user-modified values
-                # Get only values that were explicitly set by the user (non-None raw values)
-                user_modified_values = self.state.get_user_modified_values()
-
-                # Create fresh lazy instance with only user-modified values
-                # This preserves lazy resolution for unmodified fields
-                new_config = self.config_class(**user_modified_values)
-            else:
-                # For non-lazy dataclasses, use all current values
-                current_values = self.state.get_current_values()
-                new_config = self.config_class(**current_values)
+            # Get current values from state (now returns proper dataclass instances for nested configs)
+            current_values = self.state.get_current_values()
+            # Filter to non-None values (preserves lazy resolution for unmodified fields)
+            user_modified_values = {k: v for k, v in current_values.items() if v is not None}
+            new_config = self.config_class(**user_modified_values)
 
             # CRITICAL: Set flag to prevent refresh_config from recreating the form
             # The window already has the correct data - it just saved it!
