@@ -61,7 +61,12 @@ class QtExecutionStrategy(CacheExecutionStrategy):
 
 
 def _migrate_dataclass(cached_obj, target_type):
-    """Recursively migrate dataclass with schema evolution."""
+    """Recursively migrate dataclass with schema evolution.
+
+    CRITICAL: Uses object.__getattribute__ to get raw stored values without
+    triggering lazy resolution. This preserves None values in nested configs
+    so that MRO inheritance continues to work after loading from cache.
+    """
     if not (hasattr(cached_obj, '__dataclass_fields__') and hasattr(target_type, '__dataclass_fields__')):
         return cached_obj
 
@@ -69,7 +74,10 @@ def _migrate_dataclass(cached_obj, target_type):
     preserved_values = {}
     for f in fields(target_type):
         if hasattr(cached_obj, f.name):
-            old_value = getattr(cached_obj, f.name)
+            # CRITICAL FIX: Use object.__getattribute__ to get raw value without lazy resolution
+            # getattr() would trigger __getattribute__ which resolves None -> concrete value
+            # This broke MRO inheritance because None values became concrete after cache load
+            old_value = object.__getattribute__(cached_obj, f.name)
             preserved_values[f.name] = (_migrate_dataclass(old_value, f.type)
                                       if hasattr(f.type, '__dataclass_fields__')
                                       else old_value)
