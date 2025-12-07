@@ -28,6 +28,7 @@ from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.pyqt_gui.config import PyQtGUIConfig, get_default_pyqt_gui_config
 from openhcs.config_framework import LiveContextResolver
 from openhcs.config_framework.object_state import ObjectState, ObjectStateRegistry
+from openhcs.pyqt_gui.widgets.shared.services.scope_token_service import ScopeTokenService
 
 # Import shared list widget components (single source of truth)
 from openhcs.pyqt_gui.widgets.shared.reorderable_list_widget import ReorderableListWidget
@@ -104,7 +105,7 @@ class PipelineEditorWidget(AbstractManagerWidget):
         'step_materialization_config',  # Uses CONFIG_INDICATORS['step_materialization_config'] = 'MAT'
     ]
 
-    STEP_SCOPE_ATTR = "_pipeline_scope_token"
+
 
     # Signals
     pipeline_changed = pyqtSignal(list)  # List[FunctionStep]
@@ -135,7 +136,7 @@ class PipelineEditorWidget(AbstractManagerWidget):
         # Step scope management
         self._preview_step_cache: Dict[int, FunctionStep] = {}
         self._preview_step_cache_token: Optional[int] = None
-        self._next_scope_token = 0  # Counter for generating unique step scope tokens
+
 
         # Initialize base class (creates style_generator, event_bus, item_list, buttons, status_label internally)
         # Also auto-processes PREVIEW_FIELD_CONFIGS declaratively
@@ -359,16 +360,15 @@ class PipelineEditorWidget(AbstractManagerWidget):
             func=[],  # Start with empty function list
             name=step_name
         )
-        self._ensure_step_scope_token(new_step)
-
-
+        plate_scope = self.current_plate or "no_plate"
+        ScopeTokenService.ensure_token(plate_scope, new_step)
 
         def handle_save(edited_step):
             """Handle step save from editor."""
             # Check if step already exists in pipeline (for Shift+Click saves)
             if edited_step not in self.pipeline_steps:
                 self.pipeline_steps.append(edited_step)
-                self._ensure_step_scope_token(edited_step)
+                ScopeTokenService.ensure_token(plate_scope, edited_step)
                 self.status_message.emit(f"Added new step: {edited_step.name}")
             else:
                 # Step already exists, just update the display
@@ -634,35 +634,21 @@ class PipelineEditorWidget(AbstractManagerWidget):
     # _resolve_config_attr() DELETED - use base class version
     # Step-specific context stack provided via _get_context_stack_for_resolution() hook
 
-    def _build_step_scope_id(self, step: FunctionStep) -> Optional[str]:
-        """Return the hierarchical scope id for a step editor instance."""
-        token = self._ensure_step_scope_token(step)
+    def _build_step_scope_id(self, step: FunctionStep) -> str:
+        """Return the hierarchical scope id for a step: plate::step_N."""
         plate_scope = self.current_plate or "no_plate"
-        return f"{plate_scope}::{token}"
-
-    def _ensure_step_scope_token(self, step: FunctionStep) -> str:
-        token = getattr(step, self.STEP_SCOPE_ATTR, None)
-        if not token:
-            token = f"step_{self._next_scope_token}"
-            self._next_scope_token += 1
-            setattr(step, self.STEP_SCOPE_ATTR, token)
-        return token
-
-    def _transfer_scope_token(self, source_step: FunctionStep, target_step: FunctionStep) -> None:
-        token = getattr(source_step, self.STEP_SCOPE_ATTR, None)
-        if token:
-            setattr(target_step, self.STEP_SCOPE_ATTR, token)
+        return ScopeTokenService.build_scope_id(plate_scope, step)
 
     def _normalize_step_scope_tokens(self) -> None:
+        """Ensure all steps have tokens and are registered."""
+        plate_scope = self.current_plate or "no_plate"
+        ScopeTokenService.seed_from_objects(plate_scope, self.pipeline_steps)
         for step in self.pipeline_steps:
-            self._ensure_step_scope_token(step)
             self._register_step_state(step)
 
     def _register_step_state(self, step: FunctionStep) -> None:
         """Register ObjectState for a step (creates if not exists)."""
         scope_id = self._build_step_scope_id(step)
-        if not scope_id:
-            return
 
         # Check if already registered
         existing = ObjectStateRegistry.get_by_scope(scope_id)
@@ -675,7 +661,7 @@ class PipelineEditorWidget(AbstractManagerWidget):
 
         state = ObjectState(
             object_instance=step,
-            field_id=f"step_{step.name}",
+            field_id=ScopeTokenService.ensure_token(self.current_plate or "no_plate", step),
             scope_id=scope_id,
             context_obj=context_obj,
             exclude_params=['func'],  # Exclude func - handled separately by FunctionPane
@@ -686,8 +672,6 @@ class PipelineEditorWidget(AbstractManagerWidget):
     def _unregister_step_state(self, step: FunctionStep) -> None:
         """Unregister ObjectState for a step."""
         scope_id = self._build_step_scope_id(step)
-        if not scope_id:
-            return
 
         existing = ObjectStateRegistry.get_by_scope(scope_id)
         if existing:
@@ -901,12 +885,15 @@ class PipelineEditorWidget(AbstractManagerWidget):
 
         from openhcs.pyqt_gui.windows.dual_editor_window import DualEditorWindow
 
+        plate_scope = self.current_plate or "no_plate"
+
         def handle_save(edited_step):
             """Handle step save from editor."""
             # Find and replace the step in the pipeline
             for i, step in enumerate(self.pipeline_steps):
                 if step is step_to_edit:
-                    self._transfer_scope_token(step_to_edit, edited_step)
+                    # Transfer scope token from old to new step
+                    ScopeTokenService.get_generator(plate_scope).transfer(step_to_edit, edited_step)
                     self.pipeline_steps[i] = edited_step
                     break
 

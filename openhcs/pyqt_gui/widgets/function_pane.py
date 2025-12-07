@@ -251,17 +251,23 @@ class FunctionPaneWidget(QWidget):
         # - To keep each function pane only as tall as its content, we explicitly
         #   disable the inner scroll area and let the outer FunctionListWidget
         #   handle scrolling for long forms.
-        from openhcs.config_framework.object_state import ObjectState
+        from openhcs.config_framework.object_state import ObjectState, ObjectStateRegistry
+        from openhcs.pyqt_gui.widgets.shared.services.scope_token_service import ScopeTokenService
 
-        # Create local ObjectState for function (not registered - internal to FunctionPaneWidget)
-        # TODO: In future, register function ObjectStates for full lifecycle management
+        # Build function-specific scope: step_scope::func_N
+        step_scope = self.scope_id or "no_scope"
+        func_scope_id = ScopeTokenService.build_scope_id(step_scope, self.func)
+        func_token = ScopeTokenService.ensure_token(step_scope, self.func)
+
         func_state = ObjectState(
             object_instance=self.func,
-            field_id=f"func_{self.index}",
-            scope_id=self.scope_id,
+            field_id=func_token,
+            scope_id=func_scope_id,
             context_obj=self.step_instance,
             initial_values=self.kwargs,
         )
+        ObjectStateRegistry.register(func_state)
+        self._func_state = func_state  # Store for cleanup
 
         self.form_manager = PyQtParameterFormManager(
             state=func_state,
@@ -278,9 +284,16 @@ class FunctionPaneWidget(QWidget):
         )
 
         layout.addWidget(self.form_manager)
-        
+
         return group_box
-    
+
+    def cleanup_object_state(self) -> None:
+        """Unregister ObjectState on widget destruction."""
+        from openhcs.config_framework.object_state import ObjectStateRegistry
+        if hasattr(self, '_func_state') and self._func_state:
+            ObjectStateRegistry.unregister(self._func_state)
+            self._func_state = None
+
     def create_parameter_widget(self, param_name: str, param_type: type, current_value: Any) -> Optional[QWidget]:
         """
         Create parameter widget based on type.
@@ -537,6 +550,9 @@ class FunctionListWidget(QWidget):
         # Clear existing panes - CRITICAL: Manually unregister form managers BEFORE deleteLater()
         # This prevents RuntimeError when new widgets try to connect to deleted managers
         for pane in self.function_panes:
+            # Unregister ObjectState
+            if hasattr(pane, 'cleanup_object_state'):
+                pane.cleanup_object_state()
             # Explicitly unregister the form manager before scheduling deletion
             if hasattr(pane, 'form_manager') and pane.form_manager is not None:
                 try:

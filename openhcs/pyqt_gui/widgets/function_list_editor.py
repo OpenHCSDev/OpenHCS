@@ -498,9 +498,20 @@ class FunctionListEditorWidget(QWidget):
             self.function_pattern_changed.emit()
             logger.debug(f"Added function at index {index}: {selected_function.__name__}")
     
-    def _remove_function(self, index):
+    def _remove_function(self, index: int) -> None:
         """Remove function at index."""
         if 0 <= index < len(self.functions):
+            func, _kwargs = self.functions[index]
+
+            # Unregister ObjectState before removal
+            if self.scope_id:
+                from openhcs.config_framework.object_state import ObjectStateRegistry
+                from openhcs.pyqt_gui.widgets.shared.services.scope_token_service import ScopeTokenService
+                scope_id = ScopeTokenService.build_scope_id(self.scope_id, func)
+                existing = ObjectStateRegistry.get_by_scope(scope_id)
+                if existing:
+                    ObjectStateRegistry.unregister(existing)
+
             self.functions.pop(index)
             self._update_pattern_data()
             self._populate_function_list()

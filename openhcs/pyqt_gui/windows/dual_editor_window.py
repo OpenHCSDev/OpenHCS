@@ -237,12 +237,9 @@ class DualEditorWindow(BaseFormDialog):
             logger.info(f"🔘 Updating save button text: is_new={self.is_new} → '{new_text}'")
             self.save_button.setText(new_text)
 
-    def _build_step_scope_id(self, fallback_name: str) -> str:
-        plate_scope = getattr(self.orchestrator, 'plate_path', 'no_orchestrator')
-        token = getattr(self.editing_step, '_pipeline_scope_token', None)
-        if token:
-            return f"{plate_scope}::{token}"
-        return f"{plate_scope}::{fallback_name}"
+    def _build_step_scope_id(self) -> str:
+        from openhcs.pyqt_gui.widgets.shared.services.scope_token_service import ScopeTokenService
+        return ScopeTokenService.build_scope_id(self.orchestrator.plate_path, self.editing_step)
     
     def create_step_tab(self):
         """Create the step settings tab (using dedicated widget)."""
@@ -252,9 +249,7 @@ class DualEditorWindow(BaseFormDialog):
         # Create step parameter editor widget with proper nested context
         # Step must be nested: GlobalPipelineConfig -> PipelineConfig -> Step
         # CRITICAL: Use hierarchical scope_id to isolate this step editor + its function panes
-        # Format: "plate_path::step_name" to prevent cross-contamination between different step editors
-        step_name = getattr(self.editing_step, 'name', 'unknown_step')
-        scope_id = self._build_step_scope_id(step_name)
+        scope_id = self._build_step_scope_id()
 
         with config_context(self.orchestrator.pipeline_config):  # Pipeline level
             with config_context(self.editing_step):              # Step level
@@ -284,8 +279,8 @@ class DualEditorWindow(BaseFormDialog):
         # Create function list editor widget (mirrors Textual TUI)
         # CRITICAL: Pass editing_step for context hierarchy (Function → Step → Pipeline → Global)
         # CRITICAL: Use same hierarchical scope_id as step editor to isolate this step editor + its function panes
+        scope_id = self._build_step_scope_id()
         step_name = getattr(self.editing_step, 'name', 'unknown_step')
-        scope_id = self._build_step_scope_id(step_name)
 
         self.func_editor = FunctionListEditorWidget(
             initial_functions=initial_functions,

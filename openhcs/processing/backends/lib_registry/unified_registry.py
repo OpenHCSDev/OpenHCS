@@ -35,7 +35,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 from openhcs.core.xdg_paths import get_cache_file_path
 from openhcs.core.memory.stack_utils import unstack_slices, stack_slices
 from openhcs.core.auto_register_meta import AutoRegisterMeta, LazyDiscoveryDict
-from openhcs.core.config import LazyDtypeConfig 
+from openhcs.core.config import LazyDtypeConfig , LazyWellFilterConfig, LazyStepWellFilterConfig
 
 logger = logging.getLogger(__name__)
 
@@ -183,6 +183,8 @@ class LibraryRegistryBase(ABC, metaclass=AutoRegisterMeta):
     INJECTABLE_PARAMS = [
         ('enabled', True, bool),
         ('dtype_config', lambda: LazyDtypeConfig(), 'LazyDtypeConfig'),
+#        ('well_filter_config', lambda: LazyWellFilterConfig(), 'LazyWellFilterConfig'),
+#        ('step_well_filter_config', lambda: LazyStepWellFilterConfig(), 'LazyStepWellFilterConfig'),
     ]
 
     # Parameters injected only into FLEXIBLE contract functions
