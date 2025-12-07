@@ -243,13 +243,18 @@ def resolve_field_inheritance(
     available_configs: Dict[str, Any]
 ) -> Any:
     """
-    Simplified MRO-based inheritance resolution.
+    MRO-based inheritance resolution.
 
     ALGORITHM:
-    1. Check if obj has concrete value for field_name in context
-    2. Traverse obj's MRO from most to least specific
-    3. For each MRO class, check if there's a config instance in context with concrete (non-None) value
-    4. Return first concrete value found
+    For LazyDataclass types:
+      1. Check if same-type config exists in context with concrete value
+      2. Walk MRO to find parent class configs with concrete value
+      3. Fall back to static class defaults if nothing found
+
+    For concrete classes with lazy resolution:
+      1. SKIP same-type lookup (if you created ProcessingConfig(group_by=None), you want None)
+      2. Walk MRO to find PARENT class configs with concrete value (sibling inheritance)
+      3. Return None if nothing found (no static default fallback)
 
     Args:
         obj: The object requesting field resolution
@@ -259,27 +264,36 @@ def resolve_field_inheritance(
     Returns:
         Resolved field value or None if not found
     """
+    from openhcs.config_framework.lazy_factory import LazyDataclass
+
     obj_type = type(obj)
+    is_lazy_dataclass = isinstance(obj, LazyDataclass)
 
     # Step 1: Check if exact same type has concrete value in context
-    for config_name, config_instance in available_configs.items():
-        if type(config_instance) == obj_type:
-            try:
-                field_value = object.__getattribute__(config_instance, field_name)
-                if field_value is not None:
-                    if field_name == 'well_filter':
-                        logger.debug(f"🔍 CONCRETE VALUE: {obj_type.__name__}.{field_name} = {field_value}")
-                    return field_value
-            except AttributeError:
-                continue
+    # ONLY for LazyDataclass types. For concrete classes, same-type lookup is skipped
+    # because finding another ProcessingConfig in context is NOT inheritance - it's
+    # just another instance in a different scope. If you explicitly created
+    # ProcessingConfig(group_by=None), you wanted None.
+    if is_lazy_dataclass:
+        for config_name, config_instance in available_configs.items():
+            if type(config_instance) == obj_type:
+                try:
+                    field_value = object.__getattribute__(config_instance, field_name)
+                    if field_value is not None:
+                        if field_name == 'well_filter':
+                            logger.debug(f"🔍 CONCRETE VALUE: {obj_type.__name__}.{field_name} = {field_value}")
+                        return field_value
+                except AttributeError:
+                    continue
 
     # Step 2: MRO-based inheritance - traverse MRO from most to least specific
-    # For each class in the MRO, check if there's a config instance in context with concrete value
+    # Skip the first entry (self type) since we already checked it above (for lazy) or want to skip it (for concrete)
+    # This finds PARENT class configs with concrete values (sibling inheritance)
     if field_name in ['output_dir_suffix', 'sub_dir', 'well_filter']:
         logger.debug(f"🔍 MRO-INHERITANCE: Resolving {obj_type.__name__}.{field_name}")
         logger.debug(f"🔍 MRO-INHERITANCE: MRO = {[cls.__name__ for cls in obj_type.__mro__]}")
 
-    for mro_class in obj_type.__mro__:
+    for mro_class in obj_type.__mro__[1:]:  # Skip first (self type)
         if not is_dataclass(mro_class):
             continue
 
@@ -297,16 +311,9 @@ def resolve_field_inheritance(
                 except AttributeError:
                     continue
 
-    # Step 3: Class defaults as final fallback
-    try:
-        class_default = object.__getattribute__(obj_type, field_name)
-        if class_default is not None:
-            if field_name in ['output_dir_suffix', 'sub_dir', 'well_filter']:
-                logger.debug(f"🔍 CLASS-DEFAULT: {obj_type.__name__}.{field_name} = {class_default}")
-            return class_default
-    except AttributeError:
-        pass
-
+    # No Step 3: If MRO walk finds nothing, return None.
+    # "If we wanted static class defaults, it wouldn't have been overridden to None"
+    # For LazyDataclass, class defaults are all None anyway (via rebuild_with_none_defaults).
     if field_name in ['output_dir_suffix', 'sub_dir', 'well_filter']:
         logger.debug(f"🔍 NO-RESOLUTION: {obj_type.__name__}.{field_name} = None")
     return None

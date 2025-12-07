@@ -22,6 +22,111 @@ _base_to_lazy_registry: Dict[Type, Type] = {}
 _lazy_class_cache: Dict[str, Type] = {}
 
 
+# =============================================================================
+# UNIFIED NONE-FORCING: Single path for both base and lazy classes
+# Replaces the old 3-stage approach (pre-process setattr, post-process Field patch)
+# =============================================================================
+
+def get_inherited_field_names(cls: Type) -> set:
+    """
+    Get names of fields inherited from parent dataclasses (not defined in cls itself).
+
+    A field is "inherited" if it exists in a parent's __dataclass_fields__ but
+    is NOT in this class's own __annotations__ (i.e., not redefined here).
+    """
+    # Get all field names from parent dataclasses
+    parent_fields = set()
+    for base in cls.__mro__[1:]:  # Skip cls itself
+        if dataclasses.is_dataclass(base):
+            parent_fields.update(base.__dataclass_fields__.keys())
+
+    # Get cls's OWN annotations (not inherited) - check __dict__ not getattr
+    own_defined = set()
+    if '__annotations__' in cls.__dict__:
+        own_defined = set(cls.__dict__['__annotations__'].keys())
+
+    return parent_fields - own_defined
+
+
+def rebuild_with_none_defaults(
+    cls: Type,
+    field_names_to_none: Optional[set] = None,
+    new_name: Optional[str] = None
+) -> Type:
+    """
+    Rebuild a dataclass via make_dataclass with None defaults for specified fields.
+
+    This is the UNIFIED approach for both base classes (inherit_as_none) and lazy classes.
+    Instead of patching Field objects after @dataclass, we rebuild with correct defaults.
+
+    Args:
+        cls: The dataclass to rebuild
+        field_names_to_none: Fields that should have default=None.
+                            If None, ALL fields get default=None (for lazy classes).
+        new_name: Optional new class name (for lazy classes)
+
+    Returns:
+        A new class with the same fields but modified defaults
+    """
+    import copy
+
+    if not dataclasses.is_dataclass(cls):
+        raise ValueError(f"{cls} is not a dataclass")
+
+    if field_names_to_none is None:
+        # All fields get None (for lazy classes)
+        field_names_to_none = {f.name for f in fields(cls)}
+
+    # Build field definitions
+    field_defs = []
+    for f in fields(cls):
+        if f.name in field_names_to_none:
+            # Force None default, but preserve original default in metadata for fallback
+            # This allows standalone usage to fall back to parent's static default
+            new_metadata = dict(f.metadata) if f.metadata else {}
+            new_metadata['_inherited_default'] = f.default if f.default is not MISSING else MISSING
+            new_metadata['_inherited_default_factory'] = f.default_factory
+            field_defs.append((f.name, f.type, field(default=None, metadata=new_metadata)))
+        else:
+            # Preserve original field (copy to avoid sharing)
+            field_defs.append((f.name, f.type, copy.copy(f)))
+
+    # Collect non-dunder attributes to preserve (methods, class vars, etc.)
+    namespace = {}
+    for key, value in cls.__dict__.items():
+        if key.startswith('__') and key.endswith('__'):
+            continue  # Skip dunders (make_dataclass will generate them)
+        if key == '__dataclass_fields__':
+            continue  # Will be regenerated
+        namespace[key] = value
+
+    # Keep original bases for isinstance() to work
+    bases = cls.__bases__
+
+    # Check if any base is a frozen dataclass - if so, new class must also be frozen
+    is_frozen = any(
+        dataclasses.is_dataclass(b) and b.__dataclass_fields__ and
+        getattr(b, '__dataclass_params__', None) and b.__dataclass_params__.frozen
+        for b in cls.__mro__[1:]
+    )
+
+    # Create new class
+    new_cls = make_dataclass(
+        new_name or cls.__name__,
+        fields=field_defs,
+        bases=bases,
+        namespace=namespace,
+        frozen=is_frozen,
+    )
+
+    # Preserve module and qualname
+    new_cls.__module__ = cls.__module__
+    if new_name is None:
+        new_cls.__qualname__ = cls.__qualname__
+
+    return new_cls
+
+
 # ContextEventCoordinator removed - replaced with contextvars-based context system
 
 
@@ -319,13 +424,37 @@ class LazyMethodBindings:
                 if field_obj and is_dataclass(field_obj.type):
                     return field_obj.type()
 
+                # Fallback to inherited default from parent class (for standalone usage)
+                if field_obj and '_inherited_default' in field_obj.metadata:
+                    inherited = field_obj.metadata['_inherited_default']
+                    if inherited is not MISSING:
+                        return inherited
+                    # Check for default_factory
+                    factory = field_obj.metadata.get('_inherited_default_factory', MISSING)
+                    if factory is not MISSING:
+                        return factory()
+
                 return None
 
             except LookupError:
                 # No context available - fallback to MRO concrete values
                 # For LazyDataclass types, get the base type; for concrete types, use self.__class__ directly
                 base_type = get_base_type_for_lazy(self.__class__) or self.__class__
-                return _find_mro_concrete_value(base_type, name)
+                mro_value = _find_mro_concrete_value(base_type, name)
+                if mro_value is not None:
+                    return mro_value
+
+                # Also check inherited default metadata
+                field_obj = next((f for f in fields(self.__class__) if f.name == name), None)
+                if field_obj and '_inherited_default' in field_obj.metadata:
+                    inherited = field_obj.metadata['_inherited_default']
+                    if inherited is not MISSING:
+                        return inherited
+                    factory = field_obj.metadata.get('_inherited_default_factory', MISSING)
+                    if factory is not MISSING:
+                        return factory()
+
+                return None
         return __getattribute__
 
     @staticmethod
@@ -771,59 +900,16 @@ def create_global_default_decorator(target_config_class: Type):
             ui_hidden: Whether to hide from UI (apply decorator but don't inject into global config) (default: False)
         """
         def decorator(actual_cls):
-            # Configure logging inline for decorator execution (runs at import time before logging is configured)
-            import logging
-            import sys
-            _decorator_logger = logging.getLogger('openhcs.config_framework.lazy_factory')
-            # DISABLED: StreamHandler causes print output even when logging is disabled
-            # This logger will use the root logger's handlers configured in launch.py
-            pass
-
-            # Apply inherit_as_none by modifying class BEFORE @dataclass (multiprocessing-safe)
+            # UNIFIED NONE-FORCING: Single make_dataclass rebuild instead of old 3-stage approach
             if inherit_as_none:
-                # Mark the class for inherit_as_none processing
+                # Mark the class for inherit_as_none processing (used by lazy factory metaclass check)
                 actual_cls._inherit_as_none = True
 
-                # Apply inherit_as_none logic by directly modifying the class definition
-                # This must happen BEFORE @dataclass processes the class
-                explicitly_defined_fields = set()
-                if hasattr(actual_cls, '__annotations__'):
-                    for field_name in actual_cls.__annotations__:
-                        # Check if field has a concrete default value in THIS class definition (not inherited)
-                        if field_name in actual_cls.__dict__:  # Only fields defined in THIS class
-                            field_value = actual_cls.__dict__[field_name]
-                            # Only consider it explicitly defined if it has a concrete value (not None)
-                            if field_value is not None:
-                                explicitly_defined_fields.add(field_name)
-
-                # Process parent classes to find fields that need None overrides
-                processed_fields = set()
-                fields_set_to_none = set()  # Track which fields were actually set to None
-                for base in actual_cls.__bases__:
-                    if hasattr(base, '__annotations__'):
-                        for field_name, field_type in base.__annotations__.items():
-                            if field_name in processed_fields:
-                                continue
-
-                            # Set inherited fields to None (except explicitly defined ones)
-                            if field_name not in explicitly_defined_fields:
-                                # CRITICAL: Force the field to be seen as locally defined by @dataclass
-                                # We need to ensure @dataclass processes this as a local field, not inherited
-
-                                # 1. Set the class attribute to None
-                                setattr(actual_cls, field_name, None)
-                                fields_set_to_none.add(field_name)
-
-                                # 2. Ensure annotation exists in THIS class
-                                if not hasattr(actual_cls, '__annotations__'):
-                                    actual_cls.__annotations__ = {}
-                                actual_cls.__annotations__[field_name] = field_type
-
-                            processed_fields.add(field_name)
-
-                # Note: We modify class attributes here, but we also need to fix the dataclass
-                # field definitions after @dataclass runs, since @dataclass processes the MRO
-                # and may use parent class field definitions instead of our modified attributes.
+                # Rebuild class with None defaults for inherited fields
+                # This replaces the old pre-process setattr + post-process Field patching
+                inherited_fields = get_inherited_field_names(actual_cls)
+                if inherited_fields:
+                    actual_cls = rebuild_with_none_defaults(actual_cls, inherited_fields)
 
             # Generate field and class names
             field_name = _camel_to_snake(actual_cls.__name__)
@@ -873,26 +959,9 @@ def create_global_default_decorator(target_config_class: Type):
             if ui_hidden:
                 lazy_class._ui_hidden = True
 
-            # CRITICAL: Post-process dataclass fields after @dataclass has run
-            # This fixes the constructor behavior for inherited fields that should be None
-            # Apply to BOTH base class AND lazy class
-            # _decorator_logger.info(f"🔍 @global_pipeline_config: {actual_cls.__name__} - inherit_as_none={inherit_as_none}, fields_set_to_none={fields_set_to_none}")
-            if inherit_as_none and hasattr(actual_cls, '__dataclass_fields__'):
-                # _decorator_logger.info(f"🔍 BASE CLASS FIX: {actual_cls.__name__} - fixing {len(fields_set_to_none)} inherited fields")
-                _fix_dataclass_field_defaults_post_processing(actual_cls, fields_set_to_none)
-
-            # CRITICAL: Also fix lazy class to ensure ALL fields are None by default
-            # For lazy classes, ALL fields should be None (not just inherited ones)
-            # _decorator_logger.info(f"🔍 LAZY CLASS CHECK: {lazy_class.__name__} - inherit_as_none={inherit_as_none}, has_dataclass_fields={hasattr(lazy_class, '__dataclass_fields__')}")
-            if inherit_as_none:
-                if hasattr(lazy_class, '__dataclass_fields__'):
-                    # Compute ALL fields for lazy class (not just inherited ones)
-                    lazy_fields_to_set_none = set(lazy_class.__dataclass_fields__.keys())
-                    # _decorator_logger.info(f"🔍 LAZY CLASS FIX: {lazy_class.__name__} - setting {len(lazy_fields_to_set_none)} fields to None: {lazy_fields_to_set_none}")
-                    _fix_dataclass_field_defaults_post_processing(lazy_class, lazy_fields_to_set_none)
-                else:
-                    # _decorator_logger.warning(f"🔍 WARNING: {lazy_class.__name__} does not have __dataclass_fields__!")
-                    pass
+            # Note: No Stage 3 post-processing needed!
+            # - Base class: rebuilt via rebuild_with_none_defaults() above
+            # - Lazy class: _introspect_dataclass_fields() already sets None defaults
 
             # PHASE 2 FIX: Add lazy resolution to the CONCRETE class
             # This allows GlobalPipelineConfig's nested configs to auto-resolve None values
@@ -910,54 +979,6 @@ def create_global_default_decorator(target_config_class: Type):
             return decorator(cls)
 
     return global_default_decorator
-
-
-def _fix_dataclass_field_defaults_post_processing(cls: Type, fields_set_to_none: set) -> None:
-    """
-    Fix dataclass field defaults after @dataclass has processed the class.
-
-    This is necessary because @dataclass processes the MRO and may use parent class
-    field definitions instead of our modified class attributes. We need to ensure
-    that fields we set to None actually use None as the default in the constructor.
-    """
-    import dataclasses
-    import copy
-
-    # Store the original __init__ method
-    original_init = cls.__init__
-
-    def custom_init(self, **kwargs):
-        """Custom __init__ that ensures inherited fields use None defaults."""
-        # For fields that should be None, set them to None if not explicitly provided
-        for field_name in fields_set_to_none:
-            if field_name not in kwargs:
-                kwargs[field_name] = None
-
-        # Call the original __init__ with modified kwargs
-        original_init(self, **kwargs)
-
-    # Replace the __init__ method
-    cls.__init__ = custom_init
-
-    # Also update the field defaults for consistency
-    for field_name in fields_set_to_none:
-        if field_name in cls.__dataclass_fields__:
-            # Get the field object
-            field_obj = cls.__dataclass_fields__[field_name]
-
-            # CRITICAL: Create a copy of the field object to avoid modifying parent class fields
-            # When a child class inherits from a parent, they share the same field objects
-            # Modifying the field object directly would affect the parent class too!
-            field_copy = copy.copy(field_obj)
-            field_copy.default = None
-            field_copy.default_factory = dataclasses.MISSING
-
-            # Replace the field object in this class's __dataclass_fields__
-            cls.__dataclass_fields__[field_name] = field_copy
-
-            # Also ensure the class attribute is None (should already be set, but double-check)
-            setattr(cls, field_name, None)
-
 
 
 def _inject_all_pending_fields():
