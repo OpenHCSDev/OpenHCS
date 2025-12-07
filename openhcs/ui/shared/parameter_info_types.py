@@ -55,6 +55,9 @@ class ParameterInfoBase(ABC):
     current_value: Any
     description: Optional[str] = None
 
+    # Widget creation type - subclasses override. Imported lazily to avoid circular imports.
+    widget_creation_type: str = "REGULAR"  # Default, overridden by subclasses
+
 
 class ParameterInfoMeta(ABCMeta):
     """
@@ -101,6 +104,7 @@ class OptionalDataclassInfo(ParameterInfoBase, metaclass=ParameterInfoMeta):
     """
     default_value: Any = None
     is_required: bool = True
+    widget_creation_type: str = "OPTIONAL_NESTED"
 
     @staticmethod
     def matches(param_type: Type) -> bool:
@@ -138,6 +142,7 @@ class DirectDataclassInfo(ParameterInfoBase, metaclass=ParameterInfoMeta):
     """
     default_value: Any = None
     is_required: bool = True
+    widget_creation_type: str = "NESTED"
 
     @staticmethod
     def matches(param_type: Type) -> bool:

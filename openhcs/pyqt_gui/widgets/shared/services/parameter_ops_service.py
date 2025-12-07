@@ -84,8 +84,9 @@ class ParameterOpsService(ParameterServiceABC):
     def _reset_OptionalDataclassInfo(self, info: OptionalDataclassInfo, manager) -> None:
         """Reset Optional[Dataclass] field - sync checkbox and reset nested manager."""
         param_name = info.name
-        reset_value = self._get_reset_value(manager, param_name)
-        manager.parameters[param_name] = reset_value
+        # MODEL mutation through ObjectState (handles tracking)
+        manager.state.reset_parameter(param_name)
+        reset_value = manager.state.parameters.get(param_name)
 
         if param_name in manager.widgets:
             container = manager.widgets[param_name]
@@ -124,67 +125,31 @@ class ParameterOpsService(ParameterServiceABC):
     def _reset_GenericInfo(self, info: GenericInfo, manager) -> None:
         """Reset generic field to signature default.
 
-        SIMPLIFIED: Set value and refresh placeholder with proper context.
-        Same approach as reset_all_parameters but for single field.
+        MODEL mutation through ObjectState, then VIEW-only widget updates.
         """
         param_name = info.name
-        reset_value = self._get_reset_value(manager, param_name)
-        logger.info(f"🔬 RESET_TRACE: _reset_GenericInfo: {manager.field_id}.{param_name}")
-        logger.info(f"🔬 RESET_TRACE: reset_value={repr(reset_value)[:50]}")
+        # MODEL mutation through ObjectState (handles tracking, cache invalidation)
+        manager.state.reset_parameter(param_name)
+        reset_value = manager.state.parameters.get(param_name)
 
-        # Update parameters and tracking
-        old_value = manager.parameters.get(param_name)
-        logger.info(f"🔬 RESET_TRACE: old_value={repr(old_value)[:50]}")
-        manager.parameters[param_name] = reset_value
-        logger.info(f"🔬 RESET_TRACE: Set parameters[{param_name}] = {repr(reset_value)[:50]}")
-
-        logger.info(f"🔬 RESET_TRACE: BEFORE _update_reset_tracking: _user_set_fields={manager._user_set_fields}")
-        self._update_reset_tracking(manager, param_name, reset_value)
-        logger.info(f"🔬 RESET_TRACE: AFTER _update_reset_tracking: _user_set_fields={manager._user_set_fields}")
-
-        # CRITICAL: Invalidate cache token BEFORE refreshing placeholder
-        # Otherwise refresh_single_placeholder will use stale cached values
+        # Invalidate cache token BEFORE refreshing placeholder
         from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
-        old_token = LiveContextService.get_token()
         LiveContextService.increment_token()
-        new_token = LiveContextService.get_token()
-        logger.info(f"🔬 RESET_TRACE: Incremented token: {old_token} -> {new_token}")
 
+        # VIEW-only: Update widget
         if param_name in manager.widgets:
             widget = manager.widgets[param_name]
-
-            # Update widget value
             from .signal_service import SignalService
             with SignalService.block_signals(widget):
                 manager._widget_service.update_widget_value(
                     widget, reset_value, param_name, skip_context_behavior=False, manager=manager
                 )
-
-            # Refresh placeholder with proper context (same as reset_all_parameters does)
-            # This builds context stack with root values for sibling inheritance
+            # Refresh placeholder if value is None
             if reset_value is None:
-                logger.info(f"🔬 RESET_TRACE: Calling refresh_single_placeholder for {param_name}")
                 self.refresh_single_placeholder(manager, param_name)
-                logger.info(f"🔬 RESET_TRACE: Done refresh_single_placeholder")
 
-            logger.info(f"🔬 RESET_TRACE: _reset_GenericInfo complete")
-
-    @staticmethod
-    def _get_reset_value(manager, param_name: str) -> Any:
-        """Get reset value from param_defaults (signature defaults)."""
-        return manager.param_defaults.get(param_name)
-
-    @staticmethod
-    def _update_reset_tracking(manager, param_name: str, reset_value: Any) -> None:
-        """Update reset field tracking for lazy behavior."""
-        field_path = f"{manager.field_id}.{param_name}"
-        if reset_value is None:
-            manager.reset_fields.add(param_name)
-            manager.shared_reset_fields.add(field_path)
-            manager._user_set_fields.discard(param_name)
-        else:
-            manager.reset_fields.discard(param_name)
-            manager.shared_reset_fields.discard(field_path)
+    # DELETED: _get_reset_value - ObjectState owns defaults
+    # DELETED: _update_reset_tracking - ObjectState.reset_parameter handles tracking
 
     # ========== PLACEHOLDER REFRESH (from PlaceholderRefreshService) ==========
 

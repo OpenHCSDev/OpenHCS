@@ -22,6 +22,7 @@ from openhcs.ui.shared.pattern_data_manager import PatternDataManager
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 from openhcs.pyqt_gui.windows.base_form_dialog import BaseFormDialog
+from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
 from openhcs.introspection.unified_parameter_analyzer import UnifiedParameterAnalyzer
 from typing import List
 logger = logging.getLogger(__name__)
@@ -457,8 +458,7 @@ class DualEditorWindow(BaseFormDialog):
 
         # Trigger cross-window refresh for all form managers
         # This will update placeholders in the step editor to show new inherited values
-        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
-        ParameterFormManager.trigger_global_cross_window_refresh()
+        LiveContextService.trigger_global_refresh()
         logger.debug("Triggered global cross-window refresh after config change")
 
     def setup_connections(self):
@@ -641,8 +641,7 @@ class DualEditorWindow(BaseFormDialog):
 
                     # Refresh placeholders to show new inherited values
                     # Use the same pattern as on_config_changed (line 466)
-                    from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
-                    ParameterFormManager.trigger_global_cross_window_refresh()
+                    LiveContextService.trigger_global_refresh()
                     logger.debug("Triggered global cross-window refresh after pipeline config change")
 
     def _update_context_obj_recursively(self, form_manager, new_context_obj):
@@ -794,13 +793,13 @@ class DualEditorWindow(BaseFormDialog):
                 self.editing_step.func = current_pattern
                 logger.debug(f"Synced function pattern before save: {current_pattern}")
 
-            # CRITICAL FIX: Collect current values from all form managers before saving
+            # CRITICAL FIX: Collect current values from all tab states before saving
             # This ensures nested dataclass field values are properly saved to the step object
             for tab_index in range(self.tab_widget.count()):
                 tab_widget = self.tab_widget.widget(tab_index)
-                if hasattr(tab_widget, 'form_manager'):
-                    # Get current values from this tab's form manager
-                    current_values = tab_widget.form_manager.get_current_values()
+                if hasattr(tab_widget, 'state') and tab_widget.state:
+                    # Get current values from this tab's state
+                    current_values = tab_widget.state.get_current_values()
 
                     # Apply values to the editing step
                     for param_name, value in current_values.items():
@@ -914,11 +913,11 @@ class DualEditorWindow(BaseFormDialog):
 
         for tab_index in range(self.tab_widget.count()):
             tab_widget = self.tab_widget.widget(tab_index)
-            form_manager = getattr(tab_widget, 'form_manager', None)
-            if not form_manager:
+            state = getattr(tab_widget, 'state', None)
+            if not state:
                 continue
 
-            current_values = form_manager.get_current_values()
+            current_values = state.get_current_values()
             for param_name, value in current_values.items():
                 if hasattr(temp_step, param_name):
                     setattr(temp_step, param_name, value)
@@ -1005,8 +1004,7 @@ class DualEditorWindow(BaseFormDialog):
         # CRITICAL: Trigger global refresh AFTER unregistration so other windows
         # re-collect live context without this cancelled window's values
         logger.info("🔍 DualEditorWindow: About to trigger global refresh")
-        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
-        ParameterFormManager.trigger_global_cross_window_refresh()
+        LiveContextService.trigger_global_refresh()
         logger.info("🔍 DualEditorWindow: Triggered global refresh after cancel")
 
     def closeEvent(self, event):

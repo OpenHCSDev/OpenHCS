@@ -116,14 +116,14 @@ class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
         # ObjectState was registered by PipelineEditorWidget when step was added
         logger.info(f"🔍 STEP_EDITOR: Looking up ObjectState for scope_id={self.scope_id}")
         logger.info(f"🔍 STEP_EDITOR: Registry has scopes: {[s.scope_id for s in ObjectStateRegistry.get_all()]}")
-        state = ObjectStateRegistry.get_by_scope(self.scope_id) if self.scope_id else None
-        logger.info(f"🔍 STEP_EDITOR: Found state={state is not None}, object_instance={type(state.object_instance).__name__ if state else 'N/A'}")
+        self.state = ObjectStateRegistry.get_by_scope(self.scope_id) if self.scope_id else None
+        logger.info(f"🔍 STEP_EDITOR: Found state={self.state is not None}, object_instance={type(self.state.object_instance).__name__ if self.state else 'N/A'}")
 
-        if state is None:
+        if self.state is None:
             # Fallback: create local ObjectState (for backward compatibility)
             logger.info(f"🔍 STEP_EDITOR: Creating LOCAL ObjectState (not in registry)")
             field_id = f"{self.scope_id}.step_{self.step_index}" if self.step_index is not None and self.scope_id else "step"
-            state = ObjectState(
+            self.state = ObjectState(
                 object_instance=self.step,
                 field_id=field_id,
                 scope_id=self.scope_id,
@@ -131,7 +131,7 @@ class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
                 exclude_params=['func'],
             )
         else:
-            logger.info(f"🔍 STEP_EDITOR: Using REGISTERED ObjectState, params={list(state.parameters.keys())}")
+            logger.info(f"🔍 STEP_EDITOR: Using REGISTERED ObjectState, params={list(self.state.parameters.keys())}")
 
         config = FormManagerConfig(
             parent=self,                         # Pass self as parent widget
@@ -140,7 +140,7 @@ class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
         )
 
         self.form_manager = ParameterFormManager(
-            state=state,                         # ObjectState (MODEL) from registry
+            state=self.state,                    # ObjectState (MODEL) from registry
             config=config                        # Pass configuration object
         )
         self.hierarchy_tree = None
@@ -406,9 +406,9 @@ class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
             if len(path_parts) == 1:
                 leaf_field = path_parts[0]
 
-                # Get the properly converted value from the form manager
-                # The form manager handles all type conversions including List[Enum]
-                final_value = self.form_manager.get_current_values().get(leaf_field, value)
+                # Get the properly converted value from state
+                # The state handles all type conversions including List[Enum]
+                final_value = self.state.get_current_values().get(leaf_field, value)
 
                 # CRITICAL FIX: For function parameters, use fresh imports to avoid unpicklable registry wrappers
                 if leaf_field == 'func' and callable(final_value) and hasattr(final_value, '__module__'):
@@ -495,8 +495,8 @@ class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
         """Save step settings to file."""
         try:
             import dill as pickle
-            # Get current values from form manager
-            step_data = self.form_manager.get_current_values()
+            # Get current values from state
+            step_data = self.state.get_current_values()
             with open(file_path, 'wb') as f:
                 pickle.dump(step_data, f)
             logger.debug(f"Saved {len(step_data)} parameters to {file_path.name}")
@@ -534,8 +534,8 @@ class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
             # This ensures code editor shows unsaved changes from other open windows
             ParameterOpsService().refresh_with_live_context(self.form_manager)
 
-            # Get current step from form (includes live context values)
-            current_values = self.form_manager.get_current_values()
+            # Get current step from state (includes live context values)
+            current_values = self.state.get_current_values()
 
             # CRITICAL: Get func from parent dual editor's function list editor if available
             # The func is managed by the Function Pattern tab in the dual editor

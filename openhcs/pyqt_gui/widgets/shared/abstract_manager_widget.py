@@ -26,6 +26,7 @@ from PyQt6.QtGui import QFont
 
 from openhcs.pyqt_gui.widgets.shared.reorderable_list_widget import ReorderableListWidget
 from openhcs.pyqt_gui.widgets.shared.list_item_delegate import MultilinePreviewItemDelegate
+from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
 from openhcs.pyqt_gui.widgets.mixins import (
     CrossWindowPreviewMixin,
     handle_selection_change_with_prevention,
@@ -786,8 +787,7 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, ABC, metaclass=_Co
         PlateManager: Also emit pipeline_data_changed, etc.
         """
         # Default: trigger cross-window refresh (common to both)
-        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
-        ParameterFormManager.trigger_global_cross_window_refresh()
+        LiveContextService.trigger_global_refresh()
 
     # === Broadcast Utility ===
 

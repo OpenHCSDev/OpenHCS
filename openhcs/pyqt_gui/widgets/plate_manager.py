@@ -18,6 +18,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 
 from openhcs.core.config import GlobalPipelineConfig, PipelineConfig
 from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator, OrchestratorState
+from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
 from openhcs.core.path_cache import PathCacheKey
 from openhcs.io.filemanager import FileManager
 from openhcs.io.base import _create_storage_registry
@@ -258,7 +259,7 @@ class PlateManagerWidget(AbstractManagerWidget):
         """Build preview labels for orchestrator config using ABC template."""
         try:
             pipeline_config = orchestrator.pipeline_config
-            live_context_snapshot = ParameterFormManager.collect_live_context()
+            live_context_snapshot = LiveContextService.collect()
 
             return self._build_preview_labels(
                 item=orchestrator,

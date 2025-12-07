@@ -106,7 +106,7 @@ class SyntheticPlateGeneratorWindow(QDialog):
         from openhcs.config_framework.object_state import ObjectState
 
         # Standalone tool - create local ObjectState (not registered in registry)
-        state = ObjectState(
+        self.state = ObjectState(
             object_instance=SyntheticMicroscopyGenerator,  # Pass the class itself, not __init__
             field_id="synthetic_plate_generator",
             scope_id=None,
@@ -115,7 +115,7 @@ class SyntheticPlateGeneratorWindow(QDialog):
         )
 
         self.form_manager = ParameterFormManager(
-            state=state,
+            state=self.state,
             config=FormManagerConfig(
                 parent=self,
                 color_scheme=self.color_scheme  # Pass color_scheme as instance parameter
@@ -202,8 +202,8 @@ class SyntheticPlateGeneratorWindow(QDialog):
     def generate_plate(self):
         """Generate the synthetic plate with current parameters."""
         try:
-            # Get parameters from form
-            params = self.form_manager.get_current_values()
+            # Get parameters from state
+            params = self.state.get_current_values()
             
             # Determine output directory
             if self.output_dir is None:

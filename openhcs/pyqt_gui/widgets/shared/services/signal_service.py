@@ -136,9 +136,9 @@ class SignalService:
 
         # Snapshot initial values for change detection
         if hasattr(manager.config, '_resolve_field_value'):
-            manager._initial_values_on_open = manager.get_user_modified_values()
+            manager._initial_values_on_open = manager.state.get_user_modified_values()
         else:
-            manager._initial_values_on_open = manager.get_current_values()
+            manager._initial_values_on_open = manager.state.get_current_values()
 
         from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
         logger.info(f"🔍 REGISTER: {manager.field_id} (total: {len(LiveContextService.get_active_managers())})")

@@ -56,8 +56,10 @@ class ImageBrowserWidget(QWidget):
 
         # Lazy config widgets (will be created in init_ui)
         self.napari_config_form = None
+        self.napari_config_state = None
         self.lazy_napari_config = None
         self.fiji_config_form = None
+        self.fiji_config_state = None
         self.lazy_fiji_config = None
 
         # File data tracking (images + results)
@@ -344,7 +346,7 @@ class ImageBrowserWidget(QWidget):
         context_obj = self.orchestrator.pipeline_config if self.orchestrator else None
 
         # Create local ObjectState for napari config (not registered - internal to ImageBrowser)
-        napari_state = ObjectState(
+        self.napari_config_state = ObjectState(
             object_instance=self.lazy_napari_config,
             field_id="napari_config",
             scope_id=self.scope_id,
@@ -356,7 +358,7 @@ class ImageBrowserWidget(QWidget):
             color_scheme=self.color_scheme
         )
         self.napari_config_form = ParameterFormManager(
-            state=napari_state,
+            state=self.napari_config_state,
             config=config
         )
 
@@ -396,7 +398,7 @@ class ImageBrowserWidget(QWidget):
         context_obj = self.orchestrator.pipeline_config if self.orchestrator else None
 
         # Create local ObjectState for fiji config (not registered - internal to ImageBrowser)
-        fiji_state = ObjectState(
+        self.fiji_config_state = ObjectState(
             object_instance=self.lazy_fiji_config,
             field_id="fiji_config",
             scope_id=self.scope_id,
@@ -408,7 +410,7 @@ class ImageBrowserWidget(QWidget):
             color_scheme=self.color_scheme
         )
         self.fiji_config_form = ParameterFormManager(
-            state=fiji_state,
+            state=self.fiji_config_state,
             config=config
         )
 
@@ -483,15 +485,15 @@ class ImageBrowserWidget(QWidget):
             self.filemanager = orchestrator.filemanager
             logger.debug("Image browser now using orchestrator's FileManager")
 
-        # Update config form contexts and scope_id to use new pipeline_config
-        if self.napari_config_form and orchestrator:
-            self.napari_config_form.context_obj = orchestrator.pipeline_config
-            self.napari_config_form.scope_id = self.scope_id
+        # Update config state contexts and scope_id to use new pipeline_config
+        if self.napari_config_state and orchestrator:
+            self.napari_config_state.context_obj = orchestrator.pipeline_config
+            self.napari_config_state.scope_id = self.scope_id
             self.napari_config_form._refresh_all_placeholders()
 
-        if self.fiji_config_form and orchestrator:
-            self.fiji_config_form.context_obj = orchestrator.pipeline_config
-            self.fiji_config_form.scope_id = self.scope_id
+        if self.fiji_config_state and orchestrator:
+            self.fiji_config_state.context_obj = orchestrator.pipeline_config
+            self.fiji_config_state.scope_id = self.scope_id
             self.fiji_config_form._refresh_all_placeholders()
 
         self.load_images()
@@ -962,7 +964,7 @@ class ImageBrowserWidget(QWidget):
             # For each enabled viewer, resolve config + viewer on UI thread, then spawn worker
             if napari_enabled:
                 from openhcs.core.config import LazyNapariStreamingConfig
-                current_values = self.napari_config_form.get_current_values()
+                current_values = self.napari_config_state.get_current_values()
                 temp_config = LazyNapariStreamingConfig(
                     **{k: v for k, v in current_values.items() if v is not None}
                 )
@@ -989,7 +991,7 @@ class ImageBrowserWidget(QWidget):
 
             if fiji_enabled:
                 from openhcs.core.config import LazyFijiStreamingConfig
-                current_values = self.fiji_config_form.get_current_values()
+                current_values = self.fiji_config_state.get_current_values()
                 temp_config = LazyFijiStreamingConfig(
                     **{k: v for k, v in current_values.items() if v is not None}
                 )
@@ -1352,7 +1354,7 @@ class ImageBrowserWidget(QWidget):
         from openhcs.config_framework.context_manager import config_context
         from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization, LazyNapariStreamingConfig
 
-        current_values = self.napari_config_form.get_current_values()
+        current_values = self.napari_config_state.get_current_values()
         temp_config = LazyNapariStreamingConfig(**{k: v for k, v in current_values.items() if v is not None})
 
         with config_context(self.orchestrator.pipeline_config):
@@ -1392,7 +1394,7 @@ class ImageBrowserWidget(QWidget):
         from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization
         from openhcs.core.config import LazyFijiStreamingConfig
 
-        current_values = self.fiji_config_form.get_current_values()
+        current_values = self.fiji_config_state.get_current_values()
         temp_config = LazyFijiStreamingConfig(**{k: v for k, v in current_values.items() if v is not None})
 
         with config_context(self.orchestrator.pipeline_config):
@@ -1799,7 +1801,7 @@ class ImageBrowserWidget(QWidget):
         from openhcs.core.config import LazyNapariStreamingConfig
         from openhcs.constants.constants import Backend as BackendEnum
 
-        current_values = self.napari_config_form.get_current_values()
+        current_values = self.napari_config_state.get_current_values()
         temp_config = LazyNapariStreamingConfig(
             **{k: v for k, v in current_values.items() if v is not None}
         )
@@ -1831,7 +1833,7 @@ class ImageBrowserWidget(QWidget):
         from openhcs.core.config import LazyFijiStreamingConfig
         from openhcs.constants.constants import Backend as BackendEnum
 
-        current_values = self.fiji_config_form.get_current_values()
+        current_values = self.fiji_config_state.get_current_values()
         temp_config = LazyFijiStreamingConfig(
             **{k: v for k, v in current_values.items() if v is not None}
         )

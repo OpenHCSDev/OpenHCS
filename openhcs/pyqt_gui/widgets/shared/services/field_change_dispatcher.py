@@ -221,12 +221,12 @@ class FieldChangeDispatcher:
 
     def _emit_cross_window(self, root_manager: 'ParameterFormManager', full_path: str, value: Any) -> None:
         """Emit context_changed from root with scope_id and field path."""
-        if root_manager._should_skip_updates():
+        if root_manager.state._should_skip_updates():
             if DEBUG_DISPATCHER:
                 logger.warning(f"  🚫 Cross-window BLOCKED: _should_skip_updates()=True for {root_manager.field_id}")
             return
         if root_manager.config.is_global_config_editing:
-            root_manager._update_thread_local_global_config()
+            root_manager.state.update_thread_local_global_config()
             if DEBUG_DISPATCHER:
                 logger.info(f"  🌐 Updated thread-local global config")
 

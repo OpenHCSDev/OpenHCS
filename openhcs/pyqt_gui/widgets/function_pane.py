@@ -410,7 +410,7 @@ class FunctionPaneWidget(QWidget):
             self.form_manager.reset_parameter(param_name)
 
         # Update internal kwargs to match the reset values
-        self._internal_kwargs = self.form_manager.get_current_values()
+        self._internal_kwargs = self._func_state.get_current_values()
 
         # Emit parameter changed signals for each reset parameter
         for param_name, default_value in self.param_defaults.items():

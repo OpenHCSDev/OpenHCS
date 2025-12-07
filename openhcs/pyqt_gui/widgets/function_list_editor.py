@@ -18,6 +18,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from openhcs.processing.backends.lib_registry.registry_service import RegistryService
 from openhcs.ui.shared.pattern_data_manager import PatternDataManager
 from openhcs.pyqt_gui.widgets.function_pane import FunctionPaneWidget
+from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
 from openhcs.constants.constants import GroupBy
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.pyqt_gui.widgets.shared.widget_strategies import _get_enum_display_text
@@ -459,8 +460,7 @@ class FunctionListEditorWidget(QWidget):
 
             # CRITICAL: Trigger global cross-window refresh for ALL open windows
             # This ensures any window with placeholders (configs, steps, etc.) refreshes
-            from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
-            ParameterFormManager.trigger_global_cross_window_refresh()
+            LiveContextService.trigger_global_refresh()
 
         except Exception as e:
             if self.service_adapter:

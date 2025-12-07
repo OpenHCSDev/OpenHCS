@@ -29,6 +29,7 @@ from openhcs.pyqt_gui.config import PyQtGUIConfig, get_default_pyqt_gui_config
 from openhcs.config_framework import LiveContextResolver
 from openhcs.config_framework.object_state import ObjectState, ObjectStateRegistry
 from openhcs.pyqt_gui.widgets.shared.services.scope_token_service import ScopeTokenService
+from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
 
 # Import shared list widget components (single source of truth)
 from openhcs.pyqt_gui.widgets.shared.reorderable_list_widget import ReorderableListWidget
@@ -727,11 +728,9 @@ class PipelineEditorWidget(AbstractManagerWidget):
             return
 
         if live_context_snapshot is None:
-            from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
-
             if not self.current_plate:
                 return
-            live_context_snapshot = ParameterFormManager.collect_live_context()
+            live_context_snapshot = LiveContextService.collect()
 
         for step_index in sorted(set(indices)):
             if step_index < 0 or step_index >= len(self.pipeline_steps):
@@ -954,8 +953,7 @@ class PipelineEditorWidget(AbstractManagerWidget):
         the exact step scope in snapshot.scopes - this prevents cross-step pollution.
         """
         self._normalize_step_scope_tokens()
-        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
-        return ParameterFormManager.collect_live_context()
+        return LiveContextService.collect()
 
     def _post_reorder(self) -> None:
         """Additional cleanup after reorder - normalize tokens and emit signal."""

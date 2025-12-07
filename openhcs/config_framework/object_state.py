@@ -726,3 +726,28 @@ class ObjectState:
 
 
     # DELETED: _emit_cross_window_change - moved to FieldChangeDispatcher
+
+    def update_thread_local_global_config(self):
+        """Update thread-local GlobalPipelineConfig with current form values.
+
+        LIVE UPDATES ARCHITECTURE:
+        Called on every parameter change when editing GlobalPipelineConfig.
+        Updates thread-local storage so other windows see changes immediately.
+        Original config is stored by ConfigWindow and restored on Cancel.
+        """
+        import dataclasses
+        from openhcs.core.config import GlobalPipelineConfig
+        from openhcs.config_framework.global_config import set_global_config_for_editing
+        from openhcs.config_framework.context_manager import get_base_global_config
+        from openhcs.pyqt_gui.widgets.shared.services.value_collection_service import ValueCollectionService
+
+        current_values = self.get_current_values()
+        base_config = get_base_global_config()
+        reconstructed_values = ValueCollectionService.reconstruct_nested_dataclasses(current_values, base_config)
+
+        try:
+            new_config = dataclasses.replace(base_config, **reconstructed_values)
+            set_global_config_for_editing(GlobalPipelineConfig, new_config)
+            logger.debug(f"🔍 LIVE_UPDATES: Updated thread-local GlobalPipelineConfig")
+        except Exception as e:
+            logger.warning(f"🔍 LIVE_UPDATES: Failed to update thread-local GlobalPipelineConfig: {e}")

@@ -23,6 +23,7 @@ from .widget_creation_types import (
     WidgetCreationConfig
 )
 from .services.field_change_dispatcher import FieldChangeDispatcher, FieldChangeEvent
+from .services.widget_service import WidgetService
 
 logger = logging.getLogger(__name__)
 
@@ -270,7 +271,7 @@ _WIDGET_CREATION_CONFIG: dict[WidgetCreationType, WidgetCreationConfig] = {
         create_container=_create_regular_container,
         setup_layout=_setup_regular_layout,
         create_main_widget=lambda manager, param_info, display_info, field_ids, current_value, unwrapped_type, *args, **kwargs:
-            manager.create_widget(param_info.name, param_info.type, current_value, field_ids['widget_id']),
+            manager._widget_creator(param_info.name, param_info.type, current_value, field_ids['widget_id'], None),
         needs_label=True,
         needs_reset_button=True,
         needs_unwrap_type=False,
@@ -329,21 +330,11 @@ def _get_widget_operations(creation_type: WidgetCreationType) -> dict[str, Calla
 # UNIFIED WIDGET CREATION FUNCTION
 # ============================================================================
 
-def create_widget_parametric(manager: ParameterFormManager, param_info: ParameterInfo,
-                           creation_type: WidgetCreationType) -> Any:
+def create_widget_parametric(manager: ParameterFormManager, param_info: ParameterInfo) -> Any:
     """
     UNIFIED: Create widget using parametric dispatch.
 
-    Replaces _create_regular_parameter_widget, _create_nested_dataclass_widget,
-    and _create_optional_dataclass_widget.
-
-    Args:
-        manager: ParameterFormManager instance
-        param_info: Parameter information object
-        creation_type: Widget creation type (REGULAR, NESTED, or OPTIONAL_NESTED)
-
-    Returns:
-        QWidget: Created widget container
+    Widget type is determined by param_info.widget_creation_type attribute.
     """
     from PyQt6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QPushButton
     from openhcs.pyqt_gui.widgets.shared.clickable_help_components import GroupBoxWithHelp, LabelWithHelp
@@ -353,6 +344,9 @@ def create_widget_parametric(manager: ParameterFormManager, param_info: Paramete
     import logging
 
     logger = logging.getLogger(__name__)
+
+    # Type declares its own widget creation strategy
+    creation_type = WidgetCreationType[param_info.widget_creation_type]
 
     # Get config and operations for this type
     config = _WIDGET_CREATION_CONFIG[creation_type]
@@ -491,7 +485,7 @@ def create_widget_parametric(manager: ParameterFormManager, param_info: Paramete
         PyQt6WidgetEnhancer.connect_change_signal(main_widget, param_info.name, on_widget_change)
 
         if manager.read_only:
-            manager._make_widget_readonly(main_widget)
+            WidgetService.make_readonly(main_widget, manager.config.color_scheme)
 
     return container
 

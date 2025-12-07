@@ -19,7 +19,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont
 
 # Infrastructure classes removed - functionality migrated to ParameterFormManager service layer
-from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager, FormManagerConfig
 from openhcs.pyqt_gui.widgets.shared.config_hierarchy_tree import ConfigHierarchyTreeHelper
 from openhcs.pyqt_gui.widgets.shared.scrollable_form_mixin import ScrollableFormMixin
 from openhcs.pyqt_gui.widgets.shared.collapsible_splitter_helper import CollapsibleSplitterHelper
@@ -29,6 +29,7 @@ from openhcs.pyqt_gui.windows.base_form_dialog import BaseFormDialog
 from openhcs.core.config import GlobalPipelineConfig, PipelineConfig
 from openhcs.config_framework import is_global_config_type
 from openhcs.ui.shared.code_editor_form_updater import CodeEditorFormUpdater
+from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
 # ❌ REMOVED: require_config_context decorator - enhanced decorator events system handles context automatically
 from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
 
@@ -108,18 +109,25 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
         # The overlay (current form state) will be built by ParameterFormManager
         # This fixes the circular context bug where reset showed old values instead of global defaults
 
+        # Create or lookup ObjectState from registry - callers own state directly
+        from openhcs.config_framework.object_state import ObjectState, ObjectStateRegistry
+        self.state = ObjectStateRegistry.get_by_scope(self.scope_id)
+        if self.state is None:
+            self.state = ObjectState(
+                object_instance=current_config,
+                field_id=root_field_id,
+                scope_id=self.scope_id,
+                context_obj=None,  # Inherit from thread-local GlobalPipelineConfig only
+            )
+
         # CRITICAL: Config window manages its own scroll area, so tell form_manager NOT to create one
-        # This prevents double scroll areas which cause navigation bugs
-        self.form_manager = ParameterFormManager.from_dataclass_instance(
-            dataclass_instance=current_config,
-            field_id=root_field_id,
-            placeholder_prefix=placeholder_prefix,
+        config = FormManagerConfig(
+            parent=None,
+            scope_id=self.scope_id,
             color_scheme=self.color_scheme,
             use_scroll_area=False,  # Config window handles scrolling
-            global_config_type=global_config_type,
-            context_obj=None,  # Inherit from thread-local GlobalPipelineConfig only
-            scope_id=self.scope_id  # Pass scope_id to limit cross-window updates to same orchestrator
         )
+        self.form_manager = ParameterFormManager(state=self.state, config=config)
 
         if is_global_config_type(self.config_class):
             self._original_global_config_snapshot = copy.deepcopy(current_config)
@@ -360,14 +368,14 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
             if LazyDefaultPlaceholderService.has_lazy_resolution(self.config_class):
                 # BETTER APPROACH: For lazy dataclasses, only save user-modified values
                 # Get only values that were explicitly set by the user (non-None raw values)
-                user_modified_values = self.form_manager.get_user_modified_values()
+                user_modified_values = self.state.get_user_modified_values()
 
                 # Create fresh lazy instance with only user-modified values
                 # This preserves lazy resolution for unmodified fields
                 new_config = self.config_class(**user_modified_values)
             else:
                 # For non-lazy dataclasses, use all current values
-                current_values = self.form_manager.get_current_values()
+                current_values = self.state.get_current_values()
                 new_config = self.config_class(**current_values)
 
             # CRITICAL: Set flag to prevent refresh_config from recreating the form
@@ -429,7 +437,7 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
             ParameterOpsService().refresh_with_live_context(self.form_manager)
 
             # Get current config from form (now includes live context values)
-            current_values = self.form_manager.get_current_values()
+            current_values = self.state.get_current_values()
             current_config = self.config_class(**current_values)
 
             # Generate code using existing function
@@ -531,7 +539,7 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
         if not is_global_config_type(self.config_class):
             return
         try:
-            current_values = self.form_manager.get_current_values()
+            current_values = self.state.get_current_values()
             updated_config = self.config_class(**current_values)
             self.current_config = updated_config
             from openhcs.config_framework.global_config import set_global_config_for_editing
@@ -575,7 +583,7 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
         # CRITICAL: Trigger global refresh AFTER unregistration so other windows
         # re-collect live context without this cancelled window's values
         # This ensures group_by selector and other placeholders sync correctly
-        ParameterFormManager.trigger_global_cross_window_refresh()
+        LiveContextService.trigger_global_refresh()
         logger.debug(f"Triggered global refresh after cancelling {self.config_class.__name__} editor")
 
     def _get_form_managers(self):

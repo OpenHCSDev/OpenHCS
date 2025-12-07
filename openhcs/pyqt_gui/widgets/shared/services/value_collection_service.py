@@ -84,9 +84,9 @@ class ValueCollectionService(ParameterServiceABC):
 
         # For lazy dataclasses, only persist user-set fields so untouched placeholders stay None
         if is_lazy_dataclass(nested_manager.object_instance):
-            nested_values = nested_manager.get_user_modified_values()
+            nested_values = nested_manager.state.get_user_modified_values()
         else:
-            nested_values = nested_manager.get_current_values()
+            nested_values = nested_manager.state.get_current_values()
 
         if not nested_values:
             logger.debug(f"[ValueCollection] Optional {param_name}: no nested edits, returning default")
@@ -108,9 +108,9 @@ class ValueCollectionService(ParameterServiceABC):
 
         # For lazy/placeholder-driven dataclasses, only persist user-set fields
         if is_lazy_dataclass(nested_manager.object_instance):
-            nested_values = nested_manager.get_user_modified_values()
+            nested_values = nested_manager.state.get_user_modified_values()
         else:
-            nested_values = nested_manager.get_current_values()
+            nested_values = nested_manager.state.get_current_values()
 
         if not nested_values:
             logger.debug(f"[ValueCollection] Direct {info.name}: no nested edits, returning default")
@@ -125,7 +125,7 @@ class ValueCollectionService(ParameterServiceABC):
         nested_manager
     ) -> Dict[str, Any]:
         """Collect value as raw dict (fallback for non-dataclass types)."""
-        return nested_manager.get_current_values()
+        return nested_manager.state.get_current_values()
 
     # ========== DATACLASS RECONSTRUCTION (from DataclassReconstructionUtils) ==========
 
