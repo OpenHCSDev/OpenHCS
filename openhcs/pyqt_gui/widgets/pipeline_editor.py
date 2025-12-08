@@ -26,10 +26,8 @@ from openhcs.core.steps.function_step import FunctionStep
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.pyqt_gui.config import PyQtGUIConfig, get_default_pyqt_gui_config
-from openhcs.config_framework import LiveContextResolver
 from openhcs.config_framework.object_state import ObjectState, ObjectStateRegistry
 from openhcs.pyqt_gui.widgets.shared.services.scope_token_service import ScopeTokenService
-from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
 
 # Import shared list widget components (single source of truth)
 from openhcs.pyqt_gui.widgets.shared.reorderable_list_widget import ReorderableListWidget
@@ -134,11 +132,6 @@ class PipelineEditorWidget(AbstractManagerWidget):
         # Note: orchestrator is looked up dynamically via _get_current_orchestrator()
         self.plate_manager = None
 
-        # Step scope management
-        self._preview_step_cache: Dict[int, FunctionStep] = {}
-        self._preview_step_cache_token: Optional[int] = None
-
-
         # Initialize base class (creates style_generator, event_bus, item_list, buttons, status_label internally)
         # Also auto-processes PREVIEW_FIELD_CONFIGS declaratively
         super().__init__(service_adapter, color_scheme, gui_config, parent)
@@ -167,22 +160,46 @@ class PipelineEditorWidget(AbstractManagerWidget):
         """
         Format step for display in the list with constructor value preview.
 
+        Uses ObjectState for resolved values (no context stack rebuild).
+
         Args:
             step: FunctionStep to format
-            live_context_snapshot: Optional pre-collected LiveContextSnapshot (for performance)
+            live_context_snapshot: IGNORED - kept for API compatibility
 
         Returns:
             Tuple of (display_text, step_name)
         """
-        step_for_display = self._get_step_preview_instance(step, live_context_snapshot)
-        step_name = getattr(step_for_display, 'name', 'Unknown Step')
-        processing_cfg = getattr(step_for_display, 'processing_config', None)
+        from openhcs.config_framework.object_state import ObjectStateRegistry
+
+        # Look up ObjectState for this step
+        scope_id = self._build_step_scope_id(step)
+        state = ObjectStateRegistry.get_by_scope(scope_id) if scope_id else None
+
+        # Helper to get resolved value from ObjectState or fall back to step attr
+        def get_val(name: str, default=None):
+            if state:
+                val = state.get_resolved_value(name)
+                if val is not None:
+                    return val
+            return getattr(step, name, default)
+
+        # Helper for nested processing_config values
+        def get_processing_val(name: str, default=None):
+            if state and 'processing_config' in state.nested_states:
+                val = state.nested_states['processing_config'].get_resolved_value(name)
+                if val is not None:
+                    return val
+            pc = getattr(step, 'processing_config', None)
+            return getattr(pc, name, default) if pc else default
+
+        step_name = get_val('name', 'Unknown Step')
+        processing_cfg = get_val('processing_config')
 
         # Build preview of key constructor values
         preview_parts = []
 
         # Function preview
-        func = getattr(step_for_display, 'func', None)
+        func = get_val('func')
         if func:
             if isinstance(func, list) and func:
                 # Count enabled functions (filter out None/disabled)
@@ -194,7 +211,7 @@ class PipelineEditorWidget(AbstractManagerWidget):
             elif isinstance(func, dict):
                 # Show dict keys with metadata names (like groupby selector)
                 orchestrator = self._get_current_orchestrator()
-                group_by = getattr(step_for_display.processing_config, 'group_by', None) if hasattr(step_for_display, 'processing_config') else None
+                group_by = get_processing_val('group_by')
 
                 dict_items = []
                 for key in sorted(func.keys()):
@@ -210,9 +227,9 @@ class PipelineEditorWidget(AbstractManagerWidget):
                 preview_parts.append(f"func={{{', '.join(dict_items)}}}")
 
         # Variable components preview
-        var_components = getattr(step_for_display, 'variable_components', None)
+        var_components = get_val('variable_components')
         if var_components is None and processing_cfg is not None:
-            var_components = getattr(processing_cfg, 'variable_components', None)
+            var_components = get_processing_val('variable_components')
         if var_components:
             if len(var_components) == 1:
                 comp_name = getattr(var_components[0], 'name', str(var_components[0]))
@@ -224,28 +241,26 @@ class PipelineEditorWidget(AbstractManagerWidget):
                 preview_parts.append(f"components=[{', '.join(comp_names)}]")
 
         # Group by preview
-        group_by = getattr(step_for_display, 'group_by', None)
+        group_by = get_val('group_by')
         if (group_by is None or getattr(group_by, 'value', None) is None) and processing_cfg is not None:
-            group_by = getattr(processing_cfg, 'group_by', None)
+            group_by = get_processing_val('group_by')
         if group_by and group_by.value is not None:  # Check for GroupBy.NONE
             group_name = getattr(group_by, 'name', str(group_by))
             preview_parts.append(f"group_by={group_name}")
 
         # Input source preview (access from processing_config)
-        input_source = getattr(step_for_display.processing_config, 'input_source', None) if hasattr(step_for_display, 'processing_config') else None
+        input_source = get_processing_val('input_source')
         if input_source:
             source_name = getattr(input_source, 'name', str(input_source))
             if source_name != 'PREVIOUS_STEP':  # Only show if not default
                 preview_parts.append(f"input={source_name}")
 
         # Optional configurations preview - use ABC's unified preview label builder
-        # CRITICAL: Must resolve through context hierarchy (Global -> Pipeline -> Step)
-        # to match the same resolution that step editor placeholders use
-        # Uses the same API as PlateManager for consistency
+        # Uses ObjectState for resolution (no context stack rebuild)
         config_labels = self._build_preview_labels(
-            item=step_for_display,  # Semantic item for context stack
-            config_source=step_for_display,
-            live_context_snapshot=live_context_snapshot,
+            item=step,  # Semantic item for scope lookup
+            config_source=step,
+            live_context_snapshot=None,  # Not used - ObjectState provides values
         )
 
         if config_labels:
@@ -632,8 +647,7 @@ class PipelineEditorWidget(AbstractManagerWidget):
             else:
                 logger.debug(f"No orchestrator found for config refresh: {plate_path}")
 
-    # _resolve_config_attr() DELETED - use base class version
-    # Step-specific context stack provided via _get_context_stack_for_resolution() hook
+    # _resolve_config_attr() DELETED - use base class version (uses ObjectState)
 
     def _build_step_scope_id(self, step: FunctionStep) -> str:
         """Return the hierarchical scope id for a step: plate::step_N."""
@@ -679,57 +693,19 @@ class PipelineEditorWidget(AbstractManagerWidget):
             logger.debug(f"Unregistered ObjectState for step: {scope_id}")
 
     # _merge_with_live_values() DELETED - use _merge_with_live_values() from base class
-
-    def _get_step_preview_instance(self, step: FunctionStep, live_context_snapshot) -> FunctionStep:
-        """Return a step instance that includes any live overrides for previews."""
-        if live_context_snapshot is None:
-            return step
-
-        token = getattr(live_context_snapshot, 'token', None)
-        if token is None:
-            return step
-
-        if self._preview_step_cache_token != token:
-            self._preview_step_cache.clear()
-            self._preview_step_cache_token = token
-
-        cache_key = id(step)
-        cached_step = self._preview_step_cache.get(cache_key)
-        if cached_step is not None:
-            return cached_step
-
-        scope_id = self._build_step_scope_id(step)
-        if not scope_id:
-            self._preview_step_cache[cache_key] = step
-            return step
-
-        scopes = getattr(live_context_snapshot, 'scopes', {}) or {}
-        scope_entries = scopes.get(scope_id)
-        if not scope_entries:
-            self._preview_step_cache[cache_key] = step
-            return step
-
-        step_live_values = scope_entries.get(type(step))
-        if not step_live_values:
-            self._preview_step_cache[cache_key] = step
-            return step
-
-        merged_step = self._merge_with_live_values(step, step_live_values)
-        self._preview_step_cache[cache_key] = merged_step
-        return merged_step
+    # _get_step_preview_instance() DELETED - ObjectState provides resolved values directly
 
     def _handle_full_preview_refresh(self) -> None:
         """Refresh all step preview labels."""
         self.update_item_list()
 
     def _refresh_step_items_by_index(self, indices: Iterable[int], live_context_snapshot=None) -> None:
+        """Refresh specific step items by index. Uses ObjectState for values."""
         if not indices:
             return
 
-        if live_context_snapshot is None:
-            if not self.current_plate:
-                return
-            live_context_snapshot = LiveContextService.collect()
+        if not self.current_plate:
+            return
 
         for step_index in sorted(set(indices)):
             if step_index < 0 or step_index >= len(self.pipeline_steps):
@@ -738,8 +714,7 @@ class PipelineEditorWidget(AbstractManagerWidget):
             if item is None:
                 continue
             step = self.pipeline_steps[step_index]
-            old_text = item.text()
-            display_text, _ = self.format_item_for_display(step, live_context_snapshot)
+            display_text, _ = self.format_item_for_display(step)  # No snapshot needed
             if item.text() != display_text:
                 item.setText(display_text)
             item.setData(Qt.ItemDataRole.UserRole, step_index)
@@ -946,14 +921,13 @@ class PipelineEditorWidget(AbstractManagerWidget):
         return None
 
     def _pre_update_list(self) -> Any:
-        """Normalize scope tokens and collect live context.
+        """Normalize scope tokens before list update.
 
-        collect_live_context() collects ALL active managers. The step preview
-        isolation is handled in _get_step_preview_instance() which looks up
-        the exact step scope in snapshot.scopes - this prevents cross-step pollution.
+        ObjectState provides resolved values directly - no need to collect
+        LiveContextSnapshot. Just ensure scope tokens are normalized.
         """
         self._normalize_step_scope_tokens()
-        return LiveContextService.collect()
+        return None  # ObjectState provides values, no context needed
 
     def _post_reorder(self) -> None:
         """Additional cleanup after reorder - normalize tokens and emit signal."""
@@ -961,21 +935,6 @@ class PipelineEditorWidget(AbstractManagerWidget):
         self.pipeline_changed.emit(self.pipeline_steps)
 
     # === Config Resolution Hook (domain-specific) ===
-
-    def _get_context_stack_for_resolution(self, item: Any) -> List[Any]:
-        """Build 3-element context stack for PipelineEditor (required abstract method)."""
-        from openhcs.config_framework.global_config import get_current_global_config
-
-        orchestrator = self._get_current_orchestrator()
-        if not orchestrator:
-            return []
-
-        # Return 3-element stack: [global, pipeline_config, step]
-        return [
-            get_current_global_config(GlobalPipelineConfig),
-            orchestrator.pipeline_config,
-            item  # step
-        ]
 
     def _get_scope_for_item(self, item: Any) -> str:
         """PipelineEditor: scope = plate::step_token."""

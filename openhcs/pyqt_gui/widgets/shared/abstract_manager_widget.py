@@ -438,42 +438,54 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, ABC, metaclass=_Co
     def _resolve_config_attr(self, item: Any, config: object, attr_name: str,
                              live_context_snapshot=None) -> object:
         """
-        Resolve any config attribute through lazy resolution system using LIVE context.
+        Resolve config attribute using ObjectState (no context stack rebuild).
 
-        Generic implementation that works for both:
-        - PlateManager: 2-element stack [global, pipeline_config]
-        - PipelineEditor: 3-element stack [global, pipeline_config, step]
+        Looks up the ObjectState by scope_id and uses its cached resolved values.
+        ObjectState already handles context stack building and caching internally.
 
         Args:
-            item: Semantic item for context stack building
-                  - PlateManager: orchestrator or plate dict
-                  - PipelineEditor: FunctionStep
-            config: Config dataclass instance (e.g., NapariStreamingConfig)
-            attr_name: Name of the attribute to resolve (e.g., 'enabled', 'well_filter')
-            live_context_snapshot: Optional pre-collected LiveContextSnapshot
+            item: Semantic item (used to get scope_id via subclass hook)
+            config: Config dataclass instance (used to find nested state)
+            attr_name: Name of the attribute to resolve
+            live_context_snapshot: IGNORED - kept for API compatibility
 
         Returns:
             Resolved attribute value
         """
+        from openhcs.config_framework.object_state import ObjectStateRegistry
+
         try:
-            # Subclass builds full context stack from semantic item
-            context_stack = self._get_context_stack_for_resolution(item)
-
-            from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
-            # Get scope from item via subclass hook, then merge ancestor values
+            # Get scope from item via subclass hook
             item_scope = self._get_scope_for_item(item) or ''
-            live_context = LiveContextService.merge_ancestor_values(
-                live_context_snapshot.scopes, item_scope
-            ) if live_context_snapshot else {}
 
-            resolved_value = self._live_context_resolver.resolve_config_attr(
-                config_obj=config,
-                attr_name=attr_name,
-                context_stack=context_stack,
-                live_context=live_context,
-                cache_token=live_context_snapshot.token if live_context_snapshot else 0
-            )
-            return resolved_value
+            # Look up ObjectState by scope
+            state = ObjectStateRegistry.get_by_scope(item_scope)
+            if state is None:
+                # No ObjectState registered - fall back to raw attribute
+                return object.__getattribute__(config, attr_name)
+
+            # Find the correct nested state for this config type
+            # If config is the root object, use state directly
+            # Otherwise, find the nested state that matches this config type
+            target_state = state
+            config_type = type(config)
+
+            # Check if config matches root object
+            if type(state.object_instance) != config_type:
+                # Look through nested states for matching type
+                for nested_name, nested_state in state.nested_states.items():
+                    if type(nested_state.object_instance) == config_type:
+                        target_state = nested_state
+                        break
+
+            # Get resolved value from ObjectState's cache
+            resolved = target_state.get_resolved_value(attr_name)
+            if resolved is not None:
+                return resolved
+
+            # Fall back to raw attribute if not in resolved cache
+            return object.__getattribute__(config, attr_name)
+
         except Exception as e:
             logger.warning(f"Failed to resolve config.{attr_name}: {e}")
             return object.__getattribute__(config, attr_name)
@@ -1289,13 +1301,8 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, ABC, metaclass=_Co
     # === Config Resolution Hook (subclass must implement) ===
 
     @abstractmethod
-    def _get_context_stack_for_resolution(self, item: Any) -> List[Any]:
-        """Build context stack for config resolution. Subclass must implement."""
-        ...
-
-    @abstractmethod
     def _get_scope_for_item(self, item: Any) -> str:
-        """Get scope_id for an item (for live context merging). Subclass must implement."""
+        """Get scope_id for an item (for ObjectState lookup). Subclass must implement."""
         ...
 
     # === CrossWindowPreviewMixin Hook (declarative default) ===

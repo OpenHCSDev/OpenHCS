@@ -1171,27 +1171,6 @@ class PlateManagerWidget(AbstractManagerWidget):
             return str(item.plate_path)
         return item.get('path', '') if isinstance(item, dict) else ''
 
-    def _get_context_stack_for_resolution(self, item: Any) -> List[Any]:
-        """Build 2-element context stack for PlateManager.
-
-        Args:
-            item: PipelineOrchestrator - the orchestrator being displayed/edited
-
-        Returns:
-            [global_config, pipeline_config] - LiveContextResolver will merge live values internally
-        """
-        from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
-
-        # Item is the orchestrator
-        if isinstance(item, PipelineOrchestrator):
-            pipeline_config = item.pipeline_config
-        else:
-            # Fallback: assume it's a pipeline_config directly (shouldn't happen with proper refactor)
-            pipeline_config = item
-
-        # Return raw objects - LiveContextResolver handles merging live values internally
-        return [get_current_global_config(GlobalPipelineConfig), pipeline_config]
-
     # === CrossWindowPreviewMixin Hook ===
 
     def _get_current_orchestrator(self):
