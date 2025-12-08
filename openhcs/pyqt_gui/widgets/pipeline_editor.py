@@ -183,14 +183,14 @@ class PipelineEditorWidget(AbstractManagerWidget):
                     return val
             return getattr(step, name, default)
 
-        # Helper for nested processing_config values
-        def get_processing_val(name: str, default=None):
-            if state and 'processing_config' in state.nested_states:
-                val = state.nested_states['processing_config'].get_resolved_value(name)
+        # Helper for nested config values
+        def get_nested_val(config_name: str, attr_name: str, default=None):
+            if state and config_name in state.nested_states:
+                val = state.nested_states[config_name].get_resolved_value(attr_name)
                 if val is not None:
                     return val
-            pc = getattr(step, 'processing_config', None)
-            return getattr(pc, name, default) if pc else default
+            cfg = getattr(step, config_name, None)
+            return getattr(cfg, attr_name, default) if cfg else default
 
         step_name = get_val('name', 'Unknown Step')
         processing_cfg = get_val('processing_config')
@@ -202,34 +202,27 @@ class PipelineEditorWidget(AbstractManagerWidget):
         func = get_val('func')
         if func:
             if isinstance(func, list) and func:
-                # Count enabled functions (filter out None/disabled)
                 enabled_funcs = [f for f in func if f is not None]
                 preview_parts.append(f"func=[{len(enabled_funcs)} functions]")
             elif callable(func):
                 func_name = getattr(func, '__name__', str(func))
                 preview_parts.append(f"func={func_name}")
             elif isinstance(func, dict):
-                # Show dict keys with metadata names (like groupby selector)
                 orchestrator = self._get_current_orchestrator()
-                group_by = get_processing_val('group_by')
-
+                group_by = get_nested_val('processing_config', 'group_by')
                 dict_items = []
                 for key in sorted(func.keys()):
                     if orchestrator and group_by:
                         metadata_name = orchestrator.metadata_cache.get_component_metadata(group_by, key)
-                        if metadata_name:
-                            dict_items.append(f"{key}|{metadata_name}")
-                        else:
-                            dict_items.append(key)
+                        dict_items.append(f"{key}|{metadata_name}" if metadata_name else key)
                     else:
                         dict_items.append(key)
-
                 preview_parts.append(f"func={{{', '.join(dict_items)}}}")
 
         # Variable components preview
         var_components = get_val('variable_components')
         if var_components is None and processing_cfg is not None:
-            var_components = get_processing_val('variable_components')
+            var_components = get_nested_val('processing_config', 'variable_components')
         if var_components:
             if len(var_components) == 1:
                 comp_name = getattr(var_components[0], 'name', str(var_components[0]))
@@ -243,37 +236,98 @@ class PipelineEditorWidget(AbstractManagerWidget):
         # Group by preview
         group_by = get_val('group_by')
         if (group_by is None or getattr(group_by, 'value', None) is None) and processing_cfg is not None:
-            group_by = get_processing_val('group_by')
-        if group_by and group_by.value is not None:  # Check for GroupBy.NONE
+            group_by = get_nested_val('processing_config', 'group_by')
+        if group_by and group_by.value is not None:
             group_name = getattr(group_by, 'name', str(group_by))
             preview_parts.append(f"group_by={group_name}")
 
-        # Input source preview (access from processing_config)
-        input_source = get_processing_val('input_source')
+        # Input source preview (only if not default)
+        input_source = get_nested_val('processing_config', 'input_source')
         if input_source:
             source_name = getattr(input_source, 'name', str(input_source))
-            if source_name != 'PREVIOUS_STEP':  # Only show if not default
+            if source_name != 'PREVIOUS_STEP':
                 preview_parts.append(f"input={source_name}")
 
-        # Optional configurations preview - use ABC's unified preview label builder
-        # Uses ObjectState for resolution (no context stack rebuild)
-        config_labels = self._build_preview_labels(
-            item=step,  # Semantic item for scope lookup
-            config_source=step,
-            live_context_snapshot=None,  # Not used - ObjectState provides values
-        )
-
+        # Config indicators: NAP, FIJI, MAT (initials only if enabled, + well_filter if set)
+        config_labels = self._build_step_config_labels(step, state)
         if config_labels:
-            preview_parts.append(f"configs=[{','.join(config_labels)}]")
+            preview_parts.append(f"[{','.join(config_labels)}]")
+
+        # Dirty marker
+        is_dirty = state.is_dirty() if state else False
+        dirty_marker = " *" if is_dirty else ""
 
         # Build display text
         if preview_parts:
             preview = " | ".join(preview_parts)
-            display_text = f"▶ {step_name}  ({preview})"
+            display_text = f"▶ {step_name}{dirty_marker}  ({preview})"
         else:
-            display_text = f"▶ {step_name}"
+            display_text = f"▶ {step_name}{dirty_marker}"
 
         return display_text, step_name
+
+    def _build_step_config_labels(self, step: FunctionStep, state: Optional[Any]) -> List[str]:
+        """Build compact config labels: initials if enabled, + well_filter if not None.
+
+        Args:
+            step: FunctionStep to get config from
+            state: Optional ObjectState for resolved values
+
+        Returns:
+            List of labels like ['NAP', 'MAT+5'] or ['FIJI', 'NAP+A01,A02']
+        """
+        from openhcs.core.config import WellFilterMode
+
+        labels = []
+
+        # Config name -> (indicator, nested_state_key)
+        configs = [
+            ('napari_streaming_config', 'NAP'),
+            ('fiji_streaming_config', 'FIJI'),
+            ('step_materialization_config', 'MAT'),
+        ]
+
+        for config_attr, indicator in configs:
+            # Get nested state or fall back to step attr
+            nested_state = state.nested_states.get(config_attr) if state else None
+            config_obj = getattr(step, config_attr, None)
+
+            # Check enabled
+            if nested_state:
+                enabled = nested_state.get_resolved_value('enabled')
+            elif config_obj and hasattr(config_obj, 'enabled'):
+                enabled = config_obj.enabled
+            else:
+                enabled = False
+
+            if not enabled:
+                continue
+
+            # Check well_filter
+            if nested_state:
+                well_filter = nested_state.get_resolved_value('well_filter')
+                mode = nested_state.get_resolved_value('well_filter_mode')
+            elif config_obj:
+                well_filter = getattr(config_obj, 'well_filter', None)
+                mode = getattr(config_obj, 'well_filter_mode', WellFilterMode.INCLUDE)
+            else:
+                well_filter = None
+                mode = WellFilterMode.INCLUDE
+
+            if well_filter is not None:
+                # Format well_filter
+                if isinstance(well_filter, list):
+                    wf_str = str(len(well_filter))
+                elif isinstance(well_filter, int):
+                    wf_str = str(well_filter)
+                else:
+                    wf_str = str(well_filter)
+                mode_prefix = '-' if mode == WellFilterMode.EXCLUDE else '+'
+                labels.append(f"{indicator}{mode_prefix}{wf_str}")
+            else:
+                labels.append(indicator)
+
+        return labels
 
     def _create_step_tooltip(self, step: FunctionStep) -> str:
         """Create detailed tooltip for a step showing all constructor values."""
