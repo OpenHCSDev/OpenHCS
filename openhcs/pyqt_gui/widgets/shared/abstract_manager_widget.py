@@ -478,7 +478,12 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, ABC, metaclass=_Co
                         target_state = nested_state
                         break
 
-            # Get resolved value from ObjectState's cache
+            # Check if attr_name is a nested state - return the object_instance (dataclass)
+            # NOT the resolved dict snapshot
+            if attr_name in target_state.nested_states:
+                return target_state.nested_states[attr_name].object_instance
+
+            # For regular fields, get resolved value from ObjectState's cache
             resolved = target_state.get_resolved_value(attr_name)
             if resolved is not None:
                 return resolved
@@ -1191,10 +1196,12 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, ABC, metaclass=_Co
                     return self._resolve_config_attr(i, config_obj, attr_name, snapshot)
 
                 formatted = format_config_indicator(field_path, value, resolve_attr)
+                logger.debug(f"_build_preview_labels: {field_path} is dataclass, format_config_indicator -> {repr(formatted)}")
                 # If formatter returns None, config should not be shown - don't fall back to str()
             else:
                 # Simple value - use mixin's format_preview_value
                 formatted = self.format_preview_value(field_path, value)
+                logger.debug(f"_build_preview_labels: {field_path} is simple value, format_preview_value -> {repr(formatted)}")
 
             if formatted:
                 labels.append(formatted)

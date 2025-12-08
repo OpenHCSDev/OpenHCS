@@ -82,7 +82,7 @@ class LiveContextService:
     @classmethod
     def _notify_change(cls) -> None:
         """Notify all listeners that something changed."""
-        logger.info(f"🔔 _notify_change: notifying {len(cls._change_callbacks)} listeners")
+        logger.debug(f"🔔 _notify_change: notifying {len(cls._change_callbacks)} listeners")
         dead_callbacks = []
         for callback in cls._change_callbacks:
             try:
@@ -101,7 +101,7 @@ class LiveContextService:
                     except (ImportError, TypeError):
                         pass  # sip not available or object not a Qt object
 
-                logger.info(f"  📣 Calling listener: {owner}.{callback_name}")
+                logger.debug(f"  📣 Calling listener: {owner}.{callback_name}")
                 callback()
             except RuntimeError as e:
                 # "wrapped C/C++ object has been deleted" - mark for removal
@@ -184,7 +184,7 @@ class LiveContextService:
         if dispatch_cache is not None:
             dispatch_cache_key = ('live_context',)
             if dispatch_cache_key in dispatch_cache:
-                logger.info("📦 collect_live_context: DISPATCH CACHE HIT")
+                logger.debug("📦 collect_live_context: DISPATCH CACHE HIT")
                 return dispatch_cache[dispatch_cache_key]
 
         # Initialize token cache on first use
@@ -197,7 +197,7 @@ class LiveContextService:
 
         def compute_live_context() -> LiveContextSnapshot:
             """Collect values from all ObjectStates (not PFMs)."""
-            logger.info(f"📦 collect_live_context: COMPUTING (token={cls._live_context_token_counter})")
+            logger.debug(f"📦 collect_live_context: COMPUTING (token={cls._live_context_token_counter})")
 
             scopes: Dict[str, Dict[type, Dict[str, Any]]] = {}
 
@@ -207,7 +207,7 @@ class LiveContextService:
                 cls._collect_from_state_tree(state, scopes)
 
             scope_count = len(scopes)
-            logger.info(f"  📦 COLLECTED {scope_count} scopes: {list(scopes.keys())}")
+            logger.debug(f"  📦 COLLECTED {scope_count} scopes: {list(scopes.keys())}")
             return LiveContextSnapshot(token=cls._live_context_token_counter, scopes=scopes)
 
         # Use token cache to get or compute
@@ -271,15 +271,15 @@ class LiveContextService:
             for i in range(len(parts)):
                 ancestors.append("::".join(parts[:i+1]))
 
-        logger.info(f"🔍 MERGE: my_scope={my_scope} -> ancestors={ancestors}")
-        logger.info(f"🔍 MERGE: scopes has keys: {list(scopes.keys())}")
+        logger.debug(f"🔍 MERGE: my_scope={my_scope} -> ancestors={ancestors}")
+        logger.debug(f"🔍 MERGE: scopes has keys: {list(scopes.keys())}")
 
         # Merge in order (less-specific first, more-specific overwrites)
         # Normalize types so LazyWellFilterConfig and WellFilterConfig merge together
         from openhcs.config_framework.lazy_factory import get_base_type_for_lazy
         for ancestor_scope in ancestors:
             scope_data = scopes.get(ancestor_scope, {})
-            logger.info(f"🔍 MERGE: ancestor={ancestor_scope} has types: {[t.__name__ for t in scope_data.keys()]}")
+            logger.debug(f"🔍 MERGE: ancestor={ancestor_scope} has types: {[t.__name__ for t in scope_data.keys()]}")
             for config_type, values in scope_data.items():
                 # Normalize to base type so Lazy* and concrete types merge together
                 base_type = get_base_type_for_lazy(config_type) or config_type
@@ -289,11 +289,11 @@ class LiveContextService:
                 if 'well_filter_mode' in values:
                     old_val = result[base_type].get('well_filter_mode', 'N/A')
                     new_val = values['well_filter_mode']
-                    logger.info(f"🔍 MERGE: {config_type.__name__}.well_filter_mode: {old_val} -> {new_val}")
+                    logger.debug(f"🔍 MERGE: {config_type.__name__}.well_filter_mode: {old_val} -> {new_val}")
                 result[base_type].update(values)
-                logger.info(f"🔍 MERGE: {config_type.__name__} += {list(values.keys())}")
+                logger.debug(f"🔍 MERGE: {config_type.__name__} += {list(values.keys())}")
 
-        logger.info(f"🔍 MERGE: result has {len(result)} types")
+        logger.debug(f"🔍 MERGE: result has {len(result)} types")
         return result
 
     # ========== GLOBAL REFRESH ==========

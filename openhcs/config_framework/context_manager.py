@@ -620,7 +620,7 @@ def build_context_stack(
     ctx_type_name = type(context_obj).__name__ if context_obj else "None"
     obj_type_name = obj_type.__name__
     live_val_types = [t.__name__ for t in live_values.keys()] if live_values else []
-    logger.info(f"🔧 build_context_stack: ctx={ctx_type_name}, obj={obj_type_name}, live_values={live_val_types[:5]}{'...' if len(live_val_types) > 5 else ''}")
+    logger.debug(f"🔧 build_context_stack: ctx={ctx_type_name}, obj={obj_type_name}, live_values={live_val_types[:5]}{'...' if len(live_val_types) > 5 else ''}")
 
     # 1. Global context layer
     global_layer = _get_global_context_layer(live_values, is_global_config_editing, global_config_type)
@@ -696,7 +696,7 @@ def _get_global_context_layer(
     cache = get_dispatch_cache()
     cache_key = ('global_layer', is_global_config_editing, global_config_type)
     if cache is not None and cache_key in cache:
-        logger.info(f"  🚀 GLOBAL layer CACHE HIT")
+        logger.debug(f"  🚀 GLOBAL layer CACHE HIT")
         return cache[cache_key]
 
     layer = None
@@ -718,7 +718,7 @@ def _get_global_context_layer(
 
     if cache is not None:
         cache[cache_key] = layer
-        logger.info(f"  📦 GLOBAL layer cached")
+        logger.debug(f"  📦 GLOBAL layer cached")
 
     return layer
 
@@ -762,13 +762,13 @@ def _find_live_values_for_type(target_type: type, live_context: dict) -> dict | 
         Dict of field values, or None if not found
     """
     target_base = _normalize_type(target_type)
-    logger.info(f"_find_live_values_for_type: target={target_type.__name__} -> base={target_base.__name__}")
-    logger.info(f"_find_live_values_for_type: live_context has {len(live_context)} types")
+    logger.debug(f"_find_live_values_for_type: target={target_type.__name__} -> base={target_base.__name__}")
+    logger.debug(f"_find_live_values_for_type: live_context has {len(live_context)} types")
 
     # Pass 0: exact type match without normalization (prefer most specific)
     for config_type, config_values in live_context.items():
         if config_type == target_type:
-            logger.info(f"_find_live_values_for_type: ✅ exact type match for {config_type.__name__}")
+            logger.debug(f"_find_live_values_for_type: ✅ exact type match for {config_type.__name__}")
             return config_values
 
     # First pass: look for subclass match (more specific wins) after normalization
@@ -777,7 +777,7 @@ def _find_live_values_for_type(target_type: type, live_context: dict) -> dict | 
         config_base = _normalize_type(config_type)
         try:
             if config_base != target_base and issubclass(config_base, target_base):
-                logger.info(f"_find_live_values_for_type: ✅ using {config_base.__name__} values for {target_base.__name__} (subclass)")
+                logger.debug(f"_find_live_values_for_type: ✅ using {config_base.__name__} values for {target_base.__name__} (subclass)")
                 return config_values
         except TypeError:
             pass  # Not a class
@@ -786,10 +786,10 @@ def _find_live_values_for_type(target_type: type, live_context: dict) -> dict | 
     for config_type, config_values in live_context.items():
         config_base = _normalize_type(config_type)
         if config_base == target_base:
-            logger.info(f"_find_live_values_for_type: ✅ exact match for {target_base.__name__}")
+            logger.debug(f"_find_live_values_for_type: ✅ exact match for {target_base.__name__}")
             return config_values
 
-    logger.warning(f"_find_live_values_for_type: ❌ no match for {target_base.__name__}")
+    logger.debug(f"_find_live_values_for_type: ❌ no match for {target_base.__name__}")
     return None
 
 
