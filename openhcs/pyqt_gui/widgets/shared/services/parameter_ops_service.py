@@ -133,7 +133,7 @@ class ParameterOpsService(ParameterServiceABC):
         reset_value = manager.state.parameters.get(param_name)
 
         # Invalidate cache token BEFORE refreshing placeholder
-        from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
+        from openhcs.config_framework.live_context_service import LiveContextService
         LiveContextService.increment_token()
 
         # VIEW-only: Update widget

@@ -940,7 +940,7 @@ class PipelineEditorWidget(AbstractManagerWidget):
     def closeEvent(self, event):
         """Handle widget close event to disconnect signals and prevent memory leaks."""
         # Unregister from cross-window refresh signals
-        from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
+        from openhcs.config_framework.live_context_service import LiveContextService
         LiveContextService.disconnect_listener(self._on_live_context_changed)
         logger.debug("Pipeline editor: Unregistered from cross-window refresh signals")
 

@@ -18,7 +18,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from openhcs.processing.backends.lib_registry.registry_service import RegistryService
 from openhcs.ui.shared.pattern_data_manager import PatternDataManager
 from openhcs.pyqt_gui.widgets.function_pane import FunctionPaneWidget
-from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
+from openhcs.config_framework.live_context_service import LiveContextService
 from openhcs.constants.constants import GroupBy
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.pyqt_gui.widgets.shared.widget_strategies import _get_enum_display_text
@@ -567,7 +567,7 @@ class FunctionListEditorWidget(QWidget):
             return
 
         from openhcs.config_framework.context_manager import config_context
-        from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
+        from openhcs.config_framework.live_context_service import LiveContextService
 
         try:
             # Collect all live context, then filter at consumption time

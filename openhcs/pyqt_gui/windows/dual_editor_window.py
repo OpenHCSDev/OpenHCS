@@ -22,7 +22,7 @@ from openhcs.ui.shared.pattern_data_manager import PatternDataManager
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 from openhcs.pyqt_gui.windows.base_form_dialog import BaseFormDialog
-from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
+from openhcs.config_framework.live_context_service import LiveContextService
 from openhcs.introspection.unified_parameter_analyzer import UnifiedParameterAnalyzer
 from typing import List
 logger = logging.getLogger(__name__)

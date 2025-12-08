@@ -63,18 +63,21 @@ def resolve_field_inheritance(
     Returns:
         Resolved field value or None if not found
     """
-    from openhcs.config_framework.lazy_factory import LazyDataclass
-
     obj_type = type(obj)
-    is_lazy_dataclass = isinstance(obj, LazyDataclass)
 
     # Step 1: Check if exact same type has concrete value in context
-    # ONLY for LazyDataclass types. For concrete classes, same-type lookup is skipped
-    # because finding another ProcessingConfig in context is NOT inheritance - it's
-    # just another instance in a different scope. If you explicitly created
-    # ProcessingConfig(group_by=None), you wanted None.
+    # Do same-type lookup if the field value is None (needs lazy resolution).
+    # This works for both LazyDataclass types AND concrete dataclasses with None fields.
     obj_base = _normalize_to_base(obj_type)
-    if is_lazy_dataclass:
+
+    # Check if this field needs resolution (instance value is None)
+    try:
+        instance_value = object.__getattribute__(obj, field_name)
+        needs_resolution = instance_value is None
+    except AttributeError:
+        needs_resolution = True
+
+    if needs_resolution:
         for config_instance in available_configs.values():
             # Normalize both sides: LazyWellFilterConfig matches WellFilterConfig
             instance_base = _normalize_to_base(type(config_instance))

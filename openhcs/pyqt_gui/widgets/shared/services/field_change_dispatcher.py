@@ -120,7 +120,7 @@ class FieldChangeDispatcher:
             root = self._get_root_manager(source)
             root._block_cross_window_updates = True
             try:
-                from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
+                from openhcs.config_framework.live_context_service import LiveContextService
                 LiveContextService._notify_change()
                 if DEBUG_DISPATCHER:
                     logger.info(f"  📣 Notified {len(LiveContextService._change_callbacks)} listeners")

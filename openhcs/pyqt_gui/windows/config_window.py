@@ -29,7 +29,7 @@ from openhcs.pyqt_gui.windows.base_form_dialog import BaseFormDialog
 from openhcs.core.config import GlobalPipelineConfig, PipelineConfig
 from openhcs.config_framework import is_global_config_type
 from openhcs.ui.shared.code_editor_form_updater import CodeEditorFormUpdater
-from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
+from openhcs.config_framework.live_context_service import LiveContextService
 # ❌ REMOVED: require_config_context decorator - enhanced decorator events system handles context automatically
 from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
 
@@ -397,7 +397,7 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
                 self.form_manager.object_instance = new_config
 
                 # Increment token to invalidate caches
-                from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
+                from openhcs.config_framework.live_context_service import LiveContextService
                 LiveContextService.increment_token()
 
                 # Refresh this window's placeholders with new saved values as base

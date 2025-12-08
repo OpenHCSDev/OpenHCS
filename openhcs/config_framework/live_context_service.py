@@ -225,21 +225,63 @@ class LiveContextService:
 
     @classmethod
     def _collect_from_state_tree(cls, state, scopes: Dict[str, Dict[type, Dict[str, Any]]]) -> None:
-        """Recursively collect values from ObjectState and all nested states.
+        """Collect values from ObjectState with nested configs embedded in parent.
+
+        Only ROOT states (those without a parent, or with a different scope) are added
+        as separate entries. Nested config states are embedded as field values in their
+        parent's values dict. This ensures config_context() can properly merge them.
 
         Populates scopes dict: scope_id → type → values
         """
-        if state.object_instance:
-            # Filter to non-None for sibling inheritance (None = inherit from parent)
-            values = {k: v for k, v in state.parameters.items() if v is not None}
+        if not state.object_instance:
+            return
 
-            scope_id = state.scope_id or ""
-            obj_type = type(state.object_instance)
-            scopes.setdefault(scope_id, {})[obj_type] = values
+        scope_id = state.scope_id or ""
+        obj_type = type(state.object_instance)
 
-        # Recurse into nested states (ObjectState.nested_states, not PFM.nested_managers)
-        for nested in state.nested_states.values():
-            cls._collect_from_state_tree(nested, scopes)
+        # Collect this state's own parameters (non-None only)
+        values = {k: v for k, v in state.parameters.items() if v is not None}
+
+        # Embed nested states as instantiated objects in the values dict
+        # This preserves hierarchy: GlobalPipelineConfig.napari_streaming_config = NapariStreamingConfig(...)
+        for field_name, nested_state in state.nested_states.items():
+            nested_values = cls._collect_nested_values(nested_state)
+            if nested_values:
+                # Create an instance of the nested type with the collected values
+                nested_type = type(nested_state.object_instance)
+                try:
+                    nested_instance = nested_type(**nested_values)
+                    values[field_name] = nested_instance
+                except Exception:
+                    # If instantiation fails, include raw values dict
+                    values[field_name] = nested_values
+
+        scopes.setdefault(scope_id, {})[obj_type] = values
+
+    @classmethod
+    def _collect_nested_values(cls, state) -> Dict[str, Any]:
+        """Recursively collect values from a nested ObjectState and its children.
+
+        Returns a flat dict of values suitable for dataclass instantiation.
+        """
+        if not state.object_instance:
+            return {}
+
+        # Collect this state's own parameters (non-None only)
+        values = {k: v for k, v in state.parameters.items() if v is not None}
+
+        # Recursively embed nested states
+        for field_name, nested_state in state.nested_states.items():
+            nested_values = cls._collect_nested_values(nested_state)
+            if nested_values:
+                nested_type = type(nested_state.object_instance)
+                try:
+                    nested_instance = nested_type(**nested_values)
+                    values[field_name] = nested_instance
+                except Exception:
+                    values[field_name] = nested_values
+
+        return values
 
     # ========== CONSUMPTION-TIME HELPERS ==========
 

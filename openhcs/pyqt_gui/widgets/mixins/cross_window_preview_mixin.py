@@ -35,7 +35,7 @@ class CrossWindowPreviewMixin:
     """
 
     # Debounce delay for preview updates (ms)
-    PREVIEW_UPDATE_DEBOUNCE_MS = 100
+    PREVIEW_UPDATE_DEBOUNCE_MS = 20
 
     def _init_cross_window_preview_mixin(self) -> None:
         self._preview_update_timer = None  # QTimer for debouncing
@@ -45,7 +45,7 @@ class CrossWindowPreviewMixin:
         self._preview_field_fallbacks: Dict[str, Callable] = {}
 
         # Connect to LiveContextService for change notifications
-        from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
+        from openhcs.config_framework.live_context_service import LiveContextService
         LiveContextService.connect_listener(self._on_live_context_changed)
 
         # CRITICAL: Disconnect when widget is destroyed to avoid accessing deleted C++ objects
@@ -55,7 +55,7 @@ class CrossWindowPreviewMixin:
 
     def _cleanup_cross_window_preview_mixin(self) -> None:
         """Disconnect from LiveContextService when widget is destroyed."""
-        from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
+        from openhcs.config_framework.live_context_service import LiveContextService
         LiveContextService.disconnect_listener(self._on_live_context_changed)
         logger.debug(f"{type(self).__name__}: disconnected from LiveContextService")
 

@@ -26,7 +26,7 @@ from PyQt6.QtGui import QFont
 
 from openhcs.pyqt_gui.widgets.shared.reorderable_list_widget import ReorderableListWidget
 from openhcs.pyqt_gui.widgets.shared.list_item_delegate import MultilinePreviewItemDelegate
-from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
+from openhcs.config_framework.live_context_service import LiveContextService
 from openhcs.pyqt_gui.widgets.mixins import (
     CrossWindowPreviewMixin,
     handle_selection_change_with_prevention,

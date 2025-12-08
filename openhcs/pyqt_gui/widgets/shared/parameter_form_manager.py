@@ -15,7 +15,7 @@ from .layout_constants import CURRENT_LAYOUT
 from openhcs.pyqt_gui.widgets.shared.services.value_collection_service import ValueCollectionService
 from openhcs.pyqt_gui.widgets.shared.services.signal_service import SignalService
 from openhcs.pyqt_gui.widgets.shared.services.field_change_dispatcher import FieldChangeDispatcher, FieldChangeEvent
-from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
+from openhcs.config_framework.live_context_service import LiveContextService
 from openhcs.pyqt_gui.widgets.shared.services.flag_context_manager import FlagContextManager
 from openhcs.pyqt_gui.widgets.shared.services.form_init_service import FormBuildOrchestrator, InitialRefreshStrategy
 

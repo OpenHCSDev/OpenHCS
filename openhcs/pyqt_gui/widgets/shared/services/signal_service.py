@@ -137,7 +137,7 @@ class SignalService:
         # Snapshot initial values for change detection (non-None only)
         manager._initial_values_on_open = {k: v for k, v in manager.state.parameters.items() if v is not None}
 
-        from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
+        from openhcs.config_framework.live_context_service import LiveContextService
         logger.info(f"🔍 REGISTER: {manager.field_id} (total: {len(LiveContextService.get_active_managers())})")
 
     # ========== CROSS-WINDOW REGISTRATION (from CrossWindowRegistration) ==========

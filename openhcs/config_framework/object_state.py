@@ -11,7 +11,7 @@ Replaces LiveContextService._active_form_managers as the single source of truth.
 import dataclasses
 from dataclasses import is_dataclass, fields as dataclass_fields
 import logging
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, Set, TYPE_CHECKING
 import copy
 
 if TYPE_CHECKING:
@@ -99,12 +99,11 @@ class ObjectStateRegistry:
 
     # ========== TOKEN MANAGEMENT ==========
     # Delegate to LiveContextService - single source of truth for cache invalidation
-    # Deferred imports required to avoid circular dependency (config_framework → pyqt_gui)
 
     @classmethod
     def get_token(cls) -> int:
         """Get current cache invalidation token from LiveContextService."""
-        from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
+        from openhcs.config_framework.live_context_service import LiveContextService
         return LiveContextService.get_token()
 
     @classmethod
@@ -114,8 +113,101 @@ class ObjectStateRegistry:
         Args:
             notify: If True, notify listeners. Default False (caller handles notification).
         """
-        from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
+        from openhcs.config_framework.live_context_service import LiveContextService
         LiveContextService.increment_token(notify=notify)
+
+    # ========== SCOPE + TYPE + FIELD AWARE INVALIDATION ==========
+
+    @classmethod
+    def invalidate_by_type_and_scope(
+        cls,
+        scope_id: Optional[str],
+        changed_type: type,
+        field_name: str
+    ) -> None:
+        """Invalidate a specific field in states that could inherit from changed_type at scope_id.
+
+        PERFORMANCE: Three-tier filtering:
+        1. SCOPE: State must be at or below changed scope (descendants inherit)
+        2. TYPE: State's type tree must include changed_type
+        3. FIELD: Only invalidate the specific field that changed
+
+        If changing GlobalPipelineConfig.napari_streaming_config.window_size:
+        - Only states with napari_streaming_config in their tree
+        - Only the 'window_size' field is invalidated, not all 20+ fields
+        - Steps without napari_streaming_config are NOT touched
+
+        Args:
+            scope_id: The scope that changed (None/"" for global scope)
+            changed_type: The type of the ObjectState that was modified
+            field_name: The specific field that changed
+        """
+        from openhcs.config_framework.lazy_factory import get_base_type_for_lazy
+
+        changed_scope = cls._normalize_scope_id(scope_id)
+
+        # Normalize to base type for comparison (LazyX → X)
+        base_changed_type = get_base_type_for_lazy(changed_type) or changed_type
+
+        for state in cls._states.values():
+            state_scope = cls._normalize_scope_id(state.scope_id)
+
+            # SCOPE CHECK: must be at or below changed scope
+            # Global scope (empty string) affects ALL states
+            if changed_scope == "":
+                # Global scope - always a descendant (or self if also global)
+                pass
+            else:
+                # Non-global: check exact match or descendant
+                is_self = (state_scope == changed_scope)
+                prefix = changed_scope + "::"
+                is_descendant = state_scope.startswith(prefix)
+                if not (is_self or is_descendant):
+                    continue
+
+            # TYPE + FIELD CHECK: find matching nested state and invalidate field
+            cls._invalidate_field_in_matching_states(state, base_changed_type, field_name)
+
+    @classmethod
+    def _invalidate_field_in_matching_states(
+        cls,
+        state: 'ObjectState',
+        target_base_type: type,
+        field_name: str
+    ) -> None:
+        """Find states that could inherit from target_base_type and invalidate the specific field.
+
+        A state should be invalidated if:
+        1. Its type matches target_base_type exactly, OR
+        2. Its type inherits from target_base_type (has target_base_type in MRO)
+
+        This handles sibling inheritance: when WellFilterConfig.well_filter changes,
+        StepWellFilterConfig states should also be invalidated since they inherit that field.
+
+        Args:
+            state: ObjectState to check
+            target_base_type: Normalized base type to match
+            field_name: Field to invalidate
+        """
+        from openhcs.config_framework.lazy_factory import get_base_type_for_lazy
+
+        # Check if this state's type matches or inherits from target_base_type
+        state_type = type(state.object_instance)
+        state_base_type = get_base_type_for_lazy(state_type) or state_type
+
+        # Check if target_base_type is in the MRO (state inherits the field)
+        # Normalize each MRO class to its base type for comparison
+        for mro_class in state_base_type.__mro__:
+            mro_base = get_base_type_for_lazy(mro_class) or mro_class
+            if mro_base == target_base_type:
+                # Only invalidate if the state has this field
+                if field_name in state.parameters:
+                    state.invalidate_field(field_name)
+                break
+
+        # Recurse into nested states
+        for nested_state in state.nested_states.values():
+            cls._invalidate_field_in_matching_states(nested_state, target_base_type, field_name)
 
 
 
@@ -133,8 +225,8 @@ class ObjectState:
     - object_instance: Backing object (updated on Save)
     - parameters: Mutable working copy (None = unset, value = user-set)
     - _saved_resolved: Resolved snapshot at save time
-    - _live_resolved: Resolved snapshot using live hierarchy
-    - _live_token: Token when _live_resolved was computed
+    - _live_resolved: Resolved snapshot using live hierarchy (None = needs compute)
+    - _invalid_fields: Fields needing partial recompute
     - nested_states: Recursive containment
     - _parent_state: Parent for context derivation
     - scope_id: Scope for registry lookup
@@ -193,8 +285,8 @@ class ObjectState:
         self._create_nested_states()
 
         # === Cache (2 attributes) ===
-        self._live_resolved: Dict[str, Any] = {}
-        self._live_token: int = -1  # Force recompute on first access
+        self._live_resolved: Optional[Dict[str, Any]] = None  # None = needs full compute
+        self._invalid_fields: Set[str] = set()  # Fields needing partial recompute
 
         # === Saved baseline (1 attribute) ===
         self._saved_resolved: Dict[str, Any] = {}
@@ -213,11 +305,25 @@ class ObjectState:
         return self._parent_state.object_instance if self._parent_state else None
 
     def _ensure_live_resolved(self) -> None:
-        """Recompute _live_resolved if cache is stale."""
-        token = ObjectStateRegistry.get_token()
-        if self._live_token != token:
+        """Ensure _live_resolved cache is populated.
+
+        PERFORMANCE: Field-level invalidation only.
+        - First access: full compute to populate cache
+        - After update_parameter(): only recompute invalid fields
+        - Cross-window access: return cached values directly (no work)
+
+        NOTE: Global token is for LiveContextService.collect(), NOT for _live_resolved.
+        """
+        # First access - populate cache
+        if self._live_resolved is None:
             self._live_resolved = self._compute_resolved_snapshot()
-            self._live_token = token
+            self._invalid_fields.clear()
+            return
+
+        # Partial recompute for invalid fields only
+        if self._invalid_fields:
+            self._recompute_invalid_fields()
+            self._invalid_fields.clear()
 
     def _create_nested_states(self) -> None:
         """Recursively create nested ObjectStates for nested dataclass parameters.
@@ -297,8 +403,14 @@ class ObjectState:
     def update_parameter(self, param_name: str, value: Any) -> None:
         """Update parameter value in state.
 
-        Enforces invariant: state mutation → global cache invalidation.
-        Controllers don't need to remember to invalidate - ObjectState handles it.
+        Enforces invariants:
+        1. State mutation → scope+type+field aware cache invalidation
+        2. State mutation → global token increment (for live context cache)
+
+        PERFORMANCE: Three-tier filtering for minimal invalidation:
+        - SCOPE: Only descendants of this scope (they inherit from us)
+        - TYPE: Only states with this type in their tree
+        - FIELD: Only the specific field that changed
 
         Args:
             param_name: Name of parameter to update
@@ -310,12 +422,18 @@ class ObjectState:
         # Update state directly (no type conversion - that's VIEW responsibility)
         self.parameters[param_name] = value
 
-        # Invalidate local cache (will be recomputed on next access)
-        self._live_token = -1
+        # SELF-INVALIDATION: Mark this field as needing recompute in our own cache
+        self._invalid_fields.add(param_name)
 
-        # Enforce invariant: state mutation → global cache invalidation
-        # This ensures all other ObjectStates know to recompute their resolved values
-        # notify=False: Controller handles when/how to trigger UI refresh
+        # SCOPE + TYPE + FIELD AWARE INVALIDATION:
+        # Only invalidate the specific field in OTHER states that inherit from this scope
+        ObjectStateRegistry.invalidate_by_type_and_scope(
+            scope_id=self.scope_id,
+            changed_type=type(self.object_instance),
+            field_name=param_name
+        )
+
+        # Increment global token for LiveContextService.collect() cache invalidation
         ObjectStateRegistry.increment_token(notify=False)
 
     def get_resolved_value(self, param_name: str) -> Any:
@@ -330,45 +448,77 @@ class ObjectState:
         self._ensure_live_resolved()
         return self._live_resolved.get(param_name)
 
-    def _resolve_value(self, param_name: str) -> Any:
-        """Internal resolver - builds context stack and resolves raw value.
+    def invalidate_cache(self) -> None:
+        """Invalidate resolved cache - forces full recompute on next access."""
+        self._live_resolved = None
 
-        Args:
-            param_name: Field name to resolve
+    def invalidate_self_and_nested(self) -> None:
+        """Invalidate this state's cache and all nested states recursively.
 
-        Returns:
-            Raw resolved value
+        Used by scope-aware invalidation to invalidate entire subtree.
+        """
+        self._live_resolved = None
+        self._invalid_fields.clear()  # Full invalidation, not field-level
+        for nested_state in self.nested_states.values():
+            nested_state.invalidate_self_and_nested()
+
+    def invalidate_field(self, field_name: str) -> None:
+        """Mark a specific field as needing recomputation.
+
+        PERFORMANCE: Field-level invalidation - only the changed field
+        needs recomputation, not all 20+ fields in the config.
+        """
+        if field_name in self.parameters:
+            self._invalid_fields.add(field_name)
+
+    def _recompute_invalid_fields(self) -> None:
+        """Recompute only the invalid fields, not the entire snapshot.
+
+        PERFORMANCE: For explicitly set values, use parameters directly.
+        Only build context stack for inherited (None) values.
         """
         from openhcs.config_framework.context_manager import build_context_stack
+        from openhcs.config_framework.live_context_service import LiveContextService
         from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
-        from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
 
-        # Collect live values via LiveContextService (single source of truth)
-        snapshot = LiveContextService.collect()
-        live_values = LiveContextService.merge_ancestor_values(
-            snapshot.scopes,
-            self.scope_id
-        )
+        # Separate explicit vs inherited fields
+        explicit_fields = []
+        inherited_fields = []
+        for name in self._invalid_fields:
+            if name not in self.parameters:
+                continue
+            if self.parameters[name] is not None:
+                explicit_fields.append(name)
+            else:
+                inherited_fields.append(name)
 
-        # Build context stack
-        stack = build_context_stack(
-            context_obj=self.context_obj,
-            object_instance=self.object_instance,
-            live_values=live_values,
-        )
+        # Explicit values: use parameters directly (no resolution needed)
+        for name in explicit_fields:
+            self._live_resolved[name] = self.parameters[name]
 
-        with stack:
-            obj_type = type(self.object_instance)
-            try:
-                instance = obj_type()
-                return getattr(instance, param_name)
-            except Exception:
-                # Fallback to class default
-                return LazyDefaultPlaceholderService._get_class_default_value(obj_type, param_name)
+        # Inherited values: need context stack for lazy resolution
+        if inherited_fields:
+            lcs_snapshot = LiveContextService.collect()
+            live_values = LiveContextService.merge_ancestor_values(
+                lcs_snapshot.scopes,
+                self.scope_id
+            )
 
-    def invalidate_cache(self) -> None:
-        """Invalidate resolved cache by resetting token."""
-        self._live_token = -1
+            stack = build_context_stack(
+                context_obj=self.context_obj,
+                object_instance=self.object_instance,
+                live_values=live_values,
+            )
+
+            with stack:
+                obj_type = type(self.object_instance)
+                try:
+                    instance = obj_type()
+                    for name in inherited_fields:
+                        self._live_resolved[name] = getattr(instance, name)
+                except Exception:
+                    for name in inherited_fields:
+                        self._live_resolved[name] = LazyDefaultPlaceholderService._get_class_default_value(obj_type, name)
 
     def reset_parameter(self, param_name: str) -> None:
         """Reset parameter to signature default (None for lazy dataclasses)."""
@@ -379,7 +529,7 @@ class ObjectState:
         # This ensures reset goes back to None for lazy fields, not saved concrete values
         default_value = self._signature_defaults.get(param_name)
         self.parameters[param_name] = default_value
-        self._live_token = -1  # Invalidate cache
+        self._live_resolved = None  # Invalidate cache - forces full recompute
 
 
 
@@ -416,14 +566,61 @@ class ObjectState:
 
     # ==================== SAVED STATE / DIRTY TRACKING ====================
 
-    def _compute_resolved_snapshot(self) -> Dict[str, Any]:
-        """Resolve all fields for this state and nested states into a snapshot dict."""
-        snapshot: Dict[str, Any] = {}
-        for name in self.parameters.keys():
-            snapshot[name] = self._resolve_value(name)
+    def _compute_resolved_snapshot(
+        self,
+        parent_live_values: Optional[Dict[type, Dict[str, Any]]] = None
+    ) -> Dict[str, Any]:
+        """Resolve all fields for this state and nested states into a snapshot dict.
 
+        PERFORMANCE OPTIMIZATIONS:
+        1. Build context stack ONCE and resolve ALL fields in bulk (not per-field)
+        2. Share parent's live_values with nested states (they have same scope_id)
+
+        Args:
+            parent_live_values: Pre-computed live values from parent state.
+                               If provided, skips LiveContextService.collect() and merge().
+                               Nested states inherit parent's scope_id, so same live_values apply.
+        """
+        from openhcs.config_framework.context_manager import build_context_stack
+        from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
+
+        # Use parent's live_values if provided, otherwise compute our own
+        if parent_live_values is not None:
+            live_values = parent_live_values
+        else:
+            from openhcs.config_framework.live_context_service import LiveContextService
+            lcs_snapshot = LiveContextService.collect()
+            live_values = LiveContextService.merge_ancestor_values(
+                lcs_snapshot.scopes,
+                self.scope_id
+            )
+
+        # Build context stack ONCE
+        stack = build_context_stack(
+            context_obj=self.context_obj,
+            object_instance=self.object_instance,
+            live_values=live_values,
+        )
+
+        snapshot: Dict[str, Any] = {}
+
+        # Resolve ALL fields in single context stack
+        with stack:
+            obj_type = type(self.object_instance)
+            try:
+                instance = obj_type()
+                for name in self.parameters.keys():
+                    snapshot[name] = getattr(instance, name)
+            except Exception:
+                # Fallback to per-field resolution
+                for name in self.parameters.keys():
+                    snapshot[name] = LazyDefaultPlaceholderService._get_class_default_value(obj_type, name)
+
+        # Recurse into nested states, passing our live_values (they share our scope_id)
         for nested_name, nested_state in self.nested_states.items():
-            snapshot[nested_name] = nested_state._compute_resolved_snapshot()
+            snapshot[nested_name] = nested_state._compute_resolved_snapshot(
+                parent_live_values=live_values
+            )
 
         return snapshot
 

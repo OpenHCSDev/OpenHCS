@@ -227,7 +227,7 @@ class WidgetService:
             from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
             from openhcs.config_framework.context_manager import config_context
 
-            from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
+            from openhcs.config_framework.live_context_service import LiveContextService
             live_context_snapshot = LiveContextService.collect()
             live_context = LiveContextService.merge_ancestor_values(
                 live_context_snapshot.scopes, manager.scope_id or ""
