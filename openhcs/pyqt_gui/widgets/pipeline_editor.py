@@ -248,8 +248,8 @@ class PipelineEditorWidget(AbstractManagerWidget):
             if source_name != 'PREVIOUS_STEP':
                 preview_parts.append(f"input={source_name}")
 
-        # Config indicators: NAP, FIJI, MAT (initials only if enabled, + well_filter if set)
-        config_labels = self._build_step_config_labels(step, state)
+        # Config indicators: NAP, FIJI, MAT (via ABC's _build_preview_labels)
+        config_labels = self._build_preview_labels(item=step, config_source=step)
         if config_labels:
             preview_parts.append(f"[{','.join(config_labels)}]")
 
@@ -265,69 +265,6 @@ class PipelineEditorWidget(AbstractManagerWidget):
             display_text = f"▶ {step_name}{dirty_marker}"
 
         return display_text, step_name
-
-    def _build_step_config_labels(self, step: FunctionStep, state: Optional[Any]) -> List[str]:
-        """Build compact config labels: initials if enabled, + well_filter if not None.
-
-        Args:
-            step: FunctionStep to get config from
-            state: Optional ObjectState for resolved values
-
-        Returns:
-            List of labels like ['NAP', 'MAT+5'] or ['FIJI', 'NAP+A01,A02']
-        """
-        from openhcs.core.config import WellFilterMode
-
-        labels = []
-
-        # Config name -> (indicator, nested_state_key)
-        configs = [
-            ('napari_streaming_config', 'NAP'),
-            ('fiji_streaming_config', 'FIJI'),
-            ('step_materialization_config', 'MAT'),
-        ]
-
-        for config_attr, indicator in configs:
-            # Get nested state or fall back to step attr
-            nested_state = state.nested_states.get(config_attr) if state else None
-            config_obj = getattr(step, config_attr, None)
-
-            # Check enabled
-            if nested_state:
-                enabled = nested_state.get_resolved_value('enabled')
-            elif config_obj and hasattr(config_obj, 'enabled'):
-                enabled = config_obj.enabled
-            else:
-                enabled = False
-
-            if not enabled:
-                continue
-
-            # Check well_filter
-            if nested_state:
-                well_filter = nested_state.get_resolved_value('well_filter')
-                mode = nested_state.get_resolved_value('well_filter_mode')
-            elif config_obj:
-                well_filter = getattr(config_obj, 'well_filter', None)
-                mode = getattr(config_obj, 'well_filter_mode', WellFilterMode.INCLUDE)
-            else:
-                well_filter = None
-                mode = WellFilterMode.INCLUDE
-
-            if well_filter is not None:
-                # Format well_filter
-                if isinstance(well_filter, list):
-                    wf_str = str(len(well_filter))
-                elif isinstance(well_filter, int):
-                    wf_str = str(well_filter)
-                else:
-                    wf_str = str(well_filter)
-                mode_prefix = '-' if mode == WellFilterMode.EXCLUDE else '+'
-                labels.append(f"{indicator}{mode_prefix}{wf_str}")
-            else:
-                labels.append(indicator)
-
-        return labels
 
     def _create_step_tooltip(self, step: FunctionStep) -> str:
         """Create detailed tooltip for a step showing all constructor values."""

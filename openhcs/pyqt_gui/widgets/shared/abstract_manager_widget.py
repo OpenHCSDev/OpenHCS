@@ -1191,6 +1191,7 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, ABC, metaclass=_Co
                     return self._resolve_config_attr(i, config_obj, attr_name, snapshot)
 
                 formatted = format_config_indicator(field_path, value, resolve_attr)
+                # If formatter returns None, config should not be shown - don't fall back to str()
             else:
                 # Simple value - use mixin's format_preview_value
                 formatted = self.format_preview_value(field_path, value)

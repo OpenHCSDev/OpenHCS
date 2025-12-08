@@ -18,7 +18,6 @@ from PyQt6.QtCore import Qt, pyqtSignal
 
 from openhcs.core.config import GlobalPipelineConfig, PipelineConfig
 from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator, OrchestratorState
-from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
 from openhcs.core.path_cache import PathCacheKey
 from openhcs.io.filemanager import FileManager
 from openhcs.io.base import _create_storage_registry
@@ -45,7 +44,6 @@ from openhcs.pyqt_gui.widgets.shared.abstract_manager_widget import AbstractMana
 from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
 from openhcs.pyqt_gui.widgets.shared.services.zmq_execution_service import ZMQExecutionService
 from openhcs.pyqt_gui.widgets.shared.services.compilation_service import CompilationService
-from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
 
 logger = logging.getLogger(__name__)
 
@@ -258,13 +256,9 @@ class PlateManagerWidget(AbstractManagerWidget):
     def _build_config_preview_labels(self, orchestrator: PipelineOrchestrator) -> List[str]:
         """Build preview labels for orchestrator config using ABC template."""
         try:
-            pipeline_config = orchestrator.pipeline_config
-            live_context_snapshot = LiveContextService.collect()
-
             return self._build_preview_labels(
                 item=orchestrator,
-                config_source=pipeline_config,
-                live_context_snapshot=live_context_snapshot,
+                config_source=orchestrator.pipeline_config,
             )
         except Exception as e:
             logger.error(f"Error building config preview labels: {e}\n{traceback.format_exc()}")
