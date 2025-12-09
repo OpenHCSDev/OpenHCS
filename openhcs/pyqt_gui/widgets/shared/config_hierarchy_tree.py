@@ -25,8 +25,8 @@ logger = logging.getLogger(__name__)
 class TreeItemFlashDelegate(QStyledItemDelegate):
     """Custom delegate for tree items with flash animation support.
 
-    Reads flash colors from manager's _flash_colors dict during paint - O(1) lookup.
-    Same pattern as MultilinePreviewItemDelegate for list items.
+    PAINT-TIME ARCHITECTURE: Flash color is computed during paint() via
+    manager.get_flash_color_for_key(). Scales O(visible_items) not O(all × 60fps).
 
     Automatically registers parent widget for repaint with the flash manager.
     """
@@ -36,7 +36,7 @@ class TreeItemFlashDelegate(QStyledItemDelegate):
 
         Args:
             parent: Parent widget (QTreeWidget)
-            manager: Flash manager with _flash_colors dict (e.g., ParameterFormManager)
+            manager: Flash manager with get_flash_color_for_key() (e.g., ParameterFormManager)
         """
         super().__init__(parent)
         self._manager = manager
@@ -50,15 +50,15 @@ class TreeItemFlashDelegate(QStyledItemDelegate):
 
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index) -> None:
         """Paint tree item with flash background."""
-        # FAST: Draw flash background from manager's dict (just a dict lookup)
-        if self._manager is not None and hasattr(self._manager, '_flash_colors'):
+        # PAINT-TIME: Compute flash color now (not during timer tick)
+        if self._manager is not None and hasattr(self._manager, 'get_flash_color_for_key'):
             item = self.parent().itemFromIndex(index)
             if item is not None:
                 data = item.data(0, Qt.ItemDataRole.UserRole)
                 if data and isinstance(data, dict):
                     field_name = data.get('field_name')
                     if field_name:
-                        flash_color = self._manager._flash_colors.get(field_name)
+                        flash_color = self._manager.get_flash_color_for_key(field_name)
                         if flash_color and flash_color.alpha() > 0:
                             painter.fillRect(option.rect, flash_color)
 
@@ -83,7 +83,7 @@ class ConfigHierarchyTreeHelper:
         Args:
             header_label: Header text for the tree
             minimum_width: Minimum width (0 allows free splitter movement)
-            flash_manager: Optional manager with _flash_colors dict for flash animation
+            flash_manager: Optional manager with get_flash_color_for_key() for flash animation
         """
         tree = QTreeWidget()
         tree.setHeaderLabel(header_label)

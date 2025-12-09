@@ -201,11 +201,15 @@ def config_context(obj, mask_with_none: bool = False):
 
     merged_token = current_temp_global.set(merged_config)
     type_token = context_type_stack.set(new_types)
+    # PERFORMANCE: Clear extract cache on context push (new merged config)
+    clear_extract_all_configs_cache()
     try:
         yield
     finally:
         current_temp_global.reset(merged_token)
         context_type_stack.reset(type_token)
+        # PERFORMANCE: Clear extract cache on context pop
+        clear_extract_all_configs_cache()
 
 
 def get_context_type_stack():
@@ -981,9 +985,17 @@ def extract_all_configs_from_context() -> Dict[str, Any]:
     return extract_all_configs(current)
 
 
+# PERFORMANCE: Cache extracted configs per context object id
+# Cleared when context changes (config_context push/pop)
+_extract_all_configs_cache: Dict[int, Dict[str, Any]] = {}
+
+
 def extract_all_configs(context_obj) -> Dict[str, Any]:
     """
     Extract all config instances from a context object using type-driven approach.
+
+    PERFORMANCE: Results are cached per context object id. Cache is cleared on
+    context changes via clear_extract_all_configs_cache().
 
     This function leverages dataclass field type annotations to efficiently extract
     config instances, avoiding string matching and runtime attribute scanning.
@@ -996,6 +1008,11 @@ def extract_all_configs(context_obj) -> Dict[str, Any]:
     """
     if context_obj is None:
         return {}
+
+    # PERFORMANCE: Check cache first
+    obj_id = id(context_obj)
+    if obj_id in _extract_all_configs_cache:
+        return _extract_all_configs_cache[obj_id]
 
     configs = {}
 
@@ -1024,19 +1041,23 @@ def extract_all_configs(context_obj) -> Dict[str, Any]:
                         base_type = get_base_type_for_lazy(instance_type) or instance_type
                         configs[base_type.__name__] = field_value
 
-                        logger.debug(f"Extracted config {base_type.__name__} from field {field_name}")
-
                 except AttributeError:
                     # Field doesn't exist on instance (shouldn't happen with dataclasses)
-                    logger.debug(f"Field {field_name} not found on {type(context_obj).__name__}")
                     continue
 
     # For non-dataclass objects (orchestrators, etc.), extract dataclass attributes
     else:
         _extract_from_object_attributes_typed(context_obj, configs)
 
+    # Cache result
+    _extract_all_configs_cache[obj_id] = configs
     logger.debug(f"Extracted {len(configs)} configs: {list(configs.keys())}")
     return configs
+
+
+def clear_extract_all_configs_cache() -> None:
+    """Clear the extract_all_configs cache. Call when context changes."""
+    _extract_all_configs_cache.clear()
 
 
 def _unwrap_optional_type(field_type):

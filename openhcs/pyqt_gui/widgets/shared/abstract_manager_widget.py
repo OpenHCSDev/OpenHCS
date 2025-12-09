@@ -33,7 +33,7 @@ from openhcs.pyqt_gui.widgets.mixins import (
 )
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 from openhcs.config_framework import LiveContextResolver
-from openhcs.pyqt_gui.widgets.shared.flash_mixin import FlashMixin, get_flash_color
+from openhcs.pyqt_gui.widgets.shared.flash_mixin import FlashMixin
 
 logger = logging.getLogger(__name__)
 
@@ -161,9 +161,7 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
 
         # Flash animation state: {scope_id: (ObjectState, callback)}
         self._flash_subscriptions: Dict[str, tuple] = {}
-        # Flash colors: {scope_id: QColor} - delegate reads directly (FAST)
-        self._flash_colors: Dict[str, QColor] = {}
-        self._init_visual_update_mixin()  # Initialize VisualUpdateMixin state
+        self._init_visual_update_mixin()  # Initialize VisualUpdateMixin state (PAINT-TIME API)
 
         # Initialize CrossWindowPreviewMixin for preview field configuration API
         # (We override _on_live_context_changed to use unified batching)
@@ -916,21 +914,27 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
         self._flash_subscriptions[scope_id] = (state, on_change)
         logger.info(f"⚡ FLASH_DEBUG: Subscribed to {scope_id}, total subscriptions={len(self._flash_subscriptions)}")
 
-    # VisualUpdateMixin implementation - store color in dict (delegate reads directly)
-    def _set_item_background(self, key: str, color: QColor) -> None:
-        """Store flash color in dict - delegate reads directly (FAST, no model overhead)."""
-        if color.alpha() > 0:
-            self._flash_colors[key] = color
-        elif key in self._flash_colors:
-            del self._flash_colors[key]
+    # PAINT-TIME API: get_flash_color_for_key() inherited from VisualUpdateMixin
+    # List delegate calls this during paint to get current flash color
 
-    def _get_original_color(self, key: str) -> Optional[QColor]:
-        """Get original background color for list item."""
-        return QColor(0, 0, 0, 0)  # Transparent
+    def _is_flash_visible(self) -> bool:
+        """Check if this widget's flash animations are visible on screen.
+
+        GAME ENGINE: Skip animation ticks entirely for widgets that aren't visible.
+        """
+        try:
+            if not self.isVisible():
+                return False
+            window = self.window()
+            if window and window.isMinimized():
+                return False
+        except RuntimeError:
+            return False  # Widget deleted
+        return True
 
     def _visual_repaint(self) -> None:
         """Trigger single repaint after all items updated (VisualUpdateMixin)."""
-        if self.item_list:
+        if self.item_list and self._flash_states:
             self.item_list.update()
 
     def _execute_text_update(self) -> None:
@@ -1012,7 +1016,7 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
                     self._subscribe_flash_for_item(item_obj)
             else:
                 # Count changed - rebuild list
-                self._flash_colors.clear()
+                self._flash_start_times.clear()  # PAINT-TIME: clear start times
                 self.item_list.clear()
                 for index, item_obj in enumerate(backing_items):
                     display_text = self._format_list_item(item_obj, index, update_context)

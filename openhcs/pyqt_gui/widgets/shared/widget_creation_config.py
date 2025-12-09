@@ -378,6 +378,17 @@ def create_widget_parametric(manager: ParameterFormManager, param_info: Paramete
         None, CURRENT_LAYOUT, QWidget, GroupBoxWithHelp, PyQt6ColorScheme
     )
 
+    # GAME ENGINE: Register groupbox with overlay for flash rendering
+    # Only for nested containers (GroupBoxWithHelp) that have flash_key
+    if config.is_nested and hasattr(container, '_flash_key'):
+        flash_key = container._flash_key
+        # Get root manager for overlay registration
+        root_manager = manager
+        while getattr(root_manager, '_parent_manager', None) is not None:
+            root_manager = root_manager._parent_manager
+        if hasattr(root_manager, 'register_flash_groupbox'):
+            root_manager.register_flash_groupbox(flash_key, container)
+
     # Setup layout - polymorphic dispatch
     # Each setup_layout function handles its own container type
     layout_type = config.layout_type

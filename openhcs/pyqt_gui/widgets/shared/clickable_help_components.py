@@ -12,30 +12,24 @@ logger = logging.getLogger(__name__)
 
 
 class FlashableGroupBox(QGroupBox):
-    """QGroupBox with smooth flash animation reading from manager's _flash_colors dict.
+    """QGroupBox that supports flash animation via overlay.
 
-    Single source of truth: manager._flash_colors dict is read during paintEvent.
-    Both groupboxes and tree items read from the SAME dict.
+    GAME ENGINE ARCHITECTURE: Flash effects are rendered by a single
+    FlashOverlayWidget that sits on top of the form, NOT by individual
+    groupbox paintEvents. This scales O(1) per window regardless of
+    how many items are animating.
+
+    The groupbox just stores its flash_key for the overlay to look up.
     """
 
     def __init__(self, title: str = "", parent: Optional[QWidget] = None,
                  flash_key: str = "", flash_manager=None):
         super().__init__(title, parent)
-        self._flash_key = flash_key  # Key to look up in manager's _flash_colors
-        self._flash_manager = flash_manager  # Manager with _flash_colors dict
+        self._flash_key = flash_key  # Key for overlay to look up geometry
+        self._flash_manager = flash_manager  # Kept for backwards compat
 
-    def paintEvent(self, event) -> None:
-        # Let QGroupBox paint its normal content FIRST
-        super().paintEvent(event)
-        # Read flash color from manager's dict (SINGLE source of truth)
-        flash_color = None
-        if self._flash_manager is not None and hasattr(self._flash_manager, '_flash_colors'):
-            flash_color = self._flash_manager._flash_colors.get(self._flash_key)
-        if flash_color and flash_color.alpha() > 0:
-            painter = QPainter(self)
-            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
-            painter.fillRect(self.contentsRect(), flash_color)
-            painter.end()
+    # NOTE: paintEvent flash rendering REMOVED - now handled by FlashOverlayWidget
+    # This eliminates O(n) paintEvent calls per frame
 
 
 class ClickableHelpLabel(QLabel):
@@ -350,7 +344,7 @@ class GroupBoxWithHelp(FlashableGroupBox):
     """PyQt6 group box with integrated help for dataclass titles - mirrors Textual TUI pattern.
 
     Inherits from FlashableGroupBox to support smooth flash animations.
-    Reads flash color from manager's _flash_colors dict (single source of truth).
+    Uses PAINT-TIME color computation via manager.get_flash_color_for_key().
     """
 
     def __init__(self, title: str, help_target: Union[Callable, type] = None,

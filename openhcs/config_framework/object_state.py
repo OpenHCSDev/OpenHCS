@@ -232,6 +232,10 @@ class ObjectStateRegistry:
             field_name: The specific field that changed
         """
         from openhcs.config_framework.lazy_factory import get_base_type_for_lazy
+        from openhcs.config_framework.dual_axis_resolver import invalidate_mro_cache_for_field
+
+        # PERFORMANCE: Targeted cache invalidation - only clear entries for this field/type
+        invalidate_mro_cache_for_field(changed_type, field_name)
 
         changed_scope = cls._normalize_scope_id(scope_id)
 

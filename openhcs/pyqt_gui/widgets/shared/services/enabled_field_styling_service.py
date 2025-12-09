@@ -99,10 +99,12 @@ class EnabledFieldStylingService:
     def on_enabled_field_changed(self, manager, param_name: str, value: Any) -> None:
         """
         Apply visual styling when 'enabled' parameter changes.
-        
+
         This handler is connected for ANY form that has an 'enabled' parameter.
         When enabled resolves to False, apply visual dimming WITHOUT blocking input.
-        
+
+        PERFORMANCE: Early exit if value unchanged to avoid redundant styling.
+
         Args:
             manager: ParameterFormManager instance
             param_name: Parameter name (should be 'enabled')
@@ -125,18 +127,26 @@ class EnabledFieldStylingService:
         else:
             resolved_value = value
 
+        # PERFORMANCE: Skip if value hasn't changed
+        cache_attr = '_last_enabled_value'
+        last_value = getattr(manager, cache_attr, None)
+        if last_value == resolved_value:
+            logger.debug(f"[ENABLED HANDLER] field_id={manager.field_id}, SKIP (value unchanged: {resolved_value})")
+            return
+        setattr(manager, cache_attr, resolved_value)
+
         logger.debug(f"[ENABLED HANDLER] field_id={manager.field_id}, resolved_value={resolved_value}")
 
-        # Get direct widgets (excluding nested managers)
+        # Get direct widgets (excluding nested managers) - CACHED
         direct_widgets = self._get_direct_widgets(manager)
         widget_names = [f"{w.__class__.__name__}({w.objectName() or 'no-name'})" for w in direct_widgets[:5]]
         logger.debug(f"[ENABLED HANDLER] field_id={manager.field_id}, found {len(direct_widgets)} direct widgets, first 5: {widget_names}")
-        
+
         # Check if this is a nested config
         is_nested_config = manager._parent_manager is not None and any(
             nested_manager == manager for nested_manager in manager._parent_manager.nested_managers.values()
         )
-        
+
         if is_nested_config:
             self._apply_nested_config_styling(manager, resolved_value)
         else:
@@ -171,13 +181,20 @@ class EnabledFieldStylingService:
     def _get_direct_widgets(self, manager):
         """
         Get widgets that belong to this form, excluding nested ParameterFormManager widgets.
-        
+
+        PERFORMANCE: Cached per manager instance - widget list doesn't change after form creation.
+
         Args:
             manager: ParameterFormManager instance
-        
+
         Returns:
             List of widgets belonging to this form
         """
+        # CACHE: Return cached result if available
+        cache_attr = '_cached_direct_widgets'
+        if hasattr(manager, cache_attr):
+            return getattr(manager, cache_attr)
+
         direct_widgets = []
         all_widgets = self.widget_ops.get_all_value_widgets(manager)
         logger.debug(f"[GET_DIRECT_WIDGETS] field_id={manager.field_id}, total widgets found: {len(all_widgets)}, nested_managers: {list(manager.nested_managers.keys())}")
@@ -200,6 +217,9 @@ class EnabledFieldStylingService:
                 logger.debug(f"[GET_DIRECT_WIDGETS] ✅ INCLUDE {widget_name}")
 
         logger.debug(f"[GET_DIRECT_WIDGETS] field_id={manager.field_id}, returning {len(direct_widgets)} direct widgets")
+
+        # CACHE: Store for future calls
+        setattr(manager, cache_attr, direct_widgets)
         return direct_widgets
     
     def _is_any_ancestor_disabled(self, manager) -> bool:

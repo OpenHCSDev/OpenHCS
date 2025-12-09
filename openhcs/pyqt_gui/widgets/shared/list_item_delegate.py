@@ -18,17 +18,11 @@ class MultilinePreviewItemDelegate(QStyledItemDelegate):
     - Grey preview text for lines containing specific markers
     - Proper hover/selection/border rendering
     - Configurable colors for normal/preview/selected text
-    - Flash animation (reads color from manager's flash_colors dict - FAST)
+    - Flash animation using PAINT-TIME color computation
 
-    Text format:
-    - Lines starting with "  └─" are rendered in grey (preview text)
-    - All other lines are rendered in normal color
-    - Selected items use selected text color
+    PAINT-TIME ARCHITECTURE: Flash color is computed during paint() call,
+    not stored in a dict updated 60x/sec. This scales O(visible_items).
     """
-
-    # Class-level flash colors dict - shared by all delegates, set by manager
-    # Key: scope_id, Value: QColor
-    flash_colors: dict = {}
 
     def __init__(self, name_color: QColor, preview_color: QColor, selected_text_color: QColor,
                  parent=None, manager=None):
@@ -39,7 +33,7 @@ class MultilinePreviewItemDelegate(QStyledItemDelegate):
             preview_color: Color for preview text lines (grey)
             selected_text_color: Color for text when item is selected
             parent: Parent widget (QListWidget)
-            manager: Manager widget with flash_colors dict
+            manager: Manager widget with get_flash_color_for_key()
         """
         super().__init__(parent)
         self.name_color = name_color
@@ -57,12 +51,12 @@ class MultilinePreviewItemDelegate(QStyledItemDelegate):
         text = opt.text or ""
         opt.text = ""
 
-        # FAST: Draw flash background from manager's dict (just a dict lookup)
-        if self._manager is not None:
+        # PAINT-TIME: Compute flash color now (not during timer tick)
+        if self._manager is not None and hasattr(self._manager, 'get_flash_color_for_key'):
             item_data = index.data(Qt.ItemDataRole.UserRole)
             if item_data is not None:
                 scope_id = self._manager._get_scope_for_item(item_data)
-                flash_color = self._manager._flash_colors.get(scope_id)
+                flash_color = self._manager.get_flash_color_for_key(scope_id)
                 if flash_color and flash_color.alpha() > 0:
                     painter.fillRect(option.rect, flash_color)
 

@@ -147,10 +147,19 @@ class ScopeTokenService:
         prefix = cls._get_prefix(obj)
         return cls.get_generator(parent_scope, prefix).ensure(obj)
 
+    # PERFORMANCE: Cache scope_id strings per (parent_scope, object_id)
+    _scope_id_cache: dict[tuple[str, int], str] = {}
+
     @classmethod
     def build_scope_id(cls, parent_scope: str, obj: object) -> str:
+        # PERFORMANCE: Check cache first
+        cache_key = (parent_scope, id(obj))
+        if cache_key in cls._scope_id_cache:
+            return cls._scope_id_cache[cache_key]
+
         token = cls.ensure_token(parent_scope, obj)
         result = f"{parent_scope}::{token}"
+        cls._scope_id_cache[cache_key] = result
         logger.debug(f"🔑 ScopeTokenService.build_scope_id: {result} for {type(obj).__name__}")
         return result
 
@@ -174,5 +183,11 @@ class ScopeTokenService:
         keys_to_remove = [k for k in cls._generators if k[0].startswith(parent_scope)]
         for key in keys_to_remove:
             del cls._generators[key]
+
+        # PERFORMANCE: Also clear scope_id cache for this scope
+        cache_keys_to_remove = [k for k in cls._scope_id_cache if k[0].startswith(parent_scope)]
+        for key in cache_keys_to_remove:
+            del cls._scope_id_cache[key]
+
         if keys_to_remove:
             logger.debug(f"🔑 ScopeTokenService: Cleared {len(keys_to_remove)} generators for {parent_scope}")

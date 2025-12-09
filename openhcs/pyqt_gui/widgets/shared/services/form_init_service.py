@@ -334,9 +334,8 @@ class FormBuildOrchestrator:
                 for param_info in sync_params:
                     widget = manager._create_widget_for_param(param_info)
                     content_layout.addWidget(widget)
-
-            with timer(f"        Initial placeholder refresh", threshold_ms=5.0):
-                manager._parameter_ops_service.refresh_with_live_context(manager)
+            # NOTE: Don't refresh here - root's _execute_post_build_sequence will do ONE
+            # cascading refresh at the end. Refreshing each manager separately causes O(n²) work.
 
         def on_async_complete():
             if self.is_nested_manager(manager):

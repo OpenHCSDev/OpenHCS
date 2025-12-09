@@ -8,10 +8,62 @@ The resolver is completely generic and has no application-specific dependencies.
 """
 
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Optional, Tuple
 from dataclasses import is_dataclass
 
 logger = logging.getLogger(__name__)
+
+# PERFORMANCE: Cache MRO resolution results
+# Key: (obj_type, field_name, context_signature) -> resolved value
+# context_signature = tuple of (config_type, id(config_instance)) for stable identity
+_mro_resolution_cache: Dict[Tuple, Any] = {}
+_CACHE_SENTINEL = object()  # Distinguishes "cached None" from "not cached"
+
+
+def _make_context_signature(available_configs: Dict[str, Any]) -> Tuple:
+    """Create a hashable signature for the context configs.
+
+    Uses config type names as signature. The caller's scope determines which
+    ancestor configs are available, so same types = same resolution result.
+
+    NOTE: This assumes that within a single compute cycle, the same config types
+    will resolve to the same values. Cache is invalidated when values change.
+    """
+    return tuple(sorted(available_configs.keys()))
+
+
+def clear_mro_resolution_cache() -> None:
+    """Clear the MRO resolution cache. Call when context fundamentally changes."""
+    _mro_resolution_cache.clear()
+
+
+def invalidate_mro_cache_for_field(changed_type: type, field_name: str) -> None:
+    """Invalidate cache entries for a specific field that could be affected by a type change.
+
+    PERFORMANCE: Only clears cache entries where:
+    1. The field_name matches
+    2. The obj_type has changed_type in its MRO (could inherit from it)
+
+    This is much more targeted than clear_mro_resolution_cache().
+    """
+    if not _mro_resolution_cache:
+        return
+
+    from openhcs.config_framework.lazy_factory import get_base_type_for_lazy
+    base_changed = get_base_type_for_lazy(changed_type) or changed_type
+
+    keys_to_remove = []
+    for key in _mro_resolution_cache:
+        obj_type, cached_field, _ = key
+        if cached_field != field_name:
+            continue
+        # Check if obj_type could inherit from changed_type
+        obj_base = get_base_type_for_lazy(obj_type) or obj_type
+        if base_changed in obj_base.__mro__:
+            keys_to_remove.append(key)
+
+    for key in keys_to_remove:
+        del _mro_resolution_cache[key]
 
 
 def _normalize_to_base(t: type) -> type:
@@ -65,17 +117,17 @@ def resolve_field_inheritance(
     """
     obj_type = type(obj)
 
-    # Step 1: Check if exact same type has concrete value in context
-    # Do same-type lookup if the field value is None (needs lazy resolution).
-    # This works for both LazyDataclass types AND concrete dataclasses with None fields.
-    obj_base = _normalize_to_base(obj_type)
-
     # Check if this field needs resolution (instance value is None)
     try:
         instance_value = object.__getattribute__(obj, field_name)
         needs_resolution = instance_value is None
     except AttributeError:
         needs_resolution = True
+
+    # Step 1: Check if exact same type has concrete value in context
+    # Do same-type lookup if the field value is None (needs lazy resolution).
+    # This works for both LazyDataclass types AND concrete dataclasses with None fields.
+    obj_base = _normalize_to_base(obj_type)
 
     if needs_resolution:
         for config_key, config_instance in available_configs.items():

@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import QWidget, QVBoxLayout, QScrollArea
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QColor
 
-from openhcs.pyqt_gui.widgets.shared.flash_mixin import FlashMixin, get_flash_color
+from openhcs.pyqt_gui.widgets.shared.flash_mixin import FlashMixin
 from openhcs.pyqt_gui.widgets.shared.clickable_help_components import FlashableGroupBox
 
 from openhcs.pyqt_gui.widgets.shared.widget_creation_types import ParameterFormManager as ParameterFormManagerABC, _CombinedMeta
@@ -21,7 +21,7 @@ from openhcs.pyqt_gui.widgets.shared.services.signal_service import SignalServic
 from openhcs.pyqt_gui.widgets.shared.services.field_change_dispatcher import FieldChangeDispatcher, FieldChangeEvent
 # LiveContextService deleted - functionality moved to ObjectStateRegistry
 from openhcs.pyqt_gui.widgets.shared.services.flag_context_manager import FlagContextManager
-from openhcs.pyqt_gui.widgets.shared.services.form_init_service import FormBuildOrchestrator, InitialRefreshStrategy
+from openhcs.pyqt_gui.widgets.shared.services.form_init_service import FormBuildOrchestrator
 
 logger = logging.getLogger(__name__)
 @dataclass
@@ -298,6 +298,11 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, FlashMixin, metacla
             self._widget_factory = WidgetFactory()
             self._context_event_coordinator = None
 
+            # GAME ENGINE: Initialize flash overlay state BEFORE building widgets
+            # (widgets call register_flash_groupbox during build_form)
+            if self._parent_manager is None:
+                self._init_visual_update_mixin()
+
             # STEP 6: Set up UI
             with timer("  Setup UI (widget creation)", threshold_ms=10.0):
                 self.setup_ui()
@@ -316,12 +321,9 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, FlashMixin, metacla
             # Debounce timer for cross-window placeholder refresh
             self._cross_window_refresh_timer = None
 
-            # Flash animation for groupboxes on resolved value changes (root only)
+            # Flash animation: Subscribe to resolved value changes (root only)
+            # NOTE: _init_visual_update_mixin() is called earlier (before setup_ui)
             if self._parent_manager is None:
-                self._init_visual_update_mixin()  # Initialize VisualUpdateMixin state
-                # SINGLE source of truth: _flash_colors dict read by groupboxes AND tree items
-                self._flash_colors: Dict[str, QColor] = {}
-                # Subscribe to resolved value changes
                 self.state.on_resolved_changed(self._on_resolved_values_changed)
 
             # STEP 8: _user_set_fields starts empty and is populated only when user edits widgets
@@ -336,9 +338,11 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, FlashMixin, metacla
                     lambda name, manager: setattr(manager, '_initial_load_complete', True)
                 )
 
-            # STEP 10: Execute initial refresh strategy (enum dispatch)
-            with timer("  Initial refresh", threshold_ms=10.0):
-                InitialRefreshStrategy.execute(self)
+            # STEP 10: Initial refresh - REMOVED (now done in _execute_post_build_sequence)
+            # The FormBuildOrchestrator already does ONE cascading refresh at the end of
+            # widget building. Calling InitialRefreshStrategy.execute here was redundant
+            # and caused every manager to be refreshed TWICE during init.
+            pass
 
     # ==================== WIDGET CREATION METHODS ====================
 
@@ -631,11 +635,21 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, FlashMixin, metacla
 
         Schedule a placeholder refresh so this form shows updated inherited values.
         Uses emit_signal=False to prevent infinite ping-pong between forms.
+
+        PERFORMANCE: This is called for ALL root managers when ANY value changes.
+        We skip refresh entirely here - the form's values are already correct,
+        only inherited placeholder text might need updates. Those can be lazy.
         """
         # Skip if this form triggered the change
         if getattr(self, '_block_cross_window_updates', False):
             return
-        self._schedule_cross_window_refresh(changed_field=None, emit_signal=False)
+        # PERFORMANCE FIX: Don't do full tree refresh on every cross-window change.
+        # The ObjectState already has correct values - we only need to update
+        # placeholder TEXT display, which can wait for next explicit refresh.
+        # This prevents O(n²) refresh cascade when multiple forms are open.
+        logger.debug(f"[CROSS-WINDOW] {self.field_id}: Skipping full refresh (lazy placeholder update)")
+        # Only queue a visual update for the flash overlay, don't refresh all placeholders
+        self.queue_visual_update()
 
     def unregister_from_cross_window_updates(self):
         """Unregister from cross-window updates."""
@@ -726,21 +740,24 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, FlashMixin, metacla
                 return deeper if deeper else prefix
         return None
 
-    # VisualUpdateMixin implementation - update _flash_colors dict (SINGLE source of truth)
-    def _set_item_background(self, key: str, color: QColor) -> None:
-        """Update flash color in _flash_colors dict. Groupboxes and tree items read from this dict."""
-        if color.alpha() > 0:
-            self._flash_colors[key] = color
-        elif key in self._flash_colors:
-            del self._flash_colors[key]
+    # PAINT-TIME API: get_flash_color_for_key() inherited from VisualUpdateMixin
+    # Groupboxes and tree items call this during paint to get current flash color
 
-    def _get_original_color(self, key: str) -> Optional[QColor]:
-        """Get original background color for groupbox."""
-        return QColor(0, 0, 0, 0)  # Transparent
+    # PERFORMANCE: Cache groupbox lookups - structure doesn't change after form creation
+    _groupbox_cache: Dict[str, Optional[QWidget]]
 
     def _get_groupbox_for_prefix(self, prefix: str) -> Optional[QWidget]:
-        """Get the groupbox widget for a field_prefix by finding the nested manager."""
-        return self._get_groupbox_recursive(prefix, self)
+        """Get the groupbox widget for a field_prefix by finding the nested manager.
+
+        PERFORMANCE: Results are cached since form structure is immutable.
+        """
+        if not hasattr(self, '_groupbox_cache'):
+            self._groupbox_cache = {}
+        if prefix in self._groupbox_cache:
+            return self._groupbox_cache[prefix]
+        result = self._get_groupbox_recursive(prefix, self)
+        self._groupbox_cache[prefix] = result
+        return result
 
     def _get_groupbox_recursive(self, prefix: str, manager: 'ParameterFormManager') -> Optional[QWidget]:
         """Recursively find groupbox by prefix."""
@@ -752,9 +769,39 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, FlashMixin, metacla
                 return result
         return None
 
+    def _is_flash_visible(self) -> bool:
+        """Check if this form's flash animations are visible on screen.
+
+        GAME ENGINE: Skip animation ticks entirely for forms that aren't visible.
+        """
+        # Check if our parent widget (the form itself) is visible
+        try:
+            if hasattr(self, 'isVisible') and not self.isVisible():
+                return False
+            # Check if minimized or occluded
+            if hasattr(self, 'window'):
+                window = self.window()
+                if window and hasattr(window, 'isMinimized') and window.isMinimized():
+                    return False
+        except RuntimeError:
+            return False  # Widget deleted
+        return True
+
     def _visual_repaint(self) -> None:
-        """Trigger repaint after all groupboxes updated (VisualUpdateMixin)."""
-        self.update()  # Single repaint for all groupboxes
+        """GAME ENGINE: Repaint only the overlay, not individual groupboxes.
+
+        The FlashOverlayWidget renders ALL flash effects in ONE paintEvent.
+        This is O(1) per window regardless of how many items are animating.
+        """
+        if not self._flash_states:
+            return  # Nothing animating - skip entirely
+
+        # GAME ENGINE: Update overlay only (mixin handles geometry/raise/update)
+        if self._flash_overlay is not None:
+            self._flash_overlay.setGeometry(self.rect())
+            self._flash_overlay.raise_()
+            self._flash_overlay.update()
+
         # Also repaint any registered external widgets (e.g., tree widget)
         for callback in getattr(self, '_extra_repaint_callbacks', []):
             callback()
