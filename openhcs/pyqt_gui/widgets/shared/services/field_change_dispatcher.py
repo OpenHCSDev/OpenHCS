@@ -41,15 +41,6 @@ class FieldChangeDispatcher:
 
     def dispatch(self, event: FieldChangeEvent) -> None:
         """Handle a field change event."""
-        # PERFORMANCE OPTIMIZATION: Wrap entire dispatch in dispatch_cycle
-        # This allows sibling refreshes to share cached GLOBAL layer in build_context_stack
-        from openhcs.config_framework.context_manager import dispatch_cycle
-
-        with dispatch_cycle():
-            self._dispatch_impl(event)
-
-    def _dispatch_impl(self, event: FieldChangeEvent) -> None:
-        """Implementation of dispatch (wrapped in dispatch_cycle)."""
         source = event.source_manager
 
         if DEBUG_DISPATCHER:
@@ -73,11 +64,13 @@ class FieldChangeDispatcher:
 
             # 1. Update source's data model via ObjectState
             # ObjectState.update_parameter() enforces the invariant: state mutation → global cache invalidation
-            # (calls LiveContextService.increment_token(notify=False) internally)
-            source.state.update_parameter(event.field_name, event.value)
+            # (calls ObjectStateRegistry.increment_token(notify=False) internally)
+            # CRITICAL: Compute full dotted path for nested PFMs
+            full_path = f"{source.field_prefix}.{event.field_name}" if source.field_prefix else event.field_name
+            source.state.update_parameter(full_path, event.value)
             if DEBUG_DISPATCHER:
                 reset_note = " (reset to None)" if event.is_reset else ""
-                logger.info(f"  ✅ Updated state.parameters[{event.field_name}]{reset_note}")
+                logger.info(f"  ✅ Updated state.parameters[{full_path}]{reset_note}")
 
             # 2. Mark parent chain as modified BEFORE refreshing siblings
             # This ensures root.state.parameters includes this field on first keystroke
@@ -120,10 +113,10 @@ class FieldChangeDispatcher:
             root = self._get_root_manager(source)
             root._block_cross_window_updates = True
             try:
-                from openhcs.config_framework.live_context_service import LiveContextService
-                LiveContextService._notify_change()
+                from openhcs.config_framework.object_state import ObjectStateRegistry
+                ObjectStateRegistry._notify_change()
                 if DEBUG_DISPATCHER:
-                    logger.info(f"  📣 Notified {len(LiveContextService._change_callbacks)} listeners")
+                    logger.info(f"  📣 Notified {len(ObjectStateRegistry._change_callbacks)} listeners")
             finally:
                 root._block_cross_window_updates = False
 
@@ -180,8 +173,10 @@ class FieldChangeDispatcher:
                         parent, field_name, nested_mgr
                     )
                     logger.info(f"    L{level}: Collected nested_value type={type(nested_value).__name__}")
-                    parent.state.update_parameter(field_name, nested_value)
-                    logger.info(f"    L{level}: ✅ {parent.field_id}.{field_name} updated")
+                    # CRITICAL: Compute full dotted path for nested PFMs
+                    parent_full_path = f"{parent.field_prefix}.{field_name}" if parent.field_prefix else field_name
+                    parent.state.update_parameter(parent_full_path, nested_value)
+                    logger.info(f"    L{level}: ✅ {parent.field_id}.{field_name} updated (path={parent_full_path})")
                     break
             current = parent
 

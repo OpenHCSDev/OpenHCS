@@ -26,7 +26,7 @@ from PyQt6.QtGui import QFont
 
 from openhcs.pyqt_gui.widgets.shared.reorderable_list_widget import ReorderableListWidget
 from openhcs.pyqt_gui.widgets.shared.list_item_delegate import MultilinePreviewItemDelegate
-from openhcs.config_framework.live_context_service import LiveContextService
+from openhcs.config_framework.object_state import ObjectStateRegistry
 from openhcs.pyqt_gui.widgets.mixins import (
     CrossWindowPreviewMixin,
     handle_selection_change_with_prevention,
@@ -436,7 +436,7 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, ABC, metaclass=_Co
         return selected_items
 
     def _resolve_config_attr(self, item: Any, config: object, attr_name: str,
-                             live_context_snapshot=None) -> object:
+                             live_context_snapshot=None, full_path: str = None) -> object:
         """
         Resolve config attribute using ObjectState (no context stack rebuild).
 
@@ -448,6 +448,7 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, ABC, metaclass=_Co
             config: Config dataclass instance (used to find nested state)
             attr_name: Name of the attribute to resolve
             live_context_snapshot: IGNORED - kept for API compatibility
+            full_path: Optional full dotted path for nested field lookup (e.g., 'path_planning_config.well_filter')
 
         Returns:
             Resolved attribute value
@@ -464,29 +465,49 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, ABC, metaclass=_Co
                 # No ObjectState registered - fall back to raw attribute
                 return object.__getattribute__(config, attr_name)
 
-            # Find the correct nested state for this config type
-            # If config is the root object, use state directly
-            # Otherwise, find the nested state that matches this config type
-            target_state = state
-            config_type = type(config)
+            # Determine lookup path - either explicitly provided or derived from config type
+            if full_path:
+                lookup_path = full_path
+            else:
+                # Use ObjectState's resolve_for_type to find the correct path
+                # This is the RIGHT BOUNDARY for nested config resolution
+                config_type = type(config)
+                resolved = state.resolve_for_type(config_type, attr_name)
+                if resolved is not None:
+                    return resolved
+                # Fall back to direct lookup for top-level fields
+                lookup_path = attr_name
 
-            # Check if config matches root object
-            if type(state.object_instance) != config_type:
-                # Look through nested states for matching type
-                for nested_name, nested_state in state.nested_states.items():
-                    if type(nested_state.object_instance) == config_type:
-                        target_state = nested_state
-                        break
-
-            # Check if attr_name is a nested state - return the object_instance (dataclass)
-            # NOT the resolved dict snapshot
-            if attr_name in target_state.nested_states:
-                return target_state.nested_states[attr_name].object_instance
-
-            # For regular fields, get resolved value from ObjectState's cache
-            resolved = target_state.get_resolved_value(attr_name)
+            # With flat storage, all fields are in state.parameters with dotted paths
+            resolved = state.get_resolved_value(lookup_path)
             if resolved is not None:
                 return resolved
+
+            # Check if it's a nested config by looking at _path_to_type
+            # If lookup_path is in _path_to_type, it's a nested config - reconstruct it
+            if lookup_path in state._path_to_type:
+                # Reconstruct nested config from flat parameters
+                nested_prefix = lookup_path
+                nested_type = state._path_to_type[lookup_path]
+
+                # Collect all parameters for this nested config
+                prefix_dot = f'{nested_prefix}.'
+                nested_params = {}
+                for path, value in state.parameters.items():
+                    if path.startswith(prefix_dot):
+                        remainder = path[len(prefix_dot):]
+                        # Only direct children
+                        if '.' not in remainder:
+                            nested_params[remainder] = value
+
+                # Filter None values for lazy resolution
+                filtered = {k: v for k, v in nested_params.items() if v is not None}
+
+                # Instantiate nested config
+                if filtered:
+                    return nested_type(**filtered)
+                else:
+                    return nested_type()
 
             # Fall back to raw attribute if not in resolved cache
             return object.__getattribute__(config, attr_name)
@@ -804,7 +825,7 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, ABC, metaclass=_Co
         PlateManager: Also emit pipeline_data_changed, etc.
         """
         # Default: trigger cross-window refresh (common to both)
-        LiveContextService.trigger_global_refresh()
+        ObjectStateRegistry.increment_token()
 
     # === Broadcast Utility ===
 
@@ -1120,7 +1141,8 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, ABC, metaclass=_Co
                 item,
                 config_source,
                 parts[0],
-                live_context_snapshot
+                live_context_snapshot,
+                full_path=field_path  # Pass full path for flat ObjectState lookup
             )
 
         # Dotted path: navigate to parent config using getattr, then resolve final attr
@@ -1135,11 +1157,13 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, ABC, metaclass=_Co
             return self._apply_preview_field_fallback(field_path, fallback_context)
 
         # Resolve final attribute using live context resolver (triggers MRO inheritance)
+        # CRITICAL: Pass full_path for flat ObjectState lookup (not just the final attr)
         resolved_value = self._resolve_config_attr(
             item,
             current_obj,
             parts[-1],
-            live_context_snapshot
+            live_context_snapshot,
+            full_path=field_path  # Pass full path for flat ObjectState lookup
         )
 
         if resolved_value is None:
@@ -1191,6 +1215,7 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, ABC, metaclass=_Co
             # Check if value is a dataclass config object
             if hasattr(value, '__dataclass_fields__'):
                 # Config object - use centralized formatter with resolver
+                # _resolve_config_attr uses resolve_for_type internally to find the correct path
                 def resolve_attr(parent_obj, config_obj, attr_name, context,
                                  i=item, snapshot=live_context_snapshot):
                     return self._resolve_config_attr(i, config_obj, attr_name, snapshot)
@@ -1239,6 +1264,7 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, ABC, metaclass=_Co
                 continue
 
             # Create resolver function that uses live context
+            # _resolve_config_attr uses resolve_for_type internally to find the correct path
             def resolve_attr(parent_obj, config_obj, attr_name, context,
                              i=item, snapshot=live_context_snapshot):
                 return self._resolve_config_attr(i, config_obj, attr_name, snapshot)

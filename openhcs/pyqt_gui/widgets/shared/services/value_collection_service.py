@@ -79,8 +79,9 @@ class ValueCollectionService(ParameterServiceABC):
         if checkbox and not checkbox.isChecked():
             return None
 
+        # Use nested_manager.parameters (scoped and prefix-stripped) NOT state.parameters (all paths)
         # Filter to non-None (user-set) fields so untouched placeholders stay None
-        nested_values = {k: v for k, v in nested_manager.state.parameters.items() if v is not None}
+        nested_values = {k: v for k, v in nested_manager.parameters.items() if v is not None}
 
         if not nested_values:
             logger.debug(f"[ValueCollection] Optional {param_name}: no nested edits, returning default")
@@ -98,8 +99,9 @@ class ValueCollectionService(ParameterServiceABC):
         """Collect value for direct Dataclass parameter."""
         param_type = info.type
 
+        # Use nested_manager.parameters (scoped and prefix-stripped) NOT state.parameters (all paths)
         # Filter to non-None (user-set) fields so untouched placeholders stay None
-        nested_values = {k: v for k, v in nested_manager.state.parameters.items() if v is not None}
+        nested_values = {k: v for k, v in nested_manager.parameters.items() if v is not None}
 
         if not nested_values:
             logger.debug(f"[ValueCollection] Direct {info.name}: no nested edits, returning default")

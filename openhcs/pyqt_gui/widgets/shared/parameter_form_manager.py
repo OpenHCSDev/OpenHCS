@@ -15,7 +15,7 @@ from .layout_constants import CURRENT_LAYOUT
 from openhcs.pyqt_gui.widgets.shared.services.value_collection_service import ValueCollectionService
 from openhcs.pyqt_gui.widgets.shared.services.signal_service import SignalService
 from openhcs.pyqt_gui.widgets.shared.services.field_change_dispatcher import FieldChangeDispatcher, FieldChangeEvent
-from openhcs.config_framework.live_context_service import LiveContextService
+# LiveContextService deleted - functionality moved to ObjectStateRegistry
 from openhcs.pyqt_gui.widgets.shared.services.flag_context_manager import FlagContextManager
 from openhcs.pyqt_gui.widgets.shared.services.form_init_service import FormBuildOrchestrator, InitialRefreshStrategy
 
@@ -40,6 +40,7 @@ class FormManagerConfig:
     color_scheme: Optional[Any] = None
     use_scroll_area: Optional[bool] = None  # None = auto-detect (False for nested, True for root)
     state: Optional[Any] = None  # ObjectState instance - if provided, PFM delegates to it
+    field_prefix: str = ''  # Dotted path prefix for accessing flat ObjectState (e.g., 'well_filter_config')
 
 
 class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_CombinedMeta):
@@ -104,25 +105,57 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
 
     @property
     def parameters(self) -> Dict[str, Any]:
-        """Delegate to ObjectState.parameters."""
-        return self.state.parameters
+        """Get parameters scoped to this PFM's field_prefix.
+
+        With flat storage, filters state.parameters to only include fields
+        under this PFM's prefix, and strips the prefix from keys.
+
+        Example:
+          state.parameters = {
+            'well_filter_config.well_filter': 2,
+            'well_filter_config.enabled': True,
+            'some_other_field': 'value'
+          }
+          PFM with field_prefix='well_filter_config' returns:
+          {'well_filter': 2, 'enabled': True}
+        """
+        if not self.field_prefix:
+            # Root PFM: return only top-level parameters (no dots)
+            return {k: v for k, v in self.state.parameters.items() if '.' not in k}
+
+        # Nested PFM: filter by prefix and strip prefix from keys
+        prefix_dot = f'{self.field_prefix}.'
+        result = {}
+        for path, value in self.state.parameters.items():
+            if path.startswith(prefix_dot):
+                remainder = path[len(prefix_dot):]
+                # Only direct children (no nested dots in remainder)
+                if '.' not in remainder:
+                    result[remainder] = value
+        return result
 
     @property
     def parameter_types(self) -> Dict[str, Any]:
         """Derive parameter types from object_instance using UnifiedParameterAnalyzer.
 
         Single code path for all object types - that's the point of UnifiedParameterAnalyzer.
+        Uses self.object_instance (target object for this PFM's scope), NOT self.state.object_instance (root).
+        Filters by self.parameters keys (already scoped/stripped for nested PFMs).
         """
         from openhcs.introspection.unified_parameter_analyzer import UnifiedParameterAnalyzer
-        param_info_dict = UnifiedParameterAnalyzer.analyze(self.state.object_instance)
-        return {name: info.param_type for name, info in param_info_dict.items() if name in self.state.parameters}
+        param_info_dict = UnifiedParameterAnalyzer.analyze(self.object_instance)
+        return {name: info.param_type for name, info in param_info_dict.items() if name in self.parameters}
 
     @property
     def param_defaults(self) -> Dict[str, Any]:
-        """Derive defaults from object_instance (the saved baseline)."""
-        return {name: object.__getattribute__(self.state.object_instance, name)
-                for name in self.state.parameters.keys()
-                if hasattr(self.state.object_instance, name)}
+        """Derive defaults from object_instance (the saved baseline).
+
+        Uses self.object_instance (target object for this PFM's scope), NOT self.state.object_instance (root).
+        Uses self.parameters keys (already scoped/stripped for nested PFMs).
+        """
+        return {name: object.__getattribute__(self.object_instance, name)
+                for name in self.parameters.keys()
+                if hasattr(self.object_instance, name)}
 
     @property
     def _parameter_descriptions(self) -> Dict[str, str]:
@@ -148,8 +181,19 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         # Unpack config or use defaults
         config = config or FormManagerConfig()
 
-        # Derive field_id from object type (was stored in ObjectState, now derived)
-        derived_field_id = type(state.object_instance).__name__
+        # Store field_prefix EARLY - needed for target_obj navigation
+        self.field_prefix = config.field_prefix
+
+        # For nested PFMs, navigate to the nested object using field_prefix
+        # Root PFM: analyze state.object_instance directly
+        # Nested PFM: traverse object_instance using field_prefix to get nested object
+        target_obj = state.object_instance
+        if self.field_prefix:
+            for part in self.field_prefix.split('.'):
+                target_obj = getattr(target_obj, part)
+
+        # Derive field_id from the TARGET object type (nested type for nested PFMs)
+        derived_field_id = type(target_obj).__name__
 
         with timer(f"ParameterFormManager.__init__ ({derived_field_id})", threshold_ms=5.0):
             QWidget.__init__(self, config.parent)
@@ -157,9 +201,10 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
             # Store ObjectState reference - PFM delegates MODEL to state
             self.state = state
 
-            # Derive core attributes from state (backward compatibility properties)
-            self.object_instance = state.object_instance
-            self.field_id = derived_field_id  # Derived from type, not stored
+            # Store target object for this PFM's scope (root or nested)
+            # CRITICAL: Nested PFMs need their own object_instance for type conversions, etc.
+            self.object_instance = target_obj
+            self.field_id = derived_field_id  # Derived from target type
             self.context_obj = state.context_obj
             self.scope_id = state.scope_id
             self.read_only = config.read_only
@@ -182,15 +227,18 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
                 self.service = ParameterFormService()
                 # Single code path for all object types - that's the point of UnifiedParameterAnalyzer
                 from openhcs.introspection.unified_parameter_analyzer import UnifiedParameterAnalyzer
-                param_info_dict = UnifiedParameterAnalyzer.analyze(state.object_instance)
-                derived_param_types = {name: info.param_type for name, info in param_info_dict.items() if name in state.parameters}
+
+                param_info_dict = UnifiedParameterAnalyzer.analyze(target_obj)
+                # self.parameters property already filters/strips keys for our prefix
+                derived_param_types = {name: info.param_type for name, info in param_info_dict.items() if name in self.parameters}
 
                 # Access state data directly - ObjectState is single source of truth
+                # Pass the scoped parameters and the target object for nested PFMs
                 extracted = ExtractedParameters(
-                    default_value=state.parameters,
+                    default_value=self.parameters,  # Use scoped parameters (filtered/stripped)
                     param_type=derived_param_types,
                     description=getattr(state, '_parameter_descriptions', {}),
-                    object_instance=state.object_instance,
+                    object_instance=target_obj,  # Use nested object for nested PFMs
                 )
                 form_config = ConfigBuilderService.build(
                     derived_field_id, extracted, state.context_obj, config.color_scheme, config.parent_manager, self.service, config
@@ -207,12 +255,13 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
             self._dispatching = False
             self.shared_reset_fields = set()  # VIEW-only: tracks field paths for cross-window reset styling
 
-            # CROSS-WINDOW: Register in active managers list (only root managers)
+            # CROSS-WINDOW: Connect to change notifications (only root managers)
             # Nested managers are internal to their window and should not participate in cross-window updates
             if self._parent_manager is None:
-                LiveContextService.register(self)
-                # Connect to change notifications to refresh placeholders when other forms change
-                LiveContextService.connect_listener(self._on_live_context_changed)
+                from openhcs.config_framework.object_state import ObjectStateRegistry
+                ObjectStateRegistry.connect_listener(self._on_live_context_changed)
+                # Invalidate cache so newly opened windows build fresh snapshots
+                ObjectStateRegistry.increment_token(notify=False)
             
             # Register hierarchy relationship for cross-window placeholder resolution
             if self.context_obj is not None and not self._parent_manager:
@@ -372,29 +421,28 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         QTimer.singleShot(0, create_next_batch)
 
     def _create_nested_form_inline(self, param_name: str, unwrapped_type: Type = None, current_value: Any = None) -> Any:
-        """Create nested PFM for an existing nested ObjectState.
+        """Create nested PFM that shares root ObjectState with different field_prefix.
 
-        ObjectState already created nested_states during __init__ - this is pure VIEW creation.
-        No type introspection needed - we just consume state.nested_states.
+        With flat storage, nested PFMs share the same ObjectState instance as the parent,
+        but use a different field_prefix to scope their access.
 
         Args:
-            param_name: Name of the nested parameter
-            unwrapped_type: Ignored (kept for ABC compatibility, ObjectState has the type info)
-            current_value: Ignored (kept for ABC compatibility, ObjectState has the value)
+            param_name: Name of the nested parameter (becomes part of field_prefix)
+            unwrapped_type: Ignored (kept for ABC compatibility)
+            current_value: Ignored (kept for ABC compatibility)
         """
-        # ObjectState already created the nested state - just use it
-        nested_state = self.state.nested_states.get(param_name)
-        if nested_state is None:
-            raise ValueError(f"No nested ObjectState for {param_name} - ObjectState should have created it")
+        # Build nested field_prefix
+        nested_prefix = f'{self.field_prefix}.{param_name}' if self.field_prefix else param_name
 
-        # Create nested PFM (VIEW) for the nested ObjectState (MODEL)
+        # Create nested PFM (VIEW) that shares the same ObjectState (MODEL)
         nested_config = FormManagerConfig(
             parent=self,
             parent_manager=self,
             color_scheme=self.config.color_scheme,
+            field_prefix=nested_prefix,  # Scope access to nested fields
         )
         nested_manager = ParameterFormManager(
-            state=nested_state,
+            state=self.state,  # CRITICAL: Share the same ObjectState instance
             config=nested_config
         )
 
@@ -409,7 +457,8 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         self.nested_managers[param_name] = nested_manager
 
         # Register with root manager for async completion tracking
-        param_count = len(nested_state.parameters)
+        # Count parameters with nested_prefix
+        param_count = sum(1 for path in self.state.parameters.keys() if path.startswith(f'{nested_prefix}.'))
         root_manager = self
         while root_manager._parent_manager is not None:
             root_manager = root_manager._parent_manager
@@ -467,7 +516,10 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
 
 
     def update_parameter(self, param_name: str, value: Any) -> None:
-        """Update parameter value using shared service layer."""
+        """Update parameter value using shared service layer.
+
+        With flat storage, prepends field_prefix to create full dotted path.
+        """
         if param_name not in self.parameters:
             return
 
@@ -484,19 +536,31 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
             if isinstance(widget, ValueSettable):
                 self._widget_service.update_widget_value(widget, converted_value, param_name, False, self)
 
+        # Build full dotted path for state update
+        dotted_path = f'{self.field_prefix}.{param_name}' if self.field_prefix else param_name
+
+        # Update state with full dotted path
+        self.state.update_parameter(dotted_path, converted_value)
+
         # Route through dispatcher for consistent behavior (sibling refresh, cross-window, etc.)
         event = FieldChangeEvent(param_name, converted_value, self)
         FieldChangeDispatcher.instance().dispatch(event)
 
     def reset_parameter(self, param_name: str) -> None:
-        """Reset parameter to signature default."""
+        """Reset parameter to signature default.
+
+        With flat storage, prepends field_prefix to create full dotted path.
+        """
         if param_name not in self.parameters:
             return
+
+        # Build full dotted path for state update
+        dotted_path = f'{self.field_prefix}.{param_name}' if self.field_prefix else param_name
 
         with FlagContextManager.reset_context(self, block_cross_window=False):
             self._parameter_ops_service.reset_parameter(self, param_name)
 
-        reset_value = self.parameters.get(param_name)
+        reset_value = self.state.parameters.get(dotted_path)
         event = FieldChangeEvent(param_name, reset_value, self, is_reset=True)
         FieldChangeDispatcher.instance().dispatch(event)
 
@@ -564,11 +628,13 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
     def unregister_from_cross_window_updates(self):
         """Unregister from cross-window updates."""
         try:
-            LiveContextService.disconnect_listener(self._on_live_context_changed)
+            from openhcs.config_framework.object_state import ObjectStateRegistry
+            ObjectStateRegistry.disconnect_listener(self._on_live_context_changed)
             if self.context_obj is not None and not self._parent_manager:
                 from openhcs.config_framework.context_manager import unregister_hierarchy_relationship
                 unregister_hierarchy_relationship(type(self.object_instance))
-            LiveContextService.unregister(self)
+            # Invalidate cache + notify listeners that a form closed
+            ObjectStateRegistry.increment_token()
         except Exception as e:
             logger.warning(f"Unregister error: {e}")
 

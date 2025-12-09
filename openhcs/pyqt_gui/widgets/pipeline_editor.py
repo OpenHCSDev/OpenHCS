@@ -185,8 +185,10 @@ class PipelineEditorWidget(AbstractManagerWidget):
 
         # Helper for nested config values
         def get_nested_val(config_name: str, attr_name: str, default=None):
-            if state and config_name in state.nested_states:
-                val = state.nested_states[config_name].get_resolved_value(attr_name)
+            if state:
+                # With flat storage, build dotted path and get resolved value
+                dotted_path = f'{config_name}.{attr_name}'
+                val = state.get_resolved_value(dotted_path)
                 if val is not None:
                     return val
             cfg = getattr(step, config_name, None)
@@ -940,8 +942,7 @@ class PipelineEditorWidget(AbstractManagerWidget):
     def closeEvent(self, event):
         """Handle widget close event to disconnect signals and prevent memory leaks."""
         # Unregister from cross-window refresh signals
-        from openhcs.config_framework.live_context_service import LiveContextService
-        LiveContextService.disconnect_listener(self._on_live_context_changed)
+        ObjectStateRegistry.disconnect_listener(self._on_live_context_changed)
         logger.debug("Pipeline editor: Unregistered from cross-window refresh signals")
 
         # Call parent closeEvent

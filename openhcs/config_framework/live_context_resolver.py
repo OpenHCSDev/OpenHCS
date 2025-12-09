@@ -12,7 +12,9 @@ This service is completely generic and UI-agnostic:
 """
 
 from typing import Any, Dict, Type, Optional, Tuple
-from dataclasses import is_dataclass, replace as dataclass_replace
+from dataclasses import is_dataclass
+
+from openhcs.config_framework.lazy_factory import replace_raw
 from openhcs.config_framework.context_manager import config_context
 import logging
 
@@ -141,7 +143,8 @@ class LiveContextResolver:
         reconstructed_values = self.reconstruct_live_values(live_values)
 
         # Merge into base object (including None values to override saved concrete values)
+        # Use replace_raw to preserve None values (dataclasses.replace triggers lazy resolution)
         if reconstructed_values:
-            return dataclass_replace(base_obj, **reconstructed_values)  # type: ignore[arg-type]
+            return replace_raw(base_obj, **reconstructed_values)
         else:
             return base_obj

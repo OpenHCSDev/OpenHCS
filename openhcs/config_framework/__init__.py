@@ -64,6 +64,8 @@ from openhcs.config_framework.lazy_factory import (
     GlobalConfigMeta,
     is_global_config_type,
     is_global_config_instance,
+    # Raw-value-preserving utilities
+    replace_raw,
 )
 
 # Resolver

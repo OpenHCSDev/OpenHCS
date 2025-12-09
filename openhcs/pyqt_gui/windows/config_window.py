@@ -29,7 +29,7 @@ from openhcs.pyqt_gui.windows.base_form_dialog import BaseFormDialog
 from openhcs.core.config import GlobalPipelineConfig, PipelineConfig
 from openhcs.config_framework import is_global_config_type
 from openhcs.ui.shared.code_editor_form_updater import CodeEditorFormUpdater
-from openhcs.config_framework.live_context_service import LiveContextService
+from openhcs.config_framework.object_state import ObjectStateRegistry
 # ❌ REMOVED: require_config_context decorator - enhanced decorator events system handles context automatically
 from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
 
@@ -363,11 +363,10 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
     def save_config(self, *, close_window=True):
         """Save the configuration preserving lazy behavior for unset fields. If close_window is True, close after saving; else, keep open."""
         try:
-            # Get current values from state (now returns proper dataclass instances for nested configs)
-            current_values = self.state.get_current_values()
-            # Filter to non-None values (preserves lazy resolution for unmodified fields)
-            user_modified_values = {k: v for k, v in current_values.items() if v is not None}
-            new_config = self.config_class(**user_modified_values)
+            # CRITICAL: Use to_object() to reconstruct nested dataclass structure from flat storage
+            # get_current_values() returns flat dict with dotted paths like 'well_filter_config.well_filter'
+            # which cannot be passed directly to the dataclass constructor
+            new_config = self.state.to_object()
 
             # CRITICAL: Set flag to prevent refresh_config from recreating the form
             # The window already has the correct data - it just saved it!
@@ -397,8 +396,8 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
                 self.form_manager.object_instance = new_config
 
                 # Increment token to invalidate caches
-                from openhcs.config_framework.live_context_service import LiveContextService
-                LiveContextService.increment_token()
+                from openhcs.config_framework.object_state import ObjectStateRegistry
+                ObjectStateRegistry.increment_token()
 
                 # Refresh this window's placeholders with new saved values as base
                 from openhcs.pyqt_gui.widgets.shared.services.parameter_ops_service import ParameterOpsService
@@ -427,9 +426,8 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
             #          → PipelineConfig code editor should show those live zarr_config values
             ParameterOpsService().refresh_with_live_context(self.form_manager)
 
-            # Get current config from form (now includes live context values)
-            current_values = self.state.get_current_values()
-            current_config = self.config_class(**current_values)
+            # Get current config using to_object() to reconstruct nested structure from flat storage
+            current_config = self.state.to_object()
 
             # Generate code using existing function
             python_code = generate_config_code(current_config, self.config_class, clean_mode=True)
@@ -519,7 +517,7 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
             return
         self._sync_global_context_with_current_values(param_name)
 
-    def _sync_global_context_with_current_values(self, source_param: str = None):
+    def _sync_global_context_with_current_values(self, source_param: Optional[str] = None):
         """Rebuild global context from current form values once.
 
         PERFORMANCE NOTE: Do NOT call trigger_global_cross_window_refresh() here.
@@ -530,8 +528,8 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
         if not is_global_config_type(self.config_class):
             return
         try:
-            current_values = self.state.get_current_values()
-            updated_config = self.config_class(**current_values)
+            # Use to_object() to reconstruct nested structure from flat storage
+            updated_config = self.state.to_object()
             self.current_config = updated_config
             from openhcs.config_framework.global_config import set_global_config_for_editing
             set_global_config_for_editing(self.config_class, updated_config)
@@ -574,7 +572,7 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
         # CRITICAL: Trigger global refresh AFTER unregistration so other windows
         # re-collect live context without this cancelled window's values
         # This ensures group_by selector and other placeholders sync correctly
-        LiveContextService.trigger_global_refresh()
+        ObjectStateRegistry.increment_token()
         logger.debug(f"Triggered global refresh after cancelling {self.config_class.__name__} editor")
 
     def _get_form_managers(self):

@@ -18,7 +18,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from openhcs.processing.backends.lib_registry.registry_service import RegistryService
 from openhcs.ui.shared.pattern_data_manager import PatternDataManager
 from openhcs.pyqt_gui.widgets.function_pane import FunctionPaneWidget
-from openhcs.config_framework.live_context_service import LiveContextService
+from openhcs.config_framework.object_state import ObjectStateRegistry
 from openhcs.constants.constants import GroupBy
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.pyqt_gui.widgets.shared.widget_strategies import _get_enum_display_text
@@ -460,7 +460,7 @@ class FunctionListEditorWidget(QWidget):
 
             # CRITICAL: Trigger global cross-window refresh for ALL open windows
             # This ensures any window with placeholders (configs, steps, etc.) refreshes
-            LiveContextService.trigger_global_refresh()
+            ObjectStateRegistry.increment_token()
 
         except Exception as e:
             if self.service_adapter:
@@ -559,50 +559,29 @@ class FunctionListEditorWidget(QWidget):
     def refresh_from_step_context(self) -> None:
         """Refresh group_by and variable_components from step_instance using lazy resolution.
 
-        CRITICAL: This uses the SAME live context collection mechanism as form managers
+        CRITICAL: This uses the SAME ancestor object collection mechanism as form managers
         to ensure we see live values from other open windows (PipelineConfig editor, etc.).
         """
         if not hasattr(self, 'step_instance') or self.step_instance is None:
             logger.warning("No step_instance available for context refresh")
             return
 
-        from openhcs.config_framework.context_manager import config_context
-        from openhcs.config_framework.live_context_service import LiveContextService
+        from openhcs.config_framework.context_manager import build_context_stack
+        from openhcs.config_framework.object_state import ObjectStateRegistry
 
         try:
-            # Collect all live context, then filter at consumption time
+            # Get ancestor objects for context stack
             my_scope = getattr(self, 'scope_id', '') or ''
-            live_context_snapshot = LiveContextService.collect()
-            live_context = LiveContextService.merge_ancestor_values(
-                live_context_snapshot.scopes, my_scope
+            ancestor_objects = ObjectStateRegistry.get_ancestor_objects(my_scope)
+
+            # Build context stack with ancestors
+            stack = build_context_stack(
+                context_obj=None,  # step_instance is the root
+                object_instance=self.step_instance,
+                ancestor_objects=ancestor_objects,
             )
 
-            # Build context stack with live values
-            from contextlib import ExitStack
-            from openhcs.core.config import PipelineConfig, GlobalPipelineConfig
-            import dataclasses
-
-            with ExitStack() as stack:
-                # Add GlobalPipelineConfig from live context if available
-                if GlobalPipelineConfig in live_context:
-                    global_live = live_context[GlobalPipelineConfig]
-                    # Reconstruct nested dataclasses from live values
-                    from openhcs.config_framework.context_manager import get_base_global_config
-                    thread_local_global = get_base_global_config()
-                    if thread_local_global and global_live:
-                        global_instance = dataclasses.replace(thread_local_global, **global_live)
-                        stack.enter_context(config_context(global_instance))
-
-                # Add PipelineConfig from live context if available
-                if PipelineConfig in live_context:
-                    pipeline_live = live_context[PipelineConfig]
-                    if pipeline_live:
-                        pipeline_instance = PipelineConfig(**pipeline_live)
-                        stack.enter_context(config_context(pipeline_instance))
-
-                # Add step instance
-                stack.enter_context(config_context(self.step_instance))
-
+            with stack:
                 # Resolve group_by and variable_components with full context stack
                 effective_group_by = self.step_instance.processing_config.group_by
                 variable_components = self.step_instance.processing_config.variable_components or []

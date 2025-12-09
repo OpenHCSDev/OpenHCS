@@ -84,9 +84,11 @@ class ParameterOpsService(ParameterServiceABC):
     def _reset_OptionalDataclassInfo(self, info: OptionalDataclassInfo, manager) -> None:
         """Reset Optional[Dataclass] field - sync checkbox and reset nested manager."""
         param_name = info.name
+        # CRITICAL: Compute full dotted path for nested PFMs
+        dotted_path = f'{manager.field_prefix}.{param_name}' if manager.field_prefix else param_name
         # MODEL mutation through ObjectState (handles tracking)
-        manager.state.reset_parameter(param_name)
-        reset_value = manager.state.parameters.get(param_name)
+        manager.state.reset_parameter(dotted_path)
+        reset_value = manager.state.parameters.get(dotted_path)
 
         if param_name in manager.widgets:
             container = manager.widgets[param_name]
@@ -128,13 +130,15 @@ class ParameterOpsService(ParameterServiceABC):
         MODEL mutation through ObjectState, then VIEW-only widget updates.
         """
         param_name = info.name
+        # CRITICAL: Compute full dotted path for nested PFMs
+        dotted_path = f'{manager.field_prefix}.{param_name}' if manager.field_prefix else param_name
         # MODEL mutation through ObjectState (handles tracking, cache invalidation)
-        manager.state.reset_parameter(param_name)
-        reset_value = manager.state.parameters.get(param_name)
+        manager.state.reset_parameter(dotted_path)
+        reset_value = manager.state.parameters.get(dotted_path)
 
         # Invalidate cache token BEFORE refreshing placeholder
-        from openhcs.config_framework.live_context_service import LiveContextService
-        LiveContextService.increment_token()
+        from openhcs.config_framework.object_state import ObjectStateRegistry
+        ObjectStateRegistry.increment_token()
 
         # VIEW-only: Update widget
         if param_name in manager.widgets:
@@ -175,8 +179,12 @@ class ParameterOpsService(ParameterServiceABC):
             logger.warning(f"🔬 RESET_TRACE: {field_name} not in widgets, skipping")
             return
 
+        # Compute full dotted path for nested PFMs
+        full_path = f"{manager.field_prefix}.{field_name}" if manager.field_prefix else field_name
+
         # Only refresh if value is None (needs placeholder)
-        current_value = manager.state.parameters.get(field_name)
+        # Use manager.parameters (scoped) not state.parameters (full paths)
+        current_value = manager.parameters.get(field_name)
         logger.info(f"🔬 RESET_TRACE: current_value={repr(current_value)[:50]}")
         if current_value is not None:
             logger.info(f"🔬 RESET_TRACE: value is not None, no placeholder needed")
@@ -188,7 +196,8 @@ class ParameterOpsService(ParameterServiceABC):
         from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
 
         # Get raw resolved value from ObjectState (handles context building internally)
-        resolved_value = manager.state.get_resolved_value(field_name)
+        # Use full_path for nested PFMs
+        resolved_value = manager.state.get_resolved_value(full_path)
         logger.info(f"🔬 RESET_TRACE: resolved_value={repr(resolved_value)[:50]}")
 
         # Format for display (VIEW responsibility)
@@ -240,13 +249,16 @@ class ParameterOpsService(ParameterServiceABC):
             monitor = get_monitor("Placeholder resolution per field")
 
             for param_name, widget in manager.widgets.items():
-                current_value = manager.state.parameters.get(param_name)
+                # Use manager.parameters (scoped) not state.parameters (full paths)
+                current_value = manager.parameters.get(param_name)
                 should_apply_placeholder = (current_value is None)
 
                 if should_apply_placeholder:
                     with monitor.measure():
-                        # Get raw resolved value from ObjectState
-                        resolved_value = manager.state.get_resolved_value(param_name)
+                        # Compute full dotted path for nested PFMs
+                        full_path = f"{manager.field_prefix}.{param_name}" if manager.field_prefix else param_name
+                        # Get raw resolved value from ObjectState using full path
+                        resolved_value = manager.state.get_resolved_value(full_path)
                         # Format for display (VIEW responsibility)
                         placeholder_text = LazyDefaultPlaceholderService._format_placeholder_text(
                             resolved_value, manager.config.placeholder_prefix

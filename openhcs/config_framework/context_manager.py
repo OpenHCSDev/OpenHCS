@@ -36,38 +36,6 @@ current_temp_global = contextvars.ContextVar('current_temp_global')
 # The stack is a tuple of types, ordered from outermost to innermost context
 context_type_stack = contextvars.ContextVar('context_type_stack', default=())
 
-# Dispatch cycle cache - caches expensive computations within a single field change dispatch
-# This avoids redundant computation when refreshing multiple siblings
-_dispatch_cycle_cache: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
-    '_dispatch_cycle_cache', default=None
-)
-
-
-@contextmanager
-def dispatch_cycle():
-    """Context manager for a dispatch cycle. Enables caching of computed values.
-
-    Usage in field_change_dispatcher.py:
-        with dispatch_cycle():
-            # sibling refreshes can share cached GLOBAL layer
-            for sibling in siblings:
-                refresh_placeholder(sibling, field_name)
-
-    The cache is automatically cleared when the context manager exits.
-    """
-    cache: dict = {}
-    token = _dispatch_cycle_cache.set(cache)
-    try:
-        yield cache
-    finally:
-        _dispatch_cycle_cache.reset(token)
-
-
-def get_dispatch_cache() -> dict | None:
-    """Get the current dispatch cycle cache, or None if not in a cycle."""
-    return _dispatch_cycle_cache.get()
-
-
 def _merge_nested_dataclass(base, override, mask_with_none: bool = False):
     """
     Recursively merge nested dataclass fields.
@@ -112,9 +80,11 @@ def _merge_nested_dataclass(base, override, mask_with_none: bool = False):
             # Concrete value - use override
             merge_values[field_name] = override_value
 
-    # Merge with base
+    # Merge with base using replace_raw to preserve None values
+    # (dataclasses.replace triggers lazy resolution, baking in resolved values)
     if merge_values:
-        return dataclasses.replace(base, **merge_values)
+        from openhcs.config_framework.lazy_factory import replace_raw
+        return replace_raw(base, **merge_values)
     else:
         return base
 
@@ -207,9 +177,11 @@ def config_context(obj, mask_with_none: bool = False):
                 continue
 
     # Create merged config if we have overrides
+    # Use replace_raw to preserve None values (dataclasses.replace triggers lazy resolution)
     if overrides:
         try:
-            merged_config = dataclasses.replace(base_config, **overrides)
+            from openhcs.config_framework.lazy_factory import replace_raw
+            merged_config = replace_raw(base_config, **overrides)
             logger.debug(f"Creating config context with {len(overrides)} field overrides from {type(obj).__name__}")
         except Exception as e:
             logger.warning(f"Failed to merge config overrides from {type(obj).__name__}: {e}")
@@ -582,27 +554,25 @@ def _inject_context_layer(
 def build_context_stack(
     context_obj: object | None,
     object_instance: object,
-    live_values: dict[type, dict] | None = None,
+    ancestor_objects: list[object] | None = None,
 ):
     """
     Build a complete context stack for placeholder resolution.
 
-    This is the framework-agnostic function for building context stacks. It can
-    be called from any UI framework (PyQt6, Textual, etc.) and returns an ExitStack
-    with the proper layer order.
+    SIMPLIFIED (Phase 6 refactor): Takes ancestor_objects directly instead of
+    reconstructing from live_values dict. Just iterates objects and enters config_context().
 
     Layer order (innermost to outermost when entered):
     1. Global context layer (live from editor OR thread-local)
-    2. Intermediate layers from live_values (via get_types_before_in_stack())
+    2. Ancestor objects (from ObjectStateRegistry.get_ancestor_objects())
     3. Parent context from context_obj
-    4. Overlay from current form values (included in live_values)
+    4. Current object_instance
 
     Args:
         context_obj: Parent context object (e.g., PipelineConfig for Step editor), or None for root
         object_instance: The object being edited (type used to infer global editing mode)
-        live_values: Dict mapping types to their current field values.
-                     Merges cross-window live context + current form overlay.
-                     Caller is responsible for merging these before calling.
+        ancestor_objects: List of ancestor objects from least→most specific (from ObjectStateRegistry).
+                         If None, falls back to just context_obj and object_instance.
 
     Returns:
         ExitStack with all context layers entered. Caller must manage the stack lifecycle.
@@ -615,56 +585,40 @@ def build_context_stack(
 
     # Infer global editing mode from object_instance type
     is_global_config_editing = isinstance(object_instance, GlobalConfigBase)
-    global_config_type = obj_type if is_global_config_editing else None
 
     ctx_type_name = type(context_obj).__name__ if context_obj else "None"
     obj_type_name = obj_type.__name__
-    live_val_types = [t.__name__ for t in live_values.keys()] if live_values else []
-    logger.debug(f"🔧 build_context_stack: ctx={ctx_type_name}, obj={obj_type_name}, live_values={live_val_types[:5]}{'...' if len(live_val_types) > 5 else ''}")
+    ancestor_types = [type(o).__name__ for o in ancestor_objects] if ancestor_objects else []
+    logger.debug(f"🔧 build_context_stack: ctx={ctx_type_name}, obj={obj_type_name}, ancestors={ancestor_types}")
 
-    # 1. Global context layer
-    global_layer = _get_global_context_layer(live_values, is_global_config_editing, global_config_type)
-    if global_layer is not None:
-        stack.enter_context(config_context(global_layer, mask_with_none=is_global_config_editing))
+    # 1. Global context layer (least specific)
+    # Use static defaults when editing global config, otherwise use thread-local
+    if is_global_config_editing:
+        try:
+            global_layer = obj_type()  # Fresh instance with static defaults
+            stack.enter_context(config_context(global_layer, mask_with_none=True))
+        except Exception:
+            pass  # Couldn't create global layer
+    else:
+        global_layer = get_base_global_config()
+        if global_layer:
+            stack.enter_context(config_context(global_layer))
 
-    # 2-3. Unified parent chain (ancestors + immediate parent)
-    injected_bases = set()  # Track normalized types we've already injected
+    # 2. Ancestor objects (intermediate layers)
+    if ancestor_objects:
+        for ancestor_obj in ancestor_objects:
+            from openhcs.config_framework.lazy_factory import GlobalConfigBase
+            # Skip global configs - already handled above
+            if isinstance(ancestor_obj, GlobalConfigBase):
+                continue
+            stack.enter_context(config_context(ancestor_obj))
+
+    # 3. Parent context (immediate parent)
     if context_obj is not None:
-        context_type = type(context_obj)
-        ancestor_types = get_types_before_in_stack(context_type) if live_values else []
-        parent_chain = ancestor_types + [context_type]
+        stack.enter_context(config_context(context_obj))
 
-        for t in parent_chain:
-            if _is_global_type(t):
-                continue
-            layer_values = _find_live_values_for_type(t, live_values) if live_values else None
-            stored = context_obj if t == context_type else None
-            _inject_context_layer(stack, t, layer_values, stored)
-            injected_bases.add(_normalize_type(t))
-
-    # 3b. Inject container types from live_values not in parent chain
-    # This handles intermediate forms like FunctionStep between context_obj (PipelineConfig)
-    # and the nested config being resolved. FunctionStep has fields like step_well_filter_config
-    # that need to be merged into GlobalPipelineConfig for sibling inheritance to work.
-    if live_values:
-        for live_type, values in live_values.items():
-            live_base = _normalize_type(live_type)
-            if live_base in injected_bases:
-                continue
-            if _is_global_type(live_type):
-                continue
-            # Inject ALL live types with values (not just containers)
-            # Leaf configs like LazyWellFilterConfig with {well_filter_mode: EXCLUDE}
-            # must be injected for MRO inheritance to find them
-            if values:
-                logger.debug(f"  🔧 Injecting live overlay: {live_type.__name__} with {list(values.keys())}")
-                _inject_context_layer(stack, live_type, values, None)
-                injected_bases.add(live_base)
-
-    # 4. Overlay from current form values (included in live_values under obj_type)
-    overlay = _find_live_values_for_type(obj_type, live_values) if live_values else None
-    if overlay is not None:
-        _inject_context_layer(stack, obj_type, overlay, None)
+    # 4. Current object overlay (most specific)
+    stack.enter_context(config_context(object_instance))
 
     return stack
 
@@ -693,12 +647,6 @@ def _get_global_context_layer(
     Returns:
         Global config instance to use, or None if not available
     """
-    cache = get_dispatch_cache()
-    cache_key = ('global_layer', is_global_config_editing, global_config_type)
-    if cache is not None and cache_key in cache:
-        logger.debug(f"  🚀 GLOBAL layer CACHE HIT")
-        return cache[cache_key]
-
     layer = None
 
     # 1) Global config editing → fresh instance (mask thread-local when entering)
@@ -715,10 +663,6 @@ def _get_global_context_layer(
     # 3) Fallback to thread-local base
     if layer is None:
         layer = get_base_global_config()
-
-    if cache is not None:
-        cache[cache_key] = layer
-        logger.debug(f"  📦 GLOBAL layer cached")
 
     return layer
 
@@ -905,12 +849,13 @@ def merge_configs(base, overrides: Dict[str, Any]):
     try:
         # Filter out None values - they should not override existing values
         filtered_overrides = {k: v for k, v in overrides.items() if v is not None}
-        
+
         if not filtered_overrides:
             return base
-            
-        # Use dataclasses.replace to create new instance with overrides
-        merged = dataclasses.replace(base, **filtered_overrides)
+
+        # Use replace_raw to preserve None values (dataclasses.replace triggers lazy resolution)
+        from openhcs.config_framework.lazy_factory import replace_raw
+        merged = replace_raw(base, **filtered_overrides)
         
         logger.debug(f"Merged {len(filtered_overrides)} overrides into {type(base).__name__}")
         return merged

@@ -127,6 +127,38 @@ def rebuild_with_none_defaults(
     return new_cls
 
 
+def replace_raw(instance, **changes):
+    """
+    Replace dataclass fields while preserving raw None values.
+
+    Unlike dataclasses.replace(), this function uses object.__getattribute__
+    to get field values, preventing lazy resolution from being triggered.
+    This is critical for lazy dataclasses where None means "inherit from parent"
+    and must not be resolved during copy operations.
+
+    Args:
+        instance: The dataclass instance to copy
+        **changes: Field values to override
+
+    Returns:
+        A new instance with raw values preserved (not resolved)
+    """
+    if not is_dataclass(instance):
+        raise TypeError(f"replace_raw() should be called on dataclass instances, got {type(instance)}")
+
+    # Get all field values using object.__getattribute__ to avoid lazy resolution
+    field_values = {}
+    for f in fields(instance):
+        if f.name in changes:
+            field_values[f.name] = changes[f.name]
+        else:
+            # Use object.__getattribute__ to get raw value (bypass lazy __getattribute__)
+            field_values[f.name] = object.__getattribute__(instance, f.name)
+
+    # Create new instance with raw values
+    return type(instance)(**field_values)
+
+
 # ContextEventCoordinator removed - replaced with contextvars-based context system
 
 

@@ -22,7 +22,7 @@ from openhcs.ui.shared.pattern_data_manager import PatternDataManager
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 from openhcs.pyqt_gui.windows.base_form_dialog import BaseFormDialog
-from openhcs.config_framework.live_context_service import LiveContextService
+from openhcs.config_framework.object_state import ObjectStateRegistry
 from openhcs.introspection.unified_parameter_analyzer import UnifiedParameterAnalyzer
 from typing import List
 logger = logging.getLogger(__name__)
@@ -458,7 +458,7 @@ class DualEditorWindow(BaseFormDialog):
 
         # Trigger cross-window refresh for all form managers
         # This will update placeholders in the step editor to show new inherited values
-        LiveContextService.trigger_global_refresh()
+        ObjectStateRegistry.increment_token()
         logger.debug("Triggered global cross-window refresh after config change")
 
     def setup_connections(self):
@@ -641,7 +641,7 @@ class DualEditorWindow(BaseFormDialog):
 
                     # Refresh placeholders to show new inherited values
                     # Use the same pattern as on_config_changed (line 466)
-                    LiveContextService.trigger_global_refresh()
+                    ObjectStateRegistry.increment_token()
                     logger.debug("Triggered global cross-window refresh after pipeline config change")
 
     def _update_context_obj_recursively(self, form_manager, new_context_obj):
@@ -1004,7 +1004,7 @@ class DualEditorWindow(BaseFormDialog):
         # CRITICAL: Trigger global refresh AFTER unregistration so other windows
         # re-collect live context without this cancelled window's values
         logger.info("🔍 DualEditorWindow: About to trigger global refresh")
-        LiveContextService.trigger_global_refresh()
+        ObjectStateRegistry.increment_token()
         logger.info("🔍 DualEditorWindow: Triggered global refresh after cancel")
 
     def closeEvent(self, event):
