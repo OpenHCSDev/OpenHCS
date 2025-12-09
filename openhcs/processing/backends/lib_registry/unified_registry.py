@@ -183,8 +183,8 @@ class LibraryRegistryBase(ABC, metaclass=AutoRegisterMeta):
     INJECTABLE_PARAMS = [
         ('enabled', True, bool),
         ('dtype_config', lambda: LazyDtypeConfig(), 'LazyDtypeConfig'),
-        ('well_filter_config', lambda: LazyWellFilterConfig(), 'LazyWellFilterConfig'),
-        ('step_well_filter_config', lambda: LazyStepWellFilterConfig(), 'LazyStepWellFilterConfig'),
+#        ('well_filter_config', lambda: LazyWellFilterConfig(), 'LazyWellFilterConfig'),
+#        ('step_well_filter_config', lambda: LazyStepWellFilterConfig(), 'LazyStepWellFilterConfig'),
     ]
 
     # Parameters injected only into FLEXIBLE contract functions
