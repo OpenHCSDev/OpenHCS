@@ -73,19 +73,6 @@ class PipelineEditorWidget(AbstractManagerWidget):
 
     # Declarative item hooks (replaces 9 trivial method overrides)
     ITEM_HOOKS = {
-        'id_accessor': ('attr', 'name'),          # getattr(item, 'name')
-        'backing_attr': 'pipeline_steps',         # self.pipeline_steps
-        'selection_attr': 'selected_step',        # self.selected_step = ...
-        'selection_signal': 'step_selected',      # self.step_selected.emit(...)
-        'selection_emit_id': False,               # emit the full step object
-        'selection_clear_value': None,            # emit None when cleared
-        'items_changed_signal': 'pipeline_changed',  # emit on changes
-        'preserve_selection_pred': lambda self: bool(self.pipeline_steps),
-        'list_item_data': 'index',                # store index, not item
-    }
-
-    # Declarative item hooks (replaces 9 trivial method overrides)
-    ITEM_HOOKS = {
         'id_accessor': ('attr', 'name'),          # getattr(item, 'name', '')
         'backing_attr': 'pipeline_steps',         # self.pipeline_steps
         'selection_attr': 'selected_step',        # self.selected_step = ...
@@ -94,7 +81,7 @@ class PipelineEditorWidget(AbstractManagerWidget):
         'selection_clear_value': None,            # emit None when cleared
         'items_changed_signal': 'pipeline_changed',  # self.pipeline_changed.emit(...)
         'preserve_selection_pred': lambda self: bool(self.pipeline_steps),
-        'list_item_data': 'index',                # store the step index
+        'list_item_data': 'item',                 # store the step object
     }
 
     # Declarative preview field configuration (processed automatically in ABC.__init__)

@@ -103,13 +103,17 @@ class StyleSheetGenerator:
             QTreeWidget::item, QListWidget::item {{
                 padding: 4px;
                 border-bottom: 1px solid {cs.to_hex(cs.border_color)};
+                background-color: transparent;
             }}
-            QTreeWidget::item:hover, QListWidget::item:hover {{
+            QTreeWidget::item:hover {{
                 background-color: {cs.to_hex(cs.hover_bg)};
             }}
-            QTreeWidget::item:selected, QListWidget::item:selected {{
+            QTreeWidget::item:selected {{
                 background-color: {cs.to_hex(cs.selection_bg)};
                 color: {cs.to_hex(cs.selection_text)};
+            }}
+            QListWidget::item:hover, QListWidget::item:selected {{
+                background-color: transparent;
             }}
             QHeaderView::section {{
                 background-color: {cs.to_hex(cs.panel_bg)};
@@ -495,13 +499,13 @@ class StyleSheetGenerator:
             QListWidget::item {{
                 padding: 5px;
                 border: none;
+                background-color: transparent;
             }}
             QListWidget::item:selected {{
-                background-color: {cs.to_hex(cs.selection_bg)};
-                color: {cs.to_hex(cs.selection_text)};
+                background-color: transparent;
             }}
             QListWidget::item:hover {{
-                background-color: {cs.to_hex(cs.hover_bg)};
+                background-color: transparent;
             }}
             QFrame {{
                 background-color: {cs.to_hex(cs.window_bg)};

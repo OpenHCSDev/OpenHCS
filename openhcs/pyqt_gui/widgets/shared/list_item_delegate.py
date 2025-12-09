@@ -49,7 +49,12 @@ class MultilinePreviewItemDelegate(QStyledItemDelegate):
         text = opt.text or ""
         opt.text = ""
 
-        # Let the style draw background, selection, hover, borders
+        # Draw custom background BEFORE style (for flash animation)
+        bg_brush = index.data(Qt.ItemDataRole.BackgroundRole)
+        if bg_brush and bg_brush.color().alpha() > 0:
+            painter.fillRect(option.rect, bg_brush)
+
+        # Let the style draw selection, hover, borders (but NOT background - we did it)
         self.parent().style().drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, self.parent())
 
         # Now draw text manually with custom colors
