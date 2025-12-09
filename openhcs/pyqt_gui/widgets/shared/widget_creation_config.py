@@ -218,7 +218,19 @@ def _create_nested_container(manager: ParameterFormManager, param_info: Paramete
     from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme as PCS
 
     color_scheme = manager.config.color_scheme or PCS()
-    return GBH(title=display_info['field_label'], help_target=unwrapped_type, color_scheme=color_scheme)
+    # Get root manager for flash - nested managers share root's _flash_colors dict
+    root_manager = manager
+    while getattr(root_manager, '_parent_manager', None) is not None:
+        root_manager = root_manager._parent_manager
+    # flash_key is the field prefix (e.g., 'well_filter_config')
+    flash_key = field_ids.get('field_prefix', param_info.name)
+    return GBH(
+        title=display_info['field_label'],
+        help_target=unwrapped_type,
+        color_scheme=color_scheme,
+        flash_key=flash_key,
+        flash_manager=root_manager
+    )
 
 
 def _create_optional_nested_container(manager: ParameterFormManager, param_info: ParameterInfo,

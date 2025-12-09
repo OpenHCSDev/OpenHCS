@@ -9,14 +9,61 @@ widgets only need to provide their dataclass inputs and navigation callbacks.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import fields, is_dataclass
-from typing import Dict, Type
+from typing import Dict, Type, Optional
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor
-from PyQt6.QtWidgets import QTreeWidget, QTreeWidgetItem
+from PyQt6.QtCore import Qt, QRect
+from PyQt6.QtGui import QColor, QPainter
+from PyQt6.QtWidgets import QTreeWidget, QTreeWidgetItem, QStyledItemDelegate, QStyleOptionViewItem, QStyle
 
 from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
+
+logger = logging.getLogger(__name__)
+
+
+class TreeItemFlashDelegate(QStyledItemDelegate):
+    """Custom delegate for tree items with flash animation support.
+
+    Reads flash colors from manager's _flash_colors dict during paint - O(1) lookup.
+    Same pattern as MultilinePreviewItemDelegate for list items.
+
+    Automatically registers parent widget for repaint with the flash manager.
+    """
+
+    def __init__(self, parent=None, manager=None):
+        """Initialize delegate.
+
+        Args:
+            parent: Parent widget (QTreeWidget)
+            manager: Flash manager with _flash_colors dict (e.g., ParameterFormManager)
+        """
+        super().__init__(parent)
+        self._manager = manager
+
+        # AUTO-REGISTER: Tree widget repaint when flash colors change
+        # ONE source of truth - no manual registration needed
+        if manager is not None and hasattr(manager, 'register_repaint_callback'):
+            tree_widget = parent
+            if tree_widget is not None:
+                manager.register_repaint_callback(lambda: tree_widget.viewport().update())
+
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index) -> None:
+        """Paint tree item with flash background."""
+        # FAST: Draw flash background from manager's dict (just a dict lookup)
+        if self._manager is not None and hasattr(self._manager, '_flash_colors'):
+            item = self.parent().itemFromIndex(index)
+            if item is not None:
+                data = item.data(0, Qt.ItemDataRole.UserRole)
+                if data and isinstance(data, dict):
+                    field_name = data.get('field_name')
+                    if field_name:
+                        flash_color = self._manager._flash_colors.get(field_name)
+                        if flash_color and flash_color.alpha() > 0:
+                            painter.fillRect(option.rect, flash_color)
+
+        # Let the default implementation draw everything else
+        super().paint(painter, option, index)
 
 
 class ConfigHierarchyTreeHelper:
@@ -29,12 +76,25 @@ class ConfigHierarchyTreeHelper:
         *,
         header_label: str = "Configuration Hierarchy",
         minimum_width: int = 0,  # Allow collapsing to 0 for splitter
+        flash_manager: Optional['ConfigWindow'] = None,
     ) -> QTreeWidget:
-        """Create a pre-configured QTreeWidget for hierarchy display."""
+        """Create a pre-configured QTreeWidget for hierarchy display.
+
+        Args:
+            header_label: Header text for the tree
+            minimum_width: Minimum width (0 allows free splitter movement)
+            flash_manager: Optional manager with _flash_colors dict for flash animation
+        """
         tree = QTreeWidget()
         tree.setHeaderLabel(header_label)
         tree.setMinimumWidth(minimum_width)  # 0 allows free movement in splitter
         tree.setExpandsOnDoubleClick(False)
+
+        # Install flash-aware delegate if manager provided
+        if flash_manager is not None:
+            delegate = TreeItemFlashDelegate(parent=tree, manager=flash_manager)
+            tree.setItemDelegate(delegate)
+
         return tree
 
     def populate_from_root_dataclass(

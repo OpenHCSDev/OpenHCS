@@ -5,6 +5,10 @@ import logging
 from typing import Any, Dict, Type, Optional, List, Set, Callable
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QScrollArea
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
+from PyQt6.QtGui import QColor
+
+from openhcs.pyqt_gui.widgets.shared.flash_mixin import FlashMixin, get_flash_color
+from openhcs.pyqt_gui.widgets.shared.clickable_help_components import FlashableGroupBox
 
 from openhcs.pyqt_gui.widgets.shared.widget_creation_types import ParameterFormManager as ParameterFormManagerABC, _CombinedMeta
 from openhcs.utils.performance_monitor import timer
@@ -43,7 +47,7 @@ class FormManagerConfig:
     field_prefix: str = ''  # Dotted path prefix for accessing flat ObjectState (e.g., 'well_filter_config')
 
 
-class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_CombinedMeta):
+class ParameterFormManager(QWidget, ParameterFormManagerABC, FlashMixin, metaclass=_CombinedMeta):
     """
     React-quality reactive form manager for PyQt6.
 
@@ -311,6 +315,14 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
 
             # Debounce timer for cross-window placeholder refresh
             self._cross_window_refresh_timer = None
+
+            # Flash animation for groupboxes on resolved value changes (root only)
+            if self._parent_manager is None:
+                self._init_visual_update_mixin()  # Initialize VisualUpdateMixin state
+                # SINGLE source of truth: _flash_colors dict read by groupboxes AND tree items
+                self._flash_colors: Dict[str, QColor] = {}
+                # Subscribe to resolved value changes
+                self.state.on_resolved_changed(self._on_resolved_values_changed)
 
             # STEP 8: _user_set_fields starts empty and is populated only when user edits widgets
             # (via _emit_parameter_change). Do NOT populate during initialization, as that would
@@ -685,3 +697,73 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
             self._parameter_ops_service.refresh_single_placeholder(self, field_name)
         for nested_manager in self.nested_managers.values():
             nested_manager._refresh_field_in_tree(field_name)
+
+    # ==================== GROUPBOX FLASH ANIMATION (FlashMixin) ====================
+
+    def _on_resolved_values_changed(self, changed_paths: Set[str]):
+        """Handle resolved value changes - queue groupbox flashes for affected prefixes."""
+        if self._parent_manager is not None:
+            return  # Only root manager handles flashing
+
+        logger.debug(f"[FLASH] _on_resolved_values_changed: {changed_paths}")
+        # Find which nested managers' prefixes match the changed paths
+        for path in changed_paths:
+            prefix = self._find_matching_prefix(path)
+            logger.debug(f"[FLASH] path={path} -> prefix={prefix}")
+            if prefix:
+                self.queue_flash(prefix)  # Use mixin's queue_flash
+
+    def _find_matching_prefix(self, path: str) -> Optional[str]:
+        """Find the nested manager field_prefix that matches a changed path."""
+        return self._find_prefix_recursive(path, self)
+
+    def _find_prefix_recursive(self, path: str, manager: 'ParameterFormManager') -> Optional[str]:
+        """Recursively find matching prefix through nested managers."""
+        for _, nested_manager in manager.nested_managers.items():
+            prefix = nested_manager.field_prefix
+            if path.startswith(prefix + '.') or path == prefix:
+                deeper = self._find_prefix_recursive(path, nested_manager)
+                return deeper if deeper else prefix
+        return None
+
+    # VisualUpdateMixin implementation - update _flash_colors dict (SINGLE source of truth)
+    def _set_item_background(self, key: str, color: QColor) -> None:
+        """Update flash color in _flash_colors dict. Groupboxes and tree items read from this dict."""
+        if color.alpha() > 0:
+            self._flash_colors[key] = color
+        elif key in self._flash_colors:
+            del self._flash_colors[key]
+
+    def _get_original_color(self, key: str) -> Optional[QColor]:
+        """Get original background color for groupbox."""
+        return QColor(0, 0, 0, 0)  # Transparent
+
+    def _get_groupbox_for_prefix(self, prefix: str) -> Optional[QWidget]:
+        """Get the groupbox widget for a field_prefix by finding the nested manager."""
+        return self._get_groupbox_recursive(prefix, self)
+
+    def _get_groupbox_recursive(self, prefix: str, manager: 'ParameterFormManager') -> Optional[QWidget]:
+        """Recursively find groupbox by prefix."""
+        for param_name, nested_manager in manager.nested_managers.items():
+            if nested_manager.field_prefix == prefix:
+                return manager.widgets.get(param_name)
+            result = self._get_groupbox_recursive(prefix, nested_manager)
+            if result:
+                return result
+        return None
+
+    def _visual_repaint(self) -> None:
+        """Trigger repaint after all groupboxes updated (VisualUpdateMixin)."""
+        self.update()  # Single repaint for all groupboxes
+        # Also repaint any registered external widgets (e.g., tree widget)
+        for callback in getattr(self, '_extra_repaint_callbacks', []):
+            callback()
+
+    def register_repaint_callback(self, callback) -> None:
+        """Register a callback to be invoked during _visual_repaint.
+
+        Used by ConfigWindow to repaint tree widget using same flash source of truth.
+        """
+        if not hasattr(self, '_extra_repaint_callbacks'):
+            self._extra_repaint_callbacks = []
+        self._extra_repaint_callbacks.append(callback)

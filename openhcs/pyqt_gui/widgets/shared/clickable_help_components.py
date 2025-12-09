@@ -3,12 +3,39 @@
 import logging
 from typing import Union, Callable, Optional
 from PyQt6.QtWidgets import QLabel, QPushButton, QWidget, QHBoxLayout, QGroupBox, QVBoxLayout
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont, QCursor
+from PyQt6.QtCore import Qt, pyqtSignal, pyqtProperty
+from PyQt6.QtGui import QFont, QCursor, QColor, QPainter
 
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 
 logger = logging.getLogger(__name__)
+
+
+class FlashableGroupBox(QGroupBox):
+    """QGroupBox with smooth flash animation reading from manager's _flash_colors dict.
+
+    Single source of truth: manager._flash_colors dict is read during paintEvent.
+    Both groupboxes and tree items read from the SAME dict.
+    """
+
+    def __init__(self, title: str = "", parent: Optional[QWidget] = None,
+                 flash_key: str = "", flash_manager=None):
+        super().__init__(title, parent)
+        self._flash_key = flash_key  # Key to look up in manager's _flash_colors
+        self._flash_manager = flash_manager  # Manager with _flash_colors dict
+
+    def paintEvent(self, event) -> None:
+        # Let QGroupBox paint its normal content FIRST
+        super().paintEvent(event)
+        # Read flash color from manager's dict (SINGLE source of truth)
+        flash_color = None
+        if self._flash_manager is not None and hasattr(self._flash_manager, '_flash_colors'):
+            flash_color = self._flash_manager._flash_colors.get(self._flash_key)
+        if flash_color and flash_color.alpha() > 0:
+            painter = QPainter(self)
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
+            painter.fillRect(self.contentsRect(), flash_color)
+            painter.end()
 
 
 class ClickableHelpLabel(QLabel):
@@ -319,12 +346,17 @@ class FunctionTitleWithHelp(QWidget):
         layout.addStretch()
 
 
-class GroupBoxWithHelp(QGroupBox):
-    """PyQt6 group box with integrated help for dataclass titles - mirrors Textual TUI pattern."""
+class GroupBoxWithHelp(FlashableGroupBox):
+    """PyQt6 group box with integrated help for dataclass titles - mirrors Textual TUI pattern.
+
+    Inherits from FlashableGroupBox to support smooth flash animations.
+    Reads flash color from manager's _flash_colors dict (single source of truth).
+    """
 
     def __init__(self, title: str, help_target: Union[Callable, type] = None,
-                 color_scheme: Optional[PyQt6ColorScheme] = None, parent=None):
-        super().__init__(parent)
+                 color_scheme: Optional[PyQt6ColorScheme] = None, parent=None,
+                 flash_key: str = "", flash_manager=None):
+        super().__init__("", parent, flash_key=flash_key, flash_manager=flash_manager)
 
         # Initialize color scheme
         self.color_scheme = color_scheme or PyQt6ColorScheme()
@@ -354,9 +386,6 @@ class GroupBoxWithHelp(QGroupBox):
 
         # Store title_layout so we can add more widgets later (e.g., reset button)
         self.title_layout = title_layout
-
-        # Set the custom title widget
-        self.setTitle("")  # Clear default title
 
         # Create main layout and add title widget at top
         # NOTE: Let Qt use default spacing - matches main branch behavior

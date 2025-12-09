@@ -8,7 +8,7 @@ Uses hybrid approach: extracted business logic + clean PyQt6 UI.
 import logging
 import dataclasses
 import copy
-from typing import Type, Any, Callable, Optional
+from typing import Type, Any, Callable, Optional, Dict
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
@@ -52,6 +52,8 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
     cross-window placeholder updates when the dialog closes.
 
     Inherits from ScrollableFormMixin to provide scroll-to-section functionality.
+
+    Tree items flash via form_manager's FlashMixin - ONE source of truth.
     """
 
     # Signals
@@ -241,8 +243,13 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
 
     def _create_inheritance_tree(self) -> QTreeWidget:
         """Create tree widget showing inheritance hierarchy for navigation."""
-        tree = self.tree_helper.create_tree_widget()
+        # Pass form_manager as flash_manager - tree reads from SAME _flash_colors dict as groupboxes
+        # ONE source of truth: form_manager already subscribes to ObjectState.on_resolved_changed
+        tree = self.tree_helper.create_tree_widget(flash_manager=self.form_manager)
         self.tree_helper.populate_from_root_dataclass(tree, self.config_class)
+
+        # Register tree repaint callback so flash animation triggers tree repaint
+        self.form_manager.register_repaint_callback(lambda: tree.viewport().update())
 
         # Connect double-click to navigation
         tree.itemDoubleClicked.connect(self._on_tree_item_double_clicked)
@@ -580,3 +587,5 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
         if hasattr(self, 'form_manager'):
             return [self.form_manager]
         return []
+
+

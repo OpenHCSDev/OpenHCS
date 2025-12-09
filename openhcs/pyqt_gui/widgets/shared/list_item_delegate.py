@@ -12,33 +12,41 @@ from PyQt6.QtCore import Qt, QRect
 
 class MultilinePreviewItemDelegate(QStyledItemDelegate):
     """Custom delegate to render multiline items with grey preview text.
-    
+
     Supports:
     - Multiline text rendering (automatic height calculation)
     - Grey preview text for lines containing specific markers
     - Proper hover/selection/border rendering
     - Configurable colors for normal/preview/selected text
-    
+    - Flash animation (reads color from manager's flash_colors dict - FAST)
+
     Text format:
     - Lines starting with "  └─" are rendered in grey (preview text)
     - All other lines are rendered in normal color
     - Selected items use selected text color
     """
-    
-    def __init__(self, name_color: QColor, preview_color: QColor, selected_text_color: QColor, parent=None):
+
+    # Class-level flash colors dict - shared by all delegates, set by manager
+    # Key: scope_id, Value: QColor
+    flash_colors: dict = {}
+
+    def __init__(self, name_color: QColor, preview_color: QColor, selected_text_color: QColor,
+                 parent=None, manager=None):
         """Initialize delegate with color scheme.
-        
+
         Args:
             name_color: Color for normal text lines
             preview_color: Color for preview text lines (grey)
             selected_text_color: Color for text when item is selected
-            parent: Parent widget
+            parent: Parent widget (QListWidget)
+            manager: Manager widget with flash_colors dict
         """
         super().__init__(parent)
         self.name_color = name_color
         self.preview_color = preview_color
         self.selected_text_color = selected_text_color
-    
+        self._manager = manager
+
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index) -> None:
         """Paint the item with multiline support and grey preview text."""
         # Prepare a copy to let style draw backgrounds, hover, selection, borders, etc.
@@ -49,10 +57,14 @@ class MultilinePreviewItemDelegate(QStyledItemDelegate):
         text = opt.text or ""
         opt.text = ""
 
-        # Draw custom background BEFORE style (for flash animation)
-        bg_brush = index.data(Qt.ItemDataRole.BackgroundRole)
-        if bg_brush and bg_brush.color().alpha() > 0:
-            painter.fillRect(option.rect, bg_brush)
+        # FAST: Draw flash background from manager's dict (just a dict lookup)
+        if self._manager is not None:
+            item_data = index.data(Qt.ItemDataRole.UserRole)
+            if item_data is not None:
+                scope_id = self._manager._get_scope_for_item(item_data)
+                flash_color = self._manager._flash_colors.get(scope_id)
+                if flash_color and flash_color.alpha() > 0:
+                    painter.fillRect(option.rect, flash_color)
 
         # Let the style draw selection, hover, borders (but NOT background - we did it)
         self.parent().style().drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, self.parent())

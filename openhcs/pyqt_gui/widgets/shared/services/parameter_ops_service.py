@@ -172,11 +172,11 @@ class ParameterOpsService(ParameterServiceABC):
             manager: The manager containing the field
             field_name: Name of the field to refresh
         """
-        logger.info(f"🔬 RESET_TRACE: refresh_single_placeholder: {manager.field_id}.{field_name}")
+        logger.debug(f"🔬 RESET_TRACE: refresh_single_placeholder: {manager.field_id}.{field_name}")
 
         # Check if field exists in this manager's widgets
         if field_name not in manager.widgets:
-            logger.warning(f"🔬 RESET_TRACE: {field_name} not in widgets, skipping")
+            logger.debug(f"🔬 RESET_TRACE: {field_name} not in widgets, skipping")
             return
 
         # Compute full dotted path for nested PFMs
@@ -185,12 +185,12 @@ class ParameterOpsService(ParameterServiceABC):
         # Only refresh if value is None (needs placeholder)
         # Use manager.parameters (scoped) not state.parameters (full paths)
         current_value = manager.parameters.get(field_name)
-        logger.info(f"🔬 RESET_TRACE: current_value={repr(current_value)[:50]}")
+        logger.debug(f"🔬 RESET_TRACE: current_value={repr(current_value)[:50]}")
         if current_value is not None:
-            logger.info(f"🔬 RESET_TRACE: value is not None, no placeholder needed")
+            logger.debug(f"🔬 RESET_TRACE: value is not None, no placeholder needed")
             return
 
-        logger.info(f"🔬 RESET_TRACE: value is None, calling get_resolved_value...")
+        logger.debug(f"🔬 RESET_TRACE: value is None, calling get_resolved_value...")
 
         from openhcs.pyqt_gui.widgets.shared.widget_strategies import PyQt6WidgetEnhancer
         from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
@@ -198,18 +198,18 @@ class ParameterOpsService(ParameterServiceABC):
         # Get raw resolved value from ObjectState (handles context building internally)
         # Use full_path for nested PFMs
         resolved_value = manager.state.get_resolved_value(full_path)
-        logger.info(f"🔬 RESET_TRACE: resolved_value={repr(resolved_value)[:50]}")
+        logger.debug(f"🔬 RESET_TRACE: resolved_value={repr(resolved_value)[:50]}")
 
         # Format for display (VIEW responsibility)
         placeholder_text = LazyDefaultPlaceholderService._format_placeholder_text(
             resolved_value, manager.config.placeholder_prefix
         )
-        logger.info(f"        📝 Formatted placeholder: {repr(placeholder_text)[:50]}")
+        logger.debug(f"        📝 Formatted placeholder: {repr(placeholder_text)[:50]}")
 
         if placeholder_text:
             widget = manager.widgets[field_name]
             PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
-            logger.info(f"        ✅ Applied placeholder to widget")
+            logger.debug(f"        ✅ Applied placeholder to widget")
 
             # Keep enabled-field styling in sync when placeholder changes the visual state
             if field_name == 'enabled':

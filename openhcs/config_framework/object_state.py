@@ -284,6 +284,8 @@ class ObjectStateRegistry:
         """
         from openhcs.config_framework.lazy_factory import get_base_type_for_lazy
 
+        invalidated_paths: set[str] = set()
+
         # Scan _path_to_type for matching container types
         for dotted_path, container_type in state._path_to_type.items():
             # Normalize container type
@@ -301,6 +303,16 @@ class ObjectStateRegistry:
             if type_matches and (dotted_path.endswith(f'.{field_name}') or dotted_path == field_name):
                 if dotted_path in state.parameters:
                     state.invalidate_field(dotted_path)
+                    invalidated_paths.add(dotted_path)
+
+        # Fire on_resolved_changed for descendant states so list items flash
+        # (This is triggered by cross-scope inheritance, not direct edit)
+        if invalidated_paths and state._on_resolved_changed_callbacks:
+            for callback in state._on_resolved_changed_callbacks:
+                try:
+                    callback(invalidated_paths)
+                except Exception as e:
+                    logger.warning(f"Error in resolved_changed callback during invalidation: {e}")
 
 
 class FieldProxy:
@@ -962,6 +974,9 @@ class ObjectState:
         CRITICAL: Invalidates descendant caches for any parameters that changed.
         This ensures that when closing a window without saving, other windows
         that inherited from the unsaved values get their caches invalidated.
+
+        Also emits on_resolved_changed for THIS state so same-level observers
+        (like list items subscribed to this ObjectState) flash when values revert.
         """
         if isinstance(self.object_instance, type):
             self.invalidate_cache()
@@ -993,6 +1008,16 @@ class ObjectState:
         self._extract_all_parameters_flat(self.object_instance, prefix='', exclude_params=self._exclude_param_names)
 
         self.invalidate_cache()
+
+        # Emit on_resolved_changed for changed params so SAME-LEVEL observers flash
+        # (e.g., list item subscribed to this ObjectState sees the revert as a change)
+        if changed_params and self._on_resolved_changed_callbacks:
+            changed_paths = set(changed_params)
+            for callback in self._on_resolved_changed_callbacks:
+                try:
+                    callback(changed_paths)
+                except Exception as e:
+                    logger.warning(f"Error in resolved_changed callback during restore: {e}")
 
     def is_dirty(self) -> bool:
         """Return True if resolved state differs from saved baseline."""

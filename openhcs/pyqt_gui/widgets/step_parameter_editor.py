@@ -247,9 +247,13 @@ class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
         if not getattr(self, '_tree_dataclass_params', None):
             return None
 
-        # Use default minimum_width=0 from shared helper (allows collapsing)
-        tree = self.tree_helper.create_tree_widget()
+        # Pass form_manager as flash_manager - tree reads from SAME _flash_colors dict as groupboxes
+        # ONE source of truth: form_manager already subscribes to ObjectState.on_resolved_changed
+        tree = self.tree_helper.create_tree_widget(flash_manager=self.form_manager)
         self.tree_helper.populate_from_mapping(tree, self._tree_dataclass_params)
+
+        # Register tree repaint callback so flash animation triggers tree repaint
+        self.form_manager.register_repaint_callback(lambda: tree.viewport().update())
 
         tree.itemDoubleClicked.connect(self._on_tree_item_double_clicked)
         return tree

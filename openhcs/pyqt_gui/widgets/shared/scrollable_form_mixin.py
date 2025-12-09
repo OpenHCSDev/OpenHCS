@@ -15,16 +15,22 @@ class ScrollableFormMixin:
     Mixin for widgets that have:
     - self.scroll_area: QScrollArea containing the form
     - self.form_manager: ParameterFormManager with nested_managers
-    
+
     Provides scroll-to-section functionality.
+    Optionally triggers flash animation on the target groupbox.
     """
-    
+
     # Type hints for attributes that must be provided by the implementing class
     scroll_area: QScrollArea
     form_manager: 'ParameterFormManager'  # Forward reference
-    
-    def _scroll_to_section(self, field_name: str):
-        """Scroll to a specific section in the form."""
+
+    def _scroll_to_section(self, field_name: str, flash: bool = True):
+        """Scroll to a specific section in the form.
+
+        Args:
+            field_name: The field name (nested manager key) to scroll to
+            flash: If True, flash the target groupbox after scrolling
+        """
         logger.info(f"🔍 Scrolling to section: {field_name}")
 
         if not hasattr(self, 'scroll_area') or self.scroll_area is None:
@@ -49,10 +55,16 @@ class ScrollableFormMixin:
         # Map widget position to scroll area coordinates and scroll to it
         widget_pos = first_widget.mapTo(self.scroll_area.widget(), first_widget.rect().topLeft())
         v_scroll_bar = self.scroll_area.verticalScrollBar()
-        
+
         # Scroll to widget position with offset to show context above
         target_scroll = max(0, widget_pos.y() - 50)
         v_scroll_bar.setValue(target_scroll)
-        
+
         logger.info(f"✅ Scrolled to {field_name}")
 
+        # Flash the target groupbox to highlight it
+        # Route through root form_manager (only root initializes FlashMixin)
+        if flash and hasattr(self.form_manager, 'queue_flash'):
+            # The key is the field_name which maps to the groupbox prefix
+            self.form_manager.queue_flash(field_name)
+            logger.debug(f"⚡ Flashed groupbox for {field_name}")

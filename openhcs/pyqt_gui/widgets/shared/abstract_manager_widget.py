@@ -11,17 +11,17 @@ Following OpenHCS ABC patterns:
 """
 
 from abc import ABC, abstractmethod, ABCMeta
-from typing import List, Tuple, Dict, Optional, Any, Callable, Iterable, Set
+from typing import List, Tuple, Dict, Optional, Any, Callable, Iterable
 import copy
 import inspect
 import logging
 import os
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QListWidget,
-    QListWidgetItem, QLabel, QSplitter, QSizePolicy
+    QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
+    QListWidgetItem, QLabel, QSplitter
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QColor, QBrush
 
 from openhcs.pyqt_gui.widgets.shared.reorderable_list_widget import ReorderableListWidget
@@ -33,8 +33,7 @@ from openhcs.pyqt_gui.widgets.mixins import (
 )
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 from openhcs.config_framework import LiveContextResolver
-from openhcs.config_framework.global_config import get_current_global_config
-from openhcs.core.config import GlobalPipelineConfig
+from openhcs.pyqt_gui.widgets.shared.flash_mixin import FlashMixin, get_flash_color
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +44,7 @@ class _CombinedMeta(ABCMeta, type(QWidget)):
     pass
 
 
-class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, ABC, metaclass=_CombinedMeta):
+class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, metaclass=_CombinedMeta):
     """
     Abstract base class for item list manager widgets.
 
@@ -162,16 +161,12 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, ABC, metaclass=_Co
 
         # Flash animation state: {scope_id: (ObjectState, callback)}
         self._flash_subscriptions: Dict[str, tuple] = {}
-        self._pending_flashes: Set[str] = set()
-        self._active_flashes: Set[str] = set()  # Currently visible flashes
-        self._flash_timer = QTimer(self)
-        self._flash_timer.setSingleShot(True)
-        self._flash_timer.timeout.connect(self._execute_batched_flash)
-        self._revert_timer = QTimer(self)
-        self._revert_timer.setSingleShot(True)
-        self._revert_timer.timeout.connect(self._execute_batched_revert)
+        # Flash colors: {scope_id: QColor} - delegate reads directly (FAST)
+        self._flash_colors: Dict[str, QColor] = {}
+        self._init_visual_update_mixin()  # Initialize VisualUpdateMixin state
 
-        # Initialize CrossWindowPreviewMixin
+        # Initialize CrossWindowPreviewMixin for preview field configuration API
+        # (We override _on_live_context_changed to use unified batching)
         self._init_cross_window_preview_mixin()
 
         # Process declarative preview field configs (AFTER mixin init)
@@ -282,7 +277,8 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, ABC, metaclass=_Co
             name_color=cs.to_qcolor(cs.text_primary),
             preview_color=cs.to_qcolor(cs.text_secondary),
             selected_text_color=cs.to_qcolor(cs.selection_text),
-            parent=list_widget
+            parent=list_widget,
+            manager=self  # Pass manager reference for flash opacity lookup
         )
         list_widget.setItemDelegate(delegate)
 
@@ -889,86 +885,73 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, ABC, metaclass=_Co
     # ========== List Item Flash Animation ==========
 
     def _subscribe_flash_for_item(self, item: Any) -> None:
-        """Subscribe to ObjectState changes for flash animation."""
+        """Subscribe to ObjectState changes for flash animation.
+
+        Args:
+            item: The backing data item
+        """
         scope_id = self._get_scope_for_item(item)
+        logger.info(f"⚡ FLASH_DEBUG _subscribe_flash_for_item: item={type(item).__name__}, scope_id={scope_id}")
         if not scope_id:
-            logger.debug(f"⚡ Flash: No scope_id for item {item}")
+            logger.info(f"⚡ FLASH_DEBUG: No scope_id for item {item}, returning")
             return
+
         if scope_id in self._flash_subscriptions:
+            logger.info(f"⚡ FLASH_DEBUG: Already subscribed to {scope_id}, skipping")
             return
 
         from openhcs.config_framework.object_state import ObjectStateRegistry
         state = ObjectStateRegistry.get_by_scope(scope_id)
+        logger.info(f"⚡ FLASH_DEBUG: ObjectStateRegistry.get_by_scope({scope_id}) = {state}")
         if not state:
-            logger.debug(f"⚡ Flash: No ObjectState for scope {scope_id}")
+            logger.info(f"⚡ FLASH_DEBUG: No ObjectState for scope {scope_id}, returning")
             return
 
         def on_change(changed_paths):
-            logger.debug(f"⚡ Flash queued for {scope_id}: {changed_paths}")
-            self._queue_flash(scope_id)
+            logger.info(f"⚡ FLASH_DEBUG on_change CALLBACK FIRED: scope={scope_id}, paths={changed_paths}")
+            logger.info(f"⚡ FLASH_DEBUG on_change: self={type(self).__name__}, _flash_states={getattr(self, '_flash_states', 'N/A')}")
+            self.queue_flash(scope_id)  # Use mixin's queue_flash
 
         state.on_resolved_changed(on_change)
         self._flash_subscriptions[scope_id] = (state, on_change)
-        logger.debug(f"⚡ Flash: Subscribed to {scope_id}")
+        logger.info(f"⚡ FLASH_DEBUG: Subscribed to {scope_id}, total subscriptions={len(self._flash_subscriptions)}")
 
-    def _queue_flash(self, scope_id: str) -> None:
-        """Queue a scope for batched flash. Executes after 16ms debounce."""
-        self._pending_flashes.add(scope_id)
-        if not self._flash_timer.isActive():
-            self._flash_timer.start(16)  # ~1 frame at 60fps
+    # VisualUpdateMixin implementation - store color in dict (delegate reads directly)
+    def _set_item_background(self, key: str, color: QColor) -> None:
+        """Store flash color in dict - delegate reads directly (FAST, no model overhead)."""
+        if color.alpha() > 0:
+            self._flash_colors[key] = color
+        elif key in self._flash_colors:
+            del self._flash_colors[key]
 
-    def _execute_batched_flash(self) -> None:
-        """Execute all pending flashes in one batch."""
-        if not self._pending_flashes or not self.item_list:
-            return
+    def _get_original_color(self, key: str) -> Optional[QColor]:
+        """Get original background color for list item."""
+        return QColor(0, 0, 0, 0)  # Transparent
 
-        scopes_to_flash = self._pending_flashes.copy()
-        self._pending_flashes.clear()
-        self._active_flashes.update(scopes_to_flash)
-        logger.info(f"⚡ Batched flash for {len(scopes_to_flash)} items")
+    def _visual_repaint(self) -> None:
+        """Trigger single repaint after all items updated (VisualUpdateMixin)."""
+        if self.item_list:
+            self.item_list.update()
 
-        r, g, b = self.color_scheme.text_primary
-        flash_color = QColor(r, g, b, 255)
+    def _execute_text_update(self) -> None:
+        """Execute text/placeholder update (VisualUpdateMixin)."""
+        self.update_item_list()
 
-        for i in range(self.item_list.count()):
-            list_item = self.item_list.item(i)
-            if not list_item:
-                continue
-            item = list_item.data(Qt.ItemDataRole.UserRole)
-            item_scope = self._get_scope_for_item(item)
-            if item_scope in scopes_to_flash:
-                list_item.setBackground(flash_color)
-
-        self.item_list.viewport().update()
-
-        # Reset revert timer (new flashes extend the visible duration)
-        self._revert_timer.start(150)
-
-    def _execute_batched_revert(self) -> None:
-        """Revert all active flashes in one batch."""
-        if not self.item_list or not self._active_flashes:
-            return
-
-        for i in range(self.item_list.count()):
-            list_item = self.item_list.item(i)
-            if not list_item:
-                continue
-            item = list_item.data(Qt.ItemDataRole.UserRole)
-            if self._get_scope_for_item(item) in self._active_flashes:
-                list_item.setBackground(QBrush())
-                list_item.setForeground(QBrush())
-
-        self._active_flashes.clear()
-        self.item_list.viewport().update()
+    def _on_live_context_changed(self) -> None:
+        """Override CrossWindowPreviewMixin to use unified visual update batching."""
+        self.queue_visual_update()
 
     def _cleanup_flash_subscriptions(self) -> None:
         """Unsubscribe all flash callbacks."""
+        logger.info(f"⚡ FLASH_DEBUG _cleanup_flash_subscriptions: self={type(self).__name__}, clearing {len(self._flash_subscriptions)} subscriptions")
         for scope_id, (state, callback) in list(self._flash_subscriptions.items()):
+            logger.info(f"⚡ FLASH_DEBUG: Unsubscribing from {scope_id}")
             try:
                 state.off_resolved_changed(callback)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.info(f"⚡ FLASH_DEBUG: Error unsubscribing from {scope_id}: {e}")
         self._flash_subscriptions.clear()
+        logger.info(f"⚡ FLASH_DEBUG: Subscriptions cleared")
 
     # ========== List Update Template ==========
 
@@ -1000,13 +983,17 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, ABC, metaclass=_Co
         update_context = self._pre_update_list()
 
         def update_func():
-            """Update with in-place optimization when structure unchanged."""
+            """Update list items and subscriptions."""
             backing_items = self._get_backing_items()
             current_count = self.item_list.count()
             expected_count = len(backing_items)
 
+            # Always cleanup and re-subscribe to avoid stale callbacks
+            # (e.g., when switching plates with same step count)
+            self._cleanup_flash_subscriptions()
+
             if current_count == expected_count and current_count > 0:
-                # Structure unchanged - update text in place (optimization)
+                # Same count - update text in place (optimization)
                 for index, item_obj in enumerate(backing_items):
                     list_item = self.item_list.item(index)
                     if list_item is None:
@@ -1019,15 +1006,13 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, ABC, metaclass=_Co
                     list_item.setData(Qt.ItemDataRole.UserRole, self._get_list_item_data(item_obj, index))
                     list_item.setToolTip(self._get_list_item_tooltip(item_obj))
 
-                    # Extra data (e.g., enabled flag)
                     for role_offset, value in self._get_list_item_extra_data(item_obj, index).items():
                         list_item.setData(Qt.ItemDataRole.UserRole + role_offset, value)
 
-                    # Subscribe to flash (idempotent - skips if already subscribed)
                     self._subscribe_flash_for_item(item_obj)
             else:
-                # Structure changed - rebuild list and subscriptions
-                self._cleanup_flash_subscriptions()
+                # Count changed - rebuild list
+                self._flash_colors.clear()
                 self.item_list.clear()
                 for index, item_obj in enumerate(backing_items):
                     display_text = self._format_list_item(item_obj, index, update_context)
@@ -1469,8 +1454,10 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, ABC, metaclass=_Co
         """Get scope_id for an item (for ObjectState lookup). Subclass must implement."""
         ...
 
-    # === CrossWindowPreviewMixin Hook (declarative default) ===
+    # === CrossWindowPreviewMixin Hook (overridden by VisualUpdateMixin) ===
 
     def _handle_full_preview_refresh(self) -> None:
-        """Full refresh of all previews. Default: update_item_list()."""
+        """Override: Replaced by _execute_text_update via VisualUpdateMixin."""
+        # This is only called if CrossWindowPreviewMixin's timer fires (shouldn't happen
+        # since we override _on_live_context_changed), but kept for safety
         self.update_item_list()

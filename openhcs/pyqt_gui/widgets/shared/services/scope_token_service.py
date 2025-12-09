@@ -151,7 +151,7 @@ class ScopeTokenService:
     def build_scope_id(cls, parent_scope: str, obj: object) -> str:
         token = cls.ensure_token(parent_scope, obj)
         result = f"{parent_scope}::{token}"
-        logger.info(f"🔑 ScopeTokenService.build_scope_id: {result} for {type(obj).__name__}")
+        logger.debug(f"🔑 ScopeTokenService.build_scope_id: {result} for {type(obj).__name__}")
         return result
 
     @classmethod

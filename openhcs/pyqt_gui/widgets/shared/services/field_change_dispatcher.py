@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Debug flag for verbose dispatcher logging
-DEBUG_DISPATCHER = True
+DEBUG_DISPATCHER = False
 
 
 @dataclass
@@ -60,7 +60,7 @@ class FieldChangeDispatcher:
                     logger.warning(f"🚫 DISPATCH BLOCKED: {source.field_id} has _in_reset=True")
                 return
 
-            logger.info(f"🔬 RESET_TRACE: DISPATCHER: is_reset={event.is_reset}, field={event.field_name}, value={repr(event.value)[:50]}")
+            logger.debug(f"🔬 RESET_TRACE: DISPATCHER: is_reset={event.is_reset}, field={event.field_name}, value={repr(event.value)[:50]}")
 
             # 1. Update source's data model via ObjectState
             # ObjectState.update_parameter() enforces the invariant: state mutation → global cache invalidation
@@ -134,15 +134,15 @@ class FieldChangeDispatcher:
             root = self._get_root_manager(source)
             full_path = self._get_full_path(source, event.field_name)
 
-            logger.info(f"🔔 DISPATCHER: Emitting parameter_changed from root")
-            logger.info(f"  source.field_id={source.field_id}")
-            logger.info(f"  root.field_id={root.field_id}")
-            logger.info(f"  event.field_name={event.field_name}")
-            logger.info(f"  full_path={full_path}")
-            logger.info(f"  value type={type(event.value).__name__}")
+            logger.debug(f"🔔 DISPATCHER: Emitting parameter_changed from root")
+            logger.debug(f"  source.field_id={source.field_id}")
+            logger.debug(f"  root.field_id={root.field_id}")
+            logger.debug(f"  event.field_name={event.field_name}")
+            logger.debug(f"  full_path={full_path}")
+            logger.debug(f"  value type={type(event.value).__name__}")
 
             root.parameter_changed.emit(full_path, event.value)
-            logger.info(f"  ✅ Emitted parameter_changed({full_path}, ...) from root")
+            logger.debug(f"  ✅ Emitted parameter_changed({full_path}, ...) from root")
 
             # 5. Emit cross-window signal from ROOT
             self._emit_cross_window(root, full_path, event.value)
@@ -156,31 +156,31 @@ class FieldChangeDispatcher:
         This ensures root.state.parameters includes nested changes.
         Also updates parent.parameters with the nested dataclass value.
         """
-        logger.info(f"  📝 MARK_PARENTS: Starting for {source.field_id}")
+        logger.debug(f"  📝 MARK_PARENTS: Starting for {source.field_id}")
 
         current = source
         level = 0
         while current._parent_manager is not None:
             parent = current._parent_manager
             level += 1
-            logger.info(f"    L{level}: parent={parent.field_id}")
+            logger.debug(f"    L{level}: parent={parent.field_id}")
             # Find the field name in parent that points to current
             for field_name, nested_mgr in parent.nested_managers.items():
                 if nested_mgr is current:
-                    logger.info(f"    L{level}: Found field_name={field_name} in parent")
+                    logger.debug(f"    L{level}: Found field_name={field_name} in parent")
                     # Collect nested value and update parent's parameters
                     nested_value = parent._value_collection_service.collect_nested_value(
                         parent, field_name, nested_mgr
                     )
-                    logger.info(f"    L{level}: Collected nested_value type={type(nested_value).__name__}")
+                    logger.debug(f"    L{level}: Collected nested_value type={type(nested_value).__name__}")
                     # CRITICAL: Compute full dotted path for nested PFMs
                     parent_full_path = f"{parent.field_prefix}.{field_name}" if parent.field_prefix else field_name
                     parent.state.update_parameter(parent_full_path, nested_value)
-                    logger.info(f"    L{level}: ✅ {parent.field_id}.{field_name} updated (path={parent_full_path})")
+                    logger.debug(f"    L{level}: ✅ {parent.field_id}.{field_name} updated (path={parent_full_path})")
                     break
             current = parent
 
-        logger.info(f"  ✅ MARK_PARENTS: Complete")
+        logger.debug(f"  ✅ MARK_PARENTS: Complete")
 
     def _get_root_manager(self, manager: 'ParameterFormManager') -> 'ParameterFormManager':
         """Walk up to root manager."""
