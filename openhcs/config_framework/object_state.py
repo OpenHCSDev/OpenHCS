@@ -165,7 +165,7 @@ class ObjectStateRegistry:
     # ========== ANCESTOR OBJECT COLLECTION ==========
 
     @classmethod
-    def get_ancestor_objects(cls, scope_id: Optional[str]) -> List[Any]:
+    def get_ancestor_objects(cls, scope_id: Optional[str], use_saved: bool = False) -> List[Any]:
         """Get objects from this scope and all ancestors, least→most specific.
 
         Replaces LiveContextService.collect() + merge_ancestor_values() for simpler
@@ -173,10 +173,13 @@ class ObjectStateRegistry:
 
         Args:
             scope_id: The scope to get ancestors for (e.g., "/plate::step_0")
+            use_saved: If True, return saved baseline (object_instance) instead of
+                       live state (to_object()). Used when computing _saved_resolved
+                       to ensure saved baseline only depends on other saved baselines.
 
         Returns:
             List of objects from ancestor scopes, ordered least→most specific.
-            Each object is the cached result of state.to_object().
+            Each object is from state.object_instance (saved) or state.to_object() (live).
         """
         scope_key = cls._normalize_scope_id(scope_id)
 
@@ -193,7 +196,12 @@ class ObjectStateRegistry:
         for ancestor_key in ancestors:
             state = cls._states.get(ancestor_key)
             if state:
-                objects.append(state.to_object())
+                if use_saved:
+                    # Return saved baseline (object_instance is updated in mark_saved)
+                    objects.append(state.object_instance)
+                else:
+                    # Return live state with current edits
+                    objects.append(state.to_object())
 
         return objects
 
@@ -463,8 +471,9 @@ class ObjectState:
 
         # Initialize baselines (suppress notifications during init)
         self._ensure_live_resolved(notify=False)
-        # After _ensure_live_resolved(), _live_resolved is guaranteed to be a dict
-        self._saved_resolved = copy.deepcopy(self._live_resolved) if self._live_resolved else {}
+        # Compute saved baseline using SAVED ancestor values (use_saved=True)
+        # This ensures new ObjectStates are immediately dirty if live context differs from saved
+        self._saved_resolved = self._compute_resolved_snapshot(use_saved=True)
         self._saved_parameters = copy.deepcopy(self.parameters)
 
     @property
@@ -718,13 +727,13 @@ class ObjectState:
         for name in self._invalid_fields:
             if name not in self.parameters:
                 continue
-            # Skip container entries (dataclass fields without '.' in path)
-            # They're kept in parameters for UI rendering but excluded from snapshots
-            container_type = self._path_to_type.get(name)
-            is_container = '.' not in name and container_type is not None and is_dataclass(container_type)
+            # Skip container entries (value is a dataclass instance)
+            # Container entries are kept in parameters for UI rendering but excluded from snapshots
+            raw_value = self.parameters[name]
+            is_container = raw_value is not None and is_dataclass(type(raw_value))
             if is_container:
                 continue
-            if self.parameters[name] is not None:
+            if raw_value is not None:
                 explicit_fields.append(name)
             else:
                 inherited_fields.append(name)
@@ -762,12 +771,33 @@ class ObjectState:
                     container_type = self._path_to_type.get(dotted_path)
                     if container_type is None:
                         continue
+                    # Skip non-dataclass container types (e.g., built-in 'function' type
+                    # for primitive parameters of functions - these don't have lazy resolution)
+                    if not is_dataclass(container_type):
+                        continue
                     parts = dotted_path.split('.')
                     field_name = parts[-1]
                     # Create fresh lazy dataclass instance - triggers lazy resolution
                     container_instance = container_type()
                     old_val = self._live_resolved.get(dotted_path)
                     value = getattr(container_instance, field_name)
+                    # DEBUG: Catch the bug where we get the whole GlobalPipelineConfig
+                    if is_dataclass(type(value)) and dotted_path == 'num_workers':
+                        logger.error(
+                            f"BUG DETECTED: num_workers resolved to dataclass {type(value).__name__}! "
+                            f"container_type={container_type.__name__}, field_name={field_name}, "
+                            f"container_instance.__class__={container_instance.__class__.__name__}"
+                        )
+                        # Debug: what was in available_configs?
+                        from openhcs.config_framework.context_manager import current_temp_global, extract_all_configs
+                        try:
+                            ctx = current_temp_global.get()
+                            configs = extract_all_configs(ctx)
+                            logger.error(f"  available_configs keys: {list(configs.keys())}")
+                            for k, v in configs.items():
+                                logger.error(f"    {k}: {type(v).__name__} (id={id(v)})")
+                        except Exception as e:
+                            logger.error(f"  Failed to get configs: {e}")
                     if old_val != value:
                         changed_paths.add(dotted_path)
                     self._live_resolved[dotted_path] = value
@@ -805,22 +835,32 @@ class ObjectState:
 
     # ==================== SAVED STATE / DIRTY TRACKING ====================
 
-    def _compute_resolved_snapshot(self) -> Dict[str, Any]:
+    def _compute_resolved_snapshot(self, use_saved: bool = False) -> Dict[str, Any]:
         """Resolve all fields for this state into a snapshot dict.
 
         PERFORMANCE: Build context stack ONCE and resolve ALL fields in bulk (not per-field).
 
         UNIFIED: Works for ANY object_instance type (dataclass, class instance, callable).
         Root object type doesn't matter - we iterate paths and check _path_to_type for each.
+
+        Args:
+            use_saved: If True, resolve using saved baselines (object_instance) instead of
+                       live state (to_object()). Used for computing _saved_resolved to ensure
+                       saved baseline only depends on other saved baselines.
         """
         from openhcs.config_framework.context_manager import build_context_stack
 
         # Get ancestor objects for context stack
-        ancestor_objects = ObjectStateRegistry.get_ancestor_objects(self.scope_id)
+        # use_saved=True returns object_instance (saved), False returns to_object() (live)
+        ancestor_objects = ObjectStateRegistry.get_ancestor_objects(self.scope_id, use_saved=use_saved)
 
-        # CRITICAL: Use to_object() to get CURRENT state with user edits,
-        # not object_instance which is the original/saved baseline.
-        current_obj = self.to_object()
+        # Use saved baseline or live state for this object
+        if use_saved:
+            current_obj = self.object_instance
+        else:
+            # CRITICAL: Use to_object() to get CURRENT state with user edits,
+            # not object_instance which is the original/saved baseline.
+            current_obj = self.to_object()
 
         # Build context stack ONCE
         stack = build_context_stack(
@@ -837,23 +877,29 @@ class ObjectState:
                 raw_value = self.parameters[dotted_path]
                 container_type = self._path_to_type.get(dotted_path)
                 parts = dotted_path.split('.')
-                is_nested_dataclass = container_type is not None and is_dataclass(container_type)
-                is_leaf_field = len(parts) > 1
 
-                if is_nested_dataclass and is_leaf_field:
-                    # Nested field inside a lazy dataclass - create container and resolve
+                # Check if this path is a CONTAINER entry (value is a nested dataclass)
+                # vs a LEAF field (value is primitive, even if container_type is a dataclass)
+                is_container_entry = raw_value is not None and is_dataclass(type(raw_value))
+
+                if is_container_entry:
+                    # Container-level entry - SKIP from snapshot
+                    # Containers are kept in parameters for UI rendering but excluded from
+                    # dirty comparison since we compare leaf fields instead
+                    pass
+                elif container_type is not None and is_dataclass(container_type):
+                    # Leaf field inside a lazy dataclass - create container and resolve
+                    # This handles both:
+                    # - Nested fields (processing_config.group_by) where parts > 1
+                    # - Top-level fields on root (num_workers on PipelineConfig) where parts == 1
                     container_instance = container_type()
-                    resolved_val = getattr(container_instance, parts[-1])
+                    field_name = parts[-1]
+                    resolved_val = getattr(container_instance, field_name)
                     snapshot[dotted_path] = resolved_val
                     logger.debug(
                         f"SNAPSHOT [{self.scope_id}] {dotted_path}: "
                         f"raw={raw_value!r} -> resolved={resolved_val!r} (type={type(resolved_val).__name__})"
                     )
-                elif is_nested_dataclass and not is_leaf_field:
-                    # Container-level entry - SKIP from snapshot
-                    # Containers are kept in parameters for UI rendering but excluded from
-                    # dirty comparison since we compare leaf fields instead
-                    pass
                 else:
                     # Non-dataclass field - use raw value directly
                     snapshot[dotted_path] = raw_value
@@ -864,18 +910,46 @@ class ObjectState:
         """Mark current state as saved baseline.
 
         UNIFIED: Works for any object_instance type.
+
+        CRITICAL: Invalidates descendant caches for any parameters that changed.
+        This ensures that when saving, other windows that inherited from the
+        old saved values get their caches invalidated so they pick up new values.
+        This mirrors what restore_saved() does but in the opposite direction.
         """
         if not isinstance(self.object_instance, type):
             # Update object_instance with current parameters
             # to_object() already handles all types uniformly
             self.object_instance = self.to_object()
 
-        # Capture resolved snapshot as baseline
-        self._ensure_live_resolved()
-        self._saved_resolved = copy.deepcopy(self._live_resolved) if self._live_resolved else {}
-
-        # Capture parameters snapshot as baseline for restore_saved() diff
+        # Update saved parameters FIRST (before computing saved snapshot)
         self._saved_parameters = copy.deepcopy(self.parameters)
+
+        # Compute new saved resolved using SAVED ancestor baselines (use_saved=True)
+        # This ensures saved baseline is computed relative to other saved baselines
+        new_saved_resolved = self._compute_resolved_snapshot(use_saved=True)
+
+        # Find parameters that differ between old saved and new saved
+        changed_params = []
+        for param_name in set(self._saved_resolved.keys()) | set(new_saved_resolved.keys()):
+            old_saved = self._saved_resolved.get(param_name)
+            new_value = new_saved_resolved.get(param_name)
+            if old_saved != new_value:
+                changed_params.append(param_name)
+
+        # Invalidate descendant caches for each changed parameter
+        # This mirrors what restore_saved() does
+        for param_name in changed_params:
+            container_type = self._path_to_type.get(param_name, type(self.object_instance))
+            leaf_field_name = param_name.split('.')[-1] if '.' in param_name else param_name
+
+            ObjectStateRegistry.invalidate_by_type_and_scope(
+                scope_id=self.scope_id,
+                changed_type=container_type,
+                field_name=leaf_field_name
+            )
+
+        # NOW update saved resolved baseline
+        self._saved_resolved = new_saved_resolved
 
         # Invalidate cached object so next to_object() call rebuilds
         self._cached_object = None
@@ -1059,28 +1133,38 @@ class ObjectState:
         # UNIFIED: reconstruct nested dataclass fields
         # Works for dataclass, non-dataclass class instances, AND functions
         import copy
-        import dataclasses
 
-        # Collect all top-level nested dataclass fields to update
-        nested_updates = {}
-        for field_name, field_type in self._path_to_type.items():
-            if '.' not in field_name and is_dataclass(field_type):
-                nested_updates[field_name] = self._reconstruct_from_prefix(field_name)
+        # Collect ALL top-level field updates from self.parameters
+        # This includes both primitive fields AND nested dataclass fields
+        field_updates = {}
+        for field_name in self._path_to_type:
+            if '.' not in field_name:
+                # Check if the stored value is a dataclass instance
+                value = self.parameters.get(field_name)
+                if value is not None and is_dataclass(type(value)):
+                    # Nested dataclass: recursively reconstruct
+                    field_updates[field_name] = self._reconstruct_from_prefix(field_name)
+                else:
+                    # Primitive field: use value directly from parameters
+                    field_updates[field_name] = value
 
         # Python functions can't be copied, but we CAN update their attributes
         # This is critical for MRO resolution to see edited config values
         if type(self.object_instance).__name__ == 'function':
-            for field_name, nested_obj in nested_updates.items():
-                setattr(self.object_instance, field_name, nested_obj)
+            for field_name, field_value in field_updates.items():
+                setattr(self.object_instance, field_name, field_value)
             self._cached_object = self.object_instance
         elif is_dataclass(self.object_instance):
-            # Use dataclasses.replace for frozen/non-frozen dataclasses
-            self._cached_object = dataclasses.replace(self.object_instance, **nested_updates)
+            # CRITICAL: Use replace_raw to preserve raw None values!
+            # dataclasses.replace triggers lazy resolution via __getattribute__,
+            # which resolves None -> concrete defaults and breaks inheritance.
+            from openhcs.config_framework.lazy_factory import replace_raw
+            self._cached_object = replace_raw(self.object_instance, **field_updates)
         else:
             # Non-dataclass class instance - shallow copy + setattr
             obj_copy = copy.copy(self.object_instance)
-            for field_name, nested_obj in nested_updates.items():
-                setattr(obj_copy, field_name, nested_obj)
+            for field_name, field_value in field_updates.items():
+                setattr(obj_copy, field_name, field_value)
             self._cached_object = obj_copy
 
         return self._cached_object

@@ -78,7 +78,7 @@ def resolve_field_inheritance(
         needs_resolution = True
 
     if needs_resolution:
-        for config_instance in available_configs.values():
+        for config_key, config_instance in available_configs.items():
             # Normalize both sides: LazyWellFilterConfig matches WellFilterConfig
             instance_base = _normalize_to_base(type(config_instance))
             if instance_base == obj_base:
@@ -87,6 +87,8 @@ def resolve_field_inheritance(
                     if field_value is not None:
                         if field_name == 'well_filter':
                             logger.debug(f"🔍 CONCRETE VALUE: {obj_type.__name__}.{field_name} = {field_value}")
+                        if field_name == 'num_workers':
+                            logger.debug(f"🔍 SAME-TYPE MATCH: {obj_type.__name__}.{field_name} = {field_value!r} (type={type(field_value).__name__}) FROM config_key={config_key}, config_type={type(config_instance).__name__}")
                         return field_value
                 except AttributeError:
                     continue
@@ -112,9 +114,13 @@ def resolve_field_inheritance(
                     value = object.__getattribute__(config_instance, field_name)
                     if field_name in ['output_dir_suffix', 'sub_dir', 'well_filter', 'well_filter_mode']:
                         logger.debug(f"🔍 MRO-INHERITANCE: {mro_class.__name__}.{field_name} = {value}")
+                    if field_name == 'num_workers':
+                        logger.debug(f"🔍 MRO-INHERITANCE: {mro_class.__name__}.{field_name} = {value!r} (type={type(value).__name__})")
                     if value is not None:
                         if field_name in ['output_dir_suffix', 'sub_dir', 'well_filter', 'well_filter_mode']:
                             logger.debug(f"🔍 MRO-INHERITANCE: FOUND {mro_class.__name__}.{field_name}: {value} (returning)")
+                        if field_name == 'num_workers':
+                            logger.debug(f"🔍 MRO-INHERITANCE: RETURNING {mro_class.__name__}.{field_name} = {value!r}")
                         return value
                 except AttributeError:
                     continue
