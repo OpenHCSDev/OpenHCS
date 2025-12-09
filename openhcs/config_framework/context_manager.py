@@ -61,6 +61,7 @@ def _merge_nested_dataclass(base, override, mask_with_none: bool = False):
     for field_info in fields(override):
         field_name = field_info.name
         override_value = object.__getattribute__(override, field_name)
+        base_value = object.__getattribute__(base, field_name)
 
         if override_value is None:
             if mask_with_none:
@@ -71,7 +72,6 @@ def _merge_nested_dataclass(base, override, mask_with_none: bool = False):
                 continue
         elif is_dataclass(override_value):
             # Recursively merge nested dataclass
-            base_value = getattr(base, field_name, None)
             if base_value is not None and is_dataclass(base_value):
                 merge_values[field_name] = _merge_nested_dataclass(base_value, override_value, mask_with_none)
             else:
@@ -153,22 +153,27 @@ def config_context(obj, mask_with_none: bool = False):
                         elif value is not None:
                             # Check if value is compatible (handles lazy-to-base type mapping)
                             if _is_compatible_config_type(value, expected_type):
-                                # Convert lazy configs to base configs for context
-                                if hasattr(value, 'to_base_config'):
-                                    value = value.to_base_config()
+                                # CRITICAL FIX: Do NOT call to_base_config() here!
+                                # to_base_config() passes None values to base class constructor,
+                                # but frozen dataclasses with non-Optional defaults substitute the
+                                # default value for None. This breaks cross-hierarchy inheritance.
+                                # Example: LazyWellFilterConfig(well_filter_mode=None) becomes
+                                # WellFilterConfig(well_filter_mode=INCLUDE) instead of keeping None.
+                                #
+                                # Instead, pass lazy dataclass directly to _merge_nested_dataclass,
+                                # which uses object.__getattribute__ to get raw values and correctly
+                                # skips None overrides.
 
-                                # CRITICAL FIX: Recursively merge nested dataclass fields
-                                # If this is a dataclass field, merge it with the base config's value
-                                # instead of replacing wholesale
+                                # Recursively merge nested dataclass fields
                                 if is_dataclass(value):
                                     base_value = getattr(base_config, field_name, None)
                                     if base_value is not None and is_dataclass(base_value):
-                                        # Merge nested dataclass: base + overrides
-                                        # Pass mask_with_none to recursive merge
                                         merged_nested = _merge_nested_dataclass(base_value, value, mask_with_none=False)
                                         overrides[field_name] = merged_nested
                                     else:
-                                        # No base value to merge with, use override as-is
+                                        # No base value to merge with - convert if needed
+                                        if hasattr(value, 'to_base_config'):
+                                            value = value.to_base_config()
                                         overrides[field_name] = value
                                 else:
                                     # Non-dataclass field, use override as-is
@@ -552,27 +557,24 @@ def _inject_context_layer(
 
 
 def build_context_stack(
-    context_obj: object | None,
     object_instance: object,
     ancestor_objects: list[object] | None = None,
 ):
     """
     Build a complete context stack for placeholder resolution.
 
-    SIMPLIFIED (Phase 6 refactor): Takes ancestor_objects directly instead of
-    reconstructing from live_values dict. Just iterates objects and enters config_context().
+    SINGLE SOURCE OF TRUTH: Uses ancestor_objects from ObjectStateRegistry as the
+    sole mechanism for parent hierarchy. No separate context_obj parameter.
 
     Layer order (innermost to outermost when entered):
-    1. Global context layer (live from editor OR thread-local)
+    1. Global context layer (from ancestors or thread-local)
     2. Ancestor objects (from ObjectStateRegistry.get_ancestor_objects())
-    3. Parent context from context_obj
-    4. Current object_instance
+    3. Current object_instance
 
     Args:
-        context_obj: Parent context object (e.g., PipelineConfig for Step editor), or None for root
         object_instance: The object being edited (type used to infer global editing mode)
         ancestor_objects: List of ancestor objects from least→most specific (from ObjectStateRegistry).
-                         If None, falls back to just context_obj and object_instance.
+                         This is the SINGLE SOURCE OF TRUTH for parent hierarchy.
 
     Returns:
         ExitStack with all context layers entered. Caller must manage the stack lifecycle.
@@ -586,38 +588,43 @@ def build_context_stack(
     # Infer global editing mode from object_instance type
     is_global_config_editing = isinstance(object_instance, GlobalConfigBase)
 
-    ctx_type_name = type(context_obj).__name__ if context_obj else "None"
     obj_type_name = obj_type.__name__
     ancestor_types = [type(o).__name__ for o in ancestor_objects] if ancestor_objects else []
-    logger.debug(f"🔧 build_context_stack: ctx={ctx_type_name}, obj={obj_type_name}, ancestors={ancestor_types}")
+    logger.debug(f"🔧 build_context_stack: obj={obj_type_name}, ancestors={ancestor_types}")
+
+    # Check if ancestor_objects contains a GlobalConfigBase (live edited values)
+    ancestor_global = None
+    if ancestor_objects:
+        for obj in ancestor_objects:
+            if isinstance(obj, GlobalConfigBase):
+                ancestor_global = obj
+                break  # Use first (least specific) global config
 
     # 1. Global context layer (least specific)
-    # Use static defaults when editing global config, otherwise use thread-local
+    # Priority: ancestor GlobalConfigBase > thread-local > static defaults
     if is_global_config_editing:
         try:
             global_layer = obj_type()  # Fresh instance with static defaults
             stack.enter_context(config_context(global_layer, mask_with_none=True))
         except Exception:
             pass  # Couldn't create global layer
+    elif ancestor_global is not None:
+        # Use live edited GlobalConfigBase from ancestor_objects
+        stack.enter_context(config_context(ancestor_global))
     else:
         global_layer = get_base_global_config()
         if global_layer:
             stack.enter_context(config_context(global_layer))
 
-    # 2. Ancestor objects (intermediate layers)
+    # 2. Ancestor objects (intermediate layers, excluding GlobalConfigBase already handled)
     if ancestor_objects:
         for ancestor_obj in ancestor_objects:
-            from openhcs.config_framework.lazy_factory import GlobalConfigBase
             # Skip global configs - already handled above
             if isinstance(ancestor_obj, GlobalConfigBase):
                 continue
             stack.enter_context(config_context(ancestor_obj))
 
-    # 3. Parent context (immediate parent)
-    if context_obj is not None:
-        stack.enter_context(config_context(context_obj))
-
-    # 4. Current object overlay (most specific)
+    # 3. Current object overlay (most specific)
     stack.enter_context(config_context(object_instance))
 
     return stack

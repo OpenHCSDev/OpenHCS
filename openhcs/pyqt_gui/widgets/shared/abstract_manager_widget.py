@@ -1044,10 +1044,40 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, ABC, metaclass=_Co
         """Get backing list. Interprets ITEM_HOOKS['backing_attr']."""
         return getattr(self, self.ITEM_HOOKS['backing_attr'])
 
-    @abstractmethod
     def _format_list_item(self, item: Any, index: int, context: Any) -> str:
-        """Format item for list display. Subclass must implement."""
+        """Format item for list display with automatic dirty marker.
+
+        Concrete implementation that:
+        1. Calls _format_item_content() for the base display text
+        2. Appends dirty marker (*) if item has unsaved changes
+
+        Subclasses implement _format_item_content() instead.
+        """
+        base_text = self._format_item_content(item, index, context)
+        dirty_marker = self._get_dirty_marker(item)
+        return f"{dirty_marker}{base_text}{dirty_marker}"
+
+    @abstractmethod
+    def _format_item_content(self, item: Any, index: int, context: Any) -> str:
+        """Format item content for list display. Subclass must implement.
+
+        Returns the display text WITHOUT dirty marker - ABC adds that automatically.
+        """
         ...
+
+    def _get_dirty_marker(self, item: Any) -> str:
+        """Get dirty marker for item based on ObjectState.is_dirty().
+
+        Returns " *" if item has unsaved changes, "" otherwise.
+        """
+        try:
+            scope_id = self._get_scope_for_item(item)
+            state = ObjectStateRegistry.get_by_scope(scope_id)
+            if state and state.is_dirty():
+                return " *"
+        except Exception:
+            pass  # Fail silently - no dirty marker is fine
+        return ""
 
     def _get_list_item_data(self, item: Any, index: int) -> Any:
         """Get UserRole data. Interprets ITEM_HOOKS['list_item_data']."""

@@ -576,7 +576,6 @@ class FunctionListEditorWidget(QWidget):
 
             # Build context stack with ancestors
             stack = build_context_stack(
-                context_obj=None,  # step_instance is the root
                 object_instance=self.step_instance,
                 ancestor_objects=ancestor_objects,
             )

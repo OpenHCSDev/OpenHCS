@@ -255,16 +255,12 @@ class PipelineEditorWidget(AbstractManagerWidget):
         if config_labels:
             preview_parts.append(f"[{','.join(config_labels)}]")
 
-        # Dirty marker
-        is_dirty = state.is_dirty() if state else False
-        dirty_marker = " *" if is_dirty else ""
-
-        # Build display text
+        # Build display text (dirty marker added automatically by ABC)
         if preview_parts:
             preview = " | ".join(preview_parts)
-            display_text = f"▶ {step_name}{dirty_marker}  ({preview})"
+            display_text = f"▶ {step_name}  ({preview})"
         else:
-            display_text = f"▶ {step_name}{dirty_marker}"
+            display_text = f"▶ {step_name}"
 
         return display_text, step_name
 
@@ -893,8 +889,8 @@ class PipelineEditorWidget(AbstractManagerWidget):
 
     # === List Update Hooks (domain-specific) ===
 
-    def _format_list_item(self, item: Any, index: int, context: Any) -> str:
-        """Format step for list display."""
+    def _format_item_content(self, item: Any, index: int, context: Any) -> str:
+        """Format step for list display (dirty marker added by ABC)."""
         display_text, _ = self.format_item_for_display(item, context)
         return display_text
 

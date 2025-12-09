@@ -1140,8 +1140,8 @@ class PlateManagerWidget(AbstractManagerWidget):
 
     # === List Update Hooks (domain-specific) ===
 
-    def _format_list_item(self, item: Any, index: int, context: Any) -> str:
-        """Format plate for list display."""
+    def _format_item_content(self, item: Any, index: int, context: Any) -> str:
+        """Format plate for list display (dirty marker added by ABC)."""
         return self._format_plate_item_with_preview_text(item)
 
     def _get_list_item_tooltip(self, item: Any) -> str:

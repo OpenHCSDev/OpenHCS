@@ -233,7 +233,6 @@ class WidgetService:
 
             # Build context stack
             stack = build_context_stack(
-                context_obj=manager.context_obj,
                 object_instance=manager.object_instance,
                 ancestor_objects=ancestor_objects,
             )

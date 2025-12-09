@@ -281,7 +281,23 @@ class BaseFormDialog(QDialog):
         super().reject()
         
     def closeEvent(self, a0):
-        """Override closeEvent to unregister before closing."""
+        """Override closeEvent to unregister before closing.
+
+        When user closes via X button (not via accept/reject), we need to:
+        1. Restore saved state for any unsaved changes
+        2. Trigger global refresh so other windows sync
+        """
         logger.info(f"🔍 {self.__class__.__name__}: closeEvent() called")
+
+        # Restore saved state (reverts unsaved changes)
+        # This is safe even if no changes - restore_saved() is idempotent
+        self._apply_state_action('restore_saved')
+
         self._unregister_all_form_managers()
         super().closeEvent(a0)
+
+        # Trigger global refresh AFTER unregistration so other windows
+        # re-collect live context without this window's cancelled values
+        from openhcs.config_framework.object_state import ObjectStateRegistry
+        ObjectStateRegistry.increment_token()
+        logger.info(f"🔍 {self.__class__.__name__}: Triggered global refresh after closeEvent")
