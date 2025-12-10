@@ -270,14 +270,26 @@ class BaseFormDialog(QDialog):
         # Persist current form values as the new saved baseline
         self._apply_state_action('mark_saved')
         self._unregister_all_form_managers()
+
+        # CRITICAL: Cleanup WindowFlashOverlay to prevent memory leak
+        from openhcs.pyqt_gui.widgets.shared.flash_mixin import WindowFlashOverlay
+        WindowFlashOverlay.cleanup_window(self)
+        logger.info(f"🔍 {self.__class__.__name__}: Cleaned up WindowFlashOverlay")
+
         super().accept()
-        
+
     def reject(self):
         """Override reject to unregister before closing."""
         logger.info(f"🔍 {self.__class__.__name__}: reject() called")
         # Revert to last saved baseline before closing
         self._apply_state_action('restore_saved')
         self._unregister_all_form_managers()
+
+        # CRITICAL: Cleanup WindowFlashOverlay to prevent memory leak
+        from openhcs.pyqt_gui.widgets.shared.flash_mixin import WindowFlashOverlay
+        WindowFlashOverlay.cleanup_window(self)
+        logger.info(f"🔍 {self.__class__.__name__}: Cleaned up WindowFlashOverlay")
+
         super().reject()
         
     def closeEvent(self, a0):
@@ -286,6 +298,7 @@ class BaseFormDialog(QDialog):
         When user closes via X button (not via accept/reject), we need to:
         1. Restore saved state for any unsaved changes
         2. Trigger global refresh so other windows sync
+        3. Cleanup WindowFlashOverlay to prevent memory leak
         """
         logger.info(f"🔍 {self.__class__.__name__}: closeEvent() called")
 
@@ -294,6 +307,14 @@ class BaseFormDialog(QDialog):
         self._apply_state_action('restore_saved')
 
         self._unregister_all_form_managers()
+
+        # CRITICAL: Cleanup WindowFlashOverlay to prevent memory leak
+        # Without this, every window's overlay stays in _overlays dict forever,
+        # making flash operations progressively slower (O(n) where n = windows ever opened)
+        from openhcs.pyqt_gui.widgets.shared.flash_mixin import WindowFlashOverlay
+        WindowFlashOverlay.cleanup_window(self)
+        logger.info(f"🔍 {self.__class__.__name__}: Cleaned up WindowFlashOverlay")
+
         super().closeEvent(a0)
 
         # Trigger global refresh AFTER unregistration so other windows

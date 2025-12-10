@@ -100,6 +100,7 @@ class FlashElement:
     get_rect_in_window: Callable[[QWidget], Optional[QRect]]
     get_child_rects: Optional[Callable[[QWidget], List[QRect]]] = None  # For masking child widgets
     needs_scroll_clipping: bool = True  # Groupboxes need clipping, list/tree items don't (they handle it themselves)
+    source_id: Optional[str] = None  # Unique identifier for deduplication (e.g., "groupbox:123", "list_item:scope_id")
 
 
 def create_groupbox_element(key: str, groupbox: 'QGroupBox') -> FlashElement:
@@ -190,7 +191,12 @@ def create_groupbox_element(key: str, groupbox: 'QGroupBox') -> FlashElement:
             pass
         return child_rects
 
-    return FlashElement(key=key, get_rect_in_window=get_rect, get_child_rects=get_child_rects)
+    return FlashElement(
+        key=key,
+        get_rect_in_window=get_rect,
+        get_child_rects=get_child_rects,
+        source_id=f"groupbox:{id(groupbox)}"
+    )
 
 
 def create_tree_item_element(key: str, tree: 'QTreeWidget', get_index: Callable[[], Any]) -> FlashElement:
@@ -217,7 +223,12 @@ def create_tree_item_element(key: str, tree: 'QTreeWidget', get_index: Callable[
             return QRect(window_pos, visual_rect.size())
         except RuntimeError:
             return None
-    return FlashElement(key=key, get_rect_in_window=get_rect, needs_scroll_clipping=False)
+    return FlashElement(
+        key=key,
+        get_rect_in_window=get_rect,
+        needs_scroll_clipping=False,
+        source_id=f"tree:{id(tree)}:{key}"  # Include key to distinguish different items in same tree
+    )
 
 
 def create_list_item_element(key: str, list_widget: 'QListWidget', get_row: Callable[[], int]) -> FlashElement:
@@ -245,7 +256,12 @@ def create_list_item_element(key: str, list_widget: 'QListWidget', get_row: Call
             return QRect(window_pos, visual_rect.size())
         except RuntimeError:
             return None
-    return FlashElement(key=key, get_rect_in_window=get_rect, needs_scroll_clipping=False)
+    return FlashElement(
+        key=key,
+        get_rect_in_window=get_rect,
+        needs_scroll_clipping=False,
+        source_id=f"list:{id(list_widget)}:{key}"  # Include key to distinguish different items in same list
+    )
 
 
 # ==================== WINDOW-LEVEL FLASH OVERLAY ====================
@@ -286,7 +302,8 @@ class WindowFlashOverlay(QWidget):
         if window_id not in cls._overlays:
             overlay = cls(top_window)
             cls._overlays[window_id] = overlay
-            logger.debug(f"[FLASH] Created WindowFlashOverlay for window {window_id}")
+            logger.info(f"🧹 FLASH_LEAK_DEBUG: Created WindowFlashOverlay for window {window_id}, "
+                       f"total overlays: {len(cls._overlays)}")
 
         return cls._overlays[window_id]
 
@@ -294,9 +311,20 @@ class WindowFlashOverlay(QWidget):
     def cleanup_window(cls, window: QWidget) -> None:
         """Remove overlay for a window (call when window closes)."""
         window_id = id(window.window())
+        overlays_before = len(cls._overlays)
         overlay = cls._overlays.pop(window_id, None)
+        overlays_after = len(cls._overlays)
         if overlay:
+            # CRITICAL: Clear all registered elements BEFORE deleteLater()
+            # Otherwise overlay might paint dead elements during async deletion
+            elements_count = sum(len(v) for v in overlay._elements.values())
+            overlay._elements.clear()
             overlay.deleteLater()
+            logger.info(f"🧹 FLASH_LEAK_DEBUG: Cleaned up WindowFlashOverlay for window {window_id}, "
+                       f"cleared {elements_count} elements, total overlays: {overlays_before} -> {overlays_after}")
+        else:
+            logger.warning(f"🧹 FLASH_LEAK_DEBUG: No overlay found for window {window_id}, "
+                          f"total overlays: {overlays_before}")
 
     def __init__(self, window: QWidget):
         super().__init__(window)
@@ -321,12 +349,27 @@ class WindowFlashOverlay(QWidget):
         self.show()
 
     def register_element(self, element: FlashElement) -> None:
-        """Register a flashable element. Multiple elements can share the same key."""
+        """Register a flashable element. Multiple elements can share the same key.
+
+        CRITICAL: Deduplicate based on (key, source_id) to prevent duplicate registrations
+        while allowing multiple element types (tree item + groupbox) for the same key.
+        """
         if element.key not in self._elements:
             self._elements[element.key] = []
+
+        # Check if element with same source_id already exists
+        if element.source_id is not None:
+            for i, existing in enumerate(self._elements[element.key]):
+                if existing.source_id == element.source_id:
+                    # Replace existing element with same source
+                    self._elements[element.key][i] = element
+                    logger.debug(f"[FLASH] Replaced element: {element.key}, source_id={element.source_id}")
+                    return
+
+        # New element - append
         self._elements[element.key].append(element)
         total = sum(len(v) for v in self._elements.values())
-        logger.debug(f"[FLASH] Registered element: {element.key}, total={total}")
+        logger.debug(f"[FLASH] Registered element: {element.key}, source_id={element.source_id}, total={total}")
 
     def unregister_element(self, key: str) -> None:
         """Unregister all elements for a key."""

@@ -325,6 +325,9 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, FlashMixin, metacla
             # NOTE: _init_visual_update_mixin() is called earlier (before setup_ui)
             if self._parent_manager is None:
                 self.state.on_resolved_changed(self._on_resolved_values_changed)
+                logger.info(f"🔔 CALLBACK_LEAK_DEBUG: Registered callback for {self.field_id} (PFM id={id(self)}), "
+                           f"total callbacks on ObjectState: {len(self.state._on_resolved_changed_callbacks)}, "
+                           f"scope_id={self.state.scope_id}")
 
             # STEP 8: _user_set_fields starts empty and is populated only when user edits widgets
             # (via _emit_parameter_change). Do NOT populate during initialization, as that would
@@ -656,6 +659,16 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, FlashMixin, metacla
         try:
             from openhcs.config_framework.object_state import ObjectStateRegistry
             ObjectStateRegistry.disconnect_listener(self._on_live_context_changed)
+
+            # CRITICAL: Unregister resolved value change callback to prevent memory leak
+            # Without this, closed windows leave callbacks in ObjectState that fire on every change
+            if self._parent_manager is None:
+                callbacks_before = len(self.state._on_resolved_changed_callbacks)
+                self.state.off_resolved_changed(self._on_resolved_values_changed)
+                callbacks_after = len(self.state._on_resolved_changed_callbacks)
+                logger.info(f"🔔 CALLBACK_LEAK_DEBUG: Unregistered callback for {self.field_id}, "
+                           f"callbacks: {callbacks_before} -> {callbacks_after}")
+
             if self.context_obj is not None and not self._parent_manager:
                 from openhcs.config_framework.context_manager import unregister_hierarchy_relationship
                 unregister_hierarchy_relationship(type(self.object_instance))
@@ -723,6 +736,8 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, FlashMixin, metacla
         if self._parent_manager is not None:
             return  # Only root manager handles this
 
+        logger.info(f"🔔 CALLBACK_LEAK_DEBUG: _on_resolved_values_changed invoked for {self.field_id}, "
+                   f"changed_paths={changed_paths}")
         logger.debug(f"[FLASH] _on_resolved_values_changed: {changed_paths}")
 
         # 1. Collect prefixes for flash animation

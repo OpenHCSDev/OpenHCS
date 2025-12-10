@@ -554,11 +554,17 @@ class ObjectState:
 
             # Notify subscribers of which paths actually changed
             if notify and changed_paths and self._on_resolved_changed_callbacks:
-                for callback in self._on_resolved_changed_callbacks:
+                logger.debug(f"🔔 CALLBACK_LEAK_DEBUG: Notifying {len(self._on_resolved_changed_callbacks)} callbacks "
+                            f"for scope={self.scope_id}, changed_paths={changed_paths}")
+                for i, callback in enumerate(self._on_resolved_changed_callbacks):
                     try:
                         callback(changed_paths)
+                    except RuntimeError as e:
+                        # Qt widget was deleted - this indicates a leaked callback
+                        logger.warning(f"🔴 CALLBACK_LEAK_DEBUG: Dead callback #{i} detected! "
+                                     f"scope={self.scope_id}, error: {e}")
                     except Exception as e:
-                        logger.warning(f"Error in resolved_changed callback: {e}")
+                        logger.warning(f"Error in resolved_changed callback #{i}: {e}")
 
     # DELETED: _create_nested_states() - No longer needed with flat storage
     # Nested ObjectStates are no longer created - flat storage handles all parameters
@@ -1026,11 +1032,17 @@ class ObjectState:
         # (e.g., list item subscribed to this ObjectState sees the revert as a change)
         if changed_params_with_types and self._on_resolved_changed_callbacks:
             changed_paths = {param_name for param_name, _, _ in changed_params_with_types}
-            for callback in self._on_resolved_changed_callbacks:
+            logger.debug(f"🔔 CALLBACK_LEAK_DEBUG: restore_saved notifying {len(self._on_resolved_changed_callbacks)} callbacks "
+                        f"for scope={self.scope_id}, changed_paths={changed_paths}")
+            for i, callback in enumerate(self._on_resolved_changed_callbacks):
                 try:
                     callback(changed_paths)
+                except RuntimeError as e:
+                    # Qt widget was deleted - this indicates a leaked callback
+                    logger.warning(f"🔴 CALLBACK_LEAK_DEBUG: Dead callback #{i} in restore_saved! "
+                                 f"scope={self.scope_id}, error: {e}")
                 except Exception as e:
-                    logger.warning(f"Error in resolved_changed callback during restore: {e}")
+                    logger.warning(f"Error in resolved_changed callback #{i} during restore: {e}")
 
     def is_dirty(self) -> bool:
         """Return True if resolved state differs from saved baseline."""

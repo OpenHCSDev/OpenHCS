@@ -936,7 +936,12 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
             local_pos = window.mapFromGlobal(global_pos)
             return QRect(local_pos, clipped_rect.size())
 
-        element = FlashElement(key=scope_id, get_rect_in_window=get_list_item_rect, needs_scroll_clipping=False)
+        element = FlashElement(
+            key=scope_id,
+            get_rect_in_window=get_list_item_rect,
+            needs_scroll_clipping=False,
+            source_id=f"list_item:{id(self)}:{scope_id}"  # Unique per manager instance + scope
+        )
         overlay = WindowFlashOverlay.get_for_window(self)
         logger.debug(f"⚡ FLASH_DEBUG: get_for_window returned overlay={overlay}, window={self.window()}")
         if overlay:
