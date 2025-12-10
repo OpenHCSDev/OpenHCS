@@ -309,14 +309,11 @@ class ObjectStateRegistry:
                     state.invalidate_field(dotted_path)
                     invalidated_paths.add(dotted_path)
 
-        # Fire on_resolved_changed for descendant states so list items flash
-        # (This is triggered by cross-scope inheritance, not direct edit)
-        if invalidated_paths and state._on_resolved_changed_callbacks:
-            for callback in state._on_resolved_changed_callbacks:
-                try:
-                    callback(invalidated_paths)
-                except Exception as e:
-                    logger.warning(f"Error in resolved_changed callback during invalidation: {e}")
+        # Trigger recompute immediately to detect if resolved values actually changed.
+        # This ensures callbacks fire only when values change, not just when fields are invalidated.
+        # Prevents false flashes when Reset is clicked on already-reset fields.
+        if invalidated_paths:
+            state._ensure_live_resolved(notify=True)
 
 
 class FieldProxy:
@@ -760,11 +757,11 @@ class ObjectState:
             explicit_val = self.parameters[name]
             if old_val != explicit_val:
                 changed_paths.add(name)
+                logger.debug(
+                    f"RECOMPUTE EXPLICIT CHANGED [{self.scope_id}] {name}: "
+                    f"old={old_val!r} -> new={explicit_val!r}"
+                )
             self._live_resolved[name] = explicit_val
-            logger.debug(
-                f"RECOMPUTE EXPLICIT [{self.scope_id}] {name}: "
-                f"value={explicit_val!r} (type={type(explicit_val).__name__})"
-            )
 
         # Inherited values: need context stack for lazy resolution
         if inherited_fields:
@@ -816,6 +813,10 @@ class ObjectState:
                             logger.error(f"  Failed to get configs: {e}")
                     if old_val != value:
                         changed_paths.add(dotted_path)
+                        logger.debug(
+                            f"RECOMPUTE INHERITED CHANGED [{self.scope_id}] {dotted_path}: "
+                            f"old={old_val!r} -> new={value!r}"
+                        )
                     self._live_resolved[dotted_path] = value
 
         return changed_paths
@@ -986,37 +987,38 @@ class ObjectState:
             self.invalidate_cache()
             return
 
-        # Find parameters that differ from saved baseline
-        changed_params = []
+        # Find parameters that differ from saved baseline AND capture their container types
+        # BEFORE clearing parameters (we need _path_to_type)
+        changed_params_with_types = []
         for param_name, current_value in self.parameters.items():
             saved_value = self._saved_parameters.get(param_name)
             if current_value != saved_value:
-                changed_params.append(param_name)
-
-        # Invalidate descendant caches for each changed parameter
-        # This mirrors what update_parameter() does when a value changes
-        for param_name in changed_params:
-            container_type = self._path_to_type.get(param_name, type(self.object_instance))
-            leaf_field_name = param_name.split('.')[-1] if '.' in param_name else param_name
-
-            ObjectStateRegistry.invalidate_by_type_and_scope(
-                scope_id=self.scope_id,
-                changed_type=container_type,
-                field_name=leaf_field_name
-            )
+                container_type = self._path_to_type.get(param_name, type(self.object_instance))
+                leaf_field_name = param_name.split('.')[-1] if '.' in param_name else param_name
+                changed_params_with_types.append((param_name, container_type, leaf_field_name))
 
         # Clear and re-extract from object_instance (the saved version)
         # CRITICAL: Pass exclude_params to ensure excluded fields stay excluded
+        # Do this BEFORE invalidating descendants so they see restored values
         self.parameters.clear()
         self._path_to_type.clear()
         self._extract_all_parameters_flat(self.object_instance, prefix='', exclude_params=self._exclude_param_names)
 
         self.invalidate_cache()
 
+        # NOW invalidate descendant caches for each changed parameter
+        # This must happen AFTER restoring parameters so descendants see restored values
+        for param_name, container_type, leaf_field_name in changed_params_with_types:
+            ObjectStateRegistry.invalidate_by_type_and_scope(
+                scope_id=self.scope_id,
+                changed_type=container_type,
+                field_name=leaf_field_name
+            )
+
         # Emit on_resolved_changed for changed params so SAME-LEVEL observers flash
         # (e.g., list item subscribed to this ObjectState sees the revert as a change)
-        if changed_params and self._on_resolved_changed_callbacks:
-            changed_paths = set(changed_params)
+        if changed_params_with_types and self._on_resolved_changed_callbacks:
+            changed_paths = {param_name for param_name, _, _ in changed_params_with_types}
             for callback in self._on_resolved_changed_callbacks:
                 try:
                     callback(changed_paths)

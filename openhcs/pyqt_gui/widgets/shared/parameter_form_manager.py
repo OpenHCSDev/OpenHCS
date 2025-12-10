@@ -715,7 +715,7 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, FlashMixin, metacla
     # ==================== GROUPBOX FLASH ANIMATION (FlashMixin) ====================
 
     def _on_resolved_values_changed(self, changed_paths: Set[str]):
-        """Handle resolved value changes - queue groupbox flashes for affected prefixes."""
+        """Handle resolved value changes - queue groupbox flashes AND refresh placeholders."""
         if self._parent_manager is not None:
             return  # Only root manager handles flashing
 
@@ -726,6 +726,11 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, FlashMixin, metacla
             logger.debug(f"[FLASH] path={path} -> prefix={prefix}")
             if prefix:
                 self.queue_flash(prefix)  # Use mixin's queue_flash
+
+            # Also refresh placeholder for the changed field
+            # Extract leaf field name from dotted path
+            leaf_field = path.split('.')[-1] if '.' in path else path
+            self._refresh_field_in_tree(leaf_field)
 
     def _find_matching_prefix(self, path: str) -> Optional[str]:
         """Find the nested manager field_prefix that matches a changed path."""
