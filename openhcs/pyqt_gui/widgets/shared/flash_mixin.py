@@ -99,6 +99,7 @@ class FlashElement:
     key: str
     get_rect_in_window: Callable[[QWidget], Optional[QRect]]
     get_child_rects: Optional[Callable[[QWidget], List[QRect]]] = None  # For masking child widgets
+    needs_scroll_clipping: bool = True  # Groupboxes need clipping, list/tree items don't (they handle it themselves)
 
 
 def create_groupbox_element(key: str, groupbox: 'QGroupBox') -> FlashElement:
@@ -216,7 +217,7 @@ def create_tree_item_element(key: str, tree: 'QTreeWidget', get_index: Callable[
             return QRect(window_pos, visual_rect.size())
         except RuntimeError:
             return None
-    return FlashElement(key=key, get_rect_in_window=get_rect)
+    return FlashElement(key=key, get_rect_in_window=get_rect, needs_scroll_clipping=False)
 
 
 def create_list_item_element(key: str, list_widget: 'QListWidget', get_row: Callable[[], int]) -> FlashElement:
@@ -244,7 +245,7 @@ def create_list_item_element(key: str, list_widget: 'QListWidget', get_row: Call
             return QRect(window_pos, visual_rect.size())
         except RuntimeError:
             return None
-    return FlashElement(key=key, get_rect_in_window=get_rect)
+    return FlashElement(key=key, get_rect_in_window=get_rect, needs_scroll_clipping=False)
 
 
 # ==================== WINDOW-LEVEL FLASH OVERLAY ====================
@@ -306,6 +307,13 @@ class WindowFlashOverlay(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setStyleSheet("background: transparent;")
+
+        # CRITICAL: Disable Qt's paint optimizations that clip to dirty regions
+        # When another window occludes this window and then moves away, Qt only
+        # sends paintEvents for the newly exposed "dirty" region. This causes
+        # flashes to only appear in the occluded area. By setting WA_OpaquePaintEvent
+        # to False, we tell Qt to always repaint the entire widget.
+        self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, False)
 
         # Cover entire window
         self.setGeometry(window.rect())
@@ -405,9 +413,10 @@ class WindowFlashOverlay(QWidget):
             for element in elements:
                 rect = element.get_rect_in_window(self._window)
                 if rect and rect.isValid() and rect.intersects(self.rect()):
-                    # Try clipping to scroll areas if any exist
+                    # Try clipping to scroll areas ONLY if element needs it
+                    # List/tree items handle their own viewport clipping, groupboxes need it
                     rect_to_draw = rect
-                    if clip_rects:
+                    if element.needs_scroll_clipping and clip_rects:
                         clipped_rect = self._clip_to_scroll_areas(rect, clip_rects)
                         if clipped_rect and clipped_rect.isValid():
                             # Element is inside a scroll area - use clipped rect

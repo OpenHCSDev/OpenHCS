@@ -892,23 +892,23 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
             list_item: The QListWidgetItem to flash
         """
         scope_id = self._get_scope_for_item(item)
-        logger.info(f"⚡ FLASH_DEBUG _subscribe_flash_for_item: item={type(item).__name__}, scope_id={scope_id}")
+        logger.debug(f"⚡ FLASH_DEBUG _subscribe_flash_for_item: item={type(item).__name__}, scope_id={scope_id}")
         if not scope_id:
-            logger.info(f"⚡ FLASH_DEBUG: No scope_id for item {item}, returning")
+            logger.debug(f"⚡ FLASH_DEBUG: No scope_id for item {item}, returning")
             return
 
         # Store mapping for overlay rect lookup
         self._scope_to_list_item[scope_id] = list_item
 
         if scope_id in self._flash_subscriptions:
-            logger.info(f"⚡ FLASH_DEBUG: Already subscribed to {scope_id}, skipping")
+            logger.debug(f"⚡ FLASH_DEBUG: Already subscribed to {scope_id}, skipping")
             return
 
         # Register FlashElement with WindowFlashOverlay
         from openhcs.pyqt_gui.widgets.shared.flash_mixin import FlashElement, WindowFlashOverlay
 
         def get_list_item_rect(window: QWidget) -> Optional[QRect]:
-            """Get list item rect in window coordinates."""
+            """Get list item rect in window coordinates (clipped to viewport)."""
             if scope_id not in self._scope_to_list_item:
                 return None
             item = self._scope_to_list_item[scope_id]
@@ -920,35 +920,46 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
             if visual_rect.isEmpty():
                 return None
 
-            # Map to window coordinates
-            global_pos = self.item_list.mapToGlobal(visual_rect.topLeft())
-            local_pos = window.mapFromGlobal(global_pos)
-            return QRect(local_pos, visual_rect.size())
+            # Clip to viewport (only flash visible portion)
+            viewport = self.item_list.viewport()
+            if viewport is None:
+                return None
 
-        element = FlashElement(key=scope_id, get_rect_in_window=get_list_item_rect)
+            # Intersect with viewport rect to get only visible portion
+            viewport_rect = viewport.rect()
+            clipped_rect = visual_rect.intersected(viewport_rect)
+            if clipped_rect.isEmpty():
+                return None
+
+            # Map from VIEWPORT to window coordinates
+            global_pos = viewport.mapToGlobal(clipped_rect.topLeft())
+            local_pos = window.mapFromGlobal(global_pos)
+            return QRect(local_pos, clipped_rect.size())
+
+        element = FlashElement(key=scope_id, get_rect_in_window=get_list_item_rect, needs_scroll_clipping=False)
         overlay = WindowFlashOverlay.get_for_window(self)
-        logger.info(f"⚡ FLASH_DEBUG: get_for_window returned overlay={overlay}, window={self.window()}")
+        logger.debug(f"⚡ FLASH_DEBUG: get_for_window returned overlay={overlay}, window={self.window()}")
         if overlay:
             overlay.register_element(element)
-            logger.info(f"⚡ FLASH_DEBUG: Registered element for {scope_id}, overlay has {len(overlay._elements)} keys")
+            logger.debug(f"⚡ FLASH_DEBUG: Registered element for {scope_id}, overlay has {len(overlay._elements)} keys")
         else:
-            logger.warning(f"⚡ FLASH_DEBUG: No overlay for window, cannot register list item {scope_id}")
+            logger.debug(f"⚡ FLASH_DEBUG: No overlay for window, cannot register list item {scope_id}")
 
         # Subscribe to ObjectState changes
         from openhcs.config_framework.object_state import ObjectStateRegistry
         state = ObjectStateRegistry.get_by_scope(scope_id)
-        logger.info(f"⚡ FLASH_DEBUG: ObjectStateRegistry.get_by_scope({scope_id}) = {state}")
+        logger.debug(f"⚡ FLASH_DEBUG: ObjectStateRegistry.get_by_scope({scope_id}) = {state}")
         if not state:
-            logger.info(f"⚡ FLASH_DEBUG: No ObjectState for scope {scope_id}, returning")
+            logger.debug(f"⚡ FLASH_DEBUG: No ObjectState for scope {scope_id}, returning")
             return
 
         def on_change(changed_paths):
-            logger.info(f"⚡ FLASH_DEBUG on_change CALLBACK FIRED: scope={scope_id}, paths={changed_paths}")
+            logger.debug(f"⚡ FLASH_DEBUG on_change CALLBACK FIRED: scope={scope_id}, paths={changed_paths}")
             self.queue_flash(scope_id)  # Global flash - list items flash in ALL windows
 
         state.on_resolved_changed(on_change)
         self._flash_subscriptions[scope_id] = (state, on_change)
-        logger.info(f"⚡ FLASH_DEBUG: Subscribed to {scope_id}, total subscriptions={len(self._flash_subscriptions)}")
+        logger.debug(f"⚡ FLASH_DEBUG: Subscribed to {scope_id}, total subscriptions={len(self._flash_subscriptions)}")
 
     # VisualUpdateMixin implementation - list items use WindowFlashOverlay (no custom methods needed)
 
@@ -967,16 +978,16 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
 
     def _cleanup_flash_subscriptions(self) -> None:
         """Unsubscribe all flash callbacks and clear scope mappings."""
-        logger.info(f"⚡ FLASH_DEBUG _cleanup_flash_subscriptions: self={type(self).__name__}, clearing {len(self._flash_subscriptions)} subscriptions")
+        logger.debug(f"⚡ FLASH_DEBUG _cleanup_flash_subscriptions: self={type(self).__name__}, clearing {len(self._flash_subscriptions)} subscriptions")
         for scope_id, (state, callback) in list(self._flash_subscriptions.items()):
-            logger.info(f"⚡ FLASH_DEBUG: Unsubscribing from {scope_id}")
+            logger.debug(f"⚡ FLASH_DEBUG: Unsubscribing from {scope_id}")
             try:
                 state.off_resolved_changed(callback)
             except Exception as e:
-                logger.info(f"⚡ FLASH_DEBUG: Error unsubscribing from {scope_id}: {e}")
+                logger.debug(f"⚡ FLASH_DEBUG: Error unsubscribing from {scope_id}: {e}")
         self._flash_subscriptions.clear()
         self._scope_to_list_item.clear()
-        logger.info(f"⚡ FLASH_DEBUG: Subscriptions cleared")
+        logger.debug(f"⚡ FLASH_DEBUG: Subscriptions cleared")
 
     # ========== List Update Template ==========
 
