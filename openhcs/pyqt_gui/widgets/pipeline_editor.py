@@ -355,6 +355,10 @@ class PipelineEditorWidget(AbstractManagerWidget):
         plate_scope = self.current_plate or "no_plate"
         ScopeTokenService.ensure_token(plate_scope, new_step)
 
+        # CRITICAL: Register ObjectState BEFORE opening editor
+        # StepParameterEditor expects ObjectState to exist in registry
+        self._register_step_state(new_step)
+
         def handle_save(edited_step):
             """Handle step save from editor."""
             # Check if step already exists in pipeline (for Shift+Click saves)

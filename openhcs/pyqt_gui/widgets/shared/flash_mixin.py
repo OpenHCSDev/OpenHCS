@@ -722,6 +722,9 @@ class VisualUpdateMixin:
     _flash_overlay: Optional['FlashOverlayWidget']
     _window_overlay: Optional['WindowFlashOverlay']
 
+    # Optional scope_id from implementing classes (e.g., ParameterFormManager)
+    scope_id: Optional[str]
+
     def _init_visual_update_mixin(self) -> None:
         """Initialize visual update state. Call in __init__."""
         self._flash_start_times = {}
@@ -734,58 +737,83 @@ class VisualUpdateMixin:
         self._text_timer.setSingleShot(True)
         self._text_timer.timeout.connect(self._execute_text_update_batch)
 
+    def _get_scoped_flash_key(self, key: str) -> str:
+        """Get flash key with scope prefix to prevent cross-window contamination.
+
+        Automatically prepends scope_id if available (ParameterFormManager pattern).
+        Prevents flashes from leaking between windows editing different scopes.
+
+        Example:
+            plate1 window: "step_0" → "plate1::step_0"
+            plate2 window: "step_0" → "plate2::step_0"
+        """
+        if hasattr(self, 'scope_id') and self.scope_id:
+            return f"{self.scope_id}::{key}"
+        return key
+
     def register_flash_groupbox(self, key: str, groupbox: 'QWidget') -> None:
         """Register a groupbox for flash rendering.
 
         GAME ENGINE: Uses window-level overlay for O(1) per-window rendering.
         Defers registration if widget not yet in window hierarchy.
+
+        Key is automatically scoped to prevent cross-window contamination.
         """
+        scoped_key = self._get_scoped_flash_key(key)
         try:
             if groupbox is not None:
                 overlay = WindowFlashOverlay.get_for_window(groupbox)
                 if overlay is not None:
-                    element = create_groupbox_element(key, groupbox)  # type: ignore
+                    element = create_groupbox_element(scoped_key, groupbox)  # type: ignore
                     overlay.register_element(element)
                 else:
                     # Widget not in window hierarchy yet - defer to GLOBAL coordinator
                     coordinator = _GlobalFlashCoordinator.get()
                     coordinator.add_pending_registration(
-                        key, lambda k=key, g=groupbox: create_groupbox_element(k, g), groupbox
+                        scoped_key, lambda k=scoped_key, g=groupbox: create_groupbox_element(k, g), groupbox
                     )
         except Exception as e:
             logger.warning(f"[FLASH] Failed to register groupbox: {e}")
 
     def register_flash_tree_item(self, key: str, tree: 'QTreeWidget', get_index: Callable[[], Any]) -> None:
-        """Register a tree item for flash rendering (new API)."""
+        """Register a tree item for flash rendering (new API).
+
+        Key is automatically scoped to prevent cross-window contamination.
+        """
+        scoped_key = self._get_scoped_flash_key(key)
         try:
             if tree is not None:
                 overlay = WindowFlashOverlay.get_for_window(tree)
                 if overlay is not None:
-                    element = create_tree_item_element(key, tree, get_index)
+                    element = create_tree_item_element(scoped_key, tree, get_index)
                     overlay.register_element(element)
-                    logger.debug(f"[FLASH] register_flash_tree_item: key={key}, overlay={id(overlay)}")
+                    logger.debug(f"[FLASH] register_flash_tree_item: key={key} → scoped={scoped_key}, overlay={id(overlay)}")
                 else:
                     # Widget not in window hierarchy yet - defer to GLOBAL coordinator
                     coordinator = _GlobalFlashCoordinator.get()
                     coordinator.add_pending_registration(
-                        key, lambda k=key, t=tree, g=get_index: create_tree_item_element(k, t, g), tree
+                        scoped_key, lambda k=scoped_key, t=tree, g=get_index: create_tree_item_element(k, t, g), tree
                     )
         except Exception as e:
             logger.warning(f"[FLASH] Failed to register tree item: {e}")
 
     def register_flash_list_item(self, key: str, list_widget: 'QListWidget', get_row: Callable[[], int]) -> None:
-        """Register a list item for flash rendering (new API)."""
+        """Register a list item for flash rendering (new API).
+
+        Key is automatically scoped to prevent cross-window contamination.
+        """
+        scoped_key = self._get_scoped_flash_key(key)
         try:
             if list_widget is not None:
                 overlay = WindowFlashOverlay.get_for_window(list_widget)
                 if overlay is not None:
-                    element = create_list_item_element(key, list_widget, get_row)
+                    element = create_list_item_element(scoped_key, list_widget, get_row)
                     overlay.register_element(element)
                 else:
                     # Widget not in window hierarchy yet - defer to GLOBAL coordinator
                     coordinator = _GlobalFlashCoordinator.get()
                     coordinator.add_pending_registration(
-                        key, lambda k=key, lw=list_widget, gr=get_row: create_list_item_element(k, lw, gr), list_widget
+                        scoped_key, lambda k=scoped_key, lw=list_widget, gr=get_row: create_list_item_element(k, lw, gr), list_widget
                     )
         except Exception as e:
             logger.warning(f"[FLASH] Failed to register list item: {e}")
@@ -822,10 +850,14 @@ class VisualUpdateMixin:
         Used for:
         - Scroll-to-section navigation (local feedback)
         - ParameterFormManager resolved value changes (scope-aware, window-local)
+
+        Key is automatically scoped to prevent cross-window contamination.
         """
+        scoped_key = self._get_scoped_flash_key(key)
+
         window = self.window() if hasattr(self, 'window') else None  # type: ignore
         if window is None:
-            logger.debug(f"[FLASH] queue_flash_local: key={key}, no window")
+            logger.debug(f"[FLASH] queue_flash_local: key={key} → scoped={scoped_key}, no window")
             return
 
         window_id = id(window)
@@ -836,25 +868,25 @@ class VisualUpdateMixin:
 
         overlay = WindowFlashOverlay._overlays.get(window_id)
         if overlay is None:
-            logger.debug(f"[FLASH] queue_flash_local: key={key}, no overlay for window {window_id}")
+            logger.debug(f"[FLASH] queue_flash_local: key={key} → scoped={scoped_key}, no overlay for window {window_id}")
             return
 
-        # Check if key exists in this window's overlay
-        if key not in overlay._elements:
-            logger.debug(f"[FLASH] queue_flash_local: key={key} not in overlay._elements")
+        # Check if scoped key exists in this window's overlay
+        if scoped_key not in overlay._elements:
+            logger.debug(f"[FLASH] queue_flash_local: key={key} → scoped={scoped_key} not in overlay._elements")
             return
 
         now = time.perf_counter()
-        # Store in local mixin dict
-        self._flash_start_times[key] = now
+        # Store in local mixin dict (use scoped key)
+        self._flash_start_times[scoped_key] = now
 
-        # Store in coordinator for color computation
-        coordinator._flash_start_times[key] = now
+        # Store in coordinator for color computation (use scoped key)
+        coordinator._flash_start_times[scoped_key] = now
         coordinator._active_windows.add(window_id)
         coordinator._start_timer()
         coordinator.register(self)
 
-        logger.debug(f"[FLASH] queue_flash_local: key={key}, window={window_id}, SUCCESS")
+        logger.debug(f"[FLASH] queue_flash_local: key={key} → scoped={scoped_key}, window={window_id}, SUCCESS")
 
     def get_flash_color_for_key(self, key: str) -> Optional[QColor]:
         """Get pre-computed flash color for key. O(1) dict lookup.
