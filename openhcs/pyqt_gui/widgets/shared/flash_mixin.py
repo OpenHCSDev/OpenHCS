@@ -162,11 +162,8 @@ class _GlobalFlashCoordinator:
         dead_mixins = []
         for mixin in list(self._active_mixins):
             try:
-                # Skip invisible widgets
-                if not mixin._is_flash_visible():
-                    continue
-                # Prune expired animations and trigger repaint
-                still_active = mixin._prune_and_repaint(now)
+                # Prune expired animations (always, even if invisible)
+                still_active = mixin._prune_and_repaint(now, trigger_repaint=mixin._is_flash_visible())
                 if not still_active:
                     dead_mixins.append(mixin)
             except RuntimeError:
@@ -243,17 +240,18 @@ class VisualUpdateMixin:
             return None
         return compute_flash_color_at_time(start_time, time.perf_counter())
 
-    def _prune_and_repaint(self, now: float) -> bool:
-        """Prune expired animations and trigger repaint. Called by coordinator."""
+    def _prune_and_repaint(self, now: float, trigger_repaint: bool = True) -> bool:
+        """Prune expired animations and optionally trigger repaint. Called by coordinator."""
         # Remove expired (animation complete)
         expired = [k for k, st in self._flash_start_times.items()
                    if now - st >= TOTAL_DURATION_S]
         for key in expired:
             del self._flash_start_times[key]
 
-        # Trigger repaint if still animating
+        # Trigger repaint if still animating AND visible
         if self._flash_start_times:
-            self._visual_repaint()
+            if trigger_repaint:
+                self._visual_repaint()
             return True
         return False
 
