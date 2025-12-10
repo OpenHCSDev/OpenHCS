@@ -6,6 +6,7 @@ view them in Napari with configurable display settings.
 """
 
 import logging
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, List, Dict, Set, Any
 
@@ -23,8 +24,20 @@ from openhcs.io.base import storage_registry
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 from openhcs.pyqt_gui.widgets.shared.column_filter_widget import MultiColumnFilterPanel
+from openhcs.config_framework.object_state import ObjectState, ObjectStateRegistry
+from openhcs.core.config import LazyNapariStreamingConfig, LazyFijiStreamingConfig
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ImageBrowserConfig:
+    """Namespace container for ImageBrowser's streaming configs.
+
+    Gives ImageBrowser a single root ObjectState with nested configs via dotted paths.
+    """
+    napari_config: LazyNapariStreamingConfig = field(default_factory=LazyNapariStreamingConfig)
+    fiji_config: LazyFijiStreamingConfig = field(default_factory=LazyFijiStreamingConfig)
 
 
 class ImageBrowserWidget(QWidget):
@@ -54,13 +67,22 @@ class ImageBrowserWidget(QWidget):
         # Append a suffix so image browser uses a separate scope per plate
         self.scope_id: Optional[str] = f"{orchestrator.plate_path}::image_browser" if orchestrator else None
 
-        # Lazy config widgets (will be created in init_ui)
+        # Create root ObjectState from ImageBrowserConfig namespace container
+        # This gives us a single registered state with nested configs via dotted paths
+        self.config = ImageBrowserConfig()
+        parent_state = ObjectStateRegistry.get_by_scope(self.scope_id) if self.scope_id else None
+        self.state = ObjectState(
+            object_instance=self.config,
+            scope_id=self.scope_id,
+            parent_state=parent_state,
+        )
+        # Register in ObjectStateRegistry for cross-window inheritance
+        if self.scope_id:
+            ObjectStateRegistry.register(self.state)
+
+        # PFM widgets (will be created in init_ui)
         self.napari_config_form = None
-        self.napari_config_state = None
-        self.lazy_napari_config = None
         self.fiji_config_form = None
-        self.fiji_config_state = None
-        self.lazy_fiji_config = None
 
         # File data tracking (images + results)
         self.all_files = {}  # filename -> metadata dict (merged images + results)
@@ -335,31 +357,16 @@ class ImageBrowserWidget(QWidget):
         self.napari_enable_checkbox.toggled.connect(self._on_napari_enable_toggled)
         layout.addWidget(self.napari_enable_checkbox)
 
-        # Create lazy Napari config instance
-        from openhcs.core.config import LazyNapariStreamingConfig
-        self.lazy_napari_config = LazyNapariStreamingConfig()
-
-        # Create parameter form for the lazy config
+        # Create PFM scoped to napari_config using field_prefix
         from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager, FormManagerConfig
-        from openhcs.config_framework.object_state import ObjectState
-
-        context_obj = self.orchestrator.pipeline_config if self.orchestrator else None
-
-        # Create local ObjectState for napari config (not registered - internal to ImageBrowser)
-        # Get parent state from registry for context inheritance
-        parent_state = ObjectStateRegistry.get_by_scope(self.scope_id) if self.scope_id else None
-        self.napari_config_state = ObjectState(
-            object_instance=self.lazy_napari_config,
-            scope_id=self.scope_id,
-            parent_state=parent_state,
-        )
 
         config = FormManagerConfig(
             parent=panel,
-            color_scheme=self.color_scheme
+            color_scheme=self.color_scheme,
+            field_prefix='napari_config'  # Scope to napari_config nested dataclass
         )
         self.napari_config_form = ParameterFormManager(
-            state=self.napari_config_state,
+            state=self.state,  # Share root ObjectState
             config=config
         )
 
@@ -388,29 +395,16 @@ class ImageBrowserWidget(QWidget):
         self.fiji_enable_checkbox.toggled.connect(self._on_fiji_enable_toggled)
         layout.addWidget(self.fiji_enable_checkbox)
 
-        # Create lazy Fiji config instance
-        from openhcs.config_framework.lazy_factory import LazyFijiStreamingConfig
-        self.lazy_fiji_config = LazyFijiStreamingConfig()
-
-        # Create parameter form for the lazy config
+        # Create PFM scoped to fiji_config using field_prefix
         from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager, FormManagerConfig
-        from openhcs.config_framework.object_state import ObjectState
-
-        # Create local ObjectState for fiji config (not registered - internal to ImageBrowser)
-        # Get parent state from registry for context inheritance
-        parent_state = ObjectStateRegistry.get_by_scope(self.scope_id) if self.scope_id else None
-        self.fiji_config_state = ObjectState(
-            object_instance=self.lazy_fiji_config,
-            scope_id=self.scope_id,
-            parent_state=parent_state,
-        )
 
         config = FormManagerConfig(
             parent=panel,
-            color_scheme=self.color_scheme
+            color_scheme=self.color_scheme,
+            field_prefix='fiji_config'  # Scope to fiji_config nested dataclass
         )
         self.fiji_config_form = ParameterFormManager(
-            state=self.fiji_config_state,
+            state=self.state,  # Share root ObjectState
             config=config
         )
 
@@ -437,6 +431,25 @@ class ImageBrowserWidget(QWidget):
 
         self.streaming_tabs.setTabText(self.napari_tab_index, napari_label)
         self.streaming_tabs.setTabText(self.fiji_tab_index, fiji_label)
+
+    def _get_config_values(self, prefix: str) -> Dict[str, Any]:
+        """Get current values for a nested config, scoped by prefix.
+
+        Args:
+            prefix: The dotted path prefix (e.g., 'napari_config' or 'fiji_config')
+
+        Returns:
+            Dict with prefix stripped from keys, e.g., {'port': 5555, 'host': 'localhost'}
+        """
+        prefix_dot = f'{prefix}.'
+        result = {}
+        for path, value in self.state.parameters.items():
+            if path.startswith(prefix_dot):
+                remainder = path[len(prefix_dot):]
+                # Only direct children (no nested dots in remainder)
+                if '.' not in remainder:
+                    result[remainder] = value
+        return result
 
     def _on_napari_enable_toggled(self, checked: bool):
         """Handle Napari enable checkbox toggle."""
@@ -485,16 +498,14 @@ class ImageBrowserWidget(QWidget):
             self.filemanager = orchestrator.filemanager
             logger.debug("Image browser now using orchestrator's FileManager")
 
-        # Update config state contexts and scope_id to use new pipeline_config
-        if self.napari_config_state and orchestrator:
-            self.napari_config_state.context_obj = orchestrator.pipeline_config
-            self.napari_config_state.scope_id = self.scope_id
-            self.napari_config_form._refresh_all_placeholders()
-
-        if self.fiji_config_state and orchestrator:
-            self.fiji_config_state.context_obj = orchestrator.pipeline_config
-            self.fiji_config_state.scope_id = self.scope_id
-            self.fiji_config_form._refresh_all_placeholders()
+        # Update state context and scope_id to use new pipeline_config
+        if self.state and orchestrator:
+            self.state.context_obj = orchestrator.pipeline_config
+            self.state.scope_id = self.scope_id
+            if self.napari_config_form:
+                self.napari_config_form._refresh_all_placeholders()
+            if self.fiji_config_form:
+                self.fiji_config_form._refresh_all_placeholders()
 
         self.load_images()
 
@@ -963,8 +974,7 @@ class ImageBrowserWidget(QWidget):
 
             # For each enabled viewer, resolve config + viewer on UI thread, then spawn worker
             if napari_enabled:
-                from openhcs.core.config import LazyNapariStreamingConfig
-                current_values = self.napari_config_state.get_current_values()
+                current_values = self._get_config_values('napari_config')
                 temp_config = LazyNapariStreamingConfig(
                     **{k: v for k, v in current_values.items() if v is not None}
                 )
@@ -990,8 +1000,7 @@ class ImageBrowserWidget(QWidget):
                 ).start()
 
             if fiji_enabled:
-                from openhcs.core.config import LazyFijiStreamingConfig
-                current_values = self.fiji_config_state.get_current_values()
+                current_values = self._get_config_values('fiji_config')
                 temp_config = LazyFijiStreamingConfig(
                     **{k: v for k, v in current_values.items() if v is not None}
                 )
@@ -1352,9 +1361,9 @@ class ImageBrowserWidget(QWidget):
 
         # Resolve Napari config (lightweight operation, safe in UI thread)
         from openhcs.config_framework.context_manager import config_context
-        from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization, LazyNapariStreamingConfig
+        from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization
 
-        current_values = self.napari_config_state.get_current_values()
+        current_values = self._get_config_values('napari_config')
         temp_config = LazyNapariStreamingConfig(**{k: v for k, v in current_values.items() if v is not None})
 
         with config_context(self.orchestrator.pipeline_config):
@@ -1392,9 +1401,7 @@ class ImageBrowserWidget(QWidget):
         # Resolve Fiji config (lightweight operation, safe in UI thread)
         from openhcs.config_framework.context_manager import config_context
         from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization
-        from openhcs.core.config import LazyFijiStreamingConfig
-
-        current_values = self.fiji_config_state.get_current_values()
+        current_values = self._get_config_values('fiji_config')
         temp_config = LazyFijiStreamingConfig(**{k: v for k, v in current_values.items() if v is not None})
 
         with config_context(self.orchestrator.pipeline_config):
@@ -1798,10 +1805,9 @@ class ImageBrowserWidget(QWidget):
         from openhcs.config_framework.lazy_factory import (
             resolve_lazy_configurations_for_serialization,
         )
-        from openhcs.core.config import LazyNapariStreamingConfig
         from openhcs.constants.constants import Backend as BackendEnum
 
-        current_values = self.napari_config_state.get_current_values()
+        current_values = self._get_config_values('napari_config')
         temp_config = LazyNapariStreamingConfig(
             **{k: v for k, v in current_values.items() if v is not None}
         )
@@ -1830,10 +1836,9 @@ class ImageBrowserWidget(QWidget):
         from openhcs.config_framework.lazy_factory import (
             resolve_lazy_configurations_for_serialization,
         )
-        from openhcs.core.config import LazyFijiStreamingConfig
         from openhcs.constants.constants import Backend as BackendEnum
 
-        current_values = self.fiji_config_state.get_current_values()
+        current_values = self._get_config_values('fiji_config')
         temp_config = LazyFijiStreamingConfig(
             **{k: v for k, v in current_values.items() if v is not None}
         )

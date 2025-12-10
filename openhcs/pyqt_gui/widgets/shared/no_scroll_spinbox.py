@@ -142,6 +142,9 @@ class NoneAwareCheckBox(QCheckBox):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._is_placeholder = False
+        # Prevent horizontal stretching - checkbox should only be as wide as its content
+        from PyQt6.QtWidgets import QSizePolicy
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
 
     def get_value(self):
         """Get value, returning None if in placeholder state."""

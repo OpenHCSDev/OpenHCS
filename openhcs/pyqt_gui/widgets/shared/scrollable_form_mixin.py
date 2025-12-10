@@ -62,9 +62,16 @@ class ScrollableFormMixin:
 
         logger.info(f"✅ Scrolled to {field_name}")
 
+        # Invalidate flash overlay geometry cache after programmatic scroll
+        # (scroll bar setValue doesn't trigger Wheel events that event filter catches)
+        # Use 'self' (the ConfigWindow/StepParameterEditorWidget) not form_manager
+        from openhcs.pyqt_gui.widgets.shared.flash_mixin import WindowFlashOverlay
+        WindowFlashOverlay.invalidate_cache_for_widget(self)  # type: ignore[arg-type]
+
         # Flash the target groupbox to highlight it (LOCAL to this window only)
         # Route through root form_manager (only root initializes FlashMixin)
         if flash and hasattr(self.form_manager, 'queue_flash_local'):
             # Use local flash for navigation - only this window, not cross-window
+            logger.info(f"⚡ FLASH_DEBUG: Calling queue_flash_local({field_name}) on form_manager scope_id={getattr(self.form_manager, 'scope_id', 'NONE')}")
             self.form_manager.queue_flash_local(field_name)
             logger.debug(f"⚡ Flashed groupbox for {field_name} (local)")

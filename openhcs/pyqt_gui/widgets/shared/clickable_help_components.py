@@ -15,9 +15,8 @@ class FlashableGroupBox(QGroupBox):
     """QGroupBox that supports flash animation via overlay.
 
     GAME ENGINE ARCHITECTURE: Flash effects are rendered by a single
-    FlashOverlayWidget that sits on top of the form, NOT by individual
-    groupbox paintEvents. This scales O(1) per window regardless of
-    how many items are animating.
+    WindowFlashOverlay per window, NOT by individual groupbox paintEvents.
+    This scales O(1) per window regardless of how many items are animating.
 
     The groupbox just stores its flash_key for the overlay to look up.
     """
@@ -28,7 +27,7 @@ class FlashableGroupBox(QGroupBox):
         self._flash_key = flash_key  # Key for overlay to look up geometry
         self._flash_manager = flash_manager  # Kept for backwards compat
 
-    # NOTE: paintEvent flash rendering REMOVED - now handled by FlashOverlayWidget
+    # NOTE: paintEvent flash rendering REMOVED - now handled by WindowFlashOverlay
     # This eliminates O(n) paintEvent calls per frame
 
 

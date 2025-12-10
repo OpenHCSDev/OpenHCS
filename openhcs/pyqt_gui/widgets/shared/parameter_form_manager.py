@@ -820,21 +820,14 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, FlashMixin, metacla
         return True
 
     def _visual_repaint(self) -> None:
-        """GAME ENGINE: Repaint only the overlay, not individual groupboxes.
+        """GAME ENGINE: Repaint handled by WindowFlashOverlay.
 
-        The FlashOverlayWidget renders ALL flash effects in ONE paintEvent.
+        WindowFlashOverlay renders ALL flash effects in ONE paintEvent per window.
         This is O(1) per window regardless of how many items are animating.
+
+        This method is now a no-op - the global coordinator handles all repaints.
         """
-        if not self._flash_states:
-            return  # Nothing animating - skip entirely
-
-        # GAME ENGINE: Update overlay only (mixin handles geometry/raise/update)
-        if self._flash_overlay is not None:
-            self._flash_overlay.setGeometry(self.rect())
-            self._flash_overlay.raise_()
-            self._flash_overlay.update()
-
-        # Also repaint any registered external widgets (e.g., tree widget)
+        # Repaint callbacks for external widgets (e.g., tree widget)
         for callback in getattr(self, '_extra_repaint_callbacks', []):
             callback()
 

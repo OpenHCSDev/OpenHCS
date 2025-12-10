@@ -163,6 +163,8 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
         self._flash_subscriptions: Dict[str, tuple] = {}
         # Scope to list item mapping for WindowFlashOverlay rect lookup
         self._scope_to_list_item: Dict[str, QListWidgetItem] = {}
+        # Per-update-cycle scope cache: item_id -> scope_id (cleared at start of each update)
+        self._item_scope_cache: Dict[int, str] = {}
         self._init_visual_update_mixin()  # Initialize VisualUpdateMixin state
 
         # Initialize CrossWindowPreviewMixin for preview field configuration API
@@ -463,8 +465,8 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
         from openhcs.config_framework.object_state import ObjectStateRegistry
 
         try:
-            # Get scope from item via subclass hook
-            item_scope = self._get_scope_for_item(item) or ''
+            # Get scope from item via cached lookup (avoids repeated calls during update cycle)
+            item_scope = self._get_cached_scope(item)
 
             # Look up ObjectState by scope
             state = ObjectStateRegistry.get_by_scope(item_scope)
@@ -884,14 +886,16 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
 
     # ========== List Item Flash Animation ==========
 
-    def _subscribe_flash_for_item(self, item: Any, list_item: QListWidgetItem) -> None:
+    def _subscribe_flash_for_item(self, item: Any, list_item: QListWidgetItem, scope_id: str = None) -> None:
         """Subscribe to ObjectState changes for flash animation and register with overlay.
 
         Args:
             item: The backing data item
             list_item: The QListWidgetItem to flash
+            scope_id: Pre-computed scope_id (uses cached lookup if not provided)
         """
-        scope_id = self._get_scope_for_item(item)
+        if scope_id is None:
+            scope_id = self._get_cached_scope(item)
         logger.debug(f"⚡ FLASH_DEBUG _subscribe_flash_for_item: item={type(item).__name__}, scope_id={scope_id}")
         if not scope_id:
             logger.debug(f"⚡ FLASH_DEBUG: No scope_id for item {item}, returning")
@@ -1023,18 +1027,18 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
         # Pre-update hook (collect live context, normalize state)
         update_context = self._pre_update_list()
 
+        # Clear scope cache at start of update cycle - will be populated lazily
+        self._item_scope_cache.clear()
+
         def update_func():
             """Update list items and subscriptions."""
             backing_items = self._get_backing_items()
             current_count = self.item_list.count()
             expected_count = len(backing_items)
 
-            # Always cleanup and re-subscribe to avoid stale callbacks
-            # (e.g., when switching plates with same step count)
-            self._cleanup_flash_subscriptions()
-
             if current_count == expected_count and current_count > 0:
                 # Same count - update text in place (optimization)
+                # DON'T cleanup subscriptions - they're still valid, just update text
                 for index, item_obj in enumerate(backing_items):
                     list_item = self.item_list.item(index)
                     if list_item is None:
@@ -1050,9 +1054,13 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
                     for role_offset, value in self._get_list_item_extra_data(item_obj, index).items():
                         list_item.setData(Qt.ItemDataRole.UserRole + role_offset, value)
 
-                    self._subscribe_flash_for_item(item_obj, list_item)
+                    # Only subscribe if not already subscribed (use cached scope)
+                    scope_id = self._get_cached_scope(item_obj)
+                    if scope_id and scope_id not in self._flash_subscriptions:
+                        self._subscribe_flash_for_item(item_obj, list_item, scope_id)
             else:
-                # Count changed - rebuild list
+                # Count changed - rebuild list AND subscriptions
+                self._cleanup_flash_subscriptions()
                 self._scope_to_list_item.clear()
                 self.item_list.clear()
                 for index, item_obj in enumerate(backing_items):
@@ -1065,7 +1073,9 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
                         list_item.setData(Qt.ItemDataRole.UserRole + role_offset, value)
 
                     self.item_list.addItem(list_item)
-                    self._subscribe_flash_for_item(item_obj, list_item)
+                    # Pass cached scope to avoid double lookup
+                    scope_id = self._get_cached_scope(item_obj)
+                    self._subscribe_flash_for_item(item_obj, list_item, scope_id)
 
             # Post-update (e.g., auto-select first)
             self._post_update_list()
@@ -1197,7 +1207,7 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
         Returns " *" if item has unsaved changes, "" otherwise.
         """
         try:
-            scope_id = self._get_scope_for_item(item)
+            scope_id = self._get_cached_scope(item)
             state = ObjectStateRegistry.get_by_scope(scope_id)
             if state and state.is_dirty():
                 return " *"
@@ -1494,6 +1504,17 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
     def _get_scope_for_item(self, item: Any) -> str:
         """Get scope_id for an item (for ObjectState lookup). Subclass must implement."""
         ...
+
+    def _get_cached_scope(self, item: Any) -> str:
+        """Get scope_id with per-update-cycle caching.
+
+        Uses _item_scope_cache to avoid repeated _get_scope_for_item calls
+        during a single update cycle. Cache is cleared at start of each update.
+        """
+        item_id = id(item)
+        if item_id not in self._item_scope_cache:
+            self._item_scope_cache[item_id] = self._get_scope_for_item(item) or ''
+        return self._item_scope_cache[item_id]
 
     # === CrossWindowPreviewMixin Hook (overridden by VisualUpdateMixin) ===
 
