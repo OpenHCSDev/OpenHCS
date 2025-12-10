@@ -578,9 +578,9 @@ class PipelineEditorWidget(AbstractManagerWidget):
         """
         logger.info(f"🔔 RECEIVED set_current_plate signal: {plate_path}")
 
-        # Unregister ObjectStates for old plate's steps before switching
-        for step in self.pipeline_steps:
-            self._unregister_step_state(step)
+        # DON'T unregister ObjectStates when switching plates - they should stay
+        # registered until the step editor is closed. Switching plates just changes
+        # the view, it doesn't delete the step editors.
 
         self.current_plate = plate_path
 
@@ -914,7 +914,9 @@ class PipelineEditorWidget(AbstractManagerWidget):
 
     def _get_scope_for_item(self, item: Any) -> str:
         """PipelineEditor: scope = plate::step_token."""
-        return self._build_step_scope_id(item) or ''
+        scope = self._build_step_scope_id(item) or ''
+        logger.info(f"⚡ FLASH_DEBUG _get_scope_for_item: item={item}, scope={scope}")
+        return scope
 
     # === CrossWindowPreviewMixin Hook ===
     # _get_current_orchestrator() is implemented above (line ~795) - does actual lookup from plate manager

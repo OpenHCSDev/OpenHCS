@@ -13,15 +13,15 @@ from PyQt6.QtCore import Qt, QRect
 class MultilinePreviewItemDelegate(QStyledItemDelegate):
     """Custom delegate to render multiline items with grey preview text.
 
+    TRUE O(1) ARCHITECTURE: Flash effects are rendered by WindowFlashOverlay.
+    This delegate does NOT paint flash backgrounds - window overlay handles all flash
+    rendering in a single paintEvent for O(1) per window.
+
     Supports:
     - Multiline text rendering (automatic height calculation)
     - Grey preview text for lines containing specific markers
     - Proper hover/selection/border rendering
     - Configurable colors for normal/preview/selected text
-    - Flash animation using PAINT-TIME color computation
-
-    PAINT-TIME ARCHITECTURE: Flash color is computed during paint() call,
-    not stored in a dict updated 60x/sec. This scales O(visible_items).
     """
 
     def __init__(self, name_color: QColor, preview_color: QColor, selected_text_color: QColor,
@@ -33,16 +33,17 @@ class MultilinePreviewItemDelegate(QStyledItemDelegate):
             preview_color: Color for preview text lines (grey)
             selected_text_color: Color for text when item is selected
             parent: Parent widget (QListWidget)
-            manager: Manager widget with get_flash_color_for_key()
+            manager: Manager widget (unused - kept for API compat)
         """
         super().__init__(parent)
         self.name_color = name_color
         self.preview_color = preview_color
         self.selected_text_color = selected_text_color
         self._manager = manager
+        # NOTE: Flash rendering moved to WindowFlashOverlay for O(1) performance
 
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index) -> None:
-        """Paint the item with multiline support and grey preview text."""
+        """Paint the item with multiline support (no flash - window overlay handles that)."""
         # Prepare a copy to let style draw backgrounds, hover, selection, borders, etc.
         opt = QStyleOptionViewItem(option)
         self.initStyleOption(opt, index)
@@ -51,16 +52,9 @@ class MultilinePreviewItemDelegate(QStyledItemDelegate):
         text = opt.text or ""
         opt.text = ""
 
-        # PAINT-TIME: Compute flash color now (not during timer tick)
-        if self._manager is not None and hasattr(self._manager, 'get_flash_color_for_key'):
-            item_data = index.data(Qt.ItemDataRole.UserRole)
-            if item_data is not None:
-                scope_id = self._manager._get_scope_for_item(item_data)
-                flash_color = self._manager.get_flash_color_for_key(scope_id)
-                if flash_color and flash_color.alpha() > 0:
-                    painter.fillRect(option.rect, flash_color)
+        # TRUE O(1): Flash is rendered by WindowFlashOverlay, not here
 
-        # Let the style draw selection, hover, borders (but NOT background - we did it)
+        # Let the style draw selection, hover, borders
         self.parent().style().drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, self.parent())
 
         # Now draw text manually with custom colors

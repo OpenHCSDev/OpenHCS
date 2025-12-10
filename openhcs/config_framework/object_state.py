@@ -249,14 +249,16 @@ class ObjectStateRegistry:
             # Global scope (empty string) affects ALL states
             if changed_scope == "":
                 # Global scope - always a descendant (or self if also global)
-                pass
+                logger.debug(f"[SCOPE] Global change affects state scope={state_scope!r}")
             else:
                 # Non-global: check exact match or descendant
                 is_self = (state_scope == changed_scope)
                 prefix = changed_scope + "::"
                 is_descendant = state_scope.startswith(prefix)
                 if not (is_self or is_descendant):
+                    logger.debug(f"[SCOPE] SKIP: changed_scope={changed_scope!r} does not affect state_scope={state_scope!r}")
                     continue
+                logger.debug(f"[SCOPE] MATCH: changed_scope={changed_scope!r} affects state_scope={state_scope!r}")
 
             # TYPE + FIELD CHECK: find matching nested state and invalidate field
             cls._invalidate_field_in_matching_states(state, base_changed_type, field_name)
@@ -612,6 +614,11 @@ class ObjectState:
             value: New value
         """
         if param_name not in self.parameters:
+            return
+
+        # EARLY EXIT: No change, no invalidation, no flash
+        current_value = self.parameters[param_name]
+        if current_value == value:
             return
 
         # Update state directly (no type conversion - that's VIEW responsibility)

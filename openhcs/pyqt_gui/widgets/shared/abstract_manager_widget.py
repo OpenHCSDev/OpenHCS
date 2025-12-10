@@ -21,7 +21,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QListWidgetItem, QLabel, QSplitter
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QRect, pyqtSignal
 from PyQt6.QtGui import QFont, QColor, QBrush
 
 from openhcs.pyqt_gui.widgets.shared.reorderable_list_widget import ReorderableListWidget
@@ -33,7 +33,7 @@ from openhcs.pyqt_gui.widgets.mixins import (
 )
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 from openhcs.config_framework import LiveContextResolver
-from openhcs.pyqt_gui.widgets.shared.flash_mixin import FlashMixin
+from openhcs.pyqt_gui.widgets.shared.flash_mixin import FlashMixin, get_flash_color
 
 logger = logging.getLogger(__name__)
 
@@ -161,7 +161,9 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
 
         # Flash animation state: {scope_id: (ObjectState, callback)}
         self._flash_subscriptions: Dict[str, tuple] = {}
-        self._init_visual_update_mixin()  # Initialize VisualUpdateMixin state (PAINT-TIME API)
+        # Scope to list item mapping for WindowFlashOverlay rect lookup
+        self._scope_to_list_item: Dict[str, QListWidgetItem] = {}
+        self._init_visual_update_mixin()  # Initialize VisualUpdateMixin state
 
         # Initialize CrossWindowPreviewMixin for preview field configuration API
         # (We override _on_live_context_changed to use unified batching)
@@ -882,11 +884,12 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
 
     # ========== List Item Flash Animation ==========
 
-    def _subscribe_flash_for_item(self, item: Any) -> None:
-        """Subscribe to ObjectState changes for flash animation.
+    def _subscribe_flash_for_item(self, item: Any, list_item: QListWidgetItem) -> None:
+        """Subscribe to ObjectState changes for flash animation and register with overlay.
 
         Args:
             item: The backing data item
+            list_item: The QListWidgetItem to flash
         """
         scope_id = self._get_scope_for_item(item)
         logger.info(f"⚡ FLASH_DEBUG _subscribe_flash_for_item: item={type(item).__name__}, scope_id={scope_id}")
@@ -894,10 +897,44 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
             logger.info(f"⚡ FLASH_DEBUG: No scope_id for item {item}, returning")
             return
 
+        # Store mapping for overlay rect lookup
+        self._scope_to_list_item[scope_id] = list_item
+
         if scope_id in self._flash_subscriptions:
             logger.info(f"⚡ FLASH_DEBUG: Already subscribed to {scope_id}, skipping")
             return
 
+        # Register FlashElement with WindowFlashOverlay
+        from openhcs.pyqt_gui.widgets.shared.flash_mixin import FlashElement, WindowFlashOverlay
+
+        def get_list_item_rect(window: QWidget) -> Optional[QRect]:
+            """Get list item rect in window coordinates."""
+            if scope_id not in self._scope_to_list_item:
+                return None
+            item = self._scope_to_list_item[scope_id]
+            if item is None:
+                return None
+
+            # Get visual rect from list widget
+            visual_rect = self.item_list.visualItemRect(item)
+            if visual_rect.isEmpty():
+                return None
+
+            # Map to window coordinates
+            global_pos = self.item_list.mapToGlobal(visual_rect.topLeft())
+            local_pos = window.mapFromGlobal(global_pos)
+            return QRect(local_pos, visual_rect.size())
+
+        element = FlashElement(key=scope_id, get_rect_in_window=get_list_item_rect)
+        overlay = WindowFlashOverlay.get_for_window(self)
+        logger.info(f"⚡ FLASH_DEBUG: get_for_window returned overlay={overlay}, window={self.window()}")
+        if overlay:
+            overlay.register_element(element)
+            logger.info(f"⚡ FLASH_DEBUG: Registered element for {scope_id}, overlay has {len(overlay._elements)} keys")
+        else:
+            logger.warning(f"⚡ FLASH_DEBUG: No overlay for window, cannot register list item {scope_id}")
+
+        # Subscribe to ObjectState changes
         from openhcs.config_framework.object_state import ObjectStateRegistry
         state = ObjectStateRegistry.get_by_scope(scope_id)
         logger.info(f"⚡ FLASH_DEBUG: ObjectStateRegistry.get_by_scope({scope_id}) = {state}")
@@ -907,34 +944,17 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
 
         def on_change(changed_paths):
             logger.info(f"⚡ FLASH_DEBUG on_change CALLBACK FIRED: scope={scope_id}, paths={changed_paths}")
-            logger.info(f"⚡ FLASH_DEBUG on_change: self={type(self).__name__}, _flash_states={getattr(self, '_flash_states', 'N/A')}")
-            self.queue_flash(scope_id)  # Use mixin's queue_flash
+            self.queue_flash(scope_id)  # Global flash - list items flash in ALL windows
 
         state.on_resolved_changed(on_change)
         self._flash_subscriptions[scope_id] = (state, on_change)
         logger.info(f"⚡ FLASH_DEBUG: Subscribed to {scope_id}, total subscriptions={len(self._flash_subscriptions)}")
 
-    # PAINT-TIME API: get_flash_color_for_key() inherited from VisualUpdateMixin
-    # List delegate calls this during paint to get current flash color
-
-    def _is_flash_visible(self) -> bool:
-        """Check if this widget's flash animations are visible on screen.
-
-        GAME ENGINE: Skip animation ticks entirely for widgets that aren't visible.
-        """
-        try:
-            if not self.isVisible():
-                return False
-            window = self.window()
-            if window and window.isMinimized():
-                return False
-        except RuntimeError:
-            return False  # Widget deleted
-        return True
+    # VisualUpdateMixin implementation - list items use WindowFlashOverlay (no custom methods needed)
 
     def _visual_repaint(self) -> None:
         """Trigger single repaint after all items updated (VisualUpdateMixin)."""
-        if self.item_list and self._flash_states:
+        if self.item_list:
             self.item_list.update()
 
     def _execute_text_update(self) -> None:
@@ -946,7 +966,7 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
         self.queue_visual_update()
 
     def _cleanup_flash_subscriptions(self) -> None:
-        """Unsubscribe all flash callbacks."""
+        """Unsubscribe all flash callbacks and clear scope mappings."""
         logger.info(f"⚡ FLASH_DEBUG _cleanup_flash_subscriptions: self={type(self).__name__}, clearing {len(self._flash_subscriptions)} subscriptions")
         for scope_id, (state, callback) in list(self._flash_subscriptions.items()):
             logger.info(f"⚡ FLASH_DEBUG: Unsubscribing from {scope_id}")
@@ -955,6 +975,7 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
             except Exception as e:
                 logger.info(f"⚡ FLASH_DEBUG: Error unsubscribing from {scope_id}: {e}")
         self._flash_subscriptions.clear()
+        self._scope_to_list_item.clear()
         logger.info(f"⚡ FLASH_DEBUG: Subscriptions cleared")
 
     # ========== List Update Template ==========
@@ -1013,10 +1034,10 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
                     for role_offset, value in self._get_list_item_extra_data(item_obj, index).items():
                         list_item.setData(Qt.ItemDataRole.UserRole + role_offset, value)
 
-                    self._subscribe_flash_for_item(item_obj)
+                    self._subscribe_flash_for_item(item_obj, list_item)
             else:
                 # Count changed - rebuild list
-                self._flash_start_times.clear()  # PAINT-TIME: clear start times
+                self._scope_to_list_item.clear()
                 self.item_list.clear()
                 for index, item_obj in enumerate(backing_items):
                     display_text = self._format_list_item(item_obj, index, update_context)
@@ -1028,7 +1049,7 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
                         list_item.setData(Qt.ItemDataRole.UserRole + role_offset, value)
 
                     self.item_list.addItem(list_item)
-                    self._subscribe_flash_for_item(item_obj)
+                    self._subscribe_flash_for_item(item_obj, list_item)
 
             # Post-update (e.g., auto-select first)
             self._post_update_list()

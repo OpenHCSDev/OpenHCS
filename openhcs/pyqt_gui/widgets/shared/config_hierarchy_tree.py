@@ -23,12 +23,11 @@ logger = logging.getLogger(__name__)
 
 
 class TreeItemFlashDelegate(QStyledItemDelegate):
-    """Custom delegate for tree items with flash animation support.
+    """Custom delegate for tree items.
 
-    PAINT-TIME ARCHITECTURE: Flash color is computed during paint() via
-    manager.get_flash_color_for_key(). Scales O(visible_items) not O(all × 60fps).
-
-    Automatically registers parent widget for repaint with the flash manager.
+    TRUE O(1) ARCHITECTURE: Flash effects are rendered by WindowFlashOverlay.
+    This delegate does NOT paint flash backgrounds - window overlay handles all flash
+    rendering in a single paintEvent for O(1) per window.
     """
 
     def __init__(self, parent=None, manager=None):
@@ -36,40 +35,30 @@ class TreeItemFlashDelegate(QStyledItemDelegate):
 
         Args:
             parent: Parent widget (QTreeWidget)
-            manager: Flash manager with get_flash_color_for_key() (e.g., ParameterFormManager)
+            manager: Flash manager (unused - kept for API compat)
         """
         super().__init__(parent)
         self._manager = manager
-
-        # AUTO-REGISTER: Tree widget repaint when flash colors change
-        # ONE source of truth - no manual registration needed
-        if manager is not None and hasattr(manager, 'register_repaint_callback'):
-            tree_widget = parent
-            if tree_widget is not None:
-                manager.register_repaint_callback(lambda: tree_widget.viewport().update())
+        # NOTE: Flash rendering moved to WindowFlashOverlay for O(1) performance
 
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index) -> None:
-        """Paint tree item with flash background."""
-        # PAINT-TIME: Compute flash color now (not during timer tick)
-        if self._manager is not None and hasattr(self._manager, 'get_flash_color_for_key'):
-            item = self.parent().itemFromIndex(index)
-            if item is not None:
-                data = item.data(0, Qt.ItemDataRole.UserRole)
-                if data and isinstance(data, dict):
-                    field_name = data.get('field_name')
-                    if field_name:
-                        flash_color = self._manager.get_flash_color_for_key(field_name)
-                        if flash_color and flash_color.alpha() > 0:
-                            painter.fillRect(option.rect, flash_color)
-
-        # Let the default implementation draw everything else
+        """Paint tree item (no flash - window overlay handles that)."""
+        # TRUE O(1): Flash is rendered by WindowFlashOverlay, not here
         super().paint(painter, option, index)
 
 
 class ConfigHierarchyTreeHelper:
-    """Utility for building configuration hierarchy trees."""
+    """Utility for building configuration hierarchy trees.
+
+    TRUE O(1) FLASH ARCHITECTURE: Tree items are registered with WindowFlashOverlay
+    during population. Flash rendering happens in the window overlay's single paintEvent.
+    """
 
     _INHERITANCE_TOOLTIP = "This configuration is not editable in the UI (inherited by other configs)"
+
+    def __init__(self):
+        self._flash_manager = None
+        self._current_tree: Optional[QTreeWidget] = None
 
     def create_tree_widget(
         self,
@@ -83,19 +72,37 @@ class ConfigHierarchyTreeHelper:
         Args:
             header_label: Header text for the tree
             minimum_width: Minimum width (0 allows free splitter movement)
-            flash_manager: Optional manager with get_flash_color_for_key() for flash animation
+            flash_manager: Manager with register_flash_tree_item() for O(1) flash
         """
         tree = QTreeWidget()
         tree.setHeaderLabel(header_label)
         tree.setMinimumWidth(minimum_width)  # 0 allows free movement in splitter
         tree.setExpandsOnDoubleClick(False)
 
-        # Install flash-aware delegate if manager provided
+        # Store flash manager for use during population
+        self._flash_manager = flash_manager
+        self._current_tree = tree
+
+        # Install delegate (no longer paints flash - just for API compat)
         if flash_manager is not None:
             delegate = TreeItemFlashDelegate(parent=tree, manager=flash_manager)
             tree.setItemDelegate(delegate)
 
         return tree
+
+    def _register_flash_element(self, item: QTreeWidgetItem, field_name: str) -> None:
+        """Register tree item with WindowFlashOverlay for O(1) flash rendering."""
+        if self._flash_manager is None or self._current_tree is None:
+            return
+        if not hasattr(self._flash_manager, 'register_flash_tree_item'):
+            return
+
+        tree = self._current_tree
+        # Create closure that finds item's current index (handles tree rebuild)
+        def get_index():
+            return tree.indexFromItem(item)
+
+        self._flash_manager.register_flash_tree_item(field_name, tree, get_index)
 
     def populate_from_root_dataclass(
         self,
@@ -108,6 +115,7 @@ class ConfigHierarchyTreeHelper:
         if not is_dataclass(root_dataclass):
             return
 
+        self._current_tree = tree
         self._add_ui_visible_dataclasses_to_tree(
             parent_item=tree,
             obj_type=root_dataclass,
@@ -121,6 +129,7 @@ class ConfigHierarchyTreeHelper:
         dataclass_mapping: Dict[str, Type],
     ) -> None:
         """Populate the tree given a dict of field_name -> dataclass type."""
+        self._current_tree = tree
         for field_name, obj_type in dataclass_mapping.items():
             base_type = self.get_base_type(obj_type)
             label = getattr(base_type, "__name__", field_name)
@@ -137,6 +146,8 @@ class ConfigHierarchyTreeHelper:
                 },
             )
             tree.addTopLevelItem(item)
+            # TRUE O(1): Register with WindowFlashOverlay
+            self._register_flash_element(item, field_name)
             self.add_inheritance_info(item, base_type)
 
     # ------------------------------------------------------------------
@@ -189,6 +200,9 @@ class ConfigHierarchyTreeHelper:
                 parent_item.addTopLevelItem(item)
             else:
                 parent_item.addChild(item)
+
+            # TRUE O(1): Register with WindowFlashOverlay
+            self._register_flash_element(item, field.name)
 
             self.add_inheritance_info(item, base_type)
             self._add_ui_visible_dataclasses_to_tree(

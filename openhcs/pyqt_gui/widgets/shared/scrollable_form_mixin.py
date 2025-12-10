@@ -62,9 +62,9 @@ class ScrollableFormMixin:
 
         logger.info(f"✅ Scrolled to {field_name}")
 
-        # Flash the target groupbox to highlight it
+        # Flash the target groupbox to highlight it (LOCAL to this window only)
         # Route through root form_manager (only root initializes FlashMixin)
-        if flash and hasattr(self.form_manager, 'queue_flash'):
-            # The key is the field_name which maps to the groupbox prefix
-            self.form_manager.queue_flash(field_name)
-            logger.debug(f"⚡ Flashed groupbox for {field_name}")
+        if flash and hasattr(self.form_manager, 'queue_flash_local'):
+            # Use local flash for navigation - only this window, not cross-window
+            self.form_manager.queue_flash_local(field_name)
+            logger.debug(f"⚡ Flashed groupbox for {field_name} (local)")

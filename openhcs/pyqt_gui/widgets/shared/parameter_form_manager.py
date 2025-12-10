@@ -715,20 +715,32 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, FlashMixin, metacla
     # ==================== GROUPBOX FLASH ANIMATION (FlashMixin) ====================
 
     def _on_resolved_values_changed(self, changed_paths: Set[str]):
-        """Handle resolved value changes - queue groupbox flashes AND refresh placeholders."""
+        """Handle resolved value changes - queue flashes AND refresh placeholders.
+
+        SCOPE-AWARE: This callback is fired by THIS window's ObjectState, so we only
+        flash THIS window's elements, not ALL windows globally.
+        """
         if self._parent_manager is not None:
-            return  # Only root manager handles flashing
+            return  # Only root manager handles this
 
         logger.debug(f"[FLASH] _on_resolved_values_changed: {changed_paths}")
-        # Find which nested managers' prefixes match the changed paths
+
+        # 1. Collect prefixes for flash animation
+        prefixes_to_flash = []
         for path in changed_paths:
             prefix = self._find_matching_prefix(path)
             logger.debug(f"[FLASH] path={path} -> prefix={prefix}")
             if prefix:
-                self.queue_flash(prefix)  # Use mixin's queue_flash
+                prefixes_to_flash.append(prefix)
 
-            # Also refresh placeholder for the changed field
-            # Extract leaf field name from dotted path
+        # 2. Queue flash animation - LOCAL to this window only!
+        # Use queue_flash_local to avoid cross-window contamination.
+        # The callback came from THIS ObjectState, so only THIS window should flash.
+        for prefix in prefixes_to_flash:
+            self.queue_flash_local(prefix)
+
+        # 3. Refresh placeholders for changed fields (show new resolved values)
+        for path in changed_paths:
             leaf_field = path.split('.')[-1] if '.' in path else path
             self._refresh_field_in_tree(leaf_field)
 
