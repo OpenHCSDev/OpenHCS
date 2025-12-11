@@ -1048,7 +1048,11 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
         return (scope_id, item_type) if scope_id else None
 
     def _apply_list_item_scope_color(self, list_item: QListWidgetItem, item: Any, index: int) -> None:
-        """Apply scope-based background and border colors to list item."""
+        """Apply scope-based background and border colors to list item.
+
+        Stores full ScopeColorScheme so delegate can paint layered borders
+        matching the corresponding window's border style.
+        """
         scope_info = self._get_list_item_scope(item, index)
         if not scope_info:
             return
@@ -1062,8 +1066,8 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
         if bg_color:
             list_item.setBackground(bg_color)
 
-        border_color = scheme.to_qcolor_orchestrator_border()
-        list_item.setData(self.SCOPE_BORDER_ROLE, border_color)
+        # Store full scheme for layered border rendering (not just border color)
+        list_item.setData(self.SCOPE_BORDER_ROLE, scheme)
 
     # ========== List Update Template ==========
 

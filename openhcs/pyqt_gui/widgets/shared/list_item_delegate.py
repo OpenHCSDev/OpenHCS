@@ -5,12 +5,23 @@ Single source of truth for list item rendering across PipelineEditor, PlateManag
 and other widgets that display items with preview labels.
 """
 
+from typing import List, Tuple
 from PyQt6.QtWidgets import QStyledItemDelegate, QStyleOptionViewItem, QStyle
-from PyQt6.QtGui import QPainter, QColor, QFontMetrics
+from PyQt6.QtGui import QPainter, QColor, QFontMetrics, QPen
 from PyQt6.QtCore import Qt, QRect
 
-# Custom data role for scope border color (must match manager)
-SCOPE_BORDER_ROLE = Qt.ItemDataRole.UserRole + 10
+# Custom data role for scope color scheme (must match manager)
+SCOPE_SCHEME_ROLE = Qt.ItemDataRole.UserRole + 10
+# Legacy role (kept for compatibility) - now stores full ScopeColorScheme
+SCOPE_BORDER_ROLE = SCOPE_SCHEME_ROLE
+
+# Border constants matching ScopedBorderMixin
+BORDER_TINT_FACTORS: Tuple[float, ...] = (0.7, 1.0, 1.4)
+BORDER_PATTERNS = {
+    "solid": (Qt.PenStyle.SolidLine, None),
+    "dashed": (Qt.PenStyle.DashLine, [8, 6]),
+    "dotted": (Qt.PenStyle.DotLine, [2, 6]),
+}
 
 
 class MultilinePreviewItemDelegate(QStyledItemDelegate):
@@ -144,15 +155,59 @@ class MultilinePreviewItemDelegate(QStyledItemDelegate):
 
         painter.restore()
 
-        # Draw scope border if provided
-        border_data = index.data(SCOPE_BORDER_ROLE)
-        if isinstance(border_data, QColor):
-            rect = option.rect
+        # Draw scope border using same layered pattern as window borders
+        scheme = index.data(SCOPE_SCHEME_ROLE)
+        if scheme is not None:
+            self._paint_border_layers(painter, option.rect, scheme)
+
+    def _paint_border_layers(self, painter: QPainter, rect: QRect, scheme) -> None:
+        """Paint layered borders matching window border style.
+
+        Uses same algorithm as ScopedBorderMixin._paint_border_layers() to ensure
+        list items have identical borders to their corresponding windows.
+        """
+        from openhcs.pyqt_gui.widgets.shared.scope_visual_config import ScopeColorScheme
+
+        if not isinstance(scheme, ScopeColorScheme):
+            return
+
+        layers = getattr(scheme, "step_border_layers", None)
+        base_rgb = getattr(scheme, "base_color_rgb", None)
+
+        if not layers or not base_rgb:
+            # Fallback: simple border using orchestrator border color
+            border_color = scheme.to_qcolor_orchestrator_border()
             painter.save()
-            border_rect = QRect(rect.left(), rect.top(), 5, rect.height())
-            painter.fillRect(border_rect, border_data)
+            pen = QPen(border_color, 2)
+            pen.setStyle(Qt.PenStyle.SolidLine)
+            painter.setPen(pen)
+            painter.drawRect(rect.adjusted(1, 1, -2, -2))
             painter.restore()
-    
+            return
+
+        # Paint layered borders (same logic as ScopedBorderMixin)
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        inset = 0
+        for layer in layers:
+            width, tint_idx, pattern = (layer + ("solid",))[:3]
+            tint = BORDER_TINT_FACTORS[tint_idx]
+            color = QColor(*(min(255, int(c * tint)) for c in base_rgb)).darker(120)
+
+            pen = QPen(color, width)
+            style, dash_pattern = BORDER_PATTERNS.get(pattern, BORDER_PATTERNS["solid"])
+            pen.setStyle(style)
+            if dash_pattern:
+                pen.setDashPattern(dash_pattern)
+
+            offset = int(inset + width / 2)
+            painter.setPen(pen)
+            painter.drawRect(rect.adjusted(offset, offset, -offset - 1, -offset - 1))
+            inset += width
+
+        painter.restore()
+
     def sizeHint(self, option: QStyleOptionViewItem, index) -> 'QSize':
         """Calculate size hint based on number of lines in text."""
         from PyQt6.QtCore import QSize
