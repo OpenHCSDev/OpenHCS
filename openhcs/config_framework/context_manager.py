@@ -899,7 +899,7 @@ def get_base_global_config(use_live: bool = True):
             # DEBUG: Log well_filter value
             try:
                 wf_value = object.__getattribute__(current_global.well_filter_config, 'well_filter')
-                logger.info(f"🔍 get_base_global_config: use_live={use_live}, well_filter={wf_value}")
+                logger.debug(f"🔍 get_base_global_config: use_live={use_live}, well_filter={wf_value}")
             except:
                 pass
             return current_global

@@ -584,10 +584,10 @@ class SignatureAnalyzer:
         # Use the class object itself as the key (classes are hashable and have stable identity)
         cache_key = dataclass_type
         if cache_key in SignatureAnalyzer._dataclass_analysis_cache:
-            logger.info(f"✅ CACHE HIT for {dataclass_type.__name__} (id={id(dataclass_type)})")
+            logger.debug(f"✅ CACHE HIT for {dataclass_type.__name__} (id={id(dataclass_type)})")
             return SignatureAnalyzer._dataclass_analysis_cache[cache_key]
 
-        logger.info(f"❌ CACHE MISS for {dataclass_type.__name__} (id={id(dataclass_type)}), cache has {len(SignatureAnalyzer._dataclass_analysis_cache)} entries")
+        logger.debug(f"❌ CACHE MISS for {dataclass_type.__name__} (id={id(dataclass_type)}), cache has {len(SignatureAnalyzer._dataclass_analysis_cache)} entries")
 
         try:
             # Try to get type hints, fall back to __annotations__ if resolution fails

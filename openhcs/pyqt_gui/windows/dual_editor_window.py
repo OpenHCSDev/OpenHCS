@@ -765,10 +765,10 @@ class DualEditorWindow(BaseFormDialog):
         Handles both top-level parameters (e.g., 'name', 'processing_config') and
         nested parameters from nested forms (e.g., 'group_by' from processing_config form).
         """
-        logger.info(f"🔔 DUAL_EDITOR: on_form_parameter_changed called")
-        logger.info(f"  param_name={param_name}")
-        logger.info(f"  value type={type(value).__name__}")
-        logger.info(f"  value={repr(value)[:100]}")
+        logger.debug(f"🔔 DUAL_EDITOR: on_form_parameter_changed called")
+        logger.debug(f"  param_name={param_name}")
+        logger.debug(f"  value type={type(value).__name__}")
+        logger.debug(f"  value={repr(value)[:100]}")
 
         # Handle reset_all completion signal
         if param_name == "__reset_all_complete__":
@@ -779,14 +779,14 @@ class DualEditorWindow(BaseFormDialog):
         # param_name is now a full path like "processing_config.group_by" or just "name"
         # Parse the path to determine if it's a nested field
         path_parts = param_name.split('.')
-        logger.info(f"  path_parts={path_parts}")
+        logger.debug(f"  path_parts={path_parts}")
 
         # Skip the first part if it's the form manager's field_id (type name like "FunctionStep")
         # The path format is: "TypeName.field" or "TypeName.nested.field"
         if len(path_parts) > 1:
             # Remove the type name prefix (e.g., "FunctionStep")
             path_parts = path_parts[1:]
-            logger.info(f"  path_parts after removing type prefix={path_parts}")
+            logger.debug(f"  path_parts after removing type prefix={path_parts}")
 
         if len(path_parts) == 1:
             # Top-level field (e.g., "name", "func", "processing_config")
@@ -822,11 +822,11 @@ class DualEditorWindow(BaseFormDialog):
             # Nested field (e.g., ["processing_config", "group_by"])
             # The nested form manager already updated self.editing_step via _mark_parents_modified
             # We just need to sync the function editor
-            logger.info(f"  🔄 Nested field change: {'.'.join(path_parts)}")
-            logger.info(f"  Nested field already updated by _mark_parents_modified")
+            logger.debug(f"  🔄 Nested field change: {'.'.join(path_parts)}")
+            logger.debug(f"  Nested field already updated by _mark_parents_modified")
 
         # SINGLE SOURCE OF TRUTH: Always sync function editor from step (batched)
-        logger.info(f"  🔄 Scheduling function editor sync after {param_name} change")
+        logger.debug(f"  🔄 Scheduling function editor sync after {param_name} change")
         self._schedule_function_editor_sync()
     
     def on_tab_changed(self, index: int):
@@ -842,17 +842,17 @@ class DualEditorWindow(BaseFormDialog):
         baseline_snapshot = getattr(self, '_baseline_snapshot', None)
         has_changes = current_snapshot != baseline_snapshot
 
-        logger.info(f"🔍 DETECT_CHANGES:")
-        logger.info(f"  current_snapshot={current_snapshot}")
-        logger.info(f"  baseline_snapshot={baseline_snapshot}")
-        logger.info(f"  has_changes={has_changes}")
+        logger.debug(f"🔍 DETECT_CHANGES:")
+        logger.debug(f"  current_snapshot={current_snapshot}")
+        logger.debug(f"  baseline_snapshot={baseline_snapshot}")
+        logger.debug(f"  has_changes={has_changes}")
 
         if has_changes != self.has_changes:
             self.has_changes = has_changes
-            logger.info(f"  ✅ Emitting changes_detected({has_changes})")
+            logger.debug(f"  ✅ Emitting changes_detected({has_changes})")
             self.changes_detected.emit(has_changes)
         else:
-            logger.info(f"  ⏭️  No change in has_changes state")
+            logger.debug(f"  ⏭️  No change in has_changes state")
     
     def on_changes_detected(self, has_changes: bool):
         """Handle changes detection."""

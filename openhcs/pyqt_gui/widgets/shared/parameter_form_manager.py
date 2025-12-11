@@ -326,7 +326,7 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, FlashMixin, metacla
             # NOTE: _init_visual_update_mixin() is called earlier (before setup_ui)
             if self._parent_manager is None:
                 self.state.on_resolved_changed(self._on_resolved_values_changed)
-                logger.info(f"🔔 CALLBACK_LEAK_DEBUG: Registered callback for {self.field_id} (PFM id={id(self)}), "
+                logger.debug(f"🔔 CALLBACK_LEAK_DEBUG: Registered callback for {self.field_id} (PFM id={id(self)}), "
                            f"total callbacks on ObjectState: {len(self.state._on_resolved_changed_callbacks)}, "
                            f"scope_id={self.state.scope_id}")
 
@@ -705,7 +705,7 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, FlashMixin, metacla
                 callbacks_before = len(self.state._on_resolved_changed_callbacks)
                 self.state.off_resolved_changed(self._on_resolved_values_changed)
                 callbacks_after = len(self.state._on_resolved_changed_callbacks)
-                logger.info(f"🔔 CALLBACK_LEAK_DEBUG: Unregistered callback for {self.field_id}, "
+                logger.debug(f"🔔 CALLBACK_LEAK_DEBUG: Unregistered callback for {self.field_id}, "
                            f"callbacks: {callbacks_before} -> {callbacks_after}")
 
             # Unregister parameter change callback for label styling
@@ -778,7 +778,7 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, FlashMixin, metacla
         if self._parent_manager is not None:
             return  # Only root manager handles this
 
-        logger.info(f"🔔 CALLBACK_LEAK_DEBUG: _on_resolved_values_changed invoked for {self.field_id}, "
+        logger.debug(f"🔔 CALLBACK_LEAK_DEBUG: _on_resolved_values_changed invoked for {self.field_id}, "
                    f"changed_paths={changed_paths}")
         logger.debug(f"[FLASH] _on_resolved_values_changed: {changed_paths}")
 

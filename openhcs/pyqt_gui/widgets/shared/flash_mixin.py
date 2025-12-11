@@ -402,7 +402,7 @@ def create_groupbox_element(key: str, groupbox: 'QGroupBox') -> FlashElement:
             # DEBUG: Log groupbox position and first 2 child positions
             if child_rects:
                 first_children = [f"({r.x()},{r.y()})" for r in child_rects[:2]]
-                logger.info(f"[FLASH] GET_CHILD_RECTS groupbox_id={id(groupbox)} groupbox_window_pos=({groupbox_window.x()},{groupbox_window.y()}) first_children={first_children} total={len(child_rects)}")
+                logger.debug(f"[FLASH] GET_CHILD_RECTS groupbox_id={id(groupbox)} groupbox_window_pos=({groupbox_window.x()},{groupbox_window.y()}) first_children={first_children} total={len(child_rects)}")
         except RuntimeError:
             pass
         return child_rects
@@ -558,7 +558,7 @@ class WindowFlashOverlay(QWidget):
             if window_id not in cls._overlays:
                 overlay = cls(top_window)
                 cls._overlays[window_id] = overlay
-                logger.info(f"🧹 FLASH_LEAK_DEBUG: Created WindowFlashOverlay for window {window_id}, "
+                logger.debug(f"🧹 FLASH_LEAK_DEBUG: Created WindowFlashOverlay for window {window_id}, "
                            f"total overlays: {len(cls._overlays)}")
 
             return cls._overlays[window_id]
@@ -579,7 +579,7 @@ class WindowFlashOverlay(QWidget):
             elements_count = sum(len(v) for v in overlay._elements.values())
             overlay._elements.clear()
             overlay.deleteLater()
-            logger.info(f"🧹 FLASH_LEAK_DEBUG: Cleaned up WindowFlashOverlay for window {window_id}, "
+            logger.debug(f"🧹 FLASH_LEAK_DEBUG: Cleaned up WindowFlashOverlay for window {window_id}, "
                        f"cleared {elements_count} elements, total overlays: {overlays_before} -> {overlays_after}")
         else:
             logger.warning(f"🧹 FLASH_LEAK_DEBUG: No overlay found for window {window_id}, "
@@ -769,7 +769,7 @@ class WindowFlashOverlay(QWidget):
                         if i < 3:
                             first_children.append(f"({child_rect.x()},{child_rect.y()} {child_rect.width()}x{child_rect.height()})")
                     short_key = key.split('::')[-1] if '::' in key else key[-30:]
-                    logger.info(f"[FLASH] CACHE_BUILD key={short_key} groupbox_rect=({rect_to_draw.x()},{rect_to_draw.y()}) first_child_rects={first_children} subtracted={subtracted_count}/{len(child_rects)}")
+                    logger.debug(f"[FLASH] CACHE_BUILD key={short_key} groupbox_rect=({rect_to_draw.x()},{rect_to_draw.y()}) first_child_rects={first_children} subtracted={subtracted_count}/{len(child_rects)}")
                     rects.append((rect_to_draw, radius))  # Cache rect + radius tuple
                     regions.append(path)  # QPainterPath for elements with child masking
                 else:
@@ -986,7 +986,7 @@ class WindowFlashOverlay(QWidget):
                 drawn_count += 1
 
         if drawn_count > 0:
-            logger.info(f"[FLASH] paintEvent END: drew {drawn_count} rects, overlay={self.rect().width()}x{self.rect().height()}")
+            logger.debug(f"[FLASH] paintEvent END: drew {drawn_count} rects, overlay={self.rect().width()}x{self.rect().height()}")
 
         painter.end()
 
@@ -1413,7 +1413,7 @@ class VisualUpdateMixin:
 
         # Check if scoped key exists in this window's overlay
         if scoped_key not in overlay._elements:
-            logger.info(f"[FLASH] queue_flash_local: key={key} → scoped={scoped_key} NOT IN overlay._elements. Available keys: {list(overlay._elements.keys())}")
+            logger.debug(f"[FLASH] queue_flash_local: key={key} → scoped={scoped_key} NOT IN overlay._elements. Available keys: {list(overlay._elements.keys())}")
             return
 
         now = time.perf_counter()

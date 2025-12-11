@@ -942,7 +942,7 @@ class PipelineEditorWidget(AbstractManagerWidget):
     def _get_scope_for_item(self, item: Any) -> str:
         """PipelineEditor: scope = plate::step_token."""
         scope = self._build_step_scope_id(item) or ''
-        logger.info(f"⚡ FLASH_DEBUG _get_scope_for_item: item={item}, scope={scope}")
+        logger.debug(f"⚡ FLASH_DEBUG _get_scope_for_item: item={item}, scope={scope}")
         return scope
 
     # === CrossWindowPreviewMixin Hook ===

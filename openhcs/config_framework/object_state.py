@@ -288,7 +288,7 @@ class ObjectStateRegistry:
 
         # DEBUG: Log invalidation for well_filter
         if field_name == 'well_filter':
-            logger.info(f"🔍 invalidate_by_type_and_scope: scope={changed_scope!r}, type={base_changed_type.__name__}, field={field_name}, total_states={len(cls._states)}")
+            logger.debug(f"🔍 invalidate_by_type_and_scope: scope={changed_scope!r}, type={base_changed_type.__name__}, field={field_name}, total_states={len(cls._states)}")
 
         for state in cls._states.values():
             state_scope = cls._normalize_scope_id(state.scope_id)
@@ -298,7 +298,7 @@ class ObjectStateRegistry:
             if changed_scope == "":
                 # Global scope - always a descendant (or self if also global)
                 if field_name == 'well_filter':
-                    logger.info(f"🔍   Checking state: scope={state_scope!r}, obj_type={type(state.object_instance).__name__}")
+                    logger.debug(f"🔍   Checking state: scope={state_scope!r}, obj_type={type(state.object_instance).__name__}")
                 logger.debug(f"[SCOPE] Global change affects state scope={state_scope!r}")
             else:
                 # Non-global: check exact match or descendant
@@ -805,7 +805,7 @@ class ObjectState:
                     verify_live = get_live_global_config(obj_type)
                     try:
                         wf_value = object.__getattribute__(verify_live.well_filter_config, 'well_filter')
-                        logger.info(f"🔍 LIVE thread-local updated BEFORE invalidation: {obj_type.__name__}.{param_name} = {value}, well_filter={wf_value}")
+                        logger.debug(f"🔍 LIVE thread-local updated BEFORE invalidation: {obj_type.__name__}.{param_name} = {value}, well_filter={wf_value}")
                     except:
                         pass
             except Exception as e:
@@ -822,7 +822,7 @@ class ObjectState:
 
         # DEBUG: Log invalidation for well_filter
         if 'well_filter' in param_name:
-            logger.info(f"🔍 Invalidating descendants: scope={self.scope_id}, type={container_type.__name__}, field={leaf_field_name}")
+            logger.debug(f"🔍 Invalidating descendants: scope={self.scope_id}, type={container_type.__name__}, field={leaf_field_name}")
 
         ObjectStateRegistry.invalidate_by_type_and_scope(
             scope_id=self.scope_id,
@@ -848,7 +848,7 @@ class ObjectState:
 
         # DEBUG: Log well_filter resolution
         if 'well_filter' in param_name:
-            logger.info(f"🔍 get_resolved_value: scope={self.scope_id!r}, obj_type={type(self.object_instance).__name__}, param={param_name}, value={result}")
+            logger.debug(f"🔍 get_resolved_value: scope={self.scope_id!r}, obj_type={type(self.object_instance).__name__}, param={param_name}, value={result}")
 
         return result
 
