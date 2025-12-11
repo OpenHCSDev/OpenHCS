@@ -313,12 +313,358 @@ class HelpButton(QPushButton):
 
 
 
+class ProvenanceLabel(QLabel):
+    """QLabel that supports provenance navigation on hover/click.
+
+    When a field inherits its value from an ancestor, hovering shows bold + pointer
+    cursor, and clicking navigates to the source window/field.
+    """
+
+    def __init__(self, text: str, state=None, dotted_path: str = None, parent=None):
+        super().__init__(text, parent)
+        self._state = state  # ObjectState instance
+        self._dotted_path = dotted_path  # Full dotted path for provenance lookup
+        self.setMouseTracking(True)
+
+    def set_provenance_info(self, state, dotted_path: str) -> None:
+        """Set provenance info after construction (for deferred binding)."""
+        self._state = state
+        self._dotted_path = dotted_path
+
+    def _has_provenance(self) -> bool:
+        """Check if this field has a provenance source (inherited from ancestor)."""
+        if not self._state or not self._dotted_path:
+            return False
+        try:
+            result = self._state.get_provenance(self._dotted_path)
+            return result is not None
+        except Exception:
+            return False
+
+    def enterEvent(self, event) -> None:
+        """On hover: show bold + pointer cursor if field has provenance."""
+        if self._has_provenance():
+            font = self.font()
+            font.setBold(True)
+            self.setFont(font)
+            self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        """On leave: restore normal font weight."""
+        font = self.font()
+        font.setBold(False)
+        self.setFont(font)
+        self.unsetCursor()
+        super().leaveEvent(event)
+
+    def mousePressEvent(self, event) -> None:
+        """On click: navigate to provenance source window and field."""
+        if event.button() == Qt.MouseButton.LeftButton and self._has_provenance():
+            result = self._state.get_provenance(self._dotted_path)
+            if result is not None:
+                source_scope_id, source_type = result
+                self._navigate_to_source(source_scope_id, source_type)
+                return
+        super().mousePressEvent(event)
+
+    def _navigate_to_source(self, source_scope_id: str, source_type: type) -> None:
+        """Open the source window (creating if needed) and scroll to the field.
+
+        Args:
+            source_scope_id: The scope where the concrete value exists
+            source_type: The TYPE that has the concrete value (may differ from local
+                         container type due to MRO inheritance)
+        """
+        try:
+            from openhcs.pyqt_gui.services.window_manager import WindowManager
+
+            # Extract field_name from our local dotted path
+            field_name = self._dotted_path.split('.')[-1] if '.' in self._dotted_path else self._dotted_path
+
+            logger.debug(f"_navigate_to_source: local_path={self._dotted_path}, field_name={field_name}, "
+                        f"source_scope_id={source_scope_id}, source_type={source_type.__name__}")
+
+            # Compute the target path in the source window:
+            # We need to find what path source_type is at in the target window's ObjectState
+            target_path = self._compute_target_path(source_scope_id, source_type, field_name)
+
+            logger.info(f"🔗 Navigate: {self._dotted_path} → {source_scope_id}::{target_path}")
+
+            # Check if source is in the SAME window (sibling MRO inheritance within same scope)
+            current_scope_id = getattr(self._state, 'scope_id', None)
+            if current_scope_id == source_scope_id:
+                # Same window - scroll directly without going through WindowManager
+                logger.info(f"🔄 Same-window navigation: scrolling to {target_path}")
+                self._scroll_within_current_window(target_path)
+                return
+
+            # Different window - try to navigate via WindowManager
+            success = WindowManager.focus_and_navigate(
+                scope_id=source_scope_id,
+                field_path=target_path
+            )
+
+            if success:
+                logger.info(f"✅ Navigated to source: scope={source_scope_id}, path={target_path}")
+                return
+
+            # Window not open - create it based on scope type
+            window = self._create_window_for_scope(source_scope_id)
+            if window:
+                # Navigate to field after window is shown
+                from PyQt6.QtCore import QTimer
+                QTimer.singleShot(100, lambda: WindowManager.focus_and_navigate(
+                    scope_id=source_scope_id,
+                    field_path=target_path
+                ))
+                logger.info(f"✅ Created window for scope: {source_scope_id}")
+            else:
+                logger.warning(f"Could not create window for scope: {source_scope_id}")
+
+        except Exception as e:
+            logger.error(f"Failed to navigate to provenance source: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _scroll_within_current_window(self, target_path: str) -> None:
+        """Scroll to target_path within the current window (same scope).
+
+        Used for sibling MRO inheritance navigation where source is in same window.
+        """
+        # Find the window that has ScrollableFormMixin
+        current = self.parent()
+        while current:
+            if hasattr(current, 'select_and_scroll_to_field'):
+                current.select_and_scroll_to_field(target_path)
+                logger.info(f"✅ Scrolled to {target_path} in current window")
+                return
+            current = current.parent()
+
+        logger.warning(f"Could not find scrollable parent to navigate to {target_path}")
+
+    def _compute_target_path(self, source_scope_id: str, source_type: type, field_name: str) -> str:
+        """Compute the dotted path for source_type.field_name in the target window.
+
+        The source_type might be at a different path in the target window than in our window.
+        For example:
+        - Local: WellFilterConfig at 'well_filter_config'
+        - Source: PathPlanningConfig at 'path_planning_config'
+
+        We need to find what path source_type is at in the target window's ObjectState.
+        """
+        from openhcs.config_framework.object_state import ObjectStateRegistry
+
+        logger.debug(f"_compute_target_path: scope={source_scope_id}, source_type={source_type.__name__}, field={field_name}")
+
+        # Get the target window's ObjectState
+        target_state = ObjectStateRegistry.get_by_scope(source_scope_id)
+        if target_state is None:
+            # Fallback: use same path as local (might work if same type)
+            logger.warning(f"No state for scope {source_scope_id}, using local path: {self._dotted_path}")
+            return self._dotted_path
+
+        # Debug: log the available types in target state
+        logger.debug(f"Target state _path_to_type keys: {list(target_state._path_to_type.keys())}")
+        for path, typ in target_state._path_to_type.items():
+            if '.' not in path:
+                logger.debug(f"  {path} -> {typ.__name__}")
+
+        # Find the path for source_type in the target state
+        path_prefix = target_state.find_path_for_type(source_type)
+        if path_prefix is None:
+            # Fallback: type not found in target - use same path as local
+            logger.warning(f"No path for type {source_type.__name__} in scope {source_scope_id}, using local path: {self._dotted_path}")
+            return self._dotted_path
+
+        # Construct full path: prefix.field_name (empty prefix = root level field)
+        target_path = f"{path_prefix}.{field_name}" if path_prefix else field_name
+        logger.info(f"Computed target path: {target_path} (source_type={source_type.__name__}, field={field_name})")
+        return target_path
+
+    def _find_main_window(self):
+        """Find the main window through the parent chain."""
+        current = self.parent()
+        while current:
+            if hasattr(current, 'floating_windows') and hasattr(current, 'service_adapter'):
+                return current
+            current = current.parent()
+        return None
+
+    def _find_plate_manager(self):
+        """Find PlateManagerWidget from main window."""
+        main_window = self._find_main_window()
+        if not main_window:
+            return None
+
+        if "plate_manager" not in main_window.floating_windows:
+            # Create plate manager if it doesn't exist
+            main_window.show_plate_manager()
+
+        plate_dialog = main_window.floating_windows.get("plate_manager")
+        if not plate_dialog:
+            return None
+
+        # Find PlateManagerWidget child
+        from PyQt6.QtWidgets import QWidget
+        for child in plate_dialog.findChildren(QWidget):
+            if hasattr(child, 'orchestrators') and hasattr(child, 'selected_plate_path'):
+                return child
+        return None
+
+    def _create_window_for_scope(self, scope_id: str):
+        """Create and show a window for the given scope_id.
+
+        Scope ID format:
+        - "" (empty string): GlobalPipelineConfig
+        - "/path/to/plate": PipelineConfig for that plate
+        - "/path/to/plate::step_N": DualEditorWindow → Step Settings tab
+        - "/path/to/plate::step_N::func_M": DualEditorWindow → Function Pattern tab
+        """
+        # Determine window type based on scope_id pattern
+        if scope_id == "":
+            return self._create_global_config_window()
+        elif "::" not in scope_id:
+            return self._create_plate_config_window(scope_id)
+        else:
+            return self._create_step_editor_window(scope_id)
+
+    def _create_global_config_window(self):
+        """Create GlobalPipelineConfig editor window."""
+        from openhcs.pyqt_gui.windows.config_window import ConfigWindow
+        from openhcs.core.config import GlobalPipelineConfig
+        from openhcs.pyqt_gui.services.window_manager import WindowManager
+        from openhcs.config_framework.global_config import get_current_global_config
+
+        def factory():
+            current_config = get_current_global_config(GlobalPipelineConfig) or GlobalPipelineConfig()
+            window = ConfigWindow(
+                config_class=GlobalPipelineConfig,
+                current_config=current_config,
+                on_save_callback=self._get_global_save_callback(),
+                scope_id=""
+            )
+            return window
+
+        return WindowManager.show_or_focus("", factory)
+
+    def _create_plate_config_window(self, scope_id: str):
+        """Create PipelineConfig editor window for a plate."""
+        from openhcs.pyqt_gui.windows.config_window import ConfigWindow
+        from openhcs.core.config import PipelineConfig
+        from openhcs.pyqt_gui.services.window_manager import WindowManager
+
+        plate_manager = self._find_plate_manager()
+        if not plate_manager:
+            logger.warning("Could not find PlateManager for plate config window")
+            return None
+
+        orchestrator = plate_manager.orchestrators.get(scope_id)
+        if not orchestrator:
+            logger.warning(f"No orchestrator found for scope: {scope_id}")
+            return None
+
+        def factory():
+            window = ConfigWindow(
+                config_class=PipelineConfig,
+                current_config=orchestrator.pipeline_config,
+                on_save_callback=None,  # Read-only navigation for provenance
+                scope_id=scope_id
+            )
+            return window
+
+        return WindowManager.show_or_focus(scope_id, factory)
+
+    def _create_step_editor_window(self, scope_id: str):
+        """Create DualEditorWindow for step or function scope.
+
+        Scope format: "/plate/path::step_N" or "/plate/path::step_N::func_M"
+        """
+        from openhcs.pyqt_gui.windows.dual_editor_window import DualEditorWindow
+        from openhcs.pyqt_gui.services.window_manager import WindowManager
+
+        parts = scope_id.split("::")
+        if len(parts) < 2:
+            logger.warning(f"Invalid step scope_id format: {scope_id}")
+            return None
+
+        plate_path = parts[0]
+        step_token = parts[1]  # e.g., "step_0" or "functionstep_0"
+        is_function_scope = len(parts) >= 3
+
+        plate_manager = self._find_plate_manager()
+        if not plate_manager:
+            logger.warning("Could not find PlateManager for step editor")
+            return None
+
+        orchestrator = plate_manager.orchestrators.get(plate_path)
+        if not orchestrator:
+            logger.warning(f"No orchestrator found for plate: {plate_path}")
+            return None
+
+        # Find step by token
+        step = self._find_step_by_token(plate_manager, plate_path, step_token)
+        if not step:
+            logger.warning(f"Could not find step with token: {step_token}")
+            return None
+
+        # Use step scope_id (without function part) for window registry
+        step_scope_id = f"{plate_path}::{step_token}"
+
+        def factory():
+            window = DualEditorWindow(
+                step_data=step,
+                is_new=False,
+                on_save_callback=None,  # Read-only navigation for provenance
+                orchestrator=orchestrator,
+                parent=self.window()
+            )
+            # Switch to Function Pattern tab if this is a function scope
+            if is_function_scope and window.tab_widget:
+                window.tab_widget.setCurrentIndex(1)
+            return window
+
+        return WindowManager.show_or_focus(step_scope_id, factory)
+
+    def _find_step_by_token(self, plate_manager, plate_path: str, step_token: str):
+        """Find a step in the pipeline by its scope token."""
+        # Get pipeline steps from plate_manager's plate_pipelines
+        pipeline_steps = plate_manager.plate_pipelines.get(plate_path, [])
+
+        for step in pipeline_steps:
+            # Check if step has matching token
+            token = getattr(step, '_scope_token', None)
+            if token == step_token:
+                return step
+
+            # Also check _pipeline_scope_token (older attribute name)
+            token2 = getattr(step, '_pipeline_scope_token', None)
+            if token2 == step_token:
+                return step
+
+        logger.debug(f"Step token '{step_token}' not found in {len(pipeline_steps)} steps")
+        return None
+
+    def _get_global_save_callback(self):
+        """Get save callback for global config that updates thread-local storage."""
+        def handle_save(new_config):
+            from openhcs.config_framework.global_config import set_global_config_for_editing
+            from openhcs.core.config import GlobalPipelineConfig
+            set_global_config_for_editing(GlobalPipelineConfig, new_config)
+            logger.info("Global config saved via provenance navigation")
+        return handle_save
+
+
 class LabelWithHelp(QWidget):
-    """PyQt6 widget that combines a label with a help indicator - mirrors Textual TUI pattern."""
+    """PyQt6 widget that combines a label with a help indicator - mirrors Textual TUI pattern.
+
+    Uses ProvenanceLabel for the text portion to support click-to-source navigation.
+    """
 
     def __init__(self, text: str, help_target: Union[Callable, type] = None,
                  param_name: str = None, param_description: str = None,
-                 param_type: type = None, color_scheme: Optional[PyQt6ColorScheme] = None, parent=None):
+                 param_type: type = None, color_scheme: Optional[PyQt6ColorScheme] = None,
+                 parent=None, state=None, dotted_path: str = None):
         super().__init__(parent)
 
         # Initialize color scheme
@@ -333,8 +679,8 @@ class LabelWithHelp(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(5)
 
-        # Main label - store as instance variable for font weight updates
-        self._label = QLabel(text)
+        # Main label - ProvenanceLabel for click-to-source support
+        self._label = ProvenanceLabel(text, state=state, dotted_path=dotted_path)
         layout.addWidget(self._label)
 
         # Help indicator
@@ -348,6 +694,10 @@ class LabelWithHelp(QWidget):
         layout.addWidget(help_indicator)
 
         layout.addStretch()
+
+    def set_provenance_info(self, state, dotted_path: str) -> None:
+        """Set provenance info (for deferred binding after widget creation)."""
+        self._label.set_provenance_info(state, dotted_path)
 
     def set_underline(self, underline: bool) -> None:
         """Set label underline based on whether value is concrete (not None/placeholder)."""

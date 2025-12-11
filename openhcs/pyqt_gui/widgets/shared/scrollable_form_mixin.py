@@ -25,10 +25,14 @@ class ScrollableFormMixin:
     form_manager: 'ParameterFormManager'  # Forward reference
 
     def _scroll_to_section(self, field_name: str, flash: bool = True):
-        """Scroll to a specific section in the form.
+        """Scroll to a specific section or field in the form.
+
+        Supports both:
+        - Section names (e.g., 'path_planning_config') - scrolls to groupbox
+        - Dotted paths (e.g., 'path_planning_config.well_filter') - scrolls to specific widget
 
         Args:
-            field_name: The field name (nested manager key) to scroll to
+            field_name: The field name or dotted path to scroll to
             flash: If True, flash the target groupbox after scrolling
         """
         logger.info(f"🔍 Scrolling to section: {field_name}")
@@ -37,23 +41,48 @@ class ScrollableFormMixin:
             logger.warning("Scroll area not initialized; cannot navigate to section")
             return
 
-        # Find the nested manager for this section
-        if field_name not in self.form_manager.nested_managers:
-            logger.warning(f"❌ Field '{field_name}' not in nested_managers")
+        # Parse dotted path to navigate through nested managers
+        parts = field_name.split('.')
+        current_manager = self.form_manager
+        target_widget = None
+        section_name = parts[0]  # For flashing the groupbox
+
+        # Navigate through nested managers for all but the last part
+        for i, part in enumerate(parts[:-1]):
+            if part not in current_manager.nested_managers:
+                logger.warning(f"❌ Part '{part}' not in nested_managers at depth {i}")
+                return
+            current_manager = current_manager.nested_managers[part]
+
+        # The last part is either a nested manager (section) or a widget (leaf field)
+        leaf_name = parts[-1]
+
+        if leaf_name in current_manager.nested_managers:
+            # It's a section - scroll to first widget in that section
+            nested_manager = current_manager.nested_managers[leaf_name]
+            if hasattr(nested_manager, 'widgets') and nested_manager.widgets:
+                first_param_name = next(iter(nested_manager.widgets.keys()))
+                target_widget = nested_manager.widgets[first_param_name]
+        elif leaf_name in current_manager.widgets:
+            # It's a leaf widget - scroll directly to it
+            target_widget = current_manager.widgets[leaf_name]
+        else:
+            # Single-part path that's a nested manager key
+            if len(parts) == 1 and leaf_name in self.form_manager.nested_managers:
+                nested_manager = self.form_manager.nested_managers[leaf_name]
+                if hasattr(nested_manager, 'widgets') and nested_manager.widgets:
+                    first_param_name = next(iter(nested_manager.widgets.keys()))
+                    target_widget = nested_manager.widgets[first_param_name]
+            else:
+                logger.warning(f"❌ Leaf '{leaf_name}' not found in widgets or nested_managers")
+                return
+
+        if target_widget is None:
+            logger.warning(f"⚠️ No target widget found for {field_name}")
             return
-
-        nested_manager = self.form_manager.nested_managers[field_name]
-
-        # Find the first widget in this nested manager
-        if not (hasattr(nested_manager, 'widgets') and nested_manager.widgets):
-            logger.warning(f"⚠️ No widgets found in {field_name}")
-            return
-
-        first_param_name = next(iter(nested_manager.widgets.keys()))
-        first_widget = nested_manager.widgets[first_param_name]
 
         # Map widget position to scroll area coordinates and scroll to it
-        widget_pos = first_widget.mapTo(self.scroll_area.widget(), first_widget.rect().topLeft())
+        widget_pos = target_widget.mapTo(self.scroll_area.widget(), target_widget.rect().topLeft())
         v_scroll_bar = self.scroll_area.verticalScrollBar()
 
         # Scroll to widget position with offset to show context above
@@ -72,6 +101,14 @@ class ScrollableFormMixin:
         # Route through root form_manager (only root initializes FlashMixin)
         if flash and hasattr(self.form_manager, 'queue_flash_local'):
             # Use local flash for navigation - only this window, not cross-window
-            logger.info(f"⚡ FLASH_DEBUG: Calling queue_flash_local({field_name}) on form_manager scope_id={getattr(self.form_manager, 'scope_id', 'NONE')}")
-            self.form_manager.queue_flash_local(field_name)
-            logger.debug(f"⚡ Flashed groupbox for {field_name} (local)")
+            logger.info(f"⚡ FLASH_DEBUG: Calling queue_flash_local({section_name}) on form_manager scope_id={getattr(self.form_manager, 'scope_id', 'NONE')}")
+            self.form_manager.queue_flash_local(section_name)
+            logger.debug(f"⚡ Flashed groupbox for {section_name} (local)")
+
+    def select_and_scroll_to_field(self, field_path: str) -> None:
+        """Public API for WindowManager navigation protocol.
+
+        Scrolls to and highlights the specified field.
+        This method name matches the protocol expected by WindowManager.focus_and_navigate().
+        """
+        self._scroll_to_section(field_path, flash=True)

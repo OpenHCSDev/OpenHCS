@@ -36,6 +36,14 @@ current_temp_global = contextvars.ContextVar('current_temp_global')
 # The stack is a tuple of types, ordered from outermost to innermost context
 context_type_stack = contextvars.ContextVar('context_type_stack', default=())
 
+# Context layer stack - tracks (scope_id, obj) tuples for provenance tracking
+# Parallel to merged config - NOT flattened, preserves hierarchy for inheritance source lookup
+# Used by get_field_provenance() to determine which scope provided a resolved value
+from typing import Tuple, Optional
+context_layer_stack: contextvars.ContextVar[Tuple[Tuple[str, Any], ...]] = contextvars.ContextVar(
+    'context_layer_stack', default=()
+)
+
 def _merge_nested_dataclass(base, override, mask_with_none: bool = False):
     """
     Recursively merge nested dataclass fields.
@@ -90,7 +98,7 @@ def _merge_nested_dataclass(base, override, mask_with_none: bool = False):
 
 
 @contextmanager
-def config_context(obj, mask_with_none: bool = False, use_live_global: bool = True):
+def config_context(obj, mask_with_none: bool = False, use_live_global: bool = True, scope_id: Optional[str] = None):
     """
     Create new context scope with obj's matching fields merged into base config.
 
@@ -107,6 +115,9 @@ def config_context(obj, mask_with_none: bool = False, use_live_global: bool = Tr
                        loaded instance with static class defaults.
         use_live_global: If True (default), use LIVE global config (UI sees unsaved edits).
                         If False, use SAVED global config (compiler sees saved values).
+        scope_id: Optional scope identifier for provenance tracking (e.g., "plate_123::step_0").
+                 When provided, the (scope_id, obj) tuple is pushed to context_layer_stack
+                 to enable inheritance source lookup via get_field_provenance().
 
     Usage:
         # UI operations (default - uses LIVE)
@@ -116,6 +127,10 @@ def config_context(obj, mask_with_none: bool = False, use_live_global: bool = Tr
         # Compilation (explicit - uses SAVED)
         with config_context(orchestrator.pipeline_config, use_live_global=False):
             # Compiler uses saved global config only
+
+        # With provenance tracking
+        with config_context(step, scope_id="plate_123::step_0"):
+            # Layer tracked for inheritance source lookup
     """
     # Get current context as base for nested contexts, or fall back to base global config
     current_context = get_current_temp_global()
@@ -202,8 +217,13 @@ def config_context(obj, mask_with_none: bool = False, use_live_global: bool = Tr
     current_types = context_type_stack.get()
     new_types = current_types + (type(obj),) if obj is not None else current_types
 
+    # Track (scope_id, obj) in layer stack for provenance tracking
+    current_layers = context_layer_stack.get()
+    new_layers = current_layers + ((scope_id, obj),) if scope_id is not None else current_layers
+
     merged_token = current_temp_global.set(merged_config)
     type_token = context_type_stack.set(new_types)
+    layer_token = context_layer_stack.set(new_layers)
     # PERFORMANCE: Clear extract cache on context push (new merged config)
     clear_extract_all_configs_cache()
     try:
@@ -211,6 +231,7 @@ def config_context(obj, mask_with_none: bool = False, use_live_global: bool = Tr
     finally:
         current_temp_global.reset(merged_token)
         context_type_stack.reset(type_token)
+        context_layer_stack.reset(layer_token)
         # PERFORMANCE: Clear extract cache on context pop
         clear_extract_all_configs_cache()
 
@@ -234,6 +255,28 @@ def get_context_type_stack():
                     # types == (GlobalPipelineConfig, PipelineConfig, Step)
     """
     return context_type_stack.get()
+
+
+def get_context_layer_stack() -> Tuple[Tuple[str, Any], ...]:
+    """
+    Get the current layer stack for provenance tracking.
+
+    Returns a tuple of (scope_id, obj) tuples, ordered from outermost to innermost.
+    Only includes layers where scope_id was explicitly provided to config_context().
+
+    Used by get_field_provenance() to determine which scope provided a resolved value.
+
+    Returns:
+        Tuple of (scope_id, obj) tuples representing the context hierarchy.
+        Empty tuple if no layers with scope_ids are active.
+
+    Example:
+        with config_context(plate, scope_id="plate_123"):
+            with config_context(step, scope_id="plate_123::step_0"):
+                layers = get_context_layer_stack()
+                # layers == (("plate_123", plate), ("plate_123::step_0", step))
+    """
+    return context_layer_stack.get()
 
 
 def _normalize_type(t):
@@ -566,6 +609,8 @@ def _inject_context_layer(
 def build_context_stack(
     object_instance: object,
     ancestor_objects: list[object] | None = None,
+    ancestor_objects_with_scopes: list[tuple[str, object]] | None = None,
+    current_scope_id: str | None = None,
 ):
     """
     Build a complete context stack for placeholder resolution.
@@ -582,6 +627,10 @@ def build_context_stack(
         object_instance: The object being edited (type used to infer global editing mode)
         ancestor_objects: List of ancestor objects from least→most specific (from ObjectStateRegistry).
                          This is the SINGLE SOURCE OF TRUTH for parent hierarchy.
+                         DEPRECATED: Use ancestor_objects_with_scopes for provenance tracking.
+        ancestor_objects_with_scopes: List of (scope_id, object) tuples from least→most specific.
+                                      Enables provenance tracking via context_layer_stack.
+        current_scope_id: Scope ID for the current object_instance. Used for provenance tracking.
 
     Returns:
         ExitStack with all context layers entered. Caller must manage the stack lifecycle.
@@ -596,7 +645,14 @@ def build_context_stack(
     is_global_config_editing = isinstance(object_instance, GlobalConfigBase)
 
     obj_type_name = obj_type.__name__
-    ancestor_types = [type(o).__name__ for o in ancestor_objects] if ancestor_objects else []
+
+    # Build ancestor list for logging - support both old and new format
+    if ancestor_objects_with_scopes:
+        ancestor_types = [type(o).__name__ for _, o in ancestor_objects_with_scopes]
+    elif ancestor_objects:
+        ancestor_types = [type(o).__name__ for o in ancestor_objects]
+    else:
+        ancestor_types = []
     logger.debug(f"🔧 build_context_stack: obj={obj_type_name}, ancestors={ancestor_types}")
 
     # 1. Global context layer (least specific)
@@ -606,25 +662,31 @@ def build_context_stack(
     if is_global_config_editing:
         try:
             global_layer = obj_type()  # Fresh instance with static defaults
-            stack.enter_context(config_context(global_layer, mask_with_none=True))
+            stack.enter_context(config_context(global_layer, mask_with_none=True, scope_id=""))
         except Exception:
             pass  # Couldn't create global layer
     else:
         # ALWAYS use LIVE thread-local - it's updated by GlobalPipelineConfig ObjectState
         global_layer = get_base_global_config(use_live=True)
         if global_layer:
-            stack.enter_context(config_context(global_layer))
+            stack.enter_context(config_context(global_layer, scope_id=""))
 
     # 2. Ancestor objects (intermediate layers, excluding GlobalConfigBase already handled)
-    if ancestor_objects:
+    if ancestor_objects_with_scopes:
+        # New format with scope_ids for provenance tracking
+        for scope_id, ancestor_obj in ancestor_objects_with_scopes:
+            if isinstance(ancestor_obj, GlobalConfigBase):
+                continue
+            stack.enter_context(config_context(ancestor_obj, scope_id=scope_id))
+    elif ancestor_objects:
+        # Legacy format without scope_ids
         for ancestor_obj in ancestor_objects:
-            # Skip global configs - already handled above
             if isinstance(ancestor_obj, GlobalConfigBase):
                 continue
             stack.enter_context(config_context(ancestor_obj))
 
     # 3. Current object overlay (most specific)
-    stack.enter_context(config_context(object_instance))
+    stack.enter_context(config_context(object_instance, scope_id=current_scope_id))
 
     return stack
 

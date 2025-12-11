@@ -183,3 +183,104 @@ def resolve_field_inheritance(
     if field_name in ['output_dir_suffix', 'sub_dir', 'well_filter']:
         logger.debug(f"🔍 NO-RESOLUTION: {obj_type.__name__}.{field_name} = None")
     return None
+
+
+def resolve_with_provenance(container_type: type, field_name: str) -> Tuple[Any, Optional[str], Optional[type]]:
+    """
+    Resolve a field value AND find its provenance source in ONE walk.
+
+    DUAL-AXIS RESOLUTION: Mirrors resolve_field_inheritance but also tracks provenance.
+    1. For each layer (scope) from most to least specific:
+       a. Check if same-type config has concrete value
+       b. Walk MRO to find parent class config with concrete value
+    2. Return first concrete value found, with its scope and source type.
+
+    PERFORMANCE: Single walk instead of separate resolve + provenance calls.
+
+    IMPORTANT: Must be called within a config_context() that has scope_ids set up.
+    The layer stack is built by build_context_stack() with ancestor_objects_with_scopes.
+
+    Args:
+        container_type: The type containing the field (e.g., LazyPathPlanningConfig)
+        field_name: Name of the field to find provenance for (e.g., "well_filter")
+
+    Returns:
+        (resolved_value, source_scope_id, source_type): The resolved value, scope that
+        provided it, and the TYPE that has the concrete value (may differ from container_type
+        due to MRO inheritance, e.g., PathPlanningConfig instead of WellFilterConfig).
+        If no concrete value found, returns (None, None, None).
+    """
+    from openhcs.config_framework.context_manager import get_context_layer_stack, extract_all_configs
+
+    layers = get_context_layer_stack()
+    if not layers:
+        return None, None, None
+
+    # Normalize the container type for comparison
+    container_base = _normalize_to_base(container_type)
+
+    # Build MRO list for container_type (normalized) - includes self type first
+    mro_types = []
+    for mro_class in container_base.__mro__:
+        if not is_dataclass(mro_class):
+            continue
+        mro_base = _normalize_to_base(mro_class)
+        mro_types.append(mro_base)
+
+    # X-AXIS FIRST: Walk layers from most specific to least specific scope
+    # This matches how resolve_field_inheritance gets called - the context stack
+    # is already ordered with most specific scope first.
+    if field_name == 'well_filter':
+        logger.debug(f"🔍 resolve_with_provenance: container={container_base.__name__}, field={field_name}, layers={len(layers)}")
+        logger.debug(f"🔍 resolve_with_provenance: mro_types={[t.__name__ for t in mro_types]}")
+
+    for scope_id, layer_obj in reversed(layers):
+        if layer_obj is None:
+            continue
+
+        # Extract configs from this layer
+        try:
+            layer_configs = extract_all_configs(layer_obj)
+        except Exception:
+            continue
+
+        if field_name == 'well_filter':
+            logger.debug(f"🔍   Layer scope={scope_id!r}, configs={list(layer_configs.keys())}")
+
+        # Y-AXIS SECOND: Full MRO walk within this layer (same as resolve_field_inheritance)
+        # First check same-type, then walk MRO parents
+        for mro_type in mro_types:
+            for config_instance in layer_configs.values():
+                instance_base = _normalize_to_base(type(config_instance))
+                if instance_base == mro_type:
+                    try:
+                        value = object.__getattribute__(config_instance, field_name)
+                        if field_name == 'well_filter':
+                            logger.debug(f"🔍     {mro_type.__name__}.{field_name} = {value!r}")
+                        if value is not None:
+                            # Return value, scope, AND the source type
+                            return value, scope_id, mro_type
+                    except AttributeError:
+                        continue
+
+    return None, None, None
+
+
+def get_field_provenance(container_type: type, field_name: str) -> Tuple[Optional[str], Optional[type]]:
+    """
+    Find which scope AND type provided the concrete value for a field.
+
+    CONVENIENCE WRAPPER: Calls resolve_with_provenance() and returns scope + type.
+    Use resolve_with_provenance() directly when you also need the value.
+
+    Args:
+        container_type: The type containing the field (e.g., LazyPathPlanningConfig)
+        field_name: Name of the field to find provenance for (e.g., "well_filter")
+
+    Returns:
+        (source_scope_id, source_type): The scope_id and type that provided the value.
+        source_type may differ from container_type due to MRO inheritance.
+        Returns (None, None) if no layer has a concrete value.
+    """
+    _, source_scope, source_type = resolve_with_provenance(container_type, field_name)
+    return source_scope, source_type

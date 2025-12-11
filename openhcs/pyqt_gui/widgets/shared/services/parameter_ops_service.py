@@ -249,6 +249,14 @@ class ParameterOpsService(ParameterServiceABC):
             monitor = get_monitor("Placeholder resolution per field")
 
             for param_name, widget in manager.widgets.items():
+                # Guard: Skip deleted widgets (can happen if window closed during async build)
+                try:
+                    # Access any attribute to check if widget is still valid
+                    _ = widget.objectName()
+                except RuntimeError:
+                    logger.debug(f"[PLACEHOLDER] {manager.field_id}: Widget {param_name} was deleted, skipping")
+                    continue
+
                 # Use manager.parameters (scoped) not state.parameters (full paths)
                 current_value = manager.parameters.get(param_name)
                 should_apply_placeholder = (current_value is None)

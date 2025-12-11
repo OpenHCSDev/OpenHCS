@@ -423,12 +423,28 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, FlashMixin, metacla
 
         def create_next_batch():
             nonlocal index
+
+            # Guard: Check if layout's parent widget was deleted (window closed during async build)
+            try:
+                parent = layout.parentWidget()
+                if parent is None:
+                    logger.warning("Async widget creation aborted: layout parent is None")
+                    return
+            except RuntimeError:
+                # Layout itself was deleted
+                logger.warning("Async widget creation aborted: layout was deleted")
+                return
+
             batch_end = min(index + batch_size, len(param_infos))
 
             for i in range(index, batch_end):
                 param_info = param_infos[i]
                 widget = self._create_widget_for_param(param_info)
-                layout.addWidget(widget)
+                try:
+                    layout.addWidget(widget)
+                except RuntimeError as e:
+                    logger.warning(f"Async widget creation aborted during addWidget: {e}")
+                    return
 
             index = batch_end
 

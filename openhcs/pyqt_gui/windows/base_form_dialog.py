@@ -102,16 +102,18 @@ class BaseFormDialog(ScopedBorderMixin, QDialog):
         """Build unique key for WindowManager registration.
 
         Returns:
-            Unique key like "::PipelineConfig" or "/path/to/plate::ConfigWindow"
+            The scope_id directly (e.g., "", "/path/to/plate", "/plate::step_0")
             Returns None if no scope_id is set (legacy behavior - no singleton enforcement)
+
+        Note: We use scope_id directly (not scope_id::ClassName) so that provenance
+        navigation can find windows by scope_id. The scope_id is already unique
+        per context (global, plate, step, function).
         """
         scope_id = getattr(self, 'scope_id', None)
         if scope_id is None:
             return None
 
-        # Include class name to allow different window types for same scope
-        # e.g., ConfigWindow and DualEditorWindow for same plate
-        return f"{scope_id}::{self.__class__.__name__}"
+        return scope_id
 
     def _setup_save_button(self, button: 'QPushButton', save_callback: Callable):
         """

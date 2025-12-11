@@ -10,7 +10,7 @@ Replaces LiveContextService._active_form_managers as the single source of truth.
 """
 from dataclasses import is_dataclass, fields as dataclass_fields
 import logging
-from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
 import copy
 
 if TYPE_CHECKING:
@@ -246,6 +246,40 @@ class ObjectStateRegistry:
                     objects.append(state.to_object())
 
         return objects
+
+    @classmethod
+    def get_ancestor_objects_with_scopes(cls, scope_id: Optional[str], use_saved: bool = False) -> List[Tuple[str, Any]]:
+        """Get (scope_id, object) tuples from this scope and all ancestors.
+
+        Similar to get_ancestor_objects() but includes the scope_id for each object.
+        Used for provenance tracking to determine which scope provided a resolved value.
+
+        Args:
+            scope_id: The scope to get ancestors for (e.g., "/plate::step_0")
+            use_saved: If True, return saved baseline (object_instance) instead of
+                       live state (to_object()). Used when computing _saved_resolved.
+
+        Returns:
+            List of (scope_id, object) tuples from ancestor scopes, ordered least→most specific.
+        """
+        scope_key = cls._normalize_scope_id(scope_id)
+
+        # Build list of ancestor scope keys (least-specific to most-specific)
+        ancestors = [""]  # Global scope always included
+        if scope_key:
+            parts = scope_key.split("::")
+            for i in range(len(parts)):
+                ancestors.append("::".join(parts[:i+1]))
+
+        # Get (scope_id, object) tuples from ancestor scopes
+        results: List[Tuple[str, Any]] = []
+        for ancestor_key in ancestors:
+            state = cls._states.get(ancestor_key)
+            if state:
+                obj = state.object_instance if use_saved else state.to_object()
+                results.append((ancestor_key, obj))
+
+        return results
 
     # ========== SCOPE + TYPE + FIELD AWARE INVALIDATION ==========
 
@@ -540,9 +574,12 @@ class ObjectState:
         self._parent_state: Optional['ObjectState'] = parent_state
         # NOTE: nested_states DELETED - flat storage eliminates nested ObjectState instances
 
-        # === Cache (2 attributes) ===
+        # === Cache (3 attributes) ===
         self._live_resolved: Optional[Dict[str, Any]] = None  # None = needs full compute
         self._invalid_fields: Set[str] = set()  # Fields needing partial recompute
+        # Maps dotted_path → (source_scope_id, source_type) for inherited fields
+        # source_type may differ from local container_type due to MRO inheritance
+        self._live_provenance: Dict[str, Tuple[Optional[str], Optional[type]]] = {}
 
         # === Saved baseline (2 attributes) ===
         self._saved_resolved: Dict[str, Any] = {}
@@ -852,6 +889,30 @@ class ObjectState:
 
         return result
 
+    def get_provenance(self, param_name: str) -> Optional[Tuple[str, type]]:
+        """Get the source scope_id and type for an inherited field value.
+
+        For fields where the local value is None (inherited), returns the scope_id
+        of the ancestor that provided the concrete value AND the type that has it.
+        Used for click-to-source navigation in the UI.
+
+        The source_type may differ from the local container type due to MRO inheritance.
+        For example, WellFilterConfig.well_filter might inherit from PathPlanningConfig.
+
+        Args:
+            param_name: Field name (can be dotted path like 'path_planning_config.well_filter')
+
+        Returns:
+            (source_scope_id, source_type): The scope and type that provided the value,
+            or None if the value is local (not inherited) or no source found.
+        """
+        self._ensure_live_resolved()
+        result = self._live_provenance.get(param_name)
+        if result is None or result[0] is None:
+            return None
+        # Return as (scope_id, source_type) - filter out None source_type
+        return (result[0], result[1]) if result[1] is not None else None
+
     def find_path_for_type(self, container_type: type) -> Optional[str]:
         """Find the path prefix for a container type in this ObjectState.
 
@@ -859,17 +920,33 @@ class ObjectState:
         Given a container type (e.g., PathPlanningConfig), returns the path prefix
         (e.g., 'path_planning_config').
 
+        Handles type normalization: LazyPathPlanningConfig matches PathPlanningConfig.
+
         Args:
             container_type: The type to find the path for
 
         Returns:
-            Path prefix for the type, or None if not found
+            Path prefix for the type, or None if not found.
+            Returns "" (empty string) if type is the root object type.
         """
-        # Look for paths where the TYPE is the container type (not a child of it)
+        from openhcs.config_framework.lazy_factory import get_base_type_for_lazy
+
+        # Normalize the container_type for comparison
+        container_base = get_base_type_for_lazy(container_type) or container_type
+
+        # Check if container_type matches the root object type
+        root_type = type(self.object_instance)
+        root_base = get_base_type_for_lazy(root_type) or root_type
+        if container_base == root_base:
+            return ""  # Root type has no prefix
+
+        # Look for paths where the TYPE matches (normalized comparison)
         # The path for a nested config is the one WITHOUT a dot suffix that has the type
         for path, typ in self._path_to_type.items():
-            if typ == container_type and '.' not in path:
+            typ_base = get_base_type_for_lazy(typ) or typ
+            if typ_base == container_base and '.' not in path:
                 return path
+
         return None
 
     def resolve_for_type(self, container_type: type, field_name: str) -> Any:
@@ -897,6 +974,7 @@ class ObjectState:
     def invalidate_cache(self) -> None:
         """Invalidate resolved cache - forces full recompute on next access."""
         self._live_resolved = None
+        self._live_provenance = {}  # Provenance must be recomputed with resolved values
         self._cached_object = None  # Also invalidate cached object
 
     def invalidate_self_and_nested(self) -> None:
@@ -905,6 +983,7 @@ class ObjectState:
         With flat storage, no nested states to invalidate.
         """
         self._live_resolved = None
+        self._live_provenance = {}  # Provenance must be recomputed with resolved values
         self._invalid_fields.clear()  # Full invalidation, not field-level
         self._cached_object = None
 
@@ -962,10 +1041,16 @@ class ObjectState:
                     f"old={old_val!r} -> new={explicit_val!r}"
                 )
             self._live_resolved[name] = explicit_val
+            # Clear provenance for explicit values - they're no longer inherited
+            if name in self._live_provenance:
+                del self._live_provenance[name]
 
-        # Inherited values: need context stack for lazy resolution
+        # Inherited values: need context stack for lazy resolution + provenance
         if inherited_fields:
-            ancestor_objects = ObjectStateRegistry.get_ancestor_objects(self.scope_id)
+            from openhcs.config_framework.dual_axis_resolver import resolve_with_provenance
+
+            # Use _with_scopes version to enable provenance tracking via context_layer_stack
+            ancestor_objects_with_scopes = ObjectStateRegistry.get_ancestor_objects_with_scopes(self.scope_id)
 
             # CRITICAL: Use to_object() to get CURRENT state with user edits,
             # not object_instance which is the original/saved baseline.
@@ -974,12 +1059,12 @@ class ObjectState:
 
             stack = build_context_stack(
                 object_instance=current_obj,
-                ancestor_objects=ancestor_objects,
+                ancestor_objects_with_scopes=ancestor_objects_with_scopes,
+                current_scope_id=self.scope_id,
             )
 
             with stack:
-                # For each inherited field, create a fresh instance of its CONTAINER type
-                # (the lazy dataclass), not the root object type
+                # For each inherited field, resolve using dual-axis resolution with provenance
                 for dotted_path in inherited_fields:
                     container_type = self._path_to_type.get(dotted_path)
                     if container_type is None:
@@ -990,27 +1075,11 @@ class ObjectState:
                         continue
                     parts = dotted_path.split('.')
                     field_name = parts[-1]
-                    # Create fresh lazy dataclass instance - triggers lazy resolution
-                    container_instance = container_type()
+
+                    # Use resolve_with_provenance for SINGLE walk that gets both value AND source
+                    value, source_scope_id, source_type = resolve_with_provenance(container_type, field_name)
+
                     old_val = self._live_resolved.get(dotted_path)
-                    value = getattr(container_instance, field_name)
-                    # DEBUG: Catch the bug where we get the whole GlobalPipelineConfig
-                    if is_dataclass(type(value)) and dotted_path == 'num_workers':
-                        logger.error(
-                            f"BUG DETECTED: num_workers resolved to dataclass {type(value).__name__}! "
-                            f"container_type={container_type.__name__}, field_name={field_name}, "
-                            f"container_instance.__class__={container_instance.__class__.__name__}"
-                        )
-                        # Debug: what was in available_configs?
-                        from openhcs.config_framework.context_manager import current_temp_global, extract_all_configs
-                        try:
-                            ctx = current_temp_global.get()
-                            configs = extract_all_configs(ctx)
-                            logger.error(f"  available_configs keys: {list(configs.keys())}")
-                            for k, v in configs.items():
-                                logger.error(f"    {k}: {type(v).__name__} (id={id(v)})")
-                        except Exception as e:
-                            logger.error(f"  Failed to get configs: {e}")
                     if old_val != value:
                         changed_paths.add(dotted_path)
                         logger.debug(
@@ -1018,6 +1087,9 @@ class ObjectState:
                             f"old={old_val!r} -> new={value!r}"
                         )
                     self._live_resolved[dotted_path] = value
+
+                    # Update provenance for this field
+                    self._live_provenance[dotted_path] = (source_scope_id, source_type)
 
         return changed_paths
 
@@ -1066,10 +1138,13 @@ class ObjectState:
                        saved baseline only depends on other saved baselines.
         """
         from openhcs.config_framework.context_manager import build_context_stack
+        from openhcs.config_framework.dual_axis_resolver import resolve_with_provenance
 
-        # Get ancestor objects for context stack
+        # Get ancestor objects WITH scope_ids for provenance tracking
         # use_saved=True returns object_instance (saved), False returns to_object() (live)
-        ancestor_objects = ObjectStateRegistry.get_ancestor_objects(self.scope_id, use_saved=use_saved)
+        ancestor_objects_with_scopes = ObjectStateRegistry.get_ancestor_objects_with_scopes(
+            self.scope_id, use_saved=use_saved
+        )
 
         # Use saved baseline or live state for this object
         if use_saved:
@@ -1079,13 +1154,15 @@ class ObjectState:
             # not object_instance which is the original/saved baseline.
             current_obj = self.to_object()
 
-        # Build context stack ONCE
+        # Build context stack ONCE with scope_ids for provenance tracking
         stack = build_context_stack(
             object_instance=current_obj,
-            ancestor_objects=ancestor_objects,
+            ancestor_objects_with_scopes=ancestor_objects_with_scopes,
+            current_scope_id=self.scope_id,
         )
 
         snapshot: Dict[str, Any] = {}
+        provenance: Dict[str, Tuple[Optional[str], Optional[type]]] = {}
 
         # UNIFIED: Resolve ALL fields in single context stack
         # For each path, check if it has a lazy dataclass container type
@@ -1105,14 +1182,26 @@ class ObjectState:
                     # dirty comparison since we compare leaf fields instead
                     pass
                 elif container_type is not None and is_dataclass(container_type):
-                    # Leaf field inside a lazy dataclass - create container and resolve
+                    # Leaf field inside a lazy dataclass - resolve value AND provenance in ONE walk
                     # This handles both:
                     # - Nested fields (processing_config.group_by) where parts > 1
                     # - Top-level fields on root (num_workers on PipelineConfig) where parts == 1
-                    container_instance = container_type()
                     field_name = parts[-1]
-                    resolved_val = getattr(container_instance, field_name)
-                    snapshot[dotted_path] = resolved_val
+
+                    if raw_value is None:
+                        # Field needs resolution - use combined resolve + provenance walk
+                        resolved_val, source_scope, source_type = resolve_with_provenance(container_type, field_name)
+                        snapshot[dotted_path] = resolved_val
+
+                        # Track provenance for inherited values (live only)
+                        # Store (scope_id, source_type) tuple so UI can find the correct path
+                        if not use_saved:
+                            provenance[dotted_path] = (source_scope, source_type)
+                    else:
+                        # Field has concrete local value - no resolution needed
+                        resolved_val = raw_value
+                        snapshot[dotted_path] = resolved_val
+
                     logger.debug(
                         f"SNAPSHOT [{self.scope_id}] {dotted_path}: "
                         f"raw={raw_value!r} -> resolved={resolved_val!r} (type={type(resolved_val).__name__})"
@@ -1120,6 +1209,10 @@ class ObjectState:
                 else:
                     # Non-dataclass field - use raw value directly
                     snapshot[dotted_path] = raw_value
+
+        # Store provenance for live resolution (not saved)
+        if not use_saved:
+            self._live_provenance = provenance
 
         return snapshot
 

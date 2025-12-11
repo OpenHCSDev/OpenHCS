@@ -102,9 +102,14 @@ class WindowManager:
             window = cls._scoped_windows[scope_id]
             try:
                 # Test if window still exists (Qt doesn't auto-cleanup deleted widgets)
-                window.isVisible()  # Will raise RuntimeError if deleted
+                # Note: Just accessing any property will raise RuntimeError if deleted
+                _ = window.windowTitle()
 
-                # Window exists - bring to front
+                # Window exists - bring to front regardless of visibility
+                # (window may be hidden, minimized, or still initializing - all valid states)
+                if not window.isVisible():
+                    window.show()
+
                 window.raise_()
                 window.activateWindow()
 
@@ -184,6 +189,13 @@ class WindowManager:
             return False
 
         try:
+            # Test if window still exists by accessing any property
+            _ = window.windowTitle()
+
+            # Ensure window is visible (may be hidden or still initializing)
+            if not window.isVisible():
+                window.show()
+
             # Bring window to front
             window.raise_()
             window.activateWindow()
