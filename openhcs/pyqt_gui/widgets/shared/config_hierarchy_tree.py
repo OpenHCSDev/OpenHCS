@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import fields, is_dataclass
-from typing import Dict, Type, Optional
+from typing import Dict, Type, Optional, Iterable
 
 from PyQt6.QtCore import Qt, QRect
 from PyQt6.QtGui import QColor, QPainter, QFont, QFontMetrics
@@ -142,6 +142,9 @@ class ConfigHierarchyTreeHelper:
         self._current_tree: Optional[QTreeWidget] = None
         # Mapping from dotted path to QTreeWidgetItem for dirty styling updates
         self._path_to_item: Dict[str, QTreeWidgetItem] = {}
+        self._dirty_callback = None
+        self._param_change_callback = None
+        self._tree_for_dirty: Optional[QTreeWidget] = None
         # Dirty tracking subscription
         self._state: Optional['ObjectState'] = None
         self._dirty_callback = None
@@ -170,6 +173,10 @@ class ConfigHierarchyTreeHelper:
         # Store flash manager for use during population
         self._flash_manager = flash_manager
         self._current_tree = tree
+        # Fresh mapping per tree build to avoid stale item references
+        self._path_to_item = {}
+        # Track dirty callbacks per tree to allow rebuilding subscriptions on re-init
+        self._tree_for_dirty = tree
 
         # Install delegate that draws flash BEHIND text
         if flash_manager is not None:
@@ -197,8 +204,16 @@ class ConfigHierarchyTreeHelper:
             self.update_dirty_styling(dirty_fields)
             tree.viewport().update()
 
+        def on_param_changed(_param_name: str):
+            # Field-level changes should refresh dirty markers even if overall dirty state didn't toggle
+            dirty_fields = self._state.get_dirty_fields()
+            self.update_dirty_styling(dirty_fields)
+            tree.viewport().update()
+
         self._state.on_dirty_changed(on_dirty_changed)
+        self._state.on_parameters_changed(on_param_changed)
         self._dirty_callback = on_dirty_changed
+        self._param_change_callback = on_param_changed
         self._tree_for_dirty = tree  # Store for initialize_dirty_styling
 
     def initialize_dirty_styling(self) -> None:
@@ -208,16 +223,23 @@ class ConfigHierarchyTreeHelper:
         """
         if self._state is None:
             return
-        if self._state.is_dirty():
-            self.update_dirty_styling(self._state.get_dirty_fields())
-            if hasattr(self, '_tree_for_dirty') and self._tree_for_dirty:
-                self._tree_for_dirty.viewport().update()
+        dirty_fields = self._state.get_dirty_fields() if self._state.is_dirty() else set()
+        self.update_dirty_styling(dirty_fields)
+        if hasattr(self, '_tree_for_dirty') and self._tree_for_dirty:
+            self._tree_for_dirty.viewport().update()
 
     def cleanup_subscriptions(self) -> None:
         """Unsubscribe from ObjectState dirty changes. Call on window close."""
-        if self._state is not None and self._dirty_callback is not None:
-            self._state.off_dirty_changed(self._dirty_callback)
-            self._dirty_callback = None
+        if self._state is not None:
+            if self._dirty_callback is not None:
+                self._state.off_dirty_changed(self._dirty_callback)
+                self._dirty_callback = None
+            if self._param_change_callback is not None:
+                try:
+                    self._state.off_parameters_changed(self._param_change_callback)
+                except Exception:
+                    pass
+                self._param_change_callback = None
             self._state = None
 
     def apply_scope_background(self, tree: QTreeWidget, scheme) -> None:
@@ -264,9 +286,25 @@ class ConfigHierarchyTreeHelper:
             for i in range(1, len(parts) + 1):
                 dirty_prefixes.add('.'.join(parts[:i]))
 
+        # Avoid updating the same item multiple times if it was stored under multiple paths
+        seen_items = set()
         for path, item in self._path_to_item.items():
+            if id(item) in seen_items:
+                continue
+            seen_items.add(id(item))
+
+            meta = item.data(0, Qt.ItemDataRole.UserRole) or {}
+            field_name = meta.get("field_name")
+            class_type = meta.get("class")
+            alt_name = self._to_snake_case(getattr(class_type, "__name__", "")) if class_type else None
+
+            is_dirty = (
+                path in dirty_prefixes
+                or (field_name and field_name in dirty_prefixes)
+                or (alt_name and alt_name in dirty_prefixes)
+            )
+
             current_text = item.text(0)
-            is_dirty = path in dirty_prefixes
             has_marker = current_text.startswith("* ")
 
             if is_dirty and not has_marker:
@@ -330,6 +368,7 @@ class ConfigHierarchyTreeHelper:
             base_type = self.get_base_type(obj_type)
             label = getattr(base_type, "__name__", field_name)
             path = field_name
+            alt_path = self._to_snake_case(base_type.__name__)
 
             item = QTreeWidgetItem([label])
             item.setData(
@@ -343,8 +382,8 @@ class ConfigHierarchyTreeHelper:
                 },
             )
             tree.addTopLevelItem(item)
-            # Store mapping for dirty styling updates
-            self._path_to_item[path] = item
+            # Store mapping for dirty styling updates (support both field and snake_case type name)
+            self._store_item_paths(item, [path, alt_path])
             # TRUE O(1): Register with WindowFlashOverlay
             self._register_flash_element(item, field_name)
             self.add_inheritance_info(item, base_type)
@@ -377,6 +416,8 @@ class ConfigHierarchyTreeHelper:
 
             label = display_name if is_root else f"{field.name} ({display_name})"
             path = field.name if not parent_path else f"{parent_path}.{field.name}"
+            alt_name = self._to_snake_case(base_type.__name__)
+            alt_path = alt_name if not parent_path else f"{parent_path}.{alt_name}"
 
             item = QTreeWidgetItem([label])
             item.setData(
@@ -403,7 +444,7 @@ class ConfigHierarchyTreeHelper:
                 parent_item.addChild(item)
 
             # Store mapping for dirty styling updates
-            self._path_to_item[path] = item
+            self._store_item_paths(item, [path, alt_path])
 
             # TRUE O(1): Register with WindowFlashOverlay
             self._register_flash_element(item, field.name)
@@ -416,6 +457,23 @@ class ConfigHierarchyTreeHelper:
                 skip_root_ui_hidden=False,
                 parent_path=path,
             )
+
+    def _store_item_paths(self, item: QTreeWidgetItem, paths: Iterable[str]) -> None:
+        """Store one or more paths for a tree item, skipping empties and duplicates."""
+        for path in paths:
+            if not path:
+                continue
+            if path not in self._path_to_item:
+                self._path_to_item[path] = item
+
+    @staticmethod
+    def _to_snake_case(name: str) -> str:
+        """Convert CamelCase/PascalCase to snake_case for matching dirty paths."""
+        import re
+        if not name:
+            return ""
+        s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
+        return re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
 
     def is_field_ui_hidden(
         self,
