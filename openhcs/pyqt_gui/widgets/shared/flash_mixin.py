@@ -199,6 +199,10 @@ def create_groupbox_element(key: str, groupbox: 'QGroupBox') -> FlashElement:
 
     def get_rect(window: QWidget) -> Optional[QRect]:
         try:
+            # Skip if groupbox isn't visible in the current window (e.g., hidden tab page)
+            if not groupbox.isVisible() or not groupbox.isVisibleTo(window):
+                return None
+
             from PyQt6.QtCore import QPoint
             # QGroupBox stylesheet has margin-top which is OUTSIDE the painted area
             # but still part of the widget's geometry. We need to offset by this.
@@ -243,6 +247,10 @@ def create_groupbox_element(key: str, groupbox: 'QGroupBox') -> FlashElement:
         Computes fresh window-relative rects on each call (cheap coordinate transform).
         """
         nonlocal _last_groupbox_size, _cached_child_widgets
+
+        # If the groupbox isn't visible to this window (e.g., tab not selected), skip masking
+        if not groupbox.isVisible() or not groupbox.isVisibleTo(window):
+            return []
 
         child_rects = []
         try:
@@ -328,6 +336,11 @@ def create_tree_item_element(key: str, tree: 'QTreeWidget', get_index: Callable[
             index = get_index()
             if index is None or not index.isValid():
                 return None
+
+            # Skip if tree or its viewport isn't visible in this window (hidden tab)
+            if not tree.isVisible() or not tree.isVisibleTo(window):
+                return None
+
             visual_rect = tree.visualRect(index)
             if not visual_rect.isValid():
                 return None
@@ -361,6 +374,11 @@ def create_list_item_element(key: str, list_widget: 'QListWidget', get_row: Call
             item = list_widget.item(row)
             if item is None:
                 return None
+
+            # Skip if list or its viewport isn't visible in this window (hidden tab)
+            if not list_widget.isVisible() or not list_widget.isVisibleTo(window):
+                return None
+
             visual_rect = list_widget.visualItemRect(item)
             if not visual_rect.isValid():
                 return None
@@ -659,6 +677,23 @@ class WindowFlashOverlay(QWidget):
         """Get set of keys for elements currently visible in viewport."""
         return {key for key in self._elements if self.is_element_in_viewport(key)}
 
+    def get_visible_keys_for(self, keys: Set[str]) -> Set[str]:
+        """Get visible keys from a specific subset (avoids scanning all elements)."""
+        visible: Set[str] = set()
+        for key in keys:
+            elements = self._elements.get(key)
+            if not elements:
+                continue
+            for element in elements:
+                try:
+                    rect = element.get_rect_in_window(self._window)
+                except RuntimeError:
+                    continue
+                if rect and rect.isValid() and rect.intersects(self.rect()):
+                    visible.add(key)
+                    break  # One visible element is enough
+        return visible
+
     def _get_scroll_area_clip_rects(self) -> List[QRect]:
         """Find all QScrollArea viewports in the window and return their rects in window coords.
 
@@ -711,6 +746,25 @@ class WindowFlashOverlay(QWidget):
         if not coordinator._computed_colors:
             return  # Nothing animating
 
+        # Only consider keys that are both animating and registered in this overlay
+        active_keys = {
+            key: color
+            for key, color in coordinator._computed_colors.items()
+            if key in self._elements
+        }
+        if not active_keys:
+            return  # Nothing to draw for this window
+
+        # Filter to only keys whose elements are currently visible in this window
+        visible_keys = self.get_visible_keys_for(set(active_keys.keys()))
+        if not visible_keys:
+            # Nothing visible to draw; still repaint once to clear any stale pixels
+            painter = QPainter(self)
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
+            painter.fillRect(self.rect(), Qt.GlobalColor.transparent)
+            painter.end()
+            return
+
         painter = QPainter(self)
         painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
 
@@ -726,12 +780,8 @@ class WindowFlashOverlay(QWidget):
 
         drawn_count = 0
 
-        # Get keys to draw (only keys that are registered in this overlay)
-        all_keys_to_draw = {
-            key: color
-            for key, color in coordinator._computed_colors.items()
-            if key in self._elements
-        }
+        # Get keys to draw (only keys that are registered in this overlay AND visible)
+        all_keys_to_draw = {key: color for key, color in active_keys.items() if key in visible_keys}
 
         # DEBUG: Log what we're about to draw
         logger.debug(f"[FLASH] paintEvent START: {len(all_keys_to_draw)} keys to draw")
@@ -1150,4 +1200,3 @@ class VisualUpdateMixin:
 
 # Backwards compatibility
 FlashMixin = VisualUpdateMixin
-
