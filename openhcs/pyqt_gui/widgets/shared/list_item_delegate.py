@@ -9,6 +9,9 @@ from PyQt6.QtWidgets import QStyledItemDelegate, QStyleOptionViewItem, QStyle
 from PyQt6.QtGui import QPainter, QColor, QFontMetrics
 from PyQt6.QtCore import Qt, QRect
 
+# Custom data role for scope border color (must match manager)
+SCOPE_BORDER_ROLE = Qt.ItemDataRole.UserRole + 10
+
 
 class MultilinePreviewItemDelegate(QStyledItemDelegate):
     """Custom delegate to render multiline items with grey preview text.
@@ -53,6 +56,11 @@ class MultilinePreviewItemDelegate(QStyledItemDelegate):
         opt.text = ""
 
         # TRUE O(1): Flash is rendered by WindowFlashOverlay, not here
+
+        # Scope-based background tint (if provided)
+        item_bg = index.data(Qt.ItemDataRole.BackgroundRole)
+        if item_bg:
+            painter.fillRect(option.rect, item_bg)
 
         # Let the style draw selection, hover, borders
         self.parent().style().drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, self.parent())
@@ -135,6 +143,15 @@ class MultilinePreviewItemDelegate(QStyledItemDelegate):
             y_offset += line_height
 
         painter.restore()
+
+        # Draw scope border if provided
+        border_data = index.data(SCOPE_BORDER_ROLE)
+        if isinstance(border_data, QColor):
+            rect = option.rect
+            painter.save()
+            border_rect = QRect(rect.left(), rect.top(), 5, rect.height())
+            painter.fillRect(border_rect, border_data)
+            painter.restore()
     
     def sizeHint(self, option: QStyleOptionViewItem, index) -> 'QSize':
         """Calculate size hint based on number of lines in text."""
@@ -173,4 +190,3 @@ class MultilinePreviewItemDelegate(QStyledItemDelegate):
         total_width = max_width + 20  # 10px padding on each side
 
         return QSize(total_width, total_height)
-

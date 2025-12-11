@@ -33,7 +33,8 @@ from openhcs.pyqt_gui.widgets.mixins import (
 )
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 from openhcs.config_framework import LiveContextResolver
-from openhcs.pyqt_gui.widgets.shared.flash_mixin import FlashMixin, get_flash_color
+from openhcs.pyqt_gui.widgets.shared.flash_mixin import FlashMixin, get_flash_color, WindowFlashOverlay
+from openhcs.pyqt_gui.widgets.shared.scope_visual_config import ListItemType
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +115,9 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
     #       'list_item_data': 'item',
     #   }
     ITEM_HOOKS: Dict[str, Any] = {}
+
+    # Custom data role for scope border color (kept local to avoid delegate coupling)
+    SCOPE_BORDER_ROLE = Qt.ItemDataRole.UserRole + 10
 
     # Common signals
     status_message = pyqtSignal(str)
@@ -916,30 +920,36 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
         def get_list_item_rect(window: QWidget) -> Optional[QRect]:
             """Get list item rect in window coordinates (clipped to viewport)."""
             if scope_id not in self._scope_to_list_item:
+                logger.debug(f"⚡ FLASH_DEBUG get_list_item_rect: scope_id {scope_id} NOT in _scope_to_list_item (has {len(self._scope_to_list_item)} keys)")
                 return None
             item = self._scope_to_list_item[scope_id]
             if item is None:
+                logger.debug(f"⚡ FLASH_DEBUG get_list_item_rect: item is None for {scope_id}")
                 return None
 
             # Get visual rect from list widget
             visual_rect = self.item_list.visualItemRect(item)
             if visual_rect.isEmpty():
+                logger.debug(f"⚡ FLASH_DEBUG get_list_item_rect: visual_rect is empty for {scope_id}")
                 return None
 
             # Clip to viewport (only flash visible portion)
             viewport = self.item_list.viewport()
             if viewport is None:
+                logger.debug(f"⚡ FLASH_DEBUG get_list_item_rect: viewport is None for {scope_id}")
                 return None
 
             # Intersect with viewport rect to get only visible portion
             viewport_rect = viewport.rect()
             clipped_rect = visual_rect.intersected(viewport_rect)
             if clipped_rect.isEmpty():
+                logger.debug(f"⚡ FLASH_DEBUG get_list_item_rect: clipped_rect is empty for {scope_id}")
                 return None
 
             # Map from VIEWPORT to window coordinates
             global_pos = viewport.mapToGlobal(clipped_rect.topLeft())
             local_pos = window.mapFromGlobal(global_pos)
+            logger.debug(f"⚡ FLASH_DEBUG get_list_item_rect: SUCCESS for {scope_id}, rect={QRect(local_pos, clipped_rect.size())}")
             return QRect(local_pos, clipped_rect.size())
 
         element = FlashElement(
@@ -1002,9 +1012,58 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
                 state.off_saved_resolved_changed(on_saved_resolved_callback)
             except Exception as e:
                 logger.debug(f"⚡ FLASH_DEBUG: Error unsubscribing from {scope_id}: {e}")
+
+            # CRITICAL: Also unregister the FlashElement from the overlay
+            # Otherwise stale geometry callbacks will point to deleted QListWidgetItems
+            overlay = WindowFlashOverlay.get_for_window(self)
+            if overlay:
+                logger.debug(f"⚡ FLASH_DEBUG: Unregistering FlashElement for {scope_id}")
+                overlay.unregister_element(scope_id)
+
         self._flash_subscriptions.clear()
         self._scope_to_list_item.clear()
         logger.debug(f"⚡ FLASH_DEBUG: Subscriptions cleared")
+
+    # ========== Scope Coloring (optional) ==========
+
+    def _get_list_item_scope(self, item: Any, index: int) -> Optional[Tuple[str, Any]]:
+        """Resolve scope info for list item via ITEM_HOOKS."""
+        hooks = self.ITEM_HOOKS
+        item_type = hooks.get("scope_item_type")
+        if not item_type:
+            return None
+
+        scope_id = None
+        builder = hooks.get("scope_id_builder")
+        if builder:
+            scope_id = builder(item, index, self)
+        else:
+            scope_id_attr = hooks.get("scope_id_attr")
+            if scope_id_attr:
+                if isinstance(item, dict):
+                    scope_id = item.get(scope_id_attr)
+                else:
+                    scope_id = getattr(item, scope_id_attr, None)
+
+        return (scope_id, item_type) if scope_id else None
+
+    def _apply_list_item_scope_color(self, list_item: QListWidgetItem, item: Any, index: int) -> None:
+        """Apply scope-based background and border colors to list item."""
+        scope_info = self._get_list_item_scope(item, index)
+        if not scope_info:
+            return
+
+        scope_id, item_type = scope_info
+        from openhcs.pyqt_gui.widgets.shared.scope_color_utils import get_scope_color_scheme
+
+        scheme = get_scope_color_scheme(scope_id)
+
+        bg_color = item_type.get_background_color(scheme)
+        if bg_color:
+            list_item.setBackground(bg_color)
+
+        border_color = scheme.to_qcolor_orchestrator_border()
+        list_item.setData(self.SCOPE_BORDER_ROLE, border_color)
 
     # ========== List Update Template ==========
 
@@ -1044,8 +1103,18 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
             current_count = self.item_list.count()
             expected_count = len(backing_items)
 
+            # Check if items have actually changed (not just count)
+            # This detects plate switches where count is same but items are different
+            items_changed = False
             if current_count == expected_count and current_count > 0:
-                # Same count - update text in place (optimization)
+                # Compare current scope_ids with subscribed scope_ids
+                current_scope_ids = {self._get_cached_scope(item) for item in backing_items}
+                subscribed_scope_ids = set(self._flash_subscriptions.keys())
+                items_changed = current_scope_ids != subscribed_scope_ids
+                logger.debug(f"⚡ FLASH_DEBUG: count={current_count}, current_scopes={current_scope_ids}, subscribed_scopes={subscribed_scope_ids}, items_changed={items_changed}")
+
+            if current_count == expected_count and current_count > 0 and not items_changed:
+                # Same count AND same items - update text in place (optimization)
                 # DON'T cleanup subscriptions - they're still valid, just update text
                 for index, item_obj in enumerate(backing_items):
                     list_item = self.item_list.item(index)
@@ -1062,12 +1131,15 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
                     for role_offset, value in self._get_list_item_extra_data(item_obj, index).items():
                         list_item.setData(Qt.ItemDataRole.UserRole + role_offset, value)
 
+                    # Apply scope-based colors
+                    self._apply_list_item_scope_color(list_item, item_obj, index)
+
                     # Only subscribe if not already subscribed (use cached scope)
                     scope_id = self._get_cached_scope(item_obj)
                     if scope_id and scope_id not in self._flash_subscriptions:
                         self._subscribe_flash_for_item(item_obj, list_item, scope_id)
             else:
-                # Count changed - rebuild list AND subscriptions
+                # Count changed OR items changed - rebuild list AND subscriptions
                 self._cleanup_flash_subscriptions()
                 self._scope_to_list_item.clear()
                 self.item_list.clear()
@@ -1079,6 +1151,9 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
 
                     for role_offset, value in self._get_list_item_extra_data(item_obj, index).items():
                         list_item.setData(Qt.ItemDataRole.UserRole + role_offset, value)
+
+                    # Apply scope-based colors
+                    self._apply_list_item_scope_color(list_item, item_obj, index)
 
                     self.item_list.addItem(list_item)
                     # Pass cached scope to avoid double lookup

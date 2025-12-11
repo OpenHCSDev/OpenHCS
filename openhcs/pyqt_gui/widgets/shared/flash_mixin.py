@@ -38,6 +38,8 @@ from PyQt6.QtCore import QTimer, Qt, QRect, QRectF
 from PyQt6.QtWidgets import QWidget, QMainWindow, QDialog, QScrollArea
 from PyQt6.QtGui import QColor, QPainter, QRegion, QPainterPath
 
+from openhcs.pyqt_gui.widgets.shared.flash_config import FlashConfig, get_flash_config
+
 # Default corner radius fallback if not extractable from stylesheet
 DEFAULT_CORNER_RADIUS = 6
 
@@ -86,64 +88,159 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-
-# Shared flash color (light blue)
-FLASH_BASE_COLOR = QColor(77, 166, 255)  # #4da6ff
-
-# Animation timing (seconds for perf_counter)
-FADE_IN_S = 0.100    # Rapid fade-in
-HOLD_S = 0.050       # Hold at max flash
-FADE_OUT_S = 0.350   # Smooth fade-out
-TOTAL_DURATION_S = FADE_IN_S + HOLD_S + FADE_OUT_S
-FLASH_ALPHA = 180    # Flash color alpha
-FRAME_MS = 32        # ~60fps timer interval
-
-# PERFORMANCE: Pre-computed colors to avoid allocation
-_FLASH_COLOR_FULL = QColor(77, 166, 255, FLASH_ALPHA)
-_TRANSPARENT = QColor(0, 0, 0, 0)
+# Declarative mapping: hierarchy level -> ScopeColorScheme -> QColor (or None for default flash color)
+SCOPE_LEVEL_COLOR_SELECTORS: Dict[int, Callable[[Any], Optional[QColor]]] = {
+    0: lambda scheme: None,  # Level 0: use default flash color (config base)
+    1: lambda scheme: scheme.to_qcolor_orchestrator_border(),
+    2: lambda scheme: scheme.to_qcolor_step_window_border(),
+}
 
 
-def get_flash_color(opacity: float = 1.0) -> QColor:
+# ==================== CIRCULAR PALETTE FLASH COLORS ====================
+# Pre-computed WCAG AA compliant color palette for flash animations.
+# 6 base hues × 3 variants = 18 total colors, cycling deterministically.
+
+def _generate_flash_palette() -> List[Tuple[int, int, int]]:
+    """Generate WCAG AA compliant flash color palette.
+
+    Returns 18 RGB tuples: 6 base hues × 3 variants (normal, dark, light).
+    All colors guaranteed to have ≥4.5:1 contrast against white background.
+    """
+    import colorsys
+    from openhcs.pyqt_gui.widgets.shared.scope_color_utils import _ensure_wcag_compliant
+
+    palette = []
+    base_hues = [0, 60, 120, 180, 240, 300]  # Red, Yellow, Green, Cyan, Blue, Magenta
+
+    # 3 variants per hue: normal, dark, light
+    variants = [
+        (0.70, 0.60),  # Normal: 70% saturation, 60% value
+        (0.80, 0.45),  # Dark: 80% saturation, 45% value
+        (0.50, 0.75),  # Light: 50% saturation, 75% value
+    ]
+
+    for hue in base_hues:
+        for saturation, value in variants:
+            # Convert HSV to RGB
+            r, g, b = colorsys.hsv_to_rgb(hue / 360.0, saturation, value)
+            rgb = (int(r * 255), int(g * 255), int(b * 255))
+
+            # Ensure WCAG AA compliance (4.5:1 contrast against white)
+            rgb = _ensure_wcag_compliant(rgb, background=(255, 255, 255))
+            palette.append(rgb)
+
+    return palette
+
+
+# Pre-computed palette (generated once at module load)
+_FLASH_COLOR_PALETTE_RGB: List[Tuple[int, int, int]] = _generate_flash_palette()
+
+
+def get_flash_color_from_palette(scope_id: str, alpha: int = 255, use_parent_scope: bool = True) -> QColor:
+    """Get flash color from circular palette based on scope_id.
+
+    Args:
+        scope_id: Scope identifier (e.g., "plate::config_field")
+        alpha: Alpha channel (0-255)
+        use_parent_scope: If True, hash only parent scope (plate path) so all elements
+                         in same plate get same color. If False, hash full scope_id.
+
+    Returns:
+        QColor from pre-computed WCAG-compliant palette
+    """
+    import hashlib
+    from openhcs.pyqt_gui.widgets.shared.scope_color_utils import extract_orchestrator_scope
+
+    # Extract parent scope (plate path) if requested
+    # This ensures all elements in same plate get same color
+    scope_to_hash = extract_orchestrator_scope(scope_id) if use_parent_scope else scope_id
+
+    # Hash scope to deterministic index in palette
+    hash_bytes = hashlib.md5(scope_to_hash.encode()).digest()
+    index = int.from_bytes(hash_bytes[:2], byteorder="big") % len(_FLASH_COLOR_PALETTE_RGB)
+
+    r, g, b = _FLASH_COLOR_PALETTE_RGB[index]
+    return QColor(r, g, b, alpha)
+
+
+def _base_color(config: FlashConfig) -> QColor:
+    r, g, b = config.base_color_rgb
+    return QColor(r, g, b)
+
+
+def _full_flash_color(config: FlashConfig) -> QColor:
+    r, g, b = config.base_color_rgb
+    return QColor(r, g, b, config.flash_alpha)
+
+
+def get_flash_color(
+    opacity: float = 1.0,
+    config: Optional[FlashConfig] = None,
+    base_color: Optional[QColor] = None,
+) -> QColor:
     """Get the shared flash QColor with optional opacity (0.0-1.0)."""
+    cfg = config or get_flash_config()
+    if base_color is not None:
+        color = QColor(base_color)
+        color.setAlpha(int(cfg.flash_alpha * opacity))
+        return color
     if opacity >= 1.0:
-        return _FLASH_COLOR_FULL
-    color = QColor(FLASH_BASE_COLOR)
-    color.setAlpha(int(FLASH_ALPHA * opacity))
+        return _full_flash_color(cfg)
+    color = _base_color(cfg)
+    color.setAlpha(int(cfg.flash_alpha * opacity))
     return color
 
 
-def compute_flash_color_at_time(start_time: float, now: float) -> Optional[QColor]:
+def compute_flash_color_at_time(
+    start_time: float,
+    now: float,
+    config: Optional[FlashConfig] = None,
+    base_color: Optional[QColor] = None,
+) -> Optional[QColor]:
     """Compute flash color based on elapsed time. Returns None if animation complete.
 
     PAINT-TIME COMPUTATION: Called during paint, not during timer tick.
     This moves O(n) color computation from timer to paint (which Qt batches).
     """
+    cfg = config or get_flash_config()
+    fade_in_s = cfg.fade_in_s
+    hold_s = cfg.hold_s
+    fade_out_s = cfg.fade_out_s
+    total_duration_s = fade_in_s + hold_s + fade_out_s
+
     elapsed = now - start_time
 
     if elapsed < 0:
         return None  # Not started yet
-    elif elapsed >= TOTAL_DURATION_S:
+    elif elapsed >= total_duration_s:
         return None  # Animation complete
-    elif elapsed < FADE_IN_S:
+    elif elapsed < fade_in_s:
         # Fade in: 0 → full alpha
-        t = elapsed / FADE_IN_S
+        t = elapsed / fade_in_s
         t = t * (2 - t)  # OutQuad easing
-        alpha = int(FLASH_ALPHA * t)
-        return QColor(77, 166, 255, alpha)
-    elif elapsed < FADE_IN_S + HOLD_S:
-        # Hold at full
-        return _FLASH_COLOR_FULL
+        alpha = int(cfg.flash_alpha * t)
+        color = QColor(base_color) if base_color is not None else _base_color(cfg)
+        color.setAlpha(alpha)
+        return color
+    elif elapsed < fade_in_s + hold_s:
+        if base_color is not None:
+            color = QColor(base_color)
+            color.setAlpha(cfg.flash_alpha)
+            return color
+        return _full_flash_color(cfg)
     else:
         # Fade out: full → 0
-        fade_elapsed = elapsed - FADE_IN_S - HOLD_S
-        t = fade_elapsed / FADE_OUT_S
+        fade_elapsed = elapsed - fade_in_s - hold_s
+        t = fade_elapsed / fade_out_s
         # InOutCubic easing
         if t < 0.5:
             t = 4 * t * t * t
         else:
             t = 1 - pow(-2 * t + 2, 3) / 2
-        alpha = int(FLASH_ALPHA * (1 - t))
-        return QColor(77, 166, 255, alpha)
+        alpha = int(cfg.flash_alpha * (1 - t))
+        color = QColor(base_color) if base_color is not None else _base_color(cfg)
+        color.setAlpha(alpha)
+        return color
 
 
 # ==================== FLASH ELEMENT REGISTRATION ====================
@@ -865,6 +962,7 @@ class _GlobalFlashCoordinator:
 
     def __init__(self):
         self._timer: Optional[QTimer] = None
+        self._config = get_flash_config()
         # FIX 1: Single unified flash timing (all keys are scoped, no global/local split)
         self._flash_start_times: Dict[str, float] = {}
         # Pre-computed colors for ALL keys
@@ -886,7 +984,50 @@ class _GlobalFlashCoordinator:
         """Start the timer if not running."""
         timer = self._ensure_timer()
         if not timer.isActive():
-            timer.start(FRAME_MS)
+            timer.start(self._config.frame_ms)
+
+    def _extract_scope_from_key(self, key: str) -> Optional[str]:
+        """Extract orchestrator/parent scope from flash key using canonical parser."""
+        try:
+            from openhcs.pyqt_gui.widgets.shared.scope_color_utils import extract_orchestrator_scope
+
+            return extract_orchestrator_scope(key)
+        except Exception:
+            # Fallback to original key if parsing fails
+            return key
+
+    def _get_base_color_for_key(self, key: str) -> Optional[QColor]:
+        """Look up base color for flash rendering to match window border colors.
+
+        Returns a scope-based QColor when the key looks like a scope_id.
+        Returns a neutral grey color for non-scope keys or failures.
+        """
+        # Empty/None → neutral
+        if not key or key == "":
+            return self._get_neutral_flash_color()
+        # Heuristic: non-scope keys (no "::" and not path-like) → neutral
+        if "::" not in key and not key.startswith("/"):
+            return self._get_neutral_flash_color()
+
+        try:
+            from openhcs.pyqt_gui.widgets.shared.scope_color_utils import get_scope_color_scheme
+
+            scheme = get_scope_color_scheme(key)
+            # If scheme is neutral (scope_id None), use neutral color
+            if scheme.scope_id is None:
+                return self._get_neutral_flash_color()
+
+            parts = key.split("::") if key else []
+            if len(parts) <= 1:
+                return scheme.to_qcolor_orchestrator_border()
+            return scheme.to_qcolor_step_window_border()
+        except Exception as exc:
+            logger.debug("Failed to get scope color for key %s: %s", key, exc)
+            return self._get_neutral_flash_color()
+
+    def _get_neutral_flash_color(self) -> QColor:
+        """Neutral grey flash color for non-scope keys or errors."""
+        return QColor(180, 180, 180)
 
     def add_pending_registration(self, key: str, element_factory: Callable[[], Optional['FlashElement']], widget: QWidget) -> None:
         """Add a pending registration (widget not in window hierarchy yet)."""
@@ -983,11 +1124,17 @@ class _GlobalFlashCoordinator:
         expired_keys = []
 
         # Compute colors for ALL keys (no global/local distinction)
+        total_duration_s = (
+            self._config.fade_in_s + self._config.hold_s + self._config.fade_out_s
+        )
         for key, start_time in self._flash_start_times.items():
-            if now - start_time >= TOTAL_DURATION_S:
+            base_color = self._get_base_color_for_key(key)
+            if now - start_time >= total_duration_s:
                 expired_keys.append(key)
                 continue
-            color = compute_flash_color_at_time(start_time, now)
+            color = compute_flash_color_at_time(
+                start_time, now, config=self._config, base_color=base_color
+            )
             if color and color.alpha() > 0:
                 self._computed_colors[key] = color
 

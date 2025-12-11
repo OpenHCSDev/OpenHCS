@@ -630,7 +630,8 @@ class PipelineOrchestrator:
         logger.info(f"Initializing microscope handler using input directory: {self.input_dir}...")
         try:
             # Use configured microscope type or auto-detect
-            shared_context = get_current_global_config(GlobalPipelineConfig)
+            # Use SAVED global config (not live edits) for orchestrator initialization
+            shared_context = get_current_global_config(GlobalPipelineConfig, use_live=False)
             microscope_type = shared_context.microscope.value if shared_context.microscope != Microscope.AUTO else 'auto'
             self.microscope_handler = create_microscope_handler(
                 plate_folder=str(self.plate_path),

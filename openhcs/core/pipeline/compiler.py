@@ -375,11 +375,11 @@ class PipelineCompiler:
         from openhcs.config_framework.context_manager import config_context
 
         # Resolve each step individually with nested context (pipeline -> step)
-        # NOTE: The caller has already set up config_context(orchestrator.pipeline_config)
+        # NOTE: The caller has already set up config_context(orchestrator.pipeline_config, use_live_global=False)
         # We add step-level context on top for each step
         resolved_steps = []
         for step in steps_definition:
-            with config_context(step):  # Step-level context on top of pipeline context
+            with config_context(step, use_live_global=False):  # Step-level context on top of pipeline context
                 resolved_step = resolve_lazy_configurations_for_serialization(step)
                 resolved_steps.append(resolved_step)
         steps_definition = resolved_steps
@@ -1177,8 +1177,9 @@ class PipelineCompiler:
                 temp_context.step_axis_filters = global_step_axis_filters
 
                 # CRITICAL: Wrap all compilation steps in config_context() for lazy resolution
+                # Use use_live_global=False to ensure compiler uses SAVED global config, not live edits
                 from openhcs.config_framework.context_manager import config_context
-                with config_context(orchestrator.pipeline_config):
+                with config_context(orchestrator.pipeline_config, use_live_global=False):
                     # Validate sequential components compatibility BEFORE analyzing sequential mode
                     seq_config = temp_context.global_config.sequential_processing_config
                     if seq_config and seq_config.sequential_components:
@@ -1203,7 +1204,7 @@ class PipelineCompiler:
                         context.pipeline_sequential_combinations = combinations
                         context.current_sequential_combination = combo
 
-                        with config_context(orchestrator.pipeline_config):
+                        with config_context(orchestrator.pipeline_config, use_live_global=False):
                             resolved_steps = PipelineCompiler.initialize_step_plans_for_context(context, pipeline_definition, orchestrator, metadata_writer=is_responsible, plate_path=orchestrator.plate_path)
                             PipelineCompiler.declare_zarr_stores_for_context(context, resolved_steps, orchestrator)
                             PipelineCompiler.plan_materialization_flags_for_context(context, resolved_steps, orchestrator)
@@ -1224,7 +1225,7 @@ class PipelineCompiler:
                     context = orchestrator.create_context(axis_id)
                     context.step_axis_filters = global_step_axis_filters
 
-                    with config_context(orchestrator.pipeline_config):
+                    with config_context(orchestrator.pipeline_config, use_live_global=False):
                         resolved_steps = PipelineCompiler.initialize_step_plans_for_context(context, pipeline_definition, orchestrator, metadata_writer=is_responsible, plate_path=orchestrator.plate_path)
                         PipelineCompiler.declare_zarr_stores_for_context(context, resolved_steps, orchestrator)
                         PipelineCompiler.plan_materialization_flags_for_context(context, resolved_steps, orchestrator)

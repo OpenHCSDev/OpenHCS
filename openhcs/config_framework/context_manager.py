@@ -90,7 +90,7 @@ def _merge_nested_dataclass(base, override, mask_with_none: bool = False):
 
 
 @contextmanager
-def config_context(obj, mask_with_none: bool = False):
+def config_context(obj, mask_with_none: bool = False, use_live_global: bool = True):
     """
     Create new context scope with obj's matching fields merged into base config.
 
@@ -105,18 +105,21 @@ def config_context(obj, mask_with_none: bool = False):
                        If False (default), None values are ignored (normal inheritance).
                        Use True when editing GlobalPipelineConfig to mask thread-local
                        loaded instance with static class defaults.
+        use_live_global: If True (default), use LIVE global config (UI sees unsaved edits).
+                        If False, use SAVED global config (compiler sees saved values).
 
     Usage:
-        with config_context(orchestrator.pipeline_config):  # Pipeline-level context
-            # ...
-        with config_context(step):  # Step-level context
-            # ...
-        with config_context(GlobalPipelineConfig(), mask_with_none=True):  # Static defaults
-            # ...
+        # UI operations (default - uses LIVE)
+        with config_context(orchestrator.pipeline_config):
+            # UI sees unsaved global config edits
+
+        # Compilation (explicit - uses SAVED)
+        with config_context(orchestrator.pipeline_config, use_live_global=False):
+            # Compiler uses saved global config only
     """
     # Get current context as base for nested contexts, or fall back to base global config
     current_context = get_current_temp_global()
-    base_config = current_context if current_context is not None else get_base_global_config()
+    base_config = current_context if current_context is not None else get_base_global_config(use_live=use_live_global)
 
     # Find matching fields between obj and base config type
     overrides = {}
@@ -596,27 +599,19 @@ def build_context_stack(
     ancestor_types = [type(o).__name__ for o in ancestor_objects] if ancestor_objects else []
     logger.debug(f"🔧 build_context_stack: obj={obj_type_name}, ancestors={ancestor_types}")
 
-    # Check if ancestor_objects contains a GlobalConfigBase (live edited values)
-    ancestor_global = None
-    if ancestor_objects:
-        for obj in ancestor_objects:
-            if isinstance(obj, GlobalConfigBase):
-                ancestor_global = obj
-                break  # Use first (least specific) global config
-
     # 1. Global context layer (least specific)
-    # Priority: ancestor GlobalConfigBase > thread-local > static defaults
+    # ALWAYS use LIVE thread-local for global config - it's the SINGLE SOURCE OF TRUTH
+    # Don't use ancestor_objects for GlobalConfigBase since that comes from to_object()
+    # which can be stale relative to the LIVE thread-local we just updated.
     if is_global_config_editing:
         try:
             global_layer = obj_type()  # Fresh instance with static defaults
             stack.enter_context(config_context(global_layer, mask_with_none=True))
         except Exception:
             pass  # Couldn't create global layer
-    elif ancestor_global is not None:
-        # Use live edited GlobalConfigBase from ancestor_objects
-        stack.enter_context(config_context(ancestor_global))
     else:
-        global_layer = get_base_global_config()
+        # ALWAYS use LIVE thread-local - it's updated by GlobalPipelineConfig ObjectState
+        global_layer = get_base_global_config(use_live=True)
         if global_layer:
             stack.enter_context(config_context(global_layer))
 
@@ -878,12 +873,16 @@ def merge_configs(base, overrides: Dict[str, Any]):
         return base
 
 
-def get_base_global_config():
+def get_base_global_config(use_live: bool = True):
     """
     Get the base global config (fallback when no context set).
 
     This provides the global config that was set up with ensure_global_config_context(),
     or a default if none was set. Used as the base for merging operations.
+
+    Args:
+        use_live: If True (default), return LIVE config (UI sees unsaved edits).
+                 If False, return SAVED config (compiler sees saved values).
 
     Returns:
         Current global config instance or default instance of base config type
@@ -894,9 +893,15 @@ def get_base_global_config():
 
         base_config_type = get_base_config_type()
 
-        # First try to get the global config that was set up
-        current_global = get_current_global_config(base_config_type)
+        # Get the appropriate global config (live or saved)
+        current_global = get_current_global_config(base_config_type, use_live=use_live)
         if current_global is not None:
+            # DEBUG: Log well_filter value
+            try:
+                wf_value = object.__getattribute__(current_global.well_filter_config, 'well_filter')
+                logger.info(f"🔍 get_base_global_config: use_live={use_live}, well_filter={wf_value}")
+            except:
+                pass
             return current_global
 
         # Fallback to default if none was set

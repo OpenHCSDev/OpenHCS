@@ -241,6 +241,9 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
             self.style_generator.generate_tree_widget_style()
         )
 
+        # Initialize scope-based border styling (ScopedBorderMixin)
+        self._init_scope_border()
+
     def _create_inheritance_tree(self) -> QTreeWidget:
         """Create tree widget showing inheritance hierarchy for navigation."""
         # Pass form_manager as flash_manager - tree reads from SAME _flash_colors dict as groupboxes
@@ -392,6 +395,20 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
                 logger.info(f"🔍 SAVE_CONFIG: Reset _saving=False (id={id(self)})")
 
             if is_global_config_type(self.config_class):
+                # CRITICAL: Update SAVED thread-local on save (what descendants/compiler see)
+                # Also update LIVE thread-local to match saved
+                from openhcs.config_framework.global_config import set_saved_global_config, set_live_global_config
+                set_saved_global_config(self.config_class, new_config)
+                set_live_global_config(self.config_class, new_config)
+                logger.debug(f"Updated SAVED and LIVE thread-local {self.config_class.__name__} on SAVE")
+
+                # CRITICAL: Invalidate ALL descendant caches so they re-resolve with the new SAVED thread-local
+                # This is necessary when saving None values - descendants must pick up the new None
+                # instead of continuing to use cached values resolved from the old saved thread-local
+                from openhcs.config_framework.object_state import ObjectStateRegistry
+                ObjectStateRegistry.increment_token(notify=True)
+                logger.debug(f"Invalidated all descendant caches after updating SAVED thread-local")
+
                 self._original_global_config_snapshot = copy.deepcopy(new_config)
                 self._global_context_dirty = False
 
@@ -488,9 +505,6 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
 
                 # Update form values from the new config without rebuilding
                 self._update_form_from_config(new_config)
-
-                if suppress_context:
-                    self._sync_global_context_with_current_values()
             finally:
                 if suppress_context:
                     self._suppress_global_context_sync = False
@@ -504,38 +518,14 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
             QMessageBox.critical(self, "Code Edit Error", f"Failed to apply edited code:\n{e}")
 
     def _on_global_config_field_changed(self, param_name: str, value: Any):
-        """Keep thread-local global config context in sync with live edits."""
+        """Track that global config has unsaved changes.
+
+        NOTE: LIVE thread-local is now auto-updated by ObjectState.update_parameter()
+        This callback just tracks dirty state for UI purposes.
+        """
         if self._saving:
             return
-        if self._suppress_global_context_sync:
-            self._needs_global_context_resync = True
-            return
-        self._sync_global_context_with_current_values(param_name)
-
-    def _sync_global_context_with_current_values(self, source_param: Optional[str] = None):
-        """Rebuild global context from current form values once.
-
-        PERFORMANCE NOTE: Do NOT call trigger_global_cross_window_refresh() here.
-        The FieldChangeDispatcher already handles cross-window updates via sibling
-        refresh and context_value_changed signals. We only need to update the
-        thread-local global config so lazy placeholder resolution sees current values.
-        """
-        if not is_global_config_type(self.config_class):
-            return
-        try:
-            # Use to_object() to reconstruct nested structure from flat storage
-            updated_config = self.state.to_object()
-            self.current_config = updated_config
-            from openhcs.config_framework.global_config import set_global_config_for_editing
-            set_global_config_for_editing(self.config_class, updated_config)
-            self._global_context_dirty = True
-            # REMOVED: trigger_global_cross_window_refresh() - causes O(n) refresh on every keystroke
-            # Cross-window updates are already handled by FieldChangeDispatcher
-            if source_param:
-                logger.debug(f"Synchronized {self.config_class.__name__} context after change ({source_param})")
-        except Exception as exc:
-            logger.warning("Failed to sync global context%s: %s",
-                           f' ({source_param})' if source_param else '', exc)
+        self._global_context_dirty = True
 
     def _update_form_from_config(self, new_config):
         """Update form values from new config using the shared updater."""
@@ -575,5 +565,4 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
         if hasattr(self, 'form_manager'):
             return [self.form_manager]
         return []
-
 

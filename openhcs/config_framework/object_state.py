@@ -286,6 +286,10 @@ class ObjectStateRegistry:
         # Normalize to base type for comparison (LazyX → X)
         base_changed_type = get_base_type_for_lazy(changed_type) or changed_type
 
+        # DEBUG: Log invalidation for well_filter
+        if field_name == 'well_filter':
+            logger.info(f"🔍 invalidate_by_type_and_scope: scope={changed_scope!r}, type={base_changed_type.__name__}, field={field_name}, total_states={len(cls._states)}")
+
         for state in cls._states.values():
             state_scope = cls._normalize_scope_id(state.scope_id)
 
@@ -293,6 +297,8 @@ class ObjectStateRegistry:
             # Global scope (empty string) affects ALL states
             if changed_scope == "":
                 # Global scope - always a descendant (or self if also global)
+                if field_name == 'well_filter':
+                    logger.info(f"🔍   Checking state: scope={state_scope!r}, obj_type={type(state.object_instance).__name__}")
                 logger.debug(f"[SCOPE] Global change affects state scope={state_scope!r}")
             else:
                 # Non-global: check exact match or descendant
@@ -754,6 +760,57 @@ class ObjectState:
         self._invalid_fields.add(param_name)
         self._cached_object = None  # Invalidate cached reconstructed object
 
+        # GLOBAL CONFIG EXCEPTION: Update LIVE thread-local FIRST, BEFORE invalidating descendants!
+        # This is critical: descendants re-resolve during invalidation, so they need to see
+        # the NEW value in the LIVE thread-local, not the old one.
+        obj_type = type(self.object_instance)
+        if getattr(obj_type, '_is_global_config', False):
+            try:
+                from openhcs.config_framework.global_config import set_live_global_config, get_live_global_config
+                from openhcs.config_framework.context_manager import clear_current_temp_global
+                from openhcs.config_framework.lazy_factory import replace_raw
+
+                # Get current LIVE config
+                current_live = get_live_global_config(obj_type)
+                if current_live is not None:
+                    # Do a quick partial update to set the new value in LIVE thread-local
+                    if '.' in param_name:
+                        # Nested field like 'well_filter_config.well_filter'
+                        parts = param_name.split('.')
+                        nested_config_name = parts[0]
+                        nested_field_name = '.'.join(parts[1:])
+
+                        # Get nested config using object.__getattribute__ to avoid lazy resolution
+                        try:
+                            nested_config = object.__getattribute__(current_live, nested_config_name)
+                        except AttributeError:
+                            nested_config = None
+
+                        if nested_config is not None and is_dataclass(nested_config):
+                            # Update the nested config with the new value
+                            updated_nested = replace_raw(nested_config, **{nested_field_name: value})
+                            # Update LIVE thread-local with the updated nested config
+                            temp_live = replace_raw(current_live, **{nested_config_name: updated_nested})
+                            set_live_global_config(obj_type, temp_live)
+                    else:
+                        # Top-level field
+                        temp_live = replace_raw(current_live, **{param_name: value})
+                        set_live_global_config(obj_type, temp_live)
+
+                # Clear cached context so resolution uses updated LIVE thread-local
+                clear_current_temp_global()
+
+                # DEBUG: Log well_filter value
+                if 'well_filter' in param_name:
+                    verify_live = get_live_global_config(obj_type)
+                    try:
+                        wf_value = object.__getattribute__(verify_live.well_filter_config, 'well_filter')
+                        logger.info(f"🔍 LIVE thread-local updated BEFORE invalidation: {obj_type.__name__}.{param_name} = {value}, well_filter={wf_value}")
+                    except:
+                        pass
+            except Exception as e:
+                logger.warning(f"Failed to update LIVE thread-local: {e}")
+
         # SCOPE + TYPE + FIELD AWARE INVALIDATION:
         # Get the CONTAINER type for this field (e.g., WellFilterConfig for 'well_filter_config.well_filter')
         # This is critical for sibling inheritance: when WellFilterConfig.well_filter changes,
@@ -762,6 +819,10 @@ class ObjectState:
 
         # Extract leaf field name for invalidation matching
         leaf_field_name = param_name.split('.')[-1] if '.' in param_name else param_name
+
+        # DEBUG: Log invalidation for well_filter
+        if 'well_filter' in param_name:
+            logger.info(f"🔍 Invalidating descendants: scope={self.scope_id}, type={container_type.__name__}, field={leaf_field_name}")
 
         ObjectStateRegistry.invalidate_by_type_and_scope(
             scope_id=self.scope_id,
@@ -783,7 +844,13 @@ class ObjectState:
         """
         self._ensure_live_resolved()
         assert self._live_resolved is not None  # Guaranteed by _ensure_live_resolved
-        return self._live_resolved.get(param_name)
+        result = self._live_resolved.get(param_name)
+
+        # DEBUG: Log well_filter resolution
+        if 'well_filter' in param_name:
+            logger.info(f"🔍 get_resolved_value: scope={self.scope_id!r}, obj_type={type(self.object_instance).__name__}, param={param_name}, value={result}")
+
+        return result
 
     def find_path_for_type(self, container_type: type) -> Optional[str]:
         """Find the path prefix for a container type in this ObjectState.
@@ -1243,18 +1310,23 @@ class ObjectState:
         """
         from openhcs.core.config import GlobalPipelineConfig
         from openhcs.config_framework.global_config import set_global_config_for_editing
-        from openhcs.config_framework.context_manager import get_base_global_config
-        from openhcs.pyqt_gui.widgets.shared.services.value_collection_service import ValueCollectionService
-
-        current_values = self.get_current_values()
-        base_config = get_base_global_config()
-        reconstructed_values = ValueCollectionService.reconstruct_nested_dataclasses(current_values)
 
         try:
-            # Use replace_raw to preserve None values (dataclasses.replace triggers lazy resolution)
-            from openhcs.config_framework.lazy_factory import replace_raw
-            new_config = replace_raw(base_config, **reconstructed_values)
-            set_global_config_for_editing(GlobalPipelineConfig, new_config)
+            # CRITICAL: Use to_object() to properly reconstruct nested structure from flat storage
+            # This ensures None values in nested configs (like well_filter_config.well_filter)
+            # are properly preserved and propagated to descendants.
+            # The old approach using get_current_values() + replace_raw() failed because:
+            # 1. get_current_values() returns flat dict with dotted paths ('well_filter_config.well_filter': None)
+            # 2. replace_raw() expects top-level field names, not dotted paths
+            # 3. This caused None values in nested configs to not be properly set in thread-local storage
+            updated_config = self.to_object()
+
+            # DEBUG: Log what we're about to set
+            raw_well_filter = object.__getattribute__(updated_config.well_filter_config, 'well_filter')
+            logger.debug(f"🔍 LIVE_UPDATES: to_object() returned well_filter={raw_well_filter}")
+            logger.debug(f"🔍 LIVE_UPDATES: Flat storage has well_filter_config.well_filter={self.parameters.get('well_filter_config.well_filter')}")
+
+            set_global_config_for_editing(GlobalPipelineConfig, updated_config)
             logger.debug(f"🔍 LIVE_UPDATES: Updated thread-local GlobalPipelineConfig")
         except Exception as e:
             logger.warning(f"🔍 LIVE_UPDATES: Failed to update thread-local GlobalPipelineConfig: {e}")
@@ -1358,13 +1430,18 @@ class ObjectState:
         field_updates = {}
         for field_name in self._path_to_type:
             if '.' not in field_name:
-                # Check if the stored value is a dataclass instance
-                value = self.parameters.get(field_name)
-                if value is not None and is_dataclass(type(value)):
-                    # Nested dataclass: recursively reconstruct
+                # Check if this field's TYPE is a dataclass (not the instance value)
+                # We need to check the TYPE because the instance value might be stale
+                # (e.g., self.parameters['well_filter_config'] might have well_filter=2
+                # even though self.parameters['well_filter_config.well_filter'] = None)
+                field_type = self._path_to_type.get(field_name)
+                if field_type is not None and is_dataclass(field_type):
+                    # Nested dataclass: ALWAYS recursively reconstruct from flat storage
+                    # This ensures we pick up changes to nested fields like 'well_filter_config.well_filter'
                     field_updates[field_name] = self._reconstruct_from_prefix(field_name)
                 else:
                     # Primitive field: use value directly from parameters
+                    value = self.parameters.get(field_name)
                     field_updates[field_name] = value
 
         # Python functions can't be copied, but we CAN update their attributes
@@ -1426,6 +1503,9 @@ class ObjectState:
             else:
                 # Direct field of this object
                 direct_fields[remainder] = value
+                # DEBUG
+                if prefix == 'well_filter_config' and remainder == 'well_filter':
+                    logger.debug(f"🔍 _reconstruct: Found direct field {prefix}.{remainder} = {value}")
 
         # Reconstruct nested dataclasses first
         for nested_name in nested_prefixes:
@@ -1445,5 +1525,16 @@ class ObjectState:
         if not prefix:
             direct_fields.update(self._excluded_params)
 
+        # DEBUG: Log what we're reconstructing
+        if prefix == 'well_filter_config':
+            logger.debug(f"🔍 _reconstruct_from_prefix: prefix={prefix}, direct_fields={direct_fields}")
+
         # Instantiate the dataclass with ALL fields including None values
-        return obj_type(**direct_fields)
+        result = obj_type(**direct_fields)
+
+        # DEBUG: Log the result
+        if prefix == 'well_filter_config':
+            raw_well_filter = object.__getattribute__(result, 'well_filter')
+            logger.debug(f"🔍 _reconstruct_from_prefix: Reconstructed {prefix} with well_filter={raw_well_filter}")
+
+        return result

@@ -207,10 +207,10 @@ class FieldChangeDispatcher:
             if DEBUG_DISPATCHER:
                 logger.warning(f"  🚫 Cross-window BLOCKED: _should_skip_updates()=True for {root_manager.field_id}")
             return
-        if root_manager.config.is_global_config_editing:
-            root_manager.state.update_thread_local_global_config()
-            if DEBUG_DISPATCHER:
-                logger.info(f"  🌐 Updated thread-local global config")
+
+        # REMOVED: update_thread_local_global_config() call
+        # Thread-local should ONLY be updated on SAVE, not on every keystroke!
+        # Descendants (plates, steps) should see the SAVED global config, not unsaved edits.
 
         if DEBUG_DISPATCHER:
             logger.info(f"  📡 Emitting cross-window: scope={root_manager.scope_id}, path={full_path}")

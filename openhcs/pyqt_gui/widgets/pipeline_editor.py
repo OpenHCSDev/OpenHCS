@@ -24,6 +24,7 @@ from openhcs.io.filemanager import FileManager
 from openhcs.core.steps.function_step import FunctionStep
 # Mixin imports REMOVED - now in ABC (handle_selection_change_with_prevention, CrossWindowPreviewMixin)
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
+from openhcs.pyqt_gui.widgets.shared.scope_visual_config import ListItemType
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.pyqt_gui.config import PyQtGUIConfig, get_default_pyqt_gui_config
 from openhcs.config_framework.object_state import ObjectState, ObjectStateRegistry
@@ -82,6 +83,8 @@ class PipelineEditorWidget(AbstractManagerWidget):
         'items_changed_signal': 'pipeline_changed',  # self.pipeline_changed.emit(...)
         'preserve_selection_pred': lambda self: bool(self.pipeline_steps),
         'list_item_data': 'item',                 # store the step object
+        'scope_item_type': ListItemType.STEP,
+        'scope_id_builder': lambda item, idx, w: w._build_step_scope_id(item),
     }
 
     # Declarative preview field configuration (processed automatically in ABC.__init__)
@@ -599,7 +602,18 @@ class PipelineEditorWidget(AbstractManagerWidget):
 
         self._normalize_step_scope_tokens()
 
+        # CRITICAL: Force cleanup of flash subscriptions when switching plates
+        # This ensures FlashElements don't point to stale QListWidgetItems
+        # from the previous plate's list widget
+        self._cleanup_flash_subscriptions()
+
         self.update_item_list()
+
+        # CRITICAL: Invalidate flash overlay cache after rebuilding list
+        # This forces geometry recalculation for the new list items
+        from openhcs.pyqt_gui.widgets.shared.flash_mixin import WindowFlashOverlay
+        WindowFlashOverlay.invalidate_cache_for_widget(self)
+
         self.update_button_states()
         logger.info(f"  → Pipeline editor updated for plate: {plate_path}")
 
