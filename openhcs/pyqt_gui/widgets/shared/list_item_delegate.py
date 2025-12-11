@@ -14,6 +14,8 @@ from PyQt6.QtCore import Qt, QRect
 SCOPE_SCHEME_ROLE = Qt.ItemDataRole.UserRole + 10
 # Legacy role (kept for compatibility) - now stores full ScopeColorScheme
 SCOPE_BORDER_ROLE = SCOPE_SCHEME_ROLE
+# Flash key role - stores scope_id for flash color lookup
+FLASH_KEY_ROLE = Qt.ItemDataRole.UserRole + 11
 
 # Border constants matching ScopedBorderMixin
 BORDER_TINT_FACTORS: Tuple[float, ...] = (0.7, 1.0, 1.4)
@@ -57,7 +59,7 @@ class MultilinePreviewItemDelegate(QStyledItemDelegate):
         # NOTE: Flash rendering moved to WindowFlashOverlay for O(1) performance
 
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index) -> None:
-        """Paint the item with multiline support (no flash - window overlay handles that)."""
+        """Paint the item with multiline support and flash behind text."""
         # Prepare a copy to let style draw backgrounds, hover, selection, borders, etc.
         opt = QStyleOptionViewItem(option)
         self.initStyleOption(opt, index)
@@ -66,12 +68,26 @@ class MultilinePreviewItemDelegate(QStyledItemDelegate):
         text = opt.text or ""
         opt.text = ""
 
-        # TRUE O(1): Flash is rendered by WindowFlashOverlay, not here
+        # Calculate border inset (used for background and flash)
+        scheme = index.data(SCOPE_SCHEME_ROLE)
+        border_inset = 0
+        if scheme is not None:
+            layers = getattr(scheme, "step_border_layers", None)
+            if layers:
+                border_inset = sum(layer[0] for layer in layers)
+        content_rect = option.rect.adjusted(border_inset, border_inset, -border_inset, -border_inset)
 
-        # Scope-based background tint (if provided)
+        # Scope-based background tint (if provided) - inset to avoid drawing behind borders
         item_bg = index.data(Qt.ItemDataRole.BackgroundRole)
         if item_bg:
-            painter.fillRect(option.rect, item_bg)
+            painter.fillRect(content_rect, item_bg)
+
+        # Flash effect - drawn BEHIND text but inside borders
+        flash_key = index.data(FLASH_KEY_ROLE)
+        if flash_key and self._manager is not None:
+            flash_color = self._manager.get_flash_color_for_key(flash_key)
+            if flash_color and flash_color.alpha() > 0:
+                painter.fillRect(content_rect, flash_color)
 
         # Let the style draw selection, hover, borders
         self.parent().style().drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, self.parent())
@@ -156,7 +172,7 @@ class MultilinePreviewItemDelegate(QStyledItemDelegate):
         painter.restore()
 
         # Draw scope border using same layered pattern as window borders
-        scheme = index.data(SCOPE_SCHEME_ROLE)
+        # (scheme already fetched at top of paint() for background inset calculation)
         if scheme is not None:
             self._paint_border_layers(painter, option.rect, scheme)
 

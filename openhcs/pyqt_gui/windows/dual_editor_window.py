@@ -47,12 +47,11 @@ class DualEditorWindow(BaseFormDialog):
     
     def __init__(self, step_data: Optional[FunctionStep] = None, is_new: bool = False,
                  on_save_callback: Optional[Callable] = None, color_scheme: Optional[PyQt6ColorScheme] = None,
-                 orchestrator=None, gui_config=None, parent=None):
+                 orchestrator=None, gui_config=None, parent=None, step_index: Optional[int] = None):
         """
         Initialize the dual editor window.
 
         Args:
-        if self.tab_bar is not None:
             step_data: FunctionStep to edit (None for new step)
             is_new: Whether this is a new step
             on_save_callback: Function to call when step is saved
@@ -60,8 +59,12 @@ class DualEditorWindow(BaseFormDialog):
             orchestrator: Orchestrator instance for context management
             gui_config: Optional GUI configuration passed from PipelineEditor
             parent: Parent widget
+            step_index: Position in pipeline (for border pattern matching list item)
         """
         super().__init__(parent)
+
+        # Store step_index for border pattern (used by ScopedBorderMixin._init_scope_border)
+        self._step_index = step_index
 
         # Make window non-modal (like plate manager and pipeline editor)
         self.setModal(False)

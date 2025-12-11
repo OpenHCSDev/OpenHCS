@@ -19,16 +19,24 @@ class ScopedBorderMixin:
     }
 
     _scope_color_scheme = None
+    _step_index: Optional[int] = None  # For border pattern based on actual position
 
     def _init_scope_border(self) -> None:
-        """Initialize scope-based border. Call after scope_id is set."""
+        """Initialize scope-based border. Call after scope_id is set.
+
+        If _step_index is set, uses it for border pattern instead of
+        extracting from scope_id. This allows windows to match their
+        list item's border based on actual position in pipeline.
+        """
         scope_id = getattr(self, "scope_id", None)
         if not scope_id:
             return
 
         from openhcs.pyqt_gui.widgets.shared.scope_color_utils import get_scope_color_scheme
 
-        self._scope_color_scheme = get_scope_color_scheme(scope_id)
+        # Use explicit step_index if set (for windows matching list item position)
+        step_index = getattr(self, "_step_index", None)
+        self._scope_color_scheme = get_scope_color_scheme(scope_id, step_index=step_index)
         border_style = self._scope_color_scheme.to_stylesheet_step_window_border()
         current_style = self.styleSheet() if hasattr(self, "styleSheet") else ""
         self.setStyleSheet(f"{current_style}\nQDialog {{ {border_style} }}")

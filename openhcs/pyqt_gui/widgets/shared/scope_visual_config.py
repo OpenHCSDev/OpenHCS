@@ -13,9 +13,11 @@ class ScopeVisualConfig:
     ORCHESTRATOR_ITEM_BG_VALUE: int = 85
     ORCHESTRATOR_ITEM_BORDER_SATURATION: int = 30
     ORCHESTRATOR_ITEM_BORDER_VALUE: int = 80
+    ORCHESTRATOR_ITEM_BG_OPACITY: float = 0.05 # 0.0-1.0
 
     STEP_ITEM_BG_SATURATION: int = 35
     STEP_ITEM_BG_VALUE: int = 88
+    STEP_ITEM_BG_OPACITY: float = 0.050  # 0.0-1.0
 
     STEP_WINDOW_BORDER_SATURATION: int = 60
     STEP_WINDOW_BORDER_VALUE: int = 70
@@ -52,8 +54,9 @@ class ScopeColorScheme:
         """QColor for orchestrator item background with alpha."""
         from PyQt6.QtGui import QColor
 
+        config = get_scope_visual_config()
         r, g, b = self.orchestrator_item_bg_rgb
-        return QColor(r, g, b, int(255 * 0.40))
+        return QColor(r, g, b, int(255 * config.ORCHESTRATOR_ITEM_BG_OPACITY))
 
     def to_qcolor_orchestrator_border(self):
         """QColor for orchestrator item border."""
@@ -73,8 +76,9 @@ class ScopeColorScheme:
             return None
         from PyQt6.QtGui import QColor
 
+        config = get_scope_visual_config()
         r, g, b = self.step_item_bg_rgb
-        return QColor(r, g, b, int(255 * 0.30))
+        return QColor(r, g, b, int(255 * config.STEP_ITEM_BG_OPACITY))
 
     def to_stylesheet_step_window_border(self) -> str:
         """Reserve border space via stylesheet for step windows."""

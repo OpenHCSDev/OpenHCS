@@ -956,7 +956,8 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
             key=scope_id,
             get_rect_in_window=get_list_item_rect,
             needs_scroll_clipping=False,
-            source_id=f"list_item:{id(self)}:{scope_id}"  # Unique per manager instance + scope
+            source_id=f"list_item:{id(self)}:{scope_id}",  # Unique per manager instance + scope
+            skip_overlay_paint=True  # Delegate handles painting flash behind text
         )
         overlay = WindowFlashOverlay.get_for_window(self)
         logger.debug(f"⚡ FLASH_DEBUG: get_for_window returned overlay={overlay}, window={self.window()}")
@@ -1052,6 +1053,10 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
 
         Stores full ScopeColorScheme so delegate can paint layered borders
         matching the corresponding window's border style.
+
+        The actual list position (index) is passed to get_scope_color_scheme
+        so that border patterns reflect the item's CURRENT position in the list,
+        not the token number which is stable across reordering.
         """
         scope_info = self._get_list_item_scope(item, index)
         if not scope_info:
@@ -1059,8 +1064,10 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
 
         scope_id, item_type = scope_info
         from openhcs.pyqt_gui.widgets.shared.scope_color_utils import get_scope_color_scheme
+        from openhcs.pyqt_gui.widgets.shared.list_item_delegate import FLASH_KEY_ROLE
 
-        scheme = get_scope_color_scheme(scope_id)
+        # Pass actual list position for border pattern (not token number)
+        scheme = get_scope_color_scheme(scope_id, step_index=index)
 
         bg_color = item_type.get_background_color(scheme)
         if bg_color:
@@ -1068,6 +1075,9 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
 
         # Store full scheme for layered border rendering (not just border color)
         list_item.setData(self.SCOPE_BORDER_ROLE, scheme)
+
+        # Store flash key so delegate can paint flash behind text
+        list_item.setData(FLASH_KEY_ROLE, scope_id)
 
     # ========== List Update Template ==========
 

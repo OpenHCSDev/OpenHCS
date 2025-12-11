@@ -55,7 +55,17 @@ class ScopeColorService(QObject):
         self._strategies[strategy.strategy_type] = strategy
         logger.info("Registered color strategy: %s", strategy.strategy_type.name)
 
-    def get_color_scheme(self, scope_id: Optional[str]) -> "ScopeColorScheme":
+    def get_color_scheme(
+        self, scope_id: Optional[str], step_index: Optional[int] = None
+    ) -> "ScopeColorScheme":
+        """Get color scheme for scope.
+
+        Args:
+            scope_id: The scope identifier
+            step_index: Optional explicit step index (position in pipeline).
+                        If provided, uses this for border pattern instead of
+                        extracting from scope_id. Cache key includes index.
+        """
         from openhcs.pyqt_gui.widgets.shared.scope_color_utils import (
             _build_color_scheme_from_rgb,
             extract_orchestrator_scope,
@@ -65,11 +75,16 @@ class ScopeColorService(QObject):
         if scope_id is None:
             return self._get_neutral_scheme()
 
-        if scope_id not in self._scheme_cache:
+        # Cache key includes step_index when provided (for list item position)
+        cache_key = (scope_id, step_index) if step_index is not None else scope_id
+
+        if cache_key not in self._scheme_cache:
             orchestrator_scope = extract_orchestrator_scope(scope_id)
             rgb = self.active_strategy.generate_color(orchestrator_scope)
-            self._scheme_cache[scope_id] = _build_color_scheme_from_rgb(rgb, scope_id)
-        return self._scheme_cache[scope_id]
+            self._scheme_cache[cache_key] = _build_color_scheme_from_rgb(
+                rgb, scope_id, step_index=step_index
+            )
+        return self._scheme_cache[cache_key]
 
     def _get_neutral_scheme(self) -> "ScopeColorScheme":
         from openhcs.pyqt_gui.widgets.shared.scope_visual_config import ScopeColorScheme

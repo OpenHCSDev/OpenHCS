@@ -92,21 +92,41 @@ def hsv_to_rgb(hue: int, saturation: int, value: int) -> tuple[int, int, int]:
     return (int(r * 255), int(g * 255), int(b * 255))
 
 
-def get_scope_color_scheme(scope_id: Optional[str]) -> ScopeColorScheme:
-    """Get color scheme for scope via service."""
+def get_scope_color_scheme(scope_id: Optional[str], step_index: Optional[int] = None) -> ScopeColorScheme:
+    """Get color scheme for scope via service.
+
+    Args:
+        scope_id: The scope identifier (e.g., "plate_path::functionstep_0")
+        step_index: Optional explicit step index (position in pipeline).
+                    If provided, overrides extraction from scope_id.
+                    Use this for list items where actual position matters.
+    """
     from openhcs.pyqt_gui.widgets.shared.services.scope_color_service import ScopeColorService
 
-    return ScopeColorService.instance().get_color_scheme(scope_id)
+    return ScopeColorService.instance().get_color_scheme(scope_id, step_index=step_index)
 
 
-def _build_color_scheme_from_rgb(base_rgb: Tuple[int, int, int], scope_id: str) -> ScopeColorScheme:
-    """Build color scheme for a given base RGB and scope_id."""
+def _build_color_scheme_from_rgb(
+    base_rgb: Tuple[int, int, int],
+    scope_id: str,
+    step_index: Optional[int] = None,
+) -> ScopeColorScheme:
+    """Build color scheme for a given base RGB and scope_id.
+
+    Args:
+        base_rgb: The base color for the scope (from palette)
+        scope_id: The scope identifier
+        step_index: Optional explicit step index. If provided, uses this for
+                    border pattern calculation instead of extracting from scope_id.
+    """
     orchestrator_scope = extract_orchestrator_scope(scope_id)
 
     orch_bg_rgb = base_rgb
     orch_border_rgb = tuple(int(c * 200 / 255) for c in base_rgb)
 
-    step_index = extract_step_index(scope_id) if "::" in (scope_id or "") else 0
+    # Use explicit step_index if provided, otherwise extract from scope_id
+    if step_index is None:
+        step_index = extract_step_index(scope_id) if "::" in (scope_id or "") else 0
     step_item_rgb = orch_bg_rgb
 
     num_border_layers = (step_index // 9) + 1

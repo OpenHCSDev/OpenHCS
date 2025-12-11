@@ -853,6 +853,13 @@ class PipelineEditorWidget(AbstractManagerWidget):
 
         plate_scope = self.current_plate or "no_plate"
 
+        # Find step's current position in pipeline for border pattern
+        step_index = None
+        for i, step in enumerate(self.pipeline_steps):
+            if step is step_to_edit:
+                step_index = i
+                break
+
         def handle_save(edited_step):
             """Handle step save from editor."""
             # Find and replace the step in the pipeline
@@ -877,7 +884,8 @@ class PipelineEditorWidget(AbstractManagerWidget):
             on_save_callback=handle_save,
             orchestrator=orchestrator,
             gui_config=self.gui_config,
-            parent=self
+            parent=self,
+            step_index=step_index  # Pass actual position for border pattern
         )
         # Set original step for change detection
         editor.set_original_step_for_change_detection()

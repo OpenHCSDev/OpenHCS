@@ -279,6 +279,7 @@ class FlashElement:
     needs_scroll_clipping: bool = True  # Groupboxes need clipping, list/tree items don't (they handle it themselves)
     source_id: Optional[str] = None  # Unique identifier for deduplication (e.g., "groupbox:123", "list_item:scope_id")
     corner_radius: float = 0.0  # Rounded corners (0 = sharp, >0 = rounded)
+    skip_overlay_paint: bool = False  # If True, overlay skips painting (element handles its own paint, e.g., list item delegate)
 
 
 def create_groupbox_element(key: str, groupbox: 'QGroupBox') -> FlashElement:
@@ -464,7 +465,12 @@ def create_list_item_element(key: str, list_widget: 'QListWidget', get_row: Call
         key: Flash key
         list_widget: The QListWidget
         get_row: Callback that returns the current row index (handles item recreation)
+
+    The flash rect is inset from the item rect by the border width so the flash
+    appears behind the text, not behind the borders.
     """
+    from openhcs.pyqt_gui.widgets.shared.list_item_delegate import SCOPE_SCHEME_ROLE
+
     def get_rect(window: QWidget) -> Optional[QRect]:
         try:
             row = get_row()
@@ -482,9 +488,21 @@ def create_list_item_element(key: str, list_widget: 'QListWidget', get_row: Call
             viewport = list_widget.viewport()
             if viewport is None:
                 return None
-            global_pos = viewport.mapToGlobal(visual_rect.topLeft())
+
+            # Calculate border inset from scheme (flash behind text, not behind borders)
+            border_inset = 0
+            scheme = item.data(SCOPE_SCHEME_ROLE)
+            if scheme is not None:
+                layers = getattr(scheme, "step_border_layers", None)
+                if layers:
+                    border_inset = sum(layer[0] for layer in layers)
+
+            # Inset the rect by border width
+            inset_rect = visual_rect.adjusted(border_inset, border_inset, -border_inset, -border_inset)
+
+            global_pos = viewport.mapToGlobal(inset_rect.topLeft())
             window_pos = window.mapFromGlobal(global_pos)
-            return QRect(window_pos, visual_rect.size())
+            return QRect(window_pos, inset_rect.size())
         except RuntimeError:
             return None
     return FlashElement(
@@ -691,6 +709,12 @@ class WindowFlashOverlay(QWidget):
             regions = []
 
             for element in elements:
+                # Skip elements that handle their own paint (e.g., list item delegates)
+                if element.skip_overlay_paint:
+                    rects.append(None)
+                    regions.append(None)
+                    continue
+
                 # Compute element rect in window coords
                 rect = element.get_rect_in_window(self._window)
 
