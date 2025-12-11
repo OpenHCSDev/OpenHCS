@@ -395,23 +395,11 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
                 self._original_global_config_snapshot = copy.deepcopy(new_config)
                 self._global_context_dirty = False
 
+            # UNIFIED: Both paths share same logic, differ only in whether to close window
             if close_window:
-                self.accept()
+                self.accept()  # Marks saved + unregisters + cleans up + closes
             else:
-                # CRITICAL: If keeping window open after save, update the form manager's object_instance
-                # and refresh placeholders to reflect the new saved values
-                self.form_manager.object_instance = new_config
-
-                # Increment token to invalidate caches
-                from openhcs.config_framework.object_state import ObjectStateRegistry
-                ObjectStateRegistry.increment_token()
-
-                # Refresh this window's placeholders with new saved values as base
-                from openhcs.pyqt_gui.widgets.shared.services.parameter_ops_service import ParameterOpsService
-                ParameterOpsService().refresh_with_live_context(self.form_manager)
-
-                # Emit context_changed to notify other windows (bulk refresh, no specific field)
-                self.form_manager.context_changed.emit(self.form_manager.scope_id or "", "")
+                self._mark_saved_and_refresh_all()  # Marks saved + refreshes, but stays open
 
         except Exception as e:
             logger.error(f"Failed to save configuration: {e}")

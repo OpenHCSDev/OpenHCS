@@ -975,9 +975,8 @@ class ImageBrowserWidget(QWidget):
             # For each enabled viewer, resolve config + viewer on UI thread, then spawn worker
             if napari_enabled:
                 current_values = self._get_config_values('napari_config')
-                temp_config = LazyNapariStreamingConfig(
-                    **{k: v for k, v in current_values.items() if v is not None}
-                )
+                # CRITICAL: Pass None values through for lazy resolution
+                temp_config = LazyNapariStreamingConfig(**current_values)
 
                 with config_context(self.orchestrator.pipeline_config):
                     with config_context(temp_config):
@@ -1001,9 +1000,8 @@ class ImageBrowserWidget(QWidget):
 
             if fiji_enabled:
                 current_values = self._get_config_values('fiji_config')
-                temp_config = LazyFijiStreamingConfig(
-                    **{k: v for k, v in current_values.items() if v is not None}
-                )
+                # CRITICAL: Pass None values through for lazy resolution
+                temp_config = LazyFijiStreamingConfig(**current_values)
 
                 with config_context(self.orchestrator.pipeline_config):
                     with config_context(temp_config):
@@ -1364,7 +1362,8 @@ class ImageBrowserWidget(QWidget):
         from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization
 
         current_values = self._get_config_values('napari_config')
-        temp_config = LazyNapariStreamingConfig(**{k: v for k, v in current_values.items() if v is not None})
+        # CRITICAL: Pass None values through for lazy resolution
+        temp_config = LazyNapariStreamingConfig(**current_values)
 
         with config_context(self.orchestrator.pipeline_config):
             with config_context(temp_config):
@@ -1402,7 +1401,8 @@ class ImageBrowserWidget(QWidget):
         from openhcs.config_framework.context_manager import config_context
         from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization
         current_values = self._get_config_values('fiji_config')
-        temp_config = LazyFijiStreamingConfig(**{k: v for k, v in current_values.items() if v is not None})
+        # CRITICAL: Pass None values through for lazy resolution
+        temp_config = LazyFijiStreamingConfig(**current_values)
 
         with config_context(self.orchestrator.pipeline_config):
             with config_context(temp_config):
@@ -1808,9 +1808,8 @@ class ImageBrowserWidget(QWidget):
         from openhcs.constants.constants import Backend as BackendEnum
 
         current_values = self._get_config_values('napari_config')
-        temp_config = LazyNapariStreamingConfig(
-            **{k: v for k, v in current_values.items() if v is not None}
-        )
+        # CRITICAL: Pass None values through for lazy resolution
+        temp_config = LazyNapariStreamingConfig(**current_values)
 
         with config_context(self.orchestrator.pipeline_config):
             with config_context(temp_config):
@@ -1839,9 +1838,8 @@ class ImageBrowserWidget(QWidget):
         from openhcs.constants.constants import Backend as BackendEnum
 
         current_values = self._get_config_values('fiji_config')
-        temp_config = LazyFijiStreamingConfig(
-            **{k: v for k, v in current_values.items() if v is not None}
-        )
+        # CRITICAL: Pass None values through for lazy resolution
+        temp_config = LazyFijiStreamingConfig(**current_values)
 
         with config_context(self.orchestrator.pipeline_config):
             with config_context(temp_config):

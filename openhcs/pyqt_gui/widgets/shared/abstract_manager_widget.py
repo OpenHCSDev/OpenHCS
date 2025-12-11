@@ -509,12 +509,14 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
                         if '.' not in remainder:
                             nested_params[remainder] = value
 
-                # Filter None values for lazy resolution
-                filtered = {k: v for k, v in nested_params.items() if v is not None}
+                # CRITICAL: Do NOT filter out None values!
+                # In OpenHCS, None has semantic meaning: "inherit from parent context"
+                # When a user explicitly resets a field to None, we MUST pass that None
+                # to the dataclass constructor so lazy resolution can walk up the MRO.
 
-                # Instantiate nested config
-                if filtered:
-                    return nested_type(**filtered)
+                # Instantiate nested config with ALL parameters including None values
+                if nested_params:
+                    return nested_type(**nested_params)
                 else:
                     return nested_type()
 
@@ -966,8 +968,13 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
             logger.debug(f"⚡ FLASH_DEBUG on_change CALLBACK FIRED: scope={scope_id}, paths={changed_paths}")
             self.queue_flash(scope_id)  # Global flash - list items flash in ALL windows
 
+        def on_saved_resolved_change():
+            logger.debug(f"⚡ FLASH_DEBUG on_saved_resolved_change CALLBACK FIRED: scope={scope_id} (saved baseline changed)")
+            self.queue_flash(scope_id)  # Flash list item when saved baseline changes (save or inherit)
+
         state.on_resolved_changed(on_change)
-        self._flash_subscriptions[scope_id] = (state, on_change)
+        state.on_saved_resolved_changed(on_saved_resolved_change)
+        self._flash_subscriptions[scope_id] = (state, on_change, on_saved_resolved_change)
         logger.debug(f"⚡ FLASH_DEBUG: Subscribed to {scope_id}, total subscriptions={len(self._flash_subscriptions)}")
 
     # VisualUpdateMixin implementation - list items use WindowFlashOverlay (no custom methods needed)
@@ -988,10 +995,11 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
     def _cleanup_flash_subscriptions(self) -> None:
         """Unsubscribe all flash callbacks and clear scope mappings."""
         logger.debug(f"⚡ FLASH_DEBUG _cleanup_flash_subscriptions: self={type(self).__name__}, clearing {len(self._flash_subscriptions)} subscriptions")
-        for scope_id, (state, callback) in list(self._flash_subscriptions.items()):
+        for scope_id, (state, on_change_callback, on_saved_resolved_callback) in list(self._flash_subscriptions.items()):
             logger.debug(f"⚡ FLASH_DEBUG: Unsubscribing from {scope_id}")
             try:
-                state.off_resolved_changed(callback)
+                state.off_resolved_changed(on_change_callback)
+                state.off_saved_resolved_changed(on_saved_resolved_callback)
             except Exception as e:
                 logger.debug(f"⚡ FLASH_DEBUG: Error unsubscribing from {scope_id}: {e}")
         self._flash_subscriptions.clear()

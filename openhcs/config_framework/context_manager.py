@@ -856,19 +856,21 @@ def merge_configs(base, overrides: Dict[str, Any]):
     """
     if not base or not overrides:
         return base
-        
-    try:
-        # Filter out None values - they should not override existing values
-        filtered_overrides = {k: v for k, v in overrides.items() if v is not None}
 
-        if not filtered_overrides:
+    try:
+        # CRITICAL: Do NOT filter out None values!
+        # In OpenHCS, None has semantic meaning: "inherit from parent context"
+        # When an override dict contains None, it means "reset this field to None"
+        # which should override the base value with None for lazy resolution.
+
+        if not overrides:
             return base
 
         # Use replace_raw to preserve None values (dataclasses.replace triggers lazy resolution)
         from openhcs.config_framework.lazy_factory import replace_raw
-        merged = replace_raw(base, **filtered_overrides)
-        
-        logger.debug(f"Merged {len(filtered_overrides)} overrides into {type(base).__name__}")
+        merged = replace_raw(base, **overrides)
+
+        logger.debug(f"Merged {len(overrides)} overrides into {type(base).__name__}")
         return merged
         
     except Exception as e:

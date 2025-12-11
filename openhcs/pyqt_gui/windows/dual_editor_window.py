@@ -847,8 +847,11 @@ class DualEditorWindow(BaseFormDialog):
             self._baseline_snapshot = self._serialize_for_change_detection(self.editing_step)
             self.detect_changes()
 
+            # UNIFIED: Both paths share same logic, differ only in whether to close window
             if close_window:
-                self.accept()  # BaseFormDialog handles unregistration
+                self.accept()  # Marks saved + unregisters + cleans up + closes
+            else:
+                self._mark_saved_and_refresh_all()  # Marks saved + refreshes, but stays open
             logger.debug(f"Step saved: {getattr(step_to_save, 'name', 'Unknown')}")
 
         except Exception as e:

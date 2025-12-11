@@ -212,7 +212,8 @@ class ObjectStateRegistry:
         cls,
         scope_id: Optional[str],
         changed_type: type,
-        field_name: str
+        field_name: str,
+        invalidate_saved: bool = False
     ) -> None:
         """Invalidate a specific field in states that could inherit from changed_type at scope_id.
 
@@ -230,6 +231,7 @@ class ObjectStateRegistry:
             scope_id: The scope that changed (None/"" for global scope)
             changed_type: The type of the ObjectState that was modified
             field_name: The specific field that changed
+            invalidate_saved: If True, also invalidate saved_resolved cache for descendants
         """
         from openhcs.config_framework.lazy_factory import get_base_type_for_lazy
         from openhcs.config_framework.dual_axis_resolver import invalidate_mro_cache_for_field
@@ -261,14 +263,15 @@ class ObjectStateRegistry:
                 logger.debug(f"[SCOPE] MATCH: changed_scope={changed_scope!r} affects state_scope={state_scope!r}")
 
             # TYPE + FIELD CHECK: find matching nested state and invalidate field
-            cls._invalidate_field_in_matching_states(state, base_changed_type, field_name)
+            cls._invalidate_field_in_matching_states(state, base_changed_type, field_name, invalidate_saved)
 
     @classmethod
     def _invalidate_field_in_matching_states(
         cls,
         state: 'ObjectState',
         target_base_type: type,
-        field_name: str
+        field_name: str,
+        invalidate_saved: bool = False
     ) -> None:
         """Find fields in state that could inherit from target_base_type and invalidate them.
 
@@ -287,6 +290,7 @@ class ObjectStateRegistry:
             state: ObjectState to check
             target_base_type: Normalized base type to match
             field_name: Field to invalidate
+            invalidate_saved: If True, also invalidate saved_resolved cache for this field
         """
         from openhcs.config_framework.lazy_factory import get_base_type_for_lazy
 
@@ -311,11 +315,31 @@ class ObjectStateRegistry:
                     state.invalidate_field(dotted_path)
                     invalidated_paths.add(dotted_path)
 
+                    # If invalidating saved baseline, remove from saved_resolved so it recomputes
+                    if invalidate_saved and dotted_path in state._saved_resolved:
+                        del state._saved_resolved[dotted_path]
+                        logger.debug(f"Invalidated saved_resolved cache for {dotted_path}")
+
         # Trigger recompute immediately to detect if resolved values actually changed.
         # This ensures callbacks fire only when values change, not just when fields are invalidated.
         # Prevents false flashes when Reset is clicked on already-reset fields.
         if invalidated_paths:
             state._ensure_live_resolved(notify=True)
+
+            # If we invalidated saved baseline, recompute it now with fresh ancestor values
+            if invalidate_saved:
+                # Recompute entire saved_resolved snapshot to pick up new ancestor saved values
+                old_saved_resolved = state._saved_resolved
+                state._saved_resolved = state._compute_resolved_snapshot(use_saved=True)
+                logger.debug(f"Recomputed saved_resolved baseline after invalidation")
+
+                # Fire callbacks if saved baseline actually changed (e.g., inherited new parent value)
+                if old_saved_resolved != state._saved_resolved:
+                    for callback in state._on_saved_resolved_changed_callbacks:
+                        try:
+                            callback()
+                        except Exception as e:
+                            logger.warning(f"Error in on_saved_resolved_changed callback: {e}")
 
 
 class FieldProxy:
@@ -484,6 +508,15 @@ class ObjectState:
         # Callbacks notified when resolved values actually change (for UI flashing)
         self._on_resolved_changed_callbacks: List[Callable[[Set[str]], None]] = []
 
+        # === Saved Resolved Change Callbacks ===
+        # Callbacks notified when _saved_resolved changes (for list item flashing on save)
+        # Fires when saved baseline changes, even for items that inherit values
+        self._on_saved_resolved_changed_callbacks: List[Callable[[], None]] = []
+
+        # === Parameter Change Callbacks ===
+        # Callbacks notified when raw parameters dict changes (for label styling)
+        self._on_parameters_changed_callbacks: List[Callable[[str], None]] = []
+
         # Initialize baselines (suppress notifications during init)
         self._ensure_live_resolved(notify=False)
         # Compute saved baseline using SAVED ancestor values (use_saved=True)
@@ -526,6 +559,44 @@ class ObjectState:
         """Unsubscribe from resolved value change notifications."""
         if callback in self._on_resolved_changed_callbacks:
             self._on_resolved_changed_callbacks.remove(callback)
+
+    def on_saved_resolved_changed(self, callback: Callable[[], None]) -> None:
+        """Subscribe to saved baseline change notifications.
+
+        The callback is called when _saved_resolved actually changes.
+        This fires when an item is saved OR when it inherits from a saved parent.
+
+        Example: Parent plate config saved with new well_filter value
+        → Parent flashes (its _saved_resolved changed)
+        → Child steps flash (their _saved_resolved changed by inheriting new value)
+
+        Args:
+            callback: Function with no arguments, called when saved baseline changes.
+        """
+        if callback not in self._on_saved_resolved_changed_callbacks:
+            self._on_saved_resolved_changed_callbacks.append(callback)
+
+    def off_saved_resolved_changed(self, callback: Callable[[], None]) -> None:
+        """Unsubscribe from saved baseline change notifications."""
+        if callback in self._on_saved_resolved_changed_callbacks:
+            self._on_saved_resolved_changed_callbacks.remove(callback)
+
+    def on_parameters_changed(self, callback: Callable[[str], None]) -> None:
+        """Subscribe to raw parameter change notifications.
+
+        The callback is called when state.parameters dict changes (not resolved values).
+        This is for UI updates that depend on raw parameter values (e.g., label styling).
+
+        Args:
+            callback: Function that takes a param_name string.
+        """
+        if callback not in self._on_parameters_changed_callbacks:
+            self._on_parameters_changed_callbacks.append(callback)
+
+    def off_parameters_changed(self, callback: Callable[[str], None]) -> None:
+        """Unsubscribe from parameter change notifications."""
+        if callback in self._on_parameters_changed_callbacks:
+            self._on_parameters_changed_callbacks.remove(callback)
 
     def _ensure_live_resolved(self, notify: bool = True) -> None:
         """Ensure _live_resolved cache is populated.
@@ -629,6 +700,13 @@ class ObjectState:
 
         # Update state directly (no type conversion - that's VIEW responsibility)
         self.parameters[param_name] = value
+
+        # Notify parameter change callbacks (for label styling, etc.)
+        for callback in self._on_parameters_changed_callbacks:
+            try:
+                callback(param_name)
+            except Exception as e:
+                logger.warning(f"Error in parameters_changed callback: {e}")
 
         # SELF-INVALIDATION: Mark this field as needing recompute in our own cache
         self._invalid_fields.add(param_name)
@@ -945,29 +1023,63 @@ class ObjectState:
         This ensures that when saving, other windows that inherited from the
         old saved values get their caches invalidated so they pick up new values.
         This mirrors what restore_saved() does but in the opposite direction.
+
+        Invalidation is based on comparing the OLD object_instance (about to be replaced)
+        with the NEW self.parameters (live values used for reconstruction).
         """
+        # CRITICAL: Extract old values from object_instance BEFORE rebuilding it
+        # These are the values that descendants might be inheriting from
+        old_instance_values = {}
+        if not isinstance(self.object_instance, type):
+            # Extract raw attribute values from the old object_instance
+            for param_name in self.parameters.keys():
+                # Skip container entries (nested dataclass instances)
+                if param_name in self.parameters:
+                    raw_value = self.parameters.get(param_name)
+                    is_container = raw_value is not None and is_dataclass(type(raw_value))
+                    if is_container:
+                        continue
+
+                # Get the old value from object_instance by navigating dotted path
+                try:
+                    # Navigate through nested attributes for dotted paths
+                    obj = self.object_instance
+                    parts = param_name.split('.')
+                    for part in parts:
+                        obj = object.__getattribute__(obj, part)
+                    old_instance_values[param_name] = obj
+                except AttributeError:
+                    # Field doesn't exist on object_instance, skip it
+                    pass
+
+        # Find parameters that differ between old object_instance and new live parameters
+        # These are the fields that changed and need descendant invalidation
+        changed_params = []
+        for param_name in self.parameters.keys():
+            # Skip container entries
+            raw_value = self.parameters.get(param_name)
+            is_container = raw_value is not None and is_dataclass(type(raw_value))
+            if is_container:
+                continue
+
+            old_value = old_instance_values.get(param_name)
+            new_value = self.parameters.get(param_name)
+            if old_value != new_value:
+                changed_params.append(param_name)
+
+        # CRITICAL: Rebuild object_instance BEFORE invalidating descendants
+        # Descendants will recompute using parent's object_instance, so it must have new values!
         if not isinstance(self.object_instance, type):
             # Update object_instance with current parameters
             # to_object() already handles all types uniformly
             self.object_instance = self.to_object()
 
-        # Update saved parameters FIRST (before computing saved snapshot)
+        # Update saved parameters (after object_instance update, before invalidation)
         self._saved_parameters = copy.deepcopy(self.parameters)
 
-        # Compute new saved resolved using SAVED ancestor baselines (use_saved=True)
-        # This ensures saved baseline is computed relative to other saved baselines
-        new_saved_resolved = self._compute_resolved_snapshot(use_saved=True)
-
-        # Find parameters that differ between old saved and new saved
-        changed_params = []
-        for param_name in set(self._saved_resolved.keys()) | set(new_saved_resolved.keys()):
-            old_saved = self._saved_resolved.get(param_name)
-            new_value = new_saved_resolved.get(param_name)
-            if old_saved != new_value:
-                changed_params.append(param_name)
-
-        # Invalidate descendant caches for each changed parameter
-        # This mirrors what restore_saved() does
+        # NOW invalidate descendant caches AFTER object_instance is updated
+        # This ensures descendants see the NEW object_instance when they recompute
+        # CRITICAL: Also invalidate saved_resolved cache so descendants recompute their saved baseline
         for param_name in changed_params:
             container_type = self._path_to_type.get(param_name, type(self.object_instance))
             leaf_field_name = param_name.split('.')[-1] if '.' in param_name else param_name
@@ -975,11 +1087,25 @@ class ObjectState:
             ObjectStateRegistry.invalidate_by_type_and_scope(
                 scope_id=self.scope_id,
                 changed_type=container_type,
-                field_name=leaf_field_name
+                field_name=leaf_field_name,
+                invalidate_saved=True  # Invalidate saved baseline for descendants
             )
 
-        # NOW update saved resolved baseline
+        # Compute new saved resolved using SAVED ancestor baselines (use_saved=True)
+        # This ensures saved baseline is computed relative to other saved baselines
+        old_saved_resolved = self._saved_resolved
+        new_saved_resolved = self._compute_resolved_snapshot(use_saved=True)
+
+        # Update saved resolved baseline
         self._saved_resolved = new_saved_resolved
+
+        # Fire callbacks if saved baseline actually changed
+        if old_saved_resolved != new_saved_resolved:
+            for callback in self._on_saved_resolved_changed_callbacks:
+                try:
+                    callback()
+                except Exception as e:
+                    logger.warning(f"Error in on_saved_resolved_changed callback: {e}")
 
         # Invalidate cached object so next to_object() call rebuilds
         self._cached_object = None
@@ -1163,6 +1289,7 @@ class ObjectState:
                 # Store the CONTAINER type (the type that has this field)
                 self._path_to_type[dotted_path] = obj_type
                 # Store signature default for reset functionality (flattened)
+                # info.default_value is now guaranteed to be the CLASS signature default
                 self._signature_defaults[dotted_path] = info.default_value
 
     def to_object(self) -> Any:
@@ -1264,13 +1391,17 @@ class ObjectState:
             nested_obj = self._reconstruct_from_prefix(nested_path)
             direct_fields[nested_name] = nested_obj
 
-        # Filter out None values for lazy resolution
-        filtered_fields = {k: v for k, v in direct_fields.items() if v is not None}
+        # CRITICAL: Do NOT filter out None values!
+        # In OpenHCS, None has semantic meaning: "inherit from parent context"
+        # When a user explicitly resets a field to None, we MUST pass that None
+        # to the dataclass constructor so lazy resolution can walk up the MRO.
+        # Filtering None would cause the dataclass to use its class-level default
+        # instead of the user's explicit None, breaking inheritance.
 
         # At root level, include excluded params (e.g., 'func' for FunctionStep)
         # These are required for construction but excluded from editing
         if not prefix:
-            filtered_fields.update(self._excluded_params)
+            direct_fields.update(self._excluded_params)
 
-        # Instantiate the dataclass
-        return obj_type(**filtered_fields)
+        # Instantiate the dataclass with ALL fields including None values
+        return obj_type(**direct_fields)

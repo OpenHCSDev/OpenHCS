@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, Type, Callable, Optional, Union
 
 from PyQt6.QtWidgets import QCheckBox, QLineEdit, QComboBox, QGroupBox, QVBoxLayout, QSpinBox, QDoubleSpinBox
+from PyQt6.QtCore import Qt
 from magicgui.widgets import create_widget
 from magicgui.type_map import register_type
 
@@ -384,7 +385,7 @@ class MagicGuiWidgetFactory:
 
         enum_type = get_enum_from_list(param_type)
         widget = CheckboxGroupAdapter()
-        widget.setTitle(param_name.replace('_', ' ').title())
+        # Don't set title - label is added separately in widget_creation_config.py
         layout = QVBoxLayout(widget)
 
         # Populate checkboxes for each enum value

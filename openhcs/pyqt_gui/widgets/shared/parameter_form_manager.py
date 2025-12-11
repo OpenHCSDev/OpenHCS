@@ -252,6 +252,7 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, FlashMixin, metacla
 
             # STEP 3: Initialize VIEW-only attributes
             self.widgets, self.reset_buttons, self.nested_managers = {}, {}, {}
+            self.labels = {}  # Track LabelWithHelp widgets for bold styling
             self._pending_nested_managers: Dict[str, 'ParameterFormManager'] = {}
 
             # STEP 4: VIEW-only flags (state tracking is in ObjectState)
@@ -328,6 +329,9 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, FlashMixin, metacla
                 logger.info(f"🔔 CALLBACK_LEAK_DEBUG: Registered callback for {self.field_id} (PFM id={id(self)}), "
                            f"total callbacks on ObjectState: {len(self.state._on_resolved_changed_callbacks)}, "
                            f"scope_id={self.state.scope_id}")
+
+            # Label styling: Subscribe to parameter changes (all managers, not just root)
+            self.state.on_parameters_changed(self._on_parameter_changed_for_label_styling)
 
             # STEP 8: _user_set_fields starts empty and is populated only when user edits widgets
             # (via _emit_parameter_change). Do NOT populate during initialization, as that would
@@ -565,6 +569,9 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, FlashMixin, metacla
         event = FieldChangeEvent(param_name, converted_value, self)
         FieldChangeDispatcher.instance().dispatch(event)
 
+        # Update label styling after parameter change
+        self._update_label_styling(param_name)
+
     def reset_parameter(self, param_name: str) -> None:
         """Reset parameter to signature default.
 
@@ -582,6 +589,38 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, FlashMixin, metacla
         reset_value = self.state.parameters.get(dotted_path)
         event = FieldChangeEvent(param_name, reset_value, self, is_reset=True)
         FieldChangeDispatcher.instance().dispatch(event)
+
+        # Update label styling after reset
+        self._update_label_styling(param_name)
+
+    def _update_label_styling(self, param_name: str) -> None:
+        """Update label underline based on parameter value (underlined if differs from signature default)."""
+        if param_name not in self.labels:
+            return
+
+        # Build full dotted path for state lookup
+        dotted_path = f'{self.field_prefix}.{param_name}' if self.field_prefix else param_name
+        value = self.state.parameters.get(dotted_path)
+
+        # Get signature default for comparison
+        signature_default = self.state._signature_defaults.get(dotted_path)
+
+        # Underline ONLY if value differs from signature default
+        # (i.e., user has explicitly set a value different from the default)
+        should_underline = value != signature_default
+
+        label = self.labels[param_name]
+        label.set_underline(should_underline)
+
+    def _on_parameter_changed_for_label_styling(self, param_name: str) -> None:
+        """Callback when state.parameters changes - update label styling.
+
+        This is called for ALL parameter changes in this ObjectState, including
+        changes from sibling managers via inheritance.
+        """
+        # Extract leaf field name from dotted path
+        leaf_field = param_name.split('.')[-1] if '.' in param_name else param_name
+        self._update_label_styling(leaf_field)
 
     # DELETED: MODEL DELEGATION - callers use self.state.get_*() directly
     # DELETED: _on_nested_parameter_changed - replaced by FieldChangeDispatcher
@@ -668,6 +707,9 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, FlashMixin, metacla
                 callbacks_after = len(self.state._on_resolved_changed_callbacks)
                 logger.info(f"🔔 CALLBACK_LEAK_DEBUG: Unregistered callback for {self.field_id}, "
                            f"callbacks: {callbacks_before} -> {callbacks_after}")
+
+            # Unregister parameter change callback for label styling
+            self.state.off_parameters_changed(self._on_parameter_changed_for_label_styling)
 
             if self.context_obj is not None and not self._parent_manager:
                 from openhcs.config_framework.context_manager import unregister_hierarchy_relationship

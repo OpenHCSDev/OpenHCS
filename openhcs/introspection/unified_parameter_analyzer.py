@@ -155,9 +155,14 @@ class UnifiedParameterAnalyzer:
     def _analyze_object_instance(instance: object, use_signature_defaults: bool = False) -> Dict[str, UnifiedParameterInfo]:
         """Analyze a regular object instance by examining its full inheritance hierarchy.
 
+        Returns the CLASS signature defaults in default_value field, NOT instance values.
+        Callers should use object.__getattribute__() or getattr() to get current instance values separately.
+
+        This ensures info.default_value is semantically correct - it's the DEFAULT, not the current value.
+
         Args:
             instance: Object instance to analyze
-            use_signature_defaults: If True, use signature defaults instead of instance values
+            use_signature_defaults: Deprecated - now always returns signature defaults
         """
         # Use MRO to get all constructor parameters from the inheritance chain
         instance_class = type(instance)
@@ -189,20 +194,14 @@ class UnifiedParameterAnalyzer:
                 # Add parameters that haven't been seen yet (most specific wins)
                 for param_name, param_info in class_params.items():
                     if param_name not in all_params and param_name != 'kwargs':
-                        # CRITICAL FIX: For reset functionality, use signature defaults instead of instance values
-                        if use_signature_defaults:
-                            default_value = param_info.default_value
-                        else:
-                            # Get current value from instance if it exists
-                            default_value = getattr(instance, param_name, param_info.default_value)
-
-                        # Create parameter info with appropriate default value
+                        # Always use signature defaults - callers should get instance values separately
+                        # This ensures default_value is semantically correct
                         all_params[param_name] = UnifiedParameterInfo(
                             name=param_name,
                             param_type=param_info.param_type,
-                            default_value=default_value,
+                            default_value=param_info.default_value,  # Keep CLASS signature default
                             is_required=param_info.is_required,
-                            description=param_info.description,  # CRITICAL FIX: Include description
+                            description=param_info.description,
                             source_type="object_instance"
                         )
 
@@ -215,32 +214,34 @@ class UnifiedParameterAnalyzer:
 
     @staticmethod
     def _analyze_dataclass_instance(instance: object) -> Dict[str, UnifiedParameterInfo]:
-        """Analyze a dataclass instance."""
+        """Analyze a dataclass instance.
+
+        Returns the CLASS signature defaults in default_value field, NOT instance values.
+        Callers should use object.__getattribute__() to get current instance values separately.
+
+        This ensures info.default_value is semantically correct - it's the DEFAULT, not the current value.
+        """
         from openhcs.utils.performance_monitor import timer
 
-        # Get the type and analyze it
+        # Get the type and analyze it - this returns CLASS signature defaults
         with timer(f"      Analyze dataclass type {type(instance).__name__}", threshold_ms=5.0):
             dataclass_type = type(instance)
             unified_params = UnifiedParameterAnalyzer._analyze_dataclass_type(dataclass_type)
 
-        # Update default values with current instance values
-        # Always use object.__getattribute__ to get raw values:
-        # - For lazy dataclasses: returns None if unset (bypasses resolution)
-        # - For non-lazy objects: same as getattr (no resolution to bypass)
-        with timer(f"      Extract {len(unified_params)} field values from instance", threshold_ms=5.0):
+        # Just update source_type to indicate this came from an instance analysis
+        # DO NOT overwrite default_value with instance values - that's semantically wrong
+        # Callers should get instance values via object.__getattribute__() separately
+        with timer(f"      Mark {len(unified_params)} params as from instance", threshold_ms=5.0):
             for name, param_info in unified_params.items():
-                if hasattr(instance, name):
-                    current_value = object.__getattribute__(instance, name)
-
-                    # Create new UnifiedParameterInfo with current value as default
-                    unified_params[name] = UnifiedParameterInfo(
-                        name=param_info.name,
-                        param_type=param_info.param_type,
-                        default_value=current_value,
-                        is_required=param_info.is_required,
-                        description=param_info.description,
-                        source_type="dataclass_instance"
-                    )
+                # Update source_type but keep signature default in default_value
+                unified_params[name] = UnifiedParameterInfo(
+                    name=param_info.name,
+                    param_type=param_info.param_type,
+                    default_value=param_info.default_value,  # Keep CLASS signature default
+                    is_required=param_info.is_required,
+                    description=param_info.description,
+                    source_type="dataclass_instance"
+                )
 
         return unified_params
     

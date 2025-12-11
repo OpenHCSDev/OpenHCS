@@ -272,7 +272,7 @@ class HelpButton(QPushButton):
 
 class LabelWithHelp(QWidget):
     """PyQt6 widget that combines a label with a help indicator - mirrors Textual TUI pattern."""
-    
+
     def __init__(self, text: str, help_target: Union[Callable, type] = None,
                  param_name: str = None, param_description: str = None,
                  param_type: type = None, color_scheme: Optional[PyQt6ColorScheme] = None, parent=None):
@@ -281,13 +281,18 @@ class LabelWithHelp(QWidget):
         # Initialize color scheme
         self.color_scheme = color_scheme or PyQt6ColorScheme()
 
+        # Fixed size policy prevents horizontal stretching
+        # This fixes flash area blocking for widgets to the right (e.g., checkbox groups)
+        from PyQt6.QtWidgets import QSizePolicy
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(5)
 
-        # Main label
-        label = QLabel(text)
-        layout.addWidget(label)
+        # Main label - store as instance variable for font weight updates
+        self._label = QLabel(text)
+        layout.addWidget(self._label)
 
         # Help indicator
         help_indicator = HelpIndicator(
@@ -298,8 +303,14 @@ class LabelWithHelp(QWidget):
             color_scheme=self.color_scheme
         )
         layout.addWidget(help_indicator)
-        
+
         layout.addStretch()
+
+    def set_underline(self, underline: bool) -> None:
+        """Set label underline based on whether value is concrete (not None/placeholder)."""
+        font = self._label.font()
+        font.setUnderline(underline)
+        self._label.setFont(font)
 
 
 class FunctionTitleWithHelp(QWidget):

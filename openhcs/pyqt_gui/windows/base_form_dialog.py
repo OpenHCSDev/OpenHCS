@@ -64,6 +64,32 @@ class BaseFormDialog(QDialog):
             is_shift = modifiers & Qt.KeyboardModifier.ShiftModifier
             save_callback(close_window=not is_shift)
         button.clicked.connect(_on_save)
+
+    def _mark_saved_and_refresh_all(self):
+        """Mark all states as saved and refresh placeholders.
+
+        Used by shift-click save to update saved baseline without closing window.
+        Regular save calls accept() which also marks saved but additionally closes window.
+
+        CRITICAL: This ensures shift-click save works the same as regular save:
+        - Marks all states as saved (reconstructs object_instance from ORM values via to_object())
+        - Updates saved baseline so closing window later won't revert changes
+        - Refreshes all form managers with new saved values
+        - Notifies other windows of changes
+        """
+        # Mark all states as saved (updates object_instance from ORM values)
+        self._apply_state_action('mark_saved')
+
+        # Increment global token to invalidate all caches
+        from openhcs.config_framework.object_state import ObjectStateRegistry
+        ObjectStateRegistry.increment_token()
+
+        # Refresh all form managers with new saved values as baseline
+        from openhcs.pyqt_gui.widgets.shared.services.parameter_ops_service import ParameterOpsService
+        for manager in self._get_form_managers():
+            ParameterOpsService().refresh_with_live_context(manager)
+            # Emit context_changed to notify other windows (bulk refresh)
+            manager.context_changed.emit(manager.scope_id or "", "")
     """
     Base class for dialogs that use ParameterFormManager.
     

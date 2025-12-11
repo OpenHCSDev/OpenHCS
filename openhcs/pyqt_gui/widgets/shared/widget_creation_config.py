@@ -429,6 +429,16 @@ def create_widget_parametric(manager: ParameterFormManager, param_info: Paramete
             color_scheme=manager.config.color_scheme or PyQt6ColorScheme()
         )
         layout.addWidget(label)
+        # Store label for bold styling updates
+        manager.labels[param_info.name] = label
+
+        # Set initial label styling based on current value
+        dotted_path = f'{manager.field_prefix}.{param_info.name}' if manager.field_prefix else param_info.name
+        value = manager.state.parameters.get(dotted_path)
+        signature_default = manager.state._signature_defaults.get(dotted_path)
+        # Underline ONLY if value differs from signature default
+        should_underline = value != signature_default
+        label.set_underline(should_underline)
 
     # Add main widget
     main_widget = ops['create_main_widget'](
@@ -466,12 +476,16 @@ def create_widget_parametric(manager: ParameterFormManager, param_info: Paramete
                 reset_all_button.clicked.connect(lambda: nested_manager.reset_all_parameters())
             container.addTitleWidget(reset_all_button)
         else:
-            # REGULAR: reset button in layout
+            # REGULAR: reset button in layout (right-aligned via stretch)
             reset_button = _create_optimized_reset_button(
                 manager.config.field_id,
                 param_info.name,
                 lambda: manager.reset_parameter(param_info.name)
             )
+            # Add stretch before reset button to push it to the right
+            # This only applies to REGULAR widgets (label + widget + reset button rows)
+            if not config.is_nested:
+                layout.addStretch()
             layout.addWidget(reset_button)
             manager.reset_buttons[param_info.name] = reset_button
 

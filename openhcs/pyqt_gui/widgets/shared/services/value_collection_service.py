@@ -80,8 +80,11 @@ class ValueCollectionService(ParameterServiceABC):
             return None
 
         # Use nested_manager.parameters (scoped and prefix-stripped) NOT state.parameters (all paths)
-        # Filter to non-None (user-set) fields so untouched placeholders stay None
-        nested_values = {k: v for k, v in nested_manager.parameters.items() if v is not None}
+        # CRITICAL: Do NOT filter out None values!
+        # In OpenHCS, None has semantic meaning: "inherit from parent context"
+        # When a user explicitly resets a field to None, we MUST include that None
+        # so the dataclass can be constructed with the user's explicit None value.
+        nested_values = nested_manager.parameters.copy()
 
         if not nested_values:
             logger.debug(f"[ValueCollection] Optional {param_name}: no nested edits, returning default")
@@ -100,8 +103,9 @@ class ValueCollectionService(ParameterServiceABC):
         param_type = info.type
 
         # Use nested_manager.parameters (scoped and prefix-stripped) NOT state.parameters (all paths)
-        # Filter to non-None (user-set) fields so untouched placeholders stay None
-        nested_values = {k: v for k, v in nested_manager.parameters.items() if v is not None}
+        # CRITICAL: Do NOT filter out None values!
+        # In OpenHCS, None has semantic meaning: "inherit from parent context"
+        nested_values = nested_manager.parameters.copy()
 
         if not nested_values:
             logger.debug(f"[ValueCollection] Direct {info.name}: no nested edits, returning default")
