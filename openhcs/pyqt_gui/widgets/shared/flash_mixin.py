@@ -1021,10 +1021,14 @@ class _GlobalFlashCoordinator:
             return key
 
     def _get_base_color_for_key(self, key: str) -> Optional[QColor]:
-        """Look up base color for flash rendering to match window border colors.
+        """Look up base color for flash rendering to match border colors exactly.
 
-        Returns a scope-based QColor when the key looks like a scope_id.
-        Returns a neutral grey color for non-scope keys or failures.
+        Uses the same tint_color_perceptual() as border painting to ensure
+        flash color matches the border color precisely.
+
+        IMPORTANT: Distinguishes between:
+        - Step keys (e.g. "plate_path::functionstep_5") → use full key for step-specific colors
+        - Config field keys (e.g. "plate_path::napari_config") → use orchestrator scope
         """
         # Empty/None → neutral
         if not key or key == "":
@@ -1034,17 +1038,47 @@ class _GlobalFlashCoordinator:
             return self._get_neutral_flash_color()
 
         try:
-            from openhcs.pyqt_gui.widgets.shared.scope_color_utils import get_scope_color_scheme
+            from openhcs.pyqt_gui.widgets.shared.scope_color_utils import (
+                extract_orchestrator_scope,
+                get_scope_color_scheme,
+                tint_color_perceptual,
+            )
 
-            scheme = get_scope_color_scheme(key)
+            # Determine if this is a step key or config field key
+            # Step tokens are like "functionstep_5", "imagestep_3" (type + "step_" + number)
+            # Config fields might contain "step" in their name (e.g., "lazy_step_materialization_config")
+            import re
+            parts = key.split("::")
+            if len(parts) >= 2:
+                token = parts[-1]
+                # Step tokens match pattern: word + "step_" + digits (e.g., functionstep_5)
+                is_step_token = bool(re.match(r"^[a-z]+step_\d+$", token.lower()))
+                if is_step_token:
+                    scope_for_color = key
+                else:
+                    # Config field - use orchestrator scope so all fields match plate color
+                    scope_for_color = extract_orchestrator_scope(key) or key
+            else:
+                scope_for_color = key
+
+            scheme = get_scope_color_scheme(scope_for_color)
             # If scheme is neutral (scope_id None), use neutral color
             if scheme.scope_id is None:
                 return self._get_neutral_flash_color()
 
-            parts = key.split("::") if key else []
-            if len(parts) <= 1:
-                return scheme.to_qcolor_orchestrator_border()
-            return scheme.to_qcolor_step_window_border()
+            # Always use tint_color_perceptual to match border painting exactly
+            # Both orchestrator and step levels use the same border painting logic
+            base_rgb = getattr(scheme, "base_color_rgb", None)
+            layers = getattr(scheme, "step_border_layers", None)
+            if base_rgb and layers:
+                # Use first layer's tint index for consistency with border painting
+                _, tint_idx, _ = (layers[0] + ("solid",))[:3]
+                return tint_color_perceptual(base_rgb, tint_idx).darker(120)
+
+            # Fallback: no layers means simple border, use middle tint
+            if base_rgb:
+                return tint_color_perceptual(base_rgb, 1).darker(120)
+            return scheme.to_qcolor_orchestrator_border()
         except Exception as exc:
             logger.debug("Failed to get scope color for key %s: %s", key, exc)
             return self._get_neutral_flash_color()

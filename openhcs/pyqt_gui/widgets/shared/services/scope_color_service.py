@@ -6,6 +6,7 @@ import logging
 
 from openhcs.pyqt_gui.widgets.shared.scope_color_strategy import (
     ScopeColorStrategy,
+    IndexBasedStrategy,
     MD5HashStrategy,
     ManualColorStrategy,
     ColorStrategyType,
@@ -35,11 +36,12 @@ class ScopeColorService(QObject):
     def __init__(self):
         super().__init__()
         self._strategies: Dict[ColorStrategyType, ScopeColorStrategy] = {
+            ColorStrategyType.INDEX_BASED: IndexBasedStrategy(),
             ColorStrategyType.MD5_HASH: MD5HashStrategy(),
             ColorStrategyType.MANUAL: ManualColorStrategy(),
         }
-        self._active_strategy_type = ColorStrategyType.MD5_HASH
-        self._scheme_cache: Dict[str, "ScopeColorScheme"] = {}
+        self._active_strategy_type = ColorStrategyType.INDEX_BASED  # Use index-based by default
+        self._scheme_cache: Dict = {}  # Mixed key types: str or (str, int)
 
     @property
     def active_strategy(self) -> ScopeColorStrategy:
@@ -75,12 +77,19 @@ class ScopeColorService(QObject):
         if scope_id is None:
             return self._get_neutral_scheme()
 
-        # Cache key includes step_index when provided (for list item position)
-        cache_key = (scope_id, step_index) if step_index is not None else scope_id
+        # For orchestrator-level scopes (no "::"), ignore step_index in cache key
+        # since orchestrator-level uses fixed tint regardless of step_index.
+        # This ensures plate list items and their config windows share the same scheme.
+        is_orchestrator_level = "::" not in (scope_id or "")
+        if is_orchestrator_level:
+            cache_key = scope_id
+        else:
+            cache_key = (scope_id, step_index) if step_index is not None else scope_id
 
         if cache_key not in self._scheme_cache:
-            orchestrator_scope = extract_orchestrator_scope(scope_id)
-            rgb = self.active_strategy.generate_color(orchestrator_scope)
+            orchestrator_scope = extract_orchestrator_scope(scope_id) or scope_id
+            # Pass step_index (used by some strategies, ignored by orchestrator-based)
+            rgb = self.active_strategy.generate_color(orchestrator_scope, step_index=step_index)
             self._scheme_cache[cache_key] = _build_color_scheme_from_rgb(
                 rgb, scope_id, step_index=step_index
             )

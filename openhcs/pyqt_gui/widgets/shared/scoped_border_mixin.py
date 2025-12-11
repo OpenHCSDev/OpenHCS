@@ -5,17 +5,19 @@ from PyQt6.QtGui import QPainter, QPen, QColor
 from PyQt6.QtCore import Qt
 import logging
 
+from openhcs.pyqt_gui.widgets.shared.scope_color_utils import tint_color_perceptual
+
 logger = logging.getLogger(__name__)
 
 
 class ScopedBorderMixin:
     """Mixin that renders scope-based borders on QDialog/QWidget subclasses."""
 
-    BORDER_TINT_FACTORS: Tuple[float, ...] = (0.7, 1.0, 1.4)
     BORDER_PATTERNS = {
         "solid": (Qt.PenStyle.SolidLine, None),
         "dashed": (Qt.PenStyle.DashLine, [8, 6]),
         "dotted": (Qt.PenStyle.DotLine, [2, 6]),
+        "dashdot": (Qt.PenStyle.DashDotLine, [8, 4, 2, 4]),
     }
 
     _scope_color_scheme = None
@@ -87,8 +89,7 @@ class ScopedBorderMixin:
 
         for layer in layers:
             width, tint_idx, pattern = (layer + ("solid",))[:3]
-            tint = self.BORDER_TINT_FACTORS[tint_idx]
-            color = QColor(*(min(255, int(c * tint)) for c in base_rgb)).darker(120)
+            color = tint_color_perceptual(base_rgb, tint_idx).darker(120)
 
             pen = QPen(color, width)
             style, dash_pattern = self.BORDER_PATTERNS.get(

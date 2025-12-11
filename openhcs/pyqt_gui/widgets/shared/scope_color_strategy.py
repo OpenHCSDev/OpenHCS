@@ -1,4 +1,9 @@
-"""Pluggable color generation strategies for scope-based styling."""
+"""Pluggable color generation strategies for scope-based styling.
+
+HIERARCHY:
+- Orchestrator (plate) → gets BASE color from palette (by hash)
+- Steps under that orchestrator → inherit BASE color, vary by tint + pattern
+"""
 
 from abc import ABC, abstractmethod
 from enum import Enum, auto
@@ -9,11 +14,29 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Predetermined palette of maximally distinct colors (12 primary colors)
+# Hand-picked for maximum perceptual distinction
+_PRIMARY_PALETTE_RGB: Tuple[Tuple[int, int, int], ...] = (
+    (46, 204, 113),   # 0: Emerald green
+    (52, 152, 219),   # 1: Sky blue
+    (231, 76, 60),    # 2: Red
+    (155, 89, 182),   # 3: Purple
+    (241, 196, 15),   # 4: Yellow
+    (26, 188, 156),   # 5: Turquoise
+    (230, 126, 34),   # 6: Orange
+    (52, 73, 94),     # 7: Dark blue-grey
+    (46, 204, 170),   # 8: Mint
+    (192, 57, 43),    # 9: Dark red
+    (142, 68, 173),   # 10: Dark purple
+    (39, 174, 96),    # 11: Dark green
+)
+
 
 class ColorStrategyType(Enum):
     """Available color generation strategies."""
 
-    MD5_HASH = auto()
+    INDEX_BASED = auto()  # Color by orchestrator hash (primary)
+    MD5_HASH = auto()     # Fallback (distinctipy palette)
     MANUAL = auto()
 
 
@@ -23,13 +46,48 @@ class ScopeColorStrategy(ABC):
     strategy_type: ColorStrategyType
 
     @abstractmethod
-    def generate_color(self, scope_id: str) -> Tuple[int, int, int]:
-        """Generate RGB color for scope."""
+    def generate_color(self, scope_id: str, step_index: Optional[int] = None) -> Tuple[int, int, int]:
+        """Generate RGB color for scope.
+
+        Args:
+            scope_id: The scope identifier (orchestrator or step scope)
+            step_index: Optional step index (not used for base color, only for tint/pattern)
+        """
         raise NotImplementedError
 
 
+class IndexBasedStrategy(ScopeColorStrategy):
+    """Color by orchestrator from predetermined palette.
+
+    Orchestrators (plates) get distinct BASE colors from the primary palette.
+    Steps inherit their orchestrator's base color.
+    Tint/pattern variation is handled in _build_color_scheme_from_rgb.
+    """
+
+    strategy_type = ColorStrategyType.INDEX_BASED
+
+    def generate_color(self, scope_id: str, step_index: Optional[int] = None) -> Tuple[int, int, int]:
+        # Base color determined by orchestrator (plate), NOT step_index
+        # step_index only affects tint/pattern, handled elsewhere
+        orchestrator_index = self._get_orchestrator_index(scope_id)
+        palette_index = orchestrator_index % len(_PRIMARY_PALETTE_RGB)
+        return _PRIMARY_PALETTE_RGB[palette_index]
+
+    def _get_orchestrator_index(self, scope_id: str) -> int:
+        """Get palette index for orchestrator (deterministic hash)."""
+        # Extract orchestrator part (before ::)
+        if "::" in scope_id:
+            orchestrator = scope_id.split("::")[0]
+        else:
+            orchestrator = scope_id
+
+        # Hash orchestrator to palette index
+        hash_bytes = hashlib.md5(orchestrator.encode()).digest()
+        return int.from_bytes(hash_bytes[:2], byteorder="big") % len(_PRIMARY_PALETTE_RGB)
+
+
 class MD5HashStrategy(ScopeColorStrategy):
-    """Deterministic color from MD5 hash of scope_id."""
+    """Deterministic color from MD5 hash of scope_id (fallback)."""
 
     strategy_type = ColorStrategyType.MD5_HASH
     PALETTE_SIZE = 50
@@ -69,7 +127,7 @@ class MD5HashStrategy(ScopeColorStrategy):
         hash_int = int.from_bytes(hash_bytes[:4], byteorder="big")
         return hash_int % self.PALETTE_SIZE
 
-    def generate_color(self, scope_id: str) -> Tuple[int, int, int]:
+    def generate_color(self, scope_id: str, step_index: Optional[int] = None) -> Tuple[int, int, int]:
         palette = self._get_palette()
         index = self._hash_to_index(scope_id)
         return palette[index]
@@ -99,5 +157,5 @@ class ManualColorStrategy(ScopeColorStrategy):
     def load_manual_colors(self, colors: Dict[str, Tuple[int, int, int]]) -> None:
         self._colors.update(colors)
 
-    def generate_color(self, scope_id: str) -> Tuple[int, int, int]:
-        return self._colors.get(scope_id) or self._fallback.generate_color(scope_id)
+    def generate_color(self, scope_id: str, step_index: Optional[int] = None) -> Tuple[int, int, int]:
+        return self._colors.get(scope_id) or self._fallback.generate_color(scope_id, step_index)
