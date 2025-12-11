@@ -664,13 +664,12 @@ class PipelineEditorWidget(AbstractManagerWidget):
         logger.debug(f"Registered ObjectState for step: {scope_id}")
 
     def _unregister_step_state(self, step: FunctionStep) -> None:
-        """Unregister ObjectState for a step."""
+        """Unregister ObjectState for a step and all its nested functions."""
         scope_id = self._build_step_scope_id(step)
 
-        existing = ObjectStateRegistry.get_by_scope(scope_id)
-        if existing:
-            ObjectStateRegistry.unregister(existing)
-            logger.debug(f"Unregistered ObjectState for step: {scope_id}")
+        # Cascade unregister: step + all nested functions (prevents memory leak)
+        count = ObjectStateRegistry.unregister_scope_and_descendants(scope_id)
+        logger.debug(f"Cascade unregistered {count} ObjectState(s) for deleted step: {scope_id}")
 
     # _merge_with_live_values() DELETED - use _merge_with_live_values() from base class
     # _get_step_preview_instance() DELETED - ObjectState provides resolved values directly

@@ -70,6 +70,48 @@ class ObjectStateRegistry:
             logger.debug(f"Unregistered ObjectState: scope={key}")
 
     @classmethod
+    def unregister_scope_and_descendants(cls, scope_id: Optional[str]) -> int:
+        """Unregister an ObjectState and all its descendants from the registry.
+
+        This is used when deleting a plate - we need to cascade delete all child
+        ObjectStates (steps, functions) to prevent memory leaks.
+
+        Example:
+            When deleting plate "/path/to/plate", this unregisters:
+            - "/path/to/plate" (the plate's PipelineConfig)
+            - "/path/to/plate::step_0" (step ObjectStates)
+            - "/path/to/plate::step_0::func_0" (function ObjectStates)
+            - etc.
+
+        Args:
+            scope_id: The scope to unregister (along with all descendants).
+
+        Returns:
+            Number of ObjectStates unregistered.
+        """
+        scope_key = cls._normalize_scope_id(scope_id)
+
+        # Find all scopes to delete: exact match + descendants
+        scopes_to_delete = []
+        for key in cls._states.keys():
+            # Exact match
+            if key == scope_key:
+                scopes_to_delete.append(key)
+            # Descendant (starts with scope_key::)
+            elif scope_key and key.startswith(scope_key + "::"):
+                scopes_to_delete.append(key)
+
+        # Delete all matching scopes
+        for key in scopes_to_delete:
+            del cls._states[key]
+            logger.debug(f"Unregistered ObjectState (cascade): scope={key}")
+
+        if scopes_to_delete:
+            logger.info(f"Cascade unregistered {len(scopes_to_delete)} ObjectState(s) for scope={scope_key}")
+
+        return len(scopes_to_delete)
+
+    @classmethod
     def get_by_scope(cls, scope_id: Optional[str]) -> Optional['ObjectState']:
         """Get ObjectState by scope_id.
 
