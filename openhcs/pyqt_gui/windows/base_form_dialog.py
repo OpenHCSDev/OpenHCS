@@ -89,6 +89,8 @@ class BaseFormDialog(ScopedBorderMixin, QDialog):
             logger.debug(f"[SINGLETON] Focused existing window for {scope_key}")
             return
 
+        overlay_was_cleaned = getattr(self, "_flash_overlay_cleaned", False)
+
         # Initialize scope-based border styling (ScopedBorderMixin)
         # Done here because scope_id is set by subclass AFTER super().__init__()
         self._init_scope_border()
@@ -96,6 +98,9 @@ class BaseFormDialog(ScopedBorderMixin, QDialog):
         # Register self with WindowManager (it will handle closeEvent cleanup)
         WindowManager.register(scope_key, self)
         super().show()
+        if overlay_was_cleaned:
+            self._reregister_flash_elements()
+            self._flash_overlay_cleaned = False
         logger.debug(f"[SINGLETON] Registered and showed new window for {scope_key}")
 
     def _get_window_scope_key(self) -> Optional[str]:
@@ -176,6 +181,7 @@ class BaseFormDialog(ScopedBorderMixin, QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._unregistered = False  # Track if we've already unregistered
+        self._flash_overlay_cleaned = False  # Track overlay cleanup when dialog is reused
         self._scope_accent_color = None  # Stored for deferred application to async widgets
 
         # CRITICAL: Register with global event bus for cross-window updates
@@ -448,6 +454,7 @@ class BaseFormDialog(ScopedBorderMixin, QDialog):
 
         # CRITICAL: Cleanup WindowFlashOverlay to prevent memory leak
         from openhcs.pyqt_gui.widgets.shared.flash_mixin import WindowFlashOverlay
+        self._flash_overlay_cleaned = True
         WindowFlashOverlay.cleanup_window(self)
         logger.info(f"🔍 {self.__class__.__name__}: Cleaned up WindowFlashOverlay")
 
@@ -462,6 +469,7 @@ class BaseFormDialog(ScopedBorderMixin, QDialog):
 
         # CRITICAL: Cleanup WindowFlashOverlay to prevent memory leak
         from openhcs.pyqt_gui.widgets.shared.flash_mixin import WindowFlashOverlay
+        self._flash_overlay_cleaned = True
         WindowFlashOverlay.cleanup_window(self)
         logger.info(f"🔍 {self.__class__.__name__}: Cleaned up WindowFlashOverlay")
 
@@ -488,13 +496,16 @@ class BaseFormDialog(ScopedBorderMixin, QDialog):
         # Without this, every window's overlay stays in _overlays dict forever,
         # making flash operations progressively slower (O(n) where n = windows ever opened)
         from openhcs.pyqt_gui.widgets.shared.flash_mixin import WindowFlashOverlay
+        self._flash_overlay_cleaned = True
         WindowFlashOverlay.cleanup_window(self)
         logger.info(f"🔍 {self.__class__.__name__}: Cleaned up WindowFlashOverlay")
 
         # Unregister from WindowManager so window can be reopened
         from openhcs.pyqt_gui.services.window_manager import WindowManager
         scope_key = self._get_window_scope_key()
-        if scope_key:
+        # CRITICAL: Use "is not None" check, not truthiness!
+        # scope_key="" (empty string) is a valid scope for GlobalPipelineConfig
+        if scope_key is not None:
             WindowManager.unregister(scope_key)
             logger.debug(f"🔍 {self.__class__.__name__}: Unregistered from WindowManager: {scope_key}")
 
@@ -505,3 +516,12 @@ class BaseFormDialog(ScopedBorderMixin, QDialog):
         from openhcs.config_framework.object_state import ObjectStateRegistry
         ObjectStateRegistry.increment_token()
         logger.info(f"🔍 {self.__class__.__name__}: Triggered global refresh after closeEvent")
+
+    def _reregister_flash_elements(self):
+        """Re-register flashable widgets after overlay cleanup when reusing the dialog instance."""
+        for manager in self._get_form_managers():
+            try:
+                if hasattr(manager, "reregister_flash_elements"):
+                    manager.reregister_flash_elements()
+            except Exception as exc:
+                logger.warning(f"{self.__class__.__name__}: Failed to re-register flash elements for manager {getattr(manager, 'field_id', '?')}: {exc}")

@@ -1116,6 +1116,11 @@ class DualEditorWindow(BaseFormDialog):
                 event.ignore()
                 return
 
+        # Cleanup tree helper subscriptions to prevent memory leaks
+        if hasattr(self, 'step_editor') and self.step_editor is not None:
+            if hasattr(self.step_editor, 'tree_helper'):
+                self.step_editor.tree_helper.cleanup_subscriptions()
+
         super().closeEvent(event)  # BaseFormDialog handles unregistration
 
     # No need to override _get_form_managers() - BaseFormDialog automatically

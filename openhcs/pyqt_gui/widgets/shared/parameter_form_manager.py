@@ -333,6 +333,11 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, FlashMixin, metacla
             # Label styling: Subscribe to parameter changes (all managers, not just root)
             self.state.on_parameters_changed(self._on_parameter_changed_for_label_styling)
 
+            # Dirty indicator: Subscribe to dirty state changes (root only - dirty computed at root level)
+            # This updates asterisk indicators when save/restore changes the saved baseline
+            if self._parent_manager is None:
+                self.state.on_dirty_changed(self._on_dirty_state_changed)
+
             # STEP 8: _user_set_fields starts empty and is populated only when user edits widgets
             # (via _emit_parameter_change). Do NOT populate during initialization, as that would
             # include inherited values that weren't explicitly set by the user.
@@ -610,7 +615,12 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, FlashMixin, metacla
         self._update_label_styling(param_name)
 
     def _update_label_styling(self, param_name: str) -> None:
-        """Update label underline based on parameter value (underlined if differs from signature default)."""
+        """Update label styling: underline (differs from signature default) and dirty indicator (unsaved changes).
+
+        Two independent visual semantics:
+        - Underline: raw value differs from signature default (explicitly set)
+        - Asterisk (*): resolved value differs from saved resolved value (unsaved changes)
+        """
         if param_name not in self.labels:
             return
 
@@ -628,6 +638,10 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, FlashMixin, metacla
         label = self.labels[param_name]
         label.set_underline(should_underline)
 
+        # Dirty indicator: asterisk if resolved value differs from saved resolved value
+        is_dirty = self.state.is_field_dirty(dotted_path)
+        label.set_dirty_indicator(is_dirty)
+
     def _on_parameter_changed_for_label_styling(self, param_name: str) -> None:
         """Callback when state.parameters changes - update label styling.
 
@@ -637,6 +651,20 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, FlashMixin, metacla
         # Extract leaf field name from dotted path
         leaf_field = param_name.split('.')[-1] if '.' in param_name else param_name
         self._update_label_styling(leaf_field)
+
+    def _on_dirty_state_changed(self, is_dirty: bool) -> None:
+        """Callback when dirty state changes (save/restore) - refresh all label dirty indicators.
+
+        This is called when dirty state transitions (dirty→clean or clean→dirty), typically
+        after mark_saved() or restore_saved(). Parameters haven't changed, but the saved
+        baseline has, so all dirty indicators need to be recalculated.
+        """
+        # Refresh all labels in this manager
+        for param_name in self.labels:
+            self._update_label_styling(param_name)
+        # Recursively refresh nested managers
+        for nested_manager in self.nested_managers.values():
+            nested_manager._on_dirty_state_changed(is_dirty)
 
     # DELETED: MODEL DELEGATION - callers use self.state.get_*() directly
     # DELETED: _on_nested_parameter_changed - replaced by FieldChangeDispatcher
@@ -726,6 +754,10 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, FlashMixin, metacla
 
             # Unregister parameter change callback for label styling
             self.state.off_parameters_changed(self._on_parameter_changed_for_label_styling)
+
+            # Unregister dirty state change callback (root only)
+            if self._parent_manager is None:
+                self.state.off_dirty_changed(self._on_dirty_state_changed)
 
             if self.context_obj is not None and not self._parent_manager:
                 from openhcs.config_framework.context_manager import unregister_hierarchy_relationship

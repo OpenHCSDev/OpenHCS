@@ -408,6 +408,15 @@ class ObjectStateRegistry:
         if invalidated_paths:
             state._ensure_live_resolved(notify=True)
 
+            # Fire parameter changed callbacks for sibling fields so label styling updates
+            # (on_resolved_changed handles flashes, but on_parameters_changed handles label dirty indicators)
+            for dotted_path in invalidated_paths:
+                for callback in state._on_parameters_changed_callbacks:
+                    try:
+                        callback(dotted_path)
+                    except Exception as e:
+                        logger.warning(f"Error in sibling parameters_changed callback: {e}")
+
             # If we invalidated saved baseline, recompute it now with fresh ancestor values
             if invalidate_saved:
                 # Recompute entire saved_resolved snapshot to pick up new ancestor saved values
@@ -602,6 +611,11 @@ class ObjectState:
         # Callbacks notified when raw parameters dict changes (for label styling)
         self._on_parameters_changed_callbacks: List[Callable[[str], None]] = []
 
+        # === Dirty State Change Callbacks ===
+        # Callbacks notified when dirty state transitions (dirty → clean or vice versa)
+        # Used by list items for reactive dirty markers without polling
+        self._on_dirty_changed_callbacks: List[Callable[[bool], None]] = []
+
         # Initialize baselines (suppress notifications during init)
         self._ensure_live_resolved(notify=False)
         # Compute saved baseline using SAVED ancestor values (use_saved=True)
@@ -683,6 +697,40 @@ class ObjectState:
         if callback in self._on_parameters_changed_callbacks:
             self._on_parameters_changed_callbacks.remove(callback)
 
+    def on_dirty_changed(self, callback: Callable[[bool], None]) -> None:
+        """Subscribe to dirty state change notifications.
+
+        The callback is called when dirty state TRANSITIONS (dirty → clean or clean → dirty).
+        Used by UI components for reactive dirty markers without polling.
+
+        Args:
+            callback: Function that takes a bool (True = now dirty, False = now clean).
+        """
+        if callback not in self._on_dirty_changed_callbacks:
+            self._on_dirty_changed_callbacks.append(callback)
+
+    def off_dirty_changed(self, callback: Callable[[bool], None]) -> None:
+        """Unsubscribe from dirty state change notifications."""
+        if callback in self._on_dirty_changed_callbacks:
+            self._on_dirty_changed_callbacks.remove(callback)
+
+    def _emit_dirty_changed_if_threshold_crossed(self, was_dirty: bool) -> None:
+        """Emit on_dirty_changed callbacks if dirty state crossed threshold.
+
+        Called after operations that might change dirty state (mark_saved, restore_saved,
+        parameter updates). Compares previous dirty state to current and fires callbacks
+        if there was a transition.
+        """
+        is_dirty_now = self.is_dirty()
+        if was_dirty != is_dirty_now:
+            for callback in self._on_dirty_changed_callbacks:
+                try:
+                    callback(is_dirty_now)
+                except RuntimeError as e:
+                    logger.warning(f"Dead callback in on_dirty_changed: {e}")
+                except Exception as e:
+                    logger.warning(f"Error in on_dirty_changed callback: {e}")
+
     def _ensure_live_resolved(self, notify: bool = True) -> None:
         """Ensure _live_resolved cache is populated.
 
@@ -705,6 +753,9 @@ class ObjectState:
 
         # Partial recompute for invalid fields only
         if self._invalid_fields:
+            # Track dirty state BEFORE recompute to detect threshold crossing
+            was_dirty = self._live_resolved != self._saved_resolved
+
             changed_paths = self._recompute_invalid_fields()
             self._invalid_fields.clear()
 
@@ -721,6 +772,18 @@ class ObjectState:
                                      f"scope={self.scope_id}, error: {e}")
                     except Exception as e:
                         logger.warning(f"Error in resolved_changed callback #{i}: {e}")
+
+            # Check if dirty state crossed threshold and notify
+            if notify and changed_paths:
+                is_dirty_now = self._live_resolved != self._saved_resolved
+                if was_dirty != is_dirty_now:
+                    for callback in self._on_dirty_changed_callbacks:
+                        try:
+                            callback(is_dirty_now)
+                        except RuntimeError as e:
+                            logger.warning(f"Dead callback in on_dirty_changed: {e}")
+                        except Exception as e:
+                            logger.warning(f"Error in on_dirty_changed callback: {e}")
 
     # DELETED: _create_nested_states() - No longer needed with flat storage
     # Nested ObjectStates are no longer created - flat storage handles all parameters
@@ -786,16 +849,17 @@ class ObjectState:
         # Update state directly (no type conversion - that's VIEW responsibility)
         self.parameters[param_name] = value
 
+        # SELF-INVALIDATION: Mark this field as needing recompute in our own cache
+        # CRITICAL: Must happen BEFORE callbacks so is_field_dirty() returns correct value
+        self._invalid_fields.add(param_name)
+        self._cached_object = None  # Invalidate cached reconstructed object
+
         # Notify parameter change callbacks (for label styling, etc.)
         for callback in self._on_parameters_changed_callbacks:
             try:
                 callback(param_name)
             except Exception as e:
                 logger.warning(f"Error in parameters_changed callback: {e}")
-
-        # SELF-INVALIDATION: Mark this field as needing recompute in our own cache
-        self._invalid_fields.add(param_name)
-        self._cached_object = None  # Invalidate cached reconstructed object
 
         # GLOBAL CONFIG EXCEPTION: Update LIVE thread-local FIRST, BEFORE invalidating descendants!
         # This is critical: descendants re-resolve during invalidation, so they need to see
@@ -1229,6 +1293,9 @@ class ObjectState:
         Invalidation is based on comparing the OLD object_instance (about to be replaced)
         with the NEW self.parameters (live values used for reconstruction).
         """
+        # Track dirty state BEFORE save to detect threshold crossing
+        was_dirty = self.is_dirty()
+
         # CRITICAL: Extract old values from object_instance BEFORE rebuilding it
         # These are the values that descendants might be inheriting from
         old_instance_values = {}
@@ -1312,6 +1379,9 @@ class ObjectState:
         # Invalidate cached object so next to_object() call rebuilds
         self._cached_object = None
 
+        # Emit dirty changed callback if we crossed threshold (dirty → clean)
+        self._emit_dirty_changed_if_threshold_crossed(was_dirty)
+
     def restore_saved(self) -> None:
         """Restore parameters to the last saved baseline (from object_instance).
 
@@ -1324,8 +1394,12 @@ class ObjectState:
         Also emits on_resolved_changed for THIS state so same-level observers
         (like list items subscribed to this ObjectState) flash when values revert.
         """
+        # Track dirty state BEFORE restore to detect threshold crossing
+        was_dirty = self.is_dirty()
+
         if isinstance(self.object_instance, type):
             self.invalidate_cache()
+            self._emit_dirty_changed_if_threshold_crossed(was_dirty)
             return
 
         # Find parameters that differ from saved baseline AND capture their container types
@@ -1372,22 +1446,62 @@ class ObjectState:
                 except Exception as e:
                     logger.warning(f"Error in resolved_changed callback #{i} during restore: {e}")
 
+        # Emit dirty changed callback if we crossed threshold (dirty → clean)
+        self._emit_dirty_changed_if_threshold_crossed(was_dirty)
+
+    def get_dirty_fields(self) -> Set[str]:
+        """Get set of field paths that differ from saved baseline.
+
+        Returns all dotted paths (e.g., 'path_planning_config.well_filter')
+        where _live_resolved differs from _saved_resolved.
+        """
+        self._ensure_live_resolved()
+        assert self._live_resolved is not None
+        dirty = set()
+        for key in set(self._live_resolved.keys()) | set(self._saved_resolved.keys()):
+            if self._live_resolved.get(key) != self._saved_resolved.get(key):
+                dirty.add(key)
+        return dirty
+
+    def is_field_dirty(self, field_path: str) -> bool:
+        """Check if a specific field differs from saved baseline.
+
+        Args:
+            field_path: Dotted path like 'path_planning_config.well_filter'
+
+        Returns:
+            True if resolved value differs from saved baseline.
+        """
+        self._ensure_live_resolved()
+        assert self._live_resolved is not None
+        return self._live_resolved.get(field_path) != self._saved_resolved.get(field_path)
+
+    def get_dirty_sections(self) -> Set[str]:
+        """Get set of top-level sections with any dirty fields.
+
+        E.g., if 'path_planning_config.well_filter' is dirty,
+        returns {'path_planning_config'}.
+        """
+        sections = set()
+        for field_path in self.get_dirty_fields():
+            section = field_path.split('.')[0]
+            sections.add(section)
+        return sections
+
     def is_dirty(self) -> bool:
         """Return True if resolved state differs from saved baseline."""
-        self._ensure_live_resolved()
-        is_dirty = self._live_resolved != self._saved_resolved
-        if is_dirty:
+        dirty_fields = self.get_dirty_fields()
+        if dirty_fields:
             # Log which fields differ
-            for key in set(self._live_resolved.keys()) | set(self._saved_resolved.keys()):
+            for key in dirty_fields:
                 live_val = self._live_resolved.get(key)
                 saved_val = self._saved_resolved.get(key)
-                if live_val != saved_val:
-                    logger.debug(
-                        f"DIRTY FIELD [{self.scope_id}] {key}: "
-                        f"live={live_val!r} (type={type(live_val).__name__}) != "
-                        f"saved={saved_val!r} (type={type(saved_val).__name__})"
-                    )
-        return is_dirty
+                logger.debug(
+                    f"DIRTY FIELD [{self.scope_id}] {key}: "
+                    f"live={live_val!r} (type={type(live_val).__name__}) != "
+                    f"saved={saved_val!r} (type={type(saved_val).__name__})"
+                )
+        return bool(dirty_fields)
 
     def should_skip_updates(self) -> bool:
         """Check if updates should be skipped due to batch operations."""

@@ -452,6 +452,12 @@ class ProvenanceLabel(QLabel):
         - Source: PathPlanningConfig at 'path_planning_config'
 
         We need to find what path source_type is at in the target window's ObjectState.
+
+        IMPORTANT: If source_type is ui_hidden (not shown in the UI), we find the closest
+        visible subclass in the MRO that also has this field. For example:
+        - NapariDisplayConfig is ui_hidden=True
+        - NapariStreamingConfig inherits from NapariDisplayConfig and IS visible
+        - So we navigate to napari_streaming_config.field instead of napari_display_config.field
         """
         from openhcs.config_framework.object_state import ObjectStateRegistry
 
@@ -477,10 +483,75 @@ class ProvenanceLabel(QLabel):
             logger.warning(f"No path for type {source_type.__name__} in scope {source_scope_id}, using local path: {self._dotted_path}")
             return self._dotted_path
 
+        # Check if source_type is ui_hidden - if so, find a visible subclass
+        if self._is_type_ui_hidden(source_type):
+            visible_path = self._find_visible_subclass_path(
+                target_state, source_type, field_name
+            )
+            if visible_path:
+                logger.info(f"UI-hidden fallback: {source_type.__name__} → {visible_path}")
+                return visible_path
+            # If no visible subclass found, fall through to use original path
+            # (scroll will fail but at least we tried)
+
         # Construct full path: prefix.field_name (empty prefix = root level field)
         target_path = f"{path_prefix}.{field_name}" if path_prefix else field_name
         logger.info(f"Computed target path: {target_path} (source_type={source_type.__name__}, field={field_name})")
         return target_path
+
+    def _is_type_ui_hidden(self, typ: type) -> bool:
+        """Check if a type has ui_hidden=True (should not appear in UI forms)."""
+        # Check __dict__ directly to avoid inheriting _ui_hidden from parent classes
+        return hasattr(typ, '__dict__') and '_ui_hidden' in typ.__dict__ and typ._ui_hidden
+
+    def _find_visible_subclass_path(
+        self, target_state, hidden_type: type, field_name: str
+    ) -> Optional[str]:
+        """Find a visible subclass that inherits from hidden_type and has field_name.
+
+        When provenance points to a ui_hidden config (like NapariDisplayConfig),
+        we need to find a visible subclass (like NapariStreamingConfig) that:
+        1. Inherits from the hidden type (has it in MRO)
+        2. Is visible in the UI (not ui_hidden)
+        3. Exists in the target window's ObjectState
+
+        Args:
+            target_state: ObjectState of the target window
+            hidden_type: The ui_hidden type to find a substitute for
+            field_name: The field we want to navigate to
+
+        Returns:
+            Full dotted path (e.g., 'napari_streaming_config.colormap') or None
+        """
+        from openhcs.config_framework.lazy_factory import get_base_type_for_lazy
+
+        # Scan all types in target_state to find visible subclasses
+        for path, typ in target_state._path_to_type.items():
+            # Skip if path has dots (not a top-level config)
+            if '.' in path:
+                continue
+
+            # Normalize type for comparison
+            typ_base = get_base_type_for_lazy(typ) or typ
+
+            # Skip if this type itself is ui_hidden
+            if self._is_type_ui_hidden(typ_base):
+                continue
+
+            # Check if hidden_type is in this type's MRO (inheritance chain)
+            try:
+                mro = typ_base.__mro__
+            except AttributeError:
+                continue
+
+            hidden_base = get_base_type_for_lazy(hidden_type) or hidden_type
+            if hidden_base in mro:
+                # Found a visible subclass! Return the path to the field
+                target_path = f"{path}.{field_name}"
+                logger.debug(f"Found visible subclass: {typ_base.__name__} at path {path}")
+                return target_path
+
+        return None
 
     def _find_main_window(self):
         """Find the main window through the parent chain."""
@@ -530,29 +601,35 @@ class ProvenanceLabel(QLabel):
             return self._create_step_editor_window(scope_id)
 
     def _create_global_config_window(self):
-        """Create GlobalPipelineConfig editor window."""
+        """Create GlobalPipelineConfig editor window.
+
+        Creates window directly and shows it. BaseFormDialog.show() handles
+        singleton logic via is_open() check - no need for show_or_focus().
+        """
         from openhcs.pyqt_gui.windows.config_window import ConfigWindow
         from openhcs.core.config import GlobalPipelineConfig
-        from openhcs.pyqt_gui.services.window_manager import WindowManager
         from openhcs.config_framework.global_config import get_current_global_config
 
-        def factory():
-            current_config = get_current_global_config(GlobalPipelineConfig) or GlobalPipelineConfig()
-            window = ConfigWindow(
-                config_class=GlobalPipelineConfig,
-                current_config=current_config,
-                on_save_callback=self._get_global_save_callback(),
-                scope_id=""
-            )
-            return window
-
-        return WindowManager.show_or_focus("", factory)
+        current_config = get_current_global_config(GlobalPipelineConfig) or GlobalPipelineConfig()
+        window = ConfigWindow(
+            config_class=GlobalPipelineConfig,
+            current_config=current_config,
+            on_save_callback=self._get_global_save_callback(),
+            scope_id=""
+        )
+        window.show()
+        window.raise_()
+        window.activateWindow()
+        return window
 
     def _create_plate_config_window(self, scope_id: str):
-        """Create PipelineConfig editor window for a plate."""
+        """Create PipelineConfig editor window for a plate.
+
+        Creates window directly and shows it. BaseFormDialog.show() handles
+        singleton logic via is_open() check - no need for show_or_focus().
+        """
         from openhcs.pyqt_gui.windows.config_window import ConfigWindow
         from openhcs.core.config import PipelineConfig
-        from openhcs.pyqt_gui.services.window_manager import WindowManager
 
         plate_manager = self._find_plate_manager()
         if not plate_manager:
@@ -564,24 +641,26 @@ class ProvenanceLabel(QLabel):
             logger.warning(f"No orchestrator found for scope: {scope_id}")
             return None
 
-        def factory():
-            window = ConfigWindow(
-                config_class=PipelineConfig,
-                current_config=orchestrator.pipeline_config,
-                on_save_callback=None,  # Read-only navigation for provenance
-                scope_id=scope_id
-            )
-            return window
-
-        return WindowManager.show_or_focus(scope_id, factory)
+        window = ConfigWindow(
+            config_class=PipelineConfig,
+            current_config=orchestrator.pipeline_config,
+            on_save_callback=None,  # Read-only navigation for provenance
+            scope_id=scope_id
+        )
+        window.show()
+        window.raise_()
+        window.activateWindow()
+        return window
 
     def _create_step_editor_window(self, scope_id: str):
         """Create DualEditorWindow for step or function scope.
 
         Scope format: "/plate/path::step_N" or "/plate/path::step_N::func_M"
+
+        Creates window directly and shows it. BaseFormDialog.show() handles
+        singleton logic via is_open() check - no need for show_or_focus().
         """
         from openhcs.pyqt_gui.windows.dual_editor_window import DualEditorWindow
-        from openhcs.pyqt_gui.services.window_manager import WindowManager
 
         parts = scope_id.split("::")
         if len(parts) < 2:
@@ -608,23 +687,21 @@ class ProvenanceLabel(QLabel):
             logger.warning(f"Could not find step with token: {step_token}")
             return None
 
-        # Use step scope_id (without function part) for window registry
-        step_scope_id = f"{plate_path}::{step_token}"
+        window = DualEditorWindow(
+            step_data=step,
+            is_new=False,
+            on_save_callback=None,  # Read-only navigation for provenance
+            orchestrator=orchestrator,
+            parent=self.window()
+        )
+        # Switch to Function Pattern tab if this is a function scope
+        if is_function_scope and window.tab_widget:
+            window.tab_widget.setCurrentIndex(1)
 
-        def factory():
-            window = DualEditorWindow(
-                step_data=step,
-                is_new=False,
-                on_save_callback=None,  # Read-only navigation for provenance
-                orchestrator=orchestrator,
-                parent=self.window()
-            )
-            # Switch to Function Pattern tab if this is a function scope
-            if is_function_scope and window.tab_widget:
-                window.tab_widget.setCurrentIndex(1)
-            return window
-
-        return WindowManager.show_or_focus(step_scope_id, factory)
+        window.show()
+        window.raise_()
+        window.activateWindow()
+        return window
 
     def _find_step_by_token(self, plate_manager, plate_path: str, step_token: str):
         """Find a step in the pipeline by its scope token."""
@@ -680,6 +757,8 @@ class LabelWithHelp(QWidget):
         layout.setSpacing(5)
 
         # Main label - ProvenanceLabel for click-to-source support
+        self._base_text = text  # Store base text for dirty indicator toggle
+        self._is_dirty = False  # Track dirty state for indicator
         self._label = ProvenanceLabel(text, state=state, dotted_path=dotted_path)
         layout.addWidget(self._label)
 
@@ -704,6 +783,21 @@ class LabelWithHelp(QWidget):
         font = self._label.font()
         font.setUnderline(underline)
         self._label.setFont(font)
+
+    def set_dirty_indicator(self, is_dirty: bool) -> None:
+        """Set dirty indicator (asterisk prefix) for unsaved changes.
+
+        Asterisk (*) means resolved value differs from saved resolved.
+        This is orthogonal to underline (which means raw != signature default).
+        """
+        if is_dirty == self._is_dirty:
+            return  # No change needed
+
+        self._is_dirty = is_dirty
+        if is_dirty:
+            self._label.setText(f"* {self._base_text}")
+        else:
+            self._label.setText(self._base_text)
 
 
 class FunctionTitleWithHelp(QWidget):

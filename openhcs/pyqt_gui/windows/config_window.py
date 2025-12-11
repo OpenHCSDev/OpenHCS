@@ -149,12 +149,13 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
         self.resize(800, 600)
         
         layout = QVBoxLayout(self)
-        layout.setSpacing(10)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(4)
 
         # Header with title, help button, and action buttons
         header_widget = QWidget()
         header_layout = QHBoxLayout(header_widget)
-        header_layout.setContentsMargins(10, 10, 10, 10)
+        header_layout.setContentsMargins(4, 2, 4, 2)
 
         self._header_label = QLabel(f"Configure {self.config_class.__name__}")
         self._header_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
@@ -281,8 +282,15 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
         """Create tree widget showing inheritance hierarchy for navigation."""
         # Pass form_manager as flash_manager - tree reads from SAME _flash_colors dict as groupboxes
         # ONE source of truth: form_manager already subscribes to ObjectState.on_resolved_changed
-        tree = self.tree_helper.create_tree_widget(flash_manager=self.form_manager)
+        # Pass state for automatic dirty tracking subscription (handled by helper)
+        tree = self.tree_helper.create_tree_widget(
+            flash_manager=self.form_manager,
+            state=self.state
+        )
         self.tree_helper.populate_from_root_dataclass(tree, self.config_class)
+
+        # Initialize dirty styling AFTER population (when _field_to_item is filled)
+        self.tree_helper.initialize_dirty_styling()
 
         # Register tree repaint callback so flash animation triggers tree repaint
         self.form_manager.register_repaint_callback(lambda: tree.viewport().update())
@@ -598,4 +606,11 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
         if hasattr(self, 'form_manager'):
             return [self.form_manager]
         return []
+
+    def closeEvent(self, a0):
+        """Override to cleanup dirty subscriptions before closing."""
+        # Delegate cleanup to tree helper (it manages its own subscription)
+        if hasattr(self, 'tree_helper'):
+            self.tree_helper.cleanup_subscriptions()
+        super().closeEvent(a0)
 

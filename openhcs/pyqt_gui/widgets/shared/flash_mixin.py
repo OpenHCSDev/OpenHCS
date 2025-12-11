@@ -1127,6 +1127,7 @@ class _GlobalFlashCoordinator:
         if not self._pending_registrations:
             return
 
+        logger.debug(f"[FLASH] _process_pending_registrations: processing {len(self._pending_registrations)} pending")
         still_pending = []
         for key, element_factory, widget in self._pending_registrations:
             try:
@@ -1139,13 +1140,17 @@ class _GlobalFlashCoordinator:
                     if element is not None:
                         overlay.register_element(element)
                         logger.debug(f"[FLASH] Completed deferred registration: key={key}")
+                    else:
+                        logger.debug(f"[FLASH] element_factory returned None for key={key}")
                 else:
+                    logger.debug(f"[FLASH] No overlay for widget, keeping pending: key={key}")
                     still_pending.append((key, element_factory, widget))
             except RuntimeError:
                 # Widget was deleted - discard this registration silently
                 logger.debug(f"[FLASH] Discarding registration for deleted widget: key={key}")
                 continue
 
+        logger.debug(f"[FLASH] _process_pending_registrations: {len(still_pending)} still pending")
         self._pending_registrations = still_pending
 
     def queue_flash_batch(self, keys: List[str]) -> None:
@@ -1303,6 +1308,8 @@ class VisualUpdateMixin:
     def _init_visual_update_mixin(self) -> None:
         """Initialize visual update state. Call in __init__."""
         self._text_update_pending = False
+        # Track all flash registrations so they can be re-registered after overlay cleanup
+        self._flash_registrations: List[Tuple[str, Callable[[str], FlashElement], QWidget]] = []
 
         # Text update timer (per-widget, debounced)
         self._text_timer = QTimer()
@@ -1327,18 +1334,30 @@ class VisualUpdateMixin:
         self,
         key: str,
         element_factory: Callable[[str], FlashElement],
-        widget: QWidget
+        widget: QWidget,
+        *,
+        record: bool = True
     ) -> None:
         """Internal helper for flash element registration. DRY for all element types.
 
         FAIL-LOUD: No exception handling - registration failures should crash.
         """
         scoped_key = self._get_scoped_flash_key(key)
+        if record:
+            # Avoid duplicate bookkeeping for the same widget/key pair
+            already_recorded = any(
+                existing_key == key and existing_widget is widget
+                for existing_key, _, existing_widget in self._flash_registrations
+            )
+            if not already_recorded:
+                self._flash_registrations.append((key, element_factory, widget))
+
         if widget is not None:
             overlay = WindowFlashOverlay.get_for_window(widget)
             if overlay is not None:
                 element = element_factory(scoped_key)
                 overlay.register_element(element)
+                logger.debug(f"[FLASH] Immediate registration: key={scoped_key}")
             else:
                 coordinator = _GlobalFlashCoordinator.get()
                 coordinator.add_pending_registration(
@@ -1346,6 +1365,7 @@ class VisualUpdateMixin:
                     lambda: element_factory(scoped_key),
                     widget
                 )
+                logger.debug(f"[FLASH] Deferred registration (pending): key={scoped_key}")
 
     def register_flash_groupbox(self, key: str, groupbox: 'QWidget') -> None:
         """Register a groupbox for flash rendering."""
@@ -1362,6 +1382,13 @@ class VisualUpdateMixin:
             lambda k: create_tree_item_element(k, tree, get_index),
             tree
         )
+
+    def reregister_flash_elements(self) -> None:
+        """Re-register all previously registered flash elements (after overlay cleanup)."""
+        if not getattr(self, "_flash_registrations", None):
+            return
+        for key, element_factory, widget in list(self._flash_registrations):
+            self._register_flash_element_internal(key, element_factory, widget, record=False)
 
     def queue_visual_update(self) -> None:
         """Queue text/placeholder update (debounced)."""

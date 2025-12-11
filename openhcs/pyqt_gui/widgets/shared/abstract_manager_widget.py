@@ -165,6 +165,9 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
 
         # Flash animation state: {scope_id: (ObjectState, callback)}
         self._flash_subscriptions: Dict[str, tuple] = {}
+        # Dirty state subscriptions: {scope_id: (ObjectState, callback)}
+        # Enables reactive dirty markers without polling
+        self._dirty_subscriptions: Dict[str, tuple] = {}
         # Scope to list item mapping for WindowFlashOverlay rect lookup
         self._scope_to_list_item: Dict[str, QListWidgetItem] = {}
         # Per-update-cycle scope cache: item_id -> scope_id (cleared at start of each update)
@@ -988,6 +991,17 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
         self._flash_subscriptions[scope_id] = (state, on_change, on_saved_resolved_change)
         logger.debug(f"⚡ FLASH_DEBUG: Subscribed to {scope_id}, total subscriptions={len(self._flash_subscriptions)}")
 
+        # Subscribe to dirty state changes for reactive dirty markers
+        if scope_id not in self._dirty_subscriptions:
+            def on_dirty_changed(is_dirty: bool):
+                """Update list item text when dirty state changes."""
+                logger.debug(f"🔧 DIRTY_DEBUG on_dirty_changed: scope={scope_id}, is_dirty={is_dirty}")
+                self.queue_visual_update()  # Refresh list item text
+
+            state.on_dirty_changed(on_dirty_changed)
+            self._dirty_subscriptions[scope_id] = (state, on_dirty_changed)
+            logger.debug(f"🔧 DIRTY_DEBUG: Subscribed to dirty changes for {scope_id}")
+
     # VisualUpdateMixin implementation - list items use WindowFlashOverlay (no custom methods needed)
 
     def _visual_repaint(self) -> None:
@@ -1004,8 +1018,10 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
         self.queue_visual_update()
 
     def _cleanup_flash_subscriptions(self) -> None:
-        """Unsubscribe all flash callbacks and clear scope mappings."""
-        logger.debug(f"⚡ FLASH_DEBUG _cleanup_flash_subscriptions: self={type(self).__name__}, clearing {len(self._flash_subscriptions)} subscriptions")
+        """Unsubscribe all flash and dirty callbacks and clear scope mappings."""
+        logger.debug(f"⚡ FLASH_DEBUG _cleanup_flash_subscriptions: self={type(self).__name__}, clearing {len(self._flash_subscriptions)} flash + {len(self._dirty_subscriptions)} dirty subscriptions")
+
+        # Cleanup flash subscriptions
         for scope_id, (state, on_change_callback, on_saved_resolved_callback) in list(self._flash_subscriptions.items()):
             logger.debug(f"⚡ FLASH_DEBUG: Unsubscribing from {scope_id}")
             try:
@@ -1021,7 +1037,15 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
                 logger.debug(f"⚡ FLASH_DEBUG: Unregistering FlashElement for {scope_id}")
                 overlay.unregister_element(scope_id)
 
+        # Cleanup dirty state subscriptions
+        for scope_id, (state, on_dirty_callback) in list(self._dirty_subscriptions.items()):
+            try:
+                state.off_dirty_changed(on_dirty_callback)
+            except Exception as e:
+                logger.debug(f"🔧 DIRTY_DEBUG: Error unsubscribing dirty from {scope_id}: {e}")
+
         self._flash_subscriptions.clear()
+        self._dirty_subscriptions.clear()
         self._scope_to_list_item.clear()
         logger.debug(f"⚡ FLASH_DEBUG: Subscriptions cleared")
 

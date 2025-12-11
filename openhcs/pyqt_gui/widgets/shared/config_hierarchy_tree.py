@@ -130,6 +130,9 @@ class ConfigHierarchyTreeHelper:
 
     TRUE O(1) FLASH ARCHITECTURE: Tree items are registered with WindowFlashOverlay
     during population. Flash rendering happens in the window overlay's single paintEvent.
+
+    UNIFIED DIRTY TRACKING: Automatically subscribes to ObjectState.on_dirty_changed()
+    when state is provided, and updates tree item styling reactively.
     """
 
     _INHERITANCE_TOOLTIP = "This configuration is not editable in the UI (inherited by other configs)"
@@ -137,6 +140,11 @@ class ConfigHierarchyTreeHelper:
     def __init__(self):
         self._flash_manager = None
         self._current_tree: Optional[QTreeWidget] = None
+        # Mapping from dotted path to QTreeWidgetItem for dirty styling updates
+        self._path_to_item: Dict[str, QTreeWidgetItem] = {}
+        # Dirty tracking subscription
+        self._state: Optional['ObjectState'] = None
+        self._dirty_callback = None
 
     def create_tree_widget(
         self,
@@ -144,6 +152,7 @@ class ConfigHierarchyTreeHelper:
         header_label: str = "Configuration Hierarchy",
         minimum_width: int = 0,  # Allow collapsing to 0 for splitter
         flash_manager: Optional['ConfigWindow'] = None,
+        state: Optional['ObjectState'] = None,
     ) -> QTreeWidget:
         """Create a pre-configured QTreeWidget for hierarchy display.
 
@@ -151,6 +160,7 @@ class ConfigHierarchyTreeHelper:
             header_label: Header text for the tree
             minimum_width: Minimum width (0 allows free splitter movement)
             flash_manager: Manager with register_flash_tree_item() for O(1) flash
+            state: ObjectState for automatic dirty tracking subscription
         """
         tree = QTreeWidget()
         tree.setHeaderLabel(header_label)
@@ -166,7 +176,49 @@ class ConfigHierarchyTreeHelper:
             delegate = TreeItemFlashDelegate(parent=tree, manager=flash_manager)
             tree.setItemDelegate(delegate)
 
+        # Subscribe to dirty state changes for reactive tree styling
+        if state is not None:
+            self._state = state
+            self._subscribe_to_dirty_changes(tree)
+
         return tree
+
+    def _subscribe_to_dirty_changes(self, tree: QTreeWidget) -> None:
+        """Subscribe to ObjectState dirty changes for reactive styling.
+
+        NOTE: This only sets up the subscription. Call initialize_dirty_styling()
+        AFTER populating the tree to apply initial dirty state.
+        """
+        if self._state is None:
+            return
+
+        def on_dirty_changed(is_dirty: bool):
+            dirty_fields = self._state.get_dirty_fields() if is_dirty else set()
+            self.update_dirty_styling(dirty_fields)
+            tree.viewport().update()
+
+        self._state.on_dirty_changed(on_dirty_changed)
+        self._dirty_callback = on_dirty_changed
+        self._tree_for_dirty = tree  # Store for initialize_dirty_styling
+
+    def initialize_dirty_styling(self) -> None:
+        """Apply initial dirty styling based on current state.
+
+        Call this AFTER populating the tree (after _path_to_item is filled).
+        """
+        if self._state is None:
+            return
+        if self._state.is_dirty():
+            self.update_dirty_styling(self._state.get_dirty_fields())
+            if hasattr(self, '_tree_for_dirty') and self._tree_for_dirty:
+                self._tree_for_dirty.viewport().update()
+
+    def cleanup_subscriptions(self) -> None:
+        """Unsubscribe from ObjectState dirty changes. Call on window close."""
+        if self._state is not None and self._dirty_callback is not None:
+            self._state.off_dirty_changed(self._dirty_callback)
+            self._dirty_callback = None
+            self._state = None
 
     def apply_scope_background(self, tree: QTreeWidget, scheme) -> None:
         """Apply scope-colored background tint to tree widget.
@@ -202,6 +254,25 @@ class ConfigHierarchyTreeHelper:
                 background-color: transparent;
             }}
         """)
+
+    def update_dirty_styling(self, dirty_fields: set) -> None:
+        """Update tree item styling based on dirty fields using same source of truth as labels."""
+        # Precompute all dirty paths and their ancestors once
+        dirty_prefixes = set()
+        for field_path in dirty_fields:
+            parts = field_path.split('.')
+            for i in range(1, len(parts) + 1):
+                dirty_prefixes.add('.'.join(parts[:i]))
+
+        for path, item in self._path_to_item.items():
+            current_text = item.text(0)
+            is_dirty = path in dirty_prefixes
+            has_marker = current_text.startswith("* ")
+
+            if is_dirty and not has_marker:
+                item.setText(0, f"* {current_text}")
+            elif not is_dirty and has_marker:
+                item.setText(0, current_text[2:])  # Remove "* " prefix
 
     def _register_flash_element(self, item: QTreeWidgetItem, field_name: str) -> None:
         """Register tree item for flash rendering.
@@ -258,6 +329,7 @@ class ConfigHierarchyTreeHelper:
         for field_name, obj_type in dataclass_mapping.items():
             base_type = self.get_base_type(obj_type)
             label = getattr(base_type, "__name__", field_name)
+            path = field_name
 
             item = QTreeWidgetItem([label])
             item.setData(
@@ -271,6 +343,8 @@ class ConfigHierarchyTreeHelper:
                 },
             )
             tree.addTopLevelItem(item)
+            # Store mapping for dirty styling updates
+            self._path_to_item[path] = item
             # TRUE O(1): Register with WindowFlashOverlay
             self._register_flash_element(item, field_name)
             self.add_inheritance_info(item, base_type)
@@ -286,6 +360,7 @@ class ConfigHierarchyTreeHelper:
         *,
         is_root: bool = False,
         skip_root_ui_hidden: bool = True,
+        parent_path: str = "",
     ) -> None:
         """Recursively add dataclass children that are shown in the UI."""
         for field in fields(obj_type):
@@ -301,6 +376,7 @@ class ConfigHierarchyTreeHelper:
                 continue
 
             label = display_name if is_root else f"{field.name} ({display_name})"
+            path = field.name if not parent_path else f"{parent_path}.{field.name}"
 
             item = QTreeWidgetItem([label])
             item.setData(
@@ -326,6 +402,9 @@ class ConfigHierarchyTreeHelper:
             else:
                 parent_item.addChild(item)
 
+            # Store mapping for dirty styling updates
+            self._path_to_item[path] = item
+
             # TRUE O(1): Register with WindowFlashOverlay
             self._register_flash_element(item, field.name)
 
@@ -335,6 +414,7 @@ class ConfigHierarchyTreeHelper:
                 obj_type=base_type,
                 is_root=False,
                 skip_root_ui_hidden=False,
+                parent_path=path,
             )
 
     def is_field_ui_hidden(
