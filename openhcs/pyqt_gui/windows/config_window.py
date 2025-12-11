@@ -241,9 +241,6 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
             self.style_generator.generate_tree_widget_style()
         )
 
-        # Initialize scope-based border styling (ScopedBorderMixin)
-        self._init_scope_border()
-
     def _create_inheritance_tree(self) -> QTreeWidget:
         """Create tree widget showing inheritance hierarchy for navigation."""
         # Pass form_manager as flash_manager - tree reads from SAME _flash_colors dict as groupboxes

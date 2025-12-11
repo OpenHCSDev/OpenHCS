@@ -9,7 +9,7 @@ import logging
 from typing import Optional
 
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QPushButton,
+    QVBoxLayout, QHBoxLayout, QPushButton,
     QScrollArea, QWidget, QLabel, QGroupBox
 )
 from PyQt6.QtCore import Qt
@@ -17,22 +17,26 @@ from PyQt6.QtCore import Qt
 from openhcs.microscopes.openhcs import OpenHCSMetadata
 from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
+from openhcs.pyqt_gui.windows.base_form_dialog import BaseFormDialog
 
 logger = logging.getLogger(__name__)
 
 
-class MetadataViewerDialog(QDialog):
+class MetadataViewerDialog(BaseFormDialog):
     """
     Read-only metadata viewer dialog.
-    
+
     Uses ParameterFormManager with generic reflection to display
     SubdirectoryKeyedMetadata or OpenHCSMetadata instances.
+
+    Inherits singleton-per-scope behavior from BaseFormDialog.
+    Only ONE MetadataViewerDialog per plate can be open at a time.
     """
-    
+
     def __init__(self, orchestrator, color_scheme: Optional[PyQt6ColorScheme] = None, parent=None):
         """
         Initialize metadata viewer dialog.
-        
+
         Args:
             orchestrator: PipelineOrchestrator instance
             color_scheme: Color scheme for styling
@@ -41,6 +45,9 @@ class MetadataViewerDialog(QDialog):
         super().__init__(parent)
         self.orchestrator = orchestrator
         self.color_scheme = color_scheme or PyQt6ColorScheme()
+
+        # scope_id for singleton behavior - one viewer per plate
+        self.scope_id = str(orchestrator.plate_path) if orchestrator else None
         
         self.setWindowTitle(f"Plate Metadata - {orchestrator.plate_path.name}")
         self.setMinimumSize(800, 600)
@@ -48,7 +55,7 @@ class MetadataViewerDialog(QDialog):
         
         # Make floating like other OpenHCS windows
         self.setWindowFlags(Qt.WindowType.Dialog)
-        
+
         self._setup_ui()
         self._load_metadata()
     

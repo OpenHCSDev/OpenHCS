@@ -226,10 +226,9 @@ class DualEditorWindow(BaseFormDialog):
         self._function_sync_timer.timeout.connect(self._flush_function_editor_sync)
         self._pending_function_editor_sync = False
 
-        # Scope-based border styling
+        # Scope ID for singleton behavior and border styling
         if getattr(self, "orchestrator", None) and getattr(self, "editing_step", None):
             self.scope_id = self._build_step_scope_id()
-            self._init_scope_border()
 
     def _update_window_title(self):
         title = "New Step" if getattr(self, 'is_new', False) else f"Edit Step: {getattr(self.editing_step, 'name', 'Unknown')}"

@@ -53,6 +53,63 @@ class HasUnregisterMethod(Protocol):
 
 
 class BaseFormDialog(ScopedBorderMixin, QDialog):
+    """Base dialog with automatic singleton-per-scope behavior.
+
+    Ensures only ONE window per (scope_id, window_class) is open at a time.
+    If a window for this scope already exists, show() focuses it instead of creating a duplicate.
+    """
+
+    def show(self) -> None:
+        """Override show to enforce singleton-per-scope behavior.
+
+        If a window with the same scope_key already exists, focus it instead of showing self.
+        Otherwise, register self with WindowManager and show normally.
+
+        Also initializes scope-based border styling here (not in __init__) because
+        subclasses set scope_id AFTER calling super().__init__().
+        """
+        from openhcs.pyqt_gui.services.window_manager import WindowManager
+
+        scope_key = self._get_window_scope_key()
+        if scope_key is None:
+            # No scope_id - just show normally (legacy behavior)
+            super().show()
+            return
+
+        # Check if window already exists for this scope
+        if WindowManager.is_open(scope_key):
+            # Focus existing window instead of showing duplicate
+            WindowManager.focus_and_navigate(scope_key)
+            # DON'T call deleteLater() - it causes crashes because async widget creation
+            # (QTimer.singleShot) continues running and references deleted objects.
+            # Instead, just return without showing. The window will be garbage collected
+            # naturally when all async work completes and references are released.
+            logger.debug(f"[SINGLETON] Focused existing window for {scope_key}")
+            return
+
+        # Initialize scope-based border styling (ScopedBorderMixin)
+        # Done here because scope_id is set by subclass AFTER super().__init__()
+        self._init_scope_border()
+
+        # Register self with WindowManager (it will handle closeEvent cleanup)
+        WindowManager.register(scope_key, self)
+        super().show()
+        logger.debug(f"[SINGLETON] Registered and showed new window for {scope_key}")
+
+    def _get_window_scope_key(self) -> Optional[str]:
+        """Build unique key for WindowManager registration.
+
+        Returns:
+            Unique key like "::PipelineConfig" or "/path/to/plate::ConfigWindow"
+            Returns None if no scope_id is set (legacy behavior - no singleton enforcement)
+        """
+        scope_id = getattr(self, 'scope_id', None)
+        if scope_id is None:
+            return None
+
+        # Include class name to allow different window types for same scope
+        # e.g., ConfigWindow and DualEditorWindow for same plate
+        return f"{scope_id}::{self.__class__.__name__}"
 
     def _setup_save_button(self, button: 'QPushButton', save_callback: Callable):
         """
@@ -327,6 +384,7 @@ class BaseFormDialog(ScopedBorderMixin, QDialog):
         1. Restore saved state for any unsaved changes
         2. Trigger global refresh so other windows sync
         3. Cleanup WindowFlashOverlay to prevent memory leak
+        4. Unregister from WindowManager for singleton tracking
         """
         logger.info(f"🔍 {self.__class__.__name__}: closeEvent() called")
 
@@ -342,6 +400,13 @@ class BaseFormDialog(ScopedBorderMixin, QDialog):
         from openhcs.pyqt_gui.widgets.shared.flash_mixin import WindowFlashOverlay
         WindowFlashOverlay.cleanup_window(self)
         logger.info(f"🔍 {self.__class__.__name__}: Cleaned up WindowFlashOverlay")
+
+        # Unregister from WindowManager so window can be reopened
+        from openhcs.pyqt_gui.services.window_manager import WindowManager
+        scope_key = self._get_window_scope_key()
+        if scope_key:
+            WindowManager.unregister(scope_key)
+            logger.debug(f"🔍 {self.__class__.__name__}: Unregistered from WindowManager: {scope_key}")
 
         super().closeEvent(a0)
 
