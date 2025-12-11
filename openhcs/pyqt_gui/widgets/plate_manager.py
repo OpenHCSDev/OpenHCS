@@ -1126,13 +1126,26 @@ class PlateManagerWidget(AbstractManagerWidget):
 
         # Clean up orchestrators and ObjectStates for deleted plates
         for path in paths_to_delete:
+            path_str = str(path)
+
             # Cascade unregister: plate + all steps + all functions (prevents memory leak)
-            count = ObjectStateRegistry.unregister_scope_and_descendants(str(path))
+            count = ObjectStateRegistry.unregister_scope_and_descendants(path_str)
             logger.debug(f"Cascade unregistered {count} ObjectState(s) for deleted plate: {path}")
 
             # Delete orchestrator
             if path in self.orchestrators:
                 del self.orchestrators[path]
+
+            # Delete saved PipelineConfig (prevents resurrection)
+            if path_str in self.plate_configs:
+                del self.plate_configs[path_str]
+                logger.debug(f"Deleted plate_configs entry for: {path}")
+
+            # Delete pipeline steps (prevents resurrection)
+            if hasattr(self, 'pipeline_editor') and self.pipeline_editor:
+                if path_str in self.pipeline_editor.plate_pipelines:
+                    del self.pipeline_editor.plate_pipelines[path_str]
+                    logger.debug(f"Deleted plate_pipelines entry for: {path}")
 
         if self.selected_plate_path in paths_to_delete:
             self.selected_plate_path = ""
