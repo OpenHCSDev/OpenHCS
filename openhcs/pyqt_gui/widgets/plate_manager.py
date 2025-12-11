@@ -1124,8 +1124,15 @@ class PlateManagerWidget(AbstractManagerWidget):
         paths_to_delete = {plate['path'] for plate in items}
         self.plates = [p for p in self.plates if p['path'] not in paths_to_delete]
 
-        # Clean up orchestrators for deleted plates
+        # Clean up orchestrators and ObjectStates for deleted plates
         for path in paths_to_delete:
+            # Unregister ObjectState for this plate (prevents memory leak)
+            existing_state = ObjectStateRegistry.get_by_scope(str(path))
+            if existing_state:
+                ObjectStateRegistry.unregister(existing_state)
+                logger.debug(f"Unregistered ObjectState for deleted plate: {path}")
+
+            # Delete orchestrator
             if path in self.orchestrators:
                 del self.orchestrators[path]
 
