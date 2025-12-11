@@ -52,16 +52,33 @@ def extract_orchestrator_scope(scope_id: Optional[str]) -> Optional[str]:
 
 
 def extract_step_index(scope_id: str) -> int:
-    """Extract per-orchestrator step index from scope_id."""
+    """Extract per-orchestrator step index from scope_id.
+
+    Handles multiple token formats:
+    - plate::step@5 → 5 (legacy @ notation)
+    - plate::functionstep_3 → 3 (ScopeTokenService format: prefix_N)
+    - Falls back to MD5 hash for unknown formats
+    """
+    import re
+
     if "::" not in scope_id:
         return 0
     step_part = scope_id.split("::")[1]
+
+    # Try @ notation first (legacy)
     if "@" in step_part:
         try:
             position_str = step_part.split("@")[1]
             return int(position_str)
         except (IndexError, ValueError):
             pass
+
+    # Try ScopeTokenService format: prefix_N (e.g., "functionstep_3")
+    match = re.search(r"_(\d+)$", step_part)
+    if match:
+        return int(match.group(1))
+
+    # Fallback to MD5 hash for unknown formats
     hash_bytes = hashlib.md5(step_part.encode()).digest()
     return int.from_bytes(hash_bytes[:2], byteorder="big") % 27
 
