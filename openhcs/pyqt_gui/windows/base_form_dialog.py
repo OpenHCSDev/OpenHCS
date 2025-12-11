@@ -42,7 +42,9 @@ from PyQt6.QtWidgets import QPushButton
 from typing import Callable
 from PyQt6.QtCore import Qt
 
-from openhcs.pyqt_gui.widgets.shared.scoped_border_mixin import ScopedBorderMixin
+# Import ScopedBorderMixin directly from module, avoiding widgets/__init__.py (circular import)
+import openhcs.pyqt_gui.widgets.shared.scoped_border_mixin as _scoped_border_module
+ScopedBorderMixin = _scoped_border_module.ScopedBorderMixin
 
 logger = logging.getLogger(__name__)
 
@@ -172,6 +174,7 @@ class BaseFormDialog(ScopedBorderMixin, QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._unregistered = False  # Track if we've already unregistered
+        self._scope_accent_color = None  # Stored for deferred application to async widgets
 
         # CRITICAL: Register with global event bus for cross-window updates
         # This is the OpenHCS "set and forget" pattern - all windows automatically
@@ -251,6 +254,91 @@ class BaseFormDialog(ScopedBorderMixin, QDialog):
                 # Handle single widget
                 else:
                     self._collect_form_managers_recursive(attr_value, managers, visited)
+
+    def _apply_scope_accent_styling(self) -> None:
+        """Apply scope accent color to all UI elements.
+
+        Called by ScopedBorderMixin._init_scope_border() after scope color scheme is set.
+        Styles: input focus borders, HelpButtons. Subclasses can extend for additional elements.
+        """
+        accent_color = self.get_scope_accent_color()
+        if not accent_color:
+            return
+
+        # Store for deferred application to async-created widgets
+        self._scope_accent_color = accent_color
+        hex_color = accent_color.name()
+
+        # Apply window-level stylesheet for input widget focus borders
+        input_focus_style = f"""
+            QLineEdit:focus {{
+                border: 2px solid {hex_color};
+            }}
+            QComboBox:focus {{
+                border: 2px solid {hex_color};
+            }}
+            QSpinBox:focus {{
+                border: 2px solid {hex_color};
+            }}
+            QDoubleSpinBox:focus {{
+                border: 2px solid {hex_color};
+            }}
+        """
+        current_window_style = self.styleSheet() or ""
+        self.setStyleSheet(f"{current_window_style}\n{input_focus_style}")
+
+        # Apply to existing HelpButtons now
+        self._apply_accent_to_help_buttons()
+
+        # Register callback for async-created widgets using existing infrastructure
+        for manager in self._get_form_managers():
+            if hasattr(manager, '_on_build_complete_callbacks'):
+                manager._on_build_complete_callbacks.append(self._apply_accent_to_help_buttons)
+
+    def _apply_accent_to_help_buttons(self) -> None:
+        """Apply scope accent color to all HelpButton, HelpIndicator, GroupBoxWithHelp, FunctionPaneWidget, and tree instances."""
+        accent_color = getattr(self, '_scope_accent_color', None)
+        if not accent_color:
+            return
+
+        from openhcs.pyqt_gui.widgets.shared.clickable_help_components import HelpButton, HelpIndicator, GroupBoxWithHelp
+        from openhcs.pyqt_gui.widgets.function_pane import FunctionPaneWidget
+        from PyQt6.QtWidgets import QWidget
+
+        # Find all HelpButtons, HelpIndicators, GroupBoxWithHelp, and FunctionPaneWidget in entire dialog
+        if isinstance(self, QWidget):
+            for help_btn in self.findChildren(HelpButton):
+                help_btn.set_scope_accent_color(accent_color)
+            for help_indicator in self.findChildren(HelpIndicator):
+                help_indicator.set_scope_accent_color(accent_color)
+            # Apply scope border pattern to nested groupboxes
+            scope_scheme = getattr(self, '_scope_color_scheme', None)
+            if scope_scheme:
+                for groupbox in self.findChildren(GroupBoxWithHelp):
+                    groupbox.set_scope_color_scheme(scope_scheme)
+                # FunctionPaneWidget needs scope accent for title color (no border)
+                for func_pane in self.findChildren(FunctionPaneWidget):
+                    func_pane.set_scope_color_scheme(scope_scheme)
+                # FunctionListEditorWidget needs scheme to apply to newly created panes
+                from openhcs.pyqt_gui.widgets.function_list_editor import FunctionListEditorWidget
+                for func_editor in self.findChildren(FunctionListEditorWidget):
+                    func_editor.set_scope_color_scheme(scope_scheme)
+                # Apply scope background to hierarchy tree (step editor)
+                self._apply_scope_to_hierarchy_trees(scope_scheme)
+
+    def _apply_scope_to_hierarchy_trees(self, scope_scheme) -> None:
+        """Apply scope-colored background to hierarchy trees in form managers."""
+        from openhcs.pyqt_gui.widgets.shared.config_hierarchy_tree import ConfigHierarchyTreeHelper
+
+        for manager in self._get_form_managers():
+            # Get tree from parent widget (step_editor has hierarchy_tree)
+            parent = getattr(manager, 'parent', None)
+            if parent and callable(parent):
+                parent = parent()
+            tree = getattr(parent, 'hierarchy_tree', None)
+            tree_helper = getattr(parent, 'tree_helper', None)
+            if tree and tree_helper and isinstance(tree_helper, ConfigHierarchyTreeHelper):
+                tree_helper.apply_scope_background(tree, scope_scheme)
 
     def _apply_state_action(self, action: str) -> None:
         """Apply a state-level action (mark_saved/restore_saved) to all discovered managers."""

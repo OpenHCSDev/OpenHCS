@@ -156,17 +156,18 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
         header_layout = QHBoxLayout(header_widget)
         header_layout.setContentsMargins(10, 10, 10, 10)
 
-        header_label = QLabel(f"Configure {self.config_class.__name__}")
-        header_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
-        header_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_accent)};")
-        header_layout.addWidget(header_label)
+        self._header_label = QLabel(f"Configure {self.config_class.__name__}")
+        self._header_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
+        self._header_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_accent)};")
+        header_layout.addWidget(self._header_label)
 
         # Add help button for the dataclass itself
+        self._help_btn = None
         if dataclasses.is_dataclass(self.config_class):
             from openhcs.pyqt_gui.widgets.shared.clickable_help_components import HelpButton
-            help_btn = HelpButton(help_target=self.config_class, text="Help", color_scheme=self.color_scheme)
-            help_btn.setMaximumWidth(80)
-            header_layout.addWidget(help_btn)
+            self._help_btn = HelpButton(help_target=self.config_class, text="Help", color_scheme=self.color_scheme)
+            self._help_btn.setMaximumWidth(80)
+            header_layout.addWidget(self._help_btn)
 
         header_layout.addStretch()
 
@@ -198,12 +199,12 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
         header_layout.addWidget(cancel_button)
 
         # Save button
-        save_button = QPushButton("Save")
-        save_button.setFixedHeight(28)
-        save_button.setMinimumWidth(70)
-        self._setup_save_button(save_button, self.save_config)
-        save_button.setStyleSheet(button_styles["save"])
-        header_layout.addWidget(save_button)
+        self._save_button = QPushButton("Save")
+        self._save_button.setFixedHeight(28)
+        self._save_button.setMinimumWidth(70)
+        self._setup_save_button(self._save_button, self.save_config)
+        self._save_button.setStyleSheet(button_styles["save"])
+        header_layout.addWidget(self._save_button)
 
         layout.addWidget(header_widget)
 
@@ -240,6 +241,41 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
             self.style_generator.generate_config_window_style() + "\n" +
             self.style_generator.generate_tree_widget_style()
         )
+
+    def _apply_scope_accent_styling(self) -> None:
+        """Apply scope accent color to ConfigWindow-specific elements.
+
+        Extends base class to add: Save button, header label, tree selection.
+        """
+        # Call base class for common elements (input focus, HelpButtons)
+        super()._apply_scope_accent_styling()
+
+        accent_color = self.get_scope_accent_color()
+        if not accent_color:
+            return
+
+        hex_color = accent_color.name()
+
+        # Style Save button directly
+        save_button_style = f"""
+            background-color: {hex_color};
+            color: white;
+            border: none;
+            border-radius: 3px;
+            padding: 8px;
+        """
+        if hasattr(self, '_save_button'):
+            self._save_button.setStyleSheet(save_button_style)
+
+        # Style header label with scope accent color
+        if hasattr(self, '_header_label'):
+            self._header_label.setStyleSheet(f"color: {hex_color};")
+
+        # Style tree selection with scope accent
+        tree_style = self.get_scope_tree_selection_stylesheet()
+        if tree_style and hasattr(self, 'tree_widget'):
+            current_style = self.tree_widget.styleSheet() or ""
+            self.tree_widget.setStyleSheet(f"{current_style}\n{tree_style}")
 
     def _create_inheritance_tree(self) -> QTreeWidget:
         """Create tree widget showing inheritance hierarchy for navigation."""

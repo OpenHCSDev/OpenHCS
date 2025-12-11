@@ -245,6 +245,78 @@ class DualEditorWindow(BaseFormDialog):
             logger.info(f"🔘 Updating save button text: is_new={self.is_new} → '{new_text}'")
             self.save_button.setText(new_text)
 
+    def _apply_scope_accent_styling(self) -> None:
+        """Apply scope accent color to DualEditorWindow-specific elements."""
+        super()._apply_scope_accent_styling()
+
+        accent_color = self.get_scope_accent_color()
+        if not accent_color:
+            return
+
+        hex_color = accent_color.name()
+        hex_lighter = accent_color.lighter(115).name()
+        hex_darker = accent_color.darker(115).name()
+
+        # Style Save button (preserve disabled state styling)
+        if hasattr(self, 'save_button'):
+            self.save_button.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {hex_color};
+                    color: white;
+                    border: none;
+                    border-radius: 3px;
+                    padding: 8px;
+                }}
+                QPushButton:disabled {{
+                    background-color: {self.color_scheme.to_hex(self.color_scheme.panel_bg)};
+                    color: {self.color_scheme.to_hex(self.color_scheme.border_light)};
+                    border: none;
+                }}
+            """)
+
+        # Style header label if present
+        if hasattr(self, 'header_label'):
+            self.header_label.setStyleSheet(f"color: {hex_color};")
+
+        # Style tab bar with scope accent color
+        if hasattr(self, 'tab_bar') and self.tab_bar:
+            self.tab_bar.setStyleSheet(f"""
+                QTabBar::tab {{
+                    background-color: {self.color_scheme.to_hex(self.color_scheme.input_bg)};
+                    color: {self.color_scheme.to_hex(self.color_scheme.text_primary)};
+                    padding: 8px 16px;
+                    margin-right: 2px;
+                    border: none;
+                    border-radius: 4px 4px 0 0;
+                }}
+                QTabBar::tab:selected {{
+                    background-color: {hex_color};
+                    color: white;
+                }}
+                QTabBar::tab:hover:!selected {{
+                    background-color: {hex_lighter};
+                    color: white;
+                }}
+            """)
+
+        # Style step_editor elements
+        if hasattr(self, 'step_editor') and self.step_editor:
+            # Tree selection
+            tree_style = self.get_scope_tree_selection_stylesheet()
+            if tree_style and hasattr(self.step_editor, 'hierarchy_tree') and self.step_editor.hierarchy_tree:
+                current_style = self.step_editor.hierarchy_tree.styleSheet() or ""
+                self.step_editor.hierarchy_tree.setStyleSheet(f"{current_style}\n{tree_style}")
+
+            # "Step Parameters" header label
+            if hasattr(self.step_editor, 'header_label') and self.step_editor.header_label:
+                self.step_editor.header_label.setStyleSheet(f"color: {hex_color}; font-weight: bold; font-size: 14px;")
+
+        # Style func_editor elements (Function Pattern tab)
+        if hasattr(self, 'func_editor') and self.func_editor:
+            # "Functions" header label
+            if hasattr(self.func_editor, 'header_label') and self.func_editor.header_label:
+                self.func_editor.header_label.setStyleSheet(f"color: {hex_color}; font-weight: bold; font-size: 14px;")
+
     def _build_step_scope_id(self) -> str:
         from openhcs.pyqt_gui.widgets.shared.services.scope_token_service import ScopeTokenService
         return ScopeTokenService.build_scope_id(self.orchestrator.plate_path, self.editing_step)
@@ -382,38 +454,49 @@ class DualEditorWindow(BaseFormDialog):
         Args:
             new_pipeline_steps: Updated list of FunctionStep objects from the pipeline
         """
-        # Find our step in the new pipeline by matching the original step reference
-        # (The step we're editing might have been modified in the code editor)
-        original_step = getattr(self, 'original_step', None)
-        if not original_step:
+        # Find our step in the new pipeline by matching scope_id
+        # CRITICAL: Use scope_id matching (more robust than object identity)
+        # The window's scope_id is "plate_path::functionstep_N", extract the token
+        window_scope_id = getattr(self, 'scope_id', None)
+        if not window_scope_id:
             return
 
-        # Try to find the updated version of our step in the new pipeline
-        # Match by object identity first (if editing existing step)
+        # Extract step token from scope_id (e.g., "plate_path::functionstep_3" -> "functionstep_3")
+        window_step_token = window_scope_id.split('::')[-1] if '::' in window_scope_id else None
+        if not window_step_token:
+            return
+
+        # Find matching step by scope token
         updated_step = None
-        for step in new_pipeline_steps:
-            if step is original_step:
+        new_index = None
+        for i, step in enumerate(new_pipeline_steps):
+            step_token = getattr(step, '_scope_token', None)
+            if step_token == window_step_token:
                 updated_step = step
+                new_index = i
                 break
 
-        # If we found an updated version, refresh our editor with the new values
-        if updated_step and updated_step is not self.editing_step:
-            logger.debug(f"Pipeline changed - updating step editor with new step: {updated_step.name}")
+        # Check if step position changed - refresh scope border styling only
+        # (no need to repopulate widgets, just update colors)
+        if new_index is not None and new_index != self._step_index:
+            logger.debug(f"Step moved from index {self._step_index} to {new_index} - refreshing scope border")
+            self._step_index = new_index
+            self._refresh_scope_border()
+            # Re-apply accent styling to all children with updated color scheme
+            self._apply_accent_to_help_buttons()
 
-            # Update our editing step reference
-            self.editing_step = updated_step
-            self.step = updated_step
+        # Only refresh data if the step OBJECT was replaced in the pipeline
+        # (e.g., from code editor saving a new step instance).
+        # For simple reorders, updated_step IS original_step_reference, so we skip.
+        # NOTE: We never replace editing_step with the pipeline step - editing_step
+        # is a clone that preserves isolation for unsaved changes.
+        if updated_step and updated_step is not self.original_step_reference:
+            logger.debug(f"Pipeline step object was replaced - syncing data for: {updated_step.name}")
 
-            # Update step editor's step reference
-            if hasattr(self, 'step_editor') and self.step_editor:
-                self.step_editor.step = updated_step
+            # Update reference to the new pipeline step
+            self.original_step_reference = updated_step
 
-                # Refresh the form manager with new values
-                if hasattr(self.step_editor, 'form_manager') and self.step_editor.form_manager:
-                    self.step_editor.form_manager.object_instance = updated_step
-                    self.step_editor.form_manager._refresh_with_live_context()
-
-            # Update function list editor with new func
+            # Update function list editor with new func (this recreates panes)
             if hasattr(self, 'func_editor') and self.func_editor and hasattr(updated_step, 'func'):
                 self.func_editor._initialize_pattern_data(updated_step.func)
                 self.func_editor._populate_function_list()

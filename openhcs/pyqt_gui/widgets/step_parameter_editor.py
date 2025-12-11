@@ -300,10 +300,10 @@ class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
         # Header with controls (like FunctionListEditorWidget)
         header_layout = QHBoxLayout()
 
-        # Header label
-        header_label = QLabel("Step Parameters")
-        header_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_accent)}; font-weight: bold; font-size: 14px;")
-        header_layout.addWidget(header_label)
+        # Header label (stored for scope accent styling)
+        self.header_label = QLabel("Step Parameters")
+        self.header_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_accent)}; font-weight: bold; font-size: 14px;")
+        header_layout.addWidget(self.header_label)
 
         header_layout.addStretch()
 
@@ -533,26 +533,21 @@ class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
             # This ensures code editor shows unsaved changes from other open windows
             ParameterOpsService().refresh_with_live_context(self.form_manager)
 
-            # Get current step from state (includes live context values)
-            current_values = self.state.get_current_values()
+            # Get current step from state using to_object() to properly reconstruct nested dataclasses
+            # NOTE: get_current_values() returns flat dotted paths which can't be passed to FunctionStep(**kwargs)
+            # to_object() reconstructs proper nested structure from flat storage
+            current_step = self.state.to_object()
 
             # CRITICAL: Get func from parent dual editor's function list editor if available
             # The func is managed by the Function Pattern tab in the dual editor
-            func = self.step.func  # Default to step's current func
-
-            # Check if we're inside a dual editor window with a function list editor
             parent_window = self.window()
             if hasattr(parent_window, 'func_editor') and parent_window.func_editor:
                 # Get live func pattern from function list editor
                 func = parent_window.func_editor.current_pattern
+                current_step.func = func
                 logger.debug(f"Using live func from function list editor: {func}")
             else:
-                logger.debug(f"Using func from step instance: {func}")
-
-            current_values['func'] = func
-
-            from openhcs.core.steps.function_step import FunctionStep
-            current_step = FunctionStep(**current_values)
+                logger.debug(f"Using func from step instance: {current_step.func}")
 
             # Generate code using existing pattern
             python_code = generate_step_code(current_step, clean_mode=False)

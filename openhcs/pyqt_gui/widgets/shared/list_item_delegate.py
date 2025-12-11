@@ -88,8 +88,23 @@ class MultilinePreviewItemDelegate(QStyledItemDelegate):
         # For multi-layer items, flash uses checkerboard pattern
         flash_key = index.data(FLASH_KEY_ROLE)
         if flash_key and self._manager is not None:
+            # Get flash alpha from coordinator (handles animation timing)
             flash_color = self._manager.get_flash_color_for_key(flash_key)
             if flash_color and flash_color.alpha() > 0:
+                # CRITICAL: Use the scheme stored on THIS item for color computation
+                # This ensures flash color matches border color even after reordering
+                # (coordinator may compute from scope_id token, not visual position)
+                if scheme:
+                    from openhcs.pyqt_gui.widgets.shared.scope_color_utils import tint_color_perceptual
+                    base_rgb = getattr(scheme, "base_color_rgb", None)
+                    item_layers = getattr(scheme, "step_border_layers", None)
+                    if base_rgb and item_layers:
+                        _, tint_idx, _ = (item_layers[0] + ("solid",))[:3]
+                        # Compute color matching border, but use coordinator's alpha
+                        computed_color = tint_color_perceptual(base_rgb, tint_idx).darker(120)
+                        computed_color.setAlpha(flash_color.alpha())
+                        flash_color = computed_color
+
                 if layers and len(layers) > 1:
                     # Multi-layer: flash with checkerboard pattern
                     self._paint_checkerboard_flash(painter, content_rect, flash_color)

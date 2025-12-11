@@ -428,6 +428,9 @@ def create_tree_item_element(key: str, tree: 'QTreeWidget', get_index: Callable[
         key: Flash key
         tree: The QTreeWidget
         get_index: Callback that returns the current QModelIndex (handles item recreation)
+
+    Note: Uses skip_overlay_paint=True because TreeItemFlashDelegate handles
+    drawing flash BEHIND text (same pattern as list items).
     """
     def get_rect(window: QWidget) -> Optional[QRect]:
         try:
@@ -454,7 +457,8 @@ def create_tree_item_element(key: str, tree: 'QTreeWidget', get_index: Callable[
         key=key,
         get_rect_in_window=get_rect,
         needs_scroll_clipping=False,
-        source_id=f"tree:{id(tree)}:{key}"  # Include key to distinguish different items in same tree
+        source_id=f"tree:{id(tree)}:{key}",  # Include key to distinguish different items in same tree
+        skip_overlay_paint=True  # Delegate handles painting flash behind text
     )
 
 
@@ -535,26 +539,32 @@ class WindowFlashOverlay(QWidget):
     def get_for_window(cls, widget: QWidget) -> Optional['WindowFlashOverlay']:
         """Get or create the overlay for a top-level window.
 
-        Returns None if widget is not yet in a proper window hierarchy
-        (i.e., widget.window() returns itself rather than a QMainWindow/QDialog).
+        Returns None if:
+        - Widget is not yet in a proper window hierarchy
+        - Widget has been deleted (RuntimeError from Qt C++ layer)
         """
-        # Find the actual top-level window
-        top_window = widget.window()
+        try:
+            # Find the actual top-level window
+            # This will raise RuntimeError if widget was deleted
+            top_window = widget.window()
 
-        # Only create overlays for REAL top-level windows, not widgets that
-        # return themselves because they haven't been parented yet
-        if not isinstance(top_window, (QMainWindow, QDialog)):
+            # Only create overlays for REAL top-level windows, not widgets that
+            # return themselves because they haven't been parented yet
+            if not isinstance(top_window, (QMainWindow, QDialog)):
+                return None
+
+            window_id = id(top_window)
+
+            if window_id not in cls._overlays:
+                overlay = cls(top_window)
+                cls._overlays[window_id] = overlay
+                logger.info(f"🧹 FLASH_LEAK_DEBUG: Created WindowFlashOverlay for window {window_id}, "
+                           f"total overlays: {len(cls._overlays)}")
+
+            return cls._overlays[window_id]
+        except RuntimeError:
+            # Widget was deleted - return None gracefully
             return None
-
-        window_id = id(top_window)
-
-        if window_id not in cls._overlays:
-            overlay = cls(top_window)
-            cls._overlays[window_id] = overlay
-            logger.info(f"🧹 FLASH_LEAK_DEBUG: Created WindowFlashOverlay for window {window_id}, "
-                       f"total overlays: {len(cls._overlays)}")
-
-        return cls._overlays[window_id]
 
     @classmethod
     def cleanup_window(cls, window: QWidget) -> None:
@@ -876,6 +886,23 @@ class WindowFlashOverlay(QWidget):
         if not active_keys:
             return  # Nothing to draw for this window
 
+        # CRITICAL: If window has _scope_color_scheme, override flash colors to match
+        # This ensures step editor flashes match the list item's visual position-based colors
+        window_scheme = getattr(self._window, '_scope_color_scheme', None)
+        if window_scheme:
+            from openhcs.pyqt_gui.widgets.shared.scope_color_utils import tint_color_perceptual
+            base_rgb = getattr(window_scheme, 'base_color_rgb', None)
+            layers = getattr(window_scheme, 'step_border_layers', None)
+            if base_rgb and layers:
+                # Compute flash color matching the window's border
+                _, tint_idx, _ = (layers[0] + ("solid",))[:3]
+                scheme_color = tint_color_perceptual(base_rgb, tint_idx).darker(120)
+                # Override all flash colors, keeping animation alpha
+                active_keys = {
+                    key: QColor(scheme_color.red(), scheme_color.green(), scheme_color.blue(), color.alpha())
+                    for key, color in active_keys.items()
+                }
+
         # Filter to only keys whose elements are currently visible in this window
         visible_keys = self.get_visible_keys_for(set(active_keys.keys()))
         if not visible_keys:
@@ -1092,20 +1119,32 @@ class _GlobalFlashCoordinator:
         self._pending_registrations.append((key, element_factory, widget))
 
     def _process_pending_registrations(self) -> None:
-        """Process all deferred element registrations (widgets now in window hierarchy)."""
+        """Process all deferred element registrations (widgets now in window hierarchy).
+
+        RESILIENT: Automatically discards registrations for deleted widgets.
+        This handles the case where widgets are deleted and recreated (e.g., function panes).
+        """
         if not self._pending_registrations:
             return
 
         still_pending = []
         for key, element_factory, widget in self._pending_registrations:
-            overlay = WindowFlashOverlay.get_for_window(widget)
-            if overlay is not None:
-                element = element_factory()
-                if element is not None:
-                    overlay.register_element(element)
-                    logger.debug(f"[FLASH] Completed deferred registration: key={key}")
-            else:
-                still_pending.append((key, element_factory, widget))
+            try:
+                # Check if widget is still valid (not deleted)
+                # Accessing any Qt property will raise RuntimeError if deleted
+                _ = widget.isVisible()
+                overlay = WindowFlashOverlay.get_for_window(widget)
+                if overlay is not None:
+                    element = element_factory()
+                    if element is not None:
+                        overlay.register_element(element)
+                        logger.debug(f"[FLASH] Completed deferred registration: key={key}")
+                else:
+                    still_pending.append((key, element_factory, widget))
+            except RuntimeError:
+                # Widget was deleted - discard this registration silently
+                logger.debug(f"[FLASH] Discarding registration for deleted widget: key={key}")
+                continue
 
         self._pending_registrations = still_pending
 

@@ -59,6 +59,9 @@ class FunctionListEditorWidget(QWidget):
         # CRITICAL: Store scope_id for cross-window live context updates
         self.scope_id = scope_id
 
+        # Scope color scheme for styling newly created panes
+        self._scope_color_scheme = None
+
         # Step configuration properties (mirrors Textual TUI)
         self.current_group_by = None  # Current GroupBy setting from step editor
         self.current_variable_components = []  # Current VariableComponents list from step editor
@@ -157,10 +160,11 @@ class FunctionListEditorWidget(QWidget):
         
         # Header with controls (mirrors Textual TUI)
         header_layout = QHBoxLayout()
-        
-        functions_label = QLabel("Functions")
-        functions_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_accent)}; font-weight: bold; font-size: 14px;")
-        header_layout.addWidget(functions_label)
+
+        # Store as instance attribute for scope accent styling
+        self.header_label = QLabel("Functions")
+        self.header_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_accent)}; font-weight: bold; font-size: 14px;")
+        header_layout.addWidget(self.header_label)
         
         header_layout.addStretch()
         
@@ -297,6 +301,13 @@ class FunctionListEditorWidget(QWidget):
                 self.function_panes.append(pane)
                 self.function_layout.addWidget(pane)
 
+                # Apply scope color scheme to new pane (for accent colors)
+                if self._scope_color_scheme:
+                    logger.info(f"🎨 Applying scope_color_scheme to pane {i}")
+                    pane.set_scope_color_scheme(self._scope_color_scheme)
+                else:
+                    logger.info(f"🎨 No scope_color_scheme set on FunctionListEditorWidget, pane {i} gets no styling")
+
                 # CRITICAL FIX: Apply initial enabled styling for function panes
                 # This ensures that when the function pattern editor opens, disabled functions
                 # show the correct dimmed styling immediately, not just after toggling
@@ -304,7 +315,23 @@ class FunctionListEditorWidget(QWidget):
                     # Use QTimer to ensure this runs after the widget is fully constructed
                     from PyQt6.QtCore import QTimer
                     QTimer.singleShot(0, lambda p=pane: self._apply_initial_enabled_styling_to_pane(p))
-    
+
+        # Apply scope styling to all child widgets (GroupBoxWithHelp, HelpButton, etc.)
+        # This must be done AFTER all panes are created so findChildren() finds them all
+        if self._scope_color_scheme:
+            # Apply immediately for sync-created widgets
+            self._apply_scope_styling_to_children(self._scope_color_scheme)
+
+            # CRITICAL: Register callback on each pane's form_manager for async-created widgets
+            # This hooks into FormBuildOrchestrator's async completion system properly
+            for pane in self.function_panes:
+                if hasattr(pane, 'form_manager') and pane.form_manager is not None:
+                    # Capture scheme in closure
+                    scheme = self._scope_color_scheme
+                    pane.form_manager._on_build_complete_callbacks.append(
+                        lambda s=scheme: self._apply_scope_styling_to_children(s)
+                    )
+
     def _apply_initial_enabled_styling_to_pane(self, pane):
         """Apply initial enabled styling to a function pane.
 
@@ -472,15 +499,46 @@ class FunctionListEditorWidget(QWidget):
         return patch_lazy_constructors()
 
     def _move_function(self, index, direction):
-        """Move function up or down."""
+        """Move function up or down.
+
+        CRITICAL: Does NOT recreate widgets - just reorders existing panes in layout.
+        This preserves flash registrations and avoids RuntimeError from deleted widgets.
+        """
         if 0 <= index < len(self.functions):
             new_index = index + direction
             if 0 <= new_index < len(self.functions):
-                # Swap functions
+                # Swap functions in data
                 self.functions[index], self.functions[new_index] = self.functions[new_index], self.functions[index]
                 self._update_pattern_data()
-                self._populate_function_list()
+                # Reorder existing panes (NOT recreate) - preserves flash registrations
+                self._reorder_function_panes(index, new_index)
                 self.function_pattern_changed.emit()
+
+    def _reorder_function_panes(self, old_index: int, new_index: int) -> None:
+        """Reorder existing panes in layout without recreating them.
+
+        This preserves widget instances and their flash registrations.
+        Only the layout order and pane indices are updated.
+        """
+        if not self.function_panes:
+            return
+
+        # Swap panes in our tracking list
+        self.function_panes[old_index], self.function_panes[new_index] = \
+            self.function_panes[new_index], self.function_panes[old_index]
+
+        # Update indices on the panes
+        for i, pane in enumerate(self.function_panes):
+            pane.index = i
+
+        # Reorder widgets in layout by removing and re-adding in correct order
+        # First remove all from layout (but don't delete them)
+        for pane in self.function_panes:
+            self.function_layout.removeWidget(pane)
+
+        # Re-add in correct order
+        for pane in self.function_panes:
+            self.function_layout.addWidget(pane)
     
     def _add_function_at_index(self, index):
         """Add function at specific index (mirrors Textual TUI)."""
@@ -555,6 +613,60 @@ class FunctionListEditorWidget(QWidget):
         self.functions = functions.copy() if functions else []
         self._update_pattern_data()
         self._populate_function_list()
+
+    def set_scope_color_scheme(self, scheme) -> None:
+        """Set scope color scheme for styling function panes.
+
+        Called by parent window after scope styling is initialized.
+        Stores scheme for newly created panes and applies to existing ones.
+        Also applies styling to all child GroupBoxWithHelp and HelpButton widgets.
+        """
+        logger.info(f"🎨 FunctionListEditorWidget.set_scope_color_scheme called with scheme={scheme}, panes={len(self.function_panes)}")
+        self._scope_color_scheme = scheme
+
+        # Apply to all existing panes (title color)
+        for pane in self.function_panes:
+            pane.set_scope_color_scheme(scheme)
+
+        # Apply scope styling to all child widgets (GroupBoxWithHelp, HelpButton, etc.)
+        self._apply_scope_styling_to_children(scheme)
+
+    def _apply_scope_styling_to_children(self, scheme) -> None:
+        """Apply scope styling to all child widgets that need it.
+
+        This mirrors the logic in base_form_dialog._apply_accent_to_help_buttons().
+        """
+        if not scheme:
+            return
+
+        from openhcs.pyqt_gui.widgets.shared.clickable_help_components import HelpButton, HelpIndicator, GroupBoxWithHelp
+        from openhcs.pyqt_gui.widgets.shared.scope_color_utils import tint_color_perceptual
+
+        # Compute accent color from scheme (same logic as ScopedBorderMixin.get_scope_accent_color)
+        layers = getattr(scheme, 'step_border_layers', None)
+        if layers:
+            _, tint_idx, _ = (layers[0] + ("solid",))[:3]
+            accent_color = tint_color_perceptual(scheme.base_color_rgb, tint_idx).darker(120)
+        else:
+            accent_color = tint_color_perceptual(scheme.base_color_rgb, 0).darker(120)
+
+        # Apply to all HelpButtons
+        help_btns = self.findChildren(HelpButton)
+        logger.info(f"🎨 _apply_scope_styling_to_children: found {len(help_btns)} HelpButtons")
+        for help_btn in help_btns:
+            help_btn.set_scope_accent_color(accent_color)
+
+        # Apply to all HelpIndicators
+        help_indicators = self.findChildren(HelpIndicator)
+        logger.info(f"🎨 _apply_scope_styling_to_children: found {len(help_indicators)} HelpIndicators")
+        for help_indicator in help_indicators:
+            help_indicator.set_scope_accent_color(accent_color)
+
+        # Apply to all GroupBoxWithHelp (scope border pattern)
+        groupboxes = self.findChildren(GroupBoxWithHelp)
+        logger.info(f"🎨 _apply_scope_styling_to_children: found {len(groupboxes)} GroupBoxWithHelp")
+        for groupbox in groupboxes:
+            groupbox.set_scope_color_scheme(scheme)
 
     def refresh_from_step_context(self) -> None:
         """Refresh group_by and variable_components from step_instance using lazy resolution.

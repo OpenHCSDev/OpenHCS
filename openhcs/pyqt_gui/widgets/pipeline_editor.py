@@ -934,6 +934,8 @@ class PipelineEditorWidget(AbstractManagerWidget):
         """Additional cleanup after reorder - normalize tokens and emit signal."""
         self._normalize_step_scope_tokens()
         self.pipeline_changed.emit(self.pipeline_steps)
+        # Broadcast to global event bus so open step editors update their colors
+        self._broadcast_to_event_bus('pipeline', self.pipeline_steps)
 
     # === Config Resolution Hook (domain-specific) ===
 

@@ -3,8 +3,8 @@
 import logging
 from typing import Union, Callable, Optional
 from PyQt6.QtWidgets import QLabel, QPushButton, QWidget, QHBoxLayout, QGroupBox, QVBoxLayout
-from PyQt6.QtCore import Qt, pyqtSignal, pyqtProperty
-from PyQt6.QtGui import QFont, QCursor, QColor, QPainter
+from PyQt6.QtCore import Qt, pyqtSignal, pyqtProperty, QRect, QRectF
+from PyQt6.QtGui import QFont, QCursor, QColor, QPainter, QPen
 
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 
@@ -183,6 +183,29 @@ class HelpIndicator(QLabel):
         self.setFixedSize(20, 16)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
+    def set_scope_accent_color(self, color) -> None:
+        """Set scope accent color (QColor). Called by parent window for scope styling."""
+        if hasattr(color, 'name'):
+            hex_color = color.name()
+        else:
+            hex_color = self.color_scheme.to_hex(color)
+
+        self.setStyleSheet(f"""
+            QLabel {{
+                color: {self.color_scheme.to_hex(self.color_scheme.border_light)};
+                font-size: 10px;
+                border: 1px solid {self.color_scheme.to_hex(self.color_scheme.border_light)};
+                border-radius: 8px;
+                padding: 2px 4px;
+                background-color: {self.color_scheme.to_hex(self.color_scheme.window_bg)};
+            }}
+            QLabel:hover {{
+                color: white;
+                border-color: {hex_color};
+                background-color: {hex_color};
+            }}
+        """)
+
     def mousePressEvent(self, event):
         """Handle mouse press to show help - reuses Textual TUI help manager pattern."""
         if event.button() == Qt.MouseButton.LeftButton:
@@ -232,22 +255,42 @@ class HelpButton(QPushButton):
 
         # Style as help button
         self.setMaximumWidth(60)
+        self._apply_color(self.color_scheme.selection_bg)
+
+    def _apply_color(self, color) -> None:
+        """Apply a color to this button (for scope accent styling)."""
+        if hasattr(color, 'name'):
+            # QColor
+            hex_color = color.name()
+            hex_lighter = color.lighter(115).name()
+            hex_darker = color.darker(115).name()
+        else:
+            # Tuple or color scheme color
+            hex_color = self.color_scheme.to_hex(color)
+            hex_lighter = hex_color  # Can't lighten without QColor
+            hex_darker = hex_color
+
         self.setStyleSheet(f"""
             QPushButton {{
-                background-color: {self.color_scheme.to_hex(self.color_scheme.selection_bg)};
+                background-color: {hex_color};
                 color: white;
                 border: none;
                 padding: 4px 8px;
                 border-radius: 3px;
+                font-weight: bold;
             }}
             QPushButton:hover {{
-                background-color: {self.color_scheme.to_hex(self.color_scheme.selection_bg)};
+                background-color: {hex_lighter};
             }}
             QPushButton:pressed {{
-                background-color: {self.color_scheme.to_hex(self.color_scheme.selection_bg)};
+                background-color: {hex_darker};
             }}
         """)
-        
+
+    def set_scope_accent_color(self, color) -> None:
+        """Set scope accent color (QColor). Called by parent window for scope styling."""
+        self._apply_color(color)
+
     def show_help(self):
         """Show help using the unified help manager - reuses Textual TUI logic."""
         try:
@@ -355,7 +398,16 @@ class GroupBoxWithHelp(FlashableGroupBox):
 
     Inherits from FlashableGroupBox to support smooth flash animations.
     Uses PAINT-TIME color computation via manager.get_flash_color_for_key().
+    Supports scope-based borders matching window border patterns.
     """
+
+    # Border patterns matching ScopedBorderMixin
+    BORDER_PATTERNS = {
+        "solid": (Qt.PenStyle.SolidLine, None),
+        "dashed": (Qt.PenStyle.DashLine, [8, 6]),
+        "dotted": (Qt.PenStyle.DotLine, [2, 6]),
+        "dashdot": (Qt.PenStyle.DashDotLine, [8, 4, 2, 4]),
+    }
 
     def __init__(self, title: str, help_target: Union[Callable, type] = None,
                  color_scheme: Optional[PyQt6ColorScheme] = None, parent=None,
@@ -365,6 +417,9 @@ class GroupBoxWithHelp(FlashableGroupBox):
         # Initialize color scheme
         self.color_scheme = color_scheme or PyQt6ColorScheme()
         self.help_target = help_target
+
+        # Scope border state (set via set_scope_color_scheme)
+        self._scope_color_scheme = None
 
         # Create custom title widget with help
         title_widget = QWidget()
@@ -399,6 +454,142 @@ class GroupBoxWithHelp(FlashableGroupBox):
         # Content area for child widgets
         self.content_layout = QVBoxLayout()
         main_layout.addLayout(self.content_layout)
+
+    def set_scope_color_scheme(self, scheme) -> None:
+        """Set scope color scheme for border rendering."""
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"🎨 GroupBoxWithHelp.set_scope_color_scheme: title='{self.title()}', scheme={scheme is not None}")
+        self._scope_color_scheme = scheme
+        # Add margin for border layers if needed
+        if scheme and hasattr(scheme, 'step_border_layers') and scheme.step_border_layers:
+            total_width = sum(layer[0] for layer in scheme.step_border_layers)
+            logger.info(f"🎨 GroupBoxWithHelp: Setting margins to {total_width} for border layers")
+            self.setContentsMargins(total_width, total_width, total_width, total_width)
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        """Paint with scope background and border layers if set."""
+        super().paintEvent(event)
+        if not self._scope_color_scheme:
+            return
+
+        layers = getattr(self._scope_color_scheme, 'step_border_layers', None)
+
+        # Paint scope background tint (same approach as list item delegate)
+        self._paint_scope_background(layers)
+
+        # Paint border layers on top
+        if layers:
+            self._paint_border_layers(layers)
+
+    def _paint_scope_background(self, layers) -> None:
+        """Paint subtle scope-colored background (matching list item style)."""
+        from openhcs.pyqt_gui.widgets.shared.scope_color_utils import tint_color_perceptual
+        from openhcs.pyqt_gui.widgets.shared.scope_visual_config import ScopeVisualConfig
+        from openhcs.pyqt_gui.widgets.shared.flash_mixin import get_widget_corner_radius, DEFAULT_CORNER_RADIUS
+
+        base_rgb = getattr(self._scope_color_scheme, 'base_color_rgb', None)
+        if not base_rgb:
+            return
+
+        # Get tint index from first layer (or default)
+        if layers:
+            _, tint_idx, _ = (layers[0] + ("solid",))[:3]
+        else:
+            tint_idx = 1
+
+        color = tint_color_perceptual(base_rgb, tint_idx)
+        color.setAlphaF(ScopeVisualConfig.GROUPBOX_BG_OPACITY)
+
+        # Get border rect (accounts for margin-top offset)
+        rect = self._get_border_rect()
+
+        # Get corner radius for rounded background
+        radius = get_widget_corner_radius(self)
+        if radius == 0:
+            radius = DEFAULT_CORNER_RADIUS
+
+        # Calculate content rect (inside borders)
+        border_inset = sum(layer[0] for layer in layers) if layers else 0
+        content_rect = rect.adjusted(border_inset, border_inset, -border_inset, -border_inset)
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(color)
+        painter.drawRoundedRect(QRectF(content_rect), radius - border_inset, radius - border_inset)
+        painter.end()
+
+    def _get_border_rect(self) -> QRect:
+        """Get the painted area rect, accounting for margin-top offset.
+
+        Uses the same geometry calculation as the flash overlay system
+        for consistent visual alignment.
+        """
+        import re
+        rect = self.rect()
+
+        # Extract margin-top from stylesheet (same logic as flash overlay)
+        margin_top = 0
+        stylesheet = self.styleSheet()
+        if not stylesheet:
+            parent = self.parentWidget()
+            while parent:
+                stylesheet = parent.styleSheet()
+                if stylesheet and 'QGroupBox' in stylesheet:
+                    break
+                parent = parent.parentWidget()
+
+        if stylesheet:
+            match = re.search(r'margin-top\s*:\s*(\d+)', stylesheet)
+            if match:
+                margin_top = int(match.group(1))
+
+        # Adjust rect to match painted area (offset by margin-top, reduce height)
+        return QRect(rect.x(), rect.y() + margin_top, rect.width(), rect.height() - margin_top)
+
+    def _paint_border_layers(self, layers) -> None:
+        """Paint layered scope borders (same algorithm as ScopedBorderMixin).
+
+        Uses _get_border_rect() for geometry matching flash overlay.
+        """
+        from openhcs.pyqt_gui.widgets.shared.scope_color_utils import tint_color_perceptual
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # Use flash-compatible geometry
+        rect = self._get_border_rect()
+        inset = 0
+        base_rgb = self._scope_color_scheme.base_color_rgb
+
+        # Get corner radius from stylesheet for rounded borders
+        from openhcs.pyqt_gui.widgets.shared.flash_mixin import get_widget_corner_radius, DEFAULT_CORNER_RADIUS
+        radius = get_widget_corner_radius(self)
+        if radius == 0:
+            radius = DEFAULT_CORNER_RADIUS
+
+        for layer in layers:
+            width, tint_idx, pattern = (layer + ("solid",))[:3]
+            color = tint_color_perceptual(base_rgb, tint_idx).darker(120)
+
+            pen = QPen(color, width)
+            style, dash_pattern = self.BORDER_PATTERNS.get(
+                pattern, self.BORDER_PATTERNS["solid"]
+            )
+            pen.setStyle(style)
+            if dash_pattern:
+                pen.setDashPattern(dash_pattern)
+
+            offset = int(inset + width / 2)
+            painter.setPen(pen)
+            draw_rect = rect.adjusted(offset, offset, -offset - 1, -offset - 1)
+            # Draw rounded rect to match flash overlay geometry
+            painter.drawRoundedRect(QRectF(draw_rect), radius, radius)
+            inset += width
+
+        painter.end()
 
     def addWidget(self, widget):
         """Add widget to the content area."""

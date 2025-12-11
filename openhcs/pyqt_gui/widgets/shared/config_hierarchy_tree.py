@@ -14,20 +14,21 @@ from dataclasses import fields, is_dataclass
 from typing import Dict, Type, Optional
 
 from PyQt6.QtCore import Qt, QRect
-from PyQt6.QtGui import QColor, QPainter
+from PyQt6.QtGui import QColor, QPainter, QFont, QFontMetrics
 from PyQt6.QtWidgets import QTreeWidget, QTreeWidgetItem, QStyledItemDelegate, QStyleOptionViewItem, QStyle
-
-from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
 
 logger = logging.getLogger(__name__)
 
+# Custom data role for flash key (matches list_item_delegate pattern)
+TREE_FLASH_KEY_ROLE = Qt.ItemDataRole.UserRole + 20
+
 
 class TreeItemFlashDelegate(QStyledItemDelegate):
-    """Custom delegate for tree items.
+    """Custom delegate for tree items with flash behind text.
 
-    TRUE O(1) ARCHITECTURE: Flash effects are rendered by WindowFlashOverlay.
-    This delegate does NOT paint flash backgrounds - window overlay handles all flash
-    rendering in a single paintEvent for O(1) per window.
+    TRUE O(1) ARCHITECTURE: Flash lookup uses pre-computed colors from GlobalFlashCoordinator.
+    This delegate draws flash BEHIND text (like MultilinePreviewItemDelegate for list items)
+    so text remains readable during flash animations.
     """
 
     def __init__(self, parent=None, manager=None):
@@ -35,16 +36,93 @@ class TreeItemFlashDelegate(QStyledItemDelegate):
 
         Args:
             parent: Parent widget (QTreeWidget)
-            manager: Flash manager (unused - kept for API compat)
+            manager: Flash manager with get_flash_color_for_key() method
         """
         super().__init__(parent)
         self._manager = manager
-        # NOTE: Flash rendering moved to WindowFlashOverlay for O(1) performance
 
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index) -> None:
-        """Paint tree item (no flash - window overlay handles that)."""
-        # TRUE O(1): Flash is rendered by WindowFlashOverlay, not here
-        super().paint(painter, option, index)
+        """Paint tree item with flash BEHIND text."""
+        # Prepare a copy to let style draw backgrounds, hover, selection, etc.
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+
+        # Capture text and prevent default text draw
+        text = opt.text or ""
+        opt.text = ""
+
+        # Draw flash background BEHIND text (inside item rect)
+        flash_key = index.data(TREE_FLASH_KEY_ROLE)
+        if flash_key and self._manager is not None:
+            flash_color = self._manager.get_flash_color_for_key(flash_key)
+            if flash_color and flash_color.alpha() > 0:
+                # Override flash color to match window's scope color scheme
+                # Find parent window with _scope_color_scheme
+                window = self.parent()
+                while window is not None:
+                    scheme = getattr(window, '_scope_color_scheme', None)
+                    if scheme:
+                        from openhcs.pyqt_gui.widgets.shared.scope_color_utils import tint_color_perceptual
+                        base_rgb = getattr(scheme, 'base_color_rgb', None)
+                        layers = getattr(scheme, 'step_border_layers', None)
+                        if base_rgb and layers:
+                            _, tint_idx, _ = (layers[0] + ("solid",))[:3]
+                            scheme_color = tint_color_perceptual(base_rgb, tint_idx).darker(120)
+                            # Keep animation alpha from coordinator
+                            flash_color = QColor(scheme_color.red(), scheme_color.green(),
+                                                scheme_color.blue(), flash_color.alpha())
+                        break
+                    window = window.parent() if hasattr(window, 'parent') else None
+                painter.fillRect(option.rect, flash_color)
+
+        # Let the style draw selection, hover, backgrounds (except text)
+        self.parent().style().drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, self.parent())
+
+        # Now draw text manually ON TOP of flash
+        painter.save()
+
+        # Determine text color based on selection state
+        is_selected = option.state & QStyle.StateFlag.State_Selected
+
+        # Get font from option
+        font = QFont(option.font)
+
+        # Check if item is italic (ui_hidden items use italic)
+        item_font = index.data(Qt.ItemDataRole.FontRole)
+        if item_font:
+            font = QFont(item_font)
+
+        painter.setFont(font)
+        fm = QFontMetrics(font)
+
+        # Calculate text position
+        text_rect = option.rect
+        # Use indentation from tree widget (respects item depth) + small padding
+        tree = self.parent()
+        indent = tree.indentation() if hasattr(tree, 'indentation') else 20
+        depth = 0
+        parent_idx = index.parent()
+        while parent_idx.isValid():
+            depth += 1
+            parent_idx = parent_idx.parent()
+        x_offset = text_rect.left() + indent * depth + 4  # 4px padding after arrow
+        y_offset = text_rect.top() + fm.ascent() + (text_rect.height() - fm.height()) // 2
+
+        # Determine text color
+        if is_selected:
+            color = option.palette.highlightedText().color()
+        else:
+            # Check for custom foreground (ui_hidden items use gray)
+            fg = index.data(Qt.ItemDataRole.ForegroundRole)
+            if fg:
+                color = fg.color() if hasattr(fg, 'color') else QColor(fg)
+            else:
+                color = option.palette.text().color()
+
+        painter.setPen(color)
+        painter.drawText(x_offset, y_offset, text)
+
+        painter.restore()
 
 
 class ConfigHierarchyTreeHelper:
@@ -83,19 +161,66 @@ class ConfigHierarchyTreeHelper:
         self._flash_manager = flash_manager
         self._current_tree = tree
 
-        # Install delegate (no longer paints flash - just for API compat)
+        # Install delegate that draws flash BEHIND text
         if flash_manager is not None:
             delegate = TreeItemFlashDelegate(parent=tree, manager=flash_manager)
             tree.setItemDelegate(delegate)
 
         return tree
 
+    def apply_scope_background(self, tree: QTreeWidget, scheme) -> None:
+        """Apply scope-colored background tint to tree widget.
+
+        Args:
+            tree: The QTreeWidget to style
+            scheme: ScopeColorScheme with base_color_rgb and step_border_layers
+        """
+        from openhcs.pyqt_gui.widgets.shared.scope_color_utils import tint_color_perceptual
+        from openhcs.pyqt_gui.widgets.shared.scope_visual_config import ScopeVisualConfig
+
+        base_rgb = getattr(scheme, 'base_color_rgb', None)
+        if not base_rgb:
+            return
+
+        layers = getattr(scheme, 'step_border_layers', None)
+        if layers:
+            _, tint_idx, _ = (layers[0] + ("solid",))[:3]
+        else:
+            tint_idx = 1
+
+        color = tint_color_perceptual(base_rgb, tint_idx)
+        opacity = ScopeVisualConfig.TREE_BG_OPACITY
+
+        # Apply via stylesheet (most robust for QTreeWidget)
+        r, g, b = color.red(), color.green(), color.blue()
+        alpha = int(255 * opacity)
+        tree.setStyleSheet(f"""
+            QTreeWidget {{
+                background-color: rgba({r}, {g}, {b}, {alpha});
+            }}
+            QTreeWidget::item {{
+                background-color: transparent;
+            }}
+        """)
+
     def _register_flash_element(self, item: QTreeWidgetItem, field_name: str) -> None:
-        """Register tree item with WindowFlashOverlay for O(1) flash rendering."""
+        """Register tree item for flash rendering.
+
+        Stores SCOPED flash key in item data for delegate lookup, and registers with
+        WindowFlashOverlay (with skip_overlay_paint=True since delegate handles painting).
+        """
         if self._flash_manager is None or self._current_tree is None:
             return
         if not hasattr(self._flash_manager, 'register_flash_tree_item'):
             return
+
+        # Get scoped key from flash manager (matches what's used for color lookup)
+        scoped_key = field_name
+        if hasattr(self._flash_manager, '_get_scoped_flash_key'):
+            scoped_key = self._flash_manager._get_scoped_flash_key(field_name)
+
+        # Store SCOPED flash key in item data for delegate to look up
+        item.setData(0, TREE_FLASH_KEY_ROLE, scoped_key)
 
         tree = self._current_tree
         # Create closure that finds item's current index (handles tree rebuild)
@@ -237,15 +362,17 @@ class ConfigHierarchyTreeHelper:
         return False
 
     def get_base_type(self, obj_type: Type) -> Type:
-        """Return the non-lazy base type for a dataclass."""
-        if LazyDefaultPlaceholderService.has_lazy_resolution(obj_type):
-            for base in obj_type.__bases__:
-                if (
-                    base.__name__ != "object"
-                    and not LazyDefaultPlaceholderService.has_lazy_resolution(base)
-                ):
-                    return base
+        """Return the non-lazy base type for a dataclass.
 
+        If obj_type is a Lazy* class (e.g., LazyVFSConfig), returns its
+        non-Lazy base (e.g., VFSConfig). This strips the Lazy wrapper
+        so the tree shows clean config names.
+        """
+        # If name starts with "Lazy", find the non-Lazy base
+        if obj_type.__name__.startswith("Lazy"):
+            for base in obj_type.__bases__:
+                if base.__name__ != "object" and not base.__name__.startswith("Lazy"):
+                    return base
         return obj_type
 
     def add_inheritance_info(

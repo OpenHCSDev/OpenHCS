@@ -89,7 +89,10 @@ class FunctionPaneWidget(QWidget):
         
         # UI components
         self.parameter_widgets: Dict[str, QWidget] = {}
-        
+
+        # Scope color scheme (used for title color, not border) - init before setup_ui
+        self._scope_color_scheme = None
+
         # Setup UI
         self.setup_ui()
         self.setup_connections()
@@ -126,6 +129,49 @@ class FunctionPaneWidget(QWidget):
                 margin: 2px;
             }}
         """)
+
+    def set_scope_color_scheme(self, scheme) -> None:
+        """Set scope color scheme for title color styling (no border on FunctionPaneWidget)."""
+        logger.info(f"🎨 FunctionPaneWidget.set_scope_color_scheme: scheme={scheme is not None}, has_func_name_label={hasattr(self, 'func_name_label')}, has_parameters_groupbox={hasattr(self, 'parameters_groupbox')}")
+        self._scope_color_scheme = scheme
+        # Update function name label color
+        if hasattr(self, 'func_name_label') and scheme:
+            from openhcs.pyqt_gui.widgets.shared.scope_color_utils import tint_color_perceptual
+            accent_color = tint_color_perceptual(scheme.base_color_rgb, 1)
+            logger.info(f"🎨 FunctionPaneWidget: Setting func_name_label color to {accent_color.name()}")
+            self.func_name_label.setStyleSheet(f"color: {accent_color.name()};")
+        # Update parameters groupbox title color
+        if hasattr(self, 'parameters_groupbox'):
+            logger.info(f"🎨 FunctionPaneWidget: Applying parameters_groupbox styling")
+            self._apply_parameters_groupbox_styling()
+
+    def _apply_parameters_groupbox_styling(self) -> None:
+        """Apply styling to the Parameters groupbox with scope accent color if available."""
+        # Use scope accent color if available, otherwise default
+        if self._scope_color_scheme:
+            from openhcs.pyqt_gui.widgets.shared.scope_color_utils import tint_color_perceptual
+            accent_color = tint_color_perceptual(self._scope_color_scheme.base_color_rgb, 1)
+            title_color = accent_color.name()
+        else:
+            title_color = self.color_scheme.to_hex(self.color_scheme.text_accent)
+
+        self.parameters_groupbox.setStyleSheet(f"""
+            QGroupBox {{
+                font-weight: bold;
+                border: 1px solid {self.color_scheme.to_hex(self.color_scheme.border_color)};
+                border-radius: 3px;
+                margin-top: 10px;
+                padding-top: 10px;
+                background-color: {self.color_scheme.to_hex(self.color_scheme.panel_bg)};
+                color: {self.color_scheme.to_hex(self.color_scheme.text_primary)};
+            }}
+            QGroupBox::title {{
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px 0 5px;
+                color: {title_color};
+            }}
+        """)
     
     def create_combined_header(self) -> QWidget:
         """
@@ -153,11 +199,11 @@ class FunctionPaneWidget(QWidget):
             func_name = self.func.__name__
             func_module = self.func.__module__
 
-            # Function name with help
-            name_label = QLabel(f"🔧 {func_name}")
-            name_label.setFont(QFont("Arial", 10, QFont.Weight.Bold))
-            name_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_accent)};")
-            layout.addWidget(name_label)
+            # Function name with help - store as instance attr for scope accent styling
+            self.func_name_label = QLabel(f"🔧 {func_name}")
+            self.func_name_label.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+            self.func_name_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_accent)};")
+            layout.addWidget(self.func_name_label)
 
             # Help indicator for function (import locally to avoid circular imports)
             from openhcs.pyqt_gui.widgets.shared.clickable_help_components import HelpIndicator
@@ -213,24 +259,10 @@ class FunctionPaneWidget(QWidget):
         Returns:
             Widget containing parameter form
         """
-        group_box = QGroupBox("Parameters")
-        group_box.setStyleSheet(f"""
-            QGroupBox {{
-                font-weight: bold;
-                border: 1px solid {self.color_scheme.to_hex(self.color_scheme.border_color)};
-                border-radius: 3px;
-                margin-top: 10px;
-                padding-top: 10px;
-                background-color: {self.color_scheme.to_hex(self.color_scheme.panel_bg)};
-                color: {self.color_scheme.to_hex(self.color_scheme.text_primary)};
-            }}
-            QGroupBox::title {{
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px 0 5px;
-                color: {self.color_scheme.to_hex(self.color_scheme.text_accent)};
-            }}
-        """)
+        # Store as instance attribute for scope accent styling
+        self.parameters_groupbox = QGroupBox("Parameters")
+        self._apply_parameters_groupbox_styling()
+        group_box = self.parameters_groupbox
         
         layout = QVBoxLayout(group_box)
 

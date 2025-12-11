@@ -19,6 +19,10 @@ class ScopeVisualConfig:
     STEP_ITEM_BG_VALUE: int = 85
     STEP_ITEM_BG_OPACITY: float = 0.100  # 0.0-1.0
 
+    # Groupbox and tree background tint (subtle scope coloring)
+    GROUPBOX_BG_OPACITY: float = 0.05  # 0.0-1.0
+    TREE_BG_OPACITY: float = 0.05  # 0.0-1.0
+
     STEP_WINDOW_BORDER_SATURATION: int = 60
     STEP_WINDOW_BORDER_VALUE: int = 80
     STEP_WINDOW_BORDER_WIDTH_PX: int = 4

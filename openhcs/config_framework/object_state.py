@@ -1428,6 +1428,7 @@ class ObjectState:
         # Collect ALL top-level field updates from self.parameters
         # This includes both primitive fields AND nested dataclass fields
         field_updates = {}
+        root_type = type(self.object_instance)
         for field_name in self._path_to_type:
             if '.' not in field_name:
                 # Check if this field's TYPE is a dataclass (not the instance value)
@@ -1435,7 +1436,16 @@ class ObjectState:
                 # (e.g., self.parameters['well_filter_config'] might have well_filter=2
                 # even though self.parameters['well_filter_config.well_filter'] = None)
                 field_type = self._path_to_type.get(field_name)
-                if field_type is not None and is_dataclass(field_type):
+                # CRITICAL FIX: _path_to_type stores CONTAINER type for leaf fields,
+                # but FIELD type for nested dataclass fields. We must distinguish:
+                # - If field_type == root_type, it's a leaf field (container type stored)
+                # - If field_type != root_type AND is_dataclass, it's a nested dataclass
+                is_nested_dataclass = (
+                    field_type is not None and
+                    is_dataclass(field_type) and
+                    field_type != root_type  # Not the container type
+                )
+                if is_nested_dataclass:
                     # Nested dataclass: ALWAYS recursively reconstruct from flat storage
                     # This ensures we pick up changes to nested fields like 'well_filter_config.well_filter'
                     field_updates[field_name] = self._reconstruct_from_prefix(field_name)
