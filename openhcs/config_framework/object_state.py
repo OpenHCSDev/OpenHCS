@@ -601,12 +601,16 @@ class ObjectState:
 
         # Initialize baselines (suppress flash during init)
         self._ensure_live_resolved(notify_flash=False)
-        # Compute saved baseline using SAVED ancestor values (use_saved=True)
-        # This ensures new ObjectStates are immediately dirty if live context differs from saved
-        self._saved_resolved = self._compute_resolved_snapshot(use_saved=True)
+        assert self._live_resolved is not None  # Guaranteed by _ensure_live_resolved
+        # NEW OBJECTS START CLEAN: saved = live at registration time.
+        # Dirty indicates "I made changes that aren't saved", not "my ancestors have unsaved changes".
+        # If parent has unsaved changes, that's parent's dirty indicator to show.
+        # Callers don't need to remember to call mark_saved() after registration.
+        self._saved_resolved = copy.deepcopy(self._live_resolved)
         self._saved_parameters = copy.deepcopy(self.parameters)
 
         # Materialize initial diff sets (no notification during init)
+        # Should be empty for new objects since saved = live
         self._dirty_fields = self._compute_dirty_fields()
         self._signature_diff_fields = self._compute_signature_diff_fields()
 
