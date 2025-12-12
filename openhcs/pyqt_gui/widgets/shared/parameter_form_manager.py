@@ -330,13 +330,9 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, FlashMixin, metacla
                            f"total callbacks on ObjectState: {len(self.state._on_resolved_changed_callbacks)}, "
                            f"scope_id={self.state.scope_id}")
 
-            # Label styling: Subscribe to parameter changes (all managers, not just root)
-            self.state.on_parameters_changed(self._on_parameter_changed_for_label_styling)
-
-            # Dirty indicator: Subscribe to dirty state changes (root only - dirty computed at root level)
-            # This updates asterisk indicators when save/restore changes the saved baseline
+            # Materialized state changes: Subscribe once (root only)
             if self._parent_manager is None:
-                self.state.on_dirty_changed(self._on_dirty_state_changed)
+                self.state.on_state_changed(self._on_state_changed)
 
             # STEP 8: _user_set_fields starts empty and is populated only when user edits widgets
             # (via _emit_parameter_change). Do NOT populate during initialization, as that would
@@ -626,45 +622,21 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, FlashMixin, metacla
 
         # Build full dotted path for state lookup
         dotted_path = f'{self.field_prefix}.{param_name}' if self.field_prefix else param_name
-        value = self.state.parameters.get(dotted_path)
-
-        # Get signature default for comparison
-        signature_default = self.state._signature_defaults.get(dotted_path)
-
-        # Underline ONLY if value differs from signature default
-        # (i.e., user has explicitly set a value different from the default)
-        should_underline = value != signature_default
+        should_underline = dotted_path in self.state.signature_diff_fields
 
         label = self.labels[param_name]
         label.set_underline(should_underline)
 
         # Dirty indicator: asterisk if resolved value differs from saved resolved value
-        is_dirty = self.state.is_field_dirty(dotted_path)
+        is_dirty = dotted_path in self.state.dirty_fields
         label.set_dirty_indicator(is_dirty)
 
-    def _on_parameter_changed_for_label_styling(self, param_name: str) -> None:
-        """Callback when state.parameters changes - update label styling.
-
-        This is called for ALL parameter changes in this ObjectState, including
-        changes from sibling managers via inheritance.
-        """
-        # Extract leaf field name from dotted path
-        leaf_field = param_name.split('.')[-1] if '.' in param_name else param_name
-        self._update_label_styling(leaf_field)
-
-    def _on_dirty_state_changed(self, is_dirty: bool) -> None:
-        """Callback when dirty state changes (save/restore) - refresh all label dirty indicators.
-
-        This is called when dirty state transitions (dirty→clean or clean→dirty), typically
-        after mark_saved() or restore_saved(). Parameters haven't changed, but the saved
-        baseline has, so all dirty indicators need to be recalculated.
-        """
-        # Refresh all labels in this manager
+    def _on_state_changed(self) -> None:
+        """Callback when materialized state changes (dirty/signature diff)."""
         for param_name in self.labels:
             self._update_label_styling(param_name)
-        # Recursively refresh nested managers
         for nested_manager in self.nested_managers.values():
-            nested_manager._on_dirty_state_changed(is_dirty)
+            nested_manager._on_state_changed()
 
     # DELETED: MODEL DELEGATION - callers use self.state.get_*() directly
     # DELETED: _on_nested_parameter_changed - replaced by FieldChangeDispatcher
@@ -752,12 +724,9 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, FlashMixin, metacla
                 logger.debug(f"🔔 CALLBACK_LEAK_DEBUG: Unregistered callback for {self.field_id}, "
                            f"callbacks: {callbacks_before} -> {callbacks_after}")
 
-            # Unregister parameter change callback for label styling
-            self.state.off_parameters_changed(self._on_parameter_changed_for_label_styling)
-
-            # Unregister dirty state change callback (root only)
+            # Unregister state change callback (root only)
             if self._parent_manager is None:
-                self.state.off_dirty_changed(self._on_dirty_state_changed)
+                self.state.off_state_changed(self._on_state_changed)
 
             if self.context_obj is not None and not self._parent_manager:
                 from openhcs.config_framework.context_manager import unregister_hierarchy_relationship

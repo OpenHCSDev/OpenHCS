@@ -982,24 +982,19 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
             logger.debug(f"⚡ FLASH_DEBUG on_change CALLBACK FIRED: scope={scope_id}, paths={changed_paths}")
             self.queue_flash(scope_id)  # Global flash - list items flash in ALL windows
 
-        def on_saved_resolved_change():
-            logger.debug(f"⚡ FLASH_DEBUG on_saved_resolved_change CALLBACK FIRED: scope={scope_id} (saved baseline changed)")
-            self.queue_flash(scope_id)  # Flash list item when saved baseline changes (save or inherit)
-
         state.on_resolved_changed(on_change)
-        state.on_saved_resolved_changed(on_saved_resolved_change)
-        self._flash_subscriptions[scope_id] = (state, on_change, on_saved_resolved_change)
+        self._flash_subscriptions[scope_id] = (state, on_change)
         logger.debug(f"⚡ FLASH_DEBUG: Subscribed to {scope_id}, total subscriptions={len(self._flash_subscriptions)}")
 
         # Subscribe to dirty state changes for reactive dirty markers
         if scope_id not in self._dirty_subscriptions:
-            def on_dirty_changed(is_dirty: bool):
-                """Update list item text when dirty state changes."""
-                logger.debug(f"🔧 DIRTY_DEBUG on_dirty_changed: scope={scope_id}, is_dirty={is_dirty}")
+            def on_state_changed():
+                """Update list item text when materialized state changes."""
+                logger.debug(f"🔧 DIRTY_DEBUG on_state_changed: scope={scope_id}")
                 self.queue_visual_update()  # Refresh list item text
 
-            state.on_dirty_changed(on_dirty_changed)
-            self._dirty_subscriptions[scope_id] = (state, on_dirty_changed)
+            state.on_state_changed(on_state_changed)
+            self._dirty_subscriptions[scope_id] = (state, on_state_changed)
             logger.debug(f"🔧 DIRTY_DEBUG: Subscribed to dirty changes for {scope_id}")
 
     # VisualUpdateMixin implementation - list items use WindowFlashOverlay (no custom methods needed)
@@ -1022,11 +1017,10 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
         logger.debug(f"⚡ FLASH_DEBUG _cleanup_flash_subscriptions: self={type(self).__name__}, clearing {len(self._flash_subscriptions)} flash + {len(self._dirty_subscriptions)} dirty subscriptions")
 
         # Cleanup flash subscriptions
-        for scope_id, (state, on_change_callback, on_saved_resolved_callback) in list(self._flash_subscriptions.items()):
+        for scope_id, (state, on_change_callback) in list(self._flash_subscriptions.items()):
             logger.debug(f"⚡ FLASH_DEBUG: Unsubscribing from {scope_id}")
             try:
                 state.off_resolved_changed(on_change_callback)
-                state.off_saved_resolved_changed(on_saved_resolved_callback)
             except Exception as e:
                 logger.debug(f"⚡ FLASH_DEBUG: Error unsubscribing from {scope_id}: {e}")
 
@@ -1040,7 +1034,7 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
         # Cleanup dirty state subscriptions
         for scope_id, (state, on_dirty_callback) in list(self._dirty_subscriptions.items()):
             try:
-                state.off_dirty_changed(on_dirty_callback)
+                state.off_state_changed(on_dirty_callback)
             except Exception as e:
                 logger.debug(f"🔧 DIRTY_DEBUG: Error unsubscribing dirty from {scope_id}: {e}")
 
@@ -1323,14 +1317,12 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
         ...
 
     def _get_dirty_marker(self, item: Any) -> str:
-        """Get dirty marker for item based on ObjectState.is_dirty().
+        """Get dirty marker for item based on ObjectState.dirty_fields."""
 
-        Returns " *" if item has unsaved changes, "" otherwise.
-        """
         try:
             scope_id = self._get_cached_scope(item)
             state = ObjectStateRegistry.get_by_scope(scope_id)
-            if state and state.is_dirty():
+            if state and state.dirty_fields:
                 return " *"
         except Exception:
             pass  # Fail silently - no dirty marker is fine

@@ -131,7 +131,7 @@ class ConfigHierarchyTreeHelper:
     TRUE O(1) FLASH ARCHITECTURE: Tree items are registered with WindowFlashOverlay
     during population. Flash rendering happens in the window overlay's single paintEvent.
 
-    UNIFIED DIRTY TRACKING: Automatically subscribes to ObjectState.on_dirty_changed()
+    UNIFIED DIRTY TRACKING: Automatically subscribes to ObjectState.on_state_changed()
     when state is provided, and updates tree item styling reactively.
     """
 
@@ -143,11 +143,9 @@ class ConfigHierarchyTreeHelper:
         # Mapping from dotted path to QTreeWidgetItem for dirty styling updates
         self._path_to_item: Dict[str, QTreeWidgetItem] = {}
         self._dirty_callback = None
-        self._param_change_callback = None
         self._tree_for_dirty: Optional[QTreeWidget] = None
         # Dirty tracking subscription
         self._state: Optional['ObjectState'] = None
-        self._dirty_callback = None
 
     def create_tree_widget(
         self,
@@ -199,21 +197,13 @@ class ConfigHierarchyTreeHelper:
         if self._state is None:
             return
 
-        def on_dirty_changed(is_dirty: bool):
-            dirty_fields = self._state.get_dirty_fields() if is_dirty else set()
+        def on_state_changed():
+            dirty_fields = self._state.dirty_fields
             self.update_dirty_styling(dirty_fields)
             tree.viewport().update()
 
-        def on_param_changed(_param_name: str):
-            # Field-level changes should refresh dirty markers even if overall dirty state didn't toggle
-            dirty_fields = self._state.get_dirty_fields()
-            self.update_dirty_styling(dirty_fields)
-            tree.viewport().update()
-
-        self._state.on_dirty_changed(on_dirty_changed)
-        self._state.on_parameters_changed(on_param_changed)
-        self._dirty_callback = on_dirty_changed
-        self._param_change_callback = on_param_changed
+        self._state.on_state_changed(on_state_changed)
+        self._dirty_callback = on_state_changed
         self._tree_for_dirty = tree  # Store for initialize_dirty_styling
 
     def initialize_dirty_styling(self) -> None:
@@ -223,7 +213,7 @@ class ConfigHierarchyTreeHelper:
         """
         if self._state is None:
             return
-        dirty_fields = self._state.get_dirty_fields() if self._state.is_dirty() else set()
+        dirty_fields = self._state.dirty_fields
         self.update_dirty_styling(dirty_fields)
         if hasattr(self, '_tree_for_dirty') and self._tree_for_dirty:
             self._tree_for_dirty.viewport().update()
@@ -232,14 +222,8 @@ class ConfigHierarchyTreeHelper:
         """Unsubscribe from ObjectState dirty changes. Call on window close."""
         if self._state is not None:
             if self._dirty_callback is not None:
-                self._state.off_dirty_changed(self._dirty_callback)
+                self._state.off_state_changed(self._dirty_callback)
                 self._dirty_callback = None
-            if self._param_change_callback is not None:
-                try:
-                    self._state.off_parameters_changed(self._param_change_callback)
-                except Exception:
-                    pass
-                self._param_change_callback = None
             self._state = None
 
     def apply_scope_background(self, tree: QTreeWidget, scheme) -> None:

@@ -387,7 +387,7 @@ class FormBuildOrchestrator:
 
     def _initialize_dirty_indicators(self, manager) -> None:
         """Initialize dirty indicators for all labels in manager and nested managers."""
-        if not manager.state.is_dirty():
+        if not manager.state.dirty_fields:
             return
         # Refresh all labels in this manager
         for param_name in manager.labels:
@@ -431,4 +431,3 @@ class InitialRefreshStrategy:
             with timer("  Initial live context refresh", threshold_ms=10.0):
                 service = parameter_ops_service.ParameterOpsService()
                 service.refresh_with_live_context(manager)
-

@@ -48,8 +48,11 @@ class PlateViewerWindow(BaseFormDialog):
         self.style_gen = StyleSheetGenerator(self.color_scheme)
 
         # scope_id for singleton behavior - one viewer per plate
-        self.scope_id = str(orchestrator.plate_path) if orchestrator else None
-        
+        # Use ::plate_viewer suffix to avoid conflicts with ConfigWindow (which uses just plate_path)
+        self.scope_id = f"{orchestrator.plate_path}::plate_viewer" if orchestrator else None
+        # Store plate path for styling (without suffix) so border matches plate's ConfigWindow
+        self._style_scope_id = str(orchestrator.plate_path) if orchestrator else None
+
         plate_name = orchestrator.plate_path.name if orchestrator else "Unknown"
         self.setWindowTitle(f"Plate Viewer - {plate_name}")
         self.setMinimumSize(1200, 800)
@@ -59,7 +62,22 @@ class PlateViewerWindow(BaseFormDialog):
         self.setWindowFlags(Qt.WindowType.Window)
 
         self._setup_ui()
-    
+
+    def _init_scope_border(self) -> None:
+        """Override to use plate-level styling (not step-level).
+
+        PlateViewerWindow uses scope_id with ::plate_viewer suffix for WindowManager,
+        but should use the plate path (without suffix) for border styling to match
+        the plate's ConfigWindow.
+        """
+        # Temporarily swap scope_id to use plate-level styling
+        original_scope_id = self.scope_id
+        self.scope_id = self._style_scope_id
+        try:
+            super()._init_scope_border()
+        finally:
+            self.scope_id = original_scope_id
+
     def _setup_ui(self):
         """Setup the window UI."""
         layout = QVBoxLayout(self)

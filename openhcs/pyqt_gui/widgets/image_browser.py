@@ -491,7 +491,8 @@ class ImageBrowserWidget(QWidget):
     def set_orchestrator(self, orchestrator):
         """Set the orchestrator and load images."""
         self.orchestrator = orchestrator
-        self.scope_id = str(orchestrator.plate_path) if orchestrator else None
+        # CRITICAL: Preserve ::image_browser suffix to avoid scope conflicts with ConfigWindow
+        self.scope_id = f"{orchestrator.plate_path}::image_browser" if orchestrator else None
 
         # Use orchestrator's FileManager (has plate-specific backends like VirtualWorkspaceBackend)
         if orchestrator:
