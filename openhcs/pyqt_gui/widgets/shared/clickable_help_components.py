@@ -871,12 +871,13 @@ class GroupBoxWithHelp(FlashableGroupBox):
         title_layout.setContentsMargins(0, 0, 0, 0)
         title_layout.setSpacing(5)
 
-        # Title label
-        title_label = QLabel(title)
+        # Title label - store as instance variable for dirty marker updates
+        self._title_label = QLabel(title)
+        self._base_title = title  # Store original title without dirty marker
         title_font = QFont()
         title_font.setBold(True)
-        title_label.setFont(title_font)
-        title_layout.addWidget(title_label)
+        self._title_label.setFont(title_font)
+        title_layout.addWidget(self._title_label)
 
         # Help button for dataclass (left-aligned, next to title)
         if help_target:
@@ -898,6 +899,30 @@ class GroupBoxWithHelp(FlashableGroupBox):
         # Content area for child widgets
         self.content_layout = QVBoxLayout()
         main_layout.addLayout(self.content_layout)
+
+    def set_dirty_marker(self, is_dirty: bool, has_sig_diff: bool = False) -> None:
+        """Update title styling for dirty (asterisk) and signature diff (underline).
+
+        Two orthogonal visual semantics:
+        - Asterisk (*): dirty (resolved_live != resolved_saved)
+        - Underline: signature diff (raw != signature default)
+
+        Args:
+            is_dirty: True to show asterisk prefix
+            has_sig_diff: True to apply underline
+        """
+        current_text = self._title_label.text()
+        has_marker = current_text.startswith("* ")
+
+        if is_dirty and not has_marker:
+            self._title_label.setText(f"* {self._base_title}")
+        elif not is_dirty and has_marker:
+            self._title_label.setText(self._base_title)
+
+        # Apply underline for signature diff (independent of dirty)
+        font = self._title_label.font()
+        font.setUnderline(has_sig_diff)
+        self._title_label.setFont(font)
 
     def set_scope_color_scheme(self, scheme) -> None:
         """Set scope color scheme for border rendering."""

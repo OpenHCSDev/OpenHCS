@@ -635,8 +635,37 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, FlashMixin, metacla
         """Callback when materialized state changes (dirty/signature diff)."""
         for param_name in self.labels:
             self._update_label_styling(param_name)
+
         for nested_manager in self.nested_managers.values():
             nested_manager._on_state_changed()
+
+    def update_groupbox_dirty_markers(self, dirty_prefixes: set, sig_diff_prefixes: set = None) -> None:
+        """Update groupbox titles with dirty markers and signature diff underline.
+
+        Called by ConfigHierarchyTreeHelper.update_dirty_styling() so tree items
+        and groupbox titles use the SAME prefixes computed ONCE.
+
+        Args:
+            dirty_prefixes: Pre-computed set of dirty paths and their ancestors (for asterisk)
+            sig_diff_prefixes: Pre-computed set of signature diff paths and ancestors (for underline)
+        """
+        if sig_diff_prefixes is None:
+            sig_diff_prefixes = set()
+
+        # Update this level's nested managers' groupboxes
+        for param_name, nested_manager in self.nested_managers.items():
+            groupbox = self.widgets.get(param_name)
+            if groupbox is None:
+                continue
+
+            prefix = nested_manager.field_prefix
+            is_dirty = prefix in dirty_prefixes
+            has_sig_diff = prefix in sig_diff_prefixes
+            groupbox.set_dirty_marker(is_dirty, has_sig_diff)
+
+        # Recurse to nested managers
+        for nested_manager in self.nested_managers.values():
+            nested_manager.update_groupbox_dirty_markers(dirty_prefixes, sig_diff_prefixes)
 
     # DELETED: MODEL DELEGATION - callers use self.state.get_*() directly
     # DELETED: _on_nested_parameter_changed - replaced by FieldChangeDispatcher

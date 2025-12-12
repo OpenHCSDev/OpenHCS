@@ -1674,8 +1674,17 @@ class VisualUpdateMixin:
             return
 
         now = time.perf_counter()
+        # Check if this is a NEW flash (not re-triggering existing animation)
+        is_new_flash = scoped_key not in coordinator._flash_start_times
+
         # FIX 1: Store in unified dict (key is already scoped, prevents cross-window contamination)
         coordinator._flash_start_times[scoped_key] = now
+
+        # CRITICAL: Invalidate geometry cache for NEW flashes (same as queue_flash)
+        # This ensures fresh geometry after dynamic element registration (e.g., leaf flash)
+        if is_new_flash:
+            overlay._invalidate_geometry_cache()
+
         # Start timer - active windows will be determined in tick based on computed colors
         coordinator._start_timer()
 

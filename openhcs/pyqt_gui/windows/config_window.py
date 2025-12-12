@@ -136,14 +136,47 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
         # No config_editor needed - everything goes through form_manager
         self.config_editor = None
 
+        # Subscribe to dirty state changes for window title updates
+        self._base_window_title = f"Configuration - {self.config_class.__name__}"
+        self._dirty_title_callback = self._update_window_title_dirty_marker
+        self.state.on_state_changed(self._dirty_title_callback)
+
         # Setup UI
         self.setup_ui()
 
         logger.debug(f"Config window initialized for {config_class.__name__}")
 
+    def _update_window_title_dirty_marker(self) -> None:
+        """Update window title with dirty marker and signature diff underline.
+
+        Two orthogonal visual semantics:
+        - Asterisk (*): dirty (resolved_live != resolved_saved)
+        - Underline: signature diff (raw != signature default)
+        """
+        is_dirty = bool(self.state.dirty_fields)
+        has_sig_diff = bool(self.state.signature_diff_fields)
+        current_title = self.windowTitle()
+        has_marker = current_title.startswith("* ")
+
+        if is_dirty and not has_marker:
+            self.setWindowTitle(f"* {self._base_window_title}")
+        elif not is_dirty and has_marker:
+            self.setWindowTitle(self._base_window_title)
+
+        # Update header label with both asterisk and underline
+        if hasattr(self, '_header_label'):
+            header_text = f"Configure {self.config_class.__name__}"
+            if is_dirty:
+                self._header_label.setText(f"* {header_text}")
+            else:
+                self._header_label.setText(header_text)
+            font = self._header_label.font()
+            font.setUnderline(has_sig_diff)
+            self._header_label.setFont(font)
+
     def setup_ui(self):
         """Setup the user interface."""
-        self.setWindowTitle(f"Configuration - {self.config_class.__name__}")
+        self.setWindowTitle(self._base_window_title)
         self.setModal(False)  # Non-modal like plate manager and pipeline editor
         self.setMinimumSize(600, 400)
         self.resize(800, 600)
@@ -609,8 +642,7 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
 
     def closeEvent(self, a0):
         """Override to cleanup dirty subscriptions before closing."""
-        # Delegate cleanup to tree helper (it manages its own subscription)
-        if hasattr(self, 'tree_helper'):
-            self.tree_helper.cleanup_subscriptions()
+        self.state.off_state_changed(self._dirty_title_callback)
+        self.tree_helper.cleanup_subscriptions()
         super().closeEvent(a0)
 

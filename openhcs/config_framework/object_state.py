@@ -1158,10 +1158,25 @@ class ObjectState:
         return dirty
 
     def _compute_signature_diff_fields(self) -> Set[str]:
-        """Compute signature-diff set from parameters vs defaults."""
+        """Compute signature-diff set from parameters vs defaults.
+
+        Only includes LEAF fields (those with signature defaults).
+        Nested dataclass container fields are excluded since they're not
+        directly editable values.
+
+        For steps: only includes fields INSIDE nested dataclass configs (has '.' in path),
+        not top-level step fields like name/func/enabled which are always set explicitly.
+        """
+        # Check if this is a step (has AbstractStep in MRO)
+        from openhcs.core.steps.abstract import AbstractStep
+        is_step = isinstance(self.object_instance, type) and issubclass(self.object_instance, AbstractStep) \
+                  or isinstance(self.object_instance, AbstractStep)
+
         return {
             k for k, v in self.parameters.items()
-            if v != self._signature_defaults.get(k)
+            if k in self._signature_defaults
+            and (not is_step or '.' in k)  # For steps: only nested config fields
+            and v != self._signature_defaults[k]
         }
 
     def _update_dirty_fields(self) -> bool:

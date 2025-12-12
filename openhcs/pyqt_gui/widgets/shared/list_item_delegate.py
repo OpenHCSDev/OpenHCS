@@ -18,6 +18,10 @@ SCOPE_SCHEME_ROLE = Qt.ItemDataRole.UserRole + 10
 SCOPE_BORDER_ROLE = SCOPE_SCHEME_ROLE
 # Flash key role - stores scope_id for flash color lookup
 FLASH_KEY_ROLE = Qt.ItemDataRole.UserRole + 11
+# Dirty role - stores bool for asterisk (resolved != saved)
+DIRTY_ROLE = Qt.ItemDataRole.UserRole + 12
+# Signature diff role - stores bool for underline (raw != signature default)
+SIGNATURE_DIFF_ROLE = Qt.ItemDataRole.UserRole + 13
 
 # Border patterns matching ScopedBorderMixin
 BORDER_PATTERNS = {
@@ -122,13 +126,17 @@ class MultilinePreviewItemDelegate(QStyledItemDelegate):
 
         # Check if item is disabled (stored in UserRole+1) - for PipelineEditor strikethrough
         is_disabled = index.data(Qt.ItemDataRole.UserRole + 1) or False
+        # Check if item has signature diff (stored in SIGNATURE_DIFF_ROLE) - for underline styling
+        has_sig_diff = index.data(SIGNATURE_DIFF_ROLE) or False
 
-        # Use strikethrough font for disabled items
+        # Create fonts: base font and name font (with underline for sig diff)
         from PyQt6.QtGui import QFont, QFontMetrics
-        font = QFont(option.font)
-        if is_disabled:
-            font.setStrikeOut(True)
-        painter.setFont(font)
+        base_font = QFont(option.font)
+        base_font.setStrikeOut(is_disabled)
+        base_font.setUnderline(False)  # Ensure base font has no underline
+
+        name_font = QFont(base_font)
+        name_font.setUnderline(has_sig_diff)  # Only name gets underline
 
         # Split text into lines
         # Qt converts \n to \u2028 (Unicode line separator) in QListWidgetItem text
@@ -137,7 +145,7 @@ class MultilinePreviewItemDelegate(QStyledItemDelegate):
         lines = text.split('\n')
 
         # Calculate line height
-        fm = QFontMetrics(font)
+        fm = QFontMetrics(base_font)
         line_height = fm.height()
 
         # Starting position for text with proper padding
@@ -150,14 +158,17 @@ class MultilinePreviewItemDelegate(QStyledItemDelegate):
             # Determine if this is a preview line (starts with "  └─" or contains "  (")
             is_preview_line = line.strip().startswith('└─')
 
-            # Check for inline preview format: "name  (preview)"
+            # Check for inline preview format: "name  (preview)" or "name  (preview) *"
             sep_idx = line.find("  (")
-            if sep_idx != -1 and line.endswith(")") and not is_preview_line:
+            # Match both "...)" and "...) *" endings
+            has_inline_preview = sep_idx != -1 and (line.endswith(")") or line.endswith(") *")) and not is_preview_line
+            if has_inline_preview:
                 # Inline preview format (PipelineEditor style)
                 name_part = line[:sep_idx]
                 preview_part = line[sep_idx:]
 
-                # Draw name part
+                # Draw name part with underline if sig diff
+                painter.setFont(name_font)
                 if is_selected:
                     painter.setPen(self.selected_text_color)
                 else:
@@ -165,8 +176,9 @@ class MultilinePreviewItemDelegate(QStyledItemDelegate):
 
                 painter.drawText(x_offset, y_offset, name_part)
 
-                # Draw preview part
-                name_width = fm.horizontalAdvance(name_part)
+                # Draw preview part without underline
+                painter.setFont(base_font)
+                name_width = QFontMetrics(name_font).horizontalAdvance(name_part)
                 if is_selected:
                     painter.setPen(self.selected_text_color)
                 else:
@@ -175,6 +187,14 @@ class MultilinePreviewItemDelegate(QStyledItemDelegate):
                 painter.drawText(x_offset + name_width, y_offset, preview_part)
             else:
                 # Regular line or multiline preview format
+                # First line = name (gets underline), rest = preview (no underline)
+                is_first_line = (line == lines[0])
+
+                if is_first_line and not is_preview_line:
+                    painter.setFont(name_font)
+                else:
+                    painter.setFont(base_font)
+
                 # Choose color
                 if is_selected:
                     color = self.selected_text_color

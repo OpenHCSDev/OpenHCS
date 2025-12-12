@@ -121,7 +121,7 @@ class DualEditorWindow(BaseFormDialog):
     def setup_ui(self):
         """Setup the user interface."""
         self._update_window_title()
-        self.resize(1000, 700)
+        self.resize(700, 500)
 
         layout = QVBoxLayout(self)
         layout.setSpacing(5)
@@ -234,10 +234,28 @@ class DualEditorWindow(BaseFormDialog):
             self.scope_id = self._build_step_scope_id()
 
     def _update_window_title(self):
-        title = "New Step" if getattr(self, 'is_new', False) else f"Edit Step: {getattr(self.editing_step, 'name', 'Unknown')}"
+        """Update window title with dirty marker and signature diff underline.
+
+        Two orthogonal visual semantics:
+        - Asterisk (*): dirty (resolved_live != resolved_saved)
+        - Underline: signature diff (raw != signature default)
+        """
+        base_title = "New Step" if self.is_new else f"Edit Step: {self.editing_step.name}"
+        self._base_window_title = base_title
+
+        # step_editor doesn't exist yet during initial setup_ui() call
+        step_editor = getattr(self, 'step_editor', None)
+        is_dirty = bool(step_editor and step_editor.state.dirty_fields)
+        has_sig_diff = bool(step_editor and step_editor.state.signature_diff_fields)
+
+        title = f"* {base_title}" if is_dirty else base_title
         self.setWindowTitle(title)
-        if hasattr(self, 'header_label'):
+        if getattr(self, 'header_label', None):
             self.header_label.setText(title)
+            # Apply underline for signature diff (independent of dirty)
+            font = self.header_label.font()
+            font.setUnderline(has_sig_diff)
+            self.header_label.setFont(font)
 
     def _update_save_button_text(self):
         if hasattr(self, 'save_button'):
@@ -346,6 +364,10 @@ class DualEditorWindow(BaseFormDialog):
 
         # CRITICAL: Connect context_changed signal for cross-window updates from code editor
         self.step_editor.form_manager.context_changed.connect(self._on_step_context_changed)
+
+        # Subscribe to dirty state changes for window title updates
+        self._dirty_title_callback = self._update_window_title
+        self.step_editor.state.on_state_changed(self._dirty_title_callback)
 
         self.tab_widget.addTab(self.step_editor, "Step Settings")
 
@@ -1117,9 +1139,9 @@ class DualEditorWindow(BaseFormDialog):
                 return
 
         # Cleanup tree helper subscriptions to prevent memory leaks
-        if hasattr(self, 'step_editor') and self.step_editor is not None:
-            if hasattr(self.step_editor, 'tree_helper'):
-                self.step_editor.tree_helper.cleanup_subscriptions()
+        if self.step_editor is not None:
+            self.step_editor.tree_helper.cleanup_subscriptions()
+            self.step_editor.state.off_state_changed(self._dirty_title_callback)
 
         super().closeEvent(event)  # BaseFormDialog handles unregistration
 

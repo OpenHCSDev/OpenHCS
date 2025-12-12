@@ -25,7 +25,7 @@ from PyQt6.QtCore import Qt, QRect, pyqtSignal
 from PyQt6.QtGui import QFont, QColor, QBrush
 
 from openhcs.pyqt_gui.widgets.shared.reorderable_list_widget import ReorderableListWidget
-from openhcs.pyqt_gui.widgets.shared.list_item_delegate import MultilinePreviewItemDelegate
+from openhcs.pyqt_gui.widgets.shared.list_item_delegate import MultilinePreviewItemDelegate, DIRTY_ROLE, SIGNATURE_DIFF_ROLE
 from openhcs.config_framework.object_state import ObjectStateRegistry
 from openhcs.pyqt_gui.widgets.mixins import (
     CrossWindowPreviewMixin,
@@ -1175,6 +1175,10 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
                     for role_offset, value in self._get_list_item_extra_data(item_obj, index).items():
                         list_item.setData(Qt.ItemDataRole.UserRole + role_offset, value)
 
+                    # Set styling roles for delegate
+                    list_item.setData(DIRTY_ROLE, self._is_item_dirty(item_obj))
+                    list_item.setData(SIGNATURE_DIFF_ROLE, self._has_item_signature_diff(item_obj))
+
                     # Apply scope-based colors
                     self._apply_list_item_scope_color(list_item, item_obj, index)
 
@@ -1195,6 +1199,10 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
 
                     for role_offset, value in self._get_list_item_extra_data(item_obj, index).items():
                         list_item.setData(Qt.ItemDataRole.UserRole + role_offset, value)
+
+                    # Set styling roles for delegate
+                    list_item.setData(DIRTY_ROLE, self._is_item_dirty(item_obj))
+                    list_item.setData(SIGNATURE_DIFF_ROLE, self._has_item_signature_diff(item_obj))
 
                     # Apply scope-based colors
                     self._apply_list_item_scope_color(list_item, item_obj, index)
@@ -1330,15 +1338,25 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
 
     def _get_dirty_marker(self, item: Any) -> str:
         """Get dirty marker for item based on ObjectState.dirty_fields."""
+        return " *" if self._is_item_dirty(item) else ""
 
+    def _is_item_dirty(self, item: Any) -> bool:
+        """Check if item has unsaved changes based on ObjectState.dirty_fields."""
         try:
             scope_id = self._get_cached_scope(item)
             state = ObjectStateRegistry.get_by_scope(scope_id)
-            if state and state.dirty_fields:
-                return " *"
+            return bool(state and state.dirty_fields)
         except Exception:
-            pass  # Fail silently - no dirty marker is fine
-        return ""
+            return False  # Fail silently - not dirty is fine
+
+    def _has_item_signature_diff(self, item: Any) -> bool:
+        """Check if item has signature diff based on ObjectState.signature_diff_fields."""
+        try:
+            scope_id = self._get_cached_scope(item)
+            state = ObjectStateRegistry.get_by_scope(scope_id)
+            return bool(state and state.signature_diff_fields)
+        except Exception:
+            return False  # Fail silently - no sig diff is fine
 
     def _get_list_item_data(self, item: Any, index: int) -> Any:
         """Get UserRole data. Interprets ITEM_HOOKS['list_item_data']."""

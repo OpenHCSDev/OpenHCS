@@ -10,7 +10,7 @@ from typing import Any, Dict, Callable, Optional, Tuple, List
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QFrame, QScrollArea, QGroupBox, QSizePolicy
+    QScrollArea, QGroupBox, QSizePolicy
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
@@ -102,12 +102,12 @@ class FunctionPaneWidget(QWidget):
     def setup_ui(self):
         """Setup the user interface."""
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(5, 5, 5, 5)
-        layout.setSpacing(5)
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(4)
 
         # Combined header with title and buttons on same row
-        header_frame = self.create_combined_header()
-        layout.addWidget(header_frame)
+        header_widget = self.create_combined_header()
+        layout.addWidget(header_widget)
 
         # Parameter form (if function exists and parameters shown)
         if self.func and self.show_parameters:
@@ -120,13 +120,12 @@ class FunctionPaneWidget(QWidget):
         size_policy = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
         self.setSizePolicy(size_policy)
 
-        # Set styling
+        # Set styling - subtle border, match window theme
         self.setStyleSheet(f"""
             FunctionPaneWidget {{
-                background-color: {self.color_scheme.to_hex(self.color_scheme.window_bg)};
+                background-color: {self.color_scheme.to_hex(self.color_scheme.panel_bg)};
                 border: 1px solid {self.color_scheme.to_hex(self.color_scheme.border_color)};
-                border-radius: 5px;
-                margin: 2px;
+                border-radius: 4px;
             }}
         """)
 
@@ -180,26 +179,18 @@ class FunctionPaneWidget(QWidget):
         Returns:
             Widget containing title and control buttons
         """
-        frame = QFrame()
-        frame.setFrameStyle(QFrame.Shape.Box)
-        frame.setStyleSheet(f"""
-            QFrame {{
-                background-color: {self.color_scheme.to_hex(self.color_scheme.panel_bg)};
-                border: 1px solid {self.color_scheme.to_hex(self.color_scheme.separator_color)};
-                border-radius: 3px;
-                padding: 5px;
-            }}
-        """)
-
-        layout = QHBoxLayout(frame)
-        layout.setSpacing(10)
+        # Use plain QWidget - no frame border, let parent styling handle background
+        header = QWidget()
+        layout = QHBoxLayout(header)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
 
         # Function name with help functionality (left side)
         if self.func:
             func_name = self.func.__name__
             func_module = self.func.__module__
 
-            # Function name with help - store as instance attr for scope accent styling
+            # Function name - store as instance attr for scope accent styling
             self.func_name_label = QLabel(f"🔧 {func_name}")
             self.func_name_label.setFont(QFont("Arial", 10, QFont.Weight.Bold))
             self.func_name_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_accent)};")
@@ -210,47 +201,60 @@ class FunctionPaneWidget(QWidget):
             help_indicator = HelpIndicator(help_target=self.func, color_scheme=self.color_scheme)
             layout.addWidget(help_indicator)
 
-            # Module info
+            # Module info - subtle, truncated
             if func_module:
-                module_label = QLabel(f"({func_module})")
+                # Show only last 2 parts of module path for compactness
+                parts = func_module.split('.')
+                short_module = '.'.join(parts[-2:]) if len(parts) > 2 else func_module
+                module_label = QLabel(f"({short_module})")
                 module_label.setFont(QFont("Arial", 8))
                 module_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_disabled)};")
                 layout.addWidget(module_label)
         else:
             name_label = QLabel("No Function Selected")
+            name_label.setFont(QFont("Arial", 10))
             name_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.status_error)};")
             layout.addWidget(name_label)
 
         layout.addStretch()
 
-        # Control buttons (right side) - using parameter form manager style
-        from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
-        style_gen = StyleSheetGenerator(self.color_scheme)
-        button_styles = style_gen.generate_config_button_styles()
-
+        # Control buttons (right side) - minimal styling, match window theme
         # Button configurations
         button_configs = [
             ("↑", "move_up", "Move function up"),
             ("↓", "move_down", "Move function down"),
             ("Add", "add_func", "Add new function"),
-            ("Delete", "remove_func", "Delete this function"),
+            ("Del", "remove_func", "Delete this function"),
             ("Reset", "reset_all", "Reset all parameters"),
         ]
+
+        button_style = f"""
+            QPushButton {{
+                background-color: {self.color_scheme.to_hex(self.color_scheme.input_bg)};
+                color: {self.color_scheme.to_hex(self.color_scheme.text_primary)};
+                border: none;
+                border-radius: 3px;
+                padding: 4px 8px;
+            }}
+            QPushButton:hover {{
+                background-color: {self.color_scheme.to_hex(self.color_scheme.button_hover_bg)};
+            }}
+            QPushButton:pressed {{
+                background-color: {self.color_scheme.to_hex(self.color_scheme.button_pressed_bg)};
+            }}
+        """
 
         for name, action, tooltip in button_configs:
             button = QPushButton(name)
             button.setToolTip(tooltip)
-            button.setMaximumWidth(60)
-
-            # Use reset button style for all buttons (consistent with parameter form manager)
-            button.setStyleSheet(button_styles["reset"])
+            button.setStyleSheet(button_style)
 
             # Connect button to action
             button.clicked.connect(lambda checked, a=action: self.handle_button_action(a))
 
             layout.addWidget(button)
 
-        return frame
+        return header
     
     def create_parameter_form(self) -> QWidget:
         """

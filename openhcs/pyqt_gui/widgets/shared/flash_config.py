@@ -45,7 +45,7 @@ def detect_screen_refresh_rate() -> int:
 class FlashConfig:
     """Flash animation tuning knobs with automatic screen refresh rate detection."""
 
-    base_color_rgb: Tuple[int, int, int] = (100, 100, 100)  # Medium grey for no-scope flashes
+    base_color_rgb: Tuple[int, int, int] = (255, 255, 255)  # Medium grey for no-scope flashes
     flash_alpha: int = 255
     fade_in_s: float = 0.200
     hold_s: float = 0.050

@@ -101,8 +101,8 @@ class StyleSheetGenerator:
                 selection-background-color: {cs.to_hex(cs.selection_bg)};
             }}
             QTreeWidget::item, QListWidget::item {{
-                padding: 4px;
-                border-bottom: 1px solid {cs.to_hex(cs.border_color)};
+                padding: 2px 4px;
+                border-bottom: none;
                 background-color: transparent;
             }}
             QTreeWidget::item:hover {{

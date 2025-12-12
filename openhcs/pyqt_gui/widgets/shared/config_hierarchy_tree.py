@@ -96,16 +96,9 @@ class TreeItemFlashDelegate(QStyledItemDelegate):
         fm = QFontMetrics(font)
 
         # Calculate text position
+        # Qt's option.rect is already indented for depth, just add small padding for branch indicator
         text_rect = option.rect
-        # Use indentation from tree widget (respects item depth) + small padding
-        tree = self.parent()
-        indent = tree.indentation() if hasattr(tree, 'indentation') else 20
-        depth = 0
-        parent_idx = index.parent()
-        while parent_idx.isValid():
-            depth += 1
-            parent_idx = parent_idx.parent()
-        x_offset = text_rect.left() + indent * depth + 4  # 4px padding after arrow
+        x_offset = text_rect.left() + 2  # 2px padding after branch indicator
         y_offset = text_rect.top() + fm.ascent() + (text_rect.height() - fm.height()) // 2
 
         # Determine text color
@@ -186,6 +179,14 @@ class ConfigHierarchyTreeHelper:
             self._state = state
             self._subscribe_to_dirty_changes(tree)
 
+        # ASYNC FIX: Re-run dirty styling when async form build completes
+        # During async build, nested_managers are populated incrementally, so
+        # groupbox dirty markers need to be updated again after all are ready
+        if flash_manager is not None and hasattr(flash_manager, '_on_build_complete_callbacks'):
+            flash_manager._on_build_complete_callbacks.append(
+                lambda: self.initialize_dirty_styling()
+            )
+
         return tree
 
     def _subscribe_to_dirty_changes(self, tree: QTreeWidget) -> None:
@@ -262,15 +263,23 @@ class ConfigHierarchyTreeHelper:
         """)
 
     def update_dirty_styling(self, dirty_fields: set) -> None:
-        """Update tree item styling based on dirty fields using same source of truth as labels."""
-        # Precompute all dirty paths and their ancestors once
-        dirty_prefixes = set()
-        for field_path in dirty_fields:
-            parts = field_path.split('.')
-            for i in range(1, len(parts) + 1):
-                dirty_prefixes.add('.'.join(parts[:i]))
+        """Update tree item AND groupbox styling based on dirty and signature diff fields.
 
-        # Avoid updating the same item multiple times if it was stored under multiple paths
+        Two orthogonal visual semantics:
+        - Asterisk (*): dirty (resolved_live != resolved_saved)
+        - Underline: signature diff (raw != signature default)
+
+        Single source of truth: prefixes computed ONCE and used for both
+        tree items and groupbox titles (via flash_manager).
+        """
+        # Precompute dirty prefixes (for asterisk)
+        dirty_prefixes = self._compute_prefixes(dirty_fields)
+
+        # Precompute signature diff prefixes (for underline)
+        sig_diff_fields = self._state.signature_diff_fields if self._state else set()
+        sig_diff_prefixes = self._compute_prefixes(sig_diff_fields)
+
+        # Update tree items
         seen_items = set()
         for path, item in self._path_to_item.items():
             if id(item) in seen_items:
@@ -282,19 +291,42 @@ class ConfigHierarchyTreeHelper:
             class_type = meta.get("class")
             alt_name = self._to_snake_case(getattr(class_type, "__name__", "")) if class_type else None
 
-            is_dirty = (
-                path in dirty_prefixes
-                or (field_name and field_name in dirty_prefixes)
-                or (alt_name and alt_name in dirty_prefixes)
-            )
+            is_dirty = self._matches_prefix(path, field_name, alt_name, dirty_prefixes)
+            has_sig_diff = self._matches_prefix(path, field_name, alt_name, sig_diff_prefixes)
 
+            # Asterisk for dirty
             current_text = item.text(0)
             has_marker = current_text.startswith("* ")
-
             if is_dirty and not has_marker:
                 item.setText(0, f"* {current_text}")
             elif not is_dirty and has_marker:
                 item.setText(0, current_text[2:])  # Remove "* " prefix
+
+            # Underline for signature diff
+            font = item.font(0)
+            font.setUnderline(has_sig_diff)
+            item.setFont(0, font)
+
+        # Update groupbox titles using same prefixes (single source of truth)
+        if self._flash_manager is not None:
+            self._flash_manager.update_groupbox_dirty_markers(dirty_prefixes, sig_diff_prefixes)
+
+    def _compute_prefixes(self, fields: set) -> set:
+        """Compute field paths and all their ancestor prefixes."""
+        prefixes = set()
+        for field_path in fields:
+            parts = field_path.split('.')
+            for i in range(1, len(parts) + 1):
+                prefixes.add('.'.join(parts[:i]))
+        return prefixes
+
+    def _matches_prefix(self, path: str, field_name: str, alt_name: str, prefixes: set) -> bool:
+        """Check if any identifier matches the prefix set."""
+        return (
+            path in prefixes
+            or (field_name and field_name in prefixes)
+            or (alt_name and alt_name in prefixes)
+        )
 
     def _register_flash_element(self, item: QTreeWidgetItem, field_name: str) -> None:
         """Register tree item for flash rendering.

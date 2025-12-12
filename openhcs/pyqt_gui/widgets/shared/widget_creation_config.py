@@ -437,11 +437,8 @@ def create_widget_parametric(manager: ParameterFormManager, param_info: Paramete
         # Store label for bold styling updates
         manager.labels[param_info.name] = label
 
-        # Set initial label styling based on current value
-        value = manager.state.parameters.get(dotted_path)
-        signature_default = manager.state._signature_defaults.get(dotted_path)
-        # Underline ONLY if value differs from signature default
-        should_underline = value != signature_default
+        # Set initial label styling using ObjectState.signature_diff_fields (single source of truth)
+        should_underline = dotted_path in manager.state.signature_diff_fields
         label.set_underline(should_underline)
 
     # Add main widget
