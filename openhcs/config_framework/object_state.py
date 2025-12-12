@@ -883,25 +883,30 @@ class ObjectState:
         """Get the source scope_id and type for an inherited field value.
 
         For fields where the local value is None (inherited), returns the scope_id
-        of the ancestor that provided the concrete value AND the type that has it.
+        of the ancestor that provided the value AND the type that has it.
         Used for click-to-source navigation in the UI.
 
         The source_type may differ from the local container type due to MRO inheritance.
         For example, WellFilterConfig.well_filter might inherit from PathPlanningConfig.
+
+        NOTE: Returns provenance even when the resolved value is None (signature default).
+        A "concrete None" just means the class default is None and nothing overrode it.
 
         Args:
             param_name: Field name (can be dotted path like 'path_planning_config.well_filter')
 
         Returns:
             (source_scope_id, source_type): The scope and type that provided the value,
-            or None if the value is local (not inherited) or no source found.
+            or None if the value is local (not inherited).
         """
         self._ensure_live_resolved()
         result = self._live_provenance.get(param_name)
-        if result is None or result[0] is None:
-            return None
-        # Return as (scope_id, source_type) - filter out None source_type
-        return (result[0], result[1]) if result[1] is not None else None
+        if result is None:
+            return None  # Field is local, not inherited
+        scope_id, source_type = result
+        if scope_id is None or source_type is None:
+            return None  # Field not found in hierarchy (shouldn't happen)
+        return (scope_id, source_type)
 
     def find_path_for_type(self, container_type: type) -> Optional[str]:
         """Find the path prefix for a container type in this ObjectState.

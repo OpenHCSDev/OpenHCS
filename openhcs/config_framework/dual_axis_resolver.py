@@ -234,6 +234,11 @@ def resolve_with_provenance(container_type: type, field_name: str) -> Tuple[Any,
         logger.debug(f"🔍 resolve_with_provenance: container={container_base.__name__}, field={field_name}, layers={len(layers)}")
         logger.debug(f"🔍 resolve_with_provenance: mro_types={[t.__name__ for t in mro_types]}")
 
+    # Track fallback provenance - first place we find the field, even if None
+    # This is where the "concrete None" (signature default) comes from
+    fallback_scope: Optional[str] = None
+    fallback_type: Optional[type] = None
+
     for scope_id, layer_obj in reversed(layers):
         if layer_obj is None:
             continue
@@ -258,12 +263,20 @@ def resolve_with_provenance(container_type: type, field_name: str) -> Tuple[Any,
                         if field_name == 'well_filter':
                             logger.debug(f"🔍     {mro_type.__name__}.{field_name} = {value!r}")
                         if value is not None:
-                            # Return value, scope, AND the source type
+                            # Found non-None value - return immediately with provenance
                             return value, scope_id, mro_type
+                        else:
+                            # Found None - track as fallback provenance (LAST found wins)
+                            # We want the most ANCESTRAL scope that has the field,
+                            # since that's where the signature default originates.
+                            # Iteration is most-specific first, so keep updating.
+                            fallback_scope = scope_id
+                            fallback_type = mro_type
                     except AttributeError:
                         continue
 
-    return None, None, None
+    # No non-None found - return None with fallback provenance (where the None came from)
+    return None, fallback_scope, fallback_type
 
 
 def get_field_provenance(container_type: type, field_name: str) -> Tuple[Optional[str], Optional[type]]:
