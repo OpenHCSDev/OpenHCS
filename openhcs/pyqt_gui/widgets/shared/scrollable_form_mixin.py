@@ -127,7 +127,8 @@ class ScrollableFormMixin:
             return
 
         # Register leaf flash element dynamically
-        leaf_flash_key = f"{section_name}::{leaf_name}"
+        # Use '.' for attribute access (not '::' which is for scope hierarchy)
+        leaf_flash_key = f"{section_name}.{leaf_name}"
         self.form_manager.register_flash_leaf(leaf_flash_key, groupbox, leaf_widget)
 
         # Queue BOTH flashes so they're in sync:

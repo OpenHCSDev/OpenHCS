@@ -1213,6 +1213,9 @@ class _GlobalFlashCoordinator:
         # Empty/None → neutral
         if not key or key == "":
             return self._get_neutral_flash_color()
+        # Strip tree:: namespace prefix (used to avoid groupbox key collision)
+        if key.startswith("tree::"):
+            key = key[6:]  # len("tree::") == 6
         # Heuristic: non-scope keys (no "::" and not path-like) → neutral
         if "::" not in key and not key.startswith("/"):
             return self._get_neutral_flash_color()

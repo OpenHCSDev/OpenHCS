@@ -847,7 +847,8 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, FlashMixin, metacla
 
         # Register leaf flash element (dynamic registration for this specific change)
         # Use a unique key that includes the leaf path to avoid conflicts
-        leaf_flash_key = f"{prefix}::{leaf_field}"
+        # Use '.' for attribute access (not '::' which is for scope hierarchy)
+        leaf_flash_key = f"{prefix}.{leaf_field}"
         self.register_flash_leaf(leaf_flash_key, groupbox, leaf_widget)
 
         # Queue BOTH flashes so they're in sync:
