@@ -256,6 +256,12 @@ class WindowManager:
             logger.warning(f"[WINDOW_MGR] Overwriting existing window for scope: {scope_id}")
 
         cls._scoped_windows[scope_id] = window
+
+        # Eagerly create flash overlay so OpenGL context is ready before any flashes
+        # This prevents first-paint glitches when GL initializes mid-render
+        from openhcs.pyqt_gui.widgets.shared.flash_mixin import WindowFlashOverlay
+        WindowFlashOverlay.get_for_window(window)
+
         logger.debug(f"[WINDOW_MGR] Registered window for scope: {scope_id}")
 
     @classmethod

@@ -611,6 +611,7 @@ def build_context_stack(
     ancestor_objects: list[object] | None = None,
     ancestor_objects_with_scopes: list[tuple[str, object]] | None = None,
     current_scope_id: str | None = None,
+    use_live: bool = True,
 ):
     """
     Build a complete context stack for placeholder resolution.
@@ -666,8 +667,8 @@ def build_context_stack(
         except Exception:
             pass  # Couldn't create global layer
     else:
-        # ALWAYS use LIVE thread-local - it's updated by GlobalPipelineConfig ObjectState
-        global_layer = get_base_global_config(use_live=True)
+        # Use LIVE or SAVED thread-local based on use_live parameter
+        global_layer = get_base_global_config(use_live=use_live)
         if global_layer:
             stack.enter_context(config_context(global_layer, scope_id=""))
 

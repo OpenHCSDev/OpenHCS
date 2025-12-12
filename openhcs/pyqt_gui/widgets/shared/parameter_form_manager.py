@@ -775,7 +775,7 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, FlashMixin, metacla
         self._cross_window_refresh_timer = QTimer()
         self._cross_window_refresh_timer.setSingleShot(True)
         self._cross_window_refresh_timer.timeout.connect(do_refresh)
-        self._cross_window_refresh_timer.start(10)  # 10ms debounce
+        self._cross_window_refresh_timer.start(50)  # 10ms debounce
 
     def _refresh_field_in_tree(self, field_name: str):
         """Refresh a field's placeholder in this manager and nested managers."""
@@ -791,6 +791,10 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, FlashMixin, metacla
 
         SCOPE-AWARE: This callback is fired by THIS window's ObjectState, so we only
         flash THIS window's elements, not ALL windows globally.
+
+        LEAF FLASH: For each changed path, we use INVERSE masking - flash the groupbox
+        INCLUDING all sibling fields, but mask out the specific changed widget.
+        This highlights "all fields that inherited the change".
         """
         if self._parent_manager is not None:
             return  # Only root manager handles this
@@ -799,24 +803,73 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, FlashMixin, metacla
                    f"changed_paths={changed_paths}")
         logger.debug(f"[FLASH] _on_resolved_values_changed: {changed_paths}")
 
-        # 1. Collect prefixes for flash animation
-        prefixes_to_flash = []
+        # For each changed path, register and queue a LEAF flash
         for path in changed_paths:
-            prefix = self._find_matching_prefix(path)
-            logger.debug(f"[FLASH] path={path} -> prefix={prefix}")
-            if prefix:
-                prefixes_to_flash.append(prefix)
+            self._queue_leaf_flash_for_path(path)
 
-        # 2. Queue flash animation - LOCAL to this window only!
-        # Use queue_flash_local to avoid cross-window contamination.
-        # The callback came from THIS ObjectState, so only THIS window should flash.
-        for prefix in prefixes_to_flash:
-            self.queue_flash_local(prefix)
-
-        # 3. Refresh placeholders for changed fields (show new resolved values)
+        # Refresh placeholders for changed fields (show new resolved values)
         for path in changed_paths:
             leaf_field = path.split('.')[-1] if '.' in path else path
             self._refresh_field_in_tree(leaf_field)
+
+    def _queue_leaf_flash_for_path(self, path: str) -> None:
+        """Queue a leaf flash for a changed path.
+
+        Finds the groupbox and leaf widget, registers a leaf flash element,
+        and queues the flash animation.
+        """
+        # Find the prefix (groupbox) and leaf field name
+        prefix = self._find_matching_prefix(path)
+        if not prefix:
+            logger.debug(f"[FLASH] No prefix found for path={path}")
+            return
+
+        leaf_field = path.split('.')[-1] if '.' in path else path
+
+        # Find the groupbox for the prefix
+        groupbox = self._get_groupbox_for_prefix(prefix)
+        if not groupbox:
+            logger.debug(f"[FLASH] No groupbox found for prefix={prefix}")
+            return
+
+        # Find the leaf widget in the nested manager
+        nested_manager = self._find_nested_manager_for_prefix(prefix)
+        if not nested_manager:
+            logger.debug(f"[FLASH] No nested manager found for prefix={prefix}")
+            return
+
+        leaf_widget = nested_manager.widgets.get(leaf_field)
+        if not leaf_widget:
+            # Fallback to groupbox flash if leaf widget not found
+            logger.debug(f"[FLASH] No leaf widget for {leaf_field}, falling back to groupbox flash")
+            self.queue_flash_local(prefix)
+            return
+
+        # Register leaf flash element (dynamic registration for this specific change)
+        # Use a unique key that includes the leaf path to avoid conflicts
+        leaf_flash_key = f"{prefix}::{leaf_field}"
+        self.register_flash_leaf(leaf_flash_key, groupbox, leaf_widget)
+
+        # Queue BOTH flashes so they're in sync:
+        # 1. Leaf flash for groupbox (inverse masking)
+        # 2. Tree item flash (uses tree:: prefix to avoid groupbox collision)
+        self.queue_flash_local(leaf_flash_key)  # Groupbox with inverse masking
+        self.queue_flash_local(f"tree::{prefix}")  # Tree item has separate key namespace
+        logger.debug(f"[FLASH] Queued leaf flash: key={leaf_flash_key}, tree_key={prefix}, leaf={leaf_field}")
+
+    def _find_nested_manager_for_prefix(self, prefix: str) -> Optional['ParameterFormManager']:
+        """Find the nested manager for a given field_prefix."""
+        return self._find_nested_manager_recursive(prefix, self)
+
+    def _find_nested_manager_recursive(self, prefix: str, manager: 'ParameterFormManager') -> Optional['ParameterFormManager']:
+        """Recursively find nested manager with matching prefix."""
+        for _, nested_manager in manager.nested_managers.items():
+            if nested_manager.field_prefix == prefix:
+                return nested_manager
+            result = self._find_nested_manager_recursive(prefix, nested_manager)
+            if result:
+                return result
+        return None
 
     def _find_matching_prefix(self, path: str) -> Optional[str]:
         """Find the nested manager field_prefix that matches a changed path."""

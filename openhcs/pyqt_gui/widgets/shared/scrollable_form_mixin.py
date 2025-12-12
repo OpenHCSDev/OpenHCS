@@ -97,13 +97,45 @@ class ScrollableFormMixin:
         from openhcs.pyqt_gui.widgets.shared.flash_mixin import WindowFlashOverlay
         WindowFlashOverlay.invalidate_cache_for_widget(self)  # type: ignore[arg-type]
 
-        # Flash the target groupbox to highlight it (LOCAL to this window only)
-        # Route through root form_manager (only root initializes FlashMixin)
+        # Flash the target to highlight it (LOCAL to this window only)
+        # Use LEAF flash if we have a specific field, groupbox flash for sections
         if flash and hasattr(self.form_manager, 'queue_flash_local'):
-            # Use local flash for navigation - only this window, not cross-window
-            logger.info(f"⚡ FLASH_DEBUG: Calling queue_flash_local({section_name}) on form_manager scope_id={getattr(self.form_manager, 'scope_id', 'NONE')}")
+            # Check if this is a leaf field (dotted path with specific widget)
+            if target_widget is not None and '.' in field_name:
+                # Use leaf flash - register dynamically and queue
+                self._queue_leaf_flash_for_navigation(section_name, leaf_name, target_widget)
+            else:
+                # Section-level flash (no specific leaf widget)
+                # Queue both groupbox (standard masking) and tree item
+                logger.info(f"⚡ FLASH_DEBUG: Calling queue_flash_local({section_name}) on form_manager scope_id={getattr(self.form_manager, 'scope_id', 'NONE')}")
+                self.form_manager.queue_flash_local(section_name)
+                self.form_manager.queue_flash_local(f"tree::{section_name}")
+            logger.debug(f"⚡ Flashed for {field_name} (local)")
+
+    def _queue_leaf_flash_for_navigation(self, section_name: str, leaf_name: str, leaf_widget) -> None:
+        """Queue a leaf flash for navigation to a specific field.
+
+        Uses INVERSE masking: flash the groupbox + all siblings, mask the leaf widget.
+        This highlights "the context around the source field" when navigating via provenance.
+        """
+        # Find the groupbox for this section
+        groupbox = self.form_manager._get_groupbox_for_prefix(section_name)
+        if not groupbox:
+            # Fallback to section flash
+            logger.debug(f"[FLASH] No groupbox for {section_name}, falling back to section flash")
             self.form_manager.queue_flash_local(section_name)
-            logger.debug(f"⚡ Flashed groupbox for {section_name} (local)")
+            return
+
+        # Register leaf flash element dynamically
+        leaf_flash_key = f"{section_name}::{leaf_name}"
+        self.form_manager.register_flash_leaf(leaf_flash_key, groupbox, leaf_widget)
+
+        # Queue BOTH flashes so they're in sync:
+        # 1. Leaf flash for groupbox (inverse masking)
+        # 2. Tree item flash (uses tree:: prefix to avoid groupbox collision)
+        self.form_manager.queue_flash_local(leaf_flash_key)
+        self.form_manager.queue_flash_local(f"tree::{section_name}")
+        logger.info(f"⚡ FLASH_DEBUG: Leaf flash for navigation: key={leaf_flash_key}, tree_key=tree::{section_name}")
 
     def select_and_scroll_to_field(self, field_path: str) -> None:
         """Public API for WindowManager navigation protocol.

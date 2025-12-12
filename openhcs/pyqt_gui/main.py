@@ -63,6 +63,10 @@ class OpenHCSMainWindow(QMainWindow):
         # Settings for window state persistence
         self.settings = QSettings("OpenHCS", "PyQt6GUI")
 
+        # Pre-warm OpenGL context in background (zero-delay window creation)
+        from openhcs.pyqt_gui.widgets.shared.flash_overlay_opengl import prewarm_opengl
+        prewarm_opengl()
+
         # Initialize UI
         self.setup_ui()
         self.setup_dock_system()
@@ -157,6 +161,11 @@ class OpenHCSMainWindow(QMainWindow):
         # This mirrors the Textual TUI pattern where windows are mounted dynamically
         self.floating_windows = {}  # Track created windows
 
+    def _ensure_flash_overlay(self, window: QWidget) -> None:
+        """Eagerly create flash overlay for a window to avoid first-paint glitches."""
+        from openhcs.pyqt_gui.widgets.shared.flash_mixin import WindowFlashOverlay
+        WindowFlashOverlay.get_for_window(window)
+
     def show_default_windows(self):
         """Show plate manager by default."""
         # Show plate manager by default
@@ -217,8 +226,9 @@ class OpenHCSMainWindow(QMainWindow):
             # Connect to pipeline editor if it exists (mirrors Textual TUI)
             self._connect_plate_to_pipeline_manager(plate_widget)
 
-        # Show the window
+        # Show the window and ensure flash overlay is ready
         self.floating_windows["plate_manager"].show()
+        self._ensure_flash_overlay(self.floating_windows["plate_manager"])
         self.floating_windows["plate_manager"].raise_()
         self.floating_windows["plate_manager"].activateWindow()
 
@@ -246,12 +256,11 @@ class OpenHCSMainWindow(QMainWindow):
             # Connect to plate manager for current plate selection (mirrors Textual TUI)
             self._connect_pipeline_to_plate_manager(pipeline_widget)
 
-        # Show the window
+        # Show the window and ensure flash overlay is ready
         self.floating_windows["pipeline_editor"].show()
+        self._ensure_flash_overlay(self.floating_windows["pipeline_editor"])
         self.floating_windows["pipeline_editor"].raise_()
         self.floating_windows["pipeline_editor"].activateWindow()
-
-
 
     def show_image_browser(self):
         """Show image browser window."""
@@ -294,8 +303,9 @@ class OpenHCSMainWindow(QMainWindow):
                     # Set initial orchestrator if available
                     on_plate_selected()
 
-        # Show the window
+        # Show the window and ensure flash overlay is ready
         self.floating_windows["image_browser"].show()
+        self._ensure_flash_overlay(self.floating_windows["image_browser"])
         self.floating_windows["image_browser"].raise_()
         self.floating_windows["image_browser"].activateWindow()
 
@@ -329,6 +339,7 @@ class OpenHCSMainWindow(QMainWindow):
         # Log viewer is already initialized on startup, just show it
         if "log_viewer" in self.floating_windows:
             self.floating_windows["log_viewer"].show()
+            self._ensure_flash_overlay(self.floating_windows["log_viewer"])
             self.floating_windows["log_viewer"].raise_()
             self.floating_windows["log_viewer"].activateWindow()
         else:
@@ -368,8 +379,9 @@ class OpenHCSMainWindow(QMainWindow):
 
             self.floating_windows["zmq_server_manager"] = window
 
-        # Show window
+        # Show window and ensure flash overlay is ready
         self.floating_windows["zmq_server_manager"].show()
+        self._ensure_flash_overlay(self.floating_windows["zmq_server_manager"])
         self.floating_windows["zmq_server_manager"].raise_()
         self.floating_windows["zmq_server_manager"].activateWindow()
 

@@ -96,6 +96,7 @@ class BaseFormDialog(ScopedBorderMixin, QDialog):
         self._init_scope_border()
 
         # Register self with WindowManager (it will handle closeEvent cleanup)
+        # NOTE: WindowManager.register() also eagerly creates the flash overlay
         WindowManager.register(scope_key, self)
         super().show()
         if overlay_was_cleaned:

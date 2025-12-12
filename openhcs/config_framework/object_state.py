@@ -602,12 +602,27 @@ class ObjectState:
         # Initialize baselines (suppress flash during init)
         self._ensure_live_resolved(notify_flash=False)
         assert self._live_resolved is not None  # Guaranteed by _ensure_live_resolved
-        # NEW OBJECTS START CLEAN: saved = live at registration time.
-        # Dirty indicates "I made changes that aren't saved", not "my ancestors have unsaved changes".
-        # If parent has unsaved changes, that's parent's dirty indicator to show.
-        # Callers don't need to remember to call mark_saved() after registration.
-        self._saved_resolved = copy.deepcopy(self._live_resolved)
+
+        # CRITICAL: Initialize _saved_parameters BEFORE _compute_resolved_snapshot(use_saved=True)
+        # because that method reads from _saved_parameters to get raw values.
         self._saved_parameters = copy.deepcopy(self.parameters)
+
+        # CRITICAL: Compute saved_resolved using SAVED ancestor context, not LIVE.
+        # This ensures saved baseline represents "what would this object's values be
+        # if all ancestors were at their saved state", NOT "what are values right now
+        # with ancestor's unsaved edits baked in".
+        #
+        # If we used copy.deepcopy(_live_resolved), we'd bake in ancestor's unsaved
+        # edits, causing inverted dirty state when ancestor is saved/reset.
+        self._saved_resolved = self._compute_resolved_snapshot(use_saved=True)
+
+        # DEBUG: Log live vs saved at registration
+        logger.debug(f"🔵 INIT_RESOLVED: scope={self.scope_id!r} obj_type={type(self.object_instance).__name__}")
+        for k in sorted(self._live_resolved.keys()):
+            live_val = self._live_resolved.get(k)
+            saved_val = self._saved_resolved.get(k)
+            if live_val != saved_val:
+                logger.debug(f"🔵 INIT_DIFF: {k!r} live={live_val!r} saved={saved_val!r}")
 
         # Materialize initial diff sets (no notification during init)
         # Should be empty for new objects since saved = live
@@ -1131,11 +1146,16 @@ class ObjectState:
         """Compute dirty set from live vs saved caches."""
         if self._live_resolved is None:
             return set()
-        return {
-            k
-            for k in (self._live_resolved.keys() | self._saved_resolved.keys())
-            if self._live_resolved.get(k) != self._saved_resolved.get(k)
-        }
+        dirty = set()
+        for k in (self._live_resolved.keys() | self._saved_resolved.keys()):
+            live_val = self._live_resolved.get(k)
+            saved_val = self._saved_resolved.get(k)
+            if live_val != saved_val:
+                dirty.add(k)
+                logger.debug(f"🔴 DIRTY_FIELD: scope={self.scope_id!r} field={k!r} live={live_val!r} saved={saved_val!r}")
+        if dirty:
+            logger.debug(f"🔴 DIRTY_SUMMARY: scope={self.scope_id!r} dirty_fields={dirty}")
+        return dirty
 
     def _compute_signature_diff_fields(self) -> Set[str]:
         """Compute signature-diff set from parameters vs defaults."""
@@ -1208,10 +1228,13 @@ class ObjectState:
             current_obj = self.to_object()
 
         # Build context stack ONCE with scope_ids for provenance tracking
+        # CRITICAL: use_live must match use_saved to ensure global config layer
+        # uses SAVED thread-local when computing saved baselines
         stack = build_context_stack(
             object_instance=current_obj,
             ancestor_objects_with_scopes=ancestor_objects_with_scopes,
             current_scope_id=self.scope_id,
+            use_live=not use_saved,
         )
 
         snapshot: Dict[str, Any] = {}

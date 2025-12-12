@@ -301,16 +301,22 @@ class ConfigHierarchyTreeHelper:
 
         Stores SCOPED flash key in item data for delegate lookup, and registers with
         WindowFlashOverlay (with skip_overlay_paint=True since delegate handles painting).
+
+        Tree items use 'tree::' prefix to avoid key collision with groupboxes,
+        allowing independent flash control (tree can flash without groupbox and vice versa).
         """
         if self._flash_manager is None or self._current_tree is None:
             return
         if not hasattr(self._flash_manager, 'register_flash_tree_item'):
             return
 
+        # Tree items use separate key namespace to avoid groupbox collision
+        tree_key = f"tree::{field_name}"
+
         # Get scoped key from flash manager (matches what's used for color lookup)
-        scoped_key = field_name
+        scoped_key = tree_key
         if hasattr(self._flash_manager, '_get_scoped_flash_key'):
-            scoped_key = self._flash_manager._get_scoped_flash_key(field_name)
+            scoped_key = self._flash_manager._get_scoped_flash_key(tree_key)
 
         # Store SCOPED flash key in item data for delegate to look up
         item.setData(0, TREE_FLASH_KEY_ROLE, scoped_key)
@@ -320,7 +326,7 @@ class ConfigHierarchyTreeHelper:
         def get_index():
             return tree.indexFromItem(item)
 
-        self._flash_manager.register_flash_tree_item(field_name, tree, get_index)
+        self._flash_manager.register_flash_tree_item(tree_key, tree, get_index)
 
     def populate_from_root_dataclass(
         self,

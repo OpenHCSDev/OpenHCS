@@ -955,12 +955,24 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
             logger.debug(f"⚡ FLASH_DEBUG get_list_item_rect: SUCCESS for {scope_id}, rect={QRect(local_pos, clipped_rect.size())}")
             return QRect(local_pos, clipped_rect.size())
 
+        def get_model_index():
+            """Get QModelIndex for targeted item update (avoids full viewport repaint)."""
+            if scope_id not in self._scope_to_list_item:
+                return None
+            item = self._scope_to_list_item[scope_id]
+            if item is None:
+                return None
+            # Use indexFromItem directly - O(1) vs row() which may be O(n)
+            return self.item_list.indexFromItem(item)
+
         element = FlashElement(
             key=scope_id,
             get_rect_in_window=get_list_item_rect,
             needs_scroll_clipping=False,
             source_id=f"list_item:{id(self)}:{scope_id}",  # Unique per manager instance + scope
-            skip_overlay_paint=True  # Delegate handles painting flash behind text
+            skip_overlay_paint=True,  # Delegate handles painting flash behind text
+            delegate_widget=self.item_list,  # List widget for targeted updates
+            get_model_index=get_model_index  # For targeted item updates (avoids full viewport repaint)
         )
         overlay = WindowFlashOverlay.get_for_window(self)
         logger.debug(f"⚡ FLASH_DEBUG: get_for_window returned overlay={overlay}, window={self.window()}")
