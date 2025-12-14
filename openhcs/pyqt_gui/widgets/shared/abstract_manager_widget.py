@@ -11,11 +11,55 @@ Following OpenHCS ABC patterns:
 """
 
 from abc import ABC, abstractmethod, ABCMeta
-from typing import List, Tuple, Dict, Optional, Any, Callable, Iterable
+from dataclasses import dataclass, field, is_dataclass
+from typing import List, Tuple, Dict, Optional, Any, Callable, Iterable, Union, TYPE_CHECKING
 import copy
 import inspect
 import logging
 import os
+
+if TYPE_CHECKING:
+    from openhcs.config_framework.object_state import ObjectState
+
+# Type alias for formatters: either a method name string or a callable
+FieldFormatter = Union[str, Callable[[Any], Optional[str]]]
+
+
+@dataclass(frozen=True)
+class ListItemFormat:
+    """
+    Type-safe declarative configuration for list item display format.
+
+    Replaces Dict-based LIST_ITEM_FORMAT with a proper dataclass.
+
+    Attributes:
+        first_line: Field paths shown after item name on first line (e.g., ('func',))
+        preview_line: Field paths shown on the └─ preview line
+        detail_line_field: Field path for detail line (e.g., 'path')
+        show_config_indicators: Whether to show NAP/FIJI/MAT from PREVIEW_FIELD_CONFIGS
+        formatters: Dict mapping field path to formatter (method name str or callable)
+
+    Field abbreviations are declared on config classes via @global_pipeline_config(field_abbreviations=...)
+    and looked up from FIELD_ABBREVIATIONS_REGISTRY. This keeps abbreviations with the config, not the widget.
+
+    Formatters receive the field value and return a label string (or None to skip).
+    Method name strings are resolved on the widget instance at runtime.
+
+    Example:
+        LIST_ITEM_FORMAT = ListItemFormat(
+            first_line=('func',),
+            preview_line=('processing_config.variable_components', 'processing_config.group_by'),
+            formatters={
+                'func': '_format_func_preview',
+                'processing_config.group_by': lambda v: f"group_by={v.name}" if v else None,
+            },
+        )
+    """
+    first_line: Tuple[str, ...] = ()
+    preview_line: Tuple[str, ...] = ()
+    detail_line_field: Optional[str] = None
+    show_config_indicators: bool = True
+    formatters: Dict[str, FieldFormatter] = field(default_factory=dict)
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
@@ -25,7 +69,17 @@ from PyQt6.QtCore import Qt, QRect, pyqtSignal
 from PyQt6.QtGui import QFont, QColor, QBrush
 
 from openhcs.pyqt_gui.widgets.shared.reorderable_list_widget import ReorderableListWidget
-from openhcs.pyqt_gui.widgets.shared.list_item_delegate import MultilinePreviewItemDelegate, DIRTY_ROLE, SIGNATURE_DIFF_ROLE
+from openhcs.pyqt_gui.widgets.shared.list_item_delegate import (
+    MultilinePreviewItemDelegate,
+    LAYOUT_ROLE,
+    DIRTY_FIELDS_ROLE,
+    SIG_DIFF_FIELDS_ROLE,
+    Segment,
+    StyledText,
+    StyledTextLayout,
+)
+# Backwards compat alias
+SEGMENTS_ROLE = LAYOUT_ROLE
 from openhcs.config_framework.object_state import ObjectStateRegistry
 from openhcs.pyqt_gui.widgets.mixins import (
     CrossWindowPreviewMixin,
@@ -76,14 +130,20 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
 
     # Declarative preview field configuration (processed automatically in __init__)
     # Format: List[Union[str, Tuple[str, Callable]]]
-    #   - str: field name, uses CONFIG_INDICATORS from config_preview_formatters
-    #   - Tuple[str, Callable]: (field_path, formatter_function)
+    #   - str: field name - label auto-discovered from PREVIEW_LABEL_REGISTRY
+    #         (set via @global_pipeline_config(preview_label='NAP'))
+    #   - Tuple[str, Callable]: (field_path, formatter_function) for custom formatting
     # Example:
     #   PREVIEW_FIELD_CONFIGS = [
-    #       'napari_streaming_config',  # Uses CONFIG_INDICATORS['napari_streaming_config'] = 'NAP'
+    #       'napari_streaming_config',   # Auto: preview_label='NAP' from decorator
     #       ('num_workers', lambda v: f'W:{v if v is not None else 0}'),  # Custom formatter
     #   ]
     PREVIEW_FIELD_CONFIGS: List[Any] = []  # Override in subclasses
+
+    # === Declarative List Item Format Config ===
+    # Type-safe configuration for list item display. See ListItemFormat dataclass.
+    # Override in subclasses with ListItemFormat(...) instance.
+    LIST_ITEM_FORMAT: Optional[ListItemFormat] = None
 
     # === Declarative Item Hooks (replaces trivial one-liner methods) ===
     # Subclass declares this dict instead of overriding 9 simple abstract methods.
@@ -168,6 +228,8 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
         # Dirty state subscriptions: {scope_id: (ObjectState, callback)}
         # Enables reactive dirty markers without polling
         self._dirty_subscriptions: Dict[str, tuple] = {}
+        # Time-travel limbo: backing items saved during unregister for re-registration
+        self._time_travel_limbo_items: Dict[str, Any] = {}
         # Scope to list item mapping for WindowFlashOverlay rect lookup
         self._scope_to_list_item: Dict[str, QListWidgetItem] = {}
         # Per-update-cycle scope cache: item_id -> scope_id (cleared at start of each update)
@@ -192,12 +254,12 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
 
         Called automatically in __init__ after CrossWindowPreviewMixin initialization.
         Supports two formats:
-        - str: field name, uses CONFIG_INDICATORS from config_preview_formatters
+        - str: field name (auto-discovers preview_label from registry)
         - Tuple[str, Callable]: (field_path, formatter_function)
         """
         for config in self.PREVIEW_FIELD_CONFIGS:
             if isinstance(config, str):
-                # Simple field name - uses CONFIG_INDICATORS
+                # Simple field name - auto-discovers from registry
                 self.enable_preview_for_field(config)
             elif isinstance(config, tuple) and len(config) == 2:
                 # (field_path, formatter) tuple
@@ -205,6 +267,49 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
                 self.enable_preview_for_field(field_path, formatter)
             else:
                 logger.warning(f"Invalid PREVIEW_FIELD_CONFIGS entry: {config}")
+
+    def _discover_preview_fields_from_registry(self, config_source: Any) -> List[str]:
+        """
+        Auto-discover preview fields from PREVIEW_LABEL_REGISTRY.
+
+        Scans config_source's dataclass fields and returns field names
+        whose types are registered in PREVIEW_LABEL_REGISTRY.
+
+        Args:
+            config_source: Dataclass instance to scan for registered preview types
+
+        Returns:
+            List of field names whose types have preview labels registered
+        """
+        from dataclasses import fields, is_dataclass
+        from typing import get_origin, get_args, Union
+        from openhcs.config_framework.lazy_factory import PREVIEW_LABEL_REGISTRY
+
+        if not is_dataclass(config_source):
+            return []
+
+        discovered = []
+        for f in fields(config_source):
+            field_type = f.type
+
+            # Unwrap Optional[T] -> T
+            if get_origin(field_type) is Union:
+                args = get_args(field_type)
+                field_type = next((t for t in args if t is not type(None)), field_type)
+
+            # Check if type is in registry
+            if field_type in PREVIEW_LABEL_REGISTRY:
+                discovered.append(f.name)
+                continue
+
+            # Check base classes (for lazy wrapper types)
+            if isinstance(field_type, type):
+                for base in field_type.__mro__[1:]:
+                    if base in PREVIEW_LABEL_REGISTRY:
+                        discovered.append(f.name)
+                        break
+
+        return discovered
 
     # ========== UI Infrastructure (Concrete) ==========
 
@@ -340,6 +445,90 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
 
         # Status messages
         self.status_message.connect(self.update_status)
+
+        # Subscribe to ObjectStateRegistry lifecycle for time-travel binding
+        from openhcs.config_framework.object_state import ObjectStateRegistry
+        ObjectStateRegistry.add_unregister_callback(self._on_registry_unregister)
+        ObjectStateRegistry.add_register_callback(self._on_registry_register)
+
+    def _on_registry_unregister(self, scope_key: str, state: 'ObjectState') -> None:
+        """Handle ObjectState unregistration (time-travel: remove item from UI).
+
+        Uses ITEM_HOOKS['scope_id_attr'] to find backing item by scope_id.
+        """
+        # Find backing item by matching scope_id
+        item = self._find_backing_item_by_scope(scope_key)
+        if item is None:
+            return
+
+        backing_items = self._get_backing_items()
+        if item in backing_items:
+            backing_items.remove(item)
+            self.update_item_list()
+            logger.debug(f"⏱️ TIME_TRAVEL: Removed item from UI: {scope_key}")
+
+    def _on_registry_register(self, scope_key: str, state: 'ObjectState') -> None:
+        """Handle ObjectState registration (time-travel: add item back to UI).
+
+        Only processes during time-travel. Normal registration is handled elsewhere.
+        Uses _time_travel_limbo_items to restore backing items.
+        """
+        from openhcs.config_framework.object_state import ObjectStateRegistry
+
+        # Only process during time-travel (normal registration handled elsewhere)
+        if not ObjectStateRegistry._in_time_travel:
+            return
+
+        # Find backing item from limbo (saved when unregistered)
+        item = self._time_travel_limbo_items.pop(scope_key, None)
+        if item is None:
+            return
+
+        backing_items = self._get_backing_items()
+        if item not in backing_items:
+            insert_idx = self._get_item_insert_index(item, scope_key)
+            if insert_idx is not None:
+                backing_items.insert(insert_idx, item)
+            else:
+                backing_items.append(item)
+            self.update_item_list()
+            logger.debug(f"⏱️ TIME_TRAVEL: Added item back to UI: {scope_key}")
+
+    def _find_backing_item_by_scope(self, scope_key: str) -> Optional[Any]:
+        """Find backing item that matches the given scope_key.
+
+        Uses ITEM_HOOKS['scope_id_builder'] or 'scope_id_attr' to match items.
+        Returns None if no match or neither hook is configured.
+        """
+        hooks = self.ITEM_HOOKS
+        scope_id_builder = hooks.get("scope_id_builder")
+        scope_id_attr = hooks.get("scope_id_attr")
+
+        if not scope_id_builder and not scope_id_attr:
+            return None
+
+        for idx, item in enumerate(self._get_backing_items()):
+            # Use builder if available (for computed scope_ids like PipelineEditor)
+            if scope_id_builder:
+                item_scope = scope_id_builder(item, idx, self)
+            elif isinstance(item, dict):
+                item_scope = item.get(scope_id_attr)
+            else:
+                item_scope = getattr(item, scope_id_attr, None)
+
+            if item_scope == scope_key:
+                # Save to limbo for potential re-registration
+                self._time_travel_limbo_items[scope_key] = item
+                return item
+        return None
+
+    def _get_item_insert_index(self, item: Any, scope_key: str) -> Optional[int]:
+        """Get the index at which to insert item during time-travel re-registration.
+
+        Subclass can override to maintain correct ordering.
+        Default: returns None (append to end).
+        """
+        return None
 
     # ========== Action Dispatch (Concrete) ==========
 
@@ -993,6 +1182,10 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
         def on_change(changed_paths):
             logger.debug(f"⚡ FLASH_DEBUG on_change CALLBACK FIRED: scope={scope_id}, paths={changed_paths}")
             self.queue_flash(scope_id)  # Global flash - list items flash in ALL windows
+            # CRITICAL: Also refresh list item text when resolved values change
+            # on_state_changed only fires when dirty SET changes, not when values change
+            # So if func was already dirty and we reorder, text needs to update too
+            self.queue_visual_update()
 
         state.on_resolved_changed(on_change)
         self._flash_subscriptions[scope_id] = (state, on_change)
@@ -1175,9 +1368,8 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
                     for role_offset, value in self._get_list_item_extra_data(item_obj, index).items():
                         list_item.setData(Qt.ItemDataRole.UserRole + role_offset, value)
 
-                    # Set styling roles for delegate
-                    list_item.setData(DIRTY_ROLE, self._is_item_dirty(item_obj))
-                    list_item.setData(SIGNATURE_DIFF_ROLE, self._has_item_signature_diff(item_obj))
+                    # Per-field styling roles (segments + dirty/sig-diff field sets)
+                    self._set_item_styling_roles(list_item, display_text, item_obj)
 
                     # Apply scope-based colors
                     self._apply_list_item_scope_color(list_item, item_obj, index)
@@ -1200,9 +1392,8 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
                     for role_offset, value in self._get_list_item_extra_data(item_obj, index).items():
                         list_item.setData(Qt.ItemDataRole.UserRole + role_offset, value)
 
-                    # Set styling roles for delegate
-                    list_item.setData(DIRTY_ROLE, self._is_item_dirty(item_obj))
-                    list_item.setData(SIGNATURE_DIFF_ROLE, self._has_item_signature_diff(item_obj))
+                    # Per-field styling roles (segments + dirty/sig-diff field sets)
+                    self._set_item_styling_roles(list_item, display_text, item_obj)
 
                     # Apply scope-based colors
                     self._apply_list_item_scope_color(list_item, item_obj, index)
@@ -1316,47 +1507,55 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
         return getattr(self, self.ITEM_HOOKS['backing_attr'])
 
     def _format_list_item(self, item: Any, index: int, context: Any) -> str:
-        """Format item for list display with automatic dirty marker.
+        """Format item for list display.
 
-        Concrete implementation that:
-        1. Calls _format_item_content() for the base display text
-        2. Appends dirty marker (*) if item has unsaved changes
-
-        Subclasses implement _format_item_content() instead.
+        Calls _format_item_content() which may return:
+        - str: Plain text (no styling)
+        - StyledText with segments: Per-field dirty/sig-diff styling via delegate
         """
-        base_text = self._format_item_content(item, index, context)
-        dirty_marker = self._get_dirty_marker(item)
-        return f"{dirty_marker}{base_text}{dirty_marker}"
+        return self._format_item_content(item, index, context)
 
     @abstractmethod
     def _format_item_content(self, item: Any, index: int, context: Any) -> str:
         """Format item content for list display. Subclass must implement.
 
-        Returns the display text WITHOUT dirty marker - ABC adds that automatically.
+        May return StyledText with segments for per-field styling.
         """
         ...
 
-    def _get_dirty_marker(self, item: Any) -> str:
-        """Get dirty marker for item based on ObjectState.dirty_fields."""
-        return " *" if self._is_item_dirty(item) else ""
-
-    def _is_item_dirty(self, item: Any) -> bool:
-        """Check if item has unsaved changes based on ObjectState.dirty_fields."""
+    def _get_item_dirty_fields(self, item: Any) -> set:
+        """Get set of dirty field paths for per-field styling."""
         try:
             scope_id = self._get_cached_scope(item)
             state = ObjectStateRegistry.get_by_scope(scope_id)
-            return bool(state and state.dirty_fields)
+            return state.dirty_fields if state else set()
         except Exception:
-            return False  # Fail silently - not dirty is fine
+            return set()
 
-    def _has_item_signature_diff(self, item: Any) -> bool:
-        """Check if item has signature diff based on ObjectState.signature_diff_fields."""
+    def _get_item_sig_diff_fields(self, item: Any) -> set:
+        """Get set of signature-diff field paths for per-field styling."""
         try:
             scope_id = self._get_cached_scope(item)
             state = ObjectStateRegistry.get_by_scope(scope_id)
-            return bool(state and state.signature_diff_fields)
+            return state.signature_diff_fields if state else set()
         except Exception:
-            return False  # Fail silently - no sig diff is fine
+            return set()
+
+    def _set_item_styling_roles(self, list_item: 'QListWidgetItem', display_text: Any, item_obj: Any) -> None:
+        """Set per-field styling roles on a list item.
+
+        Call this from any code that updates list items outside of _update_list()
+        (e.g., single-item refresh methods in subclasses).
+
+        Args:
+            list_item: The QListWidgetItem to set roles on
+            display_text: The display text (StyledText with layout, or plain str)
+            item_obj: The backing data object for dirty/sig-diff field lookup
+        """
+        if isinstance(display_text, StyledText) and display_text.layout:
+            list_item.setData(LAYOUT_ROLE, display_text.layout)
+            list_item.setData(DIRTY_FIELDS_ROLE, self._get_item_dirty_fields(item_obj))
+            list_item.setData(SIG_DIFF_FIELDS_ROLE, self._get_item_sig_diff_fields(item_obj))
 
     def _get_list_item_data(self, item: Any, index: int) -> Any:
         """Get UserRole data. Interprets ITEM_HOOKS['list_item_data']."""
@@ -1415,132 +1614,283 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
         """
         pass  # Default: no-op
 
-    # === Preview Field Resolution (shared by both widgets) ===
+    # === Config Preview Building ===
 
-    def _resolve_preview_field_value(
+    def _build_preview_segments(
         self,
-        item: Any,
-        config_source: Any,
-        field_path: str,
-        live_context_snapshot: Any = None,
-        fallback_context: Optional[Dict[str, Any]] = None,
-    ) -> Any:
+        state: Optional['ObjectState'],
+    ) -> List[Tuple[str, str]]:
         """
-        Resolve a preview field path using the live context resolver.
-
-        For dotted paths like 'path_planning_config.well_filter':
-        1. Use getattr to navigate to the config object (preserves lazy type)
-        2. Use _resolve_config_attr only for the final attribute (triggers MRO resolution)
-
-        Args:
-            item: Semantic item for context stack (orchestrator/plate dict or step)
-            config_source: Root config object to resolve from (pipeline_config or step)
-            field_path: Dot-separated field path (e.g., 'napari_streaming_config' or 'vfs_config.backend')
-            live_context_snapshot: Optional live context for resolving lazy values
-            fallback_context: Optional context dict for fallback resolver
+        Build preview segments from PREVIEW_FIELD_CONFIGS (NAP, FIJI, MAT).
+        Reads from ObjectState's pre-cached resolved values. No fallbacks.
 
         Returns:
-            Resolved value or None
+            List of (formatted_label, field_path) tuples
         """
-        parts = field_path.split('.')
+        if state is None:
+            return []
 
-        if len(parts) == 1:
-            # Simple field - resolve directly
-            return self._resolve_config_attr(
-                item,
-                config_source,
-                parts[0],
-                live_context_snapshot,
-                full_path=field_path  # Pass full path for flat ObjectState lookup
-            )
-
-        # Dotted path: navigate to parent config using getattr, then resolve final attr
-        # This preserves the lazy type (e.g., LazyPathPlanningConfig) so MRO resolution works
-        current_obj = config_source
-        for part in parts[:-1]:
-            if current_obj is None:
-                return self._apply_preview_field_fallback(field_path, fallback_context)
-            current_obj = getattr(current_obj, part, None)
-
-        if current_obj is None:
-            return self._apply_preview_field_fallback(field_path, fallback_context)
-
-        # Resolve final attribute using live context resolver (triggers MRO inheritance)
-        # CRITICAL: Pass full_path for flat ObjectState lookup (not just the final attr)
-        resolved_value = self._resolve_config_attr(
-            item,
-            current_obj,
-            parts[-1],
-            live_context_snapshot,
-            full_path=field_path  # Pass full path for flat ObjectState lookup
-        )
-
-        if resolved_value is None:
-            return self._apply_preview_field_fallback(field_path, fallback_context)
-
-        return resolved_value
-
-    # === Config Preview Building (shared by both widgets) ===
-
-    def _build_preview_labels(
-        self,
-        item: Any,
-        config_source: Any,
-        live_context_snapshot: Any = None,
-        fallback_context: Optional[Dict[str, Any]] = None,
-    ) -> List[str]:
-        """
-        Build preview labels for all enabled preview fields.
-
-        Unified logic that works for both PipelineEditor (step configs) and
-        PlateManager (pipeline configs). Uses CrossWindowPreviewMixin's
-        get_enabled_preview_fields() and format_preview_value().
-
-        Args:
-            item: Semantic item for context stack (orchestrator/plate dict or step)
-            config_source: Config object to get preview fields from (pipeline_config or step)
-            live_context_snapshot: Optional live context for resolving lazy values
-            fallback_context: Optional context dict for fallback resolvers
-
-        Returns:
-            List of formatted preview labels (e.g., ["NAP", "W:4", "Seq:C,Z"])
-        """
         from openhcs.pyqt_gui.widgets.config_preview_formatters import format_config_indicator
 
-        labels = []
-
+        segments = []
         for field_path in self.get_enabled_preview_fields():
-            value = self._resolve_preview_field_value(
-                item=item,
-                config_source=config_source,
-                field_path=field_path,
-                live_context_snapshot=live_context_snapshot,
-                fallback_context=fallback_context,
-            )
-
+            value = state.get_resolved_value(field_path)
             if value is None:
                 continue
 
-            # Check if value is a dataclass config object
-            if hasattr(value, '__dataclass_fields__'):
-                # Config object - use centralized formatter with resolver
-                # _resolve_config_attr uses resolve_for_type internally to find the correct path
-                def resolve_attr(parent_obj, config_obj, attr_name, context,
-                                 i=item, snapshot=live_context_snapshot):
-                    return self._resolve_config_attr(i, config_obj, attr_name, snapshot)
-
-                formatted = format_config_indicator(field_path, value, resolve_attr)
-                logger.debug(f"_build_preview_labels: {field_path} is dataclass, format_config_indicator -> {repr(formatted)}")
-                # If formatter returns None, config should not be shown - don't fall back to str()
+            # Dataclass configs use format_config_indicator
+            if is_dataclass(value) and not isinstance(value, type):
+                formatted = format_config_indicator(field_path, value)
             else:
-                # Simple value - use mixin's format_preview_value
                 formatted = self.format_preview_value(field_path, value)
-                logger.debug(f"_build_preview_labels: {field_path} is simple value, format_preview_value -> {repr(formatted)}")
 
             if formatted:
-                labels.append(formatted)
+                segments.append((formatted, field_path))
 
-        return labels
+        return segments
+
+    def _build_styled_display_text(
+        self,
+        item_name: str,
+        segments: List[Tuple[str, Optional[str]]],
+    ) -> 'StyledText':
+        """
+        Build StyledText with inline preview format for per-field styling.
+
+        Produces format: "▶ ItemName  (seg1 | seg2 | seg3)"
+
+        Uses structured StyledTextLayout - delegate renders directly from structure.
+
+        Args:
+            item_name: Display name of the item
+            segments: List of (label_text, field_path) tuples for preview items
+
+        Returns:
+            StyledText with layout for per-field dirty/sig-diff styling
+        """
+        # Convert tuples to Segment objects
+        preview_segments = [Segment(text=label, field_path=path) for label, path in segments]
+
+        layout = StyledTextLayout(
+            name=Segment(text=item_name, field_path=''),  # Root path - matches any dirty/sig-diff
+            first_line_segments=preview_segments,  # For inline format, segments go on first line
+            multiline=False,
+        )
+        return StyledText(layout)
+
+    def _build_multiline_styled_text(
+        self,
+        item_name: str,
+        segments: List[Tuple[str, Optional[str]]],
+        status_prefix: str = "",
+        detail_line: str = "",
+        config_segments: Optional[List[Tuple[str, Optional[str]]]] = None,
+        first_line_segments: Optional[List[Tuple[str, Optional[str]]]] = None,
+        item: Any = None,
+        state: Optional['ObjectState'] = None,
+    ) -> 'StyledText':
+        """
+        Build StyledText with multiline preview format for per-field styling.
+
+        Produces format:
+            ▶ ItemName (first_seg1 | first_seg2)
+              detail_line
+              └─ seg1 | seg2 | configs=[CFG1, CFG2]
+
+        Uses structured StyledTextLayout - delegate renders directly from structure.
+
+        Args:
+            item_name: Display name of the item
+            segments: List of (label_text, field_path) tuples for preview line
+            status_prefix: Optional status prefix (e.g., "✓ Init")
+            detail_line: Optional second line (e.g., path or description)
+            config_segments: Optional config segments (NAP, FIJI, MAT) shown in brackets
+            first_line_segments: Optional segments to show on first line after name
+            item: Optional item for auto-including sig-diff fields in preview
+            state: ObjectState with pre-cached resolved values (passed from entry point)
+
+        Returns:
+            StyledText with layout for per-field dirty/sig-diff styling
+        """
+        # Auto-include sig-diff fields that aren't already in segments
+        if item is not None and state is not None:
+            sig_diff_fields = self._get_item_sig_diff_fields(item)
+            existing_paths = {path for _, path in segments if path}
+            if config_segments:
+                existing_paths.update(path for _, path in config_segments if path)
+            if first_line_segments:
+                existing_paths.update(path for _, path in first_line_segments if path)
+
+            for field_path in sig_diff_fields:
+                # Skip if already covered by existing segment (exact or prefix)
+                if any(field_path == p or field_path.startswith(p + '.') for p in existing_paths):
+                    continue
+                # Read resolved value from ObjectState cache
+                value = state.get_resolved_value(field_path)
+                if value is None:
+                    continue
+                label = self._format_field_value(field_path, value)
+                if label:
+                    segments = list(segments) + [(label, field_path)]
+                    existing_paths.add(field_path)
+
+        # Convert tuples to Segment objects
+        layout = StyledTextLayout(
+            name=Segment(text=item_name, field_path=''),
+            status_prefix=status_prefix,
+            first_line_segments=[Segment(text=l, field_path=p) for l, p in (first_line_segments or [])],
+            detail_line=detail_line,
+            preview_segments=[Segment(text=l, field_path=p) for l, p in segments],
+            config_segments=[Segment(text=l, field_path=p) for l, p in (config_segments or [])],
+            multiline=True,
+        )
+        return StyledText(layout)
+
+    def _build_item_display_from_format(
+        self,
+        item: Any,
+        item_name: str,
+        status_prefix: str = "",
+        detail_line: str = "",
+    ) -> 'StyledText':
+        """
+        Build StyledText using declarative LIST_ITEM_FORMAT config.
+
+        Gets ObjectState ONCE and passes it down. No fallbacks.
+
+        Args:
+            item: The item to format (used for scope lookup and sig-diff detection)
+            item_name: Display name
+            status_prefix: Optional status prefix (e.g., "✓ Init")
+            detail_line: Optional detail line (e.g., path)
+
+        Returns:
+            StyledText with segments for per-field styling
+        """
+        from openhcs.config_framework.object_state import ObjectStateRegistry
+
+        fmt = self.LIST_ITEM_FORMAT
+        if fmt is None:
+            return self._build_multiline_styled_text(
+                item_name=item_name, segments=[], status_prefix=status_prefix,
+                detail_line=detail_line, item=item, state=None,
+            )
+
+        # Get ObjectState ONCE at entry point
+        scope_id = self._get_cached_scope(item) if item else None
+        state = ObjectStateRegistry.get_by_scope(scope_id) if scope_id else None
+
+        # Build segments from declared field paths
+        first_line_segments = self._format_segments_from_config(state, list(fmt.first_line))
+        preview_segments = self._format_segments_from_config(state, list(fmt.preview_line))
+
+        # Config indicators from PREVIEW_FIELD_CONFIGS (NAP, FIJI, MAT)
+        config_segments = None
+        if fmt.show_config_indicators:
+            config_segments = self._build_preview_segments(state=state)
+
+        # Detail line from ObjectState
+        if not detail_line and fmt.detail_line_field and state:
+            detail_line = state.get_resolved_value(fmt.detail_line_field) or ""
+
+        return self._build_multiline_styled_text(
+            item_name=item_name,
+            segments=preview_segments,
+            status_prefix=status_prefix,
+            detail_line=detail_line,
+            config_segments=config_segments,
+            first_line_segments=first_line_segments,
+            item=item,
+            state=state,
+        )
+
+    def _format_segments_from_config(
+        self,
+        state: Optional['ObjectState'],
+        field_paths: List[str],
+    ) -> List[Tuple[str, str]]:
+        """
+        Build segments from declarative field paths.
+        Reads from ObjectState's pre-cached resolved values. No fallbacks.
+
+        Args:
+            state: ObjectState with pre-cached resolved values
+            field_paths: List of field path strings (e.g., ['func', 'processing_config.group_by'])
+
+        Returns:
+            List of (label_text, field_path) tuples for styling
+        """
+        if state is None:
+            return []
+
+        fmt = self.LIST_ITEM_FORMAT
+        formatters = fmt.formatters if fmt else {}
+        segments = []
+
+        for field_path in field_paths:
+            value = state.get_resolved_value(field_path)
+            if value is None:
+                continue
+
+            # Use custom formatter from ListItemFormat if available
+            if field_path in formatters:
+                formatter = formatters[field_path]
+                if isinstance(formatter, str):
+                    formatter_method = getattr(self, formatter, None)
+                    if formatter_method:
+                        # Try to pass state as second argument for formatters that need it
+                        import inspect
+                        sig = inspect.signature(formatter_method)
+                        if len(sig.parameters) >= 2:
+                            label = formatter_method(value, state)
+                        else:
+                            label = formatter_method(value)
+                    else:
+                        label = None
+                else:
+                    label = formatter(value)
+            else:
+                label = self._format_field_value(field_path, value)
+
+            if label:
+                segments.append((label, field_path))
+
+        return segments
+
+    def _format_field_value(self, field_path: str, value: Any) -> Optional[str]:
+        """Simple type-based formatting for field values. No fallbacks."""
+        from openhcs.pyqt_gui.widgets.config_preview_formatters import (
+            format_preview_value, format_config_indicator, get_field_abbreviation
+        )
+
+        if value is None:
+            return None
+
+        field_name = field_path.split('.')[-1]
+        # Look up abbreviation from registry (declared on config classes)
+        abbrev = get_field_abbreviation(field_name)
+
+        # Dataclass config - delegate to config_preview_formatters (returns full indicator)
+        if is_dataclass(value) and not isinstance(value, type):
+            return format_config_indicator(field_name, value)
+
+        # All other values: format value, prepend field name
+        formatted = format_preview_value(value)
+        if formatted is None:
+            return None
+        return f"{abbrev}:{formatted}"
+
+    def _get_nested_attr(self, obj: Any, path: str) -> Any:
+        """Get nested attribute value by dotted path."""
+        parts = path.split('.')
+        for part in parts:
+            if obj is None:
+                return None
+            if isinstance(obj, dict):
+                obj = obj.get(part)
+            else:
+                obj = getattr(obj, part, None)
+        return obj
 
     def _build_config_indicators(
         self,

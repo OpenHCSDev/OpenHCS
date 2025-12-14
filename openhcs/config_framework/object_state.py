@@ -34,13 +34,60 @@ class ObjectStateRegistry:
     """
     _states: Dict[str, 'ObjectState'] = {}  # Keys are always strings (None normalized to "")
 
+    # Registration lifecycle callbacks - UI subscribes to sync list items with ObjectState lifecycle
+    # Callbacks receive (scope_id: str, object_state: ObjectState)
+    _on_register_callbacks: List[Callable[[str, 'ObjectState'], None]] = []
+    _on_unregister_callbacks: List[Callable[[str, 'ObjectState'], None]] = []
+
+    @classmethod
+    def add_register_callback(cls, callback: Callable[[str, 'ObjectState'], None]) -> None:
+        """Subscribe to ObjectState registration events."""
+        if callback not in cls._on_register_callbacks:
+            cls._on_register_callbacks.append(callback)
+
+    @classmethod
+    def remove_register_callback(cls, callback: Callable[[str, 'ObjectState'], None]) -> None:
+        """Unsubscribe from ObjectState registration events."""
+        if callback in cls._on_register_callbacks:
+            cls._on_register_callbacks.remove(callback)
+
+    @classmethod
+    def add_unregister_callback(cls, callback: Callable[[str, 'ObjectState'], None]) -> None:
+        """Subscribe to ObjectState unregistration events."""
+        if callback not in cls._on_unregister_callbacks:
+            cls._on_unregister_callbacks.append(callback)
+
+    @classmethod
+    def remove_unregister_callback(cls, callback: Callable[[str, 'ObjectState'], None]) -> None:
+        """Unsubscribe from ObjectState unregistration events."""
+        if callback in cls._on_unregister_callbacks:
+            cls._on_unregister_callbacks.remove(callback)
+
+    @classmethod
+    def _fire_register_callbacks(cls, scope_key: str, state: 'ObjectState') -> None:
+        """Fire all registered callbacks for ObjectState registration."""
+        for callback in cls._on_register_callbacks:
+            try:
+                callback(scope_key, state)
+            except Exception as e:
+                logger.warning(f"Error in register callback: {e}")
+
+    @classmethod
+    def _fire_unregister_callbacks(cls, scope_key: str, state: 'ObjectState') -> None:
+        """Fire all registered callbacks for ObjectState unregistration."""
+        for callback in cls._on_unregister_callbacks:
+            try:
+                callback(scope_key, state)
+            except Exception as e:
+                logger.warning(f"Error in unregister callback: {e}")
+
     @classmethod
     def _normalize_scope_id(cls, scope_id: Optional[str]) -> str:
         """Normalize scope_id: None and "" both represent global scope."""
         return scope_id if scope_id is not None else ""
 
     @classmethod
-    def register(cls, state: 'ObjectState') -> None:
+    def register(cls, state: 'ObjectState', _skip_snapshot: bool = False) -> None:
         """Register an ObjectState in the registry.
 
         Args:
@@ -48,6 +95,7 @@ class ObjectStateRegistry:
                    scope_id=None/"" for GlobalPipelineConfig (global scope).
                    scope_id=plate_path for PipelineConfig.
                    scope_id=plate_path::step_N for steps.
+            _skip_snapshot: Internal flag for time-travel (don't record snapshot).
         """
         key = cls._normalize_scope_id(state.scope_id)
 
@@ -57,20 +105,36 @@ class ObjectStateRegistry:
         cls._states[key] = state
         logger.debug(f"Registered ObjectState: scope={key}, type={type(state.object_instance).__name__}")
 
+        # Fire callbacks for UI binding
+        cls._fire_register_callbacks(key, state)
+
+        # Record snapshot for time-travel (captures new ObjectState in registry)
+        if not _skip_snapshot:
+            cls.record_snapshot(f"register {type(state.object_instance).__name__}", key)
+
     @classmethod
-    def unregister(cls, state: 'ObjectState') -> None:
+    def unregister(cls, state: 'ObjectState', _skip_snapshot: bool = False) -> None:
         """Unregister an ObjectState from the registry.
 
         Args:
             state: The ObjectState to unregister.
+            _skip_snapshot: Internal flag for time-travel (don't record snapshot).
         """
         key = cls._normalize_scope_id(state.scope_id)
         if key in cls._states:
+            obj_type_name = type(state.object_instance).__name__
             del cls._states[key]
             logger.debug(f"Unregistered ObjectState: scope={key}")
 
+            # Fire callbacks for UI binding
+            cls._fire_unregister_callbacks(key, state)
+
+            # Record snapshot for time-travel (captures ObjectState removal)
+            if not _skip_snapshot:
+                cls.record_snapshot(f"unregister {obj_type_name}", key)
+
     @classmethod
-    def unregister_scope_and_descendants(cls, scope_id: Optional[str]) -> int:
+    def unregister_scope_and_descendants(cls, scope_id: Optional[str], _skip_snapshot: bool = False) -> int:
         """Unregister an ObjectState and all its descendants from the registry.
 
         This is used when deleting a plate - we need to cascade delete all child
@@ -85,6 +149,7 @@ class ObjectStateRegistry:
 
         Args:
             scope_id: The scope to unregister (along with all descendants).
+            _skip_snapshot: Internal flag for time-travel (don't record snapshot).
 
         Returns:
             Number of ObjectStates unregistered.
@@ -101,13 +166,18 @@ class ObjectStateRegistry:
             elif scope_key and key.startswith(scope_key + "::"):
                 scopes_to_delete.append(key)
 
-        # Delete all matching scopes
+        # Delete all matching scopes and fire callbacks
         for key in scopes_to_delete:
-            del cls._states[key]
+            state = cls._states.pop(key)
             logger.debug(f"Unregistered ObjectState (cascade): scope={key}")
+            # Fire callbacks for UI binding
+            cls._fire_unregister_callbacks(key, state)
 
         if scopes_to_delete:
             logger.info(f"Cascade unregistered {len(scopes_to_delete)} ObjectState(s) for scope={scope_key}")
+            # Record single snapshot for cascade unregister (captures all removals at once)
+            if not _skip_snapshot:
+                cls.record_snapshot(f"unregister_cascade ({len(scopes_to_delete)} scopes)", scope_key)
 
         return len(scopes_to_delete)
 
@@ -420,6 +490,228 @@ class ObjectStateRegistry:
             else:
                 state._sync_materialized_state()
 
+    # ========== REGISTRY-LEVEL TIME-TRAVEL ==========
+
+    # Snapshot of ALL ObjectStates at a point in time
+    # Each entry: (timestamp, scope_id → state_snapshot, label)
+    # state_snapshot: (saved_resolved, live_resolved, parameters, provenance, object_state_ref)
+    # object_state_ref: Reference to ObjectState for re-registration during time-travel
+    _history: List[Tuple[float, Dict[str, Tuple[Dict, Dict, Dict, Dict, 'ObjectState']], str]] = []
+    _history_index: int = -1  # Current position (-1 = head/live)
+    _history_enabled: bool = True
+    _max_history_size: int = 100
+    _in_time_travel: bool = False  # Flag for PFM to know to refresh widget values
+
+    # Limbo: ObjectStates temporarily removed during time-travel
+    # When traveling to a snapshot, ObjectStates not in that snapshot are moved here.
+    # When traveling forward or to head, they're restored from here.
+    _time_travel_limbo: Dict[str, 'ObjectState'] = {}
+
+    @classmethod
+    def record_snapshot(cls, label: str = "", scope_id: Optional[str] = None) -> None:
+        """Record current state of ALL ObjectStates to history.
+
+        Called automatically after significant state changes.
+        Each snapshot captures the full system state at a point in time.
+
+        On FIRST edit, automatically records a baseline "init" snapshot first,
+        so users can always go back to the original state before any edits.
+
+        Args:
+            label: Human-readable label (e.g., "edit group_by", "save")
+            scope_id: Optional scope that triggered the snapshot (for labeling)
+        """
+        if not cls._history_enabled:
+            return
+
+        import time
+
+        # FIRST EDIT: Record baseline "init" snapshot before the actual edit snapshot
+        # This ensures we can always go back to the original state
+        if len(cls._history) == 0 and label.startswith("edit"):
+            cls._record_snapshot_internal("init", time.time())
+
+        full_label = f"{label} [{scope_id}]" if scope_id else label
+        cls._record_snapshot_internal(full_label, time.time())
+
+    @classmethod
+    def _record_snapshot_internal(cls, label: str, timestamp: float) -> None:
+        """Internal method to record a snapshot without baseline logic."""
+        # Capture ALL registered ObjectStates (including ObjectState reference for re-registration)
+        all_states_snapshot: Dict[str, Tuple[Dict, Dict, Dict, Dict, 'ObjectState']] = {}
+        for key, state in cls._states.items():
+            all_states_snapshot[key] = (
+                copy.deepcopy(state._saved_resolved),
+                copy.deepcopy(state._live_resolved) if state._live_resolved else {},
+                copy.deepcopy(state.parameters),
+                copy.deepcopy(state._live_provenance),
+                state,  # ObjectState reference for re-registration during time-travel
+            )
+
+        # If in past and making new change, truncate future
+        if cls._history_index >= 0 and cls._history_index < len(cls._history) - 1:
+            cls._history = cls._history[:cls._history_index + 1]
+            # Clear limbo when creating new branch (we're no longer just navigating)
+            cls._time_travel_limbo.clear()
+
+        cls._history.append((timestamp, all_states_snapshot, label))
+
+        # Enforce max size
+        if len(cls._history) > cls._max_history_size:
+            cls._history = cls._history[-cls._max_history_size:]
+
+        cls._history_index = -1  # Reset to head
+        logger.debug(f"⏱️ REGISTRY_TIME_TRAVEL: Recorded snapshot #{len(cls._history)}: {label}")
+
+    @classmethod
+    def time_travel_to(cls, index: int) -> bool:
+        """Travel ALL ObjectStates to a specific point in history.
+
+        Full time-travel: ObjectStates are registered/unregistered to match the snapshot.
+        ObjectStates not in the snapshot are moved to limbo. ObjectStates in snapshot
+        but not in registry are restored from the snapshot's stored reference.
+
+        Args:
+            index: History index (0 = oldest, -1 = latest/head)
+
+        Returns:
+            True if travel succeeded.
+        """
+        if not cls._history:
+            logger.warning("⏱️ REGISTRY_TIME_TRAVEL: No history to travel to")
+            return False
+
+        # Normalize negative index
+        if index < 0:
+            index = len(cls._history) + index
+
+        if index < 0 or index >= len(cls._history):
+            logger.warning(f"⏱️ REGISTRY_TIME_TRAVEL: Index {index} out of range")
+            return False
+
+        _timestamp, all_states_snapshot, label = cls._history[index]
+        cls._history_index = index
+
+        # Set flag so PFM knows to refresh widget values
+        cls._in_time_travel = True
+        try:
+            snapshot_scopes = set(all_states_snapshot.keys())
+            current_scopes = set(cls._states.keys())
+
+            # PHASE 1: UNREGISTER ObjectStates not in snapshot (move to limbo)
+            # Fire unregister callbacks so UI removes them
+            scopes_to_limbo = current_scopes - snapshot_scopes
+            for scope_key in scopes_to_limbo:
+                state = cls._states.pop(scope_key)
+                cls._time_travel_limbo[scope_key] = state
+                # Fire callbacks for UI binding (skip snapshot recording)
+                cls._fire_unregister_callbacks(scope_key, state)
+                logger.debug(f"⏱️ REGISTRY_TIME_TRAVEL: Moved to limbo: {scope_key}")
+
+            # PHASE 2: RE-REGISTER ObjectStates in snapshot but not in registry
+            # Fire register callbacks so UI adds them
+            scopes_to_register = snapshot_scopes - current_scopes
+            for scope_key in scopes_to_register:
+                # Try limbo first, then snapshot reference
+                if scope_key in cls._time_travel_limbo:
+                    state = cls._time_travel_limbo.pop(scope_key)
+                else:
+                    # Get from snapshot (5th element is ObjectState reference)
+                    state = all_states_snapshot[scope_key][4]
+                cls._states[scope_key] = state
+                # Fire callbacks for UI binding (skip snapshot recording)
+                cls._fire_register_callbacks(scope_key, state)
+                logger.debug(f"⏱️ REGISTRY_TIME_TRAVEL: Restored to registry: {scope_key}")
+
+            # PHASE 3: RESTORE state for all ObjectStates in snapshot
+            for scope_key, (saved, live, params, provenance, _state_ref) in all_states_snapshot.items():
+                state = cls._states.get(scope_key)
+                if not state:
+                    continue
+
+                # Calculate diff BEFORE restoring using RESOLVED values (not parameters)
+                # This is critical: if PipelineConfig.well_filter goes None→"abc", but
+                # GlobalPipelineConfig already provides "abc", the RESOLVED value is
+                # unchanged and we should NOT flash.
+                target_live = live  # Target resolved values from snapshot
+                current_live = state._live_resolved.copy()  # Current resolved values
+                changed_paths = set()
+                all_keys = set(target_live.keys()) | set(current_live.keys())
+                for key in all_keys:
+                    if target_live.get(key) != current_live.get(key):
+                        changed_paths.add(key)
+
+                # RESTORE: Direct assignment of ALL state
+                state._saved_resolved = copy.deepcopy(saved)
+                state._live_resolved = copy.deepcopy(live)
+                state._live_provenance = copy.deepcopy(provenance)
+                state.parameters = copy.deepcopy(params)
+
+                # Sync materialized state (updates dirty markers, etc.)
+                state._sync_materialized_state()
+
+                # Notify UI with just the changed paths (not all)
+                if changed_paths and state._on_resolved_changed_callbacks:
+                    for callback in state._on_resolved_changed_callbacks:
+                        try:
+                            callback(changed_paths)
+                        except Exception as e:
+                            logger.warning(f"Error in time-travel callback: {e}")
+        finally:
+            cls._in_time_travel = False
+
+        logger.info(f"⏱️ REGISTRY_TIME_TRAVEL: Traveled to #{index} ({label})")
+        return True
+
+    @classmethod
+    def time_travel_back(cls) -> bool:
+        """Travel one step back in history."""
+        if cls._history_index == -1:
+            return cls.time_travel_to(len(cls._history) - 2)
+        return cls.time_travel_to(cls._history_index - 1)
+
+    @classmethod
+    def time_travel_forward(cls) -> bool:
+        """Travel one step forward in history."""
+        if cls._history_index == -1:
+            return False  # Already at head
+        if cls._history_index >= len(cls._history) - 1:
+            cls._history_index = -1
+            return True
+        return cls.time_travel_to(cls._history_index + 1)
+
+    @classmethod
+    def time_travel_to_head(cls) -> bool:
+        """Return to the latest state (exit time-travel mode)."""
+        if cls._history_index == -1:
+            return True
+        return cls.time_travel_to(-1)
+
+    @classmethod
+    def get_history_info(cls) -> List[Dict[str, Any]]:
+        """Get human-readable history for UI display."""
+        import datetime
+        result = []
+        for i, (timestamp, all_states, label) in enumerate(cls._history):
+            result.append({
+                'index': i,
+                'timestamp': datetime.datetime.fromtimestamp(timestamp).strftime('%H:%M:%S.%f')[:-3],
+                'label': label or f"Snapshot #{i}",
+                'is_current': (i == cls._history_index) or (cls._history_index == -1 and i == len(cls._history) - 1),
+                'num_states': len(all_states),
+            })
+        return result
+
+    @classmethod
+    def get_history_length(cls) -> int:
+        """Get number of snapshots in history."""
+        return len(cls._history)
+
+    @classmethod
+    def is_time_traveling(cls) -> bool:
+        """Check if currently viewing historical state (not at head)."""
+        return cls._history_index >= 0 and cls._history_index < len(cls._history) - 1
+
 
 class FieldProxy:
     """Type-safe proxy for accessing ObjectState fields via dotted attribute syntax.
@@ -599,6 +891,17 @@ class ObjectState:
         # Callbacks notified when resolved values actually change (for UI flashing)
         self._on_resolved_changed_callbacks: List[Callable[[Set[str]], None]] = []
 
+        # === Time-Travel Callbacks ===
+        # Callbacks notified when time-travel restores parameters (for widget refresh)
+        self._on_time_travel_callbacks: List[Callable[[], None]] = []
+
+        # === Time-Travel History ===
+        # Each entry: (timestamp, saved_snapshot, live_snapshot, parameters_snapshot, provenance_snapshot, label)
+        self._history: List[Tuple[float, Dict[str, Any], Dict[str, Any], Dict[str, Any], Dict[str, Tuple[Optional[str], Optional[type]]], str]] = []
+        self._history_index: int = -1  # Current position in history (-1 = live/head)
+        self._history_enabled: bool = True  # Can be disabled for batch operations
+        self._max_history_size: int = 100  # Limit memory usage
+
         # Initialize baselines (suppress flash during init)
         self._ensure_live_resolved(notify_flash=False)
         assert self._live_resolved is not None  # Guaranteed by _ensure_live_resolved
@@ -628,6 +931,10 @@ class ObjectState:
         # Should be empty for new objects since saved = live
         self._dirty_fields = self._compute_dirty_fields()
         self._signature_diff_fields = self._compute_signature_diff_fields()
+
+        # NOTE: Don't record "init" snapshot here - each ObjectState would create a separate
+        # snapshot missing other ObjectStates created later. Instead, the first edit will
+        # record the baseline state automatically (see record_snapshot logic).
 
     @property
     def context_obj(self) -> Optional[Any]:
@@ -874,6 +1181,15 @@ class ObjectState:
         self._ensure_live_resolved(notify_flash=True)
         # Sync materialized state (single point for dirty/sig_diff update + notification)
         self._sync_materialized_state()
+
+        # Record snapshot for time-travel (registry-level for coherent system history)
+        # ONLY for LEAF fields - skip containers (dataclass instances that have nested params)
+        # A field is a container if there are other params that start with "param_name."
+        is_container = any(
+            p.startswith(f"{param_name}.") for p in self.parameters.keys() if p != param_name
+        )
+        if not is_container:
+            ObjectStateRegistry.record_snapshot(f"edit {param_name}", self.scope_id)
 
     def get_resolved_value(self, param_name: str) -> Any:
         """Get resolved value for a field from the bulk snapshot.
@@ -1210,6 +1526,151 @@ class ObjectState:
         if dirty_changed or sig_diff_changed:
             self._notify_state_changed()
 
+    # ==================== TIME-TRAVEL ====================
+
+    def _record_history_snapshot(self, label: str = "") -> None:
+        """Record current state to history for time-travel debugging.
+
+        Called automatically after significant state changes (save, parameter update).
+        Each snapshot captures the full dual-axis state at a point in time.
+
+        Args:
+            label: Optional human-readable label for this snapshot (e.g., "save", "edit group_by")
+        """
+        if not self._history_enabled:
+            return
+
+        import time
+        snapshot = (
+            time.time(),
+            copy.deepcopy(self._saved_resolved),
+            copy.deepcopy(self._live_resolved) if self._live_resolved else {},
+            copy.deepcopy(self.parameters),
+            copy.deepcopy(self._live_provenance),
+            label,
+        )
+
+        # If we're in the past and make a new change, truncate future history
+        if self._history_index >= 0 and self._history_index < len(self._history) - 1:
+            self._history = self._history[:self._history_index + 1]
+
+        self._history.append(snapshot)
+
+        # Enforce max history size (drop oldest)
+        if len(self._history) > self._max_history_size:
+            self._history = self._history[-self._max_history_size:]
+
+        # Reset to head (latest)
+        self._history_index = -1
+
+        logger.debug(f"⏱️ TIME_TRAVEL: Recorded snapshot #{len(self._history)} for {self.scope_id}: {label}")
+
+    def time_travel_to(self, index: int) -> bool:
+        """Travel to a specific point in history.
+
+        Args:
+            index: History index (0 = oldest, -1 = latest/head)
+
+        Returns:
+            True if travel succeeded, False if index out of range.
+        """
+        if not self._history:
+            logger.warning(f"⏱️ TIME_TRAVEL: No history for {self.scope_id}")
+            return False
+
+        # Normalize negative index
+        if index < 0:
+            index = len(self._history) + index
+
+        if index < 0 or index >= len(self._history):
+            logger.warning(f"⏱️ TIME_TRAVEL: Index {index} out of range [0, {len(self._history) - 1}]")
+            return False
+
+        _timestamp, saved, live, params, provenance, label = self._history[index]
+        self._history_index = index
+
+        # Restore state from snapshot
+        self._saved_resolved = copy.deepcopy(saved)
+        self._live_resolved = copy.deepcopy(live)
+        self.parameters = copy.deepcopy(params)
+        self._live_provenance = copy.deepcopy(provenance)
+
+        # Recompute materialized diffs and notify
+        self._sync_materialized_state()
+
+        # Notify UI of changes
+        if self._on_resolved_changed_callbacks:
+            all_paths = set(self._live_resolved.keys())
+            for callback in self._on_resolved_changed_callbacks:
+                try:
+                    callback(all_paths)
+                except Exception as e:
+                    logger.warning(f"Error in time-travel callback: {e}")
+
+        logger.info(f"⏱️ TIME_TRAVEL: Traveled to #{index} ({label}) for {self.scope_id}")
+        return True
+
+    def time_travel_back(self) -> bool:
+        """Travel one step back in history."""
+        if self._history_index == -1:
+            return self.time_travel_to(len(self._history) - 2)
+        return self.time_travel_to(self._history_index - 1)
+
+    def time_travel_forward(self) -> bool:
+        """Travel one step forward in history."""
+        if self._history_index == -1:
+            return False  # Already at head
+        if self._history_index >= len(self._history) - 1:
+            self._history_index = -1  # Return to head
+            return True
+        return self.time_travel_to(self._history_index + 1)
+
+    def time_travel_to_head(self) -> bool:
+        """Return to the latest state (exit time-travel mode)."""
+        if self._history_index == -1:
+            return True  # Already at head
+        return self.time_travel_to(-1)
+
+    def get_history_info(self) -> List[Dict[str, Any]]:
+        """Get human-readable history for UI display.
+
+        Returns:
+            List of dicts with 'index', 'timestamp', 'label', 'is_current' for each snapshot.
+        """
+        import datetime
+        result = []
+        for i, (timestamp, saved, live, _params, _provenance, label) in enumerate(self._history):
+            result.append({
+                'index': i,
+                'timestamp': datetime.datetime.fromtimestamp(timestamp).strftime('%H:%M:%S.%f')[:-3],
+                'label': label or f"Snapshot #{i}",
+                'is_current': (i == self._history_index) or (self._history_index == -1 and i == len(self._history) - 1),
+                'changed_fields': len([k for k in live.keys() if live.get(k) != saved.get(k)]) if live else 0,
+            })
+        return result
+
+    def get_history_length(self) -> int:
+        """Get number of snapshots in history."""
+        return len(self._history)
+
+    def get_provenance_at_history(self, index: int, field_path: str) -> Optional[Tuple[Optional[str], Optional[type]]]:
+        """Get provenance for a field at a specific history point.
+
+        This is the killer feature: see which scope contributed a value AT ANY POINT IN TIME.
+
+        Args:
+            index: History index
+            field_path: Dotted field path
+
+        Returns:
+            (scope_id, source_type) tuple or None if field not found.
+            scope_id/source_type may be None if field is local.
+        """
+        if index < 0 or index >= len(self._history):
+            return None
+        *_, provenance, _ = self._history[index]
+        return provenance.get(field_path)
+
     # ==================== SAVED STATE / DIRTY TRACKING ====================
 
     def _compute_resolved_snapshot(self, use_saved: bool = False) -> Dict[str, Any]:
@@ -1406,6 +1867,9 @@ class ObjectState:
         # Sync materialized state (single point for dirty/sig_diff update + notification)
         self._sync_materialized_state()
 
+        # Record snapshot for time-travel (registry-level)
+        ObjectStateRegistry.record_snapshot("save", self.scope_id)
+
     def restore_saved(self) -> None:
         """Restore parameters to the last saved baseline (from object_instance).
 
@@ -1469,6 +1933,10 @@ class ObjectState:
 
         # Sync materialized state (single point for dirty/sig_diff update + notification)
         self._sync_materialized_state()
+
+        # Record snapshot for time-travel (registry-level) - ONLY if there were changes
+        if changed_params_with_types:
+            ObjectStateRegistry.record_snapshot("restore", self.scope_id)
 
     def should_skip_updates(self) -> bool:
         """Check if updates should be skipped due to batch operations."""

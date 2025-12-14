@@ -167,6 +167,13 @@ class ParameterFormService:
         """
         import dataclasses
 
+        # Check if parent class declares this field as having a special editor
+        # (e.g., FunctionStep._ui_special_fields = ('func',) - rendered as FunctionPatternEditor)
+        if parent_obj_type is not None:
+            special_fields = getattr(parent_obj_type, '_ui_special_fields', ())
+            if param_name in special_fields:
+                return True
+
         # If no parent dataclass, can't check field metadata
         if parent_obj_type is None:
             # Still check if the type itself has _ui_hidden

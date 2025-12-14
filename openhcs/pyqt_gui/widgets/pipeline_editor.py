@@ -32,12 +32,12 @@ from openhcs.pyqt_gui.widgets.shared.services.scope_token_service import ScopeTo
 
 # Import shared list widget components (single source of truth)
 from openhcs.pyqt_gui.widgets.shared.reorderable_list_widget import ReorderableListWidget
-from openhcs.pyqt_gui.widgets.shared.list_item_delegate import MultilinePreviewItemDelegate
-from openhcs.pyqt_gui.widgets.config_preview_formatters import CONFIG_INDICATORS
+from openhcs.pyqt_gui.widgets.shared.list_item_delegate import MultilinePreviewItemDelegate, StyledText
+from openhcs.config_framework.lazy_factory import PREVIEW_LABEL_REGISTRY
 from openhcs.core.config import ProcessingConfig
 
 # Import ABC base class (Phase 4 migration)
-from openhcs.pyqt_gui.widgets.shared.abstract_manager_widget import AbstractManagerWidget
+from openhcs.pyqt_gui.widgets.shared.abstract_manager_widget import AbstractManagerWidget, ListItemFormat
 
 from openhcs.utils.performance_monitor import timer
 
@@ -88,11 +88,99 @@ class PipelineEditorWidget(AbstractManagerWidget):
     }
 
     # Declarative preview field configuration (processed automatically in ABC.__init__)
+    # Labels auto-discovered from PREVIEW_LABEL_REGISTRY (set via @global_pipeline_config(preview_label=...))
     PREVIEW_FIELD_CONFIGS = [
-        'napari_streaming_config',  # Uses CONFIG_INDICATORS['napari_streaming_config'] = 'NAP'
-        'fiji_streaming_config',    # Uses CONFIG_INDICATORS['fiji_streaming_config'] = 'FIJI'
-        'step_materialization_config',  # Uses CONFIG_INDICATORS['step_materialization_config'] = 'MAT'
+        'napari_streaming_config',       # preview_label='NAP'
+        'fiji_streaming_config',         # preview_label='FIJI'
+        'step_materialization_config',   # preview_label='MAT'
     ]
+
+    # Declarative list item format (replaces imperative format_item_for_display logic)
+    LIST_ITEM_FORMAT = ListItemFormat(
+        first_line=('func',),  # func= shown after step name
+        preview_line=(
+            'processing_config.variable_components',
+            'processing_config.group_by',
+            'processing_config.input_source',
+        ),
+        show_config_indicators=True,
+        formatters={
+            'func': '_format_func_preview',  # Method name for complex formatting
+            'processing_config.input_source': '_format_input_source_preview',
+        },
+    )
+
+    # === Declarative Field Formatters ===
+    def _format_func_preview(self, func, state=None) -> Optional[str]:
+        """Format func field for preview.
+
+        Shows function names for the pattern:
+        - Single callable: func=my_func
+        - Tuple (func, kwargs): func=my_func
+        - List chain: func=[func1, func2, func3]
+        - Dict pattern: func={DAPI: func1, GFP: func2} (uses metadata for key names)
+
+        Args:
+            func: The func value to format
+            state: Optional ObjectState to get group_by for dict key metadata lookup
+        """
+        if isinstance(func, tuple) and len(func) >= 1:
+            # (func, kwargs) pattern - extract function name
+            func_name = self._get_func_name(func)
+            return f"func={func_name}"
+        elif isinstance(func, list) and func:
+            # Show actual function names
+            func_names = [self._get_func_name(f) for f in func if f is not None]
+            return f"func=[{', '.join(func_names)}]"
+        elif callable(func):
+            func_name = getattr(func, '__name__', str(func))
+            return f"func={func_name}"
+        elif isinstance(func, dict):
+            # Use orchestrator's metadata cache for key→name mapping if available
+            orchestrator = self._get_current_orchestrator()
+            metadata_cache = orchestrator.metadata_cache if orchestrator else None
+
+            # Get group_by from ObjectState to determine component type for metadata lookup
+            group_by = None
+            if state:
+                group_by = state.get_resolved_value('processing_config.group_by')
+
+            # Build {display_name: func_name} entries
+            entries = []
+            for key in sorted(func.keys()):
+                # Try to get display name from metadata cache using step's group_by
+                display_name = None
+                if group_by and metadata_cache:
+                    display_name = metadata_cache.get_component_metadata(group_by, str(key))
+                if display_name is None:
+                    display_name = str(key)
+                func_name = self._get_func_name(func[key])
+                entries.append(f"{display_name}: {func_name}")
+            return f"func={{{', '.join(entries)}}}"
+        return None
+
+    def _get_func_name(self, func_entry) -> str:
+        """Extract function name from various func entry formats."""
+        if isinstance(func_entry, tuple) and len(func_entry) >= 1:
+            # (func, kwargs) pattern
+            return getattr(func_entry[0], '__name__', str(func_entry[0]))
+        elif isinstance(func_entry, list) and func_entry:
+            # Chain pattern - show first→last
+            first = self._get_func_name(func_entry[0])
+            if len(func_entry) > 1:
+                last = self._get_func_name(func_entry[-1])
+                return f"{first}→{last}"
+            return first
+        elif callable(func_entry):
+            return getattr(func_entry, '__name__', str(func_entry))
+        return str(func_entry)
+
+    def _format_input_source_preview(self, input_source) -> Optional[str]:
+        """Format input_source field (only show if not default)."""
+        source_name = getattr(input_source, 'name', str(input_source))
+        if source_name != 'PREVIOUS_STEP':
+            return f"input={source_name}"
+        return None  # Skip default value
 
 
 
@@ -151,108 +239,23 @@ class PipelineEditorWidget(AbstractManagerWidget):
         Format step for display in the list with constructor value preview.
 
         Uses ObjectState for resolved values (no context stack rebuild).
+        Returns StyledText with segments for per-field dirty/sig-diff styling.
 
         Args:
             step: FunctionStep to format
             live_context_snapshot: IGNORED - kept for API compatibility
 
         Returns:
-            Tuple of (display_text, step_name)
+            Tuple of (StyledText with segments, step_name)
         """
-        from openhcs.config_framework.object_state import ObjectStateRegistry
+        step_name: str = getattr(step, 'name', 'Unknown Step') or 'Unknown Step'
 
-        # Look up ObjectState for this step
-        scope_id = self._build_step_scope_id(step)
-        state = ObjectStateRegistry.get_by_scope(scope_id) if scope_id else None
-
-        # Helper to get resolved value from ObjectState or fall back to step attr
-        def get_val(name: str, default=None):
-            if state:
-                val = state.get_resolved_value(name)
-                if val is not None:
-                    return val
-            return getattr(step, name, default)
-
-        # Helper for nested config values
-        def get_nested_val(config_name: str, attr_name: str, default=None):
-            if state:
-                # With flat storage, build dotted path and get resolved value
-                dotted_path = f'{config_name}.{attr_name}'
-                val = state.get_resolved_value(dotted_path)
-                if val is not None:
-                    return val
-            cfg = getattr(step, config_name, None)
-            return getattr(cfg, attr_name, default) if cfg else default
-
-        step_name = get_val('name', 'Unknown Step')
-        processing_cfg = get_val('processing_config')
-
-        # Build preview of key constructor values
-        preview_parts = []
-
-        # Function preview
-        func = get_val('func')
-        if func:
-            if isinstance(func, list) and func:
-                enabled_funcs = [f for f in func if f is not None]
-                preview_parts.append(f"func=[{len(enabled_funcs)} functions]")
-            elif callable(func):
-                func_name = getattr(func, '__name__', str(func))
-                preview_parts.append(f"func={func_name}")
-            elif isinstance(func, dict):
-                orchestrator = self._get_current_orchestrator()
-                group_by = get_nested_val('processing_config', 'group_by')
-                dict_items = []
-                for key in sorted(func.keys()):
-                    if orchestrator and group_by:
-                        metadata_name = orchestrator.metadata_cache.get_component_metadata(group_by, key)
-                        dict_items.append(f"{key}|{metadata_name}" if metadata_name else key)
-                    else:
-                        dict_items.append(key)
-                preview_parts.append(f"func={{{', '.join(dict_items)}}}")
-
-        # Variable components preview
-        var_components = get_val('variable_components')
-        if var_components is None and processing_cfg is not None:
-            var_components = get_nested_val('processing_config', 'variable_components')
-        if var_components:
-            if len(var_components) == 1:
-                comp_name = getattr(var_components[0], 'name', str(var_components[0]))
-                preview_parts.append(f"components=[{comp_name}]")
-            else:
-                comp_names = [getattr(c, 'name', str(c)) for c in var_components[:2]]
-                if len(var_components) > 2:
-                    comp_names.append(f"+{len(var_components)-2} more")
-                preview_parts.append(f"components=[{', '.join(comp_names)}]")
-
-        # Group by preview
-        group_by = get_val('group_by')
-        if (group_by is None or getattr(group_by, 'value', None) is None) and processing_cfg is not None:
-            group_by = get_nested_val('processing_config', 'group_by')
-        if group_by and group_by.value is not None:
-            group_name = getattr(group_by, 'name', str(group_by))
-            preview_parts.append(f"group_by={group_name}")
-
-        # Input source preview (only if not default)
-        input_source = get_nested_val('processing_config', 'input_source')
-        if input_source:
-            source_name = getattr(input_source, 'name', str(input_source))
-            if source_name != 'PREVIOUS_STEP':
-                preview_parts.append(f"input={source_name}")
-
-        # Config indicators: NAP, FIJI, MAT (via ABC's _build_preview_labels)
-        config_labels = self._build_preview_labels(item=step, config_source=step)
-        if config_labels:
-            preview_parts.append(f"[{','.join(config_labels)}]")
-
-        # Build display text (dirty marker added automatically by ABC)
-        if preview_parts:
-            preview = " | ".join(preview_parts)
-            display_text = f"▶ {step_name}  ({preview})"
-        else:
-            display_text = f"▶ {step_name}"
-
-        return display_text, step_name
+        # Use declarative format from LIST_ITEM_FORMAT
+        styled = self._build_item_display_from_format(
+            item=step,
+            item_name=step_name,
+        )
+        return styled, step_name
 
     def _create_step_tooltip(self, step: FunctionStep) -> str:
         """Create detailed tooltip for a step showing all constructor values."""
@@ -323,16 +326,25 @@ class PipelineEditorWidget(AbstractManagerWidget):
                 # Generic fallback for unknown config types
                 return f"• {config_attr.replace('_', ' ').title()}: Enabled"
 
-        # Use the unified preview field API to get config attributes
-        from openhcs.pyqt_gui.widgets.config_preview_formatters import CONFIG_INDICATORS
-        for config_attr in CONFIG_INDICATORS.keys():
-            if hasattr(step, config_attr):
-                config = getattr(step, config_attr, None)
-                if config:
-                    # Check if config has 'enabled' field - if so, check it; otherwise just check existence
-                    should_show = config.enabled if hasattr(config, 'enabled') else True
-                    if should_show:
-                        config_details.append(format_config_detail(config_attr, config))
+        # Use registry to discover preview configs - iterate step's fields
+        from dataclasses import fields, is_dataclass
+        if is_dataclass(step):
+            for f in fields(step):
+                config = object.__getattribute__(step, f.name)
+                if config is None:
+                    continue
+                config_type = type(config)
+                # Check if type is in registry (or any base)
+                in_registry = config_type in PREVIEW_LABEL_REGISTRY or any(
+                    b in PREVIEW_LABEL_REGISTRY for b in config_type.__mro__[1:]
+                )
+                if not in_registry:
+                    continue
+                # Check enabled field if exists
+                if is_dataclass(config) and 'enabled' in {ff.name for ff in fields(config)}:
+                    if not config.enabled:
+                        continue
+                config_details.append(format_config_detail(f.name, config))
 
         if config_details:
             tooltip_lines.append("")  # Empty line separator
@@ -648,6 +660,18 @@ class PipelineEditorWidget(AbstractManagerWidget):
         plate_scope = self.current_plate or "no_plate"
         return ScopeTokenService.build_scope_id(plate_scope, step)
 
+    # ========== Time-Travel Hooks (ABC overrides) ==========
+
+    def _get_item_insert_index(self, item: Any, scope_key: str) -> Optional[int]:
+        """Get correct position for step re-insertion during time-travel."""
+        # Token format is e.g. "functionstep_3" - parse index from it
+        token = getattr(item, '_scope_token', None)
+        if token:
+            parts = token.rsplit('_', 1)
+            if len(parts) == 2 and parts[1].isdigit():
+                return min(int(parts[1]), len(self.pipeline_steps))
+        return None
+
     def _normalize_step_scope_tokens(self) -> None:
         """Ensure all steps have tokens and are registered."""
         plate_scope = self.current_plate or "no_plate"
@@ -672,7 +696,7 @@ class PipelineEditorWidget(AbstractManagerWidget):
             object_instance=step,
             scope_id=scope_id,
             parent_state=ObjectStateRegistry.get_by_scope(str(self.current_plate)) if self.current_plate else None,
-            exclude_params=['func'],  # Exclude func - handled separately by FunctionPane
+            # func is hidden from ParameterFormManager via _ui_special_fields but included in ObjectState
         )
         ObjectStateRegistry.register(state)
         logger.debug(f"Registered ObjectState for step: {scope_id}")
@@ -694,10 +718,7 @@ class PipelineEditorWidget(AbstractManagerWidget):
 
     def _refresh_step_items_by_index(self, indices: Iterable[int], live_context_snapshot=None) -> None:
         """Refresh specific step items by index. Uses ObjectState for values."""
-        if not indices:
-            return
-
-        if not self.current_plate:
+        if not indices or not self.current_plate:
             return
 
         for step_index in sorted(set(indices)):
@@ -707,12 +728,13 @@ class PipelineEditorWidget(AbstractManagerWidget):
             if item is None:
                 continue
             step = self.pipeline_steps[step_index]
-            display_text, _ = self.format_item_for_display(step)  # No snapshot needed
+            display_text, _ = self.format_item_for_display(step)
             if item.text() != display_text:
                 item.setText(display_text)
             item.setData(Qt.ItemDataRole.UserRole, step_index)
             item.setData(Qt.ItemDataRole.UserRole + 1, not step.enabled)
             item.setToolTip(self._create_step_tooltip(step))
+            self._set_item_styling_roles(item, display_text, step)  # ABC helper
 
     # ========== UI Helper Methods ==========
 

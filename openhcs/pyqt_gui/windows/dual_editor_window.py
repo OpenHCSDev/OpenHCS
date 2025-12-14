@@ -362,8 +362,9 @@ class DualEditorWindow(BaseFormDialog):
         # Connect parameter changes - use form manager signal for immediate response
         self.step_editor.form_manager.parameter_changed.connect(self.on_form_parameter_changed)
 
-        # CRITICAL: Connect context_changed signal for cross-window updates from code editor
-        self.step_editor.form_manager.context_changed.connect(self._on_step_context_changed)
+        # NOTE: context_changed subscription REMOVED - FunctionListEditorWidget now subscribes
+        # directly to ObjectState.on_resolved_changed, which is the proper mechanism for
+        # reacting to resolved value changes from ANY ancestor (PipelineConfig, GlobalPipelineConfig)
 
         # Subscribe to dirty state changes for window title updates
         self._dirty_title_callback = self._update_window_title
@@ -420,26 +421,17 @@ class DualEditorWindow(BaseFormDialog):
                 pass  # Use original if refresh fails
 
         self.editing_step.func = current_pattern
+
+        # CRITICAL: Also update ObjectState so list item preview updates in real-time
+        # The step_editor's state tracks 'func' parameter - update it with the new pattern
+        if hasattr(self, 'step_editor') and self.step_editor and hasattr(self.step_editor, 'state'):
+            state = self.step_editor.state
+            if state and 'func' in state.parameters:
+                state.update_parameter('func', current_pattern)
+                logger.debug(f"Updated ObjectState 'func' parameter for real-time preview")
+
         self.detect_changes()
         logger.debug(f"Function pattern changed: {current_pattern}")
-
-    def _on_step_context_changed(self, scope_id: str, field_path: str):
-        """Handle context change from step editor.
-
-        CRITICAL: This is called when:
-        1. Code editor saves (updates step instance)
-        2. Cross-window refresh (placeholders update due to PipelineConfig/GlobalPipelineConfig changes)
-        3. Reset button clicked (placeholders update to show inherited values)
-
-        We need to refresh the function editor's component button to show the new resolved group_by value.
-        """
-        # Refresh function editor from step context (updates component button with resolved group_by)
-        if hasattr(self, 'func_editor') and self.func_editor is not None:
-            self.func_editor.refresh_from_step_context()
-
-        # Detect changes
-        self.detect_changes()
-        logger.debug(f"Step context changed - scope={scope_id}, field={field_path}")
 
     def _get_event_bus(self):
         """Get the global event bus from the service adapter.
@@ -1113,6 +1105,17 @@ class DualEditorWindow(BaseFormDialog):
                 return
 
         self.step_cancelled.emit()
+
+        # CRITICAL: Before restore_saved() is called by super(), get the saved func value
+        # so we can reset the editing_step and func_editor to match
+        if hasattr(self, 'step_editor') and self.step_editor and hasattr(self.step_editor, 'state'):
+            state = self.step_editor.state
+            if state and 'func' in state._saved_parameters:
+                saved_func = state._saved_parameters['func']
+                # Restore editing_step.func to saved value (undo any live changes)
+                self.editing_step.func = saved_func
+                logger.debug(f"Restored editing_step.func to saved value")
+
         logger.info("🔍 DualEditorWindow: About to call super().reject()")
         super().reject()  # BaseFormDialog handles unregistration
 

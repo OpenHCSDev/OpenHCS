@@ -813,6 +813,25 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, FlashMixin, metacla
         for nested_manager in self.nested_managers.values():
             nested_manager._refresh_field_in_tree(field_name)
 
+    def refresh_widgets_from_state(self):
+        """Refresh all widget values from state.parameters.
+
+        Called during time-travel to sync Qt widgets with restored ObjectState.
+        """
+        from openhcs.ui.shared.widget_protocols import ValueSettable
+
+        for param_name, widget in self.widgets.items():
+            if isinstance(widget, ValueSettable):
+                # Build full dotted path
+                dotted_path = f'{self.field_prefix}.{param_name}' if self.field_prefix else param_name
+                value = self.state.parameters.get(dotted_path)
+                if value is not None:
+                    self._widget_service.update_widget_value(widget, value, param_name, False, self)
+
+        # Recurse into nested managers
+        for nested_manager in self.nested_managers.values():
+            nested_manager.refresh_widgets_from_state()
+
     # ==================== GROUPBOX FLASH ANIMATION (FlashMixin) ====================
 
     def _on_resolved_values_changed(self, changed_paths: Set[str]):
@@ -824,13 +843,23 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, FlashMixin, metacla
         LEAF FLASH: For each changed path, we use INVERSE masking - flash the groupbox
         INCLUDING all sibling fields, but mask out the specific changed widget.
         This highlights "all fields that inherited the change".
+
+        TIME-TRAVEL: When _in_time_travel flag is set, also refresh widget values
+        for the changed paths (since user didn't type - we need to sync widgets).
         """
         if self._parent_manager is not None:
             return  # Only root manager handles this
 
+        from openhcs.config_framework.object_state import ObjectStateRegistry
+
         logger.debug(f"🔔 CALLBACK_LEAK_DEBUG: _on_resolved_values_changed invoked for {self.field_id}, "
                    f"changed_paths={changed_paths}")
         logger.debug(f"[FLASH] _on_resolved_values_changed: {changed_paths}")
+
+        # TIME-TRAVEL: Refresh widget values for changed paths
+        # (during time-travel, user didn't type - widgets need to be updated from state)
+        if ObjectStateRegistry._in_time_travel:
+            self._refresh_widgets_for_paths(changed_paths)
 
         # For each changed path, register and queue a LEAF flash
         for path in changed_paths:
@@ -840,6 +869,32 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, FlashMixin, metacla
         for path in changed_paths:
             leaf_field = path.split('.')[-1] if '.' in path else path
             self._refresh_field_in_tree(leaf_field)
+
+    def _refresh_widgets_for_paths(self, paths: Set[str]):
+        """Refresh widget values for specific paths from state.parameters.
+
+        Used during time-travel to sync Qt widgets with restored ObjectState.
+        """
+        from openhcs.ui.shared.widget_protocols import ValueSettable
+
+        for path in paths:
+            # Find the widget for this path
+            leaf_field = path.split('.')[-1] if '.' in path else path
+
+            # Check if we have this widget
+            if leaf_field in self.widgets:
+                widget = self.widgets[leaf_field]
+                if isinstance(widget, ValueSettable):
+                    # Use get with sentinel to distinguish "key exists with None value" from "key doesn't exist"
+                    _MISSING = object()
+                    value = self.state.parameters.get(path, _MISSING)
+                    if value is not _MISSING:
+                        # None is a valid value (means "inherit") - don't skip it
+                        self._widget_service.update_widget_value(widget, value, leaf_field, False, self)
+
+        # Recurse into nested managers
+        for nested_manager in self.nested_managers.values():
+            nested_manager._refresh_widgets_for_paths(paths)
 
     def _queue_leaf_flash_for_path(self, path: str) -> None:
         """Queue a leaf flash for a changed path.

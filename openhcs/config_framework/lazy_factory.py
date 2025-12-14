@@ -906,6 +906,14 @@ LAZY_CONFIG_PREFIX = "Lazy"
 # Registry to accumulate all decorations before injection
 _pending_injections = {}
 
+# Preview label registry: Type -> label string
+# Used by UI to auto-discover which configs should appear in list item previews
+PREVIEW_LABEL_REGISTRY: Dict[Type, str] = {}
+
+# Field abbreviations registry: Type -> {field_name: abbreviation}
+# Used by UI to display compact field names in list item previews
+FIELD_ABBREVIATIONS_REGISTRY: Dict[Type, Dict[str, str]] = {}
+
 
 def create_global_default_decorator(target_config_class: Type):
     """
@@ -921,7 +929,7 @@ def create_global_default_decorator(target_config_class: Type):
             'configs_to_inject': []
         }
 
-    def global_default_decorator(cls=None, *, optional: bool = False, inherit_as_none: bool = True, ui_hidden: bool = False):
+    def global_default_decorator(cls=None, *, optional: bool = False, inherit_as_none: bool = True, ui_hidden: bool = False, preview_label: Optional[str] = None, field_abbreviations: Optional[Dict[str, str]] = None):
         """
         Decorator that can be used with or without parameters.
 
@@ -930,6 +938,10 @@ def create_global_default_decorator(target_config_class: Type):
             optional: Whether to wrap the field type with Optional (default: False)
             inherit_as_none: Whether to set all inherited fields to None by default (default: True)
             ui_hidden: Whether to hide from UI (apply decorator but don't inject into global config) (default: False)
+            preview_label: Short label for list item previews (e.g., "NAP", "FIJI", "MAT"). If set,
+                          config will appear in preview when enabled. Registered in PREVIEW_LABEL_REGISTRY.
+            field_abbreviations: Dict mapping field names to abbreviations for compact display.
+                          E.g., {'well_filter': 'wf', 'num_workers': 'W'}. Registered in FIELD_ABBREVIATIONS_REGISTRY.
         """
         def decorator(actual_cls):
             # UNIFIED NONE-FORCING: Single make_dataclass rebuild instead of old 3-stage approach
@@ -952,6 +964,15 @@ def create_global_default_decorator(target_config_class: Type):
             # while being hidden from UI rendering
             if ui_hidden:
                 actual_cls._ui_hidden = True
+
+            # Register preview label for UI list item previews
+            # Allows ABC to auto-discover which configs should appear in preview
+            if preview_label is not None:
+                PREVIEW_LABEL_REGISTRY[actual_cls] = preview_label
+
+            # Register field abbreviations for compact preview display
+            if field_abbreviations is not None:
+                FIELD_ABBREVIATIONS_REGISTRY[actual_cls] = field_abbreviations
 
             # Check if class is abstract (has unimplemented abstract methods)
             # Abstract classes should NEVER be injected into GlobalPipelineConfig

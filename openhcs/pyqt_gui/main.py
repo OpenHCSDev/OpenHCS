@@ -551,6 +551,11 @@ class OpenHCSMainWindow(QMainWindow):
         self.status_bar = self.statusBar()
         self.status_bar.showMessage("OpenHCS PyQt6 GUI Ready")
 
+        # Add time-travel widget to status bar
+        from openhcs.pyqt_gui.widgets.shared.time_travel_widget import TimeTravelWidget
+        self.time_travel_widget = TimeTravelWidget()
+        self.status_bar.addPermanentWidget(self.time_travel_widget)
+
         # Add graph layout toggle button to the right side of status bar
         # Only add if system monitor widget exists and has the method
         if hasattr(self, 'system_monitor') and hasattr(self.system_monitor, 'create_layout_toggle_button'):

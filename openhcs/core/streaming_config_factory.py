@@ -21,7 +21,8 @@ def create_streaming_config(
     display_config_class,
     visualizer_module: str,
     visualizer_class_name: str,
-    extra_fields: dict = None
+    extra_fields: dict = None,
+    preview_label: str = None
 ):
     """
     Factory to create streaming config classes with minimal boilerplate.
@@ -117,8 +118,11 @@ def create_streaming_config(
     
     # Apply decorators
     new_class = dataclass(frozen=True)(new_class)
-    new_class = global_pipeline_config(new_class)
-    
+    if preview_label is not None:
+        new_class = global_pipeline_config(preview_label=preview_label)(new_class)
+    else:
+        new_class = global_pipeline_config(new_class)
+
     return new_class
 
 

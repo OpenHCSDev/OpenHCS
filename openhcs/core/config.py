@@ -140,7 +140,9 @@ class GlobalPipelineConfig:
 # PipelineConfig will be created automatically by the injection system
 # (GlobalPipelineConfig → PipelineConfig by removing "Global" prefix)
 
-
+# Register field abbreviations for GlobalPipelineConfig (can't use decorator on @auto_create_decorator)
+from openhcs.config_framework.lazy_factory import FIELD_ABBREVIATIONS_REGISTRY
+FIELD_ABBREVIATIONS_REGISTRY[GlobalPipelineConfig] = {'num_workers': 'W'}
 
 # Import utilities for dynamic config creation
 from openhcs.utils.enum_factory import create_colormap_enum
@@ -247,7 +249,7 @@ FijiDisplayConfig = global_pipeline_config(ui_hidden=True)(FijiDisplayConfig)
 FijiDisplayConfig._ui_hidden = True
 
 
-@global_pipeline_config
+@global_pipeline_config(field_abbreviations={'well_filter': 'wf', 'well_filter_mode': 'wfm'})
 @dataclass(frozen=True)
 class WellFilterConfig:
     """Base configuration for well filtering functionality."""
@@ -276,7 +278,7 @@ class ZarrConfig:
     """Chunking strategy: WELL (single chunk per well) or FILE (one chunk per file)."""
 
 
-@global_pipeline_config
+@global_pipeline_config(field_abbreviations={'materialization_backend': 'mat', 'intermediate_backend': 'int', 'read_backend': 'read'})
 @dataclass(frozen=True)
 class VFSConfig:
     """Configuration for Virtual File System (VFS) related operations."""
@@ -409,7 +411,7 @@ class ExperimentalAnalysisConfig:
     """Default format to use if auto-detection fails."""
 
 
-@global_pipeline_config
+@global_pipeline_config(field_abbreviations={'output_dir_suffix': 'out', 'global_output_folder': 'gof', 'sub_dir': 'sub'})
 @dataclass(frozen=True)
 class PathPlanningConfig(WellFilterConfig):
     """
@@ -447,7 +449,7 @@ class StepWellFilterConfig(WellFilterConfig):
     #well_filter: Optional[Union[List[str], str, int]] = 1
     pass
 
-@global_pipeline_config
+@global_pipeline_config(preview_label='MAT')
 @dataclass(frozen=True)
 class StepMaterializationConfig(StepWellFilterConfig, PathPlanningConfig):
     """
@@ -544,7 +546,8 @@ NapariStreamingConfig = create_streaming_config(
     backend=Backend.NAPARI_STREAM,
     display_config_class=NapariDisplayConfig,
     visualizer_module='openhcs.runtime.napari_stream_visualizer',
-    visualizer_class_name='NapariStreamVisualizer'
+    visualizer_class_name='NapariStreamVisualizer',
+    preview_label='NAP'
 )
 
 FijiStreamingConfig = create_streaming_config(
@@ -556,7 +559,8 @@ FijiStreamingConfig = create_streaming_config(
     visualizer_class_name='FijiStreamVisualizer',
     extra_fields={
         'fiji_executable_path': (Optional[Path], None)
-    }
+    },
+    preview_label='FIJI'
 )
 
 # Inject all accumulated fields at the end of module loading

@@ -203,19 +203,19 @@ class FieldChangeDispatcher:
 
     def _emit_cross_window(self, root_manager: 'ParameterFormManager', full_path: str, value: Any) -> None:
         """Emit context_changed from root with scope_id and field path."""
+        logger.debug(f"  🔍 _emit_cross_window: checking should_skip_updates() for {root_manager.field_id}")
+        logger.debug(f"    state._in_reset={root_manager.state._in_reset}, state._block_cross_window_updates={root_manager.state._block_cross_window_updates}")
         if root_manager.state.should_skip_updates():
-            if DEBUG_DISPATCHER:
-                logger.warning(f"  🚫 Cross-window BLOCKED: _should_skip_updates()=True for {root_manager.field_id}")
+            logger.warning(f"  🚫 Cross-window BLOCKED: _should_skip_updates()=True for {root_manager.field_id}")
             return
 
         # REMOVED: update_thread_local_global_config() call
         # Thread-local should ONLY be updated on SAVE, not on every keystroke!
         # Descendants (plates, steps) should see the SAVED global config, not unsaved edits.
 
-        if DEBUG_DISPATCHER:
-            logger.info(f"  📡 Emitting cross-window: scope={root_manager.scope_id}, path={full_path}")
-
+        logger.debug(f"  📡 Emitting context_changed: scope={root_manager.scope_id}, path={full_path}")
         root_manager.context_changed.emit(root_manager.scope_id or "", full_path)
+        logger.debug(f"  ✅ context_changed emitted")
 
     def _refresh_single_field(self, manager: 'ParameterFormManager', field_name: str) -> None:
         """Refresh just one field's placeholder in a sibling manager."""

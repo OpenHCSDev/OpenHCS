@@ -81,6 +81,11 @@ class FunctionListEditorWidget(QWidget):
         self.setup_ui()
         self.setup_connections()
 
+        # CRITICAL: Subscribe to step's ObjectState resolved changes for cross-window updates
+        # When PipelineConfig changes group_by, the step's resolved value changes via inheritance,
+        # and we need to refresh the component button to reflect the new value
+        self._subscribe_to_step_state_changes()
+
         logger.debug(f"Function list editor initialized with {len(self.functions)} functions")
 
     def _initialize_pattern_data(self, initial_functions):
@@ -669,33 +674,42 @@ class FunctionListEditorWidget(QWidget):
             groupbox.set_scope_color_scheme(scheme)
 
     def refresh_from_step_context(self) -> None:
-        """Refresh group_by and variable_components from step_instance using lazy resolution.
+        """Refresh group_by and variable_components from ObjectState's LIVE values.
 
-        CRITICAL: This uses the SAME ancestor object collection mechanism as form managers
-        to ensure we see live values from other open windows (PipelineConfig editor, etc.).
+        CRITICAL: Uses ObjectState's get_resolved_value() to get LIVE form values,
+        not saved step_instance values. This ensures the function pattern editor sees
+        the same group_by value that the step editor form shows.
         """
-        if not hasattr(self, 'step_instance') or self.step_instance is None:
-            logger.warning("No step_instance available for context refresh")
-            return
-
-        from openhcs.config_framework.context_manager import build_context_stack
         from openhcs.config_framework.object_state import ObjectStateRegistry
 
         try:
-            # Get ancestor objects for context stack
+            # Get ObjectState for this step from registry
             my_scope = getattr(self, 'scope_id', '') or ''
-            ancestor_objects = ObjectStateRegistry.get_ancestor_objects(my_scope)
+            state = ObjectStateRegistry.get_by_scope(my_scope)
 
-            # Build context stack with ancestors
-            stack = build_context_stack(
-                object_instance=self.step_instance,
-                ancestor_objects=ancestor_objects,
-            )
+            logger.info(f"🔍 FUNC_EDITOR refresh_from_step_context: my_scope={my_scope!r}, state={state is not None}")
 
-            with stack:
-                # Resolve group_by and variable_components with full context stack
-                effective_group_by = self.step_instance.processing_config.group_by
-                variable_components = self.step_instance.processing_config.variable_components or []
+            if state:
+                # Use LIVE resolved values from ObjectState (includes unsaved form changes)
+                effective_group_by = state.get_resolved_value('processing_config.group_by')
+                variable_components = state.get_resolved_value('processing_config.variable_components') or []
+                logger.info(f"🔍 FUNC_EDITOR: Got LIVE values from ObjectState: group_by={effective_group_by}, current={self.current_group_by}")
+            else:
+                # Fallback to step_instance if no ObjectState (shouldn't happen in normal use)
+                logger.warning(f"No ObjectState for scope {my_scope}, falling back to step_instance")
+                if not hasattr(self, 'step_instance') or self.step_instance is None:
+                    logger.warning("No step_instance available for context refresh")
+                    return
+
+                from openhcs.config_framework.context_manager import build_context_stack
+                ancestor_objects = ObjectStateRegistry.get_ancestor_objects(my_scope)
+                stack = build_context_stack(
+                    object_instance=self.step_instance,
+                    ancestor_objects=ancestor_objects,
+                )
+                with stack:
+                    effective_group_by = self.step_instance.processing_config.group_by
+                    variable_components = self.step_instance.processing_config.variable_components or []
 
             # Update state
             self.current_group_by = effective_group_by
@@ -706,6 +720,44 @@ class FunctionListEditorWidget(QWidget):
 
         except Exception as e:
             logger.error(f"❌ Failed to refresh from step context: {e}", exc_info=True)
+
+    def _subscribe_to_step_state_changes(self) -> None:
+        """Subscribe to step's ObjectState for resolved value changes.
+
+        CRITICAL: When PipelineConfig's group_by changes, the step's resolved group_by
+        changes via inheritance. We need to refresh the component button to reflect this.
+        This is the proper cross-window update mechanism - subscribe to ObjectState,
+        not to form_manager signals (which only fire for direct edits in the same form).
+        """
+        if not self.scope_id:
+            logger.debug("No scope_id, skipping ObjectState subscription")
+            return
+
+        state = ObjectStateRegistry.get_by_scope(self.scope_id)
+        if not state:
+            logger.warning(f"No ObjectState for scope {self.scope_id}, skipping subscription")
+            return
+
+        def on_resolved_changed(changed_paths: set) -> None:
+            """Called when step's resolved values change."""
+            # Check if group_by or variable_components changed
+            relevant_paths = {'processing_config.group_by', 'processing_config.variable_components'}
+            if changed_paths & relevant_paths:
+                logger.info(f"🔔 FUNC_EDITOR: ObjectState resolved change detected: {changed_paths & relevant_paths}")
+                self.refresh_from_step_context()
+
+        state.on_resolved_changed(on_resolved_changed)
+        # Store callback reference for cleanup
+        self._resolved_change_callback = on_resolved_changed
+        self._subscribed_state = state
+        logger.info(f"🔔 FUNC_EDITOR: Subscribed to ObjectState resolved changes for scope {self.scope_id}")
+
+        # Cleanup on widget destruction
+        def cleanup_subscription():
+            if hasattr(self, '_resolved_change_callback') and hasattr(self, '_subscribed_state'):
+                self._subscribed_state.off_resolved_changed(self._resolved_change_callback)
+                logger.debug(f"🔔 FUNC_EDITOR: Unsubscribed from ObjectState on destruction")
+        self.destroyed.connect(cleanup_subscription)
 
     def set_effective_group_by(self, group_by: Optional[GroupBy]) -> None:
         """Accept authoritative GroupBy from parent (step.processing_config) and refresh UI.
@@ -902,7 +954,10 @@ class FunctionListEditorWidget(QWidget):
     def _refresh_component_button(self):
         """Refresh the component button text and state (mirrors Textual TUI)."""
         if hasattr(self, 'component_btn'):
-            self.component_btn.setText(self._get_component_button_text())
+            new_text = self._get_component_button_text()
+            old_text = self.component_btn.text()
+            logger.info(f"🔄 _refresh_component_button: old={old_text!r}, new={new_text!r}, group_by={self.current_group_by}")
+            self.component_btn.setText(new_text)
             self.component_btn.setEnabled(not self._is_component_button_disabled())
 
         # Also update navigation buttons when component button is refreshed
@@ -967,10 +1022,14 @@ class FunctionListEditorWidget(QWidget):
         """Update pattern_data based on current functions and mode (mirrors Textual TUI)."""
         if self.is_dict_mode and self.selected_channel is not None:
             # Save current functions to the selected channel
-            if not isinstance(self.pattern_data, dict):
-                self.pattern_data = {}
+            # CRITICAL: Create a NEW dict so ObjectState equality check detects changes
+            # If we modify the same dict object, current_value == value is always True
+            old_pattern = self.pattern_data if isinstance(self.pattern_data, dict) else {}
+            new_pattern = dict(old_pattern)  # Shallow copy of dict
+            new_pattern[self.selected_channel] = self.functions.copy()
+            self.pattern_data = new_pattern
             logger.debug(f"Saving {len(self.functions)} functions to channel {self.selected_channel}")
-            self.pattern_data[self.selected_channel] = self.functions.copy()
         else:
-            # List mode - pattern_data is just the functions list
-            self.pattern_data = self.functions
+            # List mode - pattern_data is a COPY of functions list
+            # CRITICAL: Must be a copy so ObjectState equality check detects changes
+            self.pattern_data = self.functions.copy()
