@@ -1952,16 +1952,39 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
     # === Selection Hooks (declarative via ITEM_HOOKS) ===
 
     def _handle_selection_changed(self, items: List[Any]) -> None:
-        """Handle selection change. Interprets ITEM_HOOKS for attr/signal."""
+        """Handle selection change. Interprets ITEM_HOOKS for attr/signal.
+
+        NOTE: During time-travel, we update the selection attr but DON'T emit
+        the signal. This prevents cascading side-effects like set_current_plate()
+        clearing pipeline_steps before step unregister callbacks can save to limbo.
+        """
+        from openhcs.config_framework.object_state import ObjectStateRegistry
+
         item = items[0]
         item_id = self._get_item_id(item)
         setattr(self, self.ITEM_HOOKS['selection_attr'], item_id)
+
+        # Don't emit selection signal during time-travel to prevent side-effects
+        if ObjectStateRegistry._in_time_travel:
+            return
+
         signal = getattr(self, self.ITEM_HOOKS['selection_signal'])
         signal.emit(item_id if self.ITEM_HOOKS.get('selection_emit_id', True) else item)
 
     def _handle_selection_cleared(self) -> None:
-        """Handle selection cleared. Interprets ITEM_HOOKS for attr/signal/clear_value."""
+        """Handle selection cleared. Interprets ITEM_HOOKS for attr/signal/clear_value.
+
+        NOTE: During time-travel, we update the selection attr but DON'T emit
+        the signal. This prevents cascading side-effects.
+        """
+        from openhcs.config_framework.object_state import ObjectStateRegistry
+
         setattr(self, self.ITEM_HOOKS['selection_attr'], '')
+
+        # Don't emit selection signal during time-travel to prevent side-effects
+        if ObjectStateRegistry._in_time_travel:
+            return
+
         signal = getattr(self, self.ITEM_HOOKS['selection_signal'])
         signal.emit(self.ITEM_HOOKS.get('selection_clear_value', ''))
 

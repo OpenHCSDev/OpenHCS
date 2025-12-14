@@ -958,6 +958,8 @@ class PipelineEditorWidget(AbstractManagerWidget):
         self.pipeline_changed.emit(self.pipeline_steps)
         # Broadcast to global event bus so open step editors update their colors
         self._broadcast_to_event_bus('pipeline', self.pipeline_steps)
+        # Record snapshot for time-travel (reordering is a significant state change)
+        ObjectStateRegistry.record_snapshot("reorder steps", scope_id=str(self.current_plate))
 
     # === Config Resolution Hook (domain-specific) ===
 

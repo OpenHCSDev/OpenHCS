@@ -409,8 +409,8 @@ class ProvenanceLabel(QLabel):
                 logger.info(f"✅ Navigated to source: scope={source_scope_id}, path={target_path}")
                 return
 
-            # Window not open - create it based on scope type
-            window = self._create_window_for_scope(source_scope_id)
+            # Window not open - create via shared infrastructure
+            window = WindowManager.create_window_for_scope(source_scope_id)
             if window:
                 # Navigate to field after window is shown
                 from PyQt6.QtCore import QTimer
@@ -583,153 +583,7 @@ class ProvenanceLabel(QLabel):
                 return child
         return None
 
-    def _create_window_for_scope(self, scope_id: str):
-        """Create and show a window for the given scope_id.
-
-        Scope ID format:
-        - "" (empty string): GlobalPipelineConfig
-        - "/path/to/plate": PipelineConfig for that plate
-        - "/path/to/plate::step_N": DualEditorWindow → Step Settings tab
-        - "/path/to/plate::step_N::func_M": DualEditorWindow → Function Pattern tab
-        """
-        # Determine window type based on scope_id pattern
-        if scope_id == "":
-            return self._create_global_config_window()
-        elif "::" not in scope_id:
-            return self._create_plate_config_window(scope_id)
-        else:
-            return self._create_step_editor_window(scope_id)
-
-    def _create_global_config_window(self):
-        """Create GlobalPipelineConfig editor window.
-
-        Creates window directly and shows it. BaseFormDialog.show() handles
-        singleton logic via is_open() check - no need for show_or_focus().
-        """
-        from openhcs.pyqt_gui.windows.config_window import ConfigWindow
-        from openhcs.core.config import GlobalPipelineConfig
-        from openhcs.config_framework.global_config import get_current_global_config
-
-        current_config = get_current_global_config(GlobalPipelineConfig) or GlobalPipelineConfig()
-        window = ConfigWindow(
-            config_class=GlobalPipelineConfig,
-            current_config=current_config,
-            on_save_callback=self._get_global_save_callback(),
-            scope_id=""
-        )
-        window.show()
-        window.raise_()
-        window.activateWindow()
-        return window
-
-    def _create_plate_config_window(self, scope_id: str):
-        """Create PipelineConfig editor window for a plate.
-
-        Creates window directly and shows it. BaseFormDialog.show() handles
-        singleton logic via is_open() check - no need for show_or_focus().
-        """
-        from openhcs.pyqt_gui.windows.config_window import ConfigWindow
-        from openhcs.core.config import PipelineConfig
-
-        plate_manager = self._find_plate_manager()
-        if not plate_manager:
-            logger.warning("Could not find PlateManager for plate config window")
-            return None
-
-        orchestrator = plate_manager.orchestrators.get(scope_id)
-        if not orchestrator:
-            logger.warning(f"No orchestrator found for scope: {scope_id}")
-            return None
-
-        window = ConfigWindow(
-            config_class=PipelineConfig,
-            current_config=orchestrator.pipeline_config,
-            on_save_callback=None,  # Read-only navigation for provenance
-            scope_id=scope_id
-        )
-        window.show()
-        window.raise_()
-        window.activateWindow()
-        return window
-
-    def _create_step_editor_window(self, scope_id: str):
-        """Create DualEditorWindow for step or function scope.
-
-        Scope format: "/plate/path::step_N" or "/plate/path::step_N::func_M"
-
-        Creates window directly and shows it. BaseFormDialog.show() handles
-        singleton logic via is_open() check - no need for show_or_focus().
-        """
-        from openhcs.pyqt_gui.windows.dual_editor_window import DualEditorWindow
-
-        parts = scope_id.split("::")
-        if len(parts) < 2:
-            logger.warning(f"Invalid step scope_id format: {scope_id}")
-            return None
-
-        plate_path = parts[0]
-        step_token = parts[1]  # e.g., "step_0" or "functionstep_0"
-        is_function_scope = len(parts) >= 3
-
-        plate_manager = self._find_plate_manager()
-        if not plate_manager:
-            logger.warning("Could not find PlateManager for step editor")
-            return None
-
-        orchestrator = plate_manager.orchestrators.get(plate_path)
-        if not orchestrator:
-            logger.warning(f"No orchestrator found for plate: {plate_path}")
-            return None
-
-        # Find step by token
-        step = self._find_step_by_token(plate_manager, plate_path, step_token)
-        if not step:
-            logger.warning(f"Could not find step with token: {step_token}")
-            return None
-
-        window = DualEditorWindow(
-            step_data=step,
-            is_new=False,
-            on_save_callback=None,  # Read-only navigation for provenance
-            orchestrator=orchestrator,
-            parent=self.window()
-        )
-        # Switch to Function Pattern tab if this is a function scope
-        if is_function_scope and window.tab_widget:
-            window.tab_widget.setCurrentIndex(1)
-
-        window.show()
-        window.raise_()
-        window.activateWindow()
-        return window
-
-    def _find_step_by_token(self, plate_manager, plate_path: str, step_token: str):
-        """Find a step in the pipeline by its scope token."""
-        # Get pipeline steps from plate_manager's plate_pipelines
-        pipeline_steps = plate_manager.plate_pipelines.get(plate_path, [])
-
-        for step in pipeline_steps:
-            # Check if step has matching token
-            token = getattr(step, '_scope_token', None)
-            if token == step_token:
-                return step
-
-            # Also check _pipeline_scope_token (older attribute name)
-            token2 = getattr(step, '_pipeline_scope_token', None)
-            if token2 == step_token:
-                return step
-
-        logger.debug(f"Step token '{step_token}' not found in {len(pipeline_steps)} steps")
-        return None
-
-    def _get_global_save_callback(self):
-        """Get save callback for global config that updates thread-local storage."""
-        def handle_save(new_config):
-            from openhcs.config_framework.global_config import set_global_config_for_editing
-            from openhcs.core.config import GlobalPipelineConfig
-            set_global_config_for_editing(GlobalPipelineConfig, new_config)
-            logger.info("Global config saved via provenance navigation")
-        return handle_save
+    # Window creation now handled by WindowManager.create_window_for_scope()
 
 
 class LabelWithHelp(QWidget):

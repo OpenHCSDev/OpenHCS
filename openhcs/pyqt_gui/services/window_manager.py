@@ -351,3 +351,177 @@ class WindowManager:
             logger.debug(f"[WINDOW_MGR] Cleaned up stale reference: {scope_id}")
 
         return valid_scopes
+
+    # ========== Window Creation for Scope (Shared Infrastructure) ==========
+
+    @classmethod
+    def create_window_for_scope(cls, scope_id: str, object_state: Optional['ObjectState'] = None) -> Optional[QWidget]:
+        """Create and show a window for the given scope_id.
+
+        This is the single source of truth for scope→window creation.
+        Used by both provenance navigation and time-travel restore.
+
+        Scope ID format:
+        - "" (empty string): GlobalPipelineConfig
+        - "/path/to/plate": PipelineConfig for that plate
+        - "/path/to/plate::step_N": DualEditorWindow → Step Settings tab
+        - "/path/to/plate::step_N::func_M": DualEditorWindow → Function Pattern tab
+
+        Args:
+            scope_id: Scope identifier
+            object_state: Optional ObjectState (used for time-travel to get object_instance)
+
+        Returns:
+            The created window, or None if creation failed
+        """
+        if scope_id == "":
+            return cls._create_global_config_window()
+        elif "::" not in scope_id:
+            return cls._create_plate_config_window(scope_id)
+        else:
+            return cls._create_step_editor_window(scope_id, object_state)
+
+    @classmethod
+    def _create_global_config_window(cls) -> Optional[QWidget]:
+        """Create GlobalPipelineConfig editor window."""
+        from openhcs.pyqt_gui.windows.config_window import ConfigWindow
+        from openhcs.core.config import GlobalPipelineConfig
+        from openhcs.config_framework.global_config import get_current_global_config, set_global_config_for_editing
+
+        current_config = get_current_global_config(GlobalPipelineConfig) or GlobalPipelineConfig()
+
+        def handle_save(new_config):
+            set_global_config_for_editing(GlobalPipelineConfig, new_config)
+            logger.info("Global config saved via window")
+
+        window = ConfigWindow(
+            config_class=GlobalPipelineConfig,
+            current_config=current_config,
+            on_save_callback=handle_save,
+            scope_id=""
+        )
+        window.show()
+        window.raise_()
+        window.activateWindow()
+        return window
+
+    @classmethod
+    def _create_plate_config_window(cls, scope_id: str) -> Optional[QWidget]:
+        """Create PipelineConfig editor window for a plate."""
+        from openhcs.pyqt_gui.windows.config_window import ConfigWindow
+        from openhcs.core.config import PipelineConfig
+
+        plate_manager = cls._find_plate_manager()
+        if not plate_manager:
+            logger.warning("Could not find PlateManager for plate config window")
+            return None
+
+        orchestrator = plate_manager.orchestrators.get(scope_id)
+        if not orchestrator:
+            logger.warning(f"No orchestrator found for scope: {scope_id}")
+            return None
+
+        window = ConfigWindow(
+            config_class=PipelineConfig,
+            current_config=orchestrator.pipeline_config,
+            on_save_callback=None,  # ObjectState handles save
+            scope_id=scope_id
+        )
+        window.show()
+        window.raise_()
+        window.activateWindow()
+        return window
+
+    @classmethod
+    def _create_step_editor_window(cls, scope_id: str, object_state: Optional['ObjectState'] = None) -> Optional[QWidget]:
+        """Create DualEditorWindow for step or function scope.
+
+        Args:
+            scope_id: Step or function scope
+            object_state: If provided, get step from object_instance (for time-travel)
+        """
+        from openhcs.pyqt_gui.windows.dual_editor_window import DualEditorWindow
+
+        parts = scope_id.split("::")
+        if len(parts) < 2:
+            logger.warning(f"Invalid step scope_id format: {scope_id}")
+            return None
+
+        plate_path = parts[0]
+        step_token = parts[1]
+        is_function_scope = len(parts) >= 3
+        step_scope_id = f"{parts[0]}::{parts[1]}"
+
+        plate_manager = cls._find_plate_manager()
+        if not plate_manager:
+            logger.warning("Could not find PlateManager for step editor")
+            return None
+
+        orchestrator = plate_manager.orchestrators.get(plate_path)
+        if not orchestrator:
+            logger.warning(f"No orchestrator found for plate: {plate_path}")
+            return None
+
+        # Get step: from ObjectState if provided, else find by token
+        step = None
+        if object_state:
+            # Time-travel: use object_instance directly
+            if is_function_scope:
+                # Function scope - get parent step's ObjectState
+                from openhcs.config_framework.object_state import ObjectStateRegistry
+                step_state = ObjectStateRegistry.get_by_scope(step_scope_id)
+                step = step_state.object_instance if step_state else None
+            else:
+                step = object_state.object_instance
+
+        if not step:
+            # Provenance navigation: find by token
+            step = cls._find_step_by_token(plate_manager, plate_path, step_token)
+
+        if not step:
+            logger.warning(f"Could not find step for scope: {scope_id}")
+            return None
+
+        window = DualEditorWindow(
+            step_data=step,
+            is_new=False,
+            on_save_callback=None,  # ObjectState handles save
+            orchestrator=orchestrator,
+            parent=None
+        )
+        if is_function_scope and window.tab_widget:
+            window.tab_widget.setCurrentIndex(1)
+
+        window.show()
+        window.raise_()
+        window.activateWindow()
+        return window
+
+    @classmethod
+    def _find_plate_manager(cls):
+        """Find PlateManagerWidget from main window."""
+        from PyQt6.QtWidgets import QApplication
+        from openhcs.pyqt_gui.widgets.plate_manager import PlateManagerWidget
+
+        for widget in QApplication.topLevelWidgets():
+            if hasattr(widget, 'floating_windows'):
+                plate_dialog = widget.floating_windows.get("plate_manager")
+                if plate_dialog:
+                    return plate_dialog.findChild(PlateManagerWidget)
+        return None
+
+    @classmethod
+    def _find_step_by_token(cls, plate_manager, plate_path: str, step_token: str):
+        """Find a step in the pipeline by its scope token."""
+        pipeline_steps = plate_manager.plate_pipelines.get(plate_path, [])
+
+        for step in pipeline_steps:
+            token = getattr(step, '_scope_token', None)
+            if token == step_token:
+                return step
+            token2 = getattr(step, '_pipeline_scope_token', None)
+            if token2 == step_token:
+                return step
+
+        logger.debug(f"Step token '{step_token}' not found in {len(pipeline_steps)} steps")
+        return None

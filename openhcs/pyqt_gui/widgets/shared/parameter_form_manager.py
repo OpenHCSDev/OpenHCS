@@ -878,8 +878,19 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, FlashMixin, metacla
         from openhcs.ui.shared.widget_protocols import ValueSettable
 
         for path in paths:
-            # Find the widget for this path
-            leaf_field = path.split('.')[-1] if '.' in path else path
+            # Extract path prefix and leaf field
+            # e.g., "step_well_filter_config.well_filter" -> prefix="step_well_filter_config", leaf="well_filter"
+            if '.' in path:
+                path_prefix = path.rsplit('.', 1)[0]
+                leaf_field = path.rsplit('.', 1)[1]
+            else:
+                path_prefix = ""
+                leaf_field = path
+
+            # CRITICAL: Only update widget if this path belongs to this manager
+            # Path prefix must match manager's field_prefix exactly
+            if path_prefix != self.field_prefix:
+                continue  # This path doesn't belong to this manager
 
             # Check if we have this widget
             if leaf_field in self.widgets:
