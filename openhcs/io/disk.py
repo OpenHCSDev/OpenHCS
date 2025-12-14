@@ -524,13 +524,11 @@ class DiskStorageBackend(StorageBackend):
             TypeError: If directory is not a valid path type
             ValueError: If there is an error creating the directory
         """
-        # 🔒 Clause 17 — VFS Boundary Enforcement
         try:
             disk_directory = Path(directory)
             disk_directory.mkdir(parents=True, exist_ok=True)
             return directory
         except OSError as e:
-            # 🔒 Clause 65 — No Fallback Logic
             # Propagate the error with additional context
             raise ValueError(f"Error creating directory {disk_directory}: {e}") from e
 

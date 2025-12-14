@@ -387,7 +387,6 @@ class OperaPhenixFilenameParser(FilenameParser):
         Returns:
             bool: True if this parser can parse the filename, False otherwise
         """
-        # 🔒 Clause 17 — VFS Boundary Method
         # This is a string operation that doesn't perform actual file I/O
         # Extract just the basename
         basename = os.path.basename(filename)
@@ -405,7 +404,6 @@ class OperaPhenixFilenameParser(FilenameParser):
         Returns:
             dict or None: Dictionary with extracted components or None if parsing fails.
         """
-        # 🔒 Clause 17 — VFS Boundary Method
         # This is a string operation that doesn't perform actual file I/O
         basename = os.path.basename(filename)
         logger.debug("OperaPhenixFilenameParser attempting to parse basename: '%s'", basename)
