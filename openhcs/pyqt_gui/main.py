@@ -873,7 +873,8 @@ class OpenHCSMainWindow(QMainWindow):
         for scope_id, state in dirty_states:
             # Only reopen window for the scope that actually triggered the snapshot
             # Skip cascade-dirty states from MRO inheritance
-            if triggering_scope and scope_id != triggering_scope:
+            # Note: Use 'is not None' because '' (empty string = global scope) is a valid triggering_scope
+            if triggering_scope is not None and scope_id != triggering_scope:
                 continue
 
             # Check if window is already open

@@ -8,7 +8,7 @@ import json
 import logging
 from dataclasses import dataclass, fields, is_dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Sequence, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import pandas as pd
 
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 class MaterializationSpec:
     """
     Declarative specification for materializing analysis outputs.
-    
+
     Attributes:
         format: Output format ('csv', 'json', 'dual')
         filename_suffix: Suffix to append to base path (e.g., '_counts.csv')
@@ -30,6 +30,7 @@ class MaterializationSpec:
         summary_fields: For 'dual' format, fields to include in JSON summary
         flatten_lists: If True, expand list fields into separate rows
         include_metadata: If True, add processing metadata to output
+        analysis_type: Type identifier for this analysis (e.g., 'cell_counts', 'roi_detection')
     """
     format: str  # 'csv', 'json', 'dual'
     filename_suffix: str = ""
@@ -37,6 +38,7 @@ class MaterializationSpec:
     summary_fields: Optional[List[str]] = None
     flatten_lists: bool = True
     include_metadata: bool = True
+    analysis_type: Optional[str] = None
     
 
 def _extract_fields(item: Any, field_names: Optional[List[str]] = None) -> Dict[str, Any]:
@@ -163,8 +165,8 @@ def _materialize_json(
         "results": results
     }
     
-    if spec.include_metadata:
-        summary["analysis_type"] = "custom_analysis"
+    if spec.include_metadata and spec.analysis_type:
+        summary["analysis_type"] = spec.analysis_type
     
     json_content = json.dumps(summary, indent=2, default=str)
     
@@ -212,8 +214,8 @@ def _materialize_dual(
         "results": summary_data
     }
     
-    if spec.include_metadata:
-        summary["analysis_type"] = "custom_analysis"
+    if spec.include_metadata and spec.analysis_type:
+        summary["analysis_type"] = spec.analysis_type
     
     # Save to all backends
     for backend in backends:
@@ -235,43 +237,52 @@ def _materialize_dual(
 
 def csv_materializer(
     fields: Optional[List[str]] = None,
-    filename_suffix: str = ".csv"
+    filename_suffix: str = ".csv",
+    analysis_type: Optional[str] = None
 ) -> Callable:
     """
     Create a CSV materializer.
-    
+
     Args:
         fields: Field names to extract. None = all fields.
         filename_suffix: Suffix for output file (default: '.csv')
-    
+        analysis_type: Type identifier for this analysis (e.g., 'cell_counts')
+
     Example:
-        @special_outputs(("counts", csv_materializer(fields=["count", "area"])))
+        @special_outputs(("counts", csv_materializer(
+            fields=["count", "area"],
+            analysis_type="cell_counts"
+        )))
         def analyze(image):
             return processed, [CountResult(count=10, area=50.0)]
     """
     spec = MaterializationSpec(
         format='csv',
         filename_suffix=filename_suffix,
-        fields=fields
+        fields=fields,
+        analysis_type=analysis_type
     )
     return create_materializer(spec)
 
 
 def json_materializer(
     fields: Optional[List[str]] = None,
-    filename_suffix: str = ".json"
+    filename_suffix: str = ".json",
+    analysis_type: Optional[str] = None
 ) -> Callable:
     """
     Create a JSON materializer.
-    
+
     Args:
         fields: Field names to extract. None = all fields.
         filename_suffix: Suffix for output file (default: '.json')
+        analysis_type: Type identifier for this analysis (e.g., 'roi_detection')
     """
     spec = MaterializationSpec(
         format='json',
         filename_suffix=filename_suffix,
-        fields=fields
+        fields=fields,
+        analysis_type=analysis_type
     )
     return create_materializer(spec)
 
@@ -279,24 +290,27 @@ def json_materializer(
 def dual_materializer(
     fields: Optional[List[str]] = None,
     summary_fields: Optional[List[str]] = None,
-    filename_suffix: str = ""
+    filename_suffix: str = "",
+    analysis_type: Optional[str] = None
 ) -> Callable:
     """
     Create a dual CSV+JSON materializer.
-    
+
     Produces both:
     - {base}.json with summary
     - {base}_details.csv with all data
-    
+
     Args:
         fields: Fields for CSV (None = all)
         summary_fields: Fields for JSON summary (None = same as fields)
         filename_suffix: Base suffix before .json/.csv
+        analysis_type: Type identifier for this analysis (e.g., 'cell_analysis')
     """
     spec = MaterializationSpec(
         format='dual',
         filename_suffix=filename_suffix,
         fields=fields,
-        summary_fields=summary_fields
+        summary_fields=summary_fields,
+        analysis_type=analysis_type
     )
     return create_materializer(spec)
