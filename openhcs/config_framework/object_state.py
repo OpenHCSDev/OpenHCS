@@ -173,8 +173,12 @@ class ObjectStateRegistry:
         key = cls._normalize_scope_id(state.scope_id)
         if key in cls._states:
             obj_type_name = type(state.object_instance).__name__
-            del cls._states[key]
-            logger.debug(f"Unregistered ObjectState: scope={key}")
+            removed_state = cls._states.pop(key)
+
+            # Move to graveyard instead of deleting - enables time travel to past snapshots
+            # that reference this ObjectState. Graveyard persists for session lifetime.
+            cls._graveyard[key] = removed_state
+            logger.debug(f"Unregistered ObjectState: scope={key} (moved to graveyard)")
 
             # Fire callbacks for UI binding
             cls._fire_unregister_callbacks(key, state)
@@ -254,9 +258,11 @@ class ObjectStateRegistry:
 
     @classmethod
     def clear(cls) -> None:
-        """Clear all registered states. For testing only."""
+        """Clear all registered states, limbo, and graveyard. For testing only."""
         cls._states.clear()
-        logger.debug("Cleared all ObjectStates from registry")
+        cls._time_travel_limbo.clear()
+        cls._graveyard.clear()
+        logger.debug("Cleared all ObjectStates from registry, limbo, and graveyard")
 
     # ========== TOKEN MANAGEMENT AND CHANGE NOTIFICATION ==========
 
@@ -559,6 +565,11 @@ class ObjectStateRegistry:
     # When traveling forward or to head, they're restored from here.
     _time_travel_limbo: Dict[str, 'ObjectState'] = {}
 
+    # Graveyard: ObjectStates that were unregistered (deleted) but may be needed for time travel
+    # Unlike limbo (cleared on diverge), graveyard persists for the session lifetime.
+    # This allows time travel to snapshots that reference deleted objects.
+    _graveyard: Dict[str, 'ObjectState'] = {}
+
     # Timelines (branches): Named branches that point to a head snapshot
     # "main" is always created automatically on first snapshot
     # head_id always points to a valid key in _snapshots (guaranteed by construction)
@@ -689,7 +700,9 @@ class ObjectStateRegistry:
                         old_snapshot = cls._snapshots[old_head_id]
                         logger.info(f"⏱️ AUTO-BRANCH: Created '{branch_name}' (was {old_snapshot.label})")
 
-            # Clear limbo when diverging
+            # Move limbo contents to graveyard before clearing - enables time travel
+            # to any snapshot that references these states (even on other branches)
+            cls._graveyard.update(cls._time_travel_limbo)
             cls._time_travel_limbo.clear()
         else:
             # At branch head - parent is current branch's head (if exists)
@@ -792,15 +805,27 @@ class ObjectStateRegistry:
                 cls._fire_unregister_callbacks(scope_key, state)
                 logger.debug(f"⏱️ TIME_TRAVEL: Moved to limbo: {scope_key}")
 
-            # PHASE 2: RE-REGISTER ObjectStates from limbo
+            # PHASE 2: RE-REGISTER ObjectStates from limbo or graveyard
             scopes_to_register = snapshot_scopes - current_scopes
             for scope_key in scopes_to_register:
-                state = cls._time_travel_limbo.pop(scope_key)  # KeyError if bug
+                # Try limbo first (time-travel within session), then graveyard (deleted objects)
+                if scope_key in cls._time_travel_limbo:
+                    state = cls._time_travel_limbo.pop(scope_key)
+                    logger.debug(f"⏱️ TIME_TRAVEL: Restored from limbo: {scope_key}")
+                elif scope_key in cls._graveyard:
+                    state = cls._graveyard.pop(scope_key)
+                    logger.debug(f"⏱️ TIME_TRAVEL: Resurrected from graveyard: {scope_key}")
+                else:
+                    # This should not happen - snapshot references a scope we never had
+                    logger.error(f"⏱️ TIME_TRAVEL: Cannot restore {scope_key} - not in limbo or graveyard")
+                    continue
                 cls._states[scope_key] = state
                 cls._fire_register_callbacks(scope_key, state)
-                logger.debug(f"⏱️ TIME_TRAVEL: Restored from limbo: {scope_key}")
 
             # PHASE 3: RESTORE state for all ObjectStates in snapshot
+            # Track which scopes had actual parameter changes (for PHASE 4)
+            scopes_with_param_changes: Set[str] = set()
+
             for scope_key, state_snap in snapshot.all_states.items():
                 state = cls._states.get(scope_key)
                 if not state:
@@ -817,13 +842,21 @@ class ObjectStateRegistry:
                     if target_live.get(key) != current_live.get(key):
                         changed_paths.add(key)
 
-                # Find changed raw parameters
+                # Find changed raw parameters and track concrete changes
+                has_concrete_param_change = False
                 all_param_keys = set(state_snap.parameters.keys()) | set(current_params.keys())
                 for param_key in all_param_keys:
                     before = current_params.get(param_key)
                     after = state_snap.parameters.get(param_key)
                     if before != after and not (is_dataclass(before) or is_dataclass(after)):
                         changed_paths.add(param_key)
+                        # Track if this is a concrete (non-None) parameter change
+                        if after is not None:
+                            has_concrete_param_change = True
+
+                # Track scopes with concrete parameter changes (for PHASE 4)
+                if has_concrete_param_change:
+                    scopes_with_param_changes.add(scope_key)
 
                 # RESTORE state
                 state._saved_resolved = copy.deepcopy(state_snap.saved_resolved)
@@ -838,14 +871,17 @@ class ObjectStateRegistry:
                         callback(changed_paths)
 
             # PHASE 4: Fire time-travel completion callbacks
-            if cls._on_time_travel_complete_callbacks:
+            # Only for states where time travel restored CONCRETE parameter values.
+            # scopes_with_param_changes already tracks scopes where parameters changed
+            # to concrete (non-None) values during this time travel.
+            if cls._on_time_travel_complete_callbacks and scopes_with_param_changes:
                 dirty_states = [
-                    (scope_key, state)
-                    for scope_key, state in cls._states.items()
-                    if state.dirty_fields
+                    (scope_key, cls._states[scope_key])
+                    for scope_key in scopes_with_param_changes
+                    if scope_key in cls._states
                 ]
                 if dirty_states:
-                    logger.debug(f"⏱️ TIME_TRAVEL: {len(dirty_states)} dirty states")
+                    logger.debug(f"⏱️ TIME_TRAVEL: {len(dirty_states)} states with concrete param changes")
                     for callback in cls._on_time_travel_complete_callbacks:
                         callback(dirty_states, snapshot.triggering_scope)
         finally:
