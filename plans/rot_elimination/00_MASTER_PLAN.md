@@ -25,12 +25,14 @@ else:
 ```
 One path. New system only. Old path deleted.
 
-**DO NOT batch multiple plans into one PR:**
+**DO NOT squash multiple plans into one commit:**
 ```
-# ❌ WRONG: "Efficiency"
-PR: "Implement streaming unification + message protocol + executor extraction"
+# ❌ WRONG: One commit for everything
+commit: "Implement streaming unification + message protocol + executor extraction"
 ```
-One plan per PR. Test after each. Easier to revert if broken.
+One plan per commit. Test after each. Can revert individual commits if broken.
+
+Multiple plans in one PR is fine — just use separate commits.
 
 **DO NOT add feature flags for gradual rollout:**
 ```python
