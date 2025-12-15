@@ -190,7 +190,51 @@ dimensions: HyperstackDimensions
 - All 6-parameter signatures → replaced by 1 `dimensions` parameter
 - If internal code uses the old patterns, it breaks — update to use `HyperstackDimensions`
 
+### ❌ ANTIPATTERNS TO AVOID
+
+**DO NOT keep the 6 parameters and wrap them:**
+```python
+# ❌ WRONG: Wrapper that builds dimensions from old params
+def process_hyperstack(
+    channel_components, slice_components, frame_components,  # DON'T KEEP
+    channel_values, slice_values, frame_values
+):
+    dimensions = HyperstackDimensions.from_components(...)  # DON'T WRAP
+```
+Callers build `HyperstackDimensions` directly. No wrapper.
+
+**DO NOT keep per-dimension helper methods:**
+```python
+# ❌ WRONG: Helper per dimension
+def _process_channel(self, channel_components, channel_values): ...
+def _process_slice(self, slice_components, slice_values): ...
+def _process_frame(self, frame_components, frame_values): ...
+```
+ONE generic method that iterates over `dimensions`. No per-dimension methods.
+
+**DO NOT add dimension-specific branches in generic code:**
+```python
+# ❌ WRONG: if/elif on dimension name
+for dim in dimensions:
+    if dim.name == 'channel':
+        self._handle_channel(dim)  # DON'T
+    elif dim.name == 'slice':
+        self._handle_slice(dim)  # DON'T
+```
+All dimensions have same interface. Generic loop, no name checks.
+
+**DO NOT keep triplicated logic "for clarity":**
+```python
+# ❌ WRONG: "More readable" triplication
+# Channel key extraction
+c_key = tuple(meta[c] for c in channel_components)
+# Slice key extraction
+z_key = tuple(meta[c] for c in slice_components)
+# Frame key extraction
+t_key = tuple(meta[c] for c in frame_components)
+```
+ONE generic extraction: `keys = {d.name: d.extract_key(meta) for d in dimensions}`
+
 ### Implementation Draft
 
 (After smell loop approval)
-

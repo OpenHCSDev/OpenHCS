@@ -130,6 +130,52 @@ def _get_button_style(self):  # step_parameter_editor.py
 - If a widget looks wrong after migration, fix the application stylesheet
 - Don't add widget-level styling back
 
+### ❌ ANTIPATTERNS TO AVOID
+
+**DO NOT create a StyleManager singleton that widgets call:**
+```python
+# ❌ WRONG: Centralized but still imperative
+class StyleManager:
+    @staticmethod
+    def get_button_style() -> str: ...
+
+# Widget still calls it:
+btn.setStyleSheet(StyleManager.get_button_style())  # DON'T
+```
+Widget code should have ZERO style strings. App stylesheet handles it.
+
+**DO NOT create helper methods for "common patterns":**
+```python
+# ❌ WRONG: Helper method
+def apply_standard_button_style(btn: QPushButton):
+    btn.setStyleSheet(...)  # DON'T
+
+# Widget code:
+apply_standard_button_style(self.btn)  # DON'T
+```
+Use object names instead. Widget declares `btn.setObjectName("primary")`, app stylesheet has `QPushButton#primary { ... }`.
+
+**DO NOT keep "special case" setStyleSheet calls:**
+```python
+# ❌ WRONG: "Just this one special case"
+# Application stylesheet handles most buttons, but THIS one is special:
+special_btn.setStyleSheet(f"background: {special_color};")  # DON'T
+```
+If it's a variant, use object names. If it's truly dynamic (flash animation), use the flash system.
+
+**DO NOT create style "themes" or "presets" as method calls:**
+```python
+# ❌ WRONG: Theme presets
+btn.apply_theme("dark")  # DON'T
+btn.set_style_preset("compact")  # DON'T
+```
+These are the same imperative pattern. Use object names + app stylesheet.
+
+**EXCEPTION: Dynamic styling IS allowed for:**
+- Flash animations (scope colors, dirty indicators) — use centralized flash system
+- Error states that change at runtime — use helper like `apply_error_border(widget)`
+- These are the ONLY legitimate setStyleSheet calls in widget code
+
 ### Files to Modify
 
 **Extend:**

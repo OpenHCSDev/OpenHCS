@@ -219,6 +219,58 @@ flowchart TD
 - Orchestrator calls executor directly
 - If something breaks, fix the plan structure — don't add special cases
 
+### ❌ ANTIPATTERNS TO AVOID
+
+**DO NOT create per-step executor subclasses:**
+```python
+# ❌ WRONG: Polymorphic dispatch
+class ExecutorBase(ABC):
+    @abstractmethod
+    def execute(self, plan, context): ...
+
+class FunctionStepExecutor(ExecutorBase): ...
+class CustomStepExecutor(ExecutorBase): ...
+```
+ONE `StepExecutor` class. Dispatch on plan structure, not step type.
+
+**DO NOT keep process() as a delegation wrapper:**
+```python
+# ❌ WRONG: Wrapper method
+class FunctionStep:
+    def process(self, context, step_index):
+        plan = context.step_plans[step_index]
+        StepExecutor().execute(plan, context)  # DON'T KEEP process()
+```
+Delete `process()` entirely. Orchestrator calls executor directly.
+
+**DO NOT create "ExecutionPhase" abstractions:**
+```python
+# ❌ WRONG: Over-engineering
+class LoadPhase(ExecutionPhase): ...
+class TransformPhase(ExecutionPhase): ...
+class SavePhase(ExecutionPhase): ...
+```
+The 647 lines are interleaved concerns, not linear phases. Keep them as methods in `StepExecutor`, not as separate classes.
+
+**DO NOT add step_type field to dispatch on:**
+```python
+# ❌ WRONG: Type field dispatch
+if plan.step_type == "function":
+    self._execute_function(plan)
+elif plan.step_type == "custom":
+    self._execute_custom(plan)
+```
+The plan structure IS the dispatch. If `plan.func` is a list, execute as chain. If dict, execute as dict pattern. No type field.
+
+**DO NOT create abstract methods in AbstractStep for execution:**
+```python
+# ❌ WRONG: Execution in step hierarchy
+class AbstractStep(ABC):
+    @abstractmethod
+    def get_executor(self) -> StepExecutor: ...
+```
+Steps are DECLARATION only. They don't know about execution.
+
 ### Implementation Draft
 
 *Awaiting smell loop approval.*

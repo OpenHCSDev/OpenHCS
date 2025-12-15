@@ -322,7 +322,68 @@ def plan_step(self, step, context):
 - Code that accesses `plan['key']` → fails loud, update to `plan.key`
 - Code that mutates plan after creation → fails loud, plans are frozen
 
+### ❌ ANTIPATTERNS TO AVOID
+
+**DO NOT keep Dict[str, Any] with TypedDict hints:**
+```python
+# ❌ WRONG: TypedDict is still a dict
+class StepPlanDict(TypedDict):
+    input_dir: Path
+    output_dir: Path
+    func: Callable
+```
+Use frozen dataclass. TypedDict is runtime-mutable and has no frozen semantics.
+
+**DO NOT add __getitem__ for dict-style access:**
+```python
+# ❌ WRONG: Backwards-compatible dict access
+@dataclass(frozen=True)
+class StepPlan:
+    input_dir: Path
+
+    def __getitem__(self, key):
+        return getattr(self, key)  # DON'T ADD THIS
+```
+Attribute access only. `plan.input_dir`, not `plan['input_dir']`.
+
+**DO NOT create mutable intermediate plans:**
+```python
+# ❌ WRONG: Mutable during compilation
+plan = StepPlan()  # mutable
+for phase in phases:
+    phase.compile(plan)  # mutates
+plan.freeze()  # DON'T
+```
+Each phase returns a NEW frozen plan. Immutable by construction.
+
+**DO NOT create abstract compile() methods for phases:**
+```python
+# ❌ WRONG: Abstract method per phase
+class PathPlanningPhase(CompilationPhase):
+    @abstractmethod
+    def compile(self, step, plan, context): ...  # DON'T
+```
+Phases declare resolver METHODS (e.g., `resolve_input_dir()`). `__init_subclass__` derives `compile()`. No abstract `compile()`.
+
+**DO NOT create phase subclasses per step type:**
+```python
+# ❌ WRONG: Per-step phase classes
+class FunctionStepPathPlanningPhase(PathPlanningPhase): ...
+class CustomStepPathPlanningPhase(PathPlanningPhase): ...
+```
+ONE phase class per concern. Dispatch on step attributes, not step type.
+
+**DO NOT store `func` in multiple phases:**
+```python
+# ❌ WRONG: Redundant storage
+class PathPlanningPhase:
+    provides = ['input_dir', 'func']  # func here
+
+class MemoryContractPhase:
+    provides = ['memory_type', 'func']  # func here too - DON'T
+```
+`func` is in PathPlanningPhase. Later phases read from existing plan.
+
 ### Implementation Draft
 
 *Awaiting smell loop approval.*
-

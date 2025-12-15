@@ -210,7 +210,52 @@ classDiagram
 - Implementations become declaration-only classes (~10 lines each)
 - If something breaks, fix the caller — don't add a shim
 
+### ❌ ANTIPATTERNS TO AVOID
+
+**DO NOT keep abstract methods in the ABC:**
+```python
+# ❌ WRONG: Abstract methods to override
+class StreamingBackend(ABC):
+    @abstractmethod
+    def convert_roi(self, roi): ...  # DON'T - use class attribute
+
+    @abstractmethod
+    def get_colormap_key(self) -> str: ...  # DON'T - use class attribute
+```
+Use class attributes (`roi_converter`, `colormap_key`) that the ABC reads. No abstract methods.
+
+**DO NOT override save_batch() in implementations:**
+```python
+# ❌ WRONG: Override with "minor differences"
+class NapariStreamingBackend(StreamingBackend):
+    def save_batch(self, ...):
+        # "Just a small tweak for Napari..."
+        super().save_batch(...)  # DON'T
+```
+If there's a difference, parameterize it via class attribute. One `save_batch()` in ABC.
+
+**DO NOT create helper methods in implementations:**
+```python
+# ❌ WRONG: Helper methods
+class NapariStreamingBackend(StreamingBackend):
+    def _prepare_napari_payload(self, data):  # DON'T
+        ...
+```
+Implementations have ZERO methods. All logic in ABC, parameterized by declarations.
+
+**DO NOT use if/elif chains for backend dispatch:**
+```python
+# ❌ WRONG: Type dispatch in ABC
+def save_batch(self):
+    if isinstance(self, NapariStreamingBackend):
+        ...
+    elif isinstance(self, FijiStreamingBackend):
+        ...
+```
+Read from class attributes. No isinstance checks.
+
+**The test: Implementation classes should be ~10 lines of pure attribute declarations. If you're adding methods, you're doing it wrong.**
+
 ### Implementation Draft
 
 *Awaiting smell loop approval.*
-

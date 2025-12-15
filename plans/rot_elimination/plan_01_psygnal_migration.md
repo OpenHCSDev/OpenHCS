@@ -184,6 +184,45 @@ on_time_travel(), off_time_travel()
 - All `_fire_*_callbacks()` → `.emit()`
 - If a caller uses old API, it fails loud — update the caller
 
+### ❌ ANTIPATTERNS TO AVOID
+
+**DO NOT create wrapper methods:**
+```python
+# ❌ WRONG: Wrapper that calls the signal
+def add_register_callback(cls, callback):
+    cls.registered.connect(callback)  # DON'T DO THIS
+```
+Callers must use `.connect()` directly. Delete the wrapper entirely.
+
+**DO NOT keep old lists "for compatibility":**
+```python
+# ❌ WRONG: Keeping both systems
+registered = Signal(str, object)
+_on_register_callbacks: List[...] = []  # DON'T KEEP THIS
+```
+Delete the lists. There is no transition period.
+
+**DO NOT create adapter classes:**
+```python
+# ❌ WRONG: Adapter pattern
+class SignalAdapter:
+    def __init__(self, signal):
+        self.signal = signal
+    def add_callback(self, cb):
+        self.signal.connect(cb)
+```
+This is the same boilerplate with extra steps. Delete it.
+
+**DO NOT add try/except for "gradual migration":**
+```python
+# ❌ WRONG: Fallback to old system
+try:
+    ObjectStateRegistry.registered.connect(callback)
+except AttributeError:
+    ObjectStateRegistry.add_register_callback(callback)  # DON'T
+```
+There is no gradual migration. Old API fails loud. Fix the caller.
+
 ### Out of Scope
 
 - Qt `pyqtSignal` in GUI widgets — stays as-is (already Qt-coupled)

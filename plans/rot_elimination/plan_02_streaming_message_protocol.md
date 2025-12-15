@@ -240,7 +240,56 @@ if msg_type == "batch":
 - Receivers call `BatchMessage.from_json()` → get typed object or fail loud
 - If old code sends raw dicts, it breaks — update the sender
 
+### ❌ ANTIPATTERNS TO AVOID
+
+**DO NOT add fallback parsing for untyped dicts:**
+```python
+# ❌ WRONG: Fallback for old format
+def from_json(cls, data: bytes) -> 'BatchMessage':
+    d = json.loads(data)
+    try:
+        return cls._parse_typed(d)
+    except KeyError:
+        return cls._parse_legacy_dict(d)  # DON'T ADD FALLBACK
+```
+Fail loud. If the message is malformed, raise. Update the sender.
+
+**DO NOT use .get() with default fallbacks:**
+```python
+# ❌ WRONG: Silent fallback to default
+item_type = data.get('type', 'image')  # DON'T - fails silently
+items = data.get('items', [])  # DON'T - hides missing field
+```
+Access directly. Missing field = KeyError = fail loud.
+
+**DO NOT create separate message classes per backend:**
+```python
+# ❌ WRONG: Per-backend messages
+class NapariBatchMessage(BatchMessage): ...
+class FijiBatchMessage(BatchMessage): ...
+```
+ONE `BatchMessage` class. Backend differences are in display config, not message structure.
+
+**DO NOT keep raw dict building "for debugging":**
+```python
+# ❌ WRONG: Parallel paths
+if DEBUG:
+    message = {'type': 'batch', ...}  # DON'T KEEP RAW DICTS
+else:
+    message = BatchMessage(...).to_json()
+```
+One path. Always typed dataclass. Debug by inspecting the dataclass.
+
+**DO NOT add optional fields to avoid migration:**
+```python
+# ❌ WRONG: All fields optional
+@dataclass
+class BatchMessage:
+    items: Optional[List[StreamingItem]] = None  # DON'T - hides bugs
+    display_config: Optional[DisplayConfig] = None
+```
+Required fields are required. Optional means semantically optional, not "might be missing in legacy code."
+
 ### Implementation Draft
 
 *Pending smell loop approval.*
-

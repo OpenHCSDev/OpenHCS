@@ -346,7 +346,50 @@ flowchart TD
 
 None. This is a standalone refactor.
 
+### ❌ ANTIPATTERNS TO AVOID
+
+**DO NOT keep the old functions as wrappers:**
+```python
+# ❌ WRONG: Wrapper for backwards compatibility
+def generate_pipeline_code(pipeline):
+    return generate_python_source(pipeline, header="# Pipeline")  # DON'T KEEP
+```
+Delete all 7 old functions. Callers use `generate_python_source()` directly.
+
+**DO NOT create separate formatter registries per context:**
+```python
+# ❌ WRONG: Multiple registries
+PIPELINE_FORMATTERS = {}
+CONFIG_FORMATTERS = {}
+STEP_FORMATTERS = {}
+```
+ONE registry. Formatters are context-agnostic. Header varies, formatters don't.
+
+**DO NOT add can_format() methods that check module paths:**
+```python
+# ❌ WRONG: String matching on module names
+def can_format(self, obj) -> bool:
+    return 'openhcs.config' in type(obj).__module__  # DON'T
+```
+Use `isinstance()` or structural checks. No string matching on module paths.
+
+**DO NOT create separate two-pass logic per output context:**
+```python
+# ❌ WRONG: Duplicated import resolution
+def generate_pipeline_code(pipeline):
+    # ... generate code ...
+    imports = resolve_imports(...)  # DON'T DUPLICATE
+```
+Import resolution is ONE function called by `generate_python_source()`. Not per-context.
+
+**DO NOT add special cases for "Lazy" types:**
+```python
+# ❌ WRONG: String matching on type names
+if 'Lazy' in type(obj).__name__:
+    return format_lazy(obj)  # DON'T
+```
+Lazy types get their own formatter with proper `isinstance()` check.
+
 ### Implementation Draft
 
 *Awaiting smell loop approval.*
-

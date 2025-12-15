@@ -106,7 +106,45 @@ def _create_merged_config(...)     # DELETE (lines 111-160)
 - Field access inside context returns resolved values via lazy resolution
 - If something doesn't resolve correctly, fix the config hierarchy — don't add special-case merging
 
+### ❌ ANTIPATTERNS TO AVOID
+
+**DO NOT create a "simplified" merge helper:**
+```python
+# ❌ WRONG: Wrapper around config_context
+def merge_configs(global_config, step_config):
+    with config_context(step_config):
+        return get_current_temp_global()  # DON'T CREATE WRAPPER
+```
+Just use `config_context` directly. No wrapper needed.
+
+**DO NOT add "fallback" merging for edge cases:**
+```python
+# ❌ WRONG: Fallback to old behavior
+with config_context(step_config):
+    value = getattr(config, field)
+    if value is None:
+        value = _merge_nested_dataclass(...)  # DON'T KEEP OLD LOGIC
+```
+If resolution returns None, that's the correct value. Fix the config hierarchy, not the resolver.
+
+**DO NOT create a MergedConfig class:**
+```python
+# ❌ WRONG: Wrapper class
+class MergedConfig:
+    def __init__(self, global_config, step_config):
+        self._merged = _create_merged_config(...)  # DON'T
+```
+Use the existing lazy dataclass resolution. No new classes.
+
+**DO NOT add field-by-field copying logic:**
+```python
+# ❌ WRONG: Manual field copying
+for field in fields(step_config):
+    if getattr(step_config, field.name) is not None:
+        setattr(result, field.name, ...)  # DON'T
+```
+This is the exact rot we're deleting. Lazy resolution handles this.
+
 ### Implementation Draft
 
 (After smell loop approval)
-
