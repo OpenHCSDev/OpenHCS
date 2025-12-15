@@ -842,20 +842,18 @@ class ObjectStateRegistry:
                     if target_live.get(key) != current_live.get(key):
                         changed_paths.add(key)
 
-                # Find changed raw parameters and track concrete changes
-                has_concrete_param_change = False
+                # Find changed raw parameters
+                has_param_change = False
                 all_param_keys = set(state_snap.parameters.keys()) | set(current_params.keys())
                 for param_key in all_param_keys:
                     before = current_params.get(param_key)
                     after = state_snap.parameters.get(param_key)
                     if before != after and not (is_dataclass(before) or is_dataclass(after)):
                         changed_paths.add(param_key)
-                        # Track if this is a concrete (non-None) parameter change
-                        if after is not None:
-                            has_concrete_param_change = True
+                        has_param_change = True
 
-                # Track scopes with concrete parameter changes (for PHASE 4)
-                if has_concrete_param_change:
+                # Track scopes with parameter changes (for PHASE 4)
+                if has_param_change:
                     scopes_with_param_changes.add(scope_key)
 
                 # RESTORE state
@@ -871,9 +869,8 @@ class ObjectStateRegistry:
                         callback(changed_paths)
 
             # PHASE 4: Fire time-travel completion callbacks
-            # Only for states where time travel restored CONCRETE parameter values.
-            # scopes_with_param_changes already tracks scopes where parameters changed
-            # to concrete (non-None) values during this time travel.
+            # Only for states where time travel changed parameters.
+            # scopes_with_param_changes tracks scopes where parameters changed during this time travel.
             if cls._on_time_travel_complete_callbacks and scopes_with_param_changes:
                 dirty_states = [
                     (scope_key, cls._states[scope_key])
@@ -881,7 +878,7 @@ class ObjectStateRegistry:
                     if scope_key in cls._states
                 ]
                 if dirty_states:
-                    logger.debug(f"⏱️ TIME_TRAVEL: {len(dirty_states)} states with concrete param changes")
+                    logger.debug(f"⏱️ TIME_TRAVEL: {len(dirty_states)} states with param changes")
                     for callback in cls._on_time_travel_complete_callbacks:
                         callback(dirty_states, snapshot.triggering_scope)
         finally:
@@ -1991,13 +1988,19 @@ class ObjectState:
             and v != self._signature_defaults[k]
         }
 
-    def _update_dirty_fields(self) -> bool:
-        """Recompute _dirty_fields, return True if changed."""
+    def _update_dirty_fields(self) -> Set[str]:
+        """Recompute _dirty_fields, return set of fields that changed dirty status.
+
+        Returns fields that either became dirty OR became clean.
+        Empty set means no change.
+        """
         new_dirty = self._compute_dirty_fields()
         if new_dirty != self._dirty_fields:
+            # Symmetric difference: fields that changed dirty status in either direction
+            changed_fields = new_dirty ^ self._dirty_fields
             self._dirty_fields = new_dirty
-            return True
-        return False
+            return changed_fields
+        return set()
 
     def _update_signature_diff_fields(self) -> bool:
         """Recompute _signature_diff_fields, return True if changed."""
@@ -2016,10 +2019,22 @@ class ObjectState:
         - parameters (affects signature_diff_fields)
 
         Correctness guarantee: All mutation paths call this ONE method.
+
+        Flash behavior: Fires on_resolved_changed for fields that changed dirty status.
+        This ensures flash animation triggers when fields become clean (not just dirty).
         """
-        dirty_changed = self._update_dirty_fields()
+        dirty_status_changed_fields = self._update_dirty_fields()
         sig_diff_changed = self._update_signature_diff_fields()
-        if dirty_changed or sig_diff_changed:
+
+        # Fire flash for fields that changed dirty status (became dirty OR clean)
+        if dirty_status_changed_fields and self._on_resolved_changed_callbacks:
+            for callback in list(self._on_resolved_changed_callbacks):
+                try:
+                    callback(dirty_status_changed_fields)
+                except Exception as e:
+                    logger.warning(f"Error in resolved_changed callback during dirty sync: {e}")
+
+        if dirty_status_changed_fields or sig_diff_changed:
             self._notify_state_changed()
 
     # ==================== SAVED STATE / DIRTY TRACKING ====================
