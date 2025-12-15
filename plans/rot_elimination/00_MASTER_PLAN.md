@@ -4,6 +4,64 @@
 
 9 plans to eliminate ~3500 lines of rot. No wrappers. No backwards compatibility.
 
+## ❌ PROJECT-LEVEL ANTIPATTERNS TO AVOID
+
+**DO NOT add "temporary" compatibility during migration:**
+```python
+# ❌ WRONG: "We'll remove this later"
+def old_api():
+    warnings.warn("Deprecated, use new_api()", DeprecationWarning)
+    return new_api()  # DON'T - there is no "later"
+```
+Delete old API. Update callers. One PR. No deprecation period.
+
+**DO NOT create parallel implementations "for safety":**
+```python
+# ❌ WRONG: Keep both paths
+if USE_NEW_SYSTEM:
+    result = new_executor.execute(plan)
+else:
+    result = step.process(context)  # DON'T KEEP OLD PATH
+```
+One path. New system only. Old path deleted.
+
+**DO NOT batch multiple plans into one PR:**
+```
+# ❌ WRONG: "Efficiency"
+PR: "Implement streaming unification + message protocol + executor extraction"
+```
+One plan per PR. Test after each. Easier to revert if broken.
+
+**DO NOT add feature flags for gradual rollout:**
+```python
+# ❌ WRONG: Feature flag
+ENABLE_TYPED_PLANS = os.environ.get('ENABLE_TYPED_PLANS', False)
+if ENABLE_TYPED_PLANS:
+    plan = StepPlan(...)  # DON'T
+else:
+    plan = {'input_dir': ...}
+```
+No flags. New system is THE system. Ship it or don't.
+
+**DO NOT "clean up later":**
+```python
+# ❌ WRONG: TODO for future
+# TODO: Remove this once all callers are migrated
+def legacy_helper():  # DON'T LEAVE THESE
+    ...
+```
+If it's not deleted in this PR, it never gets deleted. Clean up NOW.
+
+**DO NOT add tests for deprecated behavior:**
+```python
+# ❌ WRONG: Testing the old way still works
+def test_legacy_callback_system_still_works():
+    ObjectStateRegistry.add_register_callback(...)  # DON'T TEST DELETED CODE
+```
+Tests verify NEW behavior. Old behavior doesn't exist.
+
+**The principle: Every PR should make the codebase strictly simpler. If line count goes up, you're doing it wrong.**
+
 ## Dependency Graph
 
 ```mermaid
