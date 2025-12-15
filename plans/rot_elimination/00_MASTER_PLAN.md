@@ -128,33 +128,40 @@ Must be done in order. Touches core execution path.
 
 ## Testing Strategy
 
+### End-to-End Test (Required)
+
+Every plan must pass this before merge:
+
+```bash
+pytest tests/integration/test_main.py::test_main[disk-ImageXpress-3d-multiprocessing-direct-none-none] -v
+```
+
+This is THE integration test. If it passes, core execution works.
+
 ### Per-Plan Testing
 
-Each plan must pass these gates before merge:
+1. **E2E Test** — Above command must pass
+2. **Unit Tests** — Run in terminal, don't save to files
+3. **Manual Testing** — User tests UI/streaming where applicable
 
-1. **Unit Tests** — New code has tests
-2. **Existing Tests Pass** — `pytest tests/` green
-3. **Manual Smoke Test** — Run a real pipeline end-to-end
+### What Needs Manual Testing (by user)
 
-### Integration Testing
-
-After all plans merge:
-
-1. **Full Pipeline Test** — Run `basic_pipeline.py` with all backends
-2. **Streaming Test** — Verify Napari and Fiji streaming work
-3. **Config Test** — Verify config resolution, time-travel, dirty tracking
-4. **UI Test** — Open all windows, verify styling, verify flash animations
+| Area | Why Manual |
+|------|------------|
+| Streaming to Napari | Requires running viewer |
+| Streaming to Fiji | Requires Fiji installation |
+| UI Styling | Visual verification |
+| Flash animations | Visual verification |
+| Config window behavior | Interactive testing |
 
 ### Regression Watchlist
 
-These are the most likely to break:
-
 | Area | What to Watch | How to Test |
 |------|---------------|-------------|
-| Execution | Steps actually run | `pytest tests/test_pipeline_execution.py` |
-| Streaming | Data reaches viewers | Manual: run pipeline with Napari open |
-| Config | Resolution works | `pytest tests/test_config_resolution.py` |
-| UI | Styling looks right | Manual: open all dialogs |
+| Execution | Steps actually run | E2E test above |
+| Streaming | Data reaches viewers | Manual by user |
+| Config | Resolution works | E2E test covers basic resolution |
+| UI | Styling looks right | Manual by user |
 
 ## Success Criteria
 
