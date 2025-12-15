@@ -3,12 +3,6 @@ GPU memory type validator for OpenHCS.
 
 This module provides the GPUMemoryTypeValidator class, which is responsible for
 validating GPU memory types and assigning GPU IDs to steps requiring GPU memory.
-
-Doctrinal Clauses:
-- Clause 66 — Immutability After Construction
-- Clause 88 — No Inferred Capabilities
-- Clause 293 — GPU Pre-Declaration Enforcement
-- Clause 295 — GPU Scheduling Affinity
 """
 
 import logging

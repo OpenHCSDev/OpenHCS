@@ -1091,18 +1091,7 @@ class DualEditorWindow(BaseFormDialog):
 
     def reject(self):
         """Handle dialog rejection (Cancel button or Escape key)."""
-        if self.has_changes:
-            from PyQt6.QtWidgets import QMessageBox
-            reply = QMessageBox.question(
-                self,
-                "Unsaved Changes",
-                "You have unsaved changes. Are you sure you want to cancel?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No
-            )
-
-            if reply != QMessageBox.StandardButton.Yes:
-                return
+        # No confirmation needed - time travel allows recovery of any state
 
         self.step_cancelled.emit()
 
@@ -1127,19 +1116,7 @@ class DualEditorWindow(BaseFormDialog):
 
     def closeEvent(self, event):
         """Handle dialog close event."""
-        if self.has_changes:
-            from PyQt6.QtWidgets import QMessageBox
-            reply = QMessageBox.question(
-                self,
-                "Unsaved Changes",
-                "You have unsaved changes. Are you sure you want to close?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No
-            )
-
-            if reply != QMessageBox.StandardButton.Yes:
-                event.ignore()
-                return
+        # No confirmation needed - time travel allows recovery of any state
 
         # Cleanup tree helper subscriptions to prevent memory leaks
         if self.step_editor is not None:

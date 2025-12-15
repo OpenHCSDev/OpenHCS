@@ -4,19 +4,6 @@ Pipeline module for the OpenHCS pipeline architecture.
 
 This module provides components for building and executing pipelines,
 including compilation, execution, and result handling.
-
-Doctrinal Clauses:
-- Clause 17 — VFS Exclusivity (FileManager is the only component that uses VirtualPath)
-- Clause 17-B — Path Format Discipline
-- Clause 66 — Immutability After Construction
-- Clause 88 — No Inferred Capabilities
-- Clause 106-A — Declared Memory Types
-- Clause 251 — Declarative Memory Conversion
-- Clause 262 — Pre-Runtime Conversion
-- Clause 281 — Context-Bound Identifiers
-- Clause 297 — Immutable Result Enforcement
-- Clause 504 — Pipeline Preparation Modifications
-- Clause 524 — Step = Declaration = ID = Runtime Authority
 """
 
 # Import from constants
@@ -54,10 +41,6 @@ class Pipeline(list):
     - Backward compatible with existing .steps access
     - Rich metadata support for debugging and UI
     - Method chaining for fluent pipeline construction
-
-    Doctrinal Clauses:
-    - Clause 66 — Immutability After Construction (metadata can be set but steps are managed via list methods)
-    - Clause 88 — No Inferred Capabilities (explicit type declarations)
     """
 
     def __init__(self, steps=None, *, name=None, metadata=None, description=None):

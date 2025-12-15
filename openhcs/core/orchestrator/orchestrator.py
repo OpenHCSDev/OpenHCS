@@ -3,13 +3,6 @@ Consolidated orchestrator module for OpenHCS.
 
 This module provides a unified PipelineOrchestrator class that implements
 a two-phase (compile-all-then-execute-all) pipeline execution model.
-
-Doctrinal Clauses:
-- Clause 12 — Absolute Clean Execution
-- Clause 66 — Immutability After Construction
-- Clause 88 — No Inferred Capabilities
-- Clause 293 — GPU Pre-Declaration Enforcement
-- Clause 295 — GPU Scheduling Affinity
 """
 
 import logging

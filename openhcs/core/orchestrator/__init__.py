@@ -11,12 +11,6 @@ The orchestrator is responsible for:
 4. Creating processing contexts
 5. Executing pipelines
 6. Managing GPU resources
-
-Classes and functions in this module follow strict architectural principles:
-- Immutability after construction (Clause 66)
-- No inferred capabilities (Clause 88)
-- Explicit GPU pre-declaration (Clause 293)
-- GPU scheduling affinity (Clause 295)
 """
 
 # Import main orchestrator class

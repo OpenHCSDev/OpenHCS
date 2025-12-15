@@ -8,12 +8,20 @@ All functions follow OpenHCS contracts:
     - First parameter must be named 'image' (3D array: C, Y, X)
     - Must be decorated with memory type decorator (@numpy, @cupy, etc.)
     - Must return processed image (optionally with metadata dict)
+    
+For analysis functions that produce structured outputs (cell counts, measurements, etc.):
+    - Use @special_outputs decorator to declare outputs
+    - Use materialization functions from openhcs.processing.materialization
+    - Return tuple: (processed_image, analysis_result_1, analysis_result_2, ...)
 """
 
 from typing import Dict
 
 # Available memory types for custom functions
 AVAILABLE_MEMORY_TYPES = ["numpy", "cupy", "torch", "tensorflow", "jax", "pyclesperanto"]
+
+# Available template categories
+AVAILABLE_TEMPLATE_CATEGORIES = ["processing", "analysis"]
 
 
 def get_default_template() -> str:
@@ -62,39 +70,69 @@ def get_template_for_memory_type(memory_type: str) -> str:
 NUMPY_TEMPLATE = """from openhcs.core.memory.decorators import numpy
 import numpy as np
 
+# =============================================================================
+# MEMORY DECORATORS - Choose ONE based on your compute backend:
+#
+#   @numpy         - CPU processing (default, always available)
+#   @cupy          - NVIDIA GPU via CuPy (requires CUDA)
+#   @torch         - PyTorch tensors (CPU or GPU)
+#   @tensorflow    - TensorFlow tensors
+#   @jax           - JAX arrays (CPU/GPU/TPU)
+#   @pyclesperanto - GPU via OpenCL (AMD/NVIDIA/Intel)
+#
+# Import: from openhcs.core.memory.decorators import numpy, cupy, torch, ...
+# =============================================================================
+
 @numpy
 def my_custom_function(image, scale: float = 1.0, offset: float = 0.0):
     \"\"\"
-    Custom image processing function using NumPy.
+    Custom image processing function.
 
     Args:
-        image: Input image as 3D numpy array (C, Y, X)
-               C = channels, Y = height, X = width
+        image: Input image as 3D array (C, Y, X)
+               C = slices/channels, Y = height, X = width
         scale: Scaling factor to multiply image values
         offset: Offset to add after scaling
 
     Returns:
-        Processed image as 3D numpy array (C, Y, X)
-
-    Example:
-        # Simple brightness adjustment
-        result = my_custom_function(image, scale=1.2, offset=10)
-
-    Notes:
-        - First parameter MUST be named 'image'
-        - Must be decorated with @numpy
-        - Input and output must be 3D arrays (C, Y, X)
-        - Return type can be: image_array OR (image_array, metadata_dict)
+        Processed image as 3D array (C, Y, X)
     \"\"\"
-    # Your processing code here
-    # Example: linear transformation
     processed = image * scale + offset
-
-    # Optional: return metadata alongside image
-    # metadata = {"mean_intensity": float(np.mean(processed))}
-    # return processed, metadata
-
     return processed
+
+
+# =============================================================================
+# ANALYSIS OUTPUTS - To produce structured data (CSVs, measurements, etc.):
+#
+# 1. Import the decorators and materializers:
+#
+#    from openhcs.core.pipeline.function_contracts import special_outputs
+#    from openhcs.processing.materialization import csv_materializer
+#
+# 2. Declare outputs with @special_outputs:
+#
+#    @numpy
+#    @special_outputs(("measurements", csv_materializer(
+#        fields=["slice_index", "mean", "std"],
+#        analysis_type="intensity_stats"
+#    )))
+#    def analyze_intensity(image, threshold: float = 0.5):
+#        results = []
+#        for i, slice_data in enumerate(image):
+#            results.append({
+#                "slice_index": i,
+#                "mean": float(np.mean(slice_data)),
+#                "std": float(np.std(slice_data))
+#            })
+#        return image, results  # Tuple: (processed_image, analysis_data)
+#
+# 3. Available materializers:
+#
+#    csv_materializer(fields=[...], analysis_type="...")  - CSV file
+#    json_materializer(fields=[...], analysis_type="...")  - JSON file
+#    dual_materializer(fields=[...], summary_fields=[...]) - Both CSV + JSON
+#
+# =============================================================================
 """
 
 
@@ -265,3 +303,195 @@ def my_custom_function(image, radius: float = 2.0):
 
     return processed
 """
+
+
+# =============================================================================
+# ANALYSIS TEMPLATES - For functions that produce structured analysis outputs
+# =============================================================================
+
+NUMPY_ANALYSIS_TEMPLATE = """from openhcs.core.memory.decorators import numpy
+from openhcs.core.pipeline.function_contracts import special_outputs
+from openhcs.processing.materialization import csv_materializer
+from dataclasses import dataclass
+from typing import List, Tuple
+import numpy as np
+
+@dataclass
+class AnalysisResult:
+    \"\"\"Result dataclass - fields become CSV columns.\"\"\"
+    slice_index: int
+    measurement: float
+    count: int
+    # Add your analysis fields here
+
+
+@numpy
+@special_outputs(("analysis_results", csv_materializer(
+    fields=["slice_index", "measurement", "count"],
+    analysis_type="slice_analysis"
+)))
+def my_analysis_function(image, threshold: float = 0.5) -> Tuple[np.ndarray, List[AnalysisResult]]:
+    \"\"\"
+    Analysis function that produces both processed image AND structured results.
+
+    Args:
+        image: Input image as 3D numpy array (C, Y, X)
+        threshold: Analysis threshold parameter
+
+    Returns:
+        Tuple of:
+        - Processed image as 3D numpy array (C, Y, X)
+        - List of AnalysisResult dataclasses (auto-serialized to CSV)
+
+    Notes:
+        - @special_outputs declares that this function produces analysis data
+        - The csv_materializer auto-converts AnalysisResult fields to CSV columns
+        - Return is ALWAYS a tuple: (image, special_output_1, special_output_2, ...)
+    \"\"\"
+    results = []
+    
+    # Process each slice and collect measurements
+    for i, slice_data in enumerate(image):
+        # Your analysis logic here
+        measurement = float(np.mean(slice_data[slice_data > threshold]))
+        count = int(np.sum(slice_data > threshold))
+        
+        results.append(AnalysisResult(
+            slice_index=i,
+            measurement=measurement,
+            count=count
+        ))
+    
+    # Processing (can be identity if you only want analysis)
+    processed = image.copy()
+    
+    # Return tuple: (processed_image, analysis_results)
+    return processed, results
+"""
+
+
+NUMPY_DUAL_OUTPUT_TEMPLATE = """from openhcs.core.memory.decorators import numpy
+from openhcs.core.pipeline.function_contracts import special_outputs
+from openhcs.processing.materialization import csv_materializer, dual_materializer
+from dataclasses import dataclass
+from typing import List, Tuple, Dict, Any
+import numpy as np
+
+@dataclass
+class CellMeasurement:
+    \"\"\"Per-cell measurement data.\"\"\"
+    slice_index: int
+    cell_id: int
+    x_position: float
+    y_position: float
+    area: float
+    intensity: float
+
+
+@dataclass  
+class SliceSummary:
+    \"\"\"Per-slice summary statistics.\"\"\"
+    slice_index: int
+    cell_count: int
+    total_area: float
+    mean_intensity: float
+
+
+@numpy
+@special_outputs(
+    ("cell_measurements", csv_materializer(
+        filename_suffix="_cells.csv",
+        analysis_type="cell_measurements"
+    )),
+    ("slice_summaries", dual_materializer(
+        summary_fields=["slice_index", "cell_count"],
+        fields=["slice_index", "cell_count", "total_area", "mean_intensity"],
+        analysis_type="slice_summaries"
+    ))
+)
+def analyze_cells(
+    image,
+    intensity_threshold: float = 100.0,
+    min_area: int = 10
+) -> Tuple[np.ndarray, List[CellMeasurement], List[SliceSummary]]:
+    \"\"\"
+    Multi-output analysis: cell details + slice summaries.
+
+    This demonstrates:
+    - Multiple @special_outputs with different materializers
+    - CSV for detailed per-cell data
+    - Dual (JSON+CSV) for summary statistics
+
+    Args:
+        image: Input image (C, Y, X)
+        intensity_threshold: Threshold for cell detection
+        min_area: Minimum cell area in pixels
+
+    Returns:
+        Tuple of (processed_image, cell_measurements, slice_summaries)
+    \"\"\"
+    from scipy import ndimage
+    
+    cell_measurements = []
+    slice_summaries = []
+    
+    for slice_idx, slice_data in enumerate(image):
+        # Simple threshold + connected components
+        binary = slice_data > intensity_threshold
+        labeled, num_features = ndimage.label(binary)
+        
+        slice_cells = []
+        for cell_id in range(1, num_features + 1):
+            mask = labeled == cell_id
+            area = np.sum(mask)
+            
+            if area >= min_area:
+                # Get centroid
+                y_coords, x_coords = np.where(mask)
+                x_pos = float(np.mean(x_coords))
+                y_pos = float(np.mean(y_coords))
+                intensity = float(np.mean(slice_data[mask]))
+                
+                cell_measurements.append(CellMeasurement(
+                    slice_index=slice_idx,
+                    cell_id=len(slice_cells),
+                    x_position=x_pos,
+                    y_position=y_pos,
+                    area=float(area),
+                    intensity=intensity
+                ))
+                slice_cells.append(area)
+        
+        # Slice summary
+        slice_summaries.append(SliceSummary(
+            slice_index=slice_idx,
+            cell_count=len(slice_cells),
+            total_area=float(sum(slice_cells)),
+            mean_intensity=float(np.mean(slice_data)) if slice_data.size > 0 else 0.0
+        ))
+    
+    return image.copy(), cell_measurements, slice_summaries
+"""
+
+
+def get_analysis_template(memory_type: str = "numpy") -> str:
+    """
+    Get an analysis template for the specified memory type.
+    
+    Args:
+        memory_type: Currently only 'numpy' supported for analysis templates
+        
+    Returns:
+        Template string with analysis pattern
+    """
+    if memory_type == "numpy":
+        return NUMPY_ANALYSIS_TEMPLATE
+    else:
+        # For other memory types, return the basic analysis template
+        # Users can adapt the numpy pattern
+        return NUMPY_ANALYSIS_TEMPLATE
+
+
+def get_multi_output_template() -> str:
+    """Get template demonstrating multiple special outputs."""
+    return NUMPY_DUAL_OUTPUT_TEMPLATE

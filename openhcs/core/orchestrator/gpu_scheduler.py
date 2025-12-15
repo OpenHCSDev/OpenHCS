@@ -12,12 +12,6 @@ shared across all threads to ensure consistent GPU resource management.
 Thread Safety:
     All functions in this module are thread-safe and use a lock to ensure
     consistent access to the global registry.
-
-Doctrinal Clauses:
-- Clause 12 — Absolute Clean Execution
-- Clause 88 — No Inferred Capabilities
-- Clause 293 — Predeclared GPU Availability
-- Clause 295 — GPU Scheduling Affinity
 """
 
 import logging

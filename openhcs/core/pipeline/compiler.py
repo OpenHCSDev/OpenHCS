@@ -25,21 +25,6 @@ WHY:
 EXCEPTION:
 - config_context(orchestrator.pipeline_config) is CORRECT - sets up lazy resolution context
 - Writing to orchestrator.pipeline_config is CORRECT - updates the raw config
-
-Doctrinal Clauses:
-- Clause 12 — Absolute Clean Execution
-- Clause 17 — VFS Exclusivity (FileManager is the only component that uses VirtualPath)
-- Clause 17-B — Path Format Discipline
-- Clause 66 — Immutability After Construction
-- Clause 88 — No Inferred Capabilities
-- Clause 101 — Memory Type Declaration
-- Clause 245 — Path Declaration
-- Clause 273 — Backend Authorization Doctrine
-- Clause 281 — Context-Bound Identifiers
-- Clause 293 — GPU Pre-Declaration Enforcement
-- Clause 295 — GPU Scheduling Affinity
-- Clause 504 — Pipeline Preparation Modifications
-- Clause 524 — Step = Declaration = ID = Runtime Authority
 """
 
 import inspect
@@ -390,7 +375,7 @@ class PipelineCompiler:
             if step_index not in context.step_plans:
                 logger.error(
                     f"Critical error: Step {step.name} (index: {step_index}) "
-                    f"not found in step_plans after path planning phase. Clause 504."
+                    f"not found in step_plans after path planning phase."
                 )
                 # Create a minimal error plan
                 context.step_plans[step_index] = {
@@ -663,7 +648,7 @@ class PipelineCompiler:
                 missing_keys = [k for k in required_keys if k not in plan]
                 logger.error(
                     f"Materialization flag planning incomplete for step {step.name} (index: {step_index}). "
-                    f"Missing required keys: {missing_keys} (Clause 273)."
+                    f"Missing required keys: {missing_keys}."
                 )
 
 
@@ -807,7 +792,7 @@ class PipelineCompiler:
             if "input_memory_type" not in memory_types or "output_memory_type" not in memory_types:
                 step_name = context.step_plans[step_index]["step_name"]
                 raise AssertionError(
-                    f"Memory type validation must set input/output_memory_type for FunctionStep {step_name} (index: {step_index}) (Clause 101)."
+                    f"Memory type validation must set input/output_memory_type for FunctionStep {step_name} (index: {step_index})."
                 )
             if step_index in context.step_plans:
                 context.step_plans[step_index].update(memory_types)
@@ -859,7 +844,7 @@ class PipelineCompiler:
                     step_name = step_plan_val["step_name"]
                     raise AssertionError(
                         f"GPU validation must assign gpu_id for step {step_name} (index: {step_index}) "
-                        f"with GPU memory types (Clause 295)."
+                        f"with GPU memory types."
                     )
 
         for step_index, gpu_assignment in gpu_assignments.items():

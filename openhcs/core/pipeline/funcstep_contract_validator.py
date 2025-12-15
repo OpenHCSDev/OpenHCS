@@ -3,13 +3,6 @@ FuncStep memory contract validator for OpenHCS.
 
 This module provides the FuncStepContractValidator class, which is responsible for
 validating memory type declarations for FunctionStep instances in a pipeline.
-
-Doctrinal Clauses:
-- Clause 65 — No Fallback Logic
-- Clause 88 — No Inferred Capabilities
-- Clause 101 — Memory Type Declaration
-- Clause 106-A — Declared Memory Types
-- Clause 308 — Named Positional Enforcement
 """
 
 import inspect
@@ -67,10 +60,8 @@ class FuncStepContractValidator:
     """
     Validator for FunctionStep memory type contracts.
 
-    This validator enforces Clause 101 (Memory Type Declaration), Clause 88
-    (No Inferred Capabilities), and Clause 308 (Named Positional Enforcement)
-    by requiring explicit memory type declarations and named positional arguments
-    for all FunctionStep instances and their functions.
+    Enforces that all FunctionStep instances require explicit memory type declarations
+    and named positional arguments for all functions.
 
     Key principles:
     1. All functions in a FunctionStep must have consistent memory types
@@ -308,8 +299,7 @@ class FuncStepContractValidator:
         """
         Validate that all required positional arguments are provided in kwargs.
 
-        This enforces Clause 308 (Named Positional Enforcement) by requiring that
-        all required positional arguments are explicitly provided in the kwargs dict
+        All required positional arguments must be explicitly provided in the kwargs dict
         when using the (func, kwargs) pattern.
 
         Args:
