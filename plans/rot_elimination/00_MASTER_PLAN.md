@@ -1,0 +1,129 @@
+# Rot Elimination Master Plan
+
+## Overview
+
+9 plans to eliminate ~3500 lines of rot. No wrappers. No backwards compatibility.
+
+## Dependency Graph
+
+```mermaid
+flowchart TD
+    subgraph Independent["Independent (Can Start Immediately)"]
+        PSYGNAL[plan_01_psygnal_migration]
+        STYLE[plan_01_centralized_styling]
+        CONFIG[plan_01_eliminate_config_merging]
+        SERIAL[plan_01_python_source_serializer]
+        DIM[plan_03_dimension_abstraction]
+    end
+
+    subgraph Streaming["Streaming (Sequential)"]
+        STREAM1[plan_01_streaming_backend_unification]
+        STREAM2[plan_02_streaming_message_protocol]
+        STREAM1 --> STREAM2
+    end
+
+    subgraph Compiler["Compiler (Sequential)"]
+        COMP[plan_01_generic_compiler_spec]
+        EXEC[plan_02_step_executor_extraction]
+        COMP --> EXEC
+    end
+
+    style PSYGNAL fill:#51cf66
+    style STYLE fill:#51cf66
+    style CONFIG fill:#51cf66
+    style SERIAL fill:#51cf66
+    style DIM fill:#51cf66
+    style STREAM1 fill:#339af0
+    style STREAM2 fill:#339af0
+    style COMP fill:#ff6b6b
+    style EXEC fill:#ff6b6b
+```
+
+## Execution Order
+
+### Wave 1: Independent Plans (Parallel)
+These have no dependencies and can be implemented in any order:
+
+| Plan | Lines Saved | Risk | Effort |
+|------|-------------|------|--------|
+| `plan_01_psygnal_migration` | ~120 | Low | 2h |
+| `plan_01_centralized_styling` | ~200 | Low | 4h |
+| `plan_01_eliminate_config_merging` | ~90 | Low | 1h |
+| `plan_01_python_source_serializer` | ~950 | Low | 4h |
+| `plan_03_dimension_abstraction` | ~400 | Low | 3h |
+
+### Wave 2: Streaming Plans (Sequential)
+Must be done in order:
+
+| Plan | Lines Saved | Risk | Effort |
+|------|-------------|------|--------|
+| `plan_01_streaming_backend_unification` | ~300 | Low | 3h |
+| `plan_02_streaming_message_protocol` | ~100 | Low | 2h |
+
+### Wave 3: Compiler Plans (Sequential, Highest Risk)
+Must be done in order. Touches core execution path.
+
+| Plan | Lines Saved | Risk | Effort |
+|------|-------------|------|--------|
+| `plan_01_generic_compiler_spec` | ~200 | Medium | 6h |
+| `plan_02_step_executor_extraction` | ~647 | Medium | 8h |
+
+## Testing Strategy
+
+### Per-Plan Testing
+
+Each plan must pass these gates before merge:
+
+1. **Unit Tests** — New code has tests
+2. **Existing Tests Pass** — `pytest tests/` green
+3. **Manual Smoke Test** — Run a real pipeline end-to-end
+
+### Integration Testing
+
+After all plans merge:
+
+1. **Full Pipeline Test** — Run `basic_pipeline.py` with all backends
+2. **Streaming Test** — Verify Napari and Fiji streaming work
+3. **Config Test** — Verify config resolution, time-travel, dirty tracking
+4. **UI Test** — Open all windows, verify styling, verify flash animations
+
+### Regression Watchlist
+
+These are the most likely to break:
+
+| Area | What to Watch | How to Test |
+|------|---------------|-------------|
+| Execution | Steps actually run | `pytest tests/test_pipeline_execution.py` |
+| Streaming | Data reaches viewers | Manual: run pipeline with Napari open |
+| Config | Resolution works | `pytest tests/test_config_resolution.py` |
+| UI | Styling looks right | Manual: open all dialogs |
+
+## Success Criteria
+
+- [ ] All 9 plans implemented
+- [ ] ~3500 lines deleted
+- [ ] Zero new wrappers or compatibility shims
+- [ ] All existing tests pass
+- [ ] Manual smoke test passes
+- [ ] No regressions in core functionality
+
+## Risk Mitigation
+
+1. **Compiler plans are highest risk** — Do them last, after all other plans prove the pattern works
+2. **Test after each plan** — Don't batch multiple plans before testing
+3. **Revert fast** — If a plan causes regressions, revert and reassess
+
+## Plan Summaries
+
+| Plan | What It Does |
+|------|--------------|
+| `plan_01_psygnal_migration` | Replace 8 callback lists with psygnal Signals |
+| `plan_01_centralized_styling` | Move 227 setStyleSheet calls to app-level stylesheet |
+| `plan_01_eliminate_config_merging` | Delete 90 lines that duplicate config framework |
+| `plan_01_python_source_serializer` | Replace 950-line pickle_to_python with type-dispatched formatters |
+| `plan_03_dimension_abstraction` | Replace 103 channel/slice/frame references with HyperstackDimensions |
+| `plan_01_streaming_backend_unification` | Merge Napari/Fiji backends into one ABC |
+| `plan_02_streaming_message_protocol` | Replace stringly-typed JSON with typed dataclasses |
+| `plan_01_generic_compiler_spec` | Replace Dict[str, Any] plans with typed frozen StepPlan |
+| `plan_02_step_executor_extraction` | Move 647-line process() to dedicated StepExecutor |
+

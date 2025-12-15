@@ -3,150 +3,195 @@
 
 ### Objective
 
-Replace the fragmented signal/callback infrastructure with psygnal — a pure Python Qt-style signal library by Talley Lambert. Eliminate boilerplate, decouple core domain from Qt, and gain type-safe, leak-proof signals.
+Replace hand-rolled callback lists in ObjectStateRegistry with psygnal Signals. This is a surgical migration — not a rewrite of all Qt signals. The rot is specifically in `object_state.py` where we maintain 8 callback lists with 24 boilerplate methods.
 
-### Findings
-
-#### Current State: Three Competing Paradigms
-
-**1. Qt pyqtSignal (58 declarations across 25 files)**
+### The Rot
 
 ```python
-# PlateManager alone has 15 signals
-plate_selected = pyqtSignal(str)
-orchestrator_state_changed = pyqtSignal(str, str)
-progress_started = pyqtSignal(int)
-_execution_complete_signal = pyqtSignal(dict, str)
-# ... 11 more
+# openhcs/config_framework/object_state.py — 8 callback lists, 24 methods
 
-# Every widget reinvents signal patterns
-# No shared infrastructure
-# Type safety is theater: pyqtSignal(object) everywhere
-```
-
-**2. Manual Callback Lists (ObjectStateRegistry)**
-
-```python
-# 4 class-level callback lists
+# CLASS-LEVEL (ObjectStateRegistry) — 5 lists
 _on_register_callbacks: List[Callable[[str, 'ObjectState'], None]] = []
 _on_unregister_callbacks: List[Callable[[str, 'ObjectState'], None]] = []
 _on_time_travel_complete_callbacks: List[Callable[[List[Tuple], Optional[str]], None]] = []
 _on_history_changed_callbacks: List[Callable[[], None]] = []
 _change_callbacks: List[Callable[[], None]] = []
 
-# 3 instance-level callback lists per ObjectState
+# INSTANCE-LEVEL (ObjectState) — 3 lists per instance
 _on_state_changed_callbacks: List[Callable[[], None]] = []
 _on_resolved_changed_callbacks: List[Callable[[Set[str]], None]] = []
 _on_time_travel_callbacks: List[Callable[[], None]] = []
 
-# Every list requires 3 methods:
+# Each list requires 3 methods:
 #   add_*_callback(), remove_*_callback(), _fire_*_callbacks()
-# Manual dead callback detection: if "deleted" in str(e).lower()
+# Plus manual dead callback detection: if "deleted" in str(e).lower()
 ```
 
-**3. Global Singleton Signal Objects**
-
-```python
-# custom_function_signals.py
-custom_function_signals = CustomFunctionSignals()  # QObject singleton
-
-# GlobalEventBus - another QObject singleton
-pipeline_changed = pyqtSignal(list)
-config_changed = pyqtSignal(object)
-step_changed = pyqtSignal(object)
-```
-
-#### The Problems
-
-| Problem | Current | With psygnal |
-|---------|---------|--------------|
-| Qt coupling in core domain | ObjectStateRegistry imports no Qt, but has hand-rolled signal system | Pure Python signals - same pattern |
-| Boilerplate explosion | 3 methods per callback list × 8 lists = 24 methods | 0 methods - Signal handles it |
-| Memory leaks | Manual `if "deleted" in str(e).lower()` | Weak references by default |
-| Type safety | `pyqtSignal(object)`, `List[Callable]` | `Signal(str, int)` - validated |
-| Fragmentation | 3 paradigms, no unification | One paradigm everywhere |
-
-#### What psygnal Provides
+### The Solution: psygnal
 
 ```python
 from psygnal import Signal
 
 class ObjectStateRegistry:
     # Class-level signals (replace 5 callback lists)
-    register = Signal(str, object)          # scope_id, ObjectState
-    unregister = Signal(str, object)        # scope_id, ObjectState
-    history_changed = Signal()              # no args
-    time_travel_complete = Signal(list, str)  # dirty_states, triggering_scope
-    change = Signal()                       # token incremented
+    registered = Signal(str, object)           # (scope_id, ObjectState)
+    unregistered = Signal(str, object)         # (scope_id, ObjectState)
+    history_changed = Signal()                 # no args
+    time_travel_complete = Signal(list, str)   # (dirty_states, triggering_scope)
+    changed = Signal()                         # token incremented
 
 class ObjectState:
     # Instance-level signals (replace 3 callback lists)
-    resolved_changed = Signal(set)          # Set[str] changed paths
-    state_changed = Signal()                # dirty/sig-diff changed
-    time_travel = Signal()                  # restored via time-travel
+    resolved_changed = Signal(set)             # Set[str] changed paths
+    state_changed = Signal()                   # dirty/sig-diff changed
+    time_traveled = Signal()                   # restored via time-travel
 ```
 
-**Eliminated:**
-- `add_register_callback()`, `remove_register_callback()`, `_fire_register_callbacks()`
-- `add_unregister_callback()`, `remove_unregister_callback()`, `_fire_unregister_callbacks()`
-- ... 18 more methods
+**What psygnal provides:**
+- `.connect(callback)` — subscribe
+- `.disconnect(callback)` — unsubscribe
+- `.emit(*args)` — fire
+- Automatic weak reference cleanup (no more `if "deleted" in str(e).lower()`)
+- Type-checked arguments
+- Thread safety
 
-**Gained:**
-- Type-checked signal arguments
-- Automatic weak reference cleanup
-- Thread safety built-in
-- Qt-compatible API (`.connect()`, `.emit()`, `.disconnect()`)
+### Caller Enumeration (Complete)
+
+**ObjectStateRegistry class-level signals:**
+
+| Signal | Caller | File | Line |
+|--------|--------|------|------|
+| `registered` | `AbstractManagerWidget._on_registry_register` | `abstract_manager_widget.py` | 452 |
+| `unregistered` | `AbstractManagerWidget._on_registry_unregister` | `abstract_manager_widget.py` | 451 |
+| `unregistered` | `MainWindow._on_object_state_unregistered` | `main.py` | 591 |
+| `time_travel_complete` | `MainWindow._on_time_travel_complete` | `main.py` | 587 |
+| `history_changed` | `TimeTravelWidget._update_ui` | `time_travel_widget.py` | 49 |
+| `history_changed` | `SnapshotBrowserWindow._on_refresh` | `snapshot_browser_window.py` | 128 |
+| `changed` | `ParameterFormManager._on_live_context_changed` | `parameter_form_manager.py` | 267 |
+
+**ObjectState instance-level signals:**
+
+| Signal | Caller | File | Line |
+|--------|--------|------|------|
+| `resolved_changed` | `ParameterFormManager._on_resolved_values_changed` | `parameter_form_manager.py` | 328 |
+| `resolved_changed` | `FunctionListEditor.on_resolved_changed` | `function_list_editor.py` | 749 |
+| `state_changed` | `ParameterFormManager._on_state_changed` | `parameter_form_manager.py` | 335 |
+| `state_changed` | `ConfigHierarchyTree.on_state_changed` | `config_hierarchy_tree.py` | 206 |
 
 ### Plan
 
-**Phase 1: Add psygnal dependency**
-- Add `psygnal` to pyproject.toml
-- No code changes yet
+**Step 1: Add psygnal dependency**
+```bash
+uv add psygnal
+```
 
-**Phase 2: Migrate ObjectStateRegistry (core domain)**
-- Replace 5 class-level `List[Callable]` with `Signal` attributes
-- Replace `add_*_callback()` → `.connect()`
-- Replace `remove_*_callback()` → `.disconnect()`
-- Replace `_fire_*_callbacks()` → `.emit()`
-- Update all callers (ParameterFormManager, TimeTravelWidget, etc.)
+**Step 2: Replace ObjectStateRegistry class-level signals**
 
-**Phase 3: Migrate ObjectState instance signals**
-- Replace 3 instance-level callback lists with `Signal` attributes
-- Same pattern: connect/disconnect/emit
+Before:
+```python
+_on_register_callbacks: List[Callable[[str, 'ObjectState'], None]] = []
 
-**Phase 4: Assess Qt signal consolidation**
-- GlobalEventBus could remain pyqtSignal (it's already Qt-coupled)
-- OR migrate to psygnal for uniformity
-- Decision: Keep pyqtSignal in GUI layer, psygnal in core domain
+@classmethod
+def add_register_callback(cls, callback):
+    if callback not in cls._on_register_callbacks:
+        cls._on_register_callbacks.append(callback)
+
+@classmethod
+def _fire_register_callbacks(cls, scope_key, state):
+    for callback in cls._on_register_callbacks:
+        try:
+            callback(scope_key, state)
+        except Exception as e:
+            logger.warning(f"Error in register callback: {e}")
+```
+
+After:
+```python
+registered = Signal(str, object)  # (scope_id, ObjectState)
+
+# In register():
+cls.registered.emit(key, state)
+```
+
+**Step 3: Update callers**
+
+Before:
+```python
+ObjectStateRegistry.add_unregister_callback(self._on_registry_unregister)
+```
+
+After:
+```python
+ObjectStateRegistry.unregistered.connect(self._on_registry_unregister)
+```
+
+**Step 4: Replace ObjectState instance-level signals**
+
+Before:
+```python
+self._on_resolved_changed_callbacks: List[Callable[[Set[str]], None]] = []
+
+def on_resolved_changed(self, callback):
+    if callback not in self._on_resolved_changed_callbacks:
+        self._on_resolved_changed_callbacks.append(callback)
+```
+
+After:
+```python
+self.resolved_changed = Signal(set)
+
+# Callers:
+state.resolved_changed.connect(self._on_resolved_values_changed)
+```
 
 ### Cleanup — DELETE ALL OF THIS
 
-**Methods to DELETE from `ObjectStateRegistry`:**
+**From `ObjectStateRegistry` (class-level):**
 ```python
-def add_register_callback(...)        # DELETE
-def remove_register_callback(...)     # DELETE
-def _fire_register_callbacks(...)     # DELETE
-def add_unregister_callback(...)      # DELETE
-def remove_unregister_callback(...)   # DELETE
-def _fire_unregister_callbacks(...)   # DELETE
-# ... and all other add_*/remove_*/_fire_* methods
+# DELETE these 5 lists:
+_on_register_callbacks: List[...]
+_on_unregister_callbacks: List[...]
+_on_time_travel_complete_callbacks: List[...]
+_on_history_changed_callbacks: List[...]
+_change_callbacks: List[...]
+
+# DELETE these 15 methods:
+add_register_callback(), remove_register_callback(), _fire_register_callbacks()
+add_unregister_callback(), remove_unregister_callback(), _fire_unregister_callbacks()
+add_time_travel_complete_callback(), remove_time_travel_complete_callback()
+add_history_changed_callback(), remove_history_changed_callback(), _fire_history_changed_callbacks()
+connect_listener(), disconnect_listener(), _fire_change_callbacks()
 ```
 
-**Methods to DELETE from `ObjectState`:**
+**From `ObjectState` (instance-level):**
 ```python
-def add_state_changed_callback(...)   # DELETE
-def remove_state_changed_callback(...) # DELETE
-def _fire_state_changed_callbacks(...) # DELETE
-# ... and all other callback list methods
+# DELETE these 3 lists:
+_on_state_changed_callbacks: List[...]
+_on_resolved_changed_callbacks: List[...]
+_on_time_travel_callbacks: List[...]
+
+# DELETE these 9 methods:
+on_state_changed(), off_state_changed(), _notify_state_changed()
+on_resolved_changed(), off_resolved_changed()
+on_time_travel(), off_time_travel()
 ```
+
+**Estimated deletion:** ~120 lines of boilerplate
 
 **No wrappers. No backwards compatibility.**
-- All `add_*_callback()` calls → `.connect()`
-- All `remove_*_callback()` calls → `.disconnect()`
-- All `_fire_*_callbacks()` calls → `.emit()`
-- If a caller uses the old API, it fails loud — update the caller
+- All `add_*_callback()` → `.connect()`
+- All `remove_*_callback()` → `.disconnect()`
+- All `_fire_*_callbacks()` → `.emit()`
+- If a caller uses old API, it fails loud — update the caller
+
+### Out of Scope
+
+- Qt `pyqtSignal` in GUI widgets — stays as-is (already Qt-coupled)
+- `GlobalEventBus` — stays as-is (already Qt-coupled)
+- `CustomFunctionSignals` — stays as-is (already Qt-coupled)
+
+This plan is surgical: only `object_state.py` and its 11 callers.
 
 ### Implementation Draft
 
 *(Only after smell loop passes)*
-

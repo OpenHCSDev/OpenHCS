@@ -3,154 +3,170 @@
 
 ### Objective
 
-Eliminate the 647-line `FunctionStep.process()` god method by making execution **derived from the typed plan**. The plan contains everything needed — the executor reads it and acts. No polymorphism, no per-step executor classes. One generic executor that dispatches on plan structure.
+Eliminate the 647-line `FunctionStep.process()` god method by extracting execution into a **single generic executor** that reads typed plans. Not a "phase pipeline" — the complexity is real and must be preserved. The cracked solution is **one place** instead of scattered across step classes.
 
 ### The Rot
 
 ```python
-# openhcs/core/steps/function_step.py
+# openhcs/core/steps/function_step.py — 647 lines of execution logic
 class FunctionStep(AbstractStep):
     def process(self, context: ProcessingContext, step_index: int) -> None:
-        # 647 LINES of imperative execution
         step_plan = context.step_plans[step_index]
-        func = step_plan.get('func')  # Stringly-typed
+        func = step_plan.get('func')  # Stringly-typed Dict[str, Any]
         ...
 ```
 
-### The Insight
+### The Reality (Not Oversimplified)
 
-If the plan is fully typed (from `plan_01`), execution is **deterministic from plan structure**:
+The 647 lines handle REAL complexity that can't be abstracted away:
+
+1. **Pattern discovery** — `microscope_handler.get_patterns_for_well()`
+2. **Grouping** — `prepare_patterns_and_functions()` groups by component
+3. **Function chains** — `_execute_chain_core()` for `[func1, func2, ...]`
+4. **Dict patterns** — different functions per channel: `{'ch1': func_a, 'ch2': func_b}`
+5. **Special I/O** — loading ROIs, saving auxiliary outputs via `funcplan`
+6. **Memory stacking** — `stack_slices()` / `unstack_slices()` for 3D arrays
+7. **Streaming** — sending results to Napari/Fiji after processing
+8. **Materialization** — writing memory-backend data to disk
+
+**The previous plan's "composable phases" was wrong.** These aren't linear phases — they're interleaved concerns. The complexity is intrinsic.
+
+### The Actual Insight
+
+The problem isn't the complexity — it's the LOCATION. This logic is:
+1. Inside `FunctionStep` (coupling step declaration to execution)
+2. Scattered across module-level functions (`_execute_function_core`, `_execute_chain_core`, `_process_single_pattern_group`)
+3. Reading from `Dict[str, Any]` instead of typed plan
+
+**Cracked solution:** ONE `StepExecutor` class that:
+- Takes typed `StepPlan` (not dict)
+- Contains ALL execution logic (not scattered)
+- Is called by orchestrator, not by step
+
+### Plan
+
+#### 1. Typed StepPlan (from compiler spec)
 
 ```python
 @dataclass(frozen=True)
 class StepPlan:
-    func: Callable
-    input_paths: List[Path]
-    output_paths: List[Path]
+    """Typed, frozen plan. Not Dict[str, Any]."""
+    step_name: str
+    axis_id: str
+    input_dir: Path
+    output_dir: Path
+    func: Union[Callable, List[Callable], Dict[str, Callable]]
+    variable_components: List[str]
+    group_by: Optional[GroupBy]
+    special_inputs: Dict[str, SpecialInputInfo]
+    special_outputs: OrderedDict[str, SpecialOutputInfo]
+    funcplan: Dict[str, List[str]]
+    read_backend: Backend
+    write_backend: Backend
     input_memory_type: MemoryType
     output_memory_type: MemoryType
-    parameters: Dict[str, Any]
-    group_by: Optional[GroupBy]
-    streaming_config: Optional[StreamingConfig]
+    streaming_configs: List[StreamingConfig]
+    zarr_config: Optional[ZarrConfig]
+    device_id: Optional[int]
 ```
 
-The execution algorithm is GENERIC:
-1. Load from `plan.input_paths` as `plan.input_memory_type`
-2. Group by `plan.group_by`
-3. Call `plan.func(**plan.parameters)`
-4. Convert to `plan.output_memory_type`
-5. Save to `plan.output_paths`
-6. Stream if `plan.streaming_config`
-
-**This doesn't need polymorphism. It needs one executor that reads the plan.**
-
-### Plan
-
-#### 1. Single Generic Executor
+#### 2. Single StepExecutor (Contains ALL Logic)
 
 ```python
-class PlanExecutor:
-    """Executes any StepPlan. No subclasses needed.
+class StepExecutor:
+    """ONE class with ALL execution logic.
 
-    The plan IS the specification. Execution is derived.
+    Not phases. Not polymorphism. Just consolidated code.
+    The 647 lines move HERE — they don't disappear.
     """
 
     def execute(self, plan: StepPlan, context: ProcessingContext) -> None:
-        # Dispatch on plan structure, not step type
-        if plan.group_by:
-            self._execute_grouped(plan, context)
+        """Execute a compiled step plan."""
+        # Pattern discovery
+        patterns_by_well = self._discover_patterns(plan, context)
+
+        # Grouping
+        grouped_patterns, comp_to_funcs, comp_to_args = self._prepare_patterns(
+            patterns_by_well[plan.axis_id], plan
+        )
+
+        # Process each group
+        for comp_val, patterns in grouped_patterns.items():
+            func_or_chain = comp_to_funcs[comp_val]
+            base_args = comp_to_args[comp_val]
+
+            for pattern in patterns:
+                self._process_pattern(
+                    pattern, func_or_chain, base_args, plan, context, comp_val
+                )
+
+        # Streaming (after all patterns processed)
+        self._stream_results(plan, context)
+
+        # Materialization
+        self._materialize_outputs(plan, context)
+
+    def _process_pattern(self, pattern, func, args, plan, context, comp_val) -> None:
+        """Process single pattern — load, stack, execute, unstack, save."""
+        # Load and stack
+        data_stack = self._load_and_stack(pattern, plan, context)
+
+        # Execute (handles single func, chain, or dict pattern)
+        if isinstance(func, list):
+            result = self._execute_chain(data_stack, func, args, plan, context, comp_val)
         else:
-            self._execute_simple(plan, context)
+            result = self._execute_single(data_stack, func, args, plan, context, comp_val)
 
-    def _execute_simple(self, plan: StepPlan, context: ProcessingContext) -> None:
-        for input_path, output_path in zip(plan.input_paths, plan.output_paths):
-            data = self._load(input_path, plan.input_memory_type)
-            result = plan.func(data, **plan.parameters)
-            self._save(output_path, result, plan.output_memory_type)
-            if plan.streaming_config:
-                self._stream(result, plan.streaming_config)
+        # Unstack and save
+        self._unstack_and_save(result, pattern, plan, context)
 
-    def _execute_grouped(self, plan: StepPlan, context: ProcessingContext) -> None:
-        groups = self._group_paths(plan.input_paths, plan.group_by)
-        for group_key, group_paths in groups.items():
-            # ... same pattern, grouped
+    # ... rest of the 647 lines, consolidated here
 ```
 
-#### 2. Execution Phases as Composable Units
-
-The 647 lines decompose into **phases** that can be declaratively composed:
-
-```python
-class ExecutionPhase(ABC):
-    """Single responsibility execution phase."""
-
-    @abstractmethod
-    def __call__(self, data: Any, plan: StepPlan, context: ProcessingContext) -> Any:
-        ...
-
-class LoadPhase(ExecutionPhase):
-    def __call__(self, path: Path, plan: StepPlan, context: ProcessingContext) -> Any:
-        return context.io_backend.load(path, plan.input_memory_type)
-
-class TransformPhase(ExecutionPhase):
-    def __call__(self, data: Any, plan: StepPlan, context: ProcessingContext) -> Any:
-        return plan.func(data, **plan.parameters)
-
-class SavePhase(ExecutionPhase):
-    def __call__(self, data: Any, plan: StepPlan, context: ProcessingContext) -> Any:
-        context.io_backend.save(data, plan.output_path, plan.output_memory_type)
-        return data
-
-class StreamPhase(ExecutionPhase):
-    def __call__(self, data: Any, plan: StepPlan, context: ProcessingContext) -> Any:
-        if plan.streaming_config:
-            context.streaming_backend.send(data, plan.streaming_config)
-        return data
-```
-
-#### 3. Pipeline of Phases (Derived from Plan)
-
-```python
-class PlanExecutor:
-    """Execution pipeline derived from plan structure."""
-
-    def __init__(self):
-        # Phase pipeline - order matters
-        self.phases = [LoadPhase(), TransformPhase(), SavePhase(), StreamPhase()]
-
-    def execute(self, plan: StepPlan, context: ProcessingContext) -> None:
-        for input_path in plan.input_paths:
-            data = input_path
-            for phase in self.phases:
-                data = phase(data, plan, context)
-```
-
-#### 4. Steps Have No Execution Logic
+#### 3. FunctionStep Becomes Pure Declaration
 
 ```python
 @dataclass
 class FunctionStep(AbstractStep):
-    """Pure declaration. No process() method. No executor_class property."""
-
+    """Declaration only. Zero execution logic."""
     func: FuncPattern
-    processing_config: ProcessingConfig
 
-    # Compilation produces StepPlan
-    # Execution reads StepPlan
-    # Step is ONLY declaration
+    # NO process() method
+    # Compiler produces StepPlan
+    # Orchestrator calls StepExecutor.execute(plan)
 ```
 
-### Why This Is Cracked
+#### 4. Orchestrator Calls Executor
 
-| Old (Competent) | New (Cracked) |
-|-----------------|---------------|
-| `FunctionStepExecutor` with 647 lines | `PlanExecutor` with ~50 lines |
-| Per-step executor classes | One generic executor |
-| Polymorphic dispatch on step type | Structural dispatch on plan fields |
-| Manual phase ordering | Composable phase pipeline |
-| Execution logic in executor | Execution derived from plan structure |
+```python
+class Orchestrator:
+    def run_step(self, step: AbstractStep, step_index: int) -> None:
+        # Compilation already happened — plan is in context
+        plan = self.context.step_plans[step_index]
 
-**The plan IS the execution specification. Reading it IS executing it.**
+        # One executor, takes any plan
+        executor = StepExecutor()
+        executor.execute(plan, self.context)
+```
+
+### Why This Is Actually Cracked
+
+| Old | New |
+|-----|-----|
+| Execution in `FunctionStep.process()` | Execution in `StepExecutor.execute()` |
+| Scattered module functions | Consolidated in one class |
+| `Dict[str, Any]` plan | Typed frozen `StepPlan` |
+| Step knows how to execute itself | Step is pure declaration |
+| 647 lines in step file | 647 lines in executor file (moved, not deleted) |
+
+**The lines don't shrink. The coupling shrinks.** FunctionStep goes from 1467 → ~50 lines. The execution logic moves to a dedicated executor.
+
+### What This Enables
+
+1. **Other step types** reuse the same executor (if they produce compatible StepPlan)
+2. **Testing** can mock StepExecutor without mocking steps
+3. **Debugging** has one place to look for execution issues
+4. **Future optimization** (parallelism, caching) has one entry point
 
 ### Architecture Diagram
 
@@ -161,16 +177,17 @@ flowchart TD
     end
 
     subgraph Execute["Execute Time"]
-        SP -->|"executor.execute(plan)"| PE[PlanExecutor]
-        PE --> LP[LoadPhase]
-        LP --> TP[TransformPhase]
-        TP --> SVP[SavePhase]
-        SVP --> STP[StreamPhase]
+        SP -->|"executor.execute(plan)"| SE[StepExecutor]
+        SE --> DP[discover_patterns]
+        DP --> PP[prepare_patterns]
+        PP --> PR[process_pattern loop]
+        PR --> ST[stream_results]
+        ST --> MT[materialize_outputs]
     end
 
     style FS fill:#339af0,color:#fff
     style SP fill:#51cf66,color:#fff
-    style PE fill:#51cf66,color:#fff
+    style SE fill:#51cf66,color:#fff
 ```
 
 ### Dependencies
@@ -179,17 +196,29 @@ flowchart TD
 
 ### Cleanup — DELETE ALL OF THIS
 
-**Code to DELETE from `function_step.py`:**
-- The entire 647-line `process()` method body → replaced by `PlanExecutor.execute(plan)`
-- All per-step execution logic → derived from `StepPlan` structure
-- All manual phase management → replaced by composable `ExecutionPhase` pipeline
+**Files to modify:**
+
+1. **`openhcs/core/steps/function_step.py`** (1467 → ~50 lines)
+   - DELETE: `process()` method (lines 821-1036)
+   - DELETE: `_execute_function_core()` (lines 384-491)
+   - DELETE: `_execute_chain_core()` (lines 493-571)
+   - DELETE: `_process_single_pattern_group()` (lines 573-798)
+   - DELETE: All streaming/materialization helpers
+   - KEEP: `__init__()`, class attributes, `func` property
+
+2. **NEW: `openhcs/core/execution/step_executor.py`** (~500 lines)
+   - All deleted code moves here, consolidated
+   - Takes typed `StepPlan` instead of `Dict[str, Any]`
+   - Single entry point: `StepExecutor.execute(plan, context)`
+
+3. **`openhcs/core/orchestrator.py`**
+   - CHANGE: `step.process(context, i)` → `StepExecutor().execute(plan, context)`
 
 **No wrappers. No backwards compatibility.**
-- `FunctionStep.process()` becomes: `PlanExecutor().execute(self.compile(context), context)`
-- One-liner that delegates to the generic executor
-- If something breaks, fix the plan structure — don't add special cases to the executor
+- Steps lose `process()` method entirely
+- Orchestrator calls executor directly
+- If something breaks, fix the plan structure — don't add special cases
 
 ### Implementation Draft
 
 *Awaiting smell loop approval.*
-

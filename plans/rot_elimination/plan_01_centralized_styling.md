@@ -2,104 +2,147 @@
 ## Component: PyQt Centralized Styling
 
 ### Objective
-Eliminate duplicate `StyleSheetGenerator` instantiations and duplicate `_get_button_style()` methods across 25+ widgets. Every widget should access styling through a single centralized source — NOT by creating its own generator instance.
 
-### Findings
+Eliminate 227 scattered `setStyleSheet()` calls and 25+ `StyleSheetGenerator` instantiations. Widgets should declare WHAT they are (via object names), not HOW they look (via style strings).
 
-**Current Rot:**
+### The Rot
 
-| Pattern | Count | Issue |
-|---------|-------|-------|
-| Widgets creating own `StyleSheetGenerator` | 25 | Duplicate instantiation, scattered state |
-| Manual `.generate_*_style()` calls | 42 | Imperative styling, widgets know about styling |
-| Duplicate `_get_button_style()` methods | 2+ | Same method copy-pasted (function_list_editor, step_parameter_editor) |
-
-**Existing Infrastructure (Underutilized):**
-
-1. `PaletteManager` — Already holds centralized `style_generator` instance
-2. `generate_complete_application_style()` — Already generates app-wide stylesheet
-3. `ThemeManager` — Already manages color scheme changes
-
-**The Wrong Way (Current):**
 ```python
+# 25+ widgets do this:
 class MyWidget(QWidget):
     def __init__(self, color_scheme, ...):
-        self.style_generator = StyleSheetGenerator(self.color_scheme)  # ❌ 25 copies
-        
+        self.style_generator = StyleSheetGenerator(self.color_scheme)  # ❌ Duplicate
+
     def setup_ui(self):
         btn.setStyleSheet(self.style_generator.generate_button_style())  # ❌ Imperative
+        label.setStyleSheet(f"color: {self.color_scheme.to_hex(...)};")  # ❌ Inline
 ```
 
-**The Cracked Way:**
+**Counts:**
+- 227 `setStyleSheet()` calls across pyqt_gui/
+- 25+ `StyleSheetGenerator` instantiations
+- 2+ duplicate `_get_button_style()` methods
+
+### The Insight
+
+Qt stylesheets cascade like CSS. Application-level stylesheet applies to ALL widgets. Widget-level `setStyleSheet()` is only needed for:
+1. **Dynamic state** — e.g., flash animations, error highlighting
+2. **Variant styling** — e.g., primary vs secondary buttons
+
+Everything else should be in the application stylesheet.
+
+### Existing Infrastructure (Underutilized)
+
 ```python
-class MyWidget(QWidget):
-    # No style_generator. No setStyleSheet calls. 
-    # Application-level stylesheet targets widget types automatically.
-    pass
+# openhcs/pyqt_gui/shared/palette_manager.py
+class PaletteManager:
+    def __init__(self):
+        self.style_generator = StyleSheetGenerator(self.color_scheme)  # ✅ ONE instance
+
+# openhcs/pyqt_gui/shared/style_generator.py
+def generate_complete_application_style(self) -> str:
+    """Generate complete application-wide QStyleSheet."""  # ✅ Already exists
 ```
 
 ### Plan
 
-**Phase 1: Application-Level Stylesheet Completeness**
+**Step 1: Audit and Extend Application Stylesheet**
 
-The `generate_complete_application_style()` already exists but doesn't cover all widget types.
+The `generate_complete_application_style()` exists but doesn't cover all widget types.
 
-1. Audit all widget types that currently need manual styling
-2. Add rules to `generate_complete_application_style()` for each widget type
-3. Ensure QSS specificity is correct (more specific rules override general ones)
+1. Grep all `setStyleSheet()` calls
+2. Categorize: which are static (can move to app stylesheet) vs dynamic (must stay)
+3. Add missing widget type rules to `generate_complete_application_style()`
 
-**Phase 2: Remove Widget-Level StyleSheetGenerator Instantiation**
+**Step 2: Introduce Object Name Convention**
+
+For variant styling, widgets declare their role:
+
+```python
+# Widget code (declaration only):
+btn.setObjectName("primary_button")
+btn.setObjectName("secondary_button")
+btn.setObjectName("danger_button")
+
+# Application stylesheet (styling only):
+QPushButton#primary_button { background-color: ...; }
+QPushButton#secondary_button { background-color: ...; }
+QPushButton#danger_button { background-color: ...; }
+```
+
+**Step 3: Remove Widget-Level StyleSheetGenerator**
 
 For each widget that creates its own `StyleSheetGenerator`:
-1. Remove `self.style_generator = StyleSheetGenerator(...)` line
-2. Remove all `btn.setStyleSheet(self.style_generator.generate_*())` calls
-3. Widget inherits styling from application-level stylesheet automatically
+1. DELETE `self.style_generator = StyleSheetGenerator(...)`
+2. DELETE all static `setStyleSheet()` calls
+3. Widget inherits from application stylesheet automatically
 
-**Phase 3: Eliminate Duplicate `_get_button_style()` Methods**
+**Step 4: Keep Dynamic Styling Where Needed**
 
-Files with duplicate methods:
-- `openhcs/pyqt_gui/widgets/function_list_editor.py:241`
-- `openhcs/pyqt_gui/widgets/step_parameter_editor.py:370`
+Some `setStyleSheet()` calls are legitimate:
+- Flash animations (scope colors, dirty indicators)
+- Error states (red borders)
+- Runtime-computed styles
 
-1. Delete both `_get_button_style()` methods
-2. Buttons inherit from application-level button style
-3. If variant needed, use QSS object names or classes
+These stay, but should use a centralized helper:
 
-**Phase 4: Dynamic Styling via Object Names**
+```python
+# Instead of inline style strings:
+widget.setStyleSheet(f"border: 2px solid {color};")
 
-For widgets that need variant styles (e.g., primary vs secondary buttons):
-1. Widget sets `setObjectName("primary_button")` or `setObjectName("secondary_button")`
-2. Application stylesheet has rules: `QPushButton#primary_button { ... }`
-3. Widget code contains ZERO style strings
+# Use centralized helper:
+from openhcs.pyqt_gui.shared.style_helpers import apply_flash_border
+apply_flash_border(widget, scope_color)
+```
 
-### Structural Properties
+### Qt Stylesheet Limitations (Acknowledged)
 
-- **No StyleSheetGenerator in widgets** — Widgets don't import or instantiate StyleSheetGenerator
-- **No setStyleSheet calls** — Except at application level
-- **Style is derived from widget type** — QPushButton gets button style automatically
-- **Variants via object names** — Not via method calls
+Qt stylesheets have quirks:
+- Specificity rules differ from CSS
+- Some properties don't cascade (e.g., `font` on QGroupBox)
+- Pseudo-states (`:hover`, `:pressed`) can be finicky
+
+**Mitigation:** Test each widget type after migration. If Qt fights back, document the exception and keep minimal widget-level styling.
 
 ### Cleanup — DELETE ALL OF THIS
 
-**Code to DELETE from 25+ widget files:**
+**From 25+ widget files:**
 ```python
-self.style_gen = StyleSheetGenerator(self.color_scheme)  # DELETE all 25 instances
-self.style_generator = StyleSheetGenerator(...)          # DELETE
-self.setStyleSheet(self.style_gen.generate_*_style())    # DELETE all 42 calls
+# DELETE all of these patterns:
+self.style_gen = StyleSheetGenerator(self.color_scheme)
+self.style_generator = StyleSheetGenerator(...)
+from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator  # (if unused after)
+
+# DELETE static setStyleSheet calls:
+btn.setStyleSheet(self.style_generator.generate_button_style())
+label.setStyleSheet(f"color: {self.color_scheme.to_hex(...)};")
 ```
 
-**Methods to DELETE:**
+**DELETE duplicate methods:**
 ```python
-def _get_button_style(self):  # DELETE from function_list_editor.py
-def _get_button_style(self):  # DELETE from step_parameter_editor.py
+def _get_button_style(self):  # function_list_editor.py
+def _get_button_style(self):  # step_parameter_editor.py
 ```
+
+**Estimated deletion:** ~200 lines of scattered styling code
 
 **No wrappers. No backwards compatibility.**
-- Widgets that call `style_gen.generate_*_style()` → DELETE the call entirely
-- Application stylesheet handles all styling
-- If a widget looks wrong, fix the application stylesheet — don't add widget-level styling
+- If a widget looks wrong after migration, fix the application stylesheet
+- Don't add widget-level styling back
+
+### Files to Modify
+
+**Extend:**
+- `openhcs/pyqt_gui/shared/style_generator.py` — Add missing widget type rules
+
+**Clean up (remove StyleSheetGenerator):**
+- `openhcs/pyqt_gui/dialogs/custom_function_manager_dialog.py`
+- `openhcs/pyqt_gui/dialogs/function_selector_dialog.py`
+- `openhcs/pyqt_gui/widgets/shared/abstract_table_browser.py`
+- `openhcs/pyqt_gui/widgets/shared/column_filter_widget.py`
+- `openhcs/pyqt_gui/widgets/shared/zmq_server_manager.py`
+- ... and 20+ more
 
 ### Implementation Draft
 
-(After smell loop approval)
-
+*(Only after smell loop passes)*
