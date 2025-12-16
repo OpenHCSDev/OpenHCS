@@ -2263,8 +2263,10 @@ class ObjectState:
         # Sync materialized state (single point for dirty/sig_diff update + notification)
         self._sync_materialized_state()
 
-        # Record snapshot for time-travel (registry-level)
-        ObjectStateRegistry.record_snapshot("save", self.scope_id)
+        # Record snapshot for time-travel (registry-level) - ONLY if there were actual changes
+        # This prevents no-op snapshots (e.g., saving a window where only sibling state changed)
+        if changed_params:
+            ObjectStateRegistry.record_snapshot("save", self.scope_id)
 
     def restore_saved(self) -> None:
         """Restore parameters to the last saved baseline (from object_instance).
@@ -2300,7 +2302,16 @@ class ObjectState:
         self._path_to_type.clear()
         self._extract_all_parameters_flat(self.object_instance, prefix='', exclude_params=self._exclude_param_names)
 
+        # CRITICAL: Also restore _saved_parameters to match current parameters
+        # After restore, parameters == saved (both extracted from object_instance)
+        self._saved_parameters = copy.deepcopy(self.parameters)
+
         self.invalidate_cache()
+
+        # CRITICAL: Recompute _saved_resolved to match the restored state
+        # Time travel may have overwritten _saved_resolved with snapshot values,
+        # but after restore_saved(), _saved_resolved should reflect object_instance
+        self._saved_resolved = self._compute_resolved_snapshot(use_saved=True)
 
         # NOW invalidate descendant caches for each changed parameter
         # This must happen AFTER restoring parameters so descendants see restored values

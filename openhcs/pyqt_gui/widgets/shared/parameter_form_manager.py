@@ -877,6 +877,8 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, FlashMixin, metacla
         """
         from openhcs.ui.shared.widget_protocols import ValueSettable
 
+        logger.debug(f"⏱️ WIDGET_REFRESH: paths={paths}, field_prefix={self.field_prefix!r}, widgets={list(self.widgets.keys())}")
+
         for path in paths:
             # Extract path prefix and leaf field
             # e.g., "step_well_filter_config.well_filter" -> prefix="step_well_filter_config", leaf="well_filter"
@@ -887,9 +889,12 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, FlashMixin, metacla
                 path_prefix = ""
                 leaf_field = path
 
+            logger.debug(f"⏱️ WIDGET_REFRESH: path={path}, path_prefix={path_prefix!r}, leaf_field={leaf_field}, my_prefix={self.field_prefix!r}")
+
             # CRITICAL: Only update widget if this path belongs to this manager
             # Path prefix must match manager's field_prefix exactly
             if path_prefix != self.field_prefix:
+                logger.debug(f"⏱️ WIDGET_REFRESH: SKIP path={path} (prefix mismatch: {path_prefix!r} != {self.field_prefix!r})")
                 continue  # This path doesn't belong to this manager
 
             # Check if we have this widget
@@ -899,9 +904,12 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, FlashMixin, metacla
                     # Use get with sentinel to distinguish "key exists with None value" from "key doesn't exist"
                     _MISSING = object()
                     value = self.state.parameters.get(path, _MISSING)
+                    logger.debug(f"⏱️ WIDGET_REFRESH: UPDATING {leaf_field} -> {value!r}")
                     if value is not _MISSING:
                         # None is a valid value (means "inherit") - don't skip it
                         self._widget_service.update_widget_value(widget, value, leaf_field, False, self)
+            else:
+                logger.debug(f"⏱️ WIDGET_REFRESH: NO WIDGET for {leaf_field}")
 
         # Recurse into nested managers
         for nested_manager in self.nested_managers.values():
