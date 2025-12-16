@@ -8,7 +8,7 @@ Uses hybrid approach: extracted business logic + clean PyQt6 UI.
 import logging
 import dataclasses
 import copy
-from typing import Type, Any, Callable, Optional
+from typing import Type, Any, Callable, Optional, Dict
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
@@ -19,7 +19,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont
 
 # Infrastructure classes removed - functionality migrated to ParameterFormManager service layer
-from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager, FormManagerConfig
 from openhcs.pyqt_gui.widgets.shared.config_hierarchy_tree import ConfigHierarchyTreeHelper
 from openhcs.pyqt_gui.widgets.shared.scrollable_form_mixin import ScrollableFormMixin
 from openhcs.pyqt_gui.widgets.shared.collapsible_splitter_helper import CollapsibleSplitterHelper
@@ -29,6 +29,7 @@ from openhcs.pyqt_gui.windows.base_form_dialog import BaseFormDialog
 from openhcs.core.config import GlobalPipelineConfig, PipelineConfig
 from openhcs.config_framework import is_global_config_type
 from openhcs.ui.shared.code_editor_form_updater import CodeEditorFormUpdater
+from openhcs.config_framework.object_state_registry import ObjectStateRegistry
 # ❌ REMOVED: require_config_context decorator - enhanced decorator events system handles context automatically
 from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
 
@@ -51,6 +52,8 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
     cross-window placeholder updates when the dialog closes.
 
     Inherits from ScrollableFormMixin to provide scroll-to-section functionality.
+
+    Tree items flash via form_manager's FlashMixin - ONE source of truth.
     """
 
     # Signals
@@ -108,18 +111,24 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
         # The overlay (current form state) will be built by ParameterFormManager
         # This fixes the circular context bug where reset showed old values instead of global defaults
 
+        # Create or lookup ObjectState from registry - callers own state directly
+        from openhcs.config_framework.object_state import ObjectState
+        from openhcs.config_framework.object_state_registry import ObjectStateRegistry
+        self.state = ObjectStateRegistry.get_by_scope(self.scope_id)
+        if self.state is None:
+            self.state = ObjectState(
+                object_instance=current_config,
+                scope_id=self.scope_id,
+            )
+
         # CRITICAL: Config window manages its own scroll area, so tell form_manager NOT to create one
-        # This prevents double scroll areas which cause navigation bugs
-        self.form_manager = ParameterFormManager.from_dataclass_instance(
-            dataclass_instance=current_config,
-            field_id=root_field_id,
-            placeholder_prefix=placeholder_prefix,
+        config = FormManagerConfig(
+            parent=None,
+            scope_id=self.scope_id,
             color_scheme=self.color_scheme,
             use_scroll_area=False,  # Config window handles scrolling
-            global_config_type=global_config_type,
-            context_obj=None,  # Inherit from thread-local GlobalPipelineConfig only
-            scope_id=self.scope_id  # Pass scope_id to limit cross-window updates to same orchestrator
         )
+        self.form_manager = ParameterFormManager(state=self.state, config=config)
 
         if is_global_config_type(self.config_class):
             self._original_global_config_snapshot = copy.deepcopy(current_config)
@@ -128,37 +137,72 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
         # No config_editor needed - everything goes through form_manager
         self.config_editor = None
 
+        # Subscribe to dirty state changes for window title updates
+        self._base_window_title = f"Configuration - {self.config_class.__name__}"
+        self._dirty_title_callback = self._update_window_title_dirty_marker
+        self.state.on_state_changed(self._dirty_title_callback)
+
         # Setup UI
         self.setup_ui()
 
         logger.debug(f"Config window initialized for {config_class.__name__}")
 
+    def _update_window_title_dirty_marker(self) -> None:
+        """Update window title with dirty marker and signature diff underline.
+
+        Two orthogonal visual semantics:
+        - Asterisk (*): dirty (resolved_live != resolved_saved)
+        - Underline: signature diff (raw != signature default)
+        """
+        is_dirty = bool(self.state.dirty_fields)
+        has_sig_diff = bool(self.state.signature_diff_fields)
+        current_title = self.windowTitle()
+        has_marker = current_title.startswith("* ")
+
+        if is_dirty and not has_marker:
+            self.setWindowTitle(f"* {self._base_window_title}")
+        elif not is_dirty and has_marker:
+            self.setWindowTitle(self._base_window_title)
+
+        # Update header label with both asterisk and underline
+        if hasattr(self, '_header_label'):
+            header_text = f"Configure {self.config_class.__name__}"
+            if is_dirty:
+                self._header_label.setText(f"* {header_text}")
+            else:
+                self._header_label.setText(header_text)
+            font = self._header_label.font()
+            font.setUnderline(has_sig_diff)
+            self._header_label.setFont(font)
+
     def setup_ui(self):
         """Setup the user interface."""
-        self.setWindowTitle(f"Configuration - {self.config_class.__name__}")
+        self.setWindowTitle(self._base_window_title)
         self.setModal(False)  # Non-modal like plate manager and pipeline editor
         self.setMinimumSize(600, 400)
         self.resize(800, 600)
         
         layout = QVBoxLayout(self)
-        layout.setSpacing(10)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(4)
 
         # Header with title, help button, and action buttons
         header_widget = QWidget()
         header_layout = QHBoxLayout(header_widget)
-        header_layout.setContentsMargins(10, 10, 10, 10)
+        header_layout.setContentsMargins(4, 2, 4, 2)
 
-        header_label = QLabel(f"Configure {self.config_class.__name__}")
-        header_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
-        header_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_accent)};")
-        header_layout.addWidget(header_label)
+        self._header_label = QLabel(f"Configure {self.config_class.__name__}")
+        self._header_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
+        self._header_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_accent)};")
+        header_layout.addWidget(self._header_label)
 
         # Add help button for the dataclass itself
+        self._help_btn = None
         if dataclasses.is_dataclass(self.config_class):
             from openhcs.pyqt_gui.widgets.shared.clickable_help_components import HelpButton
-            help_btn = HelpButton(help_target=self.config_class, text="Help", color_scheme=self.color_scheme)
-            help_btn.setMaximumWidth(80)
-            header_layout.addWidget(help_btn)
+            self._help_btn = HelpButton(help_target=self.config_class, text="Help", color_scheme=self.color_scheme)
+            self._help_btn.setMaximumWidth(80)
+            header_layout.addWidget(self._help_btn)
 
         header_layout.addStretch()
 
@@ -190,12 +234,12 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
         header_layout.addWidget(cancel_button)
 
         # Save button
-        save_button = QPushButton("Save")
-        save_button.setFixedHeight(28)
-        save_button.setMinimumWidth(70)
-        self._setup_save_button(save_button, self.save_config)
-        save_button.setStyleSheet(button_styles["save"])
-        header_layout.addWidget(save_button)
+        self._save_button = QPushButton("Save")
+        self._save_button.setFixedHeight(28)
+        self._save_button.setMinimumWidth(70)
+        self._setup_save_button(self._save_button, self.save_config)
+        self._save_button.setStyleSheet(button_styles["save"])
+        header_layout.addWidget(self._save_button)
 
         layout.addWidget(header_widget)
 
@@ -233,10 +277,57 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
             self.style_generator.generate_tree_widget_style()
         )
 
+    def _apply_scope_accent_styling(self) -> None:
+        """Apply scope accent color to ConfigWindow-specific elements.
+
+        Extends base class to add: Save button, header label, tree selection.
+        """
+        # Call base class for common elements (input focus, HelpButtons)
+        super()._apply_scope_accent_styling()
+
+        accent_color = self.get_scope_accent_color()
+        if not accent_color:
+            return
+
+        hex_color = accent_color.name()
+
+        # Style Save button directly
+        save_button_style = f"""
+            background-color: {hex_color};
+            color: white;
+            border: none;
+            border-radius: 3px;
+            padding: 8px;
+        """
+        if hasattr(self, '_save_button'):
+            self._save_button.setStyleSheet(save_button_style)
+
+        # Style header label with scope accent color
+        if hasattr(self, '_header_label'):
+            self._header_label.setStyleSheet(f"color: {hex_color};")
+
+        # Style tree selection with scope accent
+        tree_style = self.get_scope_tree_selection_stylesheet()
+        if tree_style and hasattr(self, 'tree_widget'):
+            current_style = self.tree_widget.styleSheet() or ""
+            self.tree_widget.setStyleSheet(f"{current_style}\n{tree_style}")
+
     def _create_inheritance_tree(self) -> QTreeWidget:
         """Create tree widget showing inheritance hierarchy for navigation."""
-        tree = self.tree_helper.create_tree_widget()
+        # Pass form_manager as flash_manager - tree reads from SAME _flash_colors dict as groupboxes
+        # ONE source of truth: form_manager already subscribes to ObjectState.on_resolved_changed
+        # Pass state for automatic dirty tracking subscription (handled by helper)
+        tree = self.tree_helper.create_tree_widget(
+            flash_manager=self.form_manager,
+            state=self.state
+        )
         self.tree_helper.populate_from_root_dataclass(tree, self.config_class)
+
+        # Initialize dirty styling AFTER population (when _field_to_item is filled)
+        self.tree_helper.initialize_dirty_styling()
+
+        # Register tree repaint callback so flash animation triggers tree repaint
+        self.form_manager.register_repaint_callback(lambda: tree.viewport().update())
 
         # Connect double-click to navigation
         tree.itemDoubleClicked.connect(self._on_tree_item_double_clicked)
@@ -357,18 +448,10 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
     def save_config(self, *, close_window=True):
         """Save the configuration preserving lazy behavior for unset fields. If close_window is True, close after saving; else, keep open."""
         try:
-            if LazyDefaultPlaceholderService.has_lazy_resolution(self.config_class):
-                # BETTER APPROACH: For lazy dataclasses, only save user-modified values
-                # Get only values that were explicitly set by the user (non-None raw values)
-                user_modified_values = self.form_manager.get_user_modified_values()
-
-                # Create fresh lazy instance with only user-modified values
-                # This preserves lazy resolution for unmodified fields
-                new_config = self.config_class(**user_modified_values)
-            else:
-                # For non-lazy dataclasses, use all current values
-                current_values = self.form_manager.get_current_values()
-                new_config = self.config_class(**current_values)
+            # CRITICAL: Use to_object() to reconstruct nested dataclass structure from flat storage
+            # get_current_values() returns flat dict with dotted paths like 'well_filter_config.well_filter'
+            # which cannot be passed directly to the dataclass constructor
+            new_config = self.state.to_object()
 
             # CRITICAL: Set flag to prevent refresh_config from recreating the form
             # The window already has the correct data - it just saved it!
@@ -387,26 +470,28 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
                 logger.info(f"🔍 SAVE_CONFIG: Reset _saving=False (id={id(self)})")
 
             if is_global_config_type(self.config_class):
+                # CRITICAL: Update SAVED thread-local on save (what descendants/compiler see)
+                # Also update LIVE thread-local to match saved
+                from openhcs.config_framework.global_config import set_saved_global_config, set_live_global_config
+                set_saved_global_config(self.config_class, new_config)
+                set_live_global_config(self.config_class, new_config)
+                logger.debug(f"Updated SAVED and LIVE thread-local {self.config_class.__name__} on SAVE")
+
+                # CRITICAL: Invalidate ALL descendant caches so they re-resolve with the new SAVED thread-local
+                # This is necessary when saving None values - descendants must pick up the new None
+                # instead of continuing to use cached values resolved from the old saved thread-local
+                from openhcs.config_framework.object_state_registry import ObjectStateRegistry
+                ObjectStateRegistry.increment_token(notify=True)
+                logger.debug(f"Invalidated all descendant caches after updating SAVED thread-local")
+
                 self._original_global_config_snapshot = copy.deepcopy(new_config)
                 self._global_context_dirty = False
 
+            # UNIFIED: Both paths share same logic, differ only in whether to close window
             if close_window:
-                self.accept()
+                self.accept()  # Marks saved + unregisters + cleans up + closes
             else:
-                # CRITICAL: If keeping window open after save, update the form manager's object_instance
-                # and refresh placeholders to reflect the new saved values
-                self.form_manager.object_instance = new_config
-
-                # Increment token to invalidate caches
-                from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
-                LiveContextService.increment_token()
-
-                # Refresh this window's placeholders with new saved values as base
-                from openhcs.pyqt_gui.widgets.shared.services.parameter_ops_service import ParameterOpsService
-                ParameterOpsService().refresh_with_live_context(self.form_manager)
-
-                # Emit context_changed to notify other windows (bulk refresh, no specific field)
-                self.form_manager.context_changed.emit(self.form_manager.scope_id or "", "")
+                self._mark_saved_and_refresh_all()  # Marks saved + refreshes, but stays open
 
         except Exception as e:
             logger.error(f"Failed to save configuration: {e}")
@@ -428,9 +513,8 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
             #          → PipelineConfig code editor should show those live zarr_config values
             ParameterOpsService().refresh_with_live_context(self.form_manager)
 
-            # Get current config from form (now includes live context values)
-            current_values = self.form_manager.get_current_values()
-            current_config = self.config_class(**current_values)
+            # Get current config using to_object() to reconstruct nested structure from flat storage
+            current_config = self.state.to_object()
 
             # Generate code using existing function
             python_code = generate_config_code(current_config, self.config_class, clean_mode=True)
@@ -496,9 +580,6 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
 
                 # Update form values from the new config without rebuilding
                 self._update_form_from_config(new_config)
-
-                if suppress_context:
-                    self._sync_global_context_with_current_values()
             finally:
                 if suppress_context:
                     self._suppress_global_context_sync = False
@@ -512,38 +593,14 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
             QMessageBox.critical(self, "Code Edit Error", f"Failed to apply edited code:\n{e}")
 
     def _on_global_config_field_changed(self, param_name: str, value: Any):
-        """Keep thread-local global config context in sync with live edits."""
+        """Track that global config has unsaved changes.
+
+        NOTE: LIVE thread-local is now auto-updated by ObjectState.update_parameter()
+        This callback just tracks dirty state for UI purposes.
+        """
         if self._saving:
             return
-        if self._suppress_global_context_sync:
-            self._needs_global_context_resync = True
-            return
-        self._sync_global_context_with_current_values(param_name)
-
-    def _sync_global_context_with_current_values(self, source_param: str = None):
-        """Rebuild global context from current form values once.
-
-        PERFORMANCE NOTE: Do NOT call trigger_global_cross_window_refresh() here.
-        The FieldChangeDispatcher already handles cross-window updates via sibling
-        refresh and context_value_changed signals. We only need to update the
-        thread-local global config so lazy placeholder resolution sees current values.
-        """
-        if not is_global_config_type(self.config_class):
-            return
-        try:
-            current_values = self.form_manager.get_current_values()
-            updated_config = self.config_class(**current_values)
-            self.current_config = updated_config
-            from openhcs.config_framework.global_config import set_global_config_for_editing
-            set_global_config_for_editing(self.config_class, updated_config)
-            self._global_context_dirty = True
-            # REMOVED: trigger_global_cross_window_refresh() - causes O(n) refresh on every keystroke
-            # Cross-window updates are already handled by FieldChangeDispatcher
-            if source_param:
-                logger.debug(f"Synchronized {self.config_class.__name__} context after change ({source_param})")
-        except Exception as exc:
-            logger.warning("Failed to sync global context%s: %s",
-                           f' ({source_param})' if source_param else '', exc)
+        self._global_context_dirty = True
 
     def _update_form_from_config(self, new_config):
         """Update form values from new config using the shared updater."""
@@ -575,7 +632,7 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
         # CRITICAL: Trigger global refresh AFTER unregistration so other windows
         # re-collect live context without this cancelled window's values
         # This ensures group_by selector and other placeholders sync correctly
-        ParameterFormManager.trigger_global_cross_window_refresh()
+        ObjectStateRegistry.increment_token()
         logger.debug(f"Triggered global refresh after cancelling {self.config_class.__name__} editor")
 
     def _get_form_managers(self):
@@ -583,3 +640,10 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
         if hasattr(self, 'form_manager'):
             return [self.form_manager]
         return []
+
+    def closeEvent(self, a0):
+        """Override to cleanup dirty subscriptions before closing."""
+        self.state.off_state_changed(self._dirty_title_callback)
+        self.tree_helper.cleanup_subscriptions()
+        super().closeEvent(a0)
+

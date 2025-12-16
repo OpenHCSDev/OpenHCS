@@ -90,6 +90,8 @@ class OpenHCSPyQtApp(QApplication):
         # This was missing and caused placeholder resolution to fall back to static defaults
         from openhcs.config_framework.global_config import set_global_config_for_editing
         from openhcs.config_framework.lazy_factory import ensure_global_config_context
+        from openhcs.config_framework.object_state import ObjectState
+        from openhcs.config_framework.object_state_registry import ObjectStateRegistry
         from openhcs.core.config import GlobalPipelineConfig
 
         # Set for editing (UI placeholders) - this uses threading.local() storage
@@ -97,6 +99,15 @@ class OpenHCSPyQtApp(QApplication):
 
         # ALSO ensure context for orchestrator creation (required by orchestrator.__init__)
         ensure_global_config_context(GlobalPipelineConfig, self.global_config)
+
+        # Register GlobalPipelineConfig ObjectState (singleton, persists for app lifetime)
+        # This is the root of the ObjectState hierarchy
+        # scope_id="" (empty string) for global scope - visible to all orchestrators
+        global_state = ObjectState(
+            object_instance=self.global_config,
+            scope_id="",  # Empty string = global scope
+        )
+        ObjectStateRegistry.register(global_state)
 
         # ARCHITECTURAL FIX: Do NOT set contextvars at app startup
         # contextvars is ONLY for temporary nested contexts (inside with config_context() blocks)

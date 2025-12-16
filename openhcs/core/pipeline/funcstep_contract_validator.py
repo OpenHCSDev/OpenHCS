@@ -3,13 +3,6 @@ FuncStep memory contract validator for OpenHCS.
 
 This module provides the FuncStepContractValidator class, which is responsible for
 validating memory type declarations for FunctionStep instances in a pipeline.
-
-Doctrinal Clauses:
-- Clause 65 — No Fallback Logic
-- Clause 88 — No Inferred Capabilities
-- Clause 101 — Memory Type Declaration
-- Clause 106-A — Declared Memory Types
-- Clause 308 — Named Positional Enforcement
 """
 
 import inspect
@@ -67,10 +60,8 @@ class FuncStepContractValidator:
     """
     Validator for FunctionStep memory type contracts.
 
-    This validator enforces Clause 101 (Memory Type Declaration), Clause 88
-    (No Inferred Capabilities), and Clause 308 (Named Positional Enforcement)
-    by requiring explicit memory type declarations and named positional arguments
-    for all FunctionStep instances and their functions.
+    Enforces that all FunctionStep instances require explicit memory type declarations
+    and named positional arguments for all functions.
 
     Key principles:
     1. All functions in a FunctionStep must have consistent memory types
@@ -200,17 +191,19 @@ class FuncStepContractValidator:
 
         # Check for constraint violation: group_by ∈ variable_components
         if step.processing_config.group_by and step.processing_config.group_by.value in [vc.value for vc in step.processing_config.variable_components]:
-            # Auto-resolve constraint violation by nullifying group_by
+            # Auto-resolve constraint violation by setting group_by to NONE
+            # Use GroupBy.NONE (explicit "no grouping") instead of None (which means "inherit")
+            from openhcs.constants import GroupBy
             logger.warning(
                 f"Step '{step_name}': Auto-resolved group_by conflict. "
-                f"Set group_by to None due to conflict with variable_components {[vc.value for vc in step.processing_config.variable_components]}. "
+                f"Set group_by to GroupBy.NONE due to conflict with variable_components {[vc.value for vc in step.processing_config.variable_components]}. "
                 f"Original group_by was {step.processing_config.group_by.value}."
             )
-            # Create new config with group_by set to None
+            # Create new config with group_by set to GroupBy.NONE (explicit no-grouping)
             from openhcs.core.config import ProcessingConfig
             step.processing_config = ProcessingConfig(
                 variable_components=step.processing_config.variable_components,
-                group_by=None,
+                group_by=GroupBy.NONE,
                 input_source=step.processing_config.input_source
             )
 
@@ -306,8 +299,7 @@ class FuncStepContractValidator:
         """
         Validate that all required positional arguments are provided in kwargs.
 
-        This enforces Clause 308 (Named Positional Enforcement) by requiring that
-        all required positional arguments are explicitly provided in the kwargs dict
+        All required positional arguments must be explicitly provided in the kwargs dict
         when using the (func, kwargs) pattern.
 
         Args:

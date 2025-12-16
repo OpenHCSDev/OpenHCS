@@ -42,6 +42,10 @@ from PyQt6.QtWidgets import QPushButton
 from typing import Callable
 from PyQt6.QtCore import Qt
 
+# Import ScopedBorderMixin directly from module, avoiding widgets/__init__.py (circular import)
+import openhcs.pyqt_gui.widgets.shared.scoped_border_mixin as _scoped_border_module
+ScopedBorderMixin = _scoped_border_module.ScopedBorderMixin
+
 logger = logging.getLogger(__name__)
 
 
@@ -50,7 +54,72 @@ class HasUnregisterMethod(Protocol):
     def unregister_from_cross_window_updates(self) -> None: ...
 
 
-class BaseFormDialog(QDialog):
+class BaseFormDialog(ScopedBorderMixin, QDialog):
+    """Base dialog with automatic singleton-per-scope behavior.
+
+    Ensures only ONE window per (scope_id, window_class) is open at a time.
+    If a window for this scope already exists, show() focuses it instead of creating a duplicate.
+    """
+
+    def show(self) -> None:
+        """Override show to enforce singleton-per-scope behavior.
+
+        If a window with the same scope_key already exists, focus it instead of showing self.
+        Otherwise, register self with WindowManager and show normally.
+
+        Also initializes scope-based border styling here (not in __init__) because
+        subclasses set scope_id AFTER calling super().__init__().
+        """
+        from openhcs.pyqt_gui.services.window_manager import WindowManager
+
+        scope_key = self._get_window_scope_key()
+        if scope_key is None:
+            # No scope_id - just show normally (legacy behavior)
+            super().show()
+            return
+
+        # Check if window already exists for this scope
+        if WindowManager.is_open(scope_key):
+            # Focus existing window instead of showing duplicate
+            WindowManager.focus_and_navigate(scope_key)
+            # DON'T call deleteLater() - it causes crashes because async widget creation
+            # (QTimer.singleShot) continues running and references deleted objects.
+            # Instead, just return without showing. The window will be garbage collected
+            # naturally when all async work completes and references are released.
+            logger.debug(f"[SINGLETON] Focused existing window for {scope_key}")
+            return
+
+        overlay_was_cleaned = getattr(self, "_flash_overlay_cleaned", False)
+
+        # Initialize scope-based border styling (ScopedBorderMixin)
+        # Done here because scope_id is set by subclass AFTER super().__init__()
+        self._init_scope_border()
+
+        # Register self with WindowManager (it will handle closeEvent cleanup)
+        # NOTE: WindowManager.register() also eagerly creates the flash overlay
+        WindowManager.register(scope_key, self)
+        super().show()
+        if overlay_was_cleaned:
+            self._reregister_flash_elements()
+            self._flash_overlay_cleaned = False
+        logger.debug(f"[SINGLETON] Registered and showed new window for {scope_key}")
+
+    def _get_window_scope_key(self) -> Optional[str]:
+        """Build unique key for WindowManager registration.
+
+        Returns:
+            The scope_id directly (e.g., "", "/path/to/plate", "/plate::step_0")
+            Returns None if no scope_id is set (legacy behavior - no singleton enforcement)
+
+        Note: We use scope_id directly (not scope_id::ClassName) so that provenance
+        navigation can find windows by scope_id. The scope_id is already unique
+        per context (global, plate, step, function).
+        """
+        scope_id = getattr(self, 'scope_id', None)
+        if scope_id is None:
+            return None
+
+        return scope_id
 
     def _setup_save_button(self, button: 'QPushButton', save_callback: Callable):
         """
@@ -64,6 +133,32 @@ class BaseFormDialog(QDialog):
             is_shift = modifiers & Qt.KeyboardModifier.ShiftModifier
             save_callback(close_window=not is_shift)
         button.clicked.connect(_on_save)
+
+    def _mark_saved_and_refresh_all(self):
+        """Mark all states as saved and refresh placeholders.
+
+        Used by shift-click save to update saved baseline without closing window.
+        Regular save calls accept() which also marks saved but additionally closes window.
+
+        CRITICAL: This ensures shift-click save works the same as regular save:
+        - Marks all states as saved (reconstructs object_instance from ORM values via to_object())
+        - Updates saved baseline so closing window later won't revert changes
+        - Refreshes all form managers with new saved values
+        - Notifies other windows of changes
+        """
+        # Mark all states as saved (updates object_instance from ORM values)
+        self._apply_state_action('mark_saved')
+
+        # Increment global token to invalidate all caches
+        from openhcs.config_framework.object_state import ObjectStateRegistry
+        ObjectStateRegistry.increment_token()
+
+        # Refresh all form managers with new saved values as baseline
+        from openhcs.pyqt_gui.widgets.shared.services.parameter_ops_service import ParameterOpsService
+        for manager in self._get_form_managers():
+            ParameterOpsService().refresh_with_live_context(manager)
+            # Emit context_changed to notify other windows (bulk refresh)
+            manager.context_changed.emit(manager.scope_id or "", "")
     """
     Base class for dialogs that use ParameterFormManager.
     
@@ -87,6 +182,8 @@ class BaseFormDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._unregistered = False  # Track if we've already unregistered
+        self._flash_overlay_cleaned = False  # Track overlay cleanup when dialog is reused
+        self._scope_accent_color = None  # Stored for deferred application to async widgets
 
         # CRITICAL: Register with global event bus for cross-window updates
         # This is the OpenHCS "set and forget" pattern - all windows automatically
@@ -166,6 +263,118 @@ class BaseFormDialog(QDialog):
                 # Handle single widget
                 else:
                     self._collect_form_managers_recursive(attr_value, managers, visited)
+
+    def _apply_scope_accent_styling(self) -> None:
+        """Apply scope accent color to all UI elements.
+
+        Called by ScopedBorderMixin._init_scope_border() after scope color scheme is set.
+        Styles: input focus borders, HelpButtons. Subclasses can extend for additional elements.
+        """
+        accent_color = self.get_scope_accent_color()
+        if not accent_color:
+            return
+
+        # Store for deferred application to async-created widgets
+        self._scope_accent_color = accent_color
+        hex_color = accent_color.name()
+
+        # Apply window-level stylesheet for input widget focus borders
+        input_focus_style = f"""
+            QLineEdit:focus {{
+                border: 2px solid {hex_color};
+            }}
+            QComboBox:focus {{
+                border: 2px solid {hex_color};
+            }}
+            QSpinBox:focus {{
+                border: 2px solid {hex_color};
+            }}
+            QDoubleSpinBox:focus {{
+                border: 2px solid {hex_color};
+            }}
+        """
+        current_window_style = self.styleSheet() or ""
+        self.setStyleSheet(f"{current_window_style}\n{input_focus_style}")
+
+        # Apply to existing HelpButtons now
+        self._apply_accent_to_help_buttons()
+
+        # Register callback for async-created widgets using existing infrastructure
+        for manager in self._get_form_managers():
+            if hasattr(manager, '_on_build_complete_callbacks'):
+                manager._on_build_complete_callbacks.append(self._apply_accent_to_help_buttons)
+
+    def _apply_accent_to_help_buttons(self) -> None:
+        """Apply scope accent color to all HelpButton, HelpIndicator, GroupBoxWithHelp, FunctionPaneWidget, and tree instances."""
+        accent_color = getattr(self, '_scope_accent_color', None)
+        if not accent_color:
+            return
+
+        from openhcs.pyqt_gui.widgets.shared.clickable_help_components import HelpButton, HelpIndicator, GroupBoxWithHelp
+        from openhcs.pyqt_gui.widgets.function_pane import FunctionPaneWidget
+        from PyQt6.QtWidgets import QWidget
+
+        # Find all HelpButtons, HelpIndicators, GroupBoxWithHelp, and FunctionPaneWidget in entire dialog
+        if isinstance(self, QWidget):
+            for help_btn in self.findChildren(HelpButton):
+                help_btn.set_scope_accent_color(accent_color)
+            for help_indicator in self.findChildren(HelpIndicator):
+                help_indicator.set_scope_accent_color(accent_color)
+            # Apply scope border pattern to nested groupboxes
+            scope_scheme = getattr(self, '_scope_color_scheme', None)
+            if scope_scheme:
+                for groupbox in self.findChildren(GroupBoxWithHelp):
+                    groupbox.set_scope_color_scheme(scope_scheme)
+                # FunctionPaneWidget needs scope accent for title color (no border)
+                for func_pane in self.findChildren(FunctionPaneWidget):
+                    func_pane.set_scope_color_scheme(scope_scheme)
+                # FunctionListEditorWidget needs scheme to apply to newly created panes
+                from openhcs.pyqt_gui.widgets.function_list_editor import FunctionListEditorWidget
+                for func_editor in self.findChildren(FunctionListEditorWidget):
+                    func_editor.set_scope_color_scheme(scope_scheme)
+                # Apply scope background to hierarchy tree (step editor)
+                self._apply_scope_to_hierarchy_trees(scope_scheme)
+
+    def _apply_scope_to_hierarchy_trees(self, scope_scheme) -> None:
+        """Apply scope-colored background to hierarchy trees in form managers."""
+        from openhcs.pyqt_gui.widgets.shared.config_hierarchy_tree import ConfigHierarchyTreeHelper
+
+        for manager in self._get_form_managers():
+            # Get tree from parent widget (step_editor has hierarchy_tree)
+            parent = getattr(manager, 'parent', None)
+            if parent and callable(parent):
+                parent = parent()
+            tree = getattr(parent, 'hierarchy_tree', None)
+            tree_helper = getattr(parent, 'tree_helper', None)
+            if tree and tree_helper and isinstance(tree_helper, ConfigHierarchyTreeHelper):
+                tree_helper.apply_scope_background(tree, scope_scheme)
+
+    def _apply_state_action(self, action: str) -> None:
+        """Apply a state-level action (mark_saved/restore_saved) to all discovered managers."""
+        if action not in ("mark_saved", "restore_saved"):
+            return
+
+        seen_states = set()
+        for manager in self._get_form_managers():
+            try:
+                state = manager.state
+            except AttributeError:
+                continue
+
+            state_id = id(state)
+            if state_id in seen_states:
+                continue
+
+            try:
+                if action == "mark_saved":
+                    state.mark_saved()
+                else:
+                    state.restore_saved()
+            except Exception as e:
+                field_id = getattr(state, 'field_id', '?')
+                logger.warning(f"{self.__class__.__name__}: failed to {action} for state {field_id}: {e}")
+
+            seen_states.add(state_id)
     
     def _get_event_bus(self):
         """Get the global event bus from the service adapter.
@@ -240,18 +449,80 @@ class BaseFormDialog(QDialog):
     def accept(self):
         """Override accept to unregister before closing."""
         logger.info(f"🔍 {self.__class__.__name__}: accept() called")
+        # Persist current form values as the new saved baseline
+        self._apply_state_action('mark_saved')
         self._unregister_all_form_managers()
+
+        # CRITICAL: Cleanup WindowFlashOverlay to prevent memory leak
+        from openhcs.pyqt_gui.widgets.shared.flash_mixin import WindowFlashOverlay
+        self._flash_overlay_cleaned = True
+        WindowFlashOverlay.cleanup_window(self)
+        logger.info(f"🔍 {self.__class__.__name__}: Cleaned up WindowFlashOverlay")
+
         super().accept()
-        
+
     def reject(self):
         """Override reject to unregister before closing."""
         logger.info(f"🔍 {self.__class__.__name__}: reject() called")
+        # Revert to last saved baseline before closing
+        self._apply_state_action('restore_saved')
         self._unregister_all_form_managers()
+
+        # CRITICAL: Cleanup WindowFlashOverlay to prevent memory leak
+        from openhcs.pyqt_gui.widgets.shared.flash_mixin import WindowFlashOverlay
+        self._flash_overlay_cleaned = True
+        WindowFlashOverlay.cleanup_window(self)
+        logger.info(f"🔍 {self.__class__.__name__}: Cleaned up WindowFlashOverlay")
+
         super().reject()
         
     def closeEvent(self, a0):
-        """Override closeEvent to unregister before closing."""
+        """Override closeEvent to unregister before closing.
+
+        When user closes via X button (not via accept/reject), we need to:
+        1. Restore saved state for any unsaved changes
+        2. Trigger global refresh so other windows sync
+        3. Cleanup WindowFlashOverlay to prevent memory leak
+        4. Unregister from WindowManager for singleton tracking
+        """
         logger.info(f"🔍 {self.__class__.__name__}: closeEvent() called")
+
+        # Restore saved state (reverts unsaved changes)
+        # This is safe even if no changes - restore_saved() is idempotent
+        self._apply_state_action('restore_saved')
+
         self._unregister_all_form_managers()
+
+        # CRITICAL: Cleanup WindowFlashOverlay to prevent memory leak
+        # Without this, every window's overlay stays in _overlays dict forever,
+        # making flash operations progressively slower (O(n) where n = windows ever opened)
+        from openhcs.pyqt_gui.widgets.shared.flash_mixin import WindowFlashOverlay
+        self._flash_overlay_cleaned = True
+        WindowFlashOverlay.cleanup_window(self)
+        logger.info(f"🔍 {self.__class__.__name__}: Cleaned up WindowFlashOverlay")
+
+        # Unregister from WindowManager so window can be reopened
+        from openhcs.pyqt_gui.services.window_manager import WindowManager
+        scope_key = self._get_window_scope_key()
+        # CRITICAL: Use "is not None" check, not truthiness!
+        # scope_key="" (empty string) is a valid scope for GlobalPipelineConfig
+        if scope_key is not None:
+            WindowManager.unregister(scope_key)
+            logger.debug(f"🔍 {self.__class__.__name__}: Unregistered from WindowManager: {scope_key}")
+
         super().closeEvent(a0)
 
+        # Trigger global refresh AFTER unregistration so other windows
+        # re-collect live context without this window's cancelled values
+        from openhcs.config_framework.object_state import ObjectStateRegistry
+        ObjectStateRegistry.increment_token()
+        logger.info(f"🔍 {self.__class__.__name__}: Triggered global refresh after closeEvent")
+
+    def _reregister_flash_elements(self):
+        """Re-register flashable widgets after overlay cleanup when reusing the dialog instance."""
+        for manager in self._get_form_managers():
+            try:
+                if hasattr(manager, "reregister_flash_elements"):
+                    manager.reregister_flash_elements()
+            except Exception as exc:
+                logger.warning(f"{self.__class__.__name__}: Failed to re-register flash elements for manager {getattr(manager, 'field_id', '?')}: {exc}")

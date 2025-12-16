@@ -23,6 +23,7 @@ from .widget_creation_types import (
     WidgetCreationConfig
 )
 from .services.field_change_dispatcher import FieldChangeDispatcher, FieldChangeEvent
+from .services.widget_service import WidgetService
 
 logger = logging.getLogger(__name__)
 
@@ -217,7 +218,19 @@ def _create_nested_container(manager: ParameterFormManager, param_info: Paramete
     from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme as PCS
 
     color_scheme = manager.config.color_scheme or PCS()
-    return GBH(title=display_info['field_label'], help_target=unwrapped_type, color_scheme=color_scheme)
+    # Get root manager for flash - nested managers share root's _flash_colors dict
+    root_manager = manager
+    while getattr(root_manager, '_parent_manager', None) is not None:
+        root_manager = root_manager._parent_manager
+    # flash_key is the field prefix (e.g., 'well_filter_config')
+    flash_key = field_ids.get('field_prefix', param_info.name)
+    return GBH(
+        title=display_info['field_label'],
+        help_target=unwrapped_type,
+        color_scheme=color_scheme,
+        flash_key=flash_key,
+        flash_manager=root_manager
+    )
 
 
 def _create_optional_nested_container(manager: ParameterFormManager, param_info: ParameterInfo,
@@ -270,7 +283,7 @@ _WIDGET_CREATION_CONFIG: dict[WidgetCreationType, WidgetCreationConfig] = {
         create_container=_create_regular_container,
         setup_layout=_setup_regular_layout,
         create_main_widget=lambda manager, param_info, display_info, field_ids, current_value, unwrapped_type, *args, **kwargs:
-            manager.create_widget(param_info.name, param_info.type, current_value, field_ids['widget_id']),
+            manager._widget_creator(param_info.name, param_info.type, current_value, field_ids['widget_id'], None),
         needs_label=True,
         needs_reset_button=True,
         needs_unwrap_type=False,
@@ -329,21 +342,11 @@ def _get_widget_operations(creation_type: WidgetCreationType) -> dict[str, Calla
 # UNIFIED WIDGET CREATION FUNCTION
 # ============================================================================
 
-def create_widget_parametric(manager: ParameterFormManager, param_info: ParameterInfo,
-                           creation_type: WidgetCreationType) -> Any:
+def create_widget_parametric(manager: ParameterFormManager, param_info: ParameterInfo) -> Any:
     """
     UNIFIED: Create widget using parametric dispatch.
 
-    Replaces _create_regular_parameter_widget, _create_nested_dataclass_widget,
-    and _create_optional_dataclass_widget.
-
-    Args:
-        manager: ParameterFormManager instance
-        param_info: Parameter information object
-        creation_type: Widget creation type (REGULAR, NESTED, or OPTIONAL_NESTED)
-
-    Returns:
-        QWidget: Created widget container
+    Widget type is determined by param_info.widget_creation_type attribute.
     """
     from PyQt6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QPushButton
     from openhcs.pyqt_gui.widgets.shared.clickable_help_components import GroupBoxWithHelp, LabelWithHelp
@@ -353,6 +356,9 @@ def create_widget_parametric(manager: ParameterFormManager, param_info: Paramete
     import logging
 
     logger = logging.getLogger(__name__)
+
+    # Type declares its own widget creation strategy
+    creation_type = WidgetCreationType[param_info.widget_creation_type]
 
     # Get config and operations for this type
     config = _WIDGET_CREATION_CONFIG[creation_type]
@@ -371,6 +377,17 @@ def create_widget_parametric(manager: ParameterFormManager, param_info: Paramete
         manager, param_info, display_info, field_ids, current_value, unwrapped_type,
         None, CURRENT_LAYOUT, QWidget, GroupBoxWithHelp, PyQt6ColorScheme
     )
+
+    # GAME ENGINE: Register groupbox with overlay for flash rendering
+    # Only for nested containers (GroupBoxWithHelp) that have flash_key
+    if config.is_nested and hasattr(container, '_flash_key'):
+        flash_key = container._flash_key
+        # Get root manager for overlay registration
+        root_manager = manager
+        while getattr(root_manager, '_parent_manager', None) is not None:
+            root_manager = root_manager._parent_manager
+        if hasattr(root_manager, 'register_flash_groupbox'):
+            root_manager.register_flash_groupbox(flash_key, container)
 
     # Setup layout - polymorphic dispatch
     # Each setup_layout function handles its own container type
@@ -404,14 +421,25 @@ def create_widget_parametric(manager: ParameterFormManager, param_info: Paramete
 
     # Add label if needed (REGULAR only)
     if config.needs_label:
+        # Compute dotted_path for provenance lookup
+        dotted_path = f'{manager.field_prefix}.{param_info.name}' if manager.field_prefix else param_info.name
+
         label = LabelWithHelp(
             text=display_info['field_label'],
             param_name=param_info.name,
             param_description=display_info['description'],
             param_type=param_info.type,
-            color_scheme=manager.config.color_scheme or PyQt6ColorScheme()
+            color_scheme=manager.config.color_scheme or PyQt6ColorScheme(),
+            state=manager.state,
+            dotted_path=dotted_path
         )
         layout.addWidget(label)
+        # Store label for bold styling updates
+        manager.labels[param_info.name] = label
+
+        # Set initial label styling using ObjectState.signature_diff_fields (single source of truth)
+        should_underline = dotted_path in manager.state.signature_diff_fields
+        label.set_underline(should_underline)
 
     # Add main widget
     main_widget = ops['create_main_widget'](
@@ -449,12 +477,16 @@ def create_widget_parametric(manager: ParameterFormManager, param_info: Paramete
                 reset_all_button.clicked.connect(lambda: nested_manager.reset_all_parameters())
             container.addTitleWidget(reset_all_button)
         else:
-            # REGULAR: reset button in layout
+            # REGULAR: reset button in layout (right-aligned via stretch)
             reset_button = _create_optimized_reset_button(
                 manager.config.field_id,
                 param_info.name,
                 lambda: manager.reset_parameter(param_info.name)
             )
+            # Add stretch before reset button to push it to the right
+            # This only applies to REGULAR widgets (label + widget + reset button rows)
+            if not config.is_nested:
+                layout.addStretch()
             layout.addWidget(reset_button)
             manager.reset_buttons[param_info.name] = reset_button
 
@@ -491,7 +523,7 @@ def create_widget_parametric(manager: ParameterFormManager, param_info: Paramete
         PyQt6WidgetEnhancer.connect_change_signal(main_widget, param_info.name, on_widget_change)
 
         if manager.read_only:
-            manager._make_widget_readonly(main_widget)
+            WidgetService.make_readonly(main_widget, manager.config.color_scheme)
 
     return container
 

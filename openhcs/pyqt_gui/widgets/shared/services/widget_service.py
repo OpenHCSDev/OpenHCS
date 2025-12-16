@@ -225,32 +225,19 @@ class WidgetService:
         if value is None:
             logger.info(f"        ✅ Value is None, computing placeholder...")
             from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
-            from openhcs.config_framework.context_manager import config_context
+            from openhcs.config_framework.context_manager import build_context_stack
+            from openhcs.config_framework.object_state import ObjectStateRegistry
 
-            from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
-            live_context_snapshot = ParameterFormManager.collect_live_context()
-            live_context = LiveContextService.merge_ancestor_values(
-                live_context_snapshot.scopes, manager.scope_id or ""
-            ) if live_context_snapshot else {}
+            # Get ancestor objects for context stack
+            ancestor_objects = ObjectStateRegistry.get_ancestor_objects(manager.scope_id or "")
 
-            from contextlib import ExitStack
-            with ExitStack() as stack:
-                if manager.context_obj is not None:
-                    stack.enter_context(config_context(manager.context_obj))
+            # Build context stack
+            stack = build_context_stack(
+                object_instance=manager.object_instance,
+                ancestor_objects=ancestor_objects,
+            )
 
-                if manager.object_instance and manager.parameters:
-                    try:
-                        import dataclasses
-                        if dataclasses.is_dataclass(type(manager.object_instance)):
-                            overlay_dict = manager.parameters.copy()
-                            for excluded_param in getattr(manager, 'exclude_params', []):
-                                if excluded_param not in overlay_dict and hasattr(manager.object_instance, excluded_param):
-                                    overlay_dict[excluded_param] = getattr(manager.object_instance, excluded_param)
-                            overlay_instance = type(manager.object_instance)(**overlay_dict)
-                            stack.enter_context(config_context(overlay_instance))
-                    except Exception:
-                        pass
-
+            with stack:
                 placeholder_text = manager.service.get_placeholder_text(param_name, type(manager.object_instance))
                 logger.info(f"        📝 Placeholder text: {repr(placeholder_text)[:50]}")
                 if placeholder_text:

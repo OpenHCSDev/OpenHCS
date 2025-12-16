@@ -29,17 +29,24 @@ class LazyDefaultPlaceholderService:
 
     @staticmethod
     def has_lazy_resolution(dataclass_type: type) -> bool:
-        """Check if dataclass has lazy resolution methods (created by factory)."""
+        """
+        Check if a type has lazy resolution capability.
+
+        Returns True for:
+        1. LazyDataclass types (all None defaults, used in PipelineConfig)
+        2. Concrete types with _has_lazy_resolution (used in GlobalPipelineConfig)
+        """
         from typing import get_origin, get_args, Union
-        
+        from openhcs.config_framework.lazy_factory import is_lazy_dataclass
+
         # Unwrap Optional types (Union[Type, None])
         if get_origin(dataclass_type) is Union:
             args = get_args(dataclass_type)
             if len(args) == 2 and type(None) in args:
                 dataclass_type = next(arg for arg in args if arg is not type(None))
-        
-        return (hasattr(dataclass_type, '_resolve_field_value') and
-                hasattr(dataclass_type, 'to_base_config'))
+
+        # Check if it's a LazyDataclass OR has been bound with lazy resolution
+        return is_lazy_dataclass(dataclass_type) or getattr(dataclass_type, '_has_lazy_resolution', False)
 
     @staticmethod
     def get_lazy_resolved_placeholder(
@@ -62,23 +69,14 @@ class LazyDefaultPlaceholderService:
         """
         prefix = placeholder_prefix or LazyDefaultPlaceholderService.PLACEHOLDER_PREFIX
 
-        # Check if this is a lazy dataclass
-        is_lazy = LazyDefaultPlaceholderService.has_lazy_resolution(dataclass_type)
+        # Check if type has lazy resolution (LazyDataclass OR concrete with _has_lazy_resolution)
+        if not LazyDefaultPlaceholderService.has_lazy_resolution(dataclass_type):
+            # Non-lazy type - use direct class default
+            return LazyDefaultPlaceholderService._get_class_default_placeholder(
+                dataclass_type, field_name, prefix
+            )
 
-        # If not lazy, try to find the lazy version
-        if not is_lazy:
-            lazy_type = LazyDefaultPlaceholderService._get_lazy_type_for_base(dataclass_type)
-            if lazy_type:
-                dataclass_type = lazy_type
-            else:
-                # Use direct class default for non-lazy types
-                result = LazyDefaultPlaceholderService._get_class_default_placeholder(
-                    dataclass_type, field_name, prefix
-                )
-                return result
-
-        # Simple approach: Create new instance and let lazy system handle context resolution
-        # The context_obj parameter is unused since context should be set externally via config_context()
+        # Create instance and let lazy __getattribute__ handle context resolution
         try:
             instance = dataclass_type()
             resolved_value = getattr(instance, field_name)
@@ -94,16 +92,6 @@ class LazyDefaultPlaceholderService:
             logger.info(f"[LAZY_RESOLVE] {dataclass_type.__name__}.{field_name}: fallback class_default={class_default!r} -> '{result}'")
 
         return result
-
-    @staticmethod
-    def _get_lazy_type_for_base(base_type: type) -> Optional[type]:
-        """Get the lazy type for a base dataclass type (reverse lookup)."""
-        from openhcs.config_framework.lazy_factory import _lazy_type_registry
-
-        for lazy_type, registered_base_type in _lazy_type_registry.items():
-            if registered_base_type == base_type:
-                return lazy_type
-        return None
 
 
 

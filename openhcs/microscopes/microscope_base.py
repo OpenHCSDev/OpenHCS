@@ -535,7 +535,6 @@ class MicroscopeHandler(ABC, metaclass=AutoRegisterMeta):
             **kwargs  # Pass through dynamic filter parameters
         )
 
-        # 🔒 Clause 74 — Runtime Behavior Variation
         # Ensure we always return a dictionary, not a generator
         if not isinstance(patterns_by_well, dict):
             # Convert to dictionary if it's not already one

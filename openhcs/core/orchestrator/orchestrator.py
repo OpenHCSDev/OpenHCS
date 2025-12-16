@@ -3,13 +3,6 @@ Consolidated orchestrator module for OpenHCS.
 
 This module provides a unified PipelineOrchestrator class that implements
 a two-phase (compile-all-then-execute-all) pipeline execution model.
-
-Doctrinal Clauses:
-- Clause 12 — Absolute Clean Execution
-- Clause 66 — Immutability After Construction
-- Clause 88 — No Inferred Capabilities
-- Clause 293 — GPU Pre-Declaration Enforcement
-- Clause 295 — GPU Scheduling Affinity
 """
 
 import logging
@@ -23,7 +16,7 @@ from openhcs.constants.constants import Backend, DEFAULT_IMAGE_EXTENSIONS, Group
 from openhcs.constants import Microscope
 from openhcs.core.config import GlobalPipelineConfig
 from openhcs.config_framework.global_config import get_current_global_config
-from openhcs.config_framework.lazy_factory import ContextProvider
+
 
 
 from openhcs.core.metadata_cache import get_metadata_cache, MetadataCache
@@ -395,7 +388,7 @@ _worker_log_file_base = None
 
 
 
-class PipelineOrchestrator(ContextProvider):
+class PipelineOrchestrator:
     """
     Updated orchestrator supporting both global and per-orchestrator configuration.
 
@@ -407,7 +400,6 @@ class PipelineOrchestrator(ContextProvider):
     Then, it executes the (now stateless) pipeline definition against these contexts,
     potentially in parallel, using `execute_compiled_plate()`.
     """
-    _context_type = "orchestrator"  # Register as orchestrator context provider
 
     def __init__(
         self,
@@ -631,7 +623,8 @@ class PipelineOrchestrator(ContextProvider):
         logger.info(f"Initializing microscope handler using input directory: {self.input_dir}...")
         try:
             # Use configured microscope type or auto-detect
-            shared_context = get_current_global_config(GlobalPipelineConfig)
+            # Use SAVED global config (not live edits) for orchestrator initialization
+            shared_context = get_current_global_config(GlobalPipelineConfig, use_live=False)
             microscope_type = shared_context.microscope.value if shared_context.microscope != Microscope.AUTO else 'auto'
             self.microscope_handler = create_microscope_handler(
                 plate_folder=str(self.plate_path),

@@ -793,6 +793,9 @@ def _process_single_pattern_group(
         raise ValueError(f"Failed to process pattern group {pattern_repr}: {e}") from e
 
 class FunctionStep(AbstractStep):
+    # Fields with dedicated editors - hidden from regular ParameterFormManager
+    # but included in ObjectState for tracking and preview
+    _ui_special_fields = ('func',)
 
     def __init__(
         self,

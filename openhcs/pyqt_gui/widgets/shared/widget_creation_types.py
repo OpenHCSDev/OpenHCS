@@ -97,31 +97,12 @@ class ParameterFormManager(ABC, metaclass=_CombinedMeta):
     # These are like React component rendering
 
     @abstractmethod
-    def create_widget(self, param_name: str, param_type: Type, current_value: Any,
-                     widget_id: str, parameter_info: Optional[Any] = None) -> Any:
-        """
-        Create a widget for a parameter.
-
-        Equivalent to: render(<ParameterWidget ... />)
-        """
-        pass
-
-    @abstractmethod
     def _create_nested_form_inline(self, param_name: str, unwrapped_type: Type,
                                    current_value: Any) -> Any:
         """
         Create nested form manager inline.
 
         Equivalent to: render(<NestedForm ... />)
-        """
-        pass
-
-    @abstractmethod
-    def _make_widget_readonly(self, widget: Any) -> None:
-        """
-        Make a widget read-only.
-
-        Equivalent to: <input disabled={true} />
         """
         pass
 

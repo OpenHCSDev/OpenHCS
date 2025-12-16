@@ -130,6 +130,7 @@ TUI architecture, UI development patterns, and form management systems.
    tui_system
    widget_protocol_system
    abstract_manager_widget
+   list_item_preview_system
    plate_manager_services
    parameter_form_lifecycle
    parameter_form_service_architecture

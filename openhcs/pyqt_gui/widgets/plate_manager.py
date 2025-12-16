@@ -31,6 +31,7 @@ from openhcs.config_framework.global_config import (
     get_current_global_config
 )
 from openhcs.config_framework.context_manager import config_context
+from openhcs.config_framework.object_state import ObjectState, ObjectStateRegistry
 from openhcs.core.config_cache import _sync_save_config
 from openhcs.core.xdg_paths import get_config_file_path
 from openhcs.debug.pickle_to_python import generate_complete_orchestrator_code
@@ -39,11 +40,11 @@ from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.pyqt_gui.windows.config_window import ConfigWindow
 from openhcs.pyqt_gui.windows.plate_viewer_window import PlateViewerWindow
 from openhcs.pyqt_gui.services.simple_code_editor import SimpleCodeEditorService
-from openhcs.pyqt_gui.widgets.shared.abstract_manager_widget import AbstractManagerWidget
+from openhcs.pyqt_gui.widgets.shared.abstract_manager_widget import AbstractManagerWidget, ListItemFormat
 from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
 from openhcs.pyqt_gui.widgets.shared.services.zmq_execution_service import ZMQExecutionService
 from openhcs.pyqt_gui.widgets.shared.services.compilation_service import CompilationService
-from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
+from openhcs.pyqt_gui.widgets.shared.scope_visual_config import ListItemType
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +87,8 @@ class PlateManagerWidget(AbstractManagerWidget):
         'selection_emit_id': True, 'selection_clear_value': '',
         'items_changed_signal': None, 'list_item_data': 'item',
         'preserve_selection_pred': lambda self: bool(self.orchestrators),
+        'scope_item_type': ListItemType.ORCHESTRATOR,
+        'scope_id_attr': 'path',
     }
 
     # Signals
@@ -191,18 +194,28 @@ class PlateManagerWidget(AbstractManagerWidget):
         self.update_button_states()
 
     # Declarative preview field configuration (processed automatically in ABC.__init__)
+    # Labels auto-discovered from PREVIEW_LABEL_REGISTRY (set via @global_pipeline_config(preview_label=...))
     PREVIEW_FIELD_CONFIGS = [
-        'napari_streaming_config',  # Uses CONFIG_INDICATORS['napari_streaming_config'] = 'NAP'
-        'fiji_streaming_config',    # Uses CONFIG_INDICATORS['fiji_streaming_config'] = 'FIJI'
-        'step_materialization_config',  # Uses CONFIG_INDICATORS['step_materialization_config'] = 'MAT'
-        ('num_workers', lambda v: f'W:{v if v is not None else 0}'),
-        ('sequential_processing_config.sequential_components',
-         lambda v: f'Seq:{",".join(c.value for c in v)}' if v else None),
-        ('vfs_config.materialization_backend', lambda v: f'{v.value.upper()}'),
-        ('path_planning_config.output_dir_suffix', lambda p: f'output={p}'),
-        ('path_planning_config.well_filter', lambda wf: f'wf={len(wf)}' if wf else None),
-        ('path_planning_config.sub_dir', lambda sub: f'subdir={sub}'),
+        'napari_streaming_config',       # preview_label='NAP'
+        'fiji_streaming_config',         # preview_label='FIJI'
+        'step_materialization_config',   # preview_label='MAT'
     ]
+
+    # Declarative list item format for PlateManager
+    # The config source is orchestrator.pipeline_config
+    # Field abbreviations are declared on config classes via @global_pipeline_config(field_abbreviations=...)
+    LIST_ITEM_FORMAT = ListItemFormat(
+        first_line=(),  # No fields on first line (just name)
+        preview_line=(
+            'num_workers',
+            'vfs_config.materialization_backend',
+            'path_planning_config.well_filter',
+            'path_planning_config.output_dir_suffix',
+            'path_planning_config.global_output_folder',
+        ),
+        detail_line_field='path',  # Show plate path as detail line
+        show_config_indicators=True,
+    )
 
     # ========== CrossWindowPreviewMixin Hooks ==========
 
@@ -213,28 +226,28 @@ class PlateManagerWidget(AbstractManagerWidget):
 
     def _update_single_plate_item(self, plate_path: str):
         """Update a single plate item's preview text without rebuilding the list."""
-        # Find the item in the list
         for i in range(self.item_list.count()):
             item = self.item_list.item(i)
             plate_data = item.data(Qt.ItemDataRole.UserRole)
             if plate_data and plate_data.get('path') == plate_path:
-                # Rebuild just this item's display text
-                plate = plate_data
-                display_text = self._format_plate_item_with_preview_text(plate)
+                display_text = self._format_plate_item_with_preview_text(plate_data)
                 item.setText(display_text)
-                # Height is automatically calculated by MultilinePreviewItemDelegate.sizeHint()
-
+                self._set_item_styling_roles(item, display_text, plate_data)  # ABC helper
                 break
 
     def format_item_for_display(self, item: Dict, live_ctx=None) -> Tuple[str, str]:
         """Format plate item for display with preview (required abstract method)."""
         return (self._format_plate_item_with_preview_text(item), item['path'])
 
-    def _format_plate_item_with_preview_text(self, plate: Dict) -> str:
-        """Format plate item with status and config preview labels."""
-        status_prefix, preview_labels = "", []
-        if plate['path'] in self.orchestrators:
-            orchestrator = self.orchestrators[plate['path']]
+    def _format_plate_item_with_preview_text(self, plate: Dict):
+        """Format plate item with status and config preview labels.
+
+        Uses declarative LIST_ITEM_FORMAT with orchestrator.pipeline_config as config source.
+        """
+        status_prefix = ""
+        orchestrator = self.orchestrators.get(plate['path'])
+
+        if orchestrator:
             state_map = {
                 OrchestratorState.READY: "✓ Init", OrchestratorState.COMPILED: "✓ Compiled",
                 OrchestratorState.COMPLETED: "✅ Complete", OrchestratorState.INIT_FAILED: "❌ Init Failed",
@@ -245,31 +258,14 @@ class PlateManagerWidget(AbstractManagerWidget):
                 status_prefix = {"queued": "⏳ Queued", "running": "🔄 Running"}.get(exec_state, "🔄 Executing")
             else:
                 status_prefix = state_map.get(orchestrator.state, "")
-            preview_labels = self._build_config_preview_labels(orchestrator)
 
-        line1 = f"{status_prefix} ▶ {plate['name']}" if status_prefix else f"▶ {plate['name']}"
-        line2 = f"  {plate['path']}"
-        if preview_labels:
-            return f"{line1}\n{line2}\n  └─ configs=[{', '.join(preview_labels)}]"
-        return f"{line1}\n{line2}"
-
-    def _build_config_preview_labels(self, orchestrator: PipelineOrchestrator) -> List[str]:
-        """Build preview labels for orchestrator config using ABC template."""
-        try:
-            pipeline_config = orchestrator.pipeline_config
-            live_context_snapshot = ParameterFormManager.collect_live_context()
-
-            return self._build_preview_labels(
-                item=orchestrator,
-                config_source=pipeline_config,
-                live_context_snapshot=live_context_snapshot,
-            )
-        except Exception as e:
-            logger.error(f"Error building config preview labels: {e}\n{traceback.format_exc()}")
-            return []
-
-    # REMOVED: _build_effective_config_fallback - over-engineering
-    # LiveContextResolver handles None value resolution through context stack [global, pipeline]
+        # Use declarative format with orchestrator.pipeline_config as introspection source
+        return self._build_item_display_from_format(
+            item=orchestrator,
+            item_name=plate['name'],
+            status_prefix=status_prefix,
+            detail_line=plate['path'],
+        )
 
     def setup_connections(self):
         """Setup signal/slot connections (base class + plate-specific)."""
@@ -403,6 +399,15 @@ class PlateManagerWidget(AbstractManagerWidget):
             if saved_config:
                 orchestrator.apply_pipeline_config(saved_config)
 
+            # Register PipelineConfig ObjectState (one per orchestrator)
+            # Parent is GlobalPipelineConfig state for inheritance resolution
+            pipeline_config_state = ObjectState(
+                object_instance=orchestrator.pipeline_config,
+                scope_id=str(plate_path),
+                parent_state=ObjectStateRegistry.get_by_scope(""),  # Global scope
+            )
+            ObjectStateRegistry.register(pipeline_config_state)
+
             def do_init():
                 self._ensure_context()
                 return orchestrator.initialize()
@@ -493,12 +498,27 @@ class PlateManagerWidget(AbstractManagerWidget):
         )
 
     def _open_config_window(self, config_class, current_config, on_save_callback, orchestrator=None):
-        """Open configuration window with specified config class and current config."""
-        scope_id = str(orchestrator.plate_path) if orchestrator else None
+        """Open configuration window with specified config class and current config.
+
+        Singleton-per-scope behavior is handled automatically by BaseFormDialog.show().
+        """
+        from openhcs.config_framework.lazy_factory import is_global_config_type
+
+        # CRITICAL: GlobalPipelineConfig uses scope_id="" (empty string), not None
+        # The ObjectState is registered with scope_id="" in app.py, so we must match it
+        # to reuse the existing ObjectState instead of creating a new one
+        if orchestrator:
+            scope_id = str(orchestrator.plate_path)
+        elif is_global_config_type(config_class):
+            scope_id = ""  # Global scope - matches app.py registration
+        else:
+            scope_id = None
+
         config_window = ConfigWindow(
             config_class, current_config, on_save_callback,
             self.color_scheme, self, scope_id=scope_id
         )
+        # BaseFormDialog.show() handles singleton-per-scope automatically
         config_window.show()
         config_window.raise_()
         config_window.activateWindow()
@@ -1110,10 +1130,28 @@ class PlateManagerWidget(AbstractManagerWidget):
         paths_to_delete = {plate['path'] for plate in items}
         self.plates = [p for p in self.plates if p['path'] not in paths_to_delete]
 
-        # Clean up orchestrators for deleted plates
+        # Clean up orchestrators and ObjectStates for deleted plates
         for path in paths_to_delete:
+            path_str = str(path)
+
+            # Cascade unregister: plate + all steps + all functions (prevents memory leak)
+            count = ObjectStateRegistry.unregister_scope_and_descendants(path_str)
+            logger.debug(f"Cascade unregistered {count} ObjectState(s) for deleted plate: {path}")
+
+            # Delete orchestrator
             if path in self.orchestrators:
                 del self.orchestrators[path]
+
+            # Delete saved PipelineConfig (prevents resurrection)
+            if path_str in self.plate_configs:
+                del self.plate_configs[path_str]
+                logger.debug(f"Deleted plate_configs entry for: {path}")
+
+            # Delete pipeline steps (prevents resurrection)
+            if hasattr(self, 'pipeline_editor') and self.pipeline_editor:
+                if path_str in self.pipeline_editor.plate_pipelines:
+                    del self.pipeline_editor.plate_pipelines[path_str]
+                    logger.debug(f"Deleted plate_pipelines entry for: {path}")
 
         if self.selected_plate_path in paths_to_delete:
             self.selected_plate_path = ""
@@ -1126,8 +1164,8 @@ class PlateManagerWidget(AbstractManagerWidget):
 
     # === List Update Hooks (domain-specific) ===
 
-    def _format_list_item(self, item: Any, index: int, context: Any) -> str:
-        """Format plate for list display."""
+    def _format_item_content(self, item: Any, index: int, context: Any) -> str:
+        """Format plate for list display (dirty marker added by ABC)."""
         return self._format_plate_item_with_preview_text(item)
 
     def _get_list_item_tooltip(self, item: Any) -> str:
@@ -1150,27 +1188,6 @@ class PlateManagerWidget(AbstractManagerWidget):
         if isinstance(item, PipelineOrchestrator):
             return str(item.plate_path)
         return item.get('path', '') if isinstance(item, dict) else ''
-
-    def _get_context_stack_for_resolution(self, item: Any) -> List[Any]:
-        """Build 2-element context stack for PlateManager.
-
-        Args:
-            item: PipelineOrchestrator - the orchestrator being displayed/edited
-
-        Returns:
-            [global_config, pipeline_config] - LiveContextResolver will merge live values internally
-        """
-        from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
-
-        # Item is the orchestrator
-        if isinstance(item, PipelineOrchestrator):
-            pipeline_config = item.pipeline_config
-        else:
-            # Fallback: assume it's a pipeline_config directly (shouldn't happen with proper refactor)
-            pipeline_config = item
-
-        # Return raw objects - LiveContextResolver handles merging live values internally
-        return [get_current_global_config(GlobalPipelineConfig), pipeline_config]
 
     # === CrossWindowPreviewMixin Hook ===
 

@@ -334,9 +334,8 @@ class FormBuildOrchestrator:
                 for param_info in sync_params:
                     widget = manager._create_widget_for_param(param_info)
                     content_layout.addWidget(widget)
-
-            with timer(f"        Initial placeholder refresh", threshold_ms=5.0):
-                manager._parameter_ops_service.refresh_with_live_context(manager)
+            # NOTE: Don't refresh here - root's _execute_post_build_sequence will do ONE
+            # cascading refresh at the end. Refreshing each manager separately causes O(n²) work.
 
         def on_async_complete():
             if self.is_nested_manager(manager):
@@ -381,6 +380,22 @@ class FormBuildOrchestrator:
         with timer("  Enabled styling refresh", threshold_ms=5.0):
             manager._apply_to_nested_managers(lambda name, mgr: mgr._enabled_field_styling_service.refresh_enabled_styling(mgr))
 
+        # Initialize dirty indicators for all labels based on current state
+        # This handles the case where the form opens with pre-existing dirty state
+        with timer("  Initialize dirty indicators", threshold_ms=5.0):
+            self._initialize_dirty_indicators(manager)
+
+    def _initialize_dirty_indicators(self, manager) -> None:
+        """Initialize dirty indicators for all labels in manager and nested managers."""
+        if not manager.state.dirty_fields:
+            return
+        # Refresh all labels in this manager
+        for param_name in manager.labels:
+            manager._update_label_styling(param_name)
+        # Recursively initialize nested managers
+        for nested_manager in manager.nested_managers.values():
+            self._initialize_dirty_indicators(nested_manager)
+
     @staticmethod
     def _apply_callbacks(callback_list: List[Callable]) -> None:
         for callback in callback_list:
@@ -416,4 +431,3 @@ class InitialRefreshStrategy:
             with timer("  Initial live context refresh", threshold_ms=10.0):
                 service = parameter_ops_service.ParameterOpsService()
                 service.refresh_with_live_context(manager)
-

@@ -8,7 +8,7 @@ import logging
 from typing import Optional
 
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QPushButton,
+    QVBoxLayout, QHBoxLayout, QPushButton,
     QTabWidget, QWidget, QLabel
 )
 from PyQt6.QtCore import Qt
@@ -16,23 +16,27 @@ from PyQt6.QtGui import QFont
 
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
+from openhcs.pyqt_gui.windows.base_form_dialog import BaseFormDialog
 
 logger = logging.getLogger(__name__)
 
 
-class PlateViewerWindow(QDialog):
+class PlateViewerWindow(BaseFormDialog):
     """
     Tabbed window for viewing plate images and metadata.
-    
+
     Combines:
     - Image Browser (tab 1): Browse and view images in Napari
     - Metadata Viewer (tab 2): View plate metadata
+
+    Inherits singleton-per-scope behavior from BaseFormDialog.
+    Only ONE PlateViewerWindow per plate can be open at a time.
     """
-    
+
     def __init__(self, orchestrator, color_scheme: Optional[PyQt6ColorScheme] = None, parent=None):
         """
         Initialize plate viewer window.
-        
+
         Args:
             orchestrator: PipelineOrchestrator instance
             color_scheme: Color scheme for styling
@@ -42,7 +46,13 @@ class PlateViewerWindow(QDialog):
         self.orchestrator = orchestrator
         self.color_scheme = color_scheme or PyQt6ColorScheme()
         self.style_gen = StyleSheetGenerator(self.color_scheme)
-        
+
+        # scope_id for singleton behavior - one viewer per plate
+        # Use ::plate_viewer suffix to avoid conflicts with ConfigWindow (which uses just plate_path)
+        self.scope_id = f"{orchestrator.plate_path}::plate_viewer" if orchestrator else None
+        # Store plate path for styling (without suffix) so border matches plate's ConfigWindow
+        self._style_scope_id = str(orchestrator.plate_path) if orchestrator else None
+
         plate_name = orchestrator.plate_path.name if orchestrator else "Unknown"
         self.setWindowTitle(f"Plate Viewer - {plate_name}")
         self.setMinimumSize(1200, 800)
@@ -50,9 +60,24 @@ class PlateViewerWindow(QDialog):
         
         # Make floating window
         self.setWindowFlags(Qt.WindowType.Window)
-        
+
         self._setup_ui()
-    
+
+    def _init_scope_border(self) -> None:
+        """Override to use plate-level styling (not step-level).
+
+        PlateViewerWindow uses scope_id with ::plate_viewer suffix for WindowManager,
+        but should use the plate path (without suffix) for border styling to match
+        the plate's ConfigWindow.
+        """
+        # Temporarily swap scope_id to use plate-level styling
+        original_scope_id = self.scope_id
+        self.scope_id = self._style_scope_id
+        try:
+            super()._init_scope_border()
+        finally:
+            self.scope_id = original_scope_id
+
     def _setup_ui(self):
         """Setup the window UI."""
         layout = QVBoxLayout(self)
@@ -255,32 +280,48 @@ class PlateViewerWindow(QDialog):
     
     def _create_single_metadata_form(self, layout, metadata_instance):
         """Create a single metadata form."""
-        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager, FormManagerConfig
+        from openhcs.config_framework.object_state import ObjectState
+
+        # Create local ObjectState for metadata viewer
+        state = ObjectState(
+            object_instance=metadata_instance,
+            scope_id=None,
+        )
 
         metadata_form = ParameterFormManager(
-            object_instance=metadata_instance,
-            field_id="metadata_viewer",
-            parent=None,
-            read_only=True,
-            color_scheme=self.color_scheme
+            state=state,
+            config=FormManagerConfig(
+                parent=None,
+                read_only=True,
+                color_scheme=self.color_scheme
+            )
         )
         layout.addWidget(metadata_form)
-    
+
     def _create_multi_subdirectory_forms(self, layout, subdirs_instances):
         """Create forms for multiple subdirectories."""
         from PyQt6.QtWidgets import QGroupBox
-        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager, FormManagerConfig
+        from openhcs.config_framework.object_state import ObjectState
 
         for subdir_name, metadata_instance in subdirs_instances.items():
             group_box = QGroupBox(f"Subdirectory: {subdir_name}")
             group_layout = QVBoxLayout(group_box)
 
-            metadata_form = ParameterFormManager(
+            # Create local ObjectState for this subdirectory's metadata
+            state = ObjectState(
                 object_instance=metadata_instance,
-                field_id=f"metadata_{subdir_name}",
-                parent=None,
-                read_only=True,
-                color_scheme=self.color_scheme
+                scope_id=None,
+            )
+
+            metadata_form = ParameterFormManager(
+                state=state,
+                config=FormManagerConfig(
+                    parent=None,
+                    read_only=True,
+                    color_scheme=self.color_scheme
+                )
             )
             group_layout.addWidget(metadata_form)
 

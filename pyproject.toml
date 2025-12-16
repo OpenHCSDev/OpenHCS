@@ -89,7 +89,10 @@ gui = [
     "PyQt6>=6.9.1",
     "PyQt6-QScintilla>=2.14.1",
     "pyqtgraph>=0.13.7",  # Used for system monitor visualization
+    "PyOpenGL>=3.1.7",  # GPU-accelerated flash overlay rendering (optional, auto-fallback to QPainter)
     "GPUtil>=1.4.0",
+    "distinctipy>=1.2.2",  # Perceptually distinct colors for scope-based visuals
+    "wcag-contrast-ratio>=0.9",  # Contrast checking for scope colors
     # plotext removed - PyQt GUI now uses pyqtgraph instead
     # psutil moved to core dependencies (required by ui/shared/system_monitor_core.py)
 ]

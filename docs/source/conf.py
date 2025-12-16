@@ -14,7 +14,7 @@
 #
 import os
 import sys
-sys.path.insert(0, os.path.abspath('../..'))  # 🔒 Clause 17 — VFS Boundary Method
+sys.path.insert(0, os.path.abspath('../..'))
 
 # Mock imports for Read the Docs
 import sphinx.ext.autodoc

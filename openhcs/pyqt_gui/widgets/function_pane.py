@@ -6,11 +6,11 @@ Uses hybrid approach: extracted business logic + clean PyQt6 UI.
 """
 
 import logging
-from typing import Any, Dict, Callable, Optional, Tuple
+from typing import Any, Dict, Callable, Optional, Tuple, List
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QFrame, QScrollArea, QGroupBox, QSizePolicy
+    QScrollArea, QGroupBox, QSizePolicy
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
@@ -89,7 +89,10 @@ class FunctionPaneWidget(QWidget):
         
         # UI components
         self.parameter_widgets: Dict[str, QWidget] = {}
-        
+
+        # Scope color scheme (used for title color, not border) - init before setup_ui
+        self._scope_color_scheme = None
+
         # Setup UI
         self.setup_ui()
         self.setup_connections()
@@ -99,12 +102,12 @@ class FunctionPaneWidget(QWidget):
     def setup_ui(self):
         """Setup the user interface."""
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(5, 5, 5, 5)
-        layout.setSpacing(5)
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(4)
 
         # Combined header with title and buttons on same row
-        header_frame = self.create_combined_header()
-        layout.addWidget(header_frame)
+        header_widget = self.create_combined_header()
+        layout.addWidget(header_widget)
 
         # Parameter form (if function exists and parameters shown)
         if self.func and self.show_parameters:
@@ -117,104 +120,41 @@ class FunctionPaneWidget(QWidget):
         size_policy = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
         self.setSizePolicy(size_policy)
 
-        # Set styling
+        # Set styling - subtle border, match window theme
         self.setStyleSheet(f"""
             FunctionPaneWidget {{
-                background-color: {self.color_scheme.to_hex(self.color_scheme.window_bg)};
-                border: 1px solid {self.color_scheme.to_hex(self.color_scheme.border_color)};
-                border-radius: 5px;
-                margin: 2px;
-            }}
-        """)
-    
-    def create_combined_header(self) -> QWidget:
-        """
-        Create combined header with title and buttons on the same row.
-
-        Returns:
-            Widget containing title and control buttons
-        """
-        frame = QFrame()
-        frame.setFrameStyle(QFrame.Shape.Box)
-        frame.setStyleSheet(f"""
-            QFrame {{
                 background-color: {self.color_scheme.to_hex(self.color_scheme.panel_bg)};
-                border: 1px solid {self.color_scheme.to_hex(self.color_scheme.separator_color)};
-                border-radius: 3px;
-                padding: 5px;
+                border: 1px solid {self.color_scheme.to_hex(self.color_scheme.border_color)};
+                border-radius: 4px;
             }}
         """)
 
-        layout = QHBoxLayout(frame)
-        layout.setSpacing(10)
+    def set_scope_color_scheme(self, scheme) -> None:
+        """Set scope color scheme for title color styling (no border on FunctionPaneWidget)."""
+        logger.info(f"🎨 FunctionPaneWidget.set_scope_color_scheme: scheme={scheme is not None}, has_func_name_label={hasattr(self, 'func_name_label')}, has_parameters_groupbox={hasattr(self, 'parameters_groupbox')}")
+        self._scope_color_scheme = scheme
+        # Update function name label color
+        if hasattr(self, 'func_name_label') and scheme:
+            from openhcs.pyqt_gui.widgets.shared.scope_color_utils import tint_color_perceptual
+            accent_color = tint_color_perceptual(scheme.base_color_rgb, 1)
+            logger.info(f"🎨 FunctionPaneWidget: Setting func_name_label color to {accent_color.name()}")
+            self.func_name_label.setStyleSheet(f"color: {accent_color.name()};")
+        # Update parameters groupbox title color
+        if hasattr(self, 'parameters_groupbox'):
+            logger.info(f"🎨 FunctionPaneWidget: Applying parameters_groupbox styling")
+            self._apply_parameters_groupbox_styling()
 
-        # Function name with help functionality (left side)
-        if self.func:
-            func_name = self.func.__name__
-            func_module = self.func.__module__
-
-            # Function name with help
-            name_label = QLabel(f"🔧 {func_name}")
-            name_label.setFont(QFont("Arial", 10, QFont.Weight.Bold))
-            name_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_accent)};")
-            layout.addWidget(name_label)
-
-            # Help indicator for function (import locally to avoid circular imports)
-            from openhcs.pyqt_gui.widgets.shared.clickable_help_components import HelpIndicator
-            help_indicator = HelpIndicator(help_target=self.func, color_scheme=self.color_scheme)
-            layout.addWidget(help_indicator)
-
-            # Module info
-            if func_module:
-                module_label = QLabel(f"({func_module})")
-                module_label.setFont(QFont("Arial", 8))
-                module_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_disabled)};")
-                layout.addWidget(module_label)
+    def _apply_parameters_groupbox_styling(self) -> None:
+        """Apply styling to the Parameters groupbox with scope accent color if available."""
+        # Use scope accent color if available, otherwise default
+        if self._scope_color_scheme:
+            from openhcs.pyqt_gui.widgets.shared.scope_color_utils import tint_color_perceptual
+            accent_color = tint_color_perceptual(self._scope_color_scheme.base_color_rgb, 1)
+            title_color = accent_color.name()
         else:
-            name_label = QLabel("No Function Selected")
-            name_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.status_error)};")
-            layout.addWidget(name_label)
+            title_color = self.color_scheme.to_hex(self.color_scheme.text_accent)
 
-        layout.addStretch()
-
-        # Control buttons (right side) - using parameter form manager style
-        from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
-        style_gen = StyleSheetGenerator(self.color_scheme)
-        button_styles = style_gen.generate_config_button_styles()
-
-        # Button configurations
-        button_configs = [
-            ("↑", "move_up", "Move function up"),
-            ("↓", "move_down", "Move function down"),
-            ("Add", "add_func", "Add new function"),
-            ("Delete", "remove_func", "Delete this function"),
-            ("Reset", "reset_all", "Reset all parameters"),
-        ]
-
-        for name, action, tooltip in button_configs:
-            button = QPushButton(name)
-            button.setToolTip(tooltip)
-            button.setMaximumWidth(60)
-
-            # Use reset button style for all buttons (consistent with parameter form manager)
-            button.setStyleSheet(button_styles["reset"])
-
-            # Connect button to action
-            button.clicked.connect(lambda checked, a=action: self.handle_button_action(a))
-
-            layout.addWidget(button)
-
-        return frame
-    
-    def create_parameter_form(self) -> QWidget:
-        """
-        Create the parameter form using extracted business logic.
-        
-        Returns:
-            Widget containing parameter form
-        """
-        group_box = QGroupBox("Parameters")
-        group_box.setStyleSheet(f"""
+        self.parameters_groupbox.setStyleSheet(f"""
             QGroupBox {{
                 font-weight: bold;
                 border: 1px solid {self.color_scheme.to_hex(self.color_scheme.border_color)};
@@ -228,9 +168,105 @@ class FunctionPaneWidget(QWidget):
                 subcontrol-origin: margin;
                 left: 10px;
                 padding: 0 5px 0 5px;
-                color: {self.color_scheme.to_hex(self.color_scheme.text_accent)};
+                color: {title_color};
             }}
         """)
+    
+    def create_combined_header(self) -> QWidget:
+        """
+        Create combined header with title and buttons on the same row.
+
+        Returns:
+            Widget containing title and control buttons
+        """
+        # Use plain QWidget - no frame border, let parent styling handle background
+        header = QWidget()
+        layout = QHBoxLayout(header)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        # Function name with help functionality (left side)
+        if self.func:
+            func_name = self.func.__name__
+            func_module = self.func.__module__
+
+            # Function name - store as instance attr for scope accent styling
+            self.func_name_label = QLabel(f"🔧 {func_name}")
+            self.func_name_label.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+            self.func_name_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_accent)};")
+            layout.addWidget(self.func_name_label)
+
+            # Help indicator for function (import locally to avoid circular imports)
+            from openhcs.pyqt_gui.widgets.shared.clickable_help_components import HelpIndicator
+            help_indicator = HelpIndicator(help_target=self.func, color_scheme=self.color_scheme)
+            layout.addWidget(help_indicator)
+
+            # Module info - subtle, truncated
+            if func_module:
+                # Show only last 2 parts of module path for compactness
+                parts = func_module.split('.')
+                short_module = '.'.join(parts[-2:]) if len(parts) > 2 else func_module
+                module_label = QLabel(f"({short_module})")
+                module_label.setFont(QFont("Arial", 8))
+                module_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_disabled)};")
+                layout.addWidget(module_label)
+        else:
+            name_label = QLabel("No Function Selected")
+            name_label.setFont(QFont("Arial", 10))
+            name_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.status_error)};")
+            layout.addWidget(name_label)
+
+        layout.addStretch()
+
+        # Control buttons (right side) - minimal styling, match window theme
+        # Button configurations
+        button_configs = [
+            ("↑", "move_up", "Move function up"),
+            ("↓", "move_down", "Move function down"),
+            ("Add", "add_func", "Add new function"),
+            ("Del", "remove_func", "Delete this function"),
+            ("Reset", "reset_all", "Reset all parameters"),
+        ]
+
+        button_style = f"""
+            QPushButton {{
+                background-color: {self.color_scheme.to_hex(self.color_scheme.input_bg)};
+                color: {self.color_scheme.to_hex(self.color_scheme.text_primary)};
+                border: none;
+                border-radius: 3px;
+                padding: 4px 8px;
+            }}
+            QPushButton:hover {{
+                background-color: {self.color_scheme.to_hex(self.color_scheme.button_hover_bg)};
+            }}
+            QPushButton:pressed {{
+                background-color: {self.color_scheme.to_hex(self.color_scheme.button_pressed_bg)};
+            }}
+        """
+
+        for name, action, tooltip in button_configs:
+            button = QPushButton(name)
+            button.setToolTip(tooltip)
+            button.setStyleSheet(button_style)
+
+            # Connect button to action
+            button.clicked.connect(lambda checked, a=action: self.handle_button_action(a))
+
+            layout.addWidget(button)
+
+        return header
+    
+    def create_parameter_form(self) -> QWidget:
+        """
+        Create the parameter form using extracted business logic.
+        
+        Returns:
+            Widget containing parameter form
+        """
+        # Store as instance attribute for scope accent styling
+        self.parameters_groupbox = QGroupBox("Parameters")
+        self._apply_parameters_groupbox_styling()
+        group_box = self.parameters_groupbox
         
         layout = QVBoxLayout(group_box)
 
@@ -251,14 +287,29 @@ class FunctionPaneWidget(QWidget):
         # - To keep each function pane only as tall as its content, we explicitly
         #   disable the inner scroll area and let the outer FunctionListWidget
         #   handle scrolling for long forms.
+        from openhcs.config_framework.object_state import ObjectState
+        from openhcs.config_framework.object_state_registry import ObjectStateRegistry
+        from openhcs.pyqt_gui.widgets.shared.services.scope_token_service import ScopeTokenService
+
+        # Build function-specific scope: step_scope::func_N
+        step_scope = self.scope_id or "no_scope"
+        func_scope_id = ScopeTokenService.build_scope_id(step_scope, self.func)
+
+        # Get parent state (step state) from registry for context inheritance
+        parent_state = ObjectStateRegistry.get_by_scope(step_scope)
+        func_state = ObjectState(
+            object_instance=self.func,
+            scope_id=func_scope_id,
+            parent_state=parent_state,
+            initial_values=self.kwargs,
+        )
+        ObjectStateRegistry.register(func_state)
+        self._func_state = func_state  # Store for cleanup
+
         self.form_manager = PyQtParameterFormManager(
-            object_instance=self.func,       # Pass function as the object to build form for
-            field_id=f"func_{self.index}",   # Use function index as field identifier
+            state=func_state,
             config=FormManagerConfig(
                 parent=self,                      # Pass self as parent widget
-                context_obj=self.step_instance,   # Step instance for context hierarchy (Function → Step → Pipeline → Global)
-                initial_values=self.kwargs,       # Pass saved kwargs to populate form fields
-                scope_id=self.scope_id,           # Scope ID for cross-window live context (same as step editor)
                 color_scheme=self.color_scheme,   # Pass color_scheme for consistent theming
                 use_scroll_area=False,            # Let outer FunctionListWidget manage scrolling
             )
@@ -270,9 +321,16 @@ class FunctionPaneWidget(QWidget):
         )
 
         layout.addWidget(self.form_manager)
-        
+
         return group_box
-    
+
+    def cleanup_object_state(self) -> None:
+        """Unregister ObjectState on widget destruction."""
+        from openhcs.config_framework.object_state_registry import ObjectStateRegistry
+        if hasattr(self, '_func_state') and self._func_state:
+            ObjectStateRegistry.unregister(self._func_state)
+            self._func_state = None
+
     def create_parameter_widget(self, param_name: str, param_type: type, current_value: Any) -> Optional[QWidget]:
         """
         Create parameter widget based on type.
@@ -389,7 +447,7 @@ class FunctionPaneWidget(QWidget):
             self.form_manager.reset_parameter(param_name)
 
         # Update internal kwargs to match the reset values
-        self._internal_kwargs = self.form_manager.get_current_values()
+        self._internal_kwargs = self._func_state.get_current_values()
 
         # Emit parameter changed signals for each reset parameter
         for param_name, default_value in self.param_defaults.items():
@@ -529,6 +587,9 @@ class FunctionListWidget(QWidget):
         # Clear existing panes - CRITICAL: Manually unregister form managers BEFORE deleteLater()
         # This prevents RuntimeError when new widgets try to connect to deleted managers
         for pane in self.function_panes:
+            # Unregister ObjectState
+            if hasattr(pane, 'cleanup_object_state'):
+                pane.cleanup_object_state()
             # Explicitly unregister the form manager before scheduling deletion
             if hasattr(pane, 'form_manager') and pane.form_manager is not None:
                 try:

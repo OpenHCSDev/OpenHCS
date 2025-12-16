@@ -103,15 +103,20 @@ class SyntheticPlateGeneratorWindow(QDialog):
         # This automatically builds the UI from the __init__ signature (same pattern as function_pane.py)
         # CRITICAL: Pass color_scheme as parameter to ensure consistent theming with other parameter forms
         from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import FormManagerConfig
+        from openhcs.config_framework.object_state import ObjectState
+
+        # Standalone tool - create local ObjectState (not registered in registry)
+        self.state = ObjectState(
+            object_instance=SyntheticMicroscopyGenerator,  # Pass the class itself, not __init__
+            scope_id=None,
+            exclude_params=['output_dir', 'skip_files', 'include_all_components', 'random_seed'],
+        )
 
         self.form_manager = ParameterFormManager(
-            object_instance=SyntheticMicroscopyGenerator,  # Pass the class itself, not __init__
-            field_id="synthetic_plate_generator",
+            state=self.state,
             config=FormManagerConfig(
                 parent=self,
-                context_obj=None,
-                exclude_params=['output_dir', 'skip_files', 'include_all_components', 'random_seed'],  # Exclude advanced params (self is auto-excluded)
-                color_scheme=self.color_scheme  # Pass color_scheme as instance parameter, not class attribute
+                color_scheme=self.color_scheme  # Pass color_scheme as instance parameter
             )
         )
 
@@ -195,8 +200,8 @@ class SyntheticPlateGeneratorWindow(QDialog):
     def generate_plate(self):
         """Generate the synthetic plate with current parameters."""
         try:
-            # Get parameters from form
-            params = self.form_manager.get_current_values()
+            # Get parameters from state
+            params = self.state.get_current_values()
             
             # Determine output directory
             if self.output_dir is None:

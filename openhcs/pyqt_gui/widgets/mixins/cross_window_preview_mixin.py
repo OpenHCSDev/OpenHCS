@@ -1,9 +1,9 @@
 """Mixin for widgets that consume cross-window ParameterFormManager updates.
 
 SIMPLIFIED ARCHITECTURE:
-- Listen for any change via LiveContextService.connect_listener()
+- Listen for any change via ObjectStateRegistry.connect_listener()
 - Debounce + full refresh (no complex field path matching)
-- Use LiveContextService.collect() to get fresh values
+- Use ObjectStateRegistry.get_ancestor_objects() to get fresh values
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ class CrossWindowPreviewMixin:
     """
 
     # Debounce delay for preview updates (ms)
-    PREVIEW_UPDATE_DEBOUNCE_MS = 100
+    PREVIEW_UPDATE_DEBOUNCE_MS = 20
 
     def _init_cross_window_preview_mixin(self) -> None:
         self._preview_update_timer = None  # QTimer for debouncing
@@ -44,9 +44,9 @@ class CrossWindowPreviewMixin:
         self._preview_fields: Dict[str, Callable] = {}
         self._preview_field_fallbacks: Dict[str, Callable] = {}
 
-        # Connect to LiveContextService for change notifications
-        from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
-        LiveContextService.connect_listener(self._on_live_context_changed)
+        # Connect to ObjectStateRegistry for change notifications
+        from openhcs.config_framework.object_state import ObjectStateRegistry
+        ObjectStateRegistry.connect_listener(self._on_live_context_changed)
 
         # CRITICAL: Disconnect when widget is destroyed to avoid accessing deleted C++ objects
         # This is a mixin, so 'self' should be a QWidget with a destroyed signal
@@ -54,10 +54,10 @@ class CrossWindowPreviewMixin:
             self.destroyed.connect(self._cleanup_cross_window_preview_mixin)
 
     def _cleanup_cross_window_preview_mixin(self) -> None:
-        """Disconnect from LiveContextService when widget is destroyed."""
-        from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
-        LiveContextService.disconnect_listener(self._on_live_context_changed)
-        logger.debug(f"{type(self).__name__}: disconnected from LiveContextService")
+        """Disconnect from ObjectStateRegistry when widget is destroyed."""
+        from openhcs.config_framework.object_state import ObjectStateRegistry
+        ObjectStateRegistry.disconnect_listener(self._on_live_context_changed)
+        logger.debug(f"{type(self).__name__}: disconnected from ObjectStateRegistry")
 
     def _on_live_context_changed(self) -> None:
         """Called when any live context value changes. Schedules debounced refresh."""

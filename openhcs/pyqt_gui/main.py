@@ -63,6 +63,10 @@ class OpenHCSMainWindow(QMainWindow):
         # Settings for window state persistence
         self.settings = QSettings("OpenHCS", "PyQt6GUI")
 
+        # Pre-warm OpenGL context in background (zero-delay window creation)
+        from openhcs.pyqt_gui.widgets.shared.flash_overlay_opengl import prewarm_opengl
+        prewarm_opengl()
+
         # Initialize UI
         self.setup_ui()
         self.setup_dock_system()
@@ -157,6 +161,11 @@ class OpenHCSMainWindow(QMainWindow):
         # This mirrors the Textual TUI pattern where windows are mounted dynamically
         self.floating_windows = {}  # Track created windows
 
+    def _ensure_flash_overlay(self, window: QWidget) -> None:
+        """Eagerly create flash overlay for a window to avoid first-paint glitches."""
+        from openhcs.pyqt_gui.widgets.shared.flash_mixin import WindowFlashOverlay
+        WindowFlashOverlay.get_for_window(window)
+
     def show_default_windows(self):
         """Show plate manager by default."""
         # Show plate manager by default
@@ -217,8 +226,9 @@ class OpenHCSMainWindow(QMainWindow):
             # Connect to pipeline editor if it exists (mirrors Textual TUI)
             self._connect_plate_to_pipeline_manager(plate_widget)
 
-        # Show the window
+        # Show the window and ensure flash overlay is ready
         self.floating_windows["plate_manager"].show()
+        self._ensure_flash_overlay(self.floating_windows["plate_manager"])
         self.floating_windows["plate_manager"].raise_()
         self.floating_windows["plate_manager"].activateWindow()
 
@@ -246,12 +256,11 @@ class OpenHCSMainWindow(QMainWindow):
             # Connect to plate manager for current plate selection (mirrors Textual TUI)
             self._connect_pipeline_to_plate_manager(pipeline_widget)
 
-        # Show the window
+        # Show the window and ensure flash overlay is ready
         self.floating_windows["pipeline_editor"].show()
+        self._ensure_flash_overlay(self.floating_windows["pipeline_editor"])
         self.floating_windows["pipeline_editor"].raise_()
         self.floating_windows["pipeline_editor"].activateWindow()
-
-
 
     def show_image_browser(self):
         """Show image browser window."""
@@ -294,8 +303,9 @@ class OpenHCSMainWindow(QMainWindow):
                     # Set initial orchestrator if available
                     on_plate_selected()
 
-        # Show the window
+        # Show the window and ensure flash overlay is ready
         self.floating_windows["image_browser"].show()
+        self._ensure_flash_overlay(self.floating_windows["image_browser"])
         self.floating_windows["image_browser"].raise_()
         self.floating_windows["image_browser"].activateWindow()
 
@@ -329,6 +339,7 @@ class OpenHCSMainWindow(QMainWindow):
         # Log viewer is already initialized on startup, just show it
         if "log_viewer" in self.floating_windows:
             self.floating_windows["log_viewer"].show()
+            self._ensure_flash_overlay(self.floating_windows["log_viewer"])
             self.floating_windows["log_viewer"].raise_()
             self.floating_windows["log_viewer"].activateWindow()
         else:
@@ -368,8 +379,9 @@ class OpenHCSMainWindow(QMainWindow):
 
             self.floating_windows["zmq_server_manager"] = window
 
-        # Show window
+        # Show window and ensure flash overlay is ready
         self.floating_windows["zmq_server_manager"].show()
+        self._ensure_flash_overlay(self.floating_windows["zmq_server_manager"])
         self.floating_windows["zmq_server_manager"].raise_()
         self.floating_windows["zmq_server_manager"].activateWindow()
 
@@ -434,48 +446,51 @@ class OpenHCSMainWindow(QMainWindow):
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
 
-        # View menu
+        # View menu - shortcuts come from declarative ShortcutConfig
+        from openhcs.pyqt_gui.config import get_shortcut_config
+        shortcuts = get_shortcut_config()
+
         view_menu = menubar.addMenu("&View")
 
         # Plate Manager window
         plate_action = QAction("&Plate Manager", self)
-        plate_action.setShortcut("Ctrl+P")
+        plate_action.setShortcut(shortcuts.show_plate_manager.key)
         plate_action.triggered.connect(self.show_plate_manager)
         view_menu.addAction(plate_action)
 
         # Pipeline Editor window
         pipeline_action = QAction("Pipeline &Editor", self)
-        pipeline_action.setShortcut("Ctrl+E")
+        pipeline_action.setShortcut(shortcuts.show_pipeline_editor.key)
         pipeline_action.triggered.connect(self.show_pipeline_editor)
         view_menu.addAction(pipeline_action)
 
         # Image Browser window
         image_browser_action = QAction("&Image Browser", self)
-        image_browser_action.setShortcut("Ctrl+I")
+        image_browser_action.setShortcut(shortcuts.show_image_browser.key)
         image_browser_action.triggered.connect(self.show_image_browser)
         view_menu.addAction(image_browser_action)
 
         # Log Viewer window
         log_action = QAction("&Log Viewer", self)
-        log_action.setShortcut("Ctrl+L")
+        log_action.setShortcut(shortcuts.show_log_viewer.key)
         log_action.triggered.connect(self.show_log_viewer)
         view_menu.addAction(log_action)
 
         # ZMQ Server Manager window
         zmq_server_action = QAction("&ZMQ Server Manager", self)
-        zmq_server_action.setShortcut("Ctrl+Z")
+        zmq_server_action.setShortcut(shortcuts.show_zmq_server_manager.key)
         zmq_server_action.triggered.connect(self.show_zmq_server_manager)
         view_menu.addAction(zmq_server_action)
 
         # Configuration action
         config_action = QAction("&Global Configuration", self)
-        config_action.setShortcut("Ctrl+G")
+        config_action.setShortcut(shortcuts.show_configuration.key)
         config_action.triggered.connect(self.show_configuration)
         view_menu.addAction(config_action)
 
         # Generate Synthetic Plate action
         generate_plate_action = QAction("Generate &Synthetic Plate", self)
-        generate_plate_action.setShortcut("Ctrl+Shift+G")
+        generate_plate_action.setShortcut(shortcuts.show_synthetic_plate_generator.key)
         generate_plate_action.triggered.connect(self.show_synthetic_plate_generator)
         view_menu.addAction(generate_plate_action)
 
@@ -529,7 +544,7 @@ class OpenHCSMainWindow(QMainWindow):
 
         # General help action
         help_action = QAction("&Documentation", self)
-        help_action.setShortcut("F1")
+        help_action.setShortcut(shortcuts.show_help.key)
         help_action.triggered.connect(self.show_help)
         help_menu.addAction(help_action)
 
@@ -537,7 +552,13 @@ class OpenHCSMainWindow(QMainWindow):
     def setup_status_bar(self):
         """Setup application status bar."""
         self.status_bar = self.statusBar()
-        self.status_bar.showMessage("OpenHCS PyQt6 GUI Ready")
+
+        # Add time-travel widget to LEFT side of status bar
+        # Note: Don't use showMessage() as it hides addWidget() widgets
+        from openhcs.pyqt_gui.widgets.shared.time_travel_widget import TimeTravelWidget
+        color_scheme = self.service_adapter.get_current_color_scheme()
+        self.time_travel_widget = TimeTravelWidget(color_scheme=color_scheme)
+        self.status_bar.addWidget(self.time_travel_widget)
 
         # Add graph layout toggle button to the right side of status bar
         # Only add if system monitor widget exists and has the method
@@ -552,15 +573,108 @@ class OpenHCSMainWindow(QMainWindow):
         """Setup signal/slot connections."""
         # Connect config changes
         self.config_changed.connect(self.on_config_changed)
-        
+
         # Connect service adapter to application
         self.service_adapter.set_global_config(self.global_config)
-        
+
         # Setup auto-save timer for window state
         self.auto_save_timer = QTimer()
         self.auto_save_timer.timeout.connect(self.save_window_state)
         self.auto_save_timer.start(30000)  # Save every 30 seconds
-    
+
+        # Subscribe to time-travel completion to reopen windows for dirty states
+        from openhcs.config_framework.object_state import ObjectStateRegistry
+        ObjectStateRegistry.add_time_travel_complete_callback(self._on_time_travel_complete)
+
+        # Subscribe to ObjectState unregistration to auto-close associated windows
+        # This ensures windows close when time-traveling removes their backing state
+        ObjectStateRegistry.add_unregister_callback(self._on_object_state_unregistered)
+
+        # Setup global keyboard shortcuts from declarative config
+        self._setup_global_shortcuts()
+
+    def _setup_global_shortcuts(self):
+        """Setup global keyboard shortcuts from declarative ShortcutConfig.
+
+        Uses event filter to intercept Ctrl+Z/Y BEFORE input widgets get them,
+        so time-travel always takes priority over widget-level undo/redo.
+        """
+        from PyQt6.QtGui import QShortcut, QKeySequence
+        from PyQt6.QtCore import Qt, QEvent
+        from PyQt6.QtWidgets import QApplication
+        from openhcs.pyqt_gui.config import get_shortcut_config
+        from openhcs.config_framework.object_state import ObjectStateRegistry
+
+        shortcuts = get_shortcut_config()
+
+        # Time travel functions
+        def time_travel_back():
+            ObjectStateRegistry.time_travel_back()
+            if hasattr(self, 'time_travel_widget'):
+                self.time_travel_widget.refresh()
+
+        def time_travel_forward():
+            ObjectStateRegistry.time_travel_forward()
+            if hasattr(self, 'time_travel_widget'):
+                self.time_travel_widget.refresh()
+
+        def time_travel_to_head():
+            ObjectStateRegistry.time_travel_to_head()
+            if hasattr(self, 'time_travel_widget'):
+                self.time_travel_widget.refresh()
+
+        # Store actions for event filter
+        self._time_travel_actions = {
+            shortcuts.time_travel_back.key: time_travel_back,
+            shortcuts.time_travel_forward.key: time_travel_forward,
+            shortcuts.time_travel_to_head.key: time_travel_to_head,
+        }
+
+        # Install application-level event filter to intercept before widgets
+        from PyQt6.QtCore import QObject
+
+        class TimeTravelEventFilter(QObject):
+            def __init__(filter_self, main_window):
+                super().__init__()
+                filter_self.main_window = main_window
+
+            def eventFilter(filter_self, obj, event):
+                if event.type() == QEvent.Type.KeyPress:
+                    # Build key sequence from event
+                    key = event.key()
+                    modifiers = event.modifiers()
+
+                    # Map modifiers to string
+                    mod_str = ""
+                    if modifiers & Qt.KeyboardModifier.ControlModifier:
+                        mod_str += "Ctrl+"
+                    if modifiers & Qt.KeyboardModifier.ShiftModifier:
+                        mod_str += "Shift+"
+                    if modifiers & Qt.KeyboardModifier.AltModifier:
+                        mod_str += "Alt+"
+
+                    # Map key to string
+                    key_map = {
+                        Qt.Key.Key_Z: "Z",
+                        Qt.Key.Key_Y: "Y",
+                    }
+                    key_str = key_map.get(key, "")
+
+                    if key_str:
+                        full_key = mod_str + key_str
+                        if full_key in filter_self.main_window._time_travel_actions:
+                            filter_self.main_window._time_travel_actions[full_key]()
+                            return True  # Consume event - don't pass to widget
+
+                return False  # Let other events pass through
+
+        self._event_filter = TimeTravelEventFilter(self)
+        QApplication.instance().installEventFilter(self._event_filter)
+
+        logger.info(f"Global shortcuts (event filter): {shortcuts.time_travel_back.key}=back, "
+                    f"{shortcuts.time_travel_forward.key}=forward, "
+                    f"{shortcuts.time_travel_to_head.key}=head")
+
     def restore_window_state(self):
         """Restore window state from settings."""
         try:
@@ -631,12 +745,15 @@ class OpenHCSMainWindow(QMainWindow):
             self._save_config_to_cache(new_config)
 
         # Use concrete GlobalPipelineConfig for global config editing (static context)
+        # CRITICAL: Pass scope_id="" to match the ObjectState registered in app.py
+        # This ensures ConfigWindow reuses the existing ObjectState instead of creating a new one
         config_window = ConfigWindow(
             GlobalPipelineConfig,  # config_class (concrete class for static context)
             self.service_adapter.get_global_config(),  # current_config (concrete instance)
             handle_config_save,    # on_save_callback
             self.service_adapter.get_current_color_scheme(),  # color_scheme
-            self                   # parent
+            self,                  # parent
+            scope_id=""            # Global scope - matches app.py registration
         )
         # Show as non-modal window (like plate manager and pipeline editor)
         config_window.show()
@@ -718,6 +835,58 @@ class OpenHCSMainWindow(QMainWindow):
                 logger.warning("Could not find pipeline editor widget to connect")
         else:
             logger.debug("Pipeline editor not yet created - connection will be made when both exist")
+
+    def _on_object_state_unregistered(self, scope_id: str, state: 'ObjectState'):
+        """Handle ObjectState unregistration by closing associated windows.
+
+        When time-travel removes a step/config (unregisters its ObjectState),
+        any open editor window for that scope should automatically close.
+        This ensures UI stays in sync with the ObjectState registry.
+
+        Args:
+            scope_id: Scope of the unregistered ObjectState
+            state: The ObjectState being unregistered
+        """
+        from openhcs.pyqt_gui.services.window_manager import WindowManager
+
+        if WindowManager.is_open(scope_id):
+            WindowManager.close_window(scope_id)
+            logger.info(f"⏱️ TIME_TRAVEL: Auto-closed window for unregistered state: {scope_id}")
+
+    def _on_time_travel_complete(self, dirty_states, triggering_scope: str | None):
+        """Handle time-travel completion by reopening windows for dirty ObjectStates.
+
+        When time-travel restores state with unsaved changes, this callback
+        reopens the appropriate editor windows so the user can see/save the changes.
+
+        Only reopens windows for the scope that triggered the snapshot,
+        NOT cascade-dirty states from inheritance.
+
+        Args:
+            dirty_states: List of (scope_id, ObjectState) tuples with unsaved changes
+            triggering_scope: Scope that triggered the snapshot (None if global/init)
+        """
+        from openhcs.pyqt_gui.services.window_manager import WindowManager
+
+        logger.debug(f"⏱️ TIME_TRAVEL_CALLBACK: triggering_scope={triggering_scope!r} dirty_count={len(dirty_states)}")
+
+        for scope_id, state in dirty_states:
+            # Only reopen window for the scope that actually triggered the snapshot
+            # Skip cascade-dirty states from MRO inheritance
+            # Note: Use 'is not None' because '' (empty string = global scope) is a valid triggering_scope
+            if triggering_scope is not None and scope_id != triggering_scope:
+                continue
+
+            # Check if window is already open
+            if WindowManager.is_open(scope_id):
+                # Window exists - just focus it
+                WindowManager.focus_and_navigate(scope_id)
+                continue
+
+            # Window not open - create via shared infrastructure
+            window = WindowManager.create_window_for_scope(scope_id, state)
+            if window:
+                logger.info(f"⏱️ TIME_TRAVEL: Reopened window for dirty state: {scope_id}")
 
     def show_synthetic_plate_generator(self):
         """Show synthetic plate generator window."""

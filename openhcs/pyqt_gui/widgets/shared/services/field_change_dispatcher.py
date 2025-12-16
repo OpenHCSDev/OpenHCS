@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Debug flag for verbose dispatcher logging
-DEBUG_DISPATCHER = True
+DEBUG_DISPATCHER = False
 
 
 @dataclass
@@ -41,15 +41,6 @@ class FieldChangeDispatcher:
 
     def dispatch(self, event: FieldChangeEvent) -> None:
         """Handle a field change event."""
-        # PERFORMANCE OPTIMIZATION: Wrap entire dispatch in dispatch_cycle
-        # This allows sibling refreshes to share cached GLOBAL layer in build_context_stack
-        from openhcs.config_framework.context_manager import dispatch_cycle
-
-        with dispatch_cycle():
-            self._dispatch_impl(event)
-
-    def _dispatch_impl(self, event: FieldChangeEvent) -> None:
-        """Implementation of dispatch (wrapped in dispatch_cycle)."""
         source = event.source_manager
 
         if DEBUG_DISPATCHER:
@@ -69,33 +60,20 @@ class FieldChangeDispatcher:
                     logger.warning(f"🚫 DISPATCH BLOCKED: {source.field_id} has _in_reset=True")
                 return
 
-            # 1. Update source's data model
-            source.parameters[event.field_name] = event.value
-            # CRITICAL: Always add to _user_set_fields, even for reset
-            # This ensures get_user_modified_values() includes None for reset fields,
-            # so live context has the override and preview labels show same as placeholders.
-            # Previously we discarded on reset, but that caused preview labels to show
-            # the saved-on-disk value instead of the reset (None) value.
-            source._user_set_fields.add(event.field_name)
+            logger.debug(f"🔬 RESET_TRACE: DISPATCHER: is_reset={event.is_reset}, field={event.field_name}, value={repr(event.value)[:50]}")
+
+            # 1. Update source's data model via ObjectState
+            # ObjectState.update_parameter() enforces the invariant: state mutation → global cache invalidation
+            # (calls ObjectStateRegistry.increment_token(notify=False) internally)
+            # CRITICAL: Compute full dotted path for nested PFMs
+            full_path = f"{source.field_prefix}.{event.field_name}" if source.field_prefix else event.field_name
+            source.state.update_parameter(full_path, event.value)
             if DEBUG_DISPATCHER:
                 reset_note = " (reset to None)" if event.is_reset else ""
-                logger.info(f"  ✅ Updated source.parameters[{event.field_name}], ADDED to _user_set_fields{reset_note}")
-
-            # PERFORMANCE OPTIMIZATION: Invalidate cache but DON'T notify listeners yet
-            # This allows sibling refreshes to share the cached live context
-            # (first sibling computes and caches, subsequent siblings get cache hits)
-            # We notify listeners AFTER sibling refresh is complete
-            root = source
-            while root._parent_manager is not None:
-                root = root._parent_manager
-
-            from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
-            LiveContextService.increment_token(notify=False)  # Invalidate cache only
-            if DEBUG_DISPATCHER:
-                logger.info(f"  🔄 Incremented live context token to {LiveContextService.get_token()} (notify deferred)")
+                logger.info(f"  ✅ Updated state.parameters[{full_path}]{reset_note}")
 
             # 2. Mark parent chain as modified BEFORE refreshing siblings
-            # This ensures root.get_user_modified_values() includes this field on first keystroke
+            # This ensures root.state.parameters includes this field on first keystroke
             self._mark_parents_modified(source)
 
             # 3. Refresh siblings that have the same field
@@ -129,13 +107,16 @@ class FieldChangeDispatcher:
                 if DEBUG_DISPATCHER:
                     logger.info(f"  ℹ️  No parent manager (root-level field)")
 
-            # PERFORMANCE OPTIMIZATION: NOW notify listeners (after sibling refresh)
+            # 4. Notify listeners (after sibling refresh)
             # This allows sibling refreshes to share the cached live context
+            # (first sibling computes and caches, subsequent siblings get cache hits)
+            root = self._get_root_manager(source)
             root._block_cross_window_updates = True
             try:
-                LiveContextService._notify_change()
+                from openhcs.config_framework.object_state import ObjectStateRegistry
+                ObjectStateRegistry._notify_change()
                 if DEBUG_DISPATCHER:
-                    logger.info(f"  📣 Notified {len(LiveContextService._change_callbacks)} listeners")
+                    logger.info(f"  📣 Notified {len(ObjectStateRegistry._change_callbacks)} listeners")
             finally:
                 root._block_cross_window_updates = False
 
@@ -153,15 +134,15 @@ class FieldChangeDispatcher:
             root = self._get_root_manager(source)
             full_path = self._get_full_path(source, event.field_name)
 
-            logger.info(f"🔔 DISPATCHER: Emitting parameter_changed from root")
-            logger.info(f"  source.field_id={source.field_id}")
-            logger.info(f"  root.field_id={root.field_id}")
-            logger.info(f"  event.field_name={event.field_name}")
-            logger.info(f"  full_path={full_path}")
-            logger.info(f"  value type={type(event.value).__name__}")
+            logger.debug(f"🔔 DISPATCHER: Emitting parameter_changed from root")
+            logger.debug(f"  source.field_id={source.field_id}")
+            logger.debug(f"  root.field_id={root.field_id}")
+            logger.debug(f"  event.field_name={event.field_name}")
+            logger.debug(f"  full_path={full_path}")
+            logger.debug(f"  value type={type(event.value).__name__}")
 
             root.parameter_changed.emit(full_path, event.value)
-            logger.info(f"  ✅ Emitted parameter_changed({full_path}, ...) from root")
+            logger.debug(f"  ✅ Emitted parameter_changed({full_path}, ...) from root")
 
             # 5. Emit cross-window signal from ROOT
             self._emit_cross_window(root, full_path, event.value)
@@ -172,33 +153,34 @@ class FieldChangeDispatcher:
     def _mark_parents_modified(self, source: 'ParameterFormManager') -> None:
         """Mark parent chain as having modified nested config.
 
-        This ensures get_user_modified_values() on root includes nested changes.
+        This ensures root.state.parameters includes nested changes.
         Also updates parent.parameters with the nested dataclass value.
         """
-        logger.info(f"  📝 MARK_PARENTS: Starting for {source.field_id}")
+        logger.debug(f"  📝 MARK_PARENTS: Starting for {source.field_id}")
 
         current = source
         level = 0
         while current._parent_manager is not None:
             parent = current._parent_manager
             level += 1
-            logger.info(f"    L{level}: parent={parent.field_id}")
+            logger.debug(f"    L{level}: parent={parent.field_id}")
             # Find the field name in parent that points to current
             for field_name, nested_mgr in parent.nested_managers.items():
                 if nested_mgr is current:
-                    logger.info(f"    L{level}: Found field_name={field_name} in parent")
+                    logger.debug(f"    L{level}: Found field_name={field_name} in parent")
                     # Collect nested value and update parent's parameters
                     nested_value = parent._value_collection_service.collect_nested_value(
                         parent, field_name, nested_mgr
                     )
-                    logger.info(f"    L{level}: Collected nested_value type={type(nested_value).__name__}")
-                    parent.parameters[field_name] = nested_value
-                    parent._user_set_fields.add(field_name)
-                    logger.info(f"    L{level}: ✅ {parent.field_id}.{field_name} marked modified")
+                    logger.debug(f"    L{level}: Collected nested_value type={type(nested_value).__name__}")
+                    # CRITICAL: Compute full dotted path for nested PFMs
+                    parent_full_path = f"{parent.field_prefix}.{field_name}" if parent.field_prefix else field_name
+                    parent.state.update_parameter(parent_full_path, nested_value)
+                    logger.debug(f"    L{level}: ✅ {parent.field_id}.{field_name} updated (path={parent_full_path})")
                     break
             current = parent
 
-        logger.info(f"  ✅ MARK_PARENTS: Complete")
+        logger.debug(f"  ✅ MARK_PARENTS: Complete")
 
     def _get_root_manager(self, manager: 'ParameterFormManager') -> 'ParameterFormManager':
         """Walk up to root manager."""
@@ -221,19 +203,19 @@ class FieldChangeDispatcher:
 
     def _emit_cross_window(self, root_manager: 'ParameterFormManager', full_path: str, value: Any) -> None:
         """Emit context_changed from root with scope_id and field path."""
-        if root_manager._should_skip_updates():
-            if DEBUG_DISPATCHER:
-                logger.warning(f"  🚫 Cross-window BLOCKED: _should_skip_updates()=True for {root_manager.field_id}")
+        logger.debug(f"  🔍 _emit_cross_window: checking should_skip_updates() for {root_manager.field_id}")
+        logger.debug(f"    state._in_reset={root_manager.state._in_reset}, state._block_cross_window_updates={root_manager.state._block_cross_window_updates}")
+        if root_manager.state.should_skip_updates():
+            logger.warning(f"  🚫 Cross-window BLOCKED: _should_skip_updates()=True for {root_manager.field_id}")
             return
-        if root_manager.config.is_global_config_editing:
-            root_manager._update_thread_local_global_config()
-            if DEBUG_DISPATCHER:
-                logger.info(f"  🌐 Updated thread-local global config")
 
-        if DEBUG_DISPATCHER:
-            logger.info(f"  📡 Emitting cross-window: scope={root_manager.scope_id}, path={full_path}")
+        # REMOVED: update_thread_local_global_config() call
+        # Thread-local should ONLY be updated on SAVE, not on every keystroke!
+        # Descendants (plates, steps) should see the SAVED global config, not unsaved edits.
 
+        logger.debug(f"  📡 Emitting context_changed: scope={root_manager.scope_id}, path={full_path}")
         root_manager.context_changed.emit(root_manager.scope_id or "", full_path)
+        logger.debug(f"  ✅ context_changed emitted")
 
     def _refresh_single_field(self, manager: 'ParameterFormManager', field_name: str) -> None:
         """Refresh just one field's placeholder in a sibling manager."""

@@ -9,8 +9,7 @@ import logging
 from typing import Callable, Optional, Dict, Any
 
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLineEdit, QTableWidget,
-    QTableWidgetItem, QPushButton, QLabel, QHeaderView, QAbstractItemView,
+    QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QTreeWidget, QTreeWidgetItem, QSplitter, QWidget, QSizePolicy
 )
 from PyQt6.QtCore import Qt, pyqtSignal
@@ -22,6 +21,8 @@ from openhcs.processing.backends.lib_registry.unified_registry import FunctionMe
 from openhcs.processing.custom_functions.signals import custom_function_signals
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
+from openhcs.pyqt_gui.widgets.shared.function_table_browser import FunctionTableBrowser
+from openhcs.pyqt_gui.widgets.shared.column_filter_widget import MultiColumnFilterPanel
 
 logger = logging.getLogger(__name__)
 
@@ -143,6 +144,7 @@ class FunctionSelectorDialog(QDialog):
         self.setup_ui()
         self.setup_connections()
         self.populate_module_tree()
+        self._build_column_filters()
         self.populate_function_table()
 
         # Connect to custom function signals for auto-refresh
@@ -229,33 +231,26 @@ class FunctionSelectorDialog(QDialog):
         self._build_module_hierarchy_tree(self.module_tree, module_hierarchy, [], is_root=True)
 
     def _update_filtered_view(self, filtered_functions: Dict[str, Any], filter_description: str = ""):
-        """Mathematical simplification: factor out common filter update pattern (RST principle)."""
+        """Update filtered view using table browser."""
         self.filtered_functions = filtered_functions
         self.populate_function_table(self.filtered_functions)
 
-        # Create unified count display
+        # Create unified count display in the browser's status label
         total_count = len(self.all_functions_metadata)
         filtered_count = len(self.filtered_functions)
         count_text = f"Functions: {filtered_count}/{total_count}"
         if filter_description:
             count_text += f" ({filter_description})"
 
-        self.function_count_label.setText(count_text)
+        self.function_table_browser.status_label.setText(count_text)
 
         # Clear selection when filtering
         self._set_selection_state(None, False)
 
     def _set_selection_state(self, function: Optional[Callable], enabled: bool):
-        """Mathematical simplification: factor out common button state logic (RST principle)."""
+        """Set button state based on selection."""
         self.selected_function = function
         self.select_btn.setEnabled(enabled)
-
-    def _extract_function_from_item(self, item) -> Optional[Callable]:
-        """Mathematical simplification: factor out common data extraction pattern (RST principle)."""
-        if not item:
-            return None
-        data = item.data(Qt.ItemDataRole.UserRole)
-        return data.get("func") if data else None
 
     def _create_pane_widget(self, title: str, main_widget) -> QWidget:
         """Mathematical simplification: factor out common pane setup pattern (RST principle)."""
@@ -382,7 +377,7 @@ class FunctionSelectorDialog(QDialog):
         logger.info("Function metadata cache cleared")
     
     def setup_ui(self):
-        """Setup the dual-pane user interface with tree and table."""
+        """Setup the dual-pane user interface with tree, filters, and table."""
         self.setWindowTitle("Select Function - Dual Pane View")
         self.setModal(True)
         self.resize(self.DEFAULT_WIDTH, self.DEFAULT_HEIGHT)
@@ -399,86 +394,56 @@ class FunctionSelectorDialog(QDialog):
         title_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_accent)};")
         layout.addWidget(title_label)
 
-        # Search input with enhanced placeholder
-        self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Search functions by name, module, contract, or tags...")
-        layout.addWidget(self.search_input)
+        # Create main horizontal splitter (left panel | right table)
+        main_splitter = QSplitter(Qt.Orientation.Horizontal)
+        main_splitter.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        main_splitter.setHandleWidth(5)
 
-        # Function count label
-        self.function_count_label = QLabel(f"Functions: {len(self.all_functions_metadata)}")
-        layout.addWidget(self.function_count_label)
+        # === LEFT PANEL: Tree + Filters ===
+        left_panel = QWidget()
+        left_layout = QVBoxLayout(left_panel)
+        left_layout.setContentsMargins(0, 0, 0, 0)
 
-        # Create splitter for dual-pane layout (horizontal split = side-by-side panes)
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        splitter.setHandleWidth(5)  # Make splitter handle more visible
-
-        # Create tree widget with configuration
+        # Module tree
         self.module_tree = QTreeWidget()
         self.module_tree.setHeaderLabel("Module Structure")
         self.module_tree.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-
-        # Enable deselection by clicking in empty space
         self.module_tree.mousePressEvent = self._tree_mouse_press_event
+        left_layout.addWidget(self._create_pane_widget("Module Structure", self.module_tree), 1)
 
-        # Create panes using factored pattern (RST principle)
-        left_widget = self._create_pane_widget("Module Structure", self.module_tree)
-        splitter.addWidget(left_widget)
+        # Column filter panel (Library, Backend, Contract, Tags)
+        self.column_filter_panel = MultiColumnFilterPanel(color_scheme=self.color_scheme)
+        self.column_filter_panel.setVisible(False)  # Hidden until populated
+        left_layout.addWidget(self.column_filter_panel)
 
-        # Function table with enhanced columns - Backend shows memory type, Registry shows source
-        self.function_table = QTableWidget()
-        self.function_table.setColumnCount(7)
-        self.function_table.setHorizontalHeaderLabels([
-            "Name", "Module", "Backend", "Registry", "Contract", "Tags", "Description"
-        ])
+        main_splitter.addWidget(left_panel)
 
-        # Configure table behavior
-        self.function_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.function_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.function_table.setSortingEnabled(True)
-        self.function_table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        # === RIGHT PANEL: Function Table Browser ===
+        self.function_table_browser = FunctionTableBrowser(
+            color_scheme=self.color_scheme,
+            parent=self
+        )
+        self.function_table_browser.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
-        # Configure column widths - make all columns resizable and movable
-        header = self.function_table.horizontalHeader()
-        header.setSectionsMovable(True)  # Allow column reordering
-        resize_modes = [
-            QHeaderView.ResizeMode.Interactive,  # Name - resizable
-            QHeaderView.ResizeMode.Interactive,  # Module - resizable
-            QHeaderView.ResizeMode.Interactive,  # Backend - resizable
-            QHeaderView.ResizeMode.Interactive,  # Contract - resizable
-            QHeaderView.ResizeMode.Interactive,  # Tags - resizable
-            QHeaderView.ResizeMode.Interactive   # Description - resizable (changed from Stretch)
-        ]
-        for col, mode in enumerate(resize_modes):
-            header.setSectionResizeMode(col, mode)
+        right_widget = self._create_pane_widget("Function Details", self.function_table_browser)
+        main_splitter.addWidget(right_widget)
 
-        # Set specific column widths using constants (RST principle)
-        column_widths = {1: self.MODULE_COLUMN_WIDTH, 5: self.DESCRIPTION_COLUMN_WIDTH}
-        for col, width in column_widths.items():
-            self.function_table.setColumnWidth(col, width)
+        # Set splitter proportions
+        main_splitter.setSizes([self.TREE_PROPORTION, self.TABLE_PROPORTION])
+        layout.addWidget(main_splitter, 1)
 
-        # Create right pane using factored pattern (RST principle)
-        right_widget = self._create_pane_widget("Function Details", self.function_table)
-        splitter.addWidget(right_widget)
-
-        # Set splitter proportions using constants
-        splitter.setSizes([self.TREE_PROPORTION, self.TABLE_PROPORTION])
-
-        # Add splitter to layout with stretch factor to fill available space
-        layout.addWidget(splitter, 1)  # Stretch factor of 1 to expand
-        
-        # Buttons (mirrors Textual TUI dialog-buttons)
+        # Buttons
         button_layout = QHBoxLayout()
         button_layout.addStretch()
-        
+
         self.select_btn = QPushButton("Select")
         self.select_btn.setEnabled(False)
         self.select_btn.setDefault(True)
         button_layout.addWidget(self.select_btn)
-        
+
         cancel_btn = QPushButton("Cancel")
         button_layout.addWidget(cancel_btn)
-        
+
         button_layout.addStretch()
         layout.addLayout(button_layout)
 
@@ -496,100 +461,106 @@ class FunctionSelectorDialog(QDialog):
     
     def setup_connections(self):
         """Setup signal/slot connections."""
-        # Search functionality
-        self.search_input.textChanged.connect(self.filter_functions)
-
         # Tree selection for filtering
         self.module_tree.itemSelectionChanged.connect(self.on_tree_selection_changed)
 
-        # Table selection
-        self.function_table.itemSelectionChanged.connect(self.on_table_selection_changed)
-        self.function_table.itemDoubleClicked.connect(self.on_table_double_click)
-    
+        # Table browser signals
+        self.function_table_browser.item_selected.connect(self._on_function_selected)
+        self.function_table_browser.item_double_clicked.connect(self._on_function_double_clicked)
+
+        # Column filter panel
+        self.column_filter_panel.filters_changed.connect(self._on_column_filters_changed)
+
     def populate_function_table(self, functions_metadata: Optional[Dict[str, FunctionMetadata]] = None):
-        """Populate function table with enhanced metadata."""
+        """Populate function table using FunctionTableBrowser."""
         if functions_metadata is None:
             functions_metadata = self.filtered_functions
 
-        self.function_table.setRowCount(len(functions_metadata))
-        self.function_table.setSortingEnabled(False)  # Disable during population
+        self.function_table_browser.set_items(functions_metadata)
 
-        for row, (composite_key, metadata) in enumerate(functions_metadata.items()):
-            # Get backend (memory type) and registry separately
-            backend = metadata.get('backend', 'unknown')
-            registry = metadata.get('registry', 'unknown')
+        # Update count label
+        total = len(self.all_functions_metadata)
+        filtered = len(functions_metadata)
+        self.function_table_browser.status_label.setText(f"Functions: {filtered}/{total}")
 
-            # Format tags as comma-separated string
-            tags_str = ", ".join(metadata.get('tags', [])) if metadata.get('tags') else ""
+    def _build_column_filters(self):
+        """Build column filter widgets from function metadata."""
+        if not self.all_functions_metadata:
+            return
 
-            # Truncate description for table display (more generous)
-            doc = metadata.get('doc', '')
-            description = doc[:150] + "..." if len(doc) > 150 else doc
+        self.column_filter_panel.clear_all_filters()
 
-            # Mathematical simplification: consolidate table item creation (RST principle)
-            contract = metadata.get('contract')
-            contract_name = contract.name if hasattr(contract, 'name') else str(contract) if contract else "unknown"
+        # Extract unique values for filterable columns
+        filter_columns = {
+            'Registry': lambda m: m.get('registry', 'unknown').title(),
+            'Backend': lambda m: m.get('backend', 'unknown').title(),
+            'Contract': lambda m: (
+                m.get('contract').name if hasattr(m.get('contract'), 'name')
+                else str(m.get('contract')) if m.get('contract') else 'unknown'
+            ),
+            'Tags': None,  # Special handling for tags (multiple values per item)
+        }
 
-            # Create all table items using factored pattern - Backend shows memory type, Registry shows source
-            items_data = [
-                metadata.get('name', metadata.get('name', composite_key.split(':')[-1] if ':' in composite_key else composite_key)),
-                metadata.get('module', 'unknown'),
-                backend.title(),  # Memory type (cupy, numpy, etc.)
-                registry.title(),  # Registry source (openhcs, skimage, etc.)
-                contract_name,
-                tags_str,
-                description
-            ]
+        for column_name, extractor in filter_columns.items():
+            unique_values = set()
 
-            items = [QTableWidgetItem(data) for data in items_data]
-            items[0].setData(Qt.ItemDataRole.UserRole, {"func": metadata.get('func'), "metadata": metadata})
+            for metadata in self.all_functions_metadata.values():
+                if column_name == 'Tags':
+                    # Tags is a list - add each tag individually
+                    tags = metadata.get('tags', [])
+                    unique_values.update(tags)
+                else:
+                    value = extractor(metadata)
+                    if value:
+                        unique_values.add(value)
 
-            # Set all items in table using enumeration
-            for col, item in enumerate(items):
-                self.function_table.setItem(row, col, item)
+            if unique_values:
+                self.column_filter_panel.add_column_filter(column_name, sorted(list(unique_values)))
 
-            # Highlight current function if it matches
-            if self.current_function and metadata.get('func') == self.current_function:
-                self.function_table.selectRow(row)
+        if self.column_filter_panel.column_filters:
+            self.column_filter_panel.setVisible(True)
 
-        self.function_table.setSortingEnabled(True)  # Re-enable sorting
-    
-    def filter_functions(self, search_term: str):
-        """Filter functions using shared search service (canonical code path)."""
-        # Use shared search service for consistent behavior
-        from openhcs.ui.shared.search_service import SearchService
+    def _on_column_filters_changed(self):
+        """Handle column filter checkbox changes."""
+        active_filters = self.column_filter_panel.get_active_filters()
 
-        # Create searchable text extractor
-        def create_searchable_text(metadata):
-            """Create searchable text using functional approach."""
-            contract = metadata.get('contract')
-            contract_name = contract.name if hasattr(contract, 'name') else str(contract) if contract else ""
+        if not active_filters:
+            # No filters active - show all
+            self._update_filtered_view(self.all_functions_metadata)
+            return
 
-            # Functional approach: map fields to searchable strings
-            searchable_fields = [
-                metadata.get('name', ''),
-                metadata.get('module', ''),
-                contract_name,
-                " ".join(metadata.get('tags', [])),
-                metadata.get('doc', '')
-            ]
-            return " ".join(field for field in searchable_fields)
+        # Apply filters with AND logic across columns
+        filtered = {}
+        for key, metadata in self.all_functions_metadata.items():
+            matches = True
 
-        # Create search service if not exists
-        if not hasattr(self, '_search_service'):
-            self._search_service = SearchService(
-                all_items=self.all_functions_metadata,
-                searchable_text_extractor=create_searchable_text
-            )
+            for column_name, allowed_values in active_filters.items():
+                if column_name == 'Registry':
+                    value = metadata.get('registry', 'unknown').title()
+                elif column_name == 'Backend':
+                    value = metadata.get('backend', 'unknown').title()
+                elif column_name == 'Contract':
+                    contract = metadata.get('contract')
+                    value = contract.name if hasattr(contract, 'name') else str(contract) if contract else 'unknown'
+                elif column_name == 'Tags':
+                    # For tags, match if ANY tag is in allowed_values
+                    tags = metadata.get('tags', [])
+                    if not any(tag in allowed_values for tag in tags):
+                        matches = False
+                        continue
+                    else:
+                        continue  # Tags matched, check next column
+                else:
+                    continue
 
-        # Perform search using shared service
-        filtered = self._search_service.filter(search_term)
+                if value not in allowed_values:
+                    matches = False
+                    break
 
-        # Update view
-        if len(search_term.strip()) == 0:
-            self._update_filtered_view(filtered)
-        elif len(search_term.strip()) >= SearchService.MIN_SEARCH_CHARS:
-            self._update_filtered_view(filtered, f"search: '{search_term}'")
+            if matches:
+                filtered[key] = metadata
+
+        self._update_filtered_view(filtered, "filtered by column")
 
     def on_tree_selection_changed(self):
         """Handle tree selection using mathematical simplification (RST principle)."""
@@ -639,30 +610,17 @@ class FunctionSelectorDialog(QDialog):
             # Clicked on an item - use default behavior
             QTreeWidget.mousePressEvent(self.module_tree, event)
 
-    def on_table_selection_changed(self):
-        """Handle table selection changes."""
-        selected_items = self.function_table.selectedItems()
-        if selected_items:
-            # Get the first item in the selected row (name column)
-            row = selected_items[0].row()
-            name_item = self.function_table.item(row, 0)
+    def _on_function_selected(self, key: str, item: Dict[str, Any]):
+        """Handle function selection from table browser."""
+        func = item.get('func')
+        self._set_selection_state(func, func is not None)
 
-            # Use factored extraction and state setting
-            func = self._extract_function_from_item(name_item)
-            self._set_selection_state(func, func is not None)
-        else:
-            self._set_selection_state(None, False)
-
-    def on_table_double_click(self, item):
-        """Handle table double-click using factored extraction (RST principle)."""
-        if item:
-            row = item.row()
-            name_item = self.function_table.item(row, 0)
-            func = self._extract_function_from_item(name_item)
-
-            if func:
-                self.selected_function = func
-                self.accept_selection()
+    def _on_function_double_clicked(self, key: str, item: Dict[str, Any]):
+        """Handle function double-click from table browser."""
+        func = item.get('func')
+        if func:
+            self.selected_function = func
+            self.accept_selection()
     
     def accept_selection(self):
         """Accept the selected function."""

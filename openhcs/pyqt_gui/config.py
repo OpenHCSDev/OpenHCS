@@ -8,10 +8,64 @@ Configuration is intended to be immutable and provided as Python objects.
 
 import logging
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Callable
 from enum import Enum
 
 logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# Declarative Keyboard Shortcuts System
+# ============================================================================
+
+@dataclass(frozen=True)
+class Shortcut:
+    """Single keyboard shortcut binding."""
+    key: str  # e.g., "Ctrl+Z", "F1", "Ctrl+Shift+S"
+    action: str  # Method/action name to invoke
+    description: str  # Human-readable description
+
+
+@dataclass(frozen=True)
+class ShortcutConfig:
+    """
+    Declarative keyboard shortcuts for PyQt GUI.
+
+    All shortcuts are defined here - no hardcoding in widgets or main.py.
+    To change a shortcut, modify this dataclass.
+    """
+
+    # Time travel (global - works everywhere)
+    time_travel_back: Shortcut = Shortcut("Ctrl+Z", "time_travel_back", "Step back in history")
+    time_travel_forward: Shortcut = Shortcut("Ctrl+Y", "time_travel_forward", "Step forward in history")
+    time_travel_to_head: Shortcut = Shortcut("Ctrl+Shift+Y", "time_travel_to_head", "Return to present")
+
+    # Window management
+    show_plate_manager: Shortcut = Shortcut("Ctrl+P", "show_plate_manager", "Show Plate Manager")
+    show_pipeline_editor: Shortcut = Shortcut("Ctrl+E", "show_pipeline_editor", "Show Pipeline Editor")
+    show_image_browser: Shortcut = Shortcut("Ctrl+I", "show_image_browser", "Show Image Browser")
+    show_log_viewer: Shortcut = Shortcut("Ctrl+L", "show_log_viewer", "Show Log Viewer")
+    show_zmq_server_manager: Shortcut = Shortcut("Ctrl+M", "show_zmq_server_manager", "Show ZMQ Server Manager")
+    show_configuration: Shortcut = Shortcut("Ctrl+G", "show_configuration", "Show Global Configuration")
+    show_synthetic_plate_generator: Shortcut = Shortcut("Ctrl+Shift+G", "show_synthetic_plate_generator", "Generate Synthetic Plate")
+
+    # Help
+    show_help: Shortcut = Shortcut("F1", "show_help", "Show Documentation")
+
+    # Application
+    quit_app: Shortcut = Shortcut("Ctrl+Q", "close", "Quit Application")
+
+
+# Global shortcut config instance
+_shortcut_config: Optional[ShortcutConfig] = None
+
+
+def get_shortcut_config() -> ShortcutConfig:
+    """Get the global shortcut configuration (singleton)."""
+    global _shortcut_config
+    if _shortcut_config is None:
+        _shortcut_config = ShortcutConfig()
+    return _shortcut_config
 
 
 class PlotTheme(Enum):

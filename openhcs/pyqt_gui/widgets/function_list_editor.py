@@ -18,6 +18,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from openhcs.processing.backends.lib_registry.registry_service import RegistryService
 from openhcs.ui.shared.pattern_data_manager import PatternDataManager
 from openhcs.pyqt_gui.widgets.function_pane import FunctionPaneWidget
+from openhcs.config_framework.object_state import ObjectStateRegistry
 from openhcs.constants.constants import GroupBy
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.pyqt_gui.widgets.shared.widget_strategies import _get_enum_display_text
@@ -58,6 +59,9 @@ class FunctionListEditorWidget(QWidget):
         # CRITICAL: Store scope_id for cross-window live context updates
         self.scope_id = scope_id
 
+        # Scope color scheme for styling newly created panes
+        self._scope_color_scheme = None
+
         # Step configuration properties (mirrors Textual TUI)
         self.current_group_by = None  # Current GroupBy setting from step editor
         self.current_variable_components = []  # Current VariableComponents list from step editor
@@ -76,6 +80,11 @@ class FunctionListEditorWidget(QWidget):
 
         self.setup_ui()
         self.setup_connections()
+
+        # CRITICAL: Subscribe to step's ObjectState resolved changes for cross-window updates
+        # When PipelineConfig changes group_by, the step's resolved value changes via inheritance,
+        # and we need to refresh the component button to reflect the new value
+        self._subscribe_to_step_state_changes()
 
         logger.debug(f"Function list editor initialized with {len(self.functions)} functions")
 
@@ -156,10 +165,11 @@ class FunctionListEditorWidget(QWidget):
         
         # Header with controls (mirrors Textual TUI)
         header_layout = QHBoxLayout()
-        
-        functions_label = QLabel("Functions")
-        functions_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_accent)}; font-weight: bold; font-size: 14px;")
-        header_layout.addWidget(functions_label)
+
+        # Store as instance attribute for scope accent styling
+        self.header_label = QLabel("Functions")
+        self.header_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_accent)}; font-weight: bold; font-size: 14px;")
+        header_layout.addWidget(self.header_label)
         
         header_layout.addStretch()
         
@@ -296,6 +306,13 @@ class FunctionListEditorWidget(QWidget):
                 self.function_panes.append(pane)
                 self.function_layout.addWidget(pane)
 
+                # Apply scope color scheme to new pane (for accent colors)
+                if self._scope_color_scheme:
+                    logger.info(f"🎨 Applying scope_color_scheme to pane {i}")
+                    pane.set_scope_color_scheme(self._scope_color_scheme)
+                else:
+                    logger.info(f"🎨 No scope_color_scheme set on FunctionListEditorWidget, pane {i} gets no styling")
+
                 # CRITICAL FIX: Apply initial enabled styling for function panes
                 # This ensures that when the function pattern editor opens, disabled functions
                 # show the correct dimmed styling immediately, not just after toggling
@@ -303,7 +320,23 @@ class FunctionListEditorWidget(QWidget):
                     # Use QTimer to ensure this runs after the widget is fully constructed
                     from PyQt6.QtCore import QTimer
                     QTimer.singleShot(0, lambda p=pane: self._apply_initial_enabled_styling_to_pane(p))
-    
+
+        # Apply scope styling to all child widgets (GroupBoxWithHelp, HelpButton, etc.)
+        # This must be done AFTER all panes are created so findChildren() finds them all
+        if self._scope_color_scheme:
+            # Apply immediately for sync-created widgets
+            self._apply_scope_styling_to_children(self._scope_color_scheme)
+
+            # CRITICAL: Register callback on each pane's form_manager for async-created widgets
+            # This hooks into FormBuildOrchestrator's async completion system properly
+            for pane in self.function_panes:
+                if hasattr(pane, 'form_manager') and pane.form_manager is not None:
+                    # Capture scheme in closure
+                    scheme = self._scope_color_scheme
+                    pane.form_manager._on_build_complete_callbacks.append(
+                        lambda s=scheme: self._apply_scope_styling_to_children(s)
+                    )
+
     def _apply_initial_enabled_styling_to_pane(self, pane):
         """Apply initial enabled styling to a function pane.
 
@@ -459,8 +492,7 @@ class FunctionListEditorWidget(QWidget):
 
             # CRITICAL: Trigger global cross-window refresh for ALL open windows
             # This ensures any window with placeholders (configs, steps, etc.) refreshes
-            from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
-            ParameterFormManager.trigger_global_cross_window_refresh()
+            ObjectStateRegistry.increment_token()
 
         except Exception as e:
             if self.service_adapter:
@@ -472,15 +504,46 @@ class FunctionListEditorWidget(QWidget):
         return patch_lazy_constructors()
 
     def _move_function(self, index, direction):
-        """Move function up or down."""
+        """Move function up or down.
+
+        CRITICAL: Does NOT recreate widgets - just reorders existing panes in layout.
+        This preserves flash registrations and avoids RuntimeError from deleted widgets.
+        """
         if 0 <= index < len(self.functions):
             new_index = index + direction
             if 0 <= new_index < len(self.functions):
-                # Swap functions
+                # Swap functions in data
                 self.functions[index], self.functions[new_index] = self.functions[new_index], self.functions[index]
                 self._update_pattern_data()
-                self._populate_function_list()
+                # Reorder existing panes (NOT recreate) - preserves flash registrations
+                self._reorder_function_panes(index, new_index)
                 self.function_pattern_changed.emit()
+
+    def _reorder_function_panes(self, old_index: int, new_index: int) -> None:
+        """Reorder existing panes in layout without recreating them.
+
+        This preserves widget instances and their flash registrations.
+        Only the layout order and pane indices are updated.
+        """
+        if not self.function_panes:
+            return
+
+        # Swap panes in our tracking list
+        self.function_panes[old_index], self.function_panes[new_index] = \
+            self.function_panes[new_index], self.function_panes[old_index]
+
+        # Update indices on the panes
+        for i, pane in enumerate(self.function_panes):
+            pane.index = i
+
+        # Reorder widgets in layout by removing and re-adding in correct order
+        # First remove all from layout (but don't delete them)
+        for pane in self.function_panes:
+            self.function_layout.removeWidget(pane)
+
+        # Re-add in correct order
+        for pane in self.function_panes:
+            self.function_layout.addWidget(pane)
     
     def _add_function_at_index(self, index):
         """Add function at specific index (mirrors Textual TUI)."""
@@ -498,9 +561,20 @@ class FunctionListEditorWidget(QWidget):
             self.function_pattern_changed.emit()
             logger.debug(f"Added function at index {index}: {selected_function.__name__}")
     
-    def _remove_function(self, index):
+    def _remove_function(self, index: int) -> None:
         """Remove function at index."""
         if 0 <= index < len(self.functions):
+            func, _kwargs = self.functions[index]
+
+            # Unregister ObjectState before removal
+            if self.scope_id:
+                from openhcs.config_framework.object_state import ObjectStateRegistry
+                from openhcs.pyqt_gui.widgets.shared.services.scope_token_service import ScopeTokenService
+                scope_id = ScopeTokenService.build_scope_id(self.scope_id, func)
+                existing = ObjectStateRegistry.get_by_scope(scope_id)
+                if existing:
+                    ObjectStateRegistry.unregister(existing)
+
             self.functions.pop(index)
             self._update_pattern_data()
             self._populate_function_list()
@@ -545,56 +619,97 @@ class FunctionListEditorWidget(QWidget):
         self._update_pattern_data()
         self._populate_function_list()
 
-    def refresh_from_step_context(self) -> None:
-        """Refresh group_by and variable_components from step_instance using lazy resolution.
+    def set_scope_color_scheme(self, scheme) -> None:
+        """Set scope color scheme for styling function panes.
 
-        CRITICAL: This uses the SAME live context collection mechanism as form managers
-        to ensure we see live values from other open windows (PipelineConfig editor, etc.).
+        Called by parent window after scope styling is initialized.
+        Stores scheme for newly created panes and applies to existing ones.
+        Also applies styling to all child GroupBoxWithHelp and HelpButton widgets.
         """
-        if not hasattr(self, 'step_instance') or self.step_instance is None:
-            logger.warning("No step_instance available for context refresh")
+        logger.info(f"🎨 FunctionListEditorWidget.set_scope_color_scheme called with scheme={scheme}, panes={len(self.function_panes)}")
+        self._scope_color_scheme = scheme
+
+        # Apply to all existing panes (title color)
+        for pane in self.function_panes:
+            pane.set_scope_color_scheme(scheme)
+
+        # Apply scope styling to all child widgets (GroupBoxWithHelp, HelpButton, etc.)
+        self._apply_scope_styling_to_children(scheme)
+
+    def _apply_scope_styling_to_children(self, scheme) -> None:
+        """Apply scope styling to all child widgets that need it.
+
+        This mirrors the logic in base_form_dialog._apply_accent_to_help_buttons().
+        """
+        if not scheme:
             return
 
-        from openhcs.config_framework.context_manager import config_context
-        from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService
+        from openhcs.pyqt_gui.widgets.shared.clickable_help_components import HelpButton, HelpIndicator, GroupBoxWithHelp
+        from openhcs.pyqt_gui.widgets.shared.scope_color_utils import tint_color_perceptual
+
+        # Compute accent color from scheme (same logic as ScopedBorderMixin.get_scope_accent_color)
+        layers = getattr(scheme, 'step_border_layers', None)
+        if layers:
+            _, tint_idx, _ = (layers[0] + ("solid",))[:3]
+            accent_color = tint_color_perceptual(scheme.base_color_rgb, tint_idx).darker(120)
+        else:
+            accent_color = tint_color_perceptual(scheme.base_color_rgb, 0).darker(120)
+
+        # Apply to all HelpButtons
+        help_btns = self.findChildren(HelpButton)
+        logger.info(f"🎨 _apply_scope_styling_to_children: found {len(help_btns)} HelpButtons")
+        for help_btn in help_btns:
+            help_btn.set_scope_accent_color(accent_color)
+
+        # Apply to all HelpIndicators
+        help_indicators = self.findChildren(HelpIndicator)
+        logger.info(f"🎨 _apply_scope_styling_to_children: found {len(help_indicators)} HelpIndicators")
+        for help_indicator in help_indicators:
+            help_indicator.set_scope_accent_color(accent_color)
+
+        # Apply to all GroupBoxWithHelp (scope border pattern)
+        groupboxes = self.findChildren(GroupBoxWithHelp)
+        logger.info(f"🎨 _apply_scope_styling_to_children: found {len(groupboxes)} GroupBoxWithHelp")
+        for groupbox in groupboxes:
+            groupbox.set_scope_color_scheme(scheme)
+
+    def refresh_from_step_context(self) -> None:
+        """Refresh group_by and variable_components from ObjectState's LIVE values.
+
+        CRITICAL: Uses ObjectState's get_resolved_value() to get LIVE form values,
+        not saved step_instance values. This ensures the function pattern editor sees
+        the same group_by value that the step editor form shows.
+        """
+        from openhcs.config_framework.object_state import ObjectStateRegistry
 
         try:
-            # Collect all live context, then filter at consumption time
+            # Get ObjectState for this step from registry
             my_scope = getattr(self, 'scope_id', '') or ''
-            live_context_snapshot = LiveContextService.collect()
-            live_context = LiveContextService.merge_ancestor_values(
-                live_context_snapshot.scopes, my_scope
-            )
+            state = ObjectStateRegistry.get_by_scope(my_scope)
 
-            # Build context stack with live values
-            from contextlib import ExitStack
-            from openhcs.core.config import PipelineConfig, GlobalPipelineConfig
-            import dataclasses
+            logger.info(f"🔍 FUNC_EDITOR refresh_from_step_context: my_scope={my_scope!r}, state={state is not None}")
 
-            with ExitStack() as stack:
-                # Add GlobalPipelineConfig from live context if available
-                if GlobalPipelineConfig in live_context:
-                    global_live = live_context[GlobalPipelineConfig]
-                    # Reconstruct nested dataclasses from live values
-                    from openhcs.config_framework.context_manager import get_base_global_config
-                    thread_local_global = get_base_global_config()
-                    if thread_local_global and global_live:
-                        global_instance = dataclasses.replace(thread_local_global, **global_live)
-                        stack.enter_context(config_context(global_instance))
+            if state:
+                # Use LIVE resolved values from ObjectState (includes unsaved form changes)
+                effective_group_by = state.get_resolved_value('processing_config.group_by')
+                variable_components = state.get_resolved_value('processing_config.variable_components') or []
+                logger.info(f"🔍 FUNC_EDITOR: Got LIVE values from ObjectState: group_by={effective_group_by}, current={self.current_group_by}")
+            else:
+                # Fallback to step_instance if no ObjectState (shouldn't happen in normal use)
+                logger.warning(f"No ObjectState for scope {my_scope}, falling back to step_instance")
+                if not hasattr(self, 'step_instance') or self.step_instance is None:
+                    logger.warning("No step_instance available for context refresh")
+                    return
 
-                # Add PipelineConfig from live context if available
-                if PipelineConfig in live_context:
-                    pipeline_live = live_context[PipelineConfig]
-                    if pipeline_live:
-                        pipeline_instance = PipelineConfig(**pipeline_live)
-                        stack.enter_context(config_context(pipeline_instance))
-
-                # Add step instance
-                stack.enter_context(config_context(self.step_instance))
-
-                # Resolve group_by and variable_components with full context stack
-                effective_group_by = self.step_instance.processing_config.group_by
-                variable_components = self.step_instance.processing_config.variable_components or []
+                from openhcs.config_framework.context_manager import build_context_stack
+                ancestor_objects = ObjectStateRegistry.get_ancestor_objects(my_scope)
+                stack = build_context_stack(
+                    object_instance=self.step_instance,
+                    ancestor_objects=ancestor_objects,
+                )
+                with stack:
+                    effective_group_by = self.step_instance.processing_config.group_by
+                    variable_components = self.step_instance.processing_config.variable_components or []
 
             # Update state
             self.current_group_by = effective_group_by
@@ -605,6 +720,44 @@ class FunctionListEditorWidget(QWidget):
 
         except Exception as e:
             logger.error(f"❌ Failed to refresh from step context: {e}", exc_info=True)
+
+    def _subscribe_to_step_state_changes(self) -> None:
+        """Subscribe to step's ObjectState for resolved value changes.
+
+        CRITICAL: When PipelineConfig's group_by changes, the step's resolved group_by
+        changes via inheritance. We need to refresh the component button to reflect this.
+        This is the proper cross-window update mechanism - subscribe to ObjectState,
+        not to form_manager signals (which only fire for direct edits in the same form).
+        """
+        if not self.scope_id:
+            logger.debug("No scope_id, skipping ObjectState subscription")
+            return
+
+        state = ObjectStateRegistry.get_by_scope(self.scope_id)
+        if not state:
+            logger.warning(f"No ObjectState for scope {self.scope_id}, skipping subscription")
+            return
+
+        def on_resolved_changed(changed_paths: set) -> None:
+            """Called when step's resolved values change."""
+            # Check if group_by or variable_components changed
+            relevant_paths = {'processing_config.group_by', 'processing_config.variable_components'}
+            if changed_paths & relevant_paths:
+                logger.info(f"🔔 FUNC_EDITOR: ObjectState resolved change detected: {changed_paths & relevant_paths}")
+                self.refresh_from_step_context()
+
+        state.on_resolved_changed(on_resolved_changed)
+        # Store callback reference for cleanup
+        self._resolved_change_callback = on_resolved_changed
+        self._subscribed_state = state
+        logger.info(f"🔔 FUNC_EDITOR: Subscribed to ObjectState resolved changes for scope {self.scope_id}")
+
+        # Cleanup on widget destruction
+        def cleanup_subscription():
+            if hasattr(self, '_resolved_change_callback') and hasattr(self, '_subscribed_state'):
+                self._subscribed_state.off_resolved_changed(self._resolved_change_callback)
+                logger.debug(f"🔔 FUNC_EDITOR: Unsubscribed from ObjectState on destruction")
+        self.destroyed.connect(cleanup_subscription)
 
     def set_effective_group_by(self, group_by: Optional[GroupBy]) -> None:
         """Accept authoritative GroupBy from parent (step.processing_config) and refresh UI.
@@ -801,7 +954,10 @@ class FunctionListEditorWidget(QWidget):
     def _refresh_component_button(self):
         """Refresh the component button text and state (mirrors Textual TUI)."""
         if hasattr(self, 'component_btn'):
-            self.component_btn.setText(self._get_component_button_text())
+            new_text = self._get_component_button_text()
+            old_text = self.component_btn.text()
+            logger.info(f"🔄 _refresh_component_button: old={old_text!r}, new={new_text!r}, group_by={self.current_group_by}")
+            self.component_btn.setText(new_text)
             self.component_btn.setEnabled(not self._is_component_button_disabled())
 
         # Also update navigation buttons when component button is refreshed
@@ -866,10 +1022,14 @@ class FunctionListEditorWidget(QWidget):
         """Update pattern_data based on current functions and mode (mirrors Textual TUI)."""
         if self.is_dict_mode and self.selected_channel is not None:
             # Save current functions to the selected channel
-            if not isinstance(self.pattern_data, dict):
-                self.pattern_data = {}
+            # CRITICAL: Create a NEW dict so ObjectState equality check detects changes
+            # If we modify the same dict object, current_value == value is always True
+            old_pattern = self.pattern_data if isinstance(self.pattern_data, dict) else {}
+            new_pattern = dict(old_pattern)  # Shallow copy of dict
+            new_pattern[self.selected_channel] = self.functions.copy()
+            self.pattern_data = new_pattern
             logger.debug(f"Saving {len(self.functions)} functions to channel {self.selected_channel}")
-            self.pattern_data[self.selected_channel] = self.functions.copy()
         else:
-            # List mode - pattern_data is just the functions list
-            self.pattern_data = self.functions
+            # List mode - pattern_data is a COPY of functions list
+            # CRITICAL: Must be a copy so ObjectState equality check detects changes
+            self.pattern_data = self.functions.copy()

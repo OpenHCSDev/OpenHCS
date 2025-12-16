@@ -1,11 +1,14 @@
 """Simple metadata cache service for OpenHCS."""
 
+import logging
 import threading
 from pathlib import Path
 from typing import Dict, Optional
 
 from openhcs.core.components.validation import convert_enum_by_value
 from openhcs.constants.constants import AllComponents
+
+logger = logging.getLogger(__name__)
 
 
 class MetadataCache:
@@ -21,15 +24,17 @@ class MetadataCache:
         with self._lock:
             # Parse all metadata once
             metadata = microscope_handler.metadata_handler.parse_metadata(plate_path)
-            
+            logger.info(f"🔍 METADATA_CACHE: parse_metadata returned: {metadata}")
+
             # Initialize all components with keys mapped to None
             for component in AllComponents:
                 component_keys = component_keys_cache.get(component, [])
                 self._cache[component] = {key: None for key in component_keys}
-            
+
             # Update with actual metadata where available
             for component_name, mapping in metadata.items():
                 component = AllComponents(component_name)
+                logger.info(f"🔍 METADATA_CACHE: Caching {component_name} -> {component}: {mapping}")
                 if component in self._cache:
                     combined_cache = self._cache[component].copy()
                     for metadata_key in mapping.keys():
@@ -39,7 +44,9 @@ class MetadataCache:
                     self._cache[component] = combined_cache
                 else:
                     self._cache[component] = mapping
-            
+
+            logger.info(f"🔍 METADATA_CACHE: Final cache state: {self._cache}")
+
             # Store metadata file mtime for invalidation
             metadata_file = microscope_handler.metadata_handler.find_metadata_file(plate_path)
             if metadata_file and metadata_file.exists():
@@ -49,13 +56,22 @@ class MetadataCache:
         """Get metadata display name for a component key. Accepts GroupBy or VariableComponents."""
         with self._lock:
             if not self._is_cache_valid():
+                logger.warning(f"🔍 METADATA_CACHE: Cache invalid, clearing")
                 self._cache.clear()
                 return None
 
             # Convert GroupBy to AllComponents using OpenHCS generic utility
+            original_component = component
             component = convert_enum_by_value(component, AllComponents) or component
+            logger.info(f"🔍 METADATA_CACHE get_component_metadata: {original_component} -> {component}, key={key!r}")
+            logger.info(f"🔍 METADATA_CACHE: cache keys = {list(self._cache.keys())}")
 
-            return self._cache.get(component, {}).get(key)
+            component_cache = self._cache.get(component, {})
+            logger.info(f"🔍 METADATA_CACHE: component_cache for {component} = {component_cache}")
+
+            result = component_cache.get(key)
+            logger.info(f"🔍 METADATA_CACHE: result for key {key!r} = {result!r}")
+            return result
     
     def get_cached_metadata(self, component: 'AllComponents') -> Optional[Dict[str, Optional[str]]]:
         """Get all cached metadata for a component."""

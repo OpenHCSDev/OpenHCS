@@ -218,7 +218,6 @@ def prepare_patterns_and_functions(patterns, processing_funcs, component='defaul
 
     for comp_value in grouped_patterns.keys():
         # Get functions and args for this component
-        # No special handling for 'channel' component (Clause 77: Rot Intolerance)
         import logging
         logger = logging.getLogger(__name__)
         logger.debug(f"Processing component value: '{comp_value}' (type: {type(comp_value)})")

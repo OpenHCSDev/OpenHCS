@@ -49,12 +49,15 @@ class UnifiedParameterAnalyzer:
     """
     
     @staticmethod
-    def analyze(target: Union[Callable, Type, object], exclude_params: Optional[list] = None) -> Dict[str, UnifiedParameterInfo]:
+    def analyze(target: Union[Callable, Type, object], exclude_params: Optional[list] = None,
+                use_signature_defaults: bool = False) -> Dict[str, UnifiedParameterInfo]:
         """Analyze parameters from any source.
 
         Args:
             target: Function, method, dataclass type, or instance to analyze
             exclude_params: Optional list of parameter names to exclude from analysis
+            use_signature_defaults: If True, use CLASS signature defaults instead of instance values.
+                                   Used for reset functionality to get back to original defaults.
 
         Returns:
             Dictionary mapping parameter names to UnifiedParameterInfo objects
@@ -71,6 +74,9 @@ class UnifiedParameterAnalyzer:
 
             # Instance analysis with exclusions (e.g., exclude 'func' from FunctionStep)
             param_info = UnifiedParameterAnalyzer.analyze(step_instance, exclude_params=['func'])
+
+            # Get signature defaults for reset (not current instance values)
+            param_info = UnifiedParameterAnalyzer.analyze(step_instance, use_signature_defaults=True)
         """
         if target is None:
             return {}
@@ -93,14 +99,18 @@ class UnifiedParameterAnalyzer:
                     result = UnifiedParameterAnalyzer._analyze_callable(target.__init__)
         elif dataclasses.is_dataclass(target):
             # Instance of dataclass
-            result = UnifiedParameterAnalyzer._analyze_dataclass_instance(target)
+            if use_signature_defaults:
+                # Get CLASS signature defaults (for reset), not instance values
+                result = UnifiedParameterAnalyzer._analyze_dataclass_type(type(target))
+            else:
+                result = UnifiedParameterAnalyzer._analyze_dataclass_instance(target)
         else:
             # Try to analyze as callable
             if callable(target):
                 result = UnifiedParameterAnalyzer._analyze_callable(target)
             else:
                 # For regular object instances (like step instances), analyze their class constructor
-                result = UnifiedParameterAnalyzer._analyze_object_instance(target)
+                result = UnifiedParameterAnalyzer._analyze_object_instance(target, use_signature_defaults=use_signature_defaults)
 
         # Apply exclusions if specified
         if exclude_params:
@@ -145,9 +155,14 @@ class UnifiedParameterAnalyzer:
     def _analyze_object_instance(instance: object, use_signature_defaults: bool = False) -> Dict[str, UnifiedParameterInfo]:
         """Analyze a regular object instance by examining its full inheritance hierarchy.
 
+        Returns the CLASS signature defaults in default_value field, NOT instance values.
+        Callers should use object.__getattribute__() or getattr() to get current instance values separately.
+
+        This ensures info.default_value is semantically correct - it's the DEFAULT, not the current value.
+
         Args:
             instance: Object instance to analyze
-            use_signature_defaults: If True, use signature defaults instead of instance values
+            use_signature_defaults: Deprecated - now always returns signature defaults
         """
         # Use MRO to get all constructor parameters from the inheritance chain
         instance_class = type(instance)
@@ -179,20 +194,14 @@ class UnifiedParameterAnalyzer:
                 # Add parameters that haven't been seen yet (most specific wins)
                 for param_name, param_info in class_params.items():
                     if param_name not in all_params and param_name != 'kwargs':
-                        # CRITICAL FIX: For reset functionality, use signature defaults instead of instance values
-                        if use_signature_defaults:
-                            default_value = param_info.default_value
-                        else:
-                            # Get current value from instance if it exists
-                            default_value = getattr(instance, param_name, param_info.default_value)
-
-                        # Create parameter info with appropriate default value
+                        # Always use signature defaults - callers should get instance values separately
+                        # This ensures default_value is semantically correct
                         all_params[param_name] = UnifiedParameterInfo(
                             name=param_name,
                             param_type=param_info.param_type,
-                            default_value=default_value,
+                            default_value=param_info.default_value,  # Keep CLASS signature default
                             is_required=param_info.is_required,
-                            description=param_info.description,  # CRITICAL FIX: Include description
+                            description=param_info.description,
                             source_type="object_instance"
                         )
 
@@ -205,42 +214,34 @@ class UnifiedParameterAnalyzer:
 
     @staticmethod
     def _analyze_dataclass_instance(instance: object) -> Dict[str, UnifiedParameterInfo]:
-        """Analyze a dataclass instance."""
+        """Analyze a dataclass instance.
+
+        Returns the CLASS signature defaults in default_value field, NOT instance values.
+        Callers should use object.__getattribute__() to get current instance values separately.
+
+        This ensures info.default_value is semantically correct - it's the DEFAULT, not the current value.
+        """
         from openhcs.utils.performance_monitor import timer
 
-        # Get the type and analyze it
+        # Get the type and analyze it - this returns CLASS signature defaults
         with timer(f"      Analyze dataclass type {type(instance).__name__}", threshold_ms=5.0):
             dataclass_type = type(instance)
             unified_params = UnifiedParameterAnalyzer._analyze_dataclass_type(dataclass_type)
 
-        # Check if this specific instance is a lazy config - if so, use raw field values
-        with timer("      Check lazy config", threshold_ms=1.0):
-            from openhcs.config_framework.lazy_factory import get_base_type_for_lazy
-            # CRITICAL FIX: Don't check class name - PipelineConfig is lazy but doesn't start with "Lazy"
-            # get_base_type_for_lazy() is the authoritative check for lazy dataclasses
-            is_lazy_config = get_base_type_for_lazy(dataclass_type) is not None
-
-        # Update default values with current instance values
-        with timer(f"      Extract {len(unified_params)} field values from instance", threshold_ms=5.0):
+        # Just update source_type to indicate this came from an instance analysis
+        # DO NOT overwrite default_value with instance values - that's semantically wrong
+        # Callers should get instance values via object.__getattribute__() separately
+        with timer(f"      Mark {len(unified_params)} params as from instance", threshold_ms=5.0):
             for name, param_info in unified_params.items():
-                if hasattr(instance, name):
-                    if is_lazy_config:
-                        # For lazy configs, get raw field value to avoid triggering resolution
-                        # Use object.__getattribute__() to bypass lazy property getters
-                        current_value = object.__getattribute__(instance, name)
-                    else:
-                        # For regular dataclasses, use normal getattr
-                        current_value = getattr(instance, name)
-
-                    # Create new UnifiedParameterInfo with current value as default
-                    unified_params[name] = UnifiedParameterInfo(
-                        name=param_info.name,
-                        param_type=param_info.param_type,
-                        default_value=current_value,
-                        is_required=param_info.is_required,
-                        description=param_info.description,
-                        source_type="dataclass_instance"
-                    )
+                # Update source_type but keep signature default in default_value
+                unified_params[name] = UnifiedParameterInfo(
+                    name=param_info.name,
+                    param_type=param_info.param_type,
+                    default_value=param_info.default_value,  # Keep CLASS signature default
+                    is_required=param_info.is_required,
+                    description=param_info.description,
+                    source_type="dataclass_instance"
+                )
 
         return unified_params
     

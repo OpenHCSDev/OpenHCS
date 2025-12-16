@@ -3,17 +3,6 @@ Materialization flag planner for OpenHCS.
 
 This module provides the MaterializationFlagPlanner class, which is responsible for
 determining materialization flags and backend selection for each step in a pipeline.
-
-Doctrinal Clauses:
-- Clause 12 — Absolute Clean Execution
-- Clause 17 — VFS Exclusivity (FileManager is the only component that uses VirtualPath)
-- Clause 65 — No Fallback Logic
-- Clause 66 — Immutability After Construction
-- Clause 88 — No Inferred Capabilities
-- Clause 245 — Path Declaration
-- Clause 273 — Backend Authorization Doctrine
-- Clause 276 — Positional Backend Enforcement
-- Clause 504 — Pipeline Preparation Modifications
 """
 
 import logging

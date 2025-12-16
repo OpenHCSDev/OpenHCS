@@ -109,28 +109,34 @@ class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
         # CRITICAL FIX: Use pipeline_config as context_obj (parent for inheritance)
         # The step is the overlay (what's being edited), not the parent context
         # Context hierarchy: GlobalPipelineConfig (thread-local) -> PipelineConfig (context_obj) -> Step (overlay)
-        # CRITICAL FIX: Exclude 'func' parameter - it's handled by the Function Pattern tab
         from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import FormManagerConfig
+        from openhcs.config_framework.object_state import ObjectState
+        from openhcs.config_framework.object_state_registry import ObjectStateRegistry
 
-        # Construct unique field_id based on step index for tree registry
-        # Format: "{plate_node_id}.step_{index}" or fallback to "step" if no index provided
-        if self.step_index is not None and self.scope_id:
-            field_id = f"{self.scope_id}.step_{self.step_index}"
-        else:
-            field_id = "step"  # Fallback for backward compatibility
+        # Look up ObjectState from registry using scope_id
+        # ObjectState MUST be registered by PipelineEditorWidget when step was added
+        logger.info(f"🔍 STEP_EDITOR: Looking up ObjectState for scope_id={self.scope_id}")
+        logger.info(f"🔍 STEP_EDITOR: Registry has scopes: {[s.scope_id for s in ObjectStateRegistry.get_all()]}")
+        self.state = ObjectStateRegistry.get_by_scope(self.scope_id) if self.scope_id else None
+
+        if self.state is None:
+            # FAIL LOUD: The step MUST be registered by PipelineEditor before opening the editor
+            raise RuntimeError(
+                f"ObjectState not found for scope_id={self.scope_id}. "
+                f"PipelineEditor must register the step before opening the editor. "
+                f"Registry has: {[s.scope_id for s in ObjectStateRegistry.get_all()]}"
+            )
+
+        logger.info(f"🔍 STEP_EDITOR: Using REGISTERED ObjectState, params={list(self.state.parameters.keys())}")
 
         config = FormManagerConfig(
             parent=self,                         # Pass self as parent widget
-            context_obj=self.pipeline_config,    # Pipeline config as parent context for inheritance
-            exclude_params=['func'],             # Exclude func - it has its own dedicated tab
-            scope_id=self.scope_id,              # Pass scope_id to limit cross-window updates to same orchestrator
             color_scheme=self.color_scheme,      # Pass color scheme for consistent theming
             use_scroll_area=False                # Step editor manages its own scroll area
         )
 
         self.form_manager = ParameterFormManager(
-            object_instance=self.step,           # Step instance being edited (overlay)
-            field_id=field_id,                   # Unique field_id based on step index
+            state=self.state,                    # ObjectState (MODEL) from registry
             config=config                        # Pass configuration object
         )
         self.hierarchy_tree = None
@@ -242,9 +248,20 @@ class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
         if not getattr(self, '_tree_dataclass_params', None):
             return None
 
-        # Use default minimum_width=0 from shared helper (allows collapsing)
-        tree = self.tree_helper.create_tree_widget()
+        # Pass form_manager as flash_manager - tree reads from SAME _flash_colors dict as groupboxes
+        # ONE source of truth: form_manager already subscribes to ObjectState.on_resolved_changed
+        # Pass state for automatic dirty tracking subscription (handled by helper)
+        tree = self.tree_helper.create_tree_widget(
+            flash_manager=self.form_manager,
+            state=self.state
+        )
         self.tree_helper.populate_from_mapping(tree, self._tree_dataclass_params)
+
+        # Initialize dirty styling AFTER population (when _field_to_item is filled)
+        self.tree_helper.initialize_dirty_styling()
+
+        # Register tree repaint callback so flash animation triggers tree repaint
+        self.form_manager.register_repaint_callback(lambda: tree.viewport().update())
 
         tree.itemDoubleClicked.connect(self._on_tree_item_double_clicked)
         return tree
@@ -291,10 +308,10 @@ class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
         # Header with controls (like FunctionListEditorWidget)
         header_layout = QHBoxLayout()
 
-        # Header label
-        header_label = QLabel("Step Parameters")
-        header_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_accent)}; font-weight: bold; font-size: 14px;")
-        header_layout.addWidget(header_label)
+        # Header label (stored for scope accent styling)
+        self.header_label = QLabel("Step Parameters")
+        self.header_label.setObjectName("section_header")
+        header_layout.addWidget(self.header_label)
 
         header_layout.addStretch()
 
@@ -396,9 +413,9 @@ class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
             if len(path_parts) == 1:
                 leaf_field = path_parts[0]
 
-                # Get the properly converted value from the form manager
-                # The form manager handles all type conversions including List[Enum]
-                final_value = self.form_manager.get_current_values().get(leaf_field, value)
+                # Get the properly converted value from state
+                # The state handles all type conversions including List[Enum]
+                final_value = self.state.get_current_values().get(leaf_field, value)
 
                 # CRITICAL FIX: For function parameters, use fresh imports to avoid unpicklable registry wrappers
                 if leaf_field == 'func' and callable(final_value) and hasattr(final_value, '__module__'):
@@ -485,8 +502,8 @@ class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
         """Save step settings to file."""
         try:
             import dill as pickle
-            # Get current values from form manager
-            step_data = self.form_manager.get_current_values()
+            # Get current values from state
+            step_data = self.state.get_current_values()
             with open(file_path, 'wb') as f:
                 pickle.dump(step_data, f)
             logger.debug(f"Saved {len(step_data)} parameters to {file_path.name}")
@@ -524,26 +541,21 @@ class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
             # This ensures code editor shows unsaved changes from other open windows
             ParameterOpsService().refresh_with_live_context(self.form_manager)
 
-            # Get current step from form (includes live context values)
-            current_values = self.form_manager.get_current_values()
+            # Get current step from state using to_object() to properly reconstruct nested dataclasses
+            # NOTE: get_current_values() returns flat dotted paths which can't be passed to FunctionStep(**kwargs)
+            # to_object() reconstructs proper nested structure from flat storage
+            current_step = self.state.to_object()
 
             # CRITICAL: Get func from parent dual editor's function list editor if available
             # The func is managed by the Function Pattern tab in the dual editor
-            func = self.step.func  # Default to step's current func
-
-            # Check if we're inside a dual editor window with a function list editor
             parent_window = self.window()
             if hasattr(parent_window, 'func_editor') and parent_window.func_editor:
                 # Get live func pattern from function list editor
                 func = parent_window.func_editor.current_pattern
+                current_step.func = func
                 logger.debug(f"Using live func from function list editor: {func}")
             else:
-                logger.debug(f"Using func from step instance: {func}")
-
-            current_values['func'] = func
-
-            from openhcs.core.steps.function_step import FunctionStep
-            current_step = FunctionStep(**current_values)
+                logger.debug(f"Using func from step instance: {current_step.func}")
 
             # Generate code using existing pattern
             python_code = generate_step_code(current_step, clean_mode=False)

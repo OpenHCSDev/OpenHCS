@@ -13,8 +13,7 @@ Key features:
 
 from __future__ import annotations
 from typing import Any, Optional, Dict, TYPE_CHECKING
-from dataclasses import fields as dataclass_fields, is_dataclass
-import dataclasses
+from dataclasses import fields as dataclass_fields
 import logging
 
 from .parameter_service_abc import ParameterServiceABC
@@ -24,7 +23,6 @@ if TYPE_CHECKING:
     from openhcs.ui.shared.parameter_info_types import (
         OptionalDataclassInfo,
         DirectDataclassInfo,
-        GenericInfo
     )
 
 logger = logging.getLogger(__name__)
@@ -80,12 +78,18 @@ class ValueCollectionService(ParameterServiceABC):
         checkbox = WidgetService.find_nested_checkbox(manager, param_name)
         if checkbox and not checkbox.isChecked():
             return None
-        
-        nested_values = nested_manager.get_current_values()
+
+        # Use nested_manager.parameters (scoped and prefix-stripped) NOT state.parameters (all paths)
+        # CRITICAL: Do NOT filter out None values!
+        # In OpenHCS, None has semantic meaning: "inherit from parent context"
+        # When a user explicitly resets a field to None, we MUST include that None
+        # so the dataclass can be constructed with the user's explicit None value.
+        nested_values = nested_manager.parameters.copy()
+
         if not nested_values:
-            inner_type = ParameterTypeUtils.get_optional_inner_type(param_type)
-            return inner_type()
-        
+            logger.debug(f"[ValueCollection] Optional {param_name}: no nested edits, returning default")
+            return manager.param_defaults.get(info.name)
+
         inner_type = ParameterTypeUtils.get_optional_inner_type(param_type)
         return inner_type(**nested_values)
     
@@ -97,32 +101,29 @@ class ValueCollectionService(ParameterServiceABC):
     ) -> Any:
         """Collect value for direct Dataclass parameter."""
         param_type = info.type
-        
-        nested_values = nested_manager.get_current_values()
+
+        # Use nested_manager.parameters (scoped and prefix-stripped) NOT state.parameters (all paths)
+        # CRITICAL: Do NOT filter out None values!
+        # In OpenHCS, None has semantic meaning: "inherit from parent context"
+        nested_values = nested_manager.parameters.copy()
+
         if not nested_values:
-            return param_type()
-        
+            logger.debug(f"[ValueCollection] Direct {info.name}: no nested edits, returning default")
+            return manager.param_defaults.get(info.name)
+
         return param_type(**nested_values)
     
-    def _collect_GenericInfo(
-        self,
-        info: 'GenericInfo',
-        manager,
-        nested_manager
-    ) -> Dict[str, Any]:
+    def _collect_GenericInfo(self, info, manager, nested_manager) -> Dict[str, Any]:
         """Collect value as raw dict (fallback for non-dataclass types)."""
-        return nested_manager.get_current_values()
+        # Uses all 3 params - info/manager kept for interface consistency with other _collect_* methods
+        _ = info, manager  # Silence unused warnings - interface requires these params
+        return nested_manager.state.get_current_values()
 
     # ========== DATACLASS RECONSTRUCTION (from DataclassReconstructionUtils) ==========
 
     @staticmethod
-    def reconstruct_nested_dataclasses(live_values: dict, base_instance=None) -> dict:
-        """
-        Return live values unchanged (already instances from get_user_modified_values).
-
-        Previously handled (type, dict) tuple format, but get_user_modified_values()
-        now returns fully reconstructed instances directly.
-        """
+    def reconstruct_nested_dataclasses(live_values: dict) -> dict:
+        """Return live values unchanged."""
         return dict(live_values) if live_values else {}
 
     # ========== DATACLASS UNPACKING (from DataclassUnpacker) ==========
@@ -150,4 +151,3 @@ class ValueCollectionService(ParameterServiceABC):
                 f"{prefix}{src_name}"
             )
             setattr(target, tgt_name, getattr(source, src_name))
-

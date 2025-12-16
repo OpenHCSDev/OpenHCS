@@ -1,108 +1,29 @@
-"""
-Dramatically simplified PyQt parameter form manager.
+"""PyQt parameter form manager - VIEW layer for ObjectState MODEL."""
 
-This demonstrates how the widget implementation can be drastically simplified
-by leveraging the comprehensive shared infrastructure we've built.
-"""
-
-import dataclasses
-from dataclasses import dataclass, field, is_dataclass, fields as dataclass_fields
+from dataclasses import dataclass
 import logging
-from typing import Any, Dict, Type, Optional, Tuple, List
-from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QLabel, QPushButton,
-    QLineEdit, QCheckBox, QComboBox, QGroupBox, QSpinBox, QDoubleSpinBox
-)
+from typing import Any, Dict, Type, Optional, List, Set, Callable
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QScrollArea
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
+from PyQt6.QtGui import QColor
 
-# Import ABC for type-safe widget creation
+from openhcs.pyqt_gui.widgets.shared.flash_mixin import FlashMixin
+from openhcs.pyqt_gui.widgets.shared.clickable_help_components import FlashableGroupBox
+
 from openhcs.pyqt_gui.widgets.shared.widget_creation_types import ParameterFormManager as ParameterFormManagerABC, _CombinedMeta
-
-# Performance monitoring
-from openhcs.utils.performance_monitor import timer, get_monitor
-
-# ANTI-DUCK-TYPING: Import ABC-based widget system
-# Replaces WIDGET_UPDATE_DISPATCH and WIDGET_GET_DISPATCH tables
+from openhcs.utils.performance_monitor import timer
 from openhcs.ui.shared.widget_operations import WidgetOperations
 from openhcs.ui.shared.widget_factory import WidgetFactory
-
-# DELETED: WIDGET_UPDATE_DISPATCH - replaced with WidgetOperations.set_value()
-# DELETED: WIDGET_GET_DISPATCH - replaced with WidgetOperations.get_value()
-
-logger = logging.getLogger(__name__)
-
-# Import our comprehensive shared infrastructure
-from openhcs.ui.shared.parameter_form_service import ParameterFormService
-from openhcs.ui.shared.parameter_form_config_factory import pyqt_config
-
 from openhcs.ui.shared.widget_creation_registry import create_pyqt6_registry
-from .widget_strategies import PyQt6WidgetEnhancer
-
-# Import PyQt-specific components
-from .clickable_help_components import GroupBoxWithHelp, LabelWithHelp
-from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from .layout_constants import CURRENT_LAYOUT
-
-# Import consolidated services
-from openhcs.pyqt_gui.widgets.shared.services.widget_service import WidgetService
 from openhcs.pyqt_gui.widgets.shared.services.value_collection_service import ValueCollectionService
 from openhcs.pyqt_gui.widgets.shared.services.signal_service import SignalService
-from openhcs.pyqt_gui.widgets.shared.services.parameter_ops_service import ParameterOpsService
-
-# Scope utilities
-from openhcs.config_framework.context_manager import is_scope_affected
-from openhcs.pyqt_gui.widgets.shared.services.enabled_field_styling_service import EnabledFieldStylingService
-from openhcs.pyqt_gui.widgets.shared.services.flag_context_manager import FlagContextManager, ManagerFlag
-from openhcs.pyqt_gui.widgets.shared.services.form_init_service import (
-    FormBuildOrchestrator, InitialRefreshStrategy,
-    ParameterExtractionService, ConfigBuilderService, ServiceFactoryService
-)
 from openhcs.pyqt_gui.widgets.shared.services.field_change_dispatcher import FieldChangeDispatcher, FieldChangeEvent
-from openhcs.pyqt_gui.widgets.shared.services.live_context_service import LiveContextService, LiveContextSnapshot
+# LiveContextService deleted - functionality moved to ObjectStateRegistry
+from openhcs.pyqt_gui.widgets.shared.services.flag_context_manager import FlagContextManager
+from openhcs.pyqt_gui.widgets.shared.services.form_init_service import FormBuildOrchestrator
 
-# ANTI-DUCK-TYPING: Removed ALL_INPUT_WIDGET_TYPES tuple
-# Widget discovery now uses ABC-based WidgetOperations.get_all_value_widgets()
-# which automatically finds all widgets implementing ValueGettable ABC
-
-# Keep Qt imports for backward compatibility with existing code
-from PyQt6.QtWidgets import QLineEdit, QComboBox, QPushButton, QCheckBox, QLabel, QSpinBox, QDoubleSpinBox
-from openhcs.pyqt_gui.widgets.shared.no_scroll_spinbox import NoScrollSpinBox, NoScrollDoubleSpinBox, NoScrollComboBox
-from openhcs.pyqt_gui.widgets.enhanced_path_widget import EnhancedPathWidget
-
-# DELETED: ALL_INPUT_WIDGET_TYPES - replaced with WidgetOperations.get_all_value_widgets()
-
-# Import OpenHCS core components
-# Old field path detection removed - using simple field name matching
-from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
-from openhcs.config_framework.lazy_factory import is_lazy_dataclass
-
-
-
-
-
-class NoneAwareLineEdit(QLineEdit):
-    """QLineEdit that properly handles None values for lazy dataclass contexts."""
-
-    def get_value(self):
-        """Get value, returning None for empty text instead of empty string."""
-        text = self.text().strip()
-        return None if text == "" else text
-
-    def set_value(self, value):
-        """Set value, handling None properly."""
-        self.setText("" if value is None else str(value))
-
-
-# Register NoneAwareLineEdit as implementing ValueGettable and ValueSettable
-from openhcs.ui.shared.widget_protocols import ValueGettable, ValueSettable
-ValueGettable.register(NoneAwareLineEdit)
-ValueSettable.register(NoneAwareLineEdit)
-
-
-# DELETED: _create_optimized_reset_button() - moved to widget_creation_config.py
-# See widget_creation_config.py: _create_optimized_reset_button()
-
-
+logger = logging.getLogger(__name__)
 @dataclass
 class FormManagerConfig:
     """
@@ -122,41 +43,11 @@ class FormManagerConfig:
     scope_id: Optional[str] = None
     color_scheme: Optional[Any] = None
     use_scroll_area: Optional[bool] = None  # None = auto-detect (False for nested, True for root)
+    state: Optional[Any] = None  # ObjectState instance - if provided, PFM delegates to it
+    field_prefix: str = ''  # Dotted path prefix for accessing flat ObjectState (e.g., 'well_filter_config')
 
 
-class NoneAwareIntEdit(QLineEdit):
-    """QLineEdit that only allows digits and properly handles None values for integer fields."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        # Set up input validation to only allow digits
-        from PyQt6.QtGui import QIntValidator
-        self.setValidator(QIntValidator())
-
-    def get_value(self):
-        """Get value, returning None for empty text or converting to int."""
-        text = self.text().strip()
-        if text == "":
-            return None
-        try:
-            return int(text)
-        except ValueError:
-            return None
-
-    def set_value(self, value):
-        """Set value, handling None properly."""
-        if value is None:
-            self.setText("")
-        else:
-            self.setText(str(value))
-
-
-# Register NoneAwareIntEdit as implementing ValueGettable and ValueSettable
-ValueGettable.register(NoneAwareIntEdit)
-ValueSettable.register(NoneAwareIntEdit)
-
-
-class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_CombinedMeta):
+class ParameterFormManager(QWidget, ParameterFormManagerABC, FlashMixin, metaclass=_CombinedMeta):
     """
     React-quality reactive form manager for PyQt6.
 
@@ -210,100 +101,172 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
 
     @classmethod
     def should_use_async(cls, param_count: int) -> bool:
-        """Determine if async widget creation should be used based on parameter count.
-
-        Args:
-            param_count: Number of parameters in the form
-
-        Returns:
-            True if async widget creation should be used, False otherwise
-        """
+        """Determine if async widget creation should be used based on parameter count."""
         return cls.ASYNC_WIDGET_CREATION and param_count > cls.ASYNC_THRESHOLD
 
-    def __init__(self, object_instance: Any, field_id: str, config: Optional[FormManagerConfig] = None):
+    # ========== STATE DELEGATION PROPERTIES ==========
+    # ObjectState is single source of truth - PFM delegates all state access
+
+    @property
+    def parameters(self) -> Dict[str, Any]:
+        """Get parameters scoped to this PFM's field_prefix.
+
+        With flat storage, filters state.parameters to only include fields
+        under this PFM's prefix, and strips the prefix from keys.
+
+        Example:
+          state.parameters = {
+            'well_filter_config.well_filter': 2,
+            'well_filter_config.enabled': True,
+            'some_other_field': 'value'
+          }
+          PFM with field_prefix='well_filter_config' returns:
+          {'well_filter': 2, 'enabled': True}
         """
-        Initialize PyQt parameter form manager with generic object introspection.
+        if not self.field_prefix:
+            # Root PFM: return only top-level parameters (no dots)
+            return {k: v for k, v in self.state.parameters.items() if '.' not in k}
+
+        # Nested PFM: filter by prefix and strip prefix from keys
+        prefix_dot = f'{self.field_prefix}.'
+        result = {}
+        for path, value in self.state.parameters.items():
+            if path.startswith(prefix_dot):
+                remainder = path[len(prefix_dot):]
+                # Only direct children (no nested dots in remainder)
+                if '.' not in remainder:
+                    result[remainder] = value
+        return result
+
+    @property
+    def parameter_types(self) -> Dict[str, Any]:
+        """Derive parameter types from object_instance using UnifiedParameterAnalyzer.
+
+        Single code path for all object types - that's the point of UnifiedParameterAnalyzer.
+        Uses self.object_instance (target object for this PFM's scope), NOT self.state.object_instance (root).
+        Filters by self.parameters keys (already scoped/stripped for nested PFMs).
+        """
+        from openhcs.introspection.unified_parameter_analyzer import UnifiedParameterAnalyzer
+        param_info_dict = UnifiedParameterAnalyzer.analyze(self.object_instance)
+        return {name: info.param_type for name, info in param_info_dict.items() if name in self.parameters}
+
+    @property
+    def param_defaults(self) -> Dict[str, Any]:
+        """Derive defaults from object_instance (the saved baseline).
+
+        Uses self.object_instance (target object for this PFM's scope), NOT self.state.object_instance (root).
+        Uses self.parameters keys (already scoped/stripped for nested PFMs).
+        """
+        return {name: object.__getattribute__(self.object_instance, name)
+                for name in self.parameters.keys()
+                if hasattr(self.object_instance, name)}
+
+    @property
+    def _parameter_descriptions(self) -> Dict[str, str]:
+        """Delegate to ObjectState._parameter_descriptions."""
+        return getattr(self.state, '_parameter_descriptions', {})
+
+    def __init__(self, state: 'ObjectState', config: Optional[FormManagerConfig] = None):
+        """
+        Initialize PyQt parameter form manager with ObjectState (MODEL).
+
+        PFM is purely VIEW - it receives ObjectState and delegates all MODEL
+        concerns to it. ObjectState must be created by the lifecycle owner
+        (or looked up from ObjectStateRegistry) before calling PFM.
 
         Args:
-            object_instance: Any object to build form for (dataclass, ABC constructor, step, etc.)
-            field_id: Unique identifier for the form
-            config: Optional configuration object (consolidates 8 optional parameters)
+            state: ObjectState instance containing parameters, types, defaults, user_set_fields.
+                   Created by lifecycle owner or looked up from ObjectStateRegistry.
+            config: Optional configuration object for UI settings
         """
+        # Import here to avoid circular dependency
+        from openhcs.config_framework.object_state import ObjectState
+
         # Unpack config or use defaults
         config = config or FormManagerConfig()
 
-        with timer(f"ParameterFormManager.__init__ ({field_id})", threshold_ms=5.0):
+        # Store field_prefix EARLY - needed for target_obj navigation
+        self.field_prefix = config.field_prefix
+
+        # For nested PFMs, navigate to the nested object using field_prefix
+        # Root PFM: analyze state.object_instance directly
+        # Nested PFM: traverse object_instance using field_prefix to get nested object
+        target_obj = state.object_instance
+        if self.field_prefix:
+            for part in self.field_prefix.split('.'):
+                target_obj = getattr(target_obj, part)
+
+        # Derive field_id from the TARGET object type (nested type for nested PFMs)
+        derived_field_id = type(target_obj).__name__
+
+        with timer(f"ParameterFormManager.__init__ ({derived_field_id})", threshold_ms=5.0):
             QWidget.__init__(self, config.parent)
 
-            # Store core configuration (5 lines - down from 8)
-            self.object_instance = object_instance
-            self.field_id = field_id
-            self.context_obj = config.context_obj
+            # Store ObjectState reference - PFM delegates MODEL to state
+            self.state = state
+
+            # Store target object for this PFM's scope (root or nested)
+            # CRITICAL: Nested PFMs need their own object_instance for type conversions, etc.
+            self.object_instance = target_obj
+            self.field_id = derived_field_id  # Derived from target type
+            self.context_obj = state.context_obj
+            self.scope_id = state.scope_id
             self.read_only = config.read_only
             self._parent_manager = config.parent_manager
-            self.scope_id = config.parent_manager.scope_id if config.parent_manager else config.scope_id
 
             # Track completion callbacks for async widget creation
             self._on_build_complete_callbacks = []
             self._on_placeholder_refresh_complete_callbacks = []
 
-            # STEP 1: Extract parameters (metaprogrammed service + auto-unpack)
-            with timer("  Extract parameters", threshold_ms=2.0):
-                extracted = ParameterExtractionService.build(
-                    object_instance, config.exclude_params, config.initial_values
-                )
-                # METAPROGRAMMING: Auto-unpack all fields to self
-                # Field names match UnifiedParameterInfo for auto-extraction
-                ValueCollectionService.unpack_to_self(self, extracted, {'_parameter_descriptions': 'description', 'parameters': 'default_value', 'parameter_types': 'param_type'})
+            # STEP 1: State data is accessed via self.state (no copying)
+            # Properties delegate to ObjectState - single source of truth
 
-            # STEP 2: Build config (metaprogrammed service + auto-unpack)
+            # STEP 2: Build UI config (still needed for widget creation)
             with timer("  Build config", threshold_ms=5.0):
                 from openhcs.ui.shared.parameter_form_service import ParameterFormService
+                from openhcs.pyqt_gui.widgets.shared.services.form_init_service import (
+                    ExtractedParameters, ConfigBuilderService
+                )
 
                 self.service = ParameterFormService()
+                # Single code path for all object types - that's the point of UnifiedParameterAnalyzer
+                from openhcs.introspection.unified_parameter_analyzer import UnifiedParameterAnalyzer
+
+                param_info_dict = UnifiedParameterAnalyzer.analyze(target_obj)
+                # self.parameters property already filters/strips keys for our prefix
+                derived_param_types = {name: info.param_type for name, info in param_info_dict.items() if name in self.parameters}
+
+                # Access state data directly - ObjectState is single source of truth
+                # Pass the scoped parameters and the target object for nested PFMs
+                extracted = ExtractedParameters(
+                    default_value=self.parameters,  # Use scoped parameters (filtered/stripped)
+                    param_type=derived_param_types,
+                    description=getattr(state, '_parameter_descriptions', {}),
+                    object_instance=target_obj,  # Use nested object for nested PFMs
+                )
                 form_config = ConfigBuilderService.build(
-                    field_id, extracted, config.context_obj, config.color_scheme, config.parent_manager, self.service, config
+                    derived_field_id, extracted, state.context_obj, config.color_scheme, config.parent_manager, self.service, config
                 )
                 # METAPROGRAMMING: Auto-unpack all fields to self
                 ValueCollectionService.unpack_to_self(self, form_config)
 
-            # STEP 3: Extract parameter defaults for reset functionality
-            with timer("  Extract parameter defaults", threshold_ms=1.0):
-                from openhcs.introspection.unified_parameter_analyzer import UnifiedParameterAnalyzer
-                analysis_target = (
-                    type(object_instance)
-                    if dataclasses.is_dataclass(object_instance) or (hasattr(object_instance, '__class__') and not callable(object_instance))
-                    else object_instance
-                )
-                defaults_info = UnifiedParameterAnalyzer.analyze(analysis_target, exclude_params=config.exclude_params or [])
-                self.param_defaults = {name: info.default_value for name, info in defaults_info.items()}
-
-            # STEP 4: Initialize tracking attributes (consolidated)
+            # STEP 3: Initialize VIEW-only attributes
             self.widgets, self.reset_buttons, self.nested_managers = {}, {}, {}
-            self.reset_fields, self._user_set_fields = set(), set()
+            self.labels = {}  # Track LabelWithHelp widgets for bold styling
+            self._pending_nested_managers: Dict[str, 'ParameterFormManager'] = {}
 
-            # CRITICAL FIX: Initialize _user_set_fields from _explicitly_set_fields if present
-            # This preserves which fields were user-set when reloading a saved config
-            if hasattr(object_instance, '_explicitly_set_fields'):
-                explicitly_set = getattr(object_instance, '_explicitly_set_fields')
-                if isinstance(explicitly_set, set):
-                    self._user_set_fields = explicitly_set.copy()
-                    logger.debug(f"🔍 INIT: Loaded _user_set_fields from _explicitly_set_fields: {self._user_set_fields}")
-
-            # ANTI-DUCK-TYPING: Initialize ALL flags so FlagContextManager doesn't need getattr defaults
+            # STEP 4: VIEW-only flags (state tracking is in ObjectState)
             self._initial_load_complete, self._block_cross_window_updates, self._in_reset = False, False, False
-            self.shared_reset_fields = (
-                config.parent.shared_reset_fields
-                if hasattr(config.parent, 'shared_reset_fields')
-                else set()
-            )
+            self._dispatching = False
+            self.shared_reset_fields = set()  # VIEW-only: tracks field paths for cross-window reset styling
 
-            # CROSS-WINDOW: Register in active managers list (only root managers)
+            # CROSS-WINDOW: Connect to change notifications (only root managers)
             # Nested managers are internal to their window and should not participate in cross-window updates
             if self._parent_manager is None:
-                LiveContextService.register(self)
-                # Connect to change notifications to refresh placeholders when other forms change
-                LiveContextService.connect_listener(self._on_live_context_changed)
+                from openhcs.config_framework.object_state import ObjectStateRegistry
+                ObjectStateRegistry.connect_listener(self._on_live_context_changed)
+                # Invalidate cache so newly opened windows build fresh snapshots
+                ObjectStateRegistry.increment_token(notify=False)
             
             # Register hierarchy relationship for cross-window placeholder resolution
             if self.context_obj is not None and not self._parent_manager:
@@ -323,6 +286,7 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
 
             # STEP 5: Initialize services (metaprogrammed service + auto-unpack)
             with timer("  Initialize services", threshold_ms=1.0):
+                from openhcs.pyqt_gui.widgets.shared.services.form_init_service import ServiceFactoryService
                 services = ServiceFactoryService.build()
                 # METAPROGRAMMING: Auto-unpack all services to self with _ prefix
                 ValueCollectionService.unpack_to_self(self, services, prefix="_")
@@ -334,6 +298,11 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
             self._widget_ops = WidgetOperations()
             self._widget_factory = WidgetFactory()
             self._context_event_coordinator = None
+
+            # GAME ENGINE: Initialize flash overlay state BEFORE building widgets
+            # (widgets call register_flash_groupbox during build_form)
+            if self._parent_manager is None:
+                self._init_visual_update_mixin()
 
             # STEP 6: Set up UI
             with timer("  Setup UI (widget creation)", threshold_ms=10.0):
@@ -353,6 +322,18 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
             # Debounce timer for cross-window placeholder refresh
             self._cross_window_refresh_timer = None
 
+            # Flash animation: Subscribe to resolved value changes (root only)
+            # NOTE: _init_visual_update_mixin() is called earlier (before setup_ui)
+            if self._parent_manager is None:
+                self.state.on_resolved_changed(self._on_resolved_values_changed)
+                logger.debug(f"🔔 CALLBACK_LEAK_DEBUG: Registered callback for {self.field_id} (PFM id={id(self)}), "
+                           f"total callbacks on ObjectState: {len(self.state._on_resolved_changed_callbacks)}, "
+                           f"scope_id={self.state.scope_id}")
+
+            # Materialized state changes: Subscribe once (root only)
+            if self._parent_manager is None:
+                self.state.on_state_changed(self._on_state_changed)
+
             # STEP 8: _user_set_fields starts empty and is populated only when user edits widgets
             # (via _emit_parameter_change). Do NOT populate during initialization, as that would
             # include inherited values that weren't explicitly set by the user.
@@ -365,111 +346,13 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
                     lambda name, manager: setattr(manager, '_initial_load_complete', True)
                 )
 
-            # STEP 10: Execute initial refresh strategy (enum dispatch)
-            with timer("  Initial refresh", threshold_ms=10.0):
-                InitialRefreshStrategy.execute(self)
+            # STEP 10: Initial refresh - REMOVED (now done in _execute_post_build_sequence)
+            # The FormBuildOrchestrator already does ONE cascading refresh at the end of
+            # widget building. Calling InitialRefreshStrategy.execute here was redundant
+            # and caused every manager to be refreshed TWICE during init.
+            pass
 
     # ==================== WIDGET CREATION METHODS ====================
-
-    def create_widget(self, param_name: str, param_type: Type, current_value: Any,
-                     widget_id: str, parameter_info: Any = None) -> Any:
-        """Create widget using the registry creator function."""
-        widget = self._widget_creator(param_name, param_type, current_value, widget_id, parameter_info)
-
-        if widget is None:
-            from PyQt6.QtWidgets import QLabel
-            widget = QLabel(f"ERROR: Widget creation failed for {param_name}")
-
-        return widget
-
-
-
-
-    @classmethod
-    def from_dataclass_instance(cls, dataclass_instance: Any, field_id: str,
-                              placeholder_prefix: str = "Default",
-                              parent=None, use_scroll_area: bool = True,
-                              function_target=None, color_scheme=None,
-                              force_show_all_fields: bool = False,
-                              global_config_type: Optional[Type] = None,
-                              context_event_coordinator=None, context_obj=None,
-                              scope_id: Optional[str] = None):
-        """
-        SIMPLIFIED: Create ParameterFormManager using new generic constructor.
-
-        This method now simply delegates to the simplified constructor that handles
-        all object types automatically through generic introspection.
-
-        Args:
-            dataclass_instance: The dataclass instance to edit
-            field_id: Unique identifier for the form
-            context_obj: Context object for placeholder resolution
-            scope_id: Optional scope identifier (e.g., plate_path) to limit cross-window updates
-            **kwargs: Legacy parameters (ignored - handled automatically)
-
-        Returns:
-            ParameterFormManager configured for any object type
-        """
-        # Validate input
-        if not is_dataclass(dataclass_instance):
-            raise ValueError(f"{type(dataclass_instance)} is not a dataclass")
-
-        # Use simplified constructor with automatic parameter extraction
-        # CRITICAL: Do NOT default context_obj to dataclass_instance
-        # This creates circular context bug where form uses itself as parent
-        # Caller must explicitly pass context_obj if needed (e.g., Step Editor passes pipeline_config)
-
-        # CRITICAL: Store use_scroll_area in a temporary attribute so ConfigBuilderService can use it
-        # This is a workaround because FormManagerConfig doesn't have use_scroll_area field
-        # but we need to pass it through to the config building process
-        config = FormManagerConfig(
-            parent=parent,
-            context_obj=context_obj,  # No default - None means inherit from thread-local global only
-            scope_id=scope_id,
-            color_scheme=color_scheme,
-        )
-
-        # Store use_scroll_area as a temporary attribute on the config object
-        # ConfigBuilderService will check for this and use it if present
-        config._use_scroll_area_override = use_scroll_area
-
-        return cls(
-            object_instance=dataclass_instance,
-            field_id=field_id,
-            config=config
-        )
-
-    @classmethod
-    def from_object(cls, object_instance: Any, field_id: str, parent=None, context_obj=None):
-        """
-        NEW: Create ParameterFormManager for any object type using generic introspection.
-
-        This is the new primary factory method that works with:
-        - Dataclass instances and types
-        - ABC constructors and functions
-        - Step objects with config attributes
-        - Any object with parameters
-
-        Args:
-            object_instance: Any object to build form for
-            field_id: Unique identifier for the form
-            parent: Optional parent widget
-            context_obj: Context object for placeholder resolution
-
-        Returns:
-            ParameterFormManager configured for the object type
-        """
-        config = FormManagerConfig(
-            parent=parent,
-            context_obj=context_obj
-        )
-        return cls(
-            object_instance=object_instance,
-            field_id=field_id,
-            config=config
-        )
-
-
 
     def setup_ui(self):
         """Set up the UI layout."""
@@ -495,7 +378,6 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         # OPTIMIZATION: Never add scroll areas for nested configs
         # This saves ~2ms per nested config × 20 configs = 40ms
         with timer("    Add scroll area", threshold_ms=1.0):
-            logger.info(f"🔧 {self.field_id}: is_nested={is_nested}, use_scroll_area={self.config.use_scroll_area}, will_create_scroll={self.config.use_scroll_area and not is_nested}")
             if self.config.use_scroll_area and not is_nested:
                 scroll_area = QScrollArea()
                 scroll_area.setWidgetResizable(True)
@@ -503,10 +385,8 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
                 scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
                 scroll_area.setWidget(form_widget)
                 layout.addWidget(scroll_area)
-                logger.info(f"  ✅ Created scroll area for {self.field_id}")
             else:
                 layout.addWidget(form_widget)
-                logger.info(f"  ⏭️ Skipped scroll area for {self.field_id} (nested or disabled)")
 
     def build_form(self) -> QWidget:
         """Build form UI using orchestrator service."""
@@ -526,34 +406,9 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         return content_widget
 
     def _create_widget_for_param(self, param_info: Any) -> Any:
-        """
-        Create widget for a single parameter based on its type.
-
-        Uses parametric dispatch for all widget types (REGULAR, NESTED, OPTIONAL_NESTED).
-
-        Args:
-            param_info: Parameter information (OptionalDataclassInfo, DirectDataclassInfo, or GenericInfo)
-
-        Returns:
-            QWidget: The created widget
-        """
-        from openhcs.pyqt_gui.widgets.shared.widget_creation_config import (
-            create_widget_parametric,
-            WidgetCreationType
-        )
-
-        # Type-safe dispatch using discriminated unions
-        from openhcs.ui.shared.parameter_info_types import OptionalDataclassInfo, DirectDataclassInfo
-
-        if isinstance(param_info, OptionalDataclassInfo):
-            # Optional[Dataclass]: use parametric dispatch
-            return create_widget_parametric(self, param_info, WidgetCreationType.OPTIONAL_NESTED)
-        elif isinstance(param_info, DirectDataclassInfo):
-            # Direct dataclass (non-optional): use parametric dispatch
-            return create_widget_parametric(self, param_info, WidgetCreationType.NESTED)
-        else:
-            # All regular types (including Optional[regular]): use parametric dispatch
-            return create_widget_parametric(self, param_info, WidgetCreationType.REGULAR)
+        """Create widget for a parameter. Type auto-detected from param_info."""
+        from openhcs.pyqt_gui.widgets.shared.widget_creation_config import create_widget_parametric
+        return create_widget_parametric(self, param_info)
 
     def _create_widgets_async(self, layout, param_infos, on_complete=None):
         """Create widgets asynchronously to avoid blocking the UI.
@@ -569,12 +424,28 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
 
         def create_next_batch():
             nonlocal index
+
+            # Guard: Check if layout's parent widget was deleted (window closed during async build)
+            try:
+                parent = layout.parentWidget()
+                if parent is None:
+                    logger.warning("Async widget creation aborted: layout parent is None")
+                    return
+            except RuntimeError:
+                # Layout itself was deleted
+                logger.warning("Async widget creation aborted: layout was deleted")
+                return
+
             batch_end = min(index + batch_size, len(param_infos))
 
             for i in range(index, batch_end):
                 param_info = param_infos[i]
                 widget = self._create_widget_for_param(param_info)
-                layout.addWidget(widget)
+                try:
+                    layout.addWidget(widget)
+                except RuntimeError as e:
+                    logger.warning(f"Async widget creation aborted during addWidget: {e}")
+                    return
 
             index = batch_end
 
@@ -589,74 +460,52 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         # Start creating widgets
         QTimer.singleShot(0, create_next_batch)
 
-    def _create_nested_form_inline(self, param_name: str, param_type: Type, current_value: Any) -> Any:
-        """Create nested form - simplified to let constructor handle parameter extraction"""
-        # REFACTORING PRINCIPLE: Extract duplicate type unwrapping (was repeated 3 times)
-        actual_type = ParameterTypeUtils.get_optional_inner_type(param_type) if ParameterTypeUtils.is_optional(param_type) else param_type
+    def _create_nested_form_inline(self, param_name: str, unwrapped_type: Type = None, current_value: Any = None) -> Any:
+        """Create nested PFM that shares root ObjectState with different field_prefix.
 
-        # Get actual field path from FieldPathDetector (no artificial "nested_" prefix)
-        # For function parameters (no parent object), use parameter name directly
-        obj_type = type(self.object_instance) if self.object_instance else None
-        field_path = param_name if obj_type is None else self.service.get_field_path_with_fail_loud(obj_type, param_type)
+        With flat storage, nested PFMs share the same ObjectState instance as the parent,
+        but use a different field_prefix to scope their access.
 
-        # Determine object instance (unified logic for current_value vs default)
-        if current_value is not None:
-            # If current_value is a dict (saved config), convert it back to dataclass instance
-            object_instance = actual_type(**current_value) if isinstance(current_value, dict) and dataclasses.is_dataclass(actual_type) else current_value
-        else:
-            # Create a default instance of the dataclass type for parameter extraction
-            object_instance = actual_type() if dataclasses.is_dataclass(actual_type) else actual_type
+        Args:
+            param_name: Name of the nested parameter (becomes part of field_prefix)
+            unwrapped_type: Ignored (kept for ABC compatibility)
+            current_value: Ignored (kept for ABC compatibility)
+        """
+        # Build nested field_prefix
+        nested_prefix = f'{self.field_prefix}.{param_name}' if self.field_prefix else param_name
 
-        # DELEGATE TO NEW CONSTRUCTOR: Use simplified constructor with FormManagerConfig
-        # Nested managers use parent manager's scope_id for cross-window grouping
+        # Create nested PFM (VIEW) that shares the same ObjectState (MODEL)
         nested_config = FormManagerConfig(
             parent=self,
-            context_obj=self.context_obj,
-            parent_manager=self,  # Pass parent manager so setup_ui() can detect nested configs
+            parent_manager=self,
             color_scheme=self.config.color_scheme,
-            scope_id=self.scope_id
+            field_prefix=nested_prefix,  # Scope access to nested fields
         )
         nested_manager = ParameterFormManager(
-            object_instance=object_instance,
-            field_id=field_path,
+            state=self.state,  # CRITICAL: Share the same ObjectState instance
             config=nested_config
         )
 
-        # Inherit lazy/global editing context from parent so resets behave correctly in nested forms
-        # CRITICAL FIX: Nested forms must inherit is_global_config_editing from parent
-        # This ensures GLOBAL_STATIC_DEFAULTS layer is applied to nested forms when editing GlobalPipelineConfig
-        # Without this, reset fields show stale loaded values instead of static defaults
+        # Inherit lazy/global editing context from parent
         try:
             nested_manager.config.is_lazy_dataclass = self.config.is_lazy_dataclass
             nested_manager.config.is_global_config_editing = self.config.is_global_config_editing
         except Exception:
             pass
 
-        # DISPATCHER ARCHITECTURE: No signal connection needed here.
-        # The FieldChangeDispatcher handles all nested changes:
-        # - Sibling refresh via isinstance() check
-        # - Cross-window via full path construction
-        # - Parent doesn't need to listen to nested changes
-
         # Store nested manager
         self.nested_managers[param_name] = nested_manager
 
-        # CRITICAL: Register with root manager if it's tracking async completion
-        # Only register if this nested manager will use async widget creation
-        if dataclasses.is_dataclass(actual_type):
-            param_count = len(dataclasses.fields(actual_type))
+        # Register with root manager for async completion tracking
+        # Count parameters with nested_prefix
+        param_count = sum(1 for path in self.state.parameters.keys() if path.startswith(f'{nested_prefix}.'))
+        root_manager = self
+        while root_manager._parent_manager is not None:
+            root_manager = root_manager._parent_manager
 
-            # Find root manager
-            root_manager = self
-            while root_manager._parent_manager is not None:
-                root_manager = root_manager._parent_manager
-
-            # Register with root if it's tracking and this will use async (centralized logic)
-            # ANTI-DUCK-TYPING: root_manager always has _pending_nested_managers
-            if self.should_use_async(param_count):
-                # Use a unique key that includes the full path to avoid duplicates
-                unique_key = f"{self.field_id}.{param_name}"
-                root_manager._pending_nested_managers[unique_key] = nested_manager
+        if self.should_use_async(param_count):
+            unique_key = f"{self.field_id}.{param_name}"
+            root_manager._pending_nested_managers[unique_key] = nested_manager
 
         return nested_manager
 
@@ -680,15 +529,6 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         converted_value = self.service.convert_value_to_type(converted_value, param_type, param_name, type(self.object_instance))
 
         return converted_value
-
-    # DELETED: _emit_parameter_change - replaced by FieldChangeDispatcher
-    # DELETED: _on_enabled_field_changed_universal - moved to FieldChangeDispatcher
-
-
-
-
-
-    # Framework-specific methods for backward compatibility
 
     def reset_all_parameters(self) -> None:
         """Reset all parameters - just call reset_parameter for each parameter."""
@@ -716,7 +556,10 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
 
 
     def update_parameter(self, param_name: str, value: Any) -> None:
-        """Update parameter value using shared service layer."""
+        """Update parameter value using shared service layer.
+
+        With flat storage, prepends field_prefix to create full dotted path.
+        """
         if param_name not in self.parameters:
             return
 
@@ -733,278 +576,104 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
             if isinstance(widget, ValueSettable):
                 self._widget_service.update_widget_value(widget, converted_value, param_name, False, self)
 
+        # Build full dotted path for state update
+        dotted_path = f'{self.field_prefix}.{param_name}' if self.field_prefix else param_name
+
+        # Update state with full dotted path
+        self.state.update_parameter(dotted_path, converted_value)
+
         # Route through dispatcher for consistent behavior (sibling refresh, cross-window, etc.)
         event = FieldChangeEvent(param_name, converted_value, self)
         FieldChangeDispatcher.instance().dispatch(event)
 
-    def reset_parameter(self, param_name: str) -> None:
-        """Reset parameter to signature default."""
-        logger.info(f"🔄 RESET_PARAMETER: {self.field_id}.{param_name}")
+        # Update label styling after parameter change
+        self._update_label_styling(param_name)
 
+    def reset_parameter(self, param_name: str) -> None:
+        """Reset parameter to signature default.
+
+        With flat storage, prepends field_prefix to create full dotted path.
+        """
         if param_name not in self.parameters:
-            logger.warning(f"  ⏭️  {param_name} not in parameters, skipping")
             return
 
-        old_value = self.parameters.get(param_name)
-        was_user_set = param_name in self._user_set_fields
-        logger.info(f"  📊 Before reset: value={repr(old_value)[:30]}, user_set={was_user_set}")
+        # Build full dotted path for state update
+        dotted_path = f'{self.field_prefix}.{param_name}' if self.field_prefix else param_name
 
-        # PHASE 2A: Use FlagContextManager + ParameterOpsService
         with FlagContextManager.reset_context(self, block_cross_window=False):
             self._parameter_ops_service.reset_parameter(self, param_name)
 
-        reset_value = self.parameters.get(param_name)
-        is_user_set_after = param_name in self._user_set_fields
-        logger.info(f"  📊 After reset: value={repr(reset_value)[:30]}, user_set={is_user_set_after}")
-
-        # Route through dispatcher with is_reset=True (don't re-add to _user_set_fields)
+        reset_value = self.state.parameters.get(dotted_path)
         event = FieldChangeEvent(param_name, reset_value, self, is_reset=True)
         FieldChangeDispatcher.instance().dispatch(event)
 
-    def _get_reset_value(self, param_name: str) -> Any:
-        """Get reset value based on editing context.
+        # Update label styling after reset
+        self._update_label_styling(param_name)
 
-        For global config editing: Use static class defaults (not None)
-        For lazy config editing: Use signature defaults (None for inheritance)
-        For functions: Use signature defaults
+    def _update_label_styling(self, param_name: str) -> None:
+        """Update label styling: underline (differs from signature default) and dirty indicator (unsaved changes).
+
+        Two independent visual semantics:
+        - Underline: raw value differs from signature default (explicitly set)
+        - Asterisk (*): resolved value differs from saved resolved value (unsaved changes)
         """
-        # For global config editing, use static class defaults instead of None
-        if self.config.is_global_config_editing and self.object_instance:
-            # Get static default from class attribute
-            try:
-                static_default = object.__getattribute__(type(self.object_instance), param_name)
-                return static_default
-            except AttributeError:
-                # Fallback to signature default if no class attribute
-                pass
+        if param_name not in self.labels:
+            return
 
-        # For everything else, use signature defaults
-        return self.param_defaults.get(param_name)
+        # Build full dotted path for state lookup
+        dotted_path = f'{self.field_prefix}.{param_name}' if self.field_prefix else param_name
+        should_underline = dotted_path in self.state.signature_diff_fields
 
+        label = self.labels[param_name]
+        label.set_underline(should_underline)
 
+        # Dirty indicator: asterisk if resolved value differs from saved resolved value
+        is_dirty = dotted_path in self.state.dirty_fields
+        label.set_dirty_indicator(is_dirty)
 
-    def get_current_values(self) -> Dict[str, Any]:
+    def _on_state_changed(self) -> None:
+        """Callback when materialized state changes (dirty/signature diff)."""
+        for param_name in self.labels:
+            self._update_label_styling(param_name)
+
+        for nested_manager in self.nested_managers.values():
+            nested_manager._on_state_changed()
+
+    def update_groupbox_dirty_markers(self, dirty_prefixes: set, sig_diff_prefixes: set = None) -> None:
+        """Update groupbox titles with dirty markers and signature diff underline.
+
+        Called by ConfigHierarchyTreeHelper.update_dirty_styling() so tree items
+        and groupbox titles use the SAME prefixes computed ONCE.
+
+        Args:
+            dirty_prefixes: Pre-computed set of dirty paths and their ancestors (for asterisk)
+            sig_diff_prefixes: Pre-computed set of signature diff paths and ancestors (for underline)
         """
-        Get current parameter values preserving lazy dataclass structure.
+        if sig_diff_prefixes is None:
+            sig_diff_prefixes = set()
 
-        This fixes the lazy default materialization override saving issue by ensuring
-        that lazy dataclasses maintain their structure when values are retrieved.
-        """
-        with timer(f"get_current_values ({self.field_id})", threshold_ms=2.0):
-            # CRITICAL FIX: Read actual current values from widgets, not initial parameters
-            current_values = {}
+        # Update this level's nested managers' groupboxes
+        for param_name, nested_manager in self.nested_managers.items():
+            groupbox = self.widgets.get(param_name)
+            if groupbox is None:
+                continue
 
-            # Read current values from widgets
-            for param_name in self.parameters.keys():
-                # BUGFIX: For user-set fields, use self.parameters as source of truth
-                # This prevents race conditions where widget hasn't been updated yet
-                # or is in placeholder state during sibling context building
-                if param_name in self._user_set_fields:
-                    current_values[param_name] = self.parameters.get(param_name)
+            prefix = nested_manager.field_prefix
+            is_dirty = prefix in dirty_prefixes
+            has_sig_diff = prefix in sig_diff_prefixes
+            groupbox.set_dirty_marker(is_dirty, has_sig_diff)
 
-                    # DEBUG: Log well_filter_config.well_filter reads from parameters
-                    if self.field_id == 'well_filter_config' and param_name == 'well_filter':
-                        logger.warning(f"🔍 PARAM_READ: {self.field_id}.{param_name} from self.parameters={current_values[param_name]}")
-                else:
-                    # PHASE 2A: Use WidgetService for consistent widget access
-                    widget = WidgetService.get_widget_safe(self, param_name)
-                    if widget:
-                        # REFACTORING: Inline delegate call
-                        raw_value = self._widget_service.get_widget_value(widget)
-                        # Apply unified type conversion
-                        current_values[param_name] = self._convert_widget_value(raw_value, param_name)
+        # Recurse to nested managers
+        for nested_manager in self.nested_managers.values():
+            nested_manager.update_groupbox_dirty_markers(dirty_prefixes, sig_diff_prefixes)
 
-                        # DEBUG: Log well_filter_config.well_filter widget reads
-                        if self.field_id == 'well_filter_config' and param_name == 'well_filter':
-                            is_placeholder = widget.property("is_placeholder_state")
-                            logger.warning(f"🔍 WIDGET_READ: {self.field_id}.{param_name} raw={raw_value}, converted={current_values[param_name]}, is_placeholder={is_placeholder}")
-                    else:
-                        # Fallback to initial parameter value if no widget
-                        current_values[param_name] = self.parameters.get(param_name)
-
-            # Checkbox validation is handled in widget creation
-
-            # PHASE 2B: Collect values from nested managers using enum-driven dispatch
-            # Eliminates if/elif type-checking smell with polymorphic dispatch
-            def process_nested(name, manager):
-                current_values[name] = self._value_collection_service.collect_nested_value(
-                    self, name, manager
-                )
-
-            self._apply_to_nested_managers(process_nested)
-
-            # Lazy dataclasses are now handled by LazyDataclassEditor, so no structure preservation needed
-            return current_values
-
-    def get_user_modified_values(self) -> Dict[str, Any]:
-        """
-        Get only values that were explicitly set by the user.
-
-        For lazy dataclasses, this preserves lazy resolution for unmodified fields
-        by only returning fields that are in self._user_set_fields (tracked when user edits widgets).
-
-        For nested dataclasses, only include them if they have user-modified fields inside.
-
-        CRITICAL: This method uses self._user_set_fields to distinguish between:
-        1. Values that were explicitly set by the user (in _user_set_fields)
-        2. Values that were inherited from parent or set during initialization (not in _user_set_fields)
-        """
-        # ANTI-DUCK-TYPING: Use isinstance check against LazyDataclass base class
-        if not is_lazy_dataclass(self.object_instance):
-            # For non-lazy dataclasses, return all current values
-            result = self.get_current_values()
-
-            return result
-
-        # PERFORMANCE OPTIMIZATION: Only read values for user-set fields
-        # Instead of calling get_current_values() which reads ALL widgets,
-        # we only need values for fields in _user_set_fields
-        user_modified = {}
-
-        # Fast path: if no user-set fields, return empty dict
-        if not self._user_set_fields:
-            return user_modified
-
-        # DEBUG: Log what fields are tracked as user-set
-        logger.debug(f"🔍 GET_USER_MODIFIED: {self.field_id} - _user_set_fields = {self._user_set_fields}")
-
-        # Only include fields that were explicitly set by the user
-        # PERFORMANCE: Read directly from self.parameters instead of calling get_current_values()
-        for field_name in self._user_set_fields:
-            # For user-set fields, self.parameters is always the source of truth
-            # (updated by FieldChangeDispatcher before any refresh happens)
-            value = self.parameters.get(field_name)
-
-            # CRITICAL FIX: Include None values for user-set fields
-            # When user clears a field (backspace/delete), the None value must propagate
-            # to live context so other windows can update their placeholders
-            if value is not None:
-                # CRITICAL: For nested dataclasses, we need to extract only user-modified fields
-                # by recursively calling get_user_modified_values() on the nested manager
-                if is_dataclass(value) and not isinstance(value, type):
-                    # Check if there's a nested manager for this field
-                    nested_manager = self.nested_managers.get(field_name)
-                    if nested_manager and hasattr(nested_manager, 'get_user_modified_values'):
-                        # Recursively get user-modified values from nested manager
-                        nested_user_modified = nested_manager.get_user_modified_values()
-
-                        if nested_user_modified:
-                            # Reconstruct nested dataclass instance from user-modified values
-                            user_modified[field_name] = type(value)(**nested_user_modified)
-                    else:
-                        # No nested manager, extract raw field values from nested dataclass
-                        nested_user_modified = {}
-                        for field in dataclass_fields(value):
-                            raw_value = object.__getattribute__(value, field.name)
-                            if raw_value is not None:
-                                nested_user_modified[field.name] = raw_value
-
-                        # Only include if nested dataclass has user-modified fields
-                        if nested_user_modified:
-                            user_modified[field_name] = type(value)(**nested_user_modified)
-                else:
-                    # Non-dataclass field, include if user set it
-                    user_modified[field_name] = value
-            else:
-                # User explicitly set this field to None (cleared it)
-                # Include it so live context updates propagate to other windows
-                user_modified[field_name] = None
-
-        # Also include nested manager edits even if parent field not in _user_set_fields
-        # This ensures nested edits are captured without requiring the parent to track them
-        for field_name, nested_manager in self.nested_managers.items():
-            if field_name not in user_modified:  # Not already included from _user_set_fields
-                nested_values = nested_manager.get_user_modified_values()
-                if nested_values and nested_manager.object_instance:
-                    try:
-                        user_modified[field_name] = type(nested_manager.object_instance)(**nested_values)
-                    except Exception:
-                        pass  # Skip if reconstruction fails
-
-        # DEBUG: Log what's being returned
-        logger.debug(f"🔍 GET_USER_MODIFIED: {self.field_id} - returning user_modified = {user_modified}")
-
-        return user_modified
-
-    # ==================== TREE REGISTRY INTEGRATION ====================
-
-    def get_current_values_as_instance(self) -> Any:
-        """
-        Get current form values reconstructed as an instance.
-
-        Used by ConfigNode.get_live_instance() for context stack building.
-        Returns the object instance with current form values applied.
-
-        Returns:
-            Instance with current form values
-        """
-        current_values = self.get_current_values()
-
-        # For dataclasses, reconstruct instance with current values
-        if is_dataclass(self.object_instance) and not isinstance(self.object_instance, type):
-            return dataclasses.replace(self.object_instance, **current_values)
-
-        # For non-dataclass objects, return object_instance as-is
-        # (current values are tracked in self.parameters)
-        return self.object_instance
-
-    def get_user_modified_instance(self) -> Any:
-        """
-        Get instance with only user-edited fields.
-
-        Used by ConfigNode.get_user_modified_instance() for reset logic.
-        Only includes fields that the user has explicitly edited.
-
-        Returns:
-            Instance with only user-modified fields
-        """
-        user_modified = self.get_user_modified_values()
-
-        # For dataclasses, create instance with only user-modified fields
-        if is_dataclass(self.object_instance) and not isinstance(self.object_instance, type):
-            # Start with None for all fields, only set user-modified ones
-            all_fields = {f.name: None for f in dataclass_fields(self.object_instance)}
-            all_fields.update(user_modified)
-            return dataclasses.replace(self.object_instance, **all_fields)
-
-        # For non-dataclass objects, return object_instance
-        return self.object_instance
-
-    # ==================== UPDATE CHECKING ====================
-
-    def _should_skip_updates(self) -> bool:
-        """
-        Check if updates should be skipped due to batch operations.
-
-        REFACTORING: Consolidates duplicate flag checking logic.
-        Returns True if in reset mode or blocking cross-window updates.
-        """
-        # ANTI-DUCK-TYPING: Use direct attribute access (all flags initialized in __init__)
-        # Check self flags
-        if self._in_reset:
-            logger.info(f"🚫 SKIP_CHECK: {self.field_id} has _in_reset=True")
-            return True
-        if self._block_cross_window_updates:
-            logger.info(f"🚫 SKIP_CHECK: {self.field_id} has _block_cross_window_updates=True")
-            return True
-
-        # Check nested manager flags (nested managers are also ParameterFormManager instances)
-        for nested_name, nested_manager in self.nested_managers.items():
-            if nested_manager._in_reset:
-                logger.info(f"🚫 SKIP_CHECK: {self.field_id} nested manager {nested_name} has _in_reset=True")
-                return True
-            if nested_manager._block_cross_window_updates:
-                logger.info(f"🚫 SKIP_CHECK: {self.field_id} nested manager {nested_name} has _block_cross_window_updates=True")
-                return True
-
-        return False
-
+    # DELETED: MODEL DELEGATION - callers use self.state.get_*() directly
     # DELETED: _on_nested_parameter_changed - replaced by FieldChangeDispatcher
 
-    def _apply_to_nested_managers(self, operation_func: callable) -> None:
+    def _apply_to_nested_managers(self, callback: Callable[[str, 'ParameterFormManager'], None]) -> None:
         """Apply operation to all nested managers."""
         for param_name, nested_manager in self.nested_managers.items():
-            operation_func(param_name, nested_manager)
+            callback(param_name, nested_manager)
 
     def _apply_callbacks_recursively(self, callback_list_name: str) -> None:
         """REFACTORING: Unified recursive callback application - eliminates duplicate methods.
@@ -1043,104 +712,60 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
             orchestrator = FormBuildOrchestrator()
             orchestrator._execute_post_build_sequence(self)
 
-
-
-    def _make_widget_readonly(self, widget: QWidget):
-        """
-        Make a widget read-only without greying it out.
-
-        Args:
-            widget: Widget to make read-only
-        """
-        # PHASE 2A: Delegate to WidgetService
-        WidgetService.make_readonly(widget, self.config.color_scheme)
-
     # ==================== CROSS-WINDOW CONTEXT UPDATE METHODS ====================
 
     # DELETED: _emit_cross_window_change - moved to FieldChangeDispatcher
-
-    def _update_thread_local_global_config(self):
-        """Update thread-local GlobalPipelineConfig with current form values.
-
-        LIVE UPDATES ARCHITECTURE:
-        This is called on every parameter change when editing GlobalPipelineConfig.
-        It updates the thread-local storage so other windows see changes immediately.
-
-        The original config is stored by ConfigWindow and restored on Cancel.
-        """
-        from openhcs.core.config import GlobalPipelineConfig
-        from openhcs.config_framework.global_config import set_global_config_for_editing
-
-        # Get current values from form
-        current_values = self.get_current_values()
-
-        # Reconstruct nested dataclasses from (type, dict) tuples
-        from openhcs.config_framework.context_manager import get_base_global_config
-
-        # Get the current thread-local config as base for merging
-        base_config = get_base_global_config()
-
-        # Reconstruct nested dataclasses, merging current values into base
-        reconstructed_values = ValueCollectionService.reconstruct_nested_dataclasses(current_values, base_config)
-
-        # Create new GlobalPipelineConfig instance with reconstructed values
-        try:
-            new_config = dataclasses.replace(base_config, **reconstructed_values)
-            set_global_config_for_editing(GlobalPipelineConfig, new_config)
-            logger.debug(f"🔍 LIVE_UPDATES: Updated thread-local GlobalPipelineConfig")
-        except Exception as e:
-            logger.warning(f"🔍 LIVE_UPDATES: Failed to update thread-local GlobalPipelineConfig: {e}")
-            # Don't fail the whole operation if this fails
-            pass
+    # DELETED: _update_thread_local_global_config - moved to ObjectState
 
     def _on_live_context_changed(self):
         """Handle notification that live context changed (another form edited a value).
 
         Schedule a placeholder refresh so this form shows updated inherited values.
         Uses emit_signal=False to prevent infinite ping-pong between forms.
+
+        PERFORMANCE: This is called for ALL root managers when ANY value changes.
+        We skip refresh entirely here - the form's values are already correct,
+        only inherited placeholder text might need updates. Those can be lazy.
         """
         # Skip if this form triggered the change
         if getattr(self, '_block_cross_window_updates', False):
             return
-        self._schedule_cross_window_refresh(changed_field=None, emit_signal=False)
+        # PERFORMANCE FIX: Don't do full tree refresh on every cross-window change.
+        # The ObjectState already has correct values - we only need to update
+        # placeholder TEXT display, which can wait for next explicit refresh.
+        # This prevents O(n²) refresh cascade when multiple forms are open.
+        logger.debug(f"[CROSS-WINDOW] {self.field_id}: Skipping full refresh (lazy placeholder update)")
+        # Only queue a visual update for the flash overlay, don't refresh all placeholders
+        self.queue_visual_update()
 
     def unregister_from_cross_window_updates(self):
-        """Unregister from cross-window updates.
-
-        SIMPLIFIED: Just unregister from LiveContextService. The token increment
-        in unregister() notifies all listeners to refresh.
-        """
-        logger.info(f"🔍 UNREGISTER: {self.field_id}")
-
+        """Unregister from cross-window updates."""
         try:
-            # Disconnect from change notifications
-            LiveContextService.disconnect_listener(self._on_live_context_changed)
+            from openhcs.config_framework.object_state import ObjectStateRegistry
+            ObjectStateRegistry.disconnect_listener(self._on_live_context_changed)
 
-            # Unregister hierarchy relationship if this is a root manager
+            # CRITICAL: Unregister resolved value change callback to prevent memory leak
+            # Without this, closed windows leave callbacks in ObjectState that fire on every change
+            if self._parent_manager is None:
+                callbacks_before = len(self.state._on_resolved_changed_callbacks)
+                self.state.off_resolved_changed(self._on_resolved_values_changed)
+                callbacks_after = len(self.state._on_resolved_changed_callbacks)
+                logger.debug(f"🔔 CALLBACK_LEAK_DEBUG: Unregistered callback for {self.field_id}, "
+                           f"callbacks: {callbacks_before} -> {callbacks_after}")
+
+            # Unregister state change callback (root only)
+            if self._parent_manager is None:
+                self.state.off_state_changed(self._on_state_changed)
+
             if self.context_obj is not None and not self._parent_manager:
                 from openhcs.config_framework.context_manager import unregister_hierarchy_relationship
                 unregister_hierarchy_relationship(type(self.object_instance))
-
-            # Remove from registry (triggers token increment → notifies listeners)
-            LiveContextService.unregister(self)
-
+            # Invalidate cache + notify listeners that a form closed
+            ObjectStateRegistry.increment_token()
         except Exception as e:
-            logger.warning(f"🔍 UNREGISTER: Error: {e}")
+            logger.warning(f"Unregister error: {e}")
 
     # ========== DELEGATION TO LiveContextService ==========
-    # These methods delegate to LiveContextService for backward compatibility.
-    # New code should use LiveContextService directly.
-
-    @classmethod
-    def trigger_global_cross_window_refresh(cls):
-        """DEPRECATED: Use LiveContextService.trigger_global_refresh() instead."""
-        LiveContextService.trigger_global_refresh()
-
-    @classmethod
-    def collect_live_context(cls) -> LiveContextSnapshot:
-        """DEPRECATED: Use LiveContextService.collect() instead."""
-        return LiveContextService.collect()
-
     def _schedule_cross_window_refresh(self, changed_field: Optional[str] = None, emit_signal: bool = True):
         """Schedule a debounced placeholder refresh for cross-window updates.
 
@@ -1151,24 +776,18 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
                         Set to False when refresh is triggered by another window's
                         context_refreshed to prevent infinite ping-pong loops.
         """
-        logger.info(f"⏰ SCHEDULE_REFRESH [{self.field_id}]: field={changed_field}, emit_signal={emit_signal}, scope={self.scope_id}")
-
         # Cancel existing timer if any
         if self._cross_window_refresh_timer is not None:
             self._cross_window_refresh_timer.stop()
 
         def do_refresh():
-            # CRITICAL: Check if this manager was deleted before the timer fired
-            # This can happen when a window is closed while a refresh is scheduled
+            # Check if this manager was deleted before the timer fired
             try:
                 from PyQt6 import sip
                 if sip.isdeleted(self):
-                    logger.debug(f"🔄 DO_REFRESH: manager was deleted, skipping")
                     return
             except (ImportError, TypeError):
-                pass  # sip not available or object not a Qt object
-
-            logger.info(f"🔄 DO_REFRESH [{self.field_id}]: field={changed_field}, emit_signal={emit_signal}")
+                pass
             if changed_field is not None:
                 # Targeted refresh: only refresh the specific field that changed
                 # This field might exist in this manager OR in nested managers
@@ -1185,25 +804,246 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         self._cross_window_refresh_timer = QTimer()
         self._cross_window_refresh_timer.setSingleShot(True)
         self._cross_window_refresh_timer.timeout.connect(do_refresh)
-        self._cross_window_refresh_timer.start(10)  # 10ms debounce
+        self._cross_window_refresh_timer.start(50)  # 10ms debounce
 
     def _refresh_field_in_tree(self, field_name: str):
-        """Refresh a specific field's placeholder in this manager and all nested managers.
-
-        The field might be in this manager directly, or in any nested manager.
-        We refresh it wherever it exists.
-
-        Args:
-            field_name: The leaf field name to refresh (e.g., "well_filter")
-        """
-        has_widget = field_name in self.widgets
-        nested_names = list(self.nested_managers.keys())
-        logger.info(f"  🌳 TREE [{self.field_id}]: field={field_name}, has_widget={has_widget}, nested={nested_names}")
-
-        # Try to refresh in this manager
-        if has_widget:
+        """Refresh a field's placeholder in this manager and nested managers."""
+        if field_name in self.widgets:
             self._parameter_ops_service.refresh_single_placeholder(self, field_name)
-
-        # Also try in all nested managers (the field might be nested)
         for nested_manager in self.nested_managers.values():
             nested_manager._refresh_field_in_tree(field_name)
+
+    def refresh_widgets_from_state(self):
+        """Refresh all widget values from state.parameters.
+
+        Called during time-travel to sync Qt widgets with restored ObjectState.
+        """
+        from openhcs.ui.shared.widget_protocols import ValueSettable
+
+        for param_name, widget in self.widgets.items():
+            if isinstance(widget, ValueSettable):
+                # Build full dotted path
+                dotted_path = f'{self.field_prefix}.{param_name}' if self.field_prefix else param_name
+                value = self.state.parameters.get(dotted_path)
+                if value is not None:
+                    self._widget_service.update_widget_value(widget, value, param_name, False, self)
+
+        # Recurse into nested managers
+        for nested_manager in self.nested_managers.values():
+            nested_manager.refresh_widgets_from_state()
+
+    # ==================== GROUPBOX FLASH ANIMATION (FlashMixin) ====================
+
+    def _on_resolved_values_changed(self, changed_paths: Set[str]):
+        """Handle resolved value changes - queue flashes AND refresh placeholders.
+
+        SCOPE-AWARE: This callback is fired by THIS window's ObjectState, so we only
+        flash THIS window's elements, not ALL windows globally.
+
+        LEAF FLASH: For each changed path, we use INVERSE masking - flash the groupbox
+        INCLUDING all sibling fields, but mask out the specific changed widget.
+        This highlights "all fields that inherited the change".
+
+        TIME-TRAVEL: When _in_time_travel flag is set, also refresh widget values
+        for the changed paths (since user didn't type - we need to sync widgets).
+        """
+        if self._parent_manager is not None:
+            return  # Only root manager handles this
+
+        from openhcs.config_framework.object_state import ObjectStateRegistry
+
+        logger.debug(f"🔔 CALLBACK_LEAK_DEBUG: _on_resolved_values_changed invoked for {self.field_id}, "
+                   f"changed_paths={changed_paths}")
+        logger.debug(f"[FLASH] _on_resolved_values_changed: {changed_paths}")
+
+        # TIME-TRAVEL: Refresh widget values for changed paths
+        # (during time-travel, user didn't type - widgets need to be updated from state)
+        if ObjectStateRegistry._in_time_travel:
+            self._refresh_widgets_for_paths(changed_paths)
+
+        # For each changed path, register and queue a LEAF flash
+        for path in changed_paths:
+            self._queue_leaf_flash_for_path(path)
+
+        # Refresh placeholders for changed fields (show new resolved values)
+        for path in changed_paths:
+            leaf_field = path.split('.')[-1] if '.' in path else path
+            self._refresh_field_in_tree(leaf_field)
+
+    def _refresh_widgets_for_paths(self, paths: Set[str]):
+        """Refresh widget values for specific paths from state.parameters.
+
+        Used during time-travel to sync Qt widgets with restored ObjectState.
+        """
+        from openhcs.ui.shared.widget_protocols import ValueSettable
+
+        for path in paths:
+            # Extract path prefix and leaf field
+            # e.g., "step_well_filter_config.well_filter" -> prefix="step_well_filter_config", leaf="well_filter"
+            if '.' in path:
+                path_prefix = path.rsplit('.', 1)[0]
+                leaf_field = path.rsplit('.', 1)[1]
+            else:
+                path_prefix = ""
+                leaf_field = path
+
+            # CRITICAL: Only update widget if this path belongs to this manager
+            # Path prefix must match manager's field_prefix exactly
+            if path_prefix != self.field_prefix:
+                continue  # This path doesn't belong to this manager
+
+            # Check if we have this widget
+            if leaf_field in self.widgets:
+                widget = self.widgets[leaf_field]
+                if isinstance(widget, ValueSettable):
+                    # Use get with sentinel to distinguish "key exists with None value" from "key doesn't exist"
+                    _MISSING = object()
+                    value = self.state.parameters.get(path, _MISSING)
+                    if value is not _MISSING:
+                        # None is a valid value (means "inherit") - don't skip it
+                        self._widget_service.update_widget_value(widget, value, leaf_field, False, self)
+
+        # Recurse into nested managers
+        for nested_manager in self.nested_managers.values():
+            nested_manager._refresh_widgets_for_paths(paths)
+
+    def _queue_leaf_flash_for_path(self, path: str) -> None:
+        """Queue a leaf flash for a changed path.
+
+        Finds the groupbox and leaf widget, registers a leaf flash element,
+        and queues the flash animation.
+        """
+        # Find the prefix (groupbox) and leaf field name
+        prefix = self._find_matching_prefix(path)
+        if not prefix:
+            logger.debug(f"[FLASH] No prefix found for path={path}")
+            return
+
+        leaf_field = path.split('.')[-1] if '.' in path else path
+
+        # Find the groupbox for the prefix
+        groupbox = self._get_groupbox_for_prefix(prefix)
+        if not groupbox:
+            logger.debug(f"[FLASH] No groupbox found for prefix={prefix}")
+            return
+
+        # Find the leaf widget in the nested manager
+        nested_manager = self._find_nested_manager_for_prefix(prefix)
+        if not nested_manager:
+            logger.debug(f"[FLASH] No nested manager found for prefix={prefix}")
+            return
+
+        leaf_widget = nested_manager.widgets.get(leaf_field)
+        if not leaf_widget:
+            # Fallback to groupbox flash if leaf widget not found
+            logger.debug(f"[FLASH] No leaf widget for {leaf_field}, falling back to groupbox flash")
+            self.queue_flash_local(prefix)
+            return
+
+        # Register leaf flash element (dynamic registration for this specific change)
+        # Use a unique key that includes the leaf path to avoid conflicts
+        # Use '.' for attribute access (not '::' which is for scope hierarchy)
+        leaf_flash_key = f"{prefix}.{leaf_field}"
+        self.register_flash_leaf(leaf_flash_key, groupbox, leaf_widget)
+
+        # Queue BOTH flashes so they're in sync:
+        # 1. Leaf flash for groupbox (inverse masking)
+        # 2. Tree item flash (uses tree:: prefix to avoid groupbox collision)
+        self.queue_flash_local(leaf_flash_key)  # Groupbox with inverse masking
+        self.queue_flash_local(f"tree::{prefix}")  # Tree item has separate key namespace
+        logger.debug(f"[FLASH] Queued leaf flash: key={leaf_flash_key}, tree_key={prefix}, leaf={leaf_field}")
+
+    def _find_nested_manager_for_prefix(self, prefix: str) -> Optional['ParameterFormManager']:
+        """Find the nested manager for a given field_prefix."""
+        return self._find_nested_manager_recursive(prefix, self)
+
+    def _find_nested_manager_recursive(self, prefix: str, manager: 'ParameterFormManager') -> Optional['ParameterFormManager']:
+        """Recursively find nested manager with matching prefix."""
+        for _, nested_manager in manager.nested_managers.items():
+            if nested_manager.field_prefix == prefix:
+                return nested_manager
+            result = self._find_nested_manager_recursive(prefix, nested_manager)
+            if result:
+                return result
+        return None
+
+    def _find_matching_prefix(self, path: str) -> Optional[str]:
+        """Find the nested manager field_prefix that matches a changed path."""
+        return self._find_prefix_recursive(path, self)
+
+    def _find_prefix_recursive(self, path: str, manager: 'ParameterFormManager') -> Optional[str]:
+        """Recursively find matching prefix through nested managers."""
+        for _, nested_manager in manager.nested_managers.items():
+            prefix = nested_manager.field_prefix
+            if path.startswith(prefix + '.') or path == prefix:
+                deeper = self._find_prefix_recursive(path, nested_manager)
+                return deeper if deeper else prefix
+        return None
+
+    # PAINT-TIME API: get_flash_color_for_key() inherited from VisualUpdateMixin
+    # Groupboxes and tree items call this during paint to get current flash color
+
+    # PERFORMANCE: Cache groupbox lookups - structure doesn't change after form creation
+    _groupbox_cache: Dict[str, Optional[QWidget]]
+
+    def _get_groupbox_for_prefix(self, prefix: str) -> Optional[QWidget]:
+        """Get the groupbox widget for a field_prefix by finding the nested manager.
+
+        PERFORMANCE: Results are cached since form structure is immutable.
+        """
+        if not hasattr(self, '_groupbox_cache'):
+            self._groupbox_cache = {}
+        if prefix in self._groupbox_cache:
+            return self._groupbox_cache[prefix]
+        result = self._get_groupbox_recursive(prefix, self)
+        self._groupbox_cache[prefix] = result
+        return result
+
+    def _get_groupbox_recursive(self, prefix: str, manager: 'ParameterFormManager') -> Optional[QWidget]:
+        """Recursively find groupbox by prefix."""
+        for param_name, nested_manager in manager.nested_managers.items():
+            if nested_manager.field_prefix == prefix:
+                return manager.widgets.get(param_name)
+            result = self._get_groupbox_recursive(prefix, nested_manager)
+            if result:
+                return result
+        return None
+
+    def _is_flash_visible(self) -> bool:
+        """Check if this form's flash animations are visible on screen.
+
+        GAME ENGINE: Skip animation ticks entirely for forms that aren't visible.
+        """
+        # Check if our parent widget (the form itself) is visible
+        try:
+            if hasattr(self, 'isVisible') and not self.isVisible():
+                return False
+            # Check if minimized or occluded
+            if hasattr(self, 'window'):
+                window = self.window()
+                if window and hasattr(window, 'isMinimized') and window.isMinimized():
+                    return False
+        except RuntimeError:
+            return False  # Widget deleted
+        return True
+
+    def _visual_repaint(self) -> None:
+        """GAME ENGINE: Repaint handled by WindowFlashOverlay.
+
+        WindowFlashOverlay renders ALL flash effects in ONE paintEvent per window.
+        This is O(1) per window regardless of how many items are animating.
+
+        This method is now a no-op - the global coordinator handles all repaints.
+        """
+        # Repaint callbacks for external widgets (e.g., tree widget)
+        for callback in getattr(self, '_extra_repaint_callbacks', []):
+            callback()
+
+    def register_repaint_callback(self, callback) -> None:
+        """Register a callback to be invoked during _visual_repaint.
+
+        Used by ConfigWindow to repaint tree widget using same flash source of truth.
+        """
+        if not hasattr(self, '_extra_repaint_callbacks'):
+            self._extra_repaint_callbacks = []
+        self._extra_repaint_callbacks.append(callback)

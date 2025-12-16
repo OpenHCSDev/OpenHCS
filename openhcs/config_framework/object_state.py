@@ -1,0 +1,1350 @@
+"""
+ObjectState: Extracted MODEL from ParameterFormManager.
+
+This class holds configuration state independently of UI widgets.
+Lifecycle: Created when object added to pipeline, persists until removed.
+PFM attaches to ObjectState when editor opens, detaches when closed.
+"""
+from dataclasses import is_dataclass, fields as dataclass_fields
+import logging
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
+import copy
+
+from openhcs.config_framework.snapshot_model import Snapshot, StateSnapshot, Timeline
+
+if TYPE_CHECKING:
+    pass  # Forward references if needed
+
+logger = logging.getLogger(__name__)
+
+
+from openhcs.config_framework.object_state_registry import ObjectStateRegistry
+
+class FieldProxy:
+    """Type-safe proxy for accessing ObjectState fields via dotted attribute syntax.
+
+    Provides IDE autocomplete while using flat internal storage:
+    - External API: state.fields.well_filter_config.well_filter (type-safe)
+    - Internal: state.parameters['well_filter_config.well_filter'] (flat dict)
+    """
+
+    def __init__(self, state: 'ObjectState', path: str, field_type: type):
+        """Initialize FieldProxy.
+
+        Args:
+            state: The ObjectState this proxy accesses
+            path: Current dotted path (empty for root)
+            field_type: Type of the object at this path
+        """
+        object.__setattr__(self, '_state', state)
+        object.__setattr__(self, '_path', path)
+        object.__setattr__(self, '_type', field_type)
+
+    def __getattr__(self, name: str) -> Any:
+        """Get field value or nested FieldProxy.
+
+        Args:
+            name: Field name to access
+
+        Returns:
+            FieldProxy for nested dataclass fields, or resolved value for leaf fields
+        """
+        new_path = f'{self._path}.{name}' if self._path else name
+
+        # Get field info from the type
+        if not is_dataclass(self._type):
+            type_name = getattr(self._type, '__name__', str(self._type))
+            raise AttributeError(f"{type_name} is not a dataclass")
+
+        field_info = None
+        for f in dataclass_fields(self._type):
+            if f.name == name:
+                field_info = f
+                break
+
+        if field_info is None:
+            type_name = getattr(self._type, '__name__', str(self._type))
+            raise AttributeError(f"{type_name} has no field '{name}'")
+
+        # Check if field is a nested dataclass
+        field_type = field_info.type
+
+        # Handle Optional[DataclassType]
+        from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
+        if isinstance(field_type, type) and ParameterTypeUtils.is_optional_dataclass(field_type):
+            nested_type = ParameterTypeUtils.get_optional_inner_type(field_type)
+            if isinstance(nested_type, type):
+                return FieldProxy(self._state, new_path, nested_type)
+
+        # Handle direct dataclass type
+        if isinstance(field_type, type) and is_dataclass(field_type):
+            return FieldProxy(self._state, new_path, field_type)
+
+        # Leaf field - get resolved value
+        return self._state.get_resolved_value(new_path)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        """Prevent attribute setting - use state.update_parameter() instead."""
+        _ = (name, value)  # Suppress unused warnings
+        raise AttributeError("FieldProxy is read-only. Use state.update_parameter(path, value) to set values.")
+
+
+class ObjectState:
+    """
+    Extracted MODEL from ParameterFormManager - pure Python state without PyQt dependencies.
+
+    Lifecycle:
+    - Created when object added to pipeline (before any UI)
+    - Persists until object removed from pipeline
+    - PFM attaches to ObjectState when editor opens, detaches when closed
+
+    Core Attributes (8 total):
+    - object_instance: Backing object (updated on Save)
+    - parameters: Mutable working copy (None = unset, value = user-set)
+    - _saved_resolved: Resolved snapshot at save time
+    - _live_resolved: Resolved snapshot using live hierarchy (None = needs compute)
+    - _invalid_fields: Fields needing partial recompute
+    - nested_states: Recursive containment
+    - _parent_state: Parent for context derivation
+    - scope_id: Scope for registry lookup
+
+    Everything else is derived:
+    - context_obj → _parent_state.object_instance
+    - dirty_fields → _live_resolved != _saved_resolved
+    - signature_diff_fields → parameters != signature defaults
+    - user_set_fields → {k for k,v in parameters.items() if v is not None}
+    """
+
+    def __init__(
+        self,
+        object_instance: Any,
+        scope_id: Optional[str] = None,
+        parent_state: Optional['ObjectState'] = None,
+        exclude_params: Optional[List[str]] = None,
+        initial_values: Optional[Dict[str, Any]] = None,
+    ):
+        """
+        Initialize ObjectState with minimal attributes.
+
+        Args:
+            object_instance: The object being edited (dataclass, callable, etc.)
+            scope_id: Scope identifier for filtering (e.g., "/path::step_0")
+            parent_state: Parent ObjectState for nested forms
+            exclude_params: Parameters to exclude from extraction (e.g., ['func'] for FunctionStep)
+            initial_values: Initial values to override extracted defaults (e.g., saved kwargs)
+        """
+        # === Core State (3 attributes) ===
+        self.object_instance = object_instance
+        # Use passed scope_id if provided, otherwise inherit from parent
+        # FunctionPane passes explicit scope_id for functions (step_scope::function_N)
+        # Nested dataclass configs may omit scope_id and inherit from parent
+        self.scope_id = scope_id if scope_id is not None else (parent_state.scope_id if parent_state else None)
+
+        # === Flat Storage (NEW - for flattened architecture) ===
+        self._path_to_type: Dict[str, type] = {}  # Maps dotted paths to their container types
+        self._cached_object: Optional[Any] = None  # Cached result of to_object()
+
+        # Extract parameters using FLAT extraction (dotted paths)
+        # This replaces the old UnifiedParameterAnalyzer + _create_nested_states() approach
+        self.parameters: Dict[str, Any] = {}
+        self._signature_defaults: Dict[str, Any] = {}
+
+        # Store excluded params and their original values for reconstruction
+        # e.g., FunctionStep excludes 'func' but we need it for to_object()
+        self._exclude_param_names: List[str] = list(exclude_params or [])  # For restore_saved()
+        self._excluded_params: Dict[str, Any] = {}
+        for param_name in self._exclude_param_names:
+            if hasattr(object_instance, param_name):
+                self._excluded_params[param_name] = getattr(object_instance, param_name)
+
+        # Flatten parameter extraction - walk nested dataclasses recursively
+        self._extract_all_parameters_flat(object_instance, prefix='', exclude_params=self._exclude_param_names)
+
+        # NOTE: Signature defaults are now populated by _extract_all_parameters_flat()
+        # for all fields including nested ones (flattened dotted paths).
+
+        # Apply initial_values overrides (e.g., saved kwargs for functions)
+        if initial_values:
+            self.parameters.update(initial_values)
+
+        # === Structure (1 attribute) ===
+        self._parent_state: Optional['ObjectState'] = parent_state
+        # NOTE: nested_states DELETED - flat storage eliminates nested ObjectState instances
+
+        # === Cache (3 attributes) ===
+        self._live_resolved: Optional[Dict[str, Any]] = None  # None = needs full compute
+        self._invalid_fields: Set[str] = set()  # Fields needing partial recompute
+        # Maps dotted_path → (source_scope_id, source_type) for inherited fields
+        # source_type may differ from local container_type due to MRO inheritance
+        self._live_provenance: Dict[str, Tuple[Optional[str], Optional[type]]] = {}
+
+        # === Saved baseline (2 attributes) ===
+        self._saved_resolved: Dict[str, Any] = {}
+        self._saved_parameters: Dict[str, Any] = {}  # Immutable snapshot for diff on restore
+
+        # === Materialized diffs (2 attributes) ===
+        self._dirty_fields: Set[str] = set()
+        self._signature_diff_fields: Set[str] = set()
+
+        # === Flags (kept for batch operations) ===
+        self._in_reset = False
+        self._block_cross_window_updates = False
+
+        # === State Change Callbacks ===
+        # Callbacks notified when materialized state changes (dirty/signature diffs)
+        self._on_state_changed_callbacks: List[Callable[[], None]] = []
+
+        # === Resolved Change Callbacks ===
+        # Callbacks notified when resolved values actually change (for UI flashing)
+        self._on_resolved_changed_callbacks: List[Callable[[Set[str]], None]] = []
+
+        # === Time-Travel Callbacks ===
+        # Callbacks notified when time-travel restores parameters (for widget refresh)
+        self._on_time_travel_callbacks: List[Callable[[], None]] = []
+
+        # === Time-Travel ===
+        # Instance-level time-travel removed - use ObjectStateRegistry class-level DAG instead
+
+        # Initialize baselines (suppress flash during init)
+        self._ensure_live_resolved(notify_flash=False)
+        assert self._live_resolved is not None  # Guaranteed by _ensure_live_resolved
+
+        # CRITICAL: Initialize _saved_parameters BEFORE _compute_resolved_snapshot(use_saved=True)
+        # because that method reads from _saved_parameters to get raw values.
+        self._saved_parameters = copy.deepcopy(self.parameters)
+
+        # CRITICAL: Compute saved_resolved using SAVED ancestor context, not LIVE.
+        # This ensures saved baseline represents "what would this object's values be
+        # if all ancestors were at their saved state", NOT "what are values right now
+        # with ancestor's unsaved edits baked in".
+        #
+        # If we used copy.deepcopy(_live_resolved), we'd bake in ancestor's unsaved
+        # edits, causing inverted dirty state when ancestor is saved/reset.
+        self._saved_resolved = self._compute_resolved_snapshot(use_saved=True)
+
+        # DEBUG: Log live vs saved at registration
+        logger.debug(f"🔵 INIT_RESOLVED: scope={self.scope_id!r} obj_type={type(self.object_instance).__name__}")
+        for k in sorted(self._live_resolved.keys()):
+            live_val = self._live_resolved.get(k)
+            saved_val = self._saved_resolved.get(k)
+            if live_val != saved_val:
+                logger.debug(f"🔵 INIT_DIFF: {k!r} live={live_val!r} saved={saved_val!r}")
+
+        # Materialize initial diff sets (no notification during init)
+        # Should be empty for new objects since saved = live
+        self._dirty_fields = self._compute_dirty_fields()
+        self._signature_diff_fields = self._compute_signature_diff_fields()
+
+        # NOTE: Don't record "init" snapshot here - each ObjectState would create a separate
+        # snapshot missing other ObjectStates created later. Instead, the first edit will
+        # record the baseline state automatically (see record_snapshot logic).
+
+    @property
+    def context_obj(self) -> Optional[Any]:
+        """Derive context_obj from parent_state (no separate attribute needed)."""
+        return self._parent_state.object_instance if self._parent_state else None
+
+    @property
+    def fields(self) -> FieldProxy:
+        """Type-safe field access via FieldProxy.
+
+        Returns:
+            FieldProxy for accessing fields with IDE autocomplete:
+            state.fields.well_filter_config.well_filter → resolved value
+        """
+        return FieldProxy(self, '', type(self.object_instance))
+
+    # === Resolved Change Subscription ===
+
+    def on_resolved_changed(self, callback: Callable[[Set[str]], None]) -> None:
+        """Subscribe to resolved value change notifications.
+
+        The callback is called when resolved values actually change (not just when
+        cache is invalidated). This enables UI components to flash/highlight
+        specific fields when their resolved values change.
+
+        Args:
+            callback: Function that takes a Set[str] of changed dotted paths.
+                      E.g., {'processing_config.group_by', 'well_filter_config.well_filter'}
+        """
+        if callback not in self._on_resolved_changed_callbacks:
+            self._on_resolved_changed_callbacks.append(callback)
+
+    def off_resolved_changed(self, callback: Callable[[Set[str]], None]) -> None:
+        """Unsubscribe from resolved value change notifications."""
+        if callback in self._on_resolved_changed_callbacks:
+            self._on_resolved_changed_callbacks.remove(callback)
+
+    def on_state_changed(self, callback: Callable[[], None]) -> None:
+        """Subscribe to materialized state change notifications (dirty/signature diffs)."""
+        if callback not in self._on_state_changed_callbacks:
+            self._on_state_changed_callbacks.append(callback)
+
+    def off_state_changed(self, callback: Callable[[], None]) -> None:
+        """Unsubscribe from materialized state change notifications."""
+        if callback in self._on_state_changed_callbacks:
+            self._on_state_changed_callbacks.remove(callback)
+
+    def _notify_state_changed(self) -> None:
+        """Fire state change callbacks (best-effort)."""
+        for callback in list(self._on_state_changed_callbacks):
+            try:
+                callback()
+            except Exception as e:
+                logger.warning(f"Error in state_changed callback: {e}")
+
+    def _ensure_live_resolved(self, notify_flash: bool = True) -> Set[str]:
+        """Ensure _live_resolved cache is populated.
+
+        PERFORMANCE: Field-level invalidation only.
+        - First access: full compute to populate cache
+        - After update_parameter(): only recompute invalid fields
+        - Cross-window access: return cached values directly (no work)
+
+        Args:
+            notify_flash: If True, fire on_resolved_changed callbacks for flash animations.
+                          Set to False during initialization to suppress flash.
+
+        Returns:
+            Set of paths that changed (for flash). Empty if no changes.
+
+        NOTE: This method handles CACHE + FLASH only. Caller handles _sync_materialized_state().
+        """
+        # First access - populate cache
+        if self._live_resolved is None:
+            self._live_resolved = self._compute_resolved_snapshot()
+            self._invalid_fields.clear()
+            return set()  # First populate - no "changes" to flash
+
+        # Partial recompute for invalid fields only
+        if self._invalid_fields:
+            changed_paths = self._recompute_invalid_fields()
+            self._invalid_fields.clear()
+
+            # Notify subscribers of which paths actually changed (flash events)
+            if notify_flash and changed_paths and self._on_resolved_changed_callbacks:
+                logger.debug(f"🔔 CALLBACK_LEAK_DEBUG: Notifying {len(self._on_resolved_changed_callbacks)} callbacks "
+                            f"for scope={self.scope_id}, changed_paths={changed_paths}")
+                for i, callback in enumerate(self._on_resolved_changed_callbacks):
+                    try:
+                        callback(changed_paths)
+                    except RuntimeError as e:
+                        # Qt widget was deleted - this indicates a leaked callback
+                        logger.warning(f"🔴 CALLBACK_LEAK_DEBUG: Dead callback #{i} detected! "
+                                     f"scope={self.scope_id}, error: {e}")
+                    except Exception as e:
+                        logger.warning(f"Error in resolved_changed callback #{i}: {e}")
+
+            return changed_paths
+
+        return set()  # No changes - cache was already valid
+
+    # DELETED: _create_nested_states() - No longer needed with flat storage
+    # Nested ObjectStates are no longer created - flat storage handles all parameters
+
+    def _get_nested_dataclass_type(self, param_type: Any) -> Optional[type]:
+        """Get the nested dataclass type if param_type is a nested dataclass.
+
+        Args:
+            param_type: The parameter type to check
+
+        Returns:
+            The dataclass type if nested, None otherwise
+        """
+        from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
+
+        # Check Optional[dataclass]
+        if ParameterTypeUtils.is_optional_dataclass(param_type):
+            return ParameterTypeUtils.get_optional_inner_type(param_type)
+
+        # Check direct dataclass (but not the type itself)
+        if is_dataclass(param_type) and not isinstance(param_type, type):
+            # param_type is an instance, not a type - shouldn't happen but handle it
+            return type(param_type)
+
+        if is_dataclass(param_type):
+            return param_type
+
+        return None
+
+    def reset_all_parameters(self) -> None:
+        """Reset all parameters to defaults."""
+        self._in_reset = True
+        try:
+            for param_name in list(self.parameters.keys()):
+                self.reset_parameter(param_name)
+        finally:
+            self._in_reset = False
+
+    def update_parameter(self, param_name: str, value: Any) -> None:
+        """Update parameter value in state.
+
+        Enforces invariants:
+        1. State mutation → scope+type+field aware cache invalidation
+        2. State mutation → global token increment (for live context cache)
+
+        PERFORMANCE: Three-tier filtering for minimal invalidation:
+        - SCOPE: Only descendants of this scope (they inherit from us)
+        - TYPE: Only states with this type in their tree
+        - FIELD: Only the specific field that changed
+
+        Args:
+            param_name: Name of parameter to update
+            value: New value
+        """
+        if param_name not in self.parameters:
+            return
+
+        # EARLY EXIT: No change, no invalidation, no flash
+        current_value = self.parameters[param_name]
+        if current_value == value:
+            return
+
+        # Update state directly (no type conversion - that's VIEW responsibility)
+        self.parameters[param_name] = value
+
+        # SELF-INVALIDATION: Mark this field as needing recompute in our own cache
+        self._invalid_fields.add(param_name)
+        self._cached_object = None  # Invalidate cached reconstructed object
+
+        # GLOBAL CONFIG EXCEPTION: Update LIVE thread-local FIRST, BEFORE invalidating descendants!
+        # This is critical: descendants re-resolve during invalidation, so they need to see
+        # the NEW value in the LIVE thread-local, not the old one.
+        obj_type = type(self.object_instance)
+        if getattr(obj_type, '_is_global_config', False):
+            try:
+                from openhcs.config_framework.global_config import set_live_global_config, get_live_global_config
+                from openhcs.config_framework.context_manager import clear_current_temp_global
+                from openhcs.config_framework.lazy_factory import replace_raw
+
+                # Get current LIVE config
+                current_live = get_live_global_config(obj_type)
+                if current_live is not None:
+                    # Do a quick partial update to set the new value in LIVE thread-local
+                    if '.' in param_name:
+                        # Nested field like 'well_filter_config.well_filter'
+                        parts = param_name.split('.')
+                        nested_config_name = parts[0]
+                        nested_field_name = '.'.join(parts[1:])
+
+                        # Get nested config using object.__getattribute__ to avoid lazy resolution
+                        try:
+                            nested_config = object.__getattribute__(current_live, nested_config_name)
+                        except AttributeError:
+                            nested_config = None
+
+                        if nested_config is not None and is_dataclass(nested_config):
+                            # Update the nested config with the new value
+                            updated_nested = replace_raw(nested_config, **{nested_field_name: value})
+                            # Update LIVE thread-local with the updated nested config
+                            temp_live = replace_raw(current_live, **{nested_config_name: updated_nested})
+                            set_live_global_config(obj_type, temp_live)
+                    else:
+                        # Top-level field
+                        temp_live = replace_raw(current_live, **{param_name: value})
+                        set_live_global_config(obj_type, temp_live)
+
+                # Clear cached context so resolution uses updated LIVE thread-local
+                clear_current_temp_global()
+
+                # DEBUG: Log well_filter value
+                if 'well_filter' in param_name:
+                    verify_live = get_live_global_config(obj_type)
+                    try:
+                        wf_value = object.__getattribute__(verify_live.well_filter_config, 'well_filter')
+                        logger.debug(f"🔍 LIVE thread-local updated BEFORE invalidation: {obj_type.__name__}.{param_name} = {value}, well_filter={wf_value}")
+                    except:
+                        pass
+            except Exception as e:
+                logger.warning(f"Failed to update LIVE thread-local: {e}")
+
+        # SCOPE + TYPE + FIELD AWARE INVALIDATION:
+        # Get the CONTAINER type for this field (e.g., WellFilterConfig for 'well_filter_config.well_filter')
+        # This is critical for sibling inheritance: when WellFilterConfig.well_filter changes,
+        # we need to invalidate PathPlanningConfig.well_filter (which inherits from WellFilterConfig)
+        container_type = self._path_to_type.get(param_name, type(self.object_instance))
+
+        # Extract leaf field name for invalidation matching
+        leaf_field_name = param_name.split('.')[-1] if '.' in param_name else param_name
+
+        # DEBUG: Log invalidation for well_filter
+        if 'well_filter' in param_name:
+            logger.debug(f"🔍 Invalidating descendants: scope={self.scope_id}, type={container_type.__name__}, field={leaf_field_name}")
+
+        ObjectStateRegistry.invalidate_by_type_and_scope(
+            scope_id=self.scope_id,
+            changed_type=container_type,
+            field_name=leaf_field_name
+        )
+
+        # Increment global token for LiveContextService.collect() cache invalidation
+        ObjectStateRegistry.increment_token(notify=False)
+
+        # Recompute live cache (flash events fire here)
+        self._ensure_live_resolved(notify_flash=True)
+        # Sync materialized state (single point for dirty/sig_diff update + notification)
+        self._sync_materialized_state()
+
+        # Record snapshot for time-travel (registry-level for coherent system history)
+        # ONLY for LEAF fields - skip containers (dataclass instances that have nested params)
+        # A field is a container if there are other params that start with "param_name."
+        is_container = any(
+            p.startswith(f"{param_name}.") for p in self.parameters.keys() if p != param_name
+        )
+        if not is_container:
+            ObjectStateRegistry.record_snapshot(f"edit {param_name}", self.scope_id)
+
+    def get_resolved_value(self, param_name: str) -> Any:
+        """Get resolved value for a field from the bulk snapshot.
+
+        Args:
+            param_name: Field name to resolve (can be dotted path like 'path_planning_config.well_filter')
+
+        Returns:
+            Resolved value from _live_resolved snapshot
+        """
+        self._ensure_live_resolved()
+        assert self._live_resolved is not None  # Guaranteed by _ensure_live_resolved
+        result = self._live_resolved.get(param_name)
+
+        # DEBUG: Log well_filter resolution
+        if 'well_filter' in param_name:
+            logger.debug(f"🔍 get_resolved_value: scope={self.scope_id!r}, obj_type={type(self.object_instance).__name__}, param={param_name}, value={result}")
+
+        return result
+
+    def get_provenance(self, param_name: str) -> Optional[Tuple[str, type]]:
+        """Get the source scope_id and type for an inherited field value.
+
+        For fields where the local value is None (inherited), returns the scope_id
+        of the ancestor that provided the value AND the type that has it.
+        Used for click-to-source navigation in the UI.
+
+        The source_type may differ from the local container type due to MRO inheritance.
+        For example, WellFilterConfig.well_filter might inherit from PathPlanningConfig.
+
+        NOTE: Returns provenance even when the resolved value is None (signature default).
+        A "concrete None" just means the class default is None and nothing overrode it.
+
+        Args:
+            param_name: Field name (can be dotted path like 'path_planning_config.well_filter')
+
+        Returns:
+            (source_scope_id, source_type): The scope and type that provided the value,
+            or None if the value is local (not inherited).
+        """
+        self._ensure_live_resolved()
+        result = self._live_provenance.get(param_name)
+        if result is None:
+            return None  # Field is local, not inherited
+        scope_id, source_type = result
+        if scope_id is None or source_type is None:
+            return None  # Field not found in hierarchy (shouldn't happen)
+        return (scope_id, source_type)
+
+    def find_path_for_type(self, container_type: type) -> Optional[str]:
+        """Find the path prefix for a container type in this ObjectState.
+
+        With flat storage, nested configs are identified by their path prefix.
+        Given a container type (e.g., PathPlanningConfig), returns the path prefix
+        (e.g., 'path_planning_config').
+
+        Handles type normalization: LazyPathPlanningConfig matches PathPlanningConfig.
+
+        Args:
+            container_type: The type to find the path for
+
+        Returns:
+            Path prefix for the type, or None if not found.
+            Returns "" (empty string) if type is the root object type.
+        """
+        from openhcs.config_framework.lazy_factory import get_base_type_for_lazy
+
+        # Normalize the container_type for comparison
+        container_base = get_base_type_for_lazy(container_type) or container_type
+
+        # Check if container_type matches the root object type
+        root_type = type(self.object_instance)
+        root_base = get_base_type_for_lazy(root_type) or root_type
+        if container_base == root_base:
+            return ""  # Root type has no prefix
+
+        # Look for paths where the TYPE matches (normalized comparison)
+        # The path for a nested config is the one WITHOUT a dot suffix that has the type
+        for path, typ in self._path_to_type.items():
+            typ_base = get_base_type_for_lazy(typ) or typ
+            if typ_base == container_base and '.' not in path:
+                return path
+
+        return None
+
+    def resolve_for_type(self, container_type: type, field_name: str) -> Any:
+        """Resolve a field value given the container type and field name.
+
+        Convenience method for callers who have a config object but don't know
+        its path in the flat storage. Finds the path prefix for the container type
+        and constructs the full dotted path.
+
+        Args:
+            container_type: Type of the containing config (e.g., PathPlanningConfig)
+            field_name: Field name within that config (e.g., 'well_filter')
+
+        Returns:
+            Resolved value, or None if not found
+        """
+        path_prefix = self.find_path_for_type(container_type)
+        if path_prefix is None:
+            # Type not found - try the field_name directly (top-level field)
+            return self.get_resolved_value(field_name)
+
+        full_path = f'{path_prefix}.{field_name}'
+        return self.get_resolved_value(full_path)
+
+    def invalidate_cache(self) -> None:
+        """Invalidate resolved cache - forces full recompute on next access."""
+        self._live_resolved = None
+        self._live_provenance = {}  # Provenance must be recomputed with resolved values
+        self._cached_object = None  # Also invalidate cached object
+
+    def invalidate_self_and_nested(self) -> None:
+        """Invalidate this state's cache.
+
+        With flat storage, no nested states to invalidate.
+        """
+        self._live_resolved = None
+        self._live_provenance = {}  # Provenance must be recomputed with resolved values
+        self._invalid_fields.clear()  # Full invalidation, not field-level
+        self._cached_object = None
+
+    def invalidate_field(self, field_name: str) -> None:
+        """Mark a specific field as needing recomputation.
+
+        PERFORMANCE: Field-level invalidation - only the changed field
+        needs recomputation, not all 20+ fields in the config.
+        """
+        if field_name in self.parameters:
+            self._invalid_fields.add(field_name)
+
+    def _recompute_invalid_fields(self) -> Set[str]:
+        """Recompute only the invalid fields, not the entire snapshot.
+
+        PERFORMANCE: For explicitly set values, use parameters directly.
+        Only build context stack for inherited (None) values.
+
+        Returns:
+            Set of paths whose resolved values actually changed (for UI notification).
+        """
+        from openhcs.config_framework.context_manager import build_context_stack
+
+        changed_paths: Set[str] = set()
+
+        # _live_resolved must exist when this is called (from _ensure_live_resolved)
+        if self._live_resolved is None:
+            return changed_paths
+
+        # Separate explicit vs inherited fields, skipping container entries
+        explicit_fields = []
+        inherited_fields = []
+        for name in self._invalid_fields:
+            if name not in self.parameters:
+                continue
+            # Skip container entries (value is a dataclass instance)
+            # Container entries are kept in parameters for UI rendering but excluded from snapshots
+            raw_value = self.parameters[name]
+            is_container = raw_value is not None and is_dataclass(type(raw_value))
+            if is_container:
+                continue
+            if raw_value is not None:
+                explicit_fields.append(name)
+            else:
+                inherited_fields.append(name)
+
+        # Explicit values: use parameters directly (no resolution needed)
+        for name in explicit_fields:
+            old_val = self._live_resolved.get(name)
+            explicit_val = self.parameters[name]
+            if old_val != explicit_val:
+                changed_paths.add(name)
+                logger.debug(
+                    f"RECOMPUTE EXPLICIT CHANGED [{self.scope_id}] {name}: "
+                    f"old={old_val!r} -> new={explicit_val!r}"
+                )
+            self._live_resolved[name] = explicit_val
+            # Clear provenance for explicit values - they're no longer inherited
+            if name in self._live_provenance:
+                del self._live_provenance[name]
+
+        # Inherited values: need context stack for lazy resolution + provenance
+        if inherited_fields:
+            from openhcs.config_framework.dual_axis_resolver import resolve_with_provenance
+
+            # Use _with_scopes version to enable provenance tracking via context_layer_stack
+            ancestor_objects_with_scopes = ObjectStateRegistry.get_ancestor_objects_with_scopes(self.scope_id)
+
+            # CRITICAL: Use to_object() to get CURRENT state with user edits,
+            # not object_instance which is the original/saved baseline.
+            # This ensures sibling field inheritance sees updated values.
+            current_obj = self.to_object()
+
+            stack = build_context_stack(
+                object_instance=current_obj,
+                ancestor_objects_with_scopes=ancestor_objects_with_scopes,
+                current_scope_id=self.scope_id,
+            )
+
+            with stack:
+                # For each inherited field, resolve using dual-axis resolution with provenance
+                for dotted_path in inherited_fields:
+                    container_type = self._path_to_type.get(dotted_path)
+                    if container_type is None:
+                        continue
+                    # Skip non-dataclass container types (e.g., built-in 'function' type
+                    # for primitive parameters of functions - these don't have lazy resolution)
+                    if not is_dataclass(container_type):
+                        continue
+                    parts = dotted_path.split('.')
+                    field_name = parts[-1]
+
+                    # Use resolve_with_provenance for SINGLE walk that gets both value AND source
+                    value, source_scope_id, source_type = resolve_with_provenance(container_type, field_name)
+
+                    old_val = self._live_resolved.get(dotted_path)
+                    if old_val != value:
+                        changed_paths.add(dotted_path)
+                        logger.debug(
+                            f"RECOMPUTE INHERITED CHANGED [{self.scope_id}] {dotted_path}: "
+                            f"old={old_val!r} -> new={value!r}"
+                        )
+                    self._live_resolved[dotted_path] = value
+
+                    # Update provenance for this field
+                    self._live_provenance[dotted_path] = (source_scope_id, source_type)
+
+        return changed_paths
+
+    def reset_parameter(self, param_name: str) -> None:
+        """Reset parameter to signature default (None for lazy dataclasses).
+
+        Delegates to update_parameter() to ensure consistent invalidation behavior.
+        """
+        if param_name not in self.parameters:
+            return
+
+        # Use signature defaults (CLASS defaults), not instance values
+        # This ensures reset goes back to None for lazy fields, not saved concrete values
+        default_value = self._signature_defaults.get(param_name)
+        self.update_parameter(param_name, default_value)
+
+
+
+    def get_current_values(self) -> Dict[str, Any]:
+        """
+        Get current parameter values from state.
+
+        With flat storage, this returns the flat dict with dotted paths.
+        Callers needing nested structure should use to_object() instead.
+
+        For ObjectState, this reads directly from self.parameters.
+        PFM overrides this to also read from widgets.
+        """
+        return dict(self.parameters)
+
+    # ==================== MATERIALIZED DIFFS ====================
+
+    @property
+    def dirty_fields(self) -> Set[str]:
+        """Fields where resolved_live != resolved_saved."""
+        return self._dirty_fields
+
+    @property
+    def signature_diff_fields(self) -> Set[str]:
+        """Fields where raw != signature_default."""
+        return self._signature_diff_fields
+
+    def _compute_dirty_fields(self) -> Set[str]:
+        """Compute dirty set from live vs saved caches."""
+        if self._live_resolved is None:
+            return set()
+        dirty = set()
+        for k in (self._live_resolved.keys() | self._saved_resolved.keys()):
+            live_val = self._live_resolved.get(k)
+            saved_val = self._saved_resolved.get(k)
+            if live_val != saved_val:
+                dirty.add(k)
+                logger.debug(f"🔴 DIRTY_FIELD: scope={self.scope_id!r} field={k!r} live={live_val!r} saved={saved_val!r}")
+        if dirty:
+            logger.debug(f"🔴 DIRTY_SUMMARY: scope={self.scope_id!r} dirty_fields={dirty}")
+        return dirty
+
+    def _compute_signature_diff_fields(self) -> Set[str]:
+        """Compute signature-diff set from parameters vs defaults.
+
+        Only includes LEAF fields (those with signature defaults).
+        Nested dataclass container fields are excluded since they're not
+        directly editable values.
+
+        For steps: only includes fields INSIDE nested dataclass configs (has '.' in path),
+        not top-level step fields like name/func/enabled which are always set explicitly.
+        """
+        # Check if this is a step (has AbstractStep in MRO)
+        from openhcs.core.steps.abstract import AbstractStep
+        is_step = isinstance(self.object_instance, type) and issubclass(self.object_instance, AbstractStep) \
+                  or isinstance(self.object_instance, AbstractStep)
+
+        return {
+            k for k, v in self.parameters.items()
+            if k in self._signature_defaults
+            and (not is_step or '.' in k)  # For steps: only nested config fields
+            and v != self._signature_defaults[k]
+        }
+
+    def _update_dirty_fields(self) -> bool:
+        """Recompute _dirty_fields, return True if changed."""
+        new_dirty = self._compute_dirty_fields()
+        if new_dirty != self._dirty_fields:
+            self._dirty_fields = new_dirty
+            return True
+        return False
+
+    def _update_signature_diff_fields(self) -> bool:
+        """Recompute _signature_diff_fields, return True if changed."""
+        new_sig_diff = self._compute_signature_diff_fields()
+        if new_sig_diff != self._signature_diff_fields:
+            self._signature_diff_fields = new_sig_diff
+            return True
+        return False
+
+    def _sync_materialized_state(self) -> None:
+        """Single point where materialized diffs are recomputed and notified.
+
+        Call this after ANY mutation that could affect:
+        - _live_resolved (affects dirty_fields)
+        - _saved_resolved (affects dirty_fields)
+        - parameters (affects signature_diff_fields)
+
+        Correctness guarantee: All mutation paths call this ONE method.
+        """
+        dirty_changed = self._update_dirty_fields()
+        sig_diff_changed = self._update_signature_diff_fields()
+        if dirty_changed or sig_diff_changed:
+            self._notify_state_changed()
+
+    # ==================== SAVED STATE / DIRTY TRACKING ====================
+
+    def _compute_resolved_snapshot(self, use_saved: bool = False) -> Dict[str, Any]:
+        """Resolve all fields for this state into a snapshot dict.
+
+        PERFORMANCE: Build context stack ONCE and resolve ALL fields in bulk (not per-field).
+
+        UNIFIED: Works for ANY object_instance type (dataclass, class instance, callable).
+        Root object type doesn't matter - we iterate paths and check _path_to_type for each.
+
+        Args:
+            use_saved: If True, resolve using saved baselines (object_instance) instead of
+                       live state (to_object()). Used for computing _saved_resolved to ensure
+                       saved baseline only depends on other saved baselines.
+        """
+        from openhcs.config_framework.context_manager import build_context_stack
+        from openhcs.config_framework.dual_axis_resolver import resolve_with_provenance
+
+        # Get ancestor objects WITH scope_ids for provenance tracking
+        # use_saved=True returns object_instance (saved), False returns to_object() (live)
+        ancestor_objects_with_scopes = ObjectStateRegistry.get_ancestor_objects_with_scopes(
+            self.scope_id, use_saved=use_saved
+        )
+
+        # Use saved baseline or live state for this object
+        if use_saved:
+            current_obj = self.object_instance
+        else:
+            # CRITICAL: Use to_object() to get CURRENT state with user edits,
+            # not object_instance which is the original/saved baseline.
+            current_obj = self.to_object()
+
+        # Build context stack ONCE with scope_ids for provenance tracking
+        # CRITICAL: use_live must match use_saved to ensure global config layer
+        # uses SAVED thread-local when computing saved baselines
+        stack = build_context_stack(
+            object_instance=current_obj,
+            ancestor_objects_with_scopes=ancestor_objects_with_scopes,
+            current_scope_id=self.scope_id,
+            use_live=not use_saved,
+        )
+
+        snapshot: Dict[str, Any] = {}
+        provenance: Dict[str, Tuple[Optional[str], Optional[type]]] = {}
+
+        # CRITICAL: When computing saved_resolved, use _saved_parameters for raw values.
+        # This ensures saved_resolved represents "what was last saved locally" + ancestor saved values,
+        # NOT "current live edits resolved with saved ancestor context".
+        # This is key for dirty detection: dirty = live_resolved != saved_resolved
+        params_source = self._saved_parameters if use_saved else self.parameters
+
+        # UNIFIED: Resolve ALL fields in single context stack
+        # For each path, check if it has a lazy dataclass container type
+        with stack:
+            for dotted_path in self.parameters.keys():
+                raw_value = params_source.get(dotted_path)
+                container_type = self._path_to_type.get(dotted_path)
+                parts = dotted_path.split('.')
+
+                # Check if this path is a CONTAINER entry (value is a nested dataclass)
+                # vs a LEAF field (value is primitive, even if container_type is a dataclass)
+                is_container_entry = raw_value is not None and is_dataclass(type(raw_value))
+
+                if is_container_entry:
+                    # Container-level entry - SKIP from snapshot
+                    # Containers are kept in parameters for UI rendering but excluded from
+                    # dirty comparison since we compare leaf fields instead
+                    pass
+                elif container_type is not None and is_dataclass(container_type):
+                    # Leaf field inside a lazy dataclass - resolve value AND provenance in ONE walk
+                    # This handles both:
+                    # - Nested fields (processing_config.group_by) where parts > 1
+                    # - Top-level fields on root (num_workers on PipelineConfig) where parts == 1
+                    field_name = parts[-1]
+
+                    if raw_value is None:
+                        # Field needs resolution - use combined resolve + provenance walk
+                        resolved_val, source_scope, source_type = resolve_with_provenance(container_type, field_name)
+                        snapshot[dotted_path] = resolved_val
+
+                        # Track provenance for inherited values (live only)
+                        # Store (scope_id, source_type) tuple so UI can find the correct path
+                        if not use_saved:
+                            provenance[dotted_path] = (source_scope, source_type)
+                    else:
+                        # Field has concrete local value - no resolution needed
+                        resolved_val = raw_value
+                        snapshot[dotted_path] = resolved_val
+
+                    logger.debug(
+                        f"SNAPSHOT [{self.scope_id}] {dotted_path}: "
+                        f"raw={raw_value!r} -> resolved={resolved_val!r} (type={type(resolved_val).__name__})"
+                    )
+                else:
+                    # Non-dataclass field - use raw value directly
+                    snapshot[dotted_path] = raw_value
+
+        # Store provenance for live resolution (not saved)
+        if not use_saved:
+            self._live_provenance = provenance
+
+        return snapshot
+
+    def mark_saved(self) -> None:
+        """Mark current state as saved baseline.
+
+        UNIFIED: Works for any object_instance type.
+
+        CRITICAL: Invalidates descendant caches for any parameters that changed.
+        This ensures that when saving, other windows that inherited from the
+        old saved values get their caches invalidated so they pick up new values.
+        This mirrors what restore_saved() does but in the opposite direction.
+
+        Invalidation is based on comparing the OLD object_instance (about to be replaced)
+        with the NEW self.parameters (live values used for reconstruction).
+        """
+        # Ensure live cache is populated for accurate dirty computation post-save
+        self._ensure_live_resolved(notify_flash=False)
+
+        # CRITICAL: Extract old values from object_instance BEFORE rebuilding it
+        # These are the values that descendants might be inheriting from
+        old_instance_values = {}
+        if not isinstance(self.object_instance, type):
+            # Extract raw attribute values from the old object_instance
+            for param_name in self.parameters.keys():
+                # Skip container entries (nested dataclass instances)
+                if param_name in self.parameters:
+                    raw_value = self.parameters.get(param_name)
+                    is_container = raw_value is not None and is_dataclass(type(raw_value))
+                    if is_container:
+                        continue
+
+                # Get the old value from object_instance by navigating dotted path
+                try:
+                    # Navigate through nested attributes for dotted paths
+                    obj = self.object_instance
+                    parts = param_name.split('.')
+                    for part in parts:
+                        obj = object.__getattribute__(obj, part)
+                    old_instance_values[param_name] = obj
+                except AttributeError:
+                    # Field doesn't exist on object_instance, skip it
+                    pass
+
+        # Find parameters that differ between old object_instance and new live parameters
+        # These are the fields that changed and need descendant invalidation
+        changed_params = []
+        for param_name in self.parameters.keys():
+            # Skip container entries
+            raw_value = self.parameters.get(param_name)
+            is_container = raw_value is not None and is_dataclass(type(raw_value))
+            if is_container:
+                continue
+
+            old_value = old_instance_values.get(param_name)
+            new_value = self.parameters.get(param_name)
+            if old_value != new_value:
+                changed_params.append(param_name)
+
+        # CRITICAL: Rebuild object_instance BEFORE invalidating descendants
+        # Descendants will recompute using parent's object_instance, so it must have new values!
+        if not isinstance(self.object_instance, type):
+            # Update object_instance with current parameters
+            # to_object() already handles all types uniformly
+            self.object_instance = self.to_object()
+
+        # Update saved parameters (after object_instance update, before invalidation)
+        self._saved_parameters = copy.deepcopy(self.parameters)
+
+        # NOW invalidate descendant caches AFTER object_instance is updated
+        # This ensures descendants see the NEW object_instance when they recompute
+        # CRITICAL: Also invalidate saved_resolved cache so descendants recompute their saved baseline
+        for param_name in changed_params:
+            container_type = self._path_to_type.get(param_name, type(self.object_instance))
+            leaf_field_name = param_name.split('.')[-1] if '.' in param_name else param_name
+
+            ObjectStateRegistry.invalidate_by_type_and_scope(
+                scope_id=self.scope_id,
+                changed_type=container_type,
+                field_name=leaf_field_name,
+                invalidate_saved=True  # Invalidate saved baseline for descendants
+            )
+
+        # Compute new saved resolved using SAVED ancestor baselines (use_saved=True)
+        # This ensures saved baseline is computed relative to other saved baselines
+        new_saved_resolved = self._compute_resolved_snapshot(use_saved=True)
+
+        # Update saved resolved baseline
+        self._saved_resolved = new_saved_resolved
+
+        # Invalidate cached object so next to_object() call rebuilds
+        self._cached_object = None
+
+        # Sync materialized state (single point for dirty/sig_diff update + notification)
+        self._sync_materialized_state()
+
+        # Record snapshot for time-travel (registry-level)
+        ObjectStateRegistry.record_snapshot("save", self.scope_id)
+
+    def restore_saved(self) -> None:
+        """Restore parameters to the last saved baseline (from object_instance).
+
+        UNIFIED: Works for any object_instance type.
+
+        CRITICAL: Invalidates descendant caches for any parameters that changed.
+        This ensures that when closing a window without saving, other windows
+        that inherited from the unsaved values get their caches invalidated.
+
+        Also emits on_resolved_changed for THIS state so same-level observers
+        (like list items subscribed to this ObjectState) flash when values revert.
+        """
+        if isinstance(self.object_instance, type):
+            self.invalidate_cache()
+            self._sync_materialized_state()
+            return
+
+        # Find parameters that differ from saved baseline AND capture their container types
+        # BEFORE clearing parameters (we need _path_to_type)
+        changed_params_with_types = []
+        for param_name, current_value in self.parameters.items():
+            saved_value = self._saved_parameters.get(param_name)
+            if current_value != saved_value:
+                container_type = self._path_to_type.get(param_name, type(self.object_instance))
+                leaf_field_name = param_name.split('.')[-1] if '.' in param_name else param_name
+                changed_params_with_types.append((param_name, container_type, leaf_field_name))
+
+        # Clear and re-extract from object_instance (the saved version)
+        # CRITICAL: Pass exclude_params to ensure excluded fields stay excluded
+        # Do this BEFORE invalidating descendants so they see restored values
+        self.parameters.clear()
+        self._path_to_type.clear()
+        self._extract_all_parameters_flat(self.object_instance, prefix='', exclude_params=self._exclude_param_names)
+
+        self.invalidate_cache()
+
+        # NOW invalidate descendant caches for each changed parameter
+        # This must happen AFTER restoring parameters so descendants see restored values
+        for param_name, container_type, leaf_field_name in changed_params_with_types:
+            ObjectStateRegistry.invalidate_by_type_and_scope(
+                scope_id=self.scope_id,
+                changed_type=container_type,
+                field_name=leaf_field_name
+            )
+
+        # Emit on_resolved_changed for changed params so SAME-LEVEL observers flash
+        # (e.g., list item subscribed to this ObjectState sees the revert as a change)
+        if changed_params_with_types and self._on_resolved_changed_callbacks:
+            changed_paths = {param_name for param_name, _, _ in changed_params_with_types}
+            logger.debug(f"🔔 CALLBACK_LEAK_DEBUG: restore_saved notifying {len(self._on_resolved_changed_callbacks)} callbacks "
+                        f"for scope={self.scope_id}, changed_paths={changed_paths}")
+            for i, callback in enumerate(self._on_resolved_changed_callbacks):
+                try:
+                    callback(changed_paths)
+                except RuntimeError as e:
+                    # Qt widget was deleted - this indicates a leaked callback
+                    logger.warning(f"🔴 CALLBACK_LEAK_DEBUG: Dead callback #{i} in restore_saved! "
+                                 f"scope={self.scope_id}, error: {e}")
+                except Exception as e:
+                    logger.warning(f"Error in resolved_changed callback #{i} during restore: {e}")
+
+        # Sync materialized state (single point for dirty/sig_diff update + notification)
+        self._sync_materialized_state()
+
+        # Record snapshot for time-travel (registry-level) - ONLY if there were changes
+        if changed_params_with_types:
+            ObjectStateRegistry.record_snapshot("restore", self.scope_id)
+
+    def should_skip_updates(self) -> bool:
+        """Check if updates should be skipped due to batch operations."""
+        return self._in_reset or self._block_cross_window_updates
+
+    def update_thread_local_global_config(self):
+        """Update thread-local GlobalPipelineConfig with current form values.
+
+        LIVE UPDATES ARCHITECTURE:
+        Called on every parameter change when editing GlobalPipelineConfig.
+        Updates thread-local storage so other windows see changes immediately.
+        Original config is stored by ConfigWindow and restored on Cancel.
+        """
+        from openhcs.core.config import GlobalPipelineConfig
+        from openhcs.config_framework.global_config import set_global_config_for_editing
+
+        try:
+            # CRITICAL: Use to_object() to properly reconstruct nested structure from flat storage
+            # This ensures None values in nested configs (like well_filter_config.well_filter)
+            # are properly preserved and propagated to descendants.
+            # The old approach using get_current_values() + replace_raw() failed because:
+            # 1. get_current_values() returns flat dict with dotted paths ('well_filter_config.well_filter': None)
+            # 2. replace_raw() expects top-level field names, not dotted paths
+            # 3. This caused None values in nested configs to not be properly set in thread-local storage
+            updated_config = self.to_object()
+
+            # DEBUG: Log what we're about to set
+            raw_well_filter = object.__getattribute__(updated_config.well_filter_config, 'well_filter')
+            logger.debug(f"🔍 LIVE_UPDATES: to_object() returned well_filter={raw_well_filter}")
+            logger.debug(f"🔍 LIVE_UPDATES: Flat storage has well_filter_config.well_filter={self.parameters.get('well_filter_config.well_filter')}")
+
+            set_global_config_for_editing(GlobalPipelineConfig, updated_config)
+            logger.debug(f"🔍 LIVE_UPDATES: Updated thread-local GlobalPipelineConfig")
+        except Exception as e:
+            logger.warning(f"🔍 LIVE_UPDATES: Failed to update thread-local GlobalPipelineConfig: {e}")
+
+    # ==================== FLAT STORAGE METHODS (NEW) ====================
+
+    def _extract_all_parameters_flat(self, obj: Any, prefix: str = '', exclude_params: Optional[List[str]] = None) -> None:
+        """Recursively extract parameters into flat dict with dotted paths.
+
+        Populates self.parameters and self._path_to_type with dotted path keys.
+
+        UNIFIED PATH: Uses UnifiedParameterAnalyzer for ALL object types.
+        UnifiedParameterAnalyzer already handles both dataclasses and non-dataclasses
+        via its internal routing (MRO traversal for regular classes, dataclass_fields for dataclasses).
+
+        Args:
+            obj: Object to extract from (dataclass instance OR regular object like FunctionStep)
+            prefix: Current path prefix (e.g., 'well_filter_config')
+            exclude_params: List of top-level parameter names to exclude
+        """
+        from openhcs.introspection.unified_parameter_analyzer import UnifiedParameterAnalyzer
+
+        exclude_params = exclude_params or []
+        obj_type = type(obj)
+        is_function = obj_type.__name__ == 'function'
+
+        # UNIFIED: Use UnifiedParameterAnalyzer for ALL object types
+        # It already handles dataclasses vs non-dataclasses internally
+        param_info = UnifiedParameterAnalyzer.analyze(obj, exclude_params=exclude_params if not prefix else [])
+
+        for param_name, info in param_info.items():
+            # Skip excluded parameters (only at top level)
+            if not prefix and param_name in exclude_params:
+                continue
+
+            # Build dotted path
+            dotted_path = f'{prefix}.{param_name}' if prefix else param_name
+
+            # Get current value
+            if is_function:
+                # For functions: use signature default from UnifiedParameterAnalyzer
+                # (functions don't have instance attributes)
+                current_value = info.default_value
+            else:
+                # For class instances: bypass lazy resolution via object.__getattribute__
+                try:
+                    current_value = object.__getattribute__(obj, param_name)
+                except AttributeError:
+                    current_value = info.default_value
+
+            # Check if this is a nested dataclass
+            # First try from type annotation, then fall back to checking actual value
+            nested_type = self._get_nested_dataclass_type(info.param_type)
+
+            # For functions with injected params, param_type may be Any but value is dataclass
+            # Use is_dataclass on the TYPE, not the value (to avoid triggering lazy resolution)
+            if nested_type is None and current_value is not None:
+                value_type = type(current_value)
+                if is_dataclass(value_type):
+                    nested_type = value_type
+
+            if nested_type is not None and current_value is not None:
+                # Store the nested config type reference at this path
+                self._path_to_type[dotted_path] = nested_type
+
+                # Store the nested dataclass instance in parameters (needed for UI rendering)
+                self.parameters[dotted_path] = current_value
+
+                # Recurse into nested dataclass for child fields
+                self._extract_all_parameters_flat(current_value, prefix=dotted_path, exclude_params=[])
+            else:
+                # Leaf field - store value and container type
+                self.parameters[dotted_path] = current_value
+                # Store the CONTAINER type (the type that has this field)
+                self._path_to_type[dotted_path] = obj_type
+                # Store signature default for reset functionality (flattened)
+                # info.default_value is now guaranteed to be the CLASS signature default
+                self._signature_defaults[dotted_path] = info.default_value
+
+    def to_object(self) -> Any:
+        """Reconstruct object from flat parameters with updated nested configs.
+
+        BOUNDARY METHOD - EXPENSIVE - only call at system boundaries:
+        - Save operation
+        - Execute operation
+        - Serialization
+
+        UNIFIED: Works for ANY object_instance type.
+        - Python functions: can't copy, return original
+        - Everything else: shallow copy + reconstruct nested dataclass fields
+        """
+        if self._cached_object is not None:
+            return self._cached_object
+
+        # UNIFIED: reconstruct nested dataclass fields
+        # Works for dataclass, non-dataclass class instances, AND functions
+        import copy
+
+        # Collect ALL top-level field updates from self.parameters
+        # This includes both primitive fields AND nested dataclass fields
+        field_updates = {}
+        root_type = type(self.object_instance)
+        for field_name in self._path_to_type:
+            if '.' not in field_name:
+                # Check if this field's TYPE is a dataclass (not the instance value)
+                # We need to check the TYPE because the instance value might be stale
+                # (e.g., self.parameters['well_filter_config'] might have well_filter=2
+                # even though self.parameters['well_filter_config.well_filter'] = None)
+                field_type = self._path_to_type.get(field_name)
+                # CRITICAL FIX: _path_to_type stores CONTAINER type for leaf fields,
+                # but FIELD type for nested dataclass fields. We must distinguish:
+                # - If field_type == root_type, it's a leaf field (container type stored)
+                # - If field_type != root_type AND is_dataclass, it's a nested dataclass
+                is_nested_dataclass = (
+                    field_type is not None and
+                    is_dataclass(field_type) and
+                    field_type != root_type  # Not the container type
+                )
+                if is_nested_dataclass:
+                    # Nested dataclass: ALWAYS recursively reconstruct from flat storage
+                    # This ensures we pick up changes to nested fields like 'well_filter_config.well_filter'
+                    field_updates[field_name] = self._reconstruct_from_prefix(field_name)
+                else:
+                    # Primitive field: use value directly from parameters
+                    value = self.parameters.get(field_name)
+                    field_updates[field_name] = value
+
+        # Python functions can't be copied, but we CAN update their attributes
+        # This is critical for MRO resolution to see edited config values
+        if type(self.object_instance).__name__ == 'function':
+            for field_name, field_value in field_updates.items():
+                setattr(self.object_instance, field_name, field_value)
+            self._cached_object = self.object_instance
+        elif is_dataclass(self.object_instance):
+            # CRITICAL: Use replace_raw to preserve raw None values!
+            # dataclasses.replace triggers lazy resolution via __getattribute__,
+            # which resolves None -> concrete defaults and breaks inheritance.
+            from openhcs.config_framework.lazy_factory import replace_raw
+            self._cached_object = replace_raw(self.object_instance, **field_updates)
+        else:
+            # Non-dataclass class instance - shallow copy + setattr
+            obj_copy = copy.copy(self.object_instance)
+            for field_name, field_value in field_updates.items():
+                setattr(obj_copy, field_name, field_value)
+            self._cached_object = obj_copy
+
+        return self._cached_object
+
+    def _reconstruct_from_prefix(self, prefix: str) -> Any:
+        """Recursively reconstruct dataclass from flat parameters.
+
+        Args:
+            prefix: Current path prefix (e.g., 'well_filter_config')
+
+        Returns:
+            Reconstructed dataclass instance
+        """
+        # Determine the type to reconstruct
+        if not prefix:
+            # Root level - use object_instance type
+            obj_type = type(self.object_instance)
+        else:
+            # Nested level - look up type from _path_to_type
+            obj_type = self._path_to_type.get(prefix)
+            if obj_type is None:
+                raise ValueError(f"No type mapping for prefix: {prefix}")
+
+        prefix_dot = f'{prefix}.' if prefix else ''
+
+        # Collect direct fields and nested prefixes
+        direct_fields = {}
+        nested_prefixes = set()
+
+        for path, value in self.parameters.items():
+            if not path.startswith(prefix_dot):
+                continue
+
+            remainder = path[len(prefix_dot):]
+
+            if '.' in remainder:
+                # This is a nested field - collect the first component
+                first_component = remainder.split('.')[0]
+                nested_prefixes.add(first_component)
+            else:
+                # Direct field of this object
+                direct_fields[remainder] = value
+                # DEBUG
+                if prefix == 'well_filter_config' and remainder == 'well_filter':
+                    logger.debug(f"🔍 _reconstruct: Found direct field {prefix}.{remainder} = {value}")
+
+        # Reconstruct nested dataclasses first
+        for nested_name in nested_prefixes:
+            nested_path = f'{prefix_dot}{nested_name}'
+            nested_obj = self._reconstruct_from_prefix(nested_path)
+            direct_fields[nested_name] = nested_obj
+
+        # CRITICAL: Do NOT filter out None values!
+        # In OpenHCS, None has semantic meaning: "inherit from parent context"
+        # When a user explicitly resets a field to None, we MUST pass that None
+        # to the dataclass constructor so lazy resolution can walk up the MRO.
+        # Filtering None would cause the dataclass to use its class-level default
+        # instead of the user's explicit None, breaking inheritance.
+
+        # At root level, include excluded params (e.g., 'func' for FunctionStep)
+        # These are required for construction but excluded from editing
+        if not prefix:
+            direct_fields.update(self._excluded_params)
+
+        # DEBUG: Log what we're reconstructing
+        if prefix == 'well_filter_config':
+            logger.debug(f"🔍 _reconstruct_from_prefix: prefix={prefix}, direct_fields={direct_fields}")
+
+        # Instantiate the dataclass with ALL fields including None values
+        result = obj_type(**direct_fields)
+
+        # DEBUG: Log the result
+        if prefix == 'well_filter_config':
+            raw_well_filter = object.__getattribute__(result, 'well_filter')
+            logger.debug(f"🔍 _reconstruct_from_prefix: Reconstructed {prefix} with well_filter={raw_well_filter}")
+
+        return result

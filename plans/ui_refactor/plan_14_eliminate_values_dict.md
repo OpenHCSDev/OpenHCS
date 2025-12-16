@@ -162,5 +162,28 @@ graph TD
 
 ### Implementation Draft
 
-*To be written after smell review passes.*
+**Status: COMPLETE**
+
+All phases implemented:
+
+1. **Phase 1** - `LiveContextSnapshot` simplified to `token` + `scopes` fields
+2. **Phase 2** - `collect()` now takes zero parameters, `_is_scope_visible()` removed
+3. **Phase 3** - Added `merge_ancestor_values()` static method helper
+4. **Phase 4** - Updated all consumers:
+   - `pipeline_editor.py` - uses `snapshot.scopes.get()`
+   - `parameter_ops_service.py` - uses `merge_ancestor_values()`
+   - `widget_service.py` - uses `merge_ancestor_values()`
+   - `function_list_editor.py` - uses `merge_ancestor_values()`
+   - `plate_manager.py` - uses parameterless `collect_live_context()`
+   - `abstract_manager_widget.py` - uses `merge_ancestor_values()`
+
+**Files modified:**
+- `openhcs/pyqt_gui/widgets/shared/services/live_context_service.py`
+- `openhcs/pyqt_gui/widgets/shared/parameter_form_manager.py`
+- `openhcs/pyqt_gui/widgets/shared/services/parameter_ops_service.py`
+- `openhcs/pyqt_gui/widgets/shared/services/widget_service.py`
+- `openhcs/pyqt_gui/widgets/pipeline_editor.py`
+- `openhcs/pyqt_gui/widgets/function_list_editor.py`
+- `openhcs/pyqt_gui/widgets/plate_manager.py`
+- `openhcs/pyqt_gui/widgets/shared/abstract_manager_widget.py`
 

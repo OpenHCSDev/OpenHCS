@@ -5,42 +5,39 @@ Embeddable chat panel for LLM-powered code generation.
 Can be integrated into any code editor or dialog.
 """
 
+import html
 import logging
-from typing import Optional, Callable
+from typing import Optional
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton,
-    QLabel, QMessageBox
+    QLabel, QMessageBox, QDialog, QFormLayout, QLineEdit, QDialogButtonBox,
+    QComboBox
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtGui import QFont
 
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 from openhcs.pyqt_gui.services.llm_pipeline_service import LLMPipelineService
+from openhcs.pyqt_gui.widgets.shared.background_task import BackgroundTaskManager
+from openhcs.pyqt_gui.widgets.shared.status_indicator import StatusIndicator, StatusState
+from openhcs.pyqt_gui.widgets.shared.rich_text_appender import RichTextAppender
 
 logger = logging.getLogger(__name__)
 
 
-class LLMGenerationThread(QThread):
-    """Background thread for LLM generation to keep UI responsive."""
+class LLMStatusIndicator(StatusIndicator):
+    """StatusIndicator that also controls generate button enable/disable."""
 
-    finished = pyqtSignal(str)  # Emits generated code
-    error = pyqtSignal(str)     # Emits error message
+    def __init__(self, generate_button: QPushButton, **kwargs):
+        self._generate_button = generate_button
+        super().__init__(**kwargs)
 
-    def __init__(self, service: LLMPipelineService, user_request: str, code_type: str):
-        super().__init__()
-        self.service = service
-        self.user_request = user_request
-        self.code_type = code_type
-
-    def run(self):
-        """Execute LLM generation in background."""
-        try:
-            generated_code = self.service.generate_code(self.user_request, self.code_type)
-            self.finished.emit(generated_code)
-        except Exception as e:
-            self.error.emit(str(e))
+    def set_state(self, state: StatusState, message: str = None):
+        super().set_state(state, message)
+        # Only enable generate when connected
+        self._generate_button.setEnabled(state == StatusState.CONNECTED)
 
 
 class LLMChatPanel(QWidget):
@@ -51,51 +48,72 @@ class LLMChatPanel(QWidget):
     Emits signal when code is generated for parent to handle insertion.
     """
 
-    # Signal emitted when code is generated
     code_generated = pyqtSignal(str)
 
     def __init__(self, parent=None, color_scheme: Optional[PyQt6ColorScheme] = None,
                  code_type: str = None):
-        """
-        Initialize chat panel.
-
-        Args:
-            parent: Parent widget
-            color_scheme: Color scheme for consistent styling
-            code_type: Type of code being edited ('pipeline', 'step', 'config', etc.)
-        """
         super().__init__(parent)
 
         self.color_scheme = color_scheme or PyQt6ColorScheme()
         self.style_generator = StyleSheetGenerator(self.color_scheme)
         self.code_type = code_type
         self.llm_service = LLMPipelineService()
-        self.generation_thread: Optional[LLMGenerationThread] = None
 
-        self.setup_ui()
-        self.setup_connections()
+        # State
+        self._pending_code: Optional[str] = None
+        self._last_request: Optional[str] = None
 
-    def setup_ui(self):
-        """Setup UI components."""
+        # Abstractions from plan_00
+        self._generation_tasks = BackgroundTaskManager()
+
+        self._setup_ui()
+        self._setup_connections()
+
+    def _setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(5, 5, 5, 5)
         layout.setSpacing(5)
 
-        # Title label
+        # --- Header: Title + Status Indicator ---
         context_name = {
-            'pipeline': 'Pipeline',
-            'step': 'Step',
-            'config': 'Config',
-            'function': 'Function',
-            'orchestrator': 'Orchestrator'
+            'pipeline': 'Pipeline', 'step': 'Step', 'config': 'Config',
+            'function': 'Function', 'orchestrator': 'Orchestrator'
         }.get(self.code_type, 'Code')
+
+        header_layout = QHBoxLayout()
+        header_layout.setSpacing(8)
 
         title = QLabel(f"LLM Assist - {context_name}")
         title.setFont(QFont("Arial", 9, QFont.Weight.Bold))
         title.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_primary)};")
-        layout.addWidget(title)
+        header_layout.addWidget(title)
+        header_layout.addStretch()
 
-        # Chat history display (read-only, compact)
+        # Generate button (created early so StatusIndicator can reference it)
+        self.generate_button = QPushButton("Generate")
+        self.generate_button.setStyleSheet(self.style_generator.generate_button_style())
+        self.generate_button.setMinimumHeight(28)
+        self.generate_button.setEnabled(False)  # Disabled until connection confirmed
+
+        # Status indicator controls generate button
+        self._status_indicator = LLMStatusIndicator(
+            generate_button=self.generate_button,
+            check_fn=self.llm_service.test_connection,
+            color_scheme=self.color_scheme,
+            parent=self
+        )
+        header_layout.addWidget(self._status_indicator)
+
+        # Settings button (gear icon)
+        self.settings_button = QPushButton("⚙")
+        self.settings_button.setFixedSize(24, 24)
+        self.settings_button.setToolTip("Configure LLM endpoint")
+        self.settings_button.setStyleSheet(self.style_generator.generate_button_style())
+        header_layout.addWidget(self.settings_button)
+
+        layout.addLayout(header_layout)
+
+        # --- Chat History ---
         self.chat_history = QTextEdit()
         self.chat_history.setReadOnly(True)
         self.chat_history.setStyleSheet(f"""
@@ -111,7 +129,29 @@ class LLMChatPanel(QWidget):
         """)
         layout.addWidget(self.chat_history, stretch=2)
 
-        # User input area (compact)
+        # RichTextAppender for chat history
+        self._chat_appender = RichTextAppender(self.chat_history, color_scheme=self.color_scheme)
+
+        # --- Action Buttons (Insert / Regenerate) - initially hidden ---
+        action_layout = QHBoxLayout()
+        action_layout.setSpacing(8)
+
+        self.insert_button = QPushButton("Insert into Editor")
+        self.insert_button.setStyleSheet(self.style_generator.generate_button_style())
+        action_layout.addWidget(self.insert_button)
+
+        self.regenerate_button = QPushButton("Regenerate")
+        self.regenerate_button.setStyleSheet(self.style_generator.generate_button_style())
+        action_layout.addWidget(self.regenerate_button)
+
+        action_layout.addStretch()
+
+        self.action_buttons_widget = QWidget()
+        self.action_buttons_widget.setLayout(action_layout)
+        self.action_buttons_widget.setVisible(False)
+        layout.addWidget(self.action_buttons_widget)
+
+        # --- User Input ---
         input_label = QLabel("Describe what you want:")
         input_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_primary)}; font-size: 9pt;")
         layout.addWidget(input_label)
@@ -131,13 +171,10 @@ class LLMChatPanel(QWidget):
         self.user_input.setMaximumHeight(80)
         layout.addWidget(self.user_input, stretch=1)
 
-        # Button row (compact)
+        # --- Bottom Buttons (Generate / Clear) ---
         button_layout = QHBoxLayout()
         button_layout.setSpacing(4)
 
-        self.generate_button = QPushButton("Generate")
-        self.generate_button.setStyleSheet(self.style_generator.generate_button_style())
-        self.generate_button.setMinimumHeight(28)
         button_layout.addWidget(self.generate_button)
 
         self.clear_button = QPushButton("Clear")
@@ -147,78 +184,120 @@ class LLMChatPanel(QWidget):
 
         layout.addLayout(button_layout)
 
-        # Apply panel background
+        # Panel background
         self.setStyleSheet(f"""
             QWidget {{
                 background-color: {self.color_scheme.to_hex(self.color_scheme.window_bg)};
             }}
         """)
 
-    def setup_connections(self):
-        """Setup signal/slot connections."""
-        self.generate_button.clicked.connect(self.on_generate_clicked)
-        self.clear_button.clicked.connect(self.on_clear_clicked)
+    def _setup_connections(self):
+        self.generate_button.clicked.connect(self._on_generate_clicked)
+        self.clear_button.clicked.connect(self._on_clear_clicked)
+        self.insert_button.clicked.connect(self._on_insert_clicked)
+        self.regenerate_button.clicked.connect(self._on_regenerate_clicked)
+        self.settings_button.clicked.connect(self._on_settings_clicked)
 
-    def on_generate_clicked(self):
-        """Handle generate button click."""
+    def _on_generate_clicked(self):
         user_request = self.user_input.toPlainText().strip()
-
         if not user_request:
-            QMessageBox.warning(self, "Empty Request", "Please describe what you want first.")
+            QMessageBox.warning(self, "Empty Request", "Please describe what you want.")
             return
 
-        # Disable generate button during generation
-        self.generate_button.setEnabled(False)
-        self.generate_button.setText("Generating...")
+        self._last_request = user_request
+        self.action_buttons_widget.setVisible(False)
+        self._start_generation(user_request)
 
-        # Add user request to chat history
-        self.append_to_history(f"<b>You:</b> {user_request}")
-
-        # Clear input
+    def _start_generation(self, request: str):
+        self._chat_appender.append_html(f"<b>You:</b> {html.escape(request)}")
         self.user_input.clear()
 
-        # Start background generation
-        self.generation_thread = LLMGenerationThread(
-            self.llm_service, user_request, self.code_type
+        self._generation_tasks.run(
+            target=lambda: self.llm_service.generate_code(request, self.code_type),
+            button=self.generate_button,
+            button_loading_text="Generating...",
+            on_success=self._on_generation_success,
+            on_error=self._on_generation_error,
         )
-        self.generation_thread.finished.connect(self.on_generation_finished)
-        self.generation_thread.error.connect(self.on_generation_error)
-        self.generation_thread.start()
 
-    def on_generation_finished(self, generated_code: str):
-        """Handle successful generation."""
-        # Re-enable button
-        self.generate_button.setEnabled(True)
-        self.generate_button.setText("Generate")
+    def _on_generation_success(self, code: str):
+        self._pending_code = code
+        self._chat_appender.append_text("Generated:", bold=True)
+        self._chat_appender.append_code(code)
+        self.action_buttons_widget.setVisible(True)
 
-        # Add success message to history
-        self.append_to_history(f"<b>LLM:</b> Code generated (inserted into editor)")
+    def _on_generation_error(self, error: Exception):
+        self._chat_appender.append_error(str(error))
 
-        # Emit signal for parent to handle insertion
-        self.code_generated.emit(generated_code)
+    def _on_insert_clicked(self):
+        if self._pending_code:
+            self.code_generated.emit(self._pending_code)
+            self._chat_appender.append_success("Code inserted into editor.")
+        self.action_buttons_widget.setVisible(False)
+        self._pending_code = None
 
-    def on_generation_error(self, error_message: str):
-        """Handle generation error."""
-        # Re-enable button
-        self.generate_button.setEnabled(True)
-        self.generate_button.setText("Generate")
+    def _on_regenerate_clicked(self):
+        if self._last_request:
+            self.action_buttons_widget.setVisible(False)
+            self._start_generation(self._last_request)
 
-        # Show error in chat history
-        self.append_to_history(f"<b style='color: red;'>Error:</b> {error_message}")
+    def _on_clear_clicked(self):
+        self._chat_appender.clear()
+        self.action_buttons_widget.setVisible(False)
+        self._pending_code = None
 
-        # Show error dialog
-        QMessageBox.critical(self, "Generation Failed",
-                           f"Failed to generate code:\n\n{error_message}")
+    def _on_settings_clicked(self):
+        """Open settings dialog for LLM configuration."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("LLM Settings")
+        dialog.setMinimumWidth(400)
 
-    def on_clear_clicked(self):
-        """Clear chat history."""
-        self.chat_history.clear()
+        layout = QFormLayout(dialog)
 
-    def append_to_history(self, message: str):
-        """Append message to chat history."""
-        self.chat_history.append(message)
-        self.chat_history.append("")  # Add blank line for spacing
+        # Endpoint field
+        endpoint_edit = QLineEdit(self.llm_service.api_endpoint)
+        endpoint_edit.setPlaceholderText("http://localhost:11434/api/generate")
+        layout.addRow("API Endpoint:", endpoint_edit)
 
-        # Scroll to bottom
-        scrollbar = self.chat_history.verticalScrollBar()
-        scrollbar.setValue(scrollbar.maximum())
+        # Model dropdown - fetch available models
+        model_combo = QComboBox()
+        model_combo.setEditable(True)  # Allow custom model names
+        available_models = self.llm_service._get_available_models()
+        if available_models:
+            model_combo.addItems(available_models)
+            # Select current model if available
+            if self.llm_service.model and self.llm_service.model in available_models:
+                model_combo.setCurrentText(self.llm_service.model)
+            elif self.llm_service.model:
+                model_combo.setCurrentText(self.llm_service.model)
+        else:
+            model_combo.addItem("(no models found - check Ollama)")
+            if self.llm_service.model:
+                model_combo.setCurrentText(self.llm_service.model)
+
+        layout.addRow("Model:", model_combo)
+
+        # Buttons
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addRow(buttons)
+
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            new_endpoint = endpoint_edit.text().strip()
+            new_model = model_combo.currentText().strip()
+
+            if new_endpoint and new_model and not new_model.startswith("("):
+                self.llm_service = LLMPipelineService(
+                    api_endpoint=new_endpoint,
+                    model=new_model
+                )
+                # Update status indicator's check function
+                self._status_indicator._check_fn = self.llm_service.test_connection
+                self._status_indicator.refresh(force=True)
+
+    def closeEvent(self, event):
+        self._generation_tasks.cleanup()
+        super().closeEvent(event)

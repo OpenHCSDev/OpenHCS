@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, Type, Callable, Optional, Union
 
 from PyQt6.QtWidgets import QCheckBox, QLineEdit, QComboBox, QGroupBox, QVBoxLayout, QSpinBox, QDoubleSpinBox
+from PyQt6.QtCore import Qt
 from magicgui.widgets import create_widget
 from magicgui.type_map import register_type
 
@@ -18,6 +19,53 @@ from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.ui.shared.widget_creation_registry import resolve_optional, is_enum, is_list_of_enums, get_enum_from_list
 
 logger = logging.getLogger(__name__)
+
+
+# ==================== None-Aware Widget Classes ====================
+# Defined at top so they can be used throughout this file.
+
+class NoneAwareLineEdit(QLineEdit):
+    """QLineEdit that properly handles None values for lazy dataclass contexts."""
+
+    def get_value(self):
+        """Get value, returning None for empty text instead of empty string."""
+        text = self.text().strip()
+        return None if text == "" else text
+
+    def set_value(self, value):
+        """Set value, handling None properly."""
+        self.setText("" if value is None else str(value))
+
+
+class NoneAwareIntEdit(QLineEdit):
+    """QLineEdit that only allows digits and properly handles None values for integer fields."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        from PyQt6.QtGui import QIntValidator
+        self.setValidator(QIntValidator())
+
+    def get_value(self):
+        """Get value, returning None for empty text or converting to int."""
+        text = self.text().strip()
+        if text == "":
+            return None
+        try:
+            return int(text)
+        except ValueError:
+            return None
+
+    def set_value(self, value):
+        """Set value, handling None properly."""
+        self.setText("" if value is None else str(value))
+
+
+# Register as implementing ValueGettable and ValueSettable
+from openhcs.ui.shared.widget_protocols import ValueGettable, ValueSettable
+ValueGettable.register(NoneAwareLineEdit)
+ValueSettable.register(NoneAwareLineEdit)
+ValueGettable.register(NoneAwareIntEdit)
+ValueSettable.register(NoneAwareIntEdit)
 
 
 def _get_enum_display_text(enum_value: Enum) -> str:
@@ -54,7 +102,6 @@ def create_enhanced_path_widget(param_name: str = "", current_value: Any = None,
 
 def _create_none_aware_int_widget():
     """Factory function for NoneAwareIntEdit widgets."""
-    from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import NoneAwareIntEdit
     return NoneAwareIntEdit()
 
 
@@ -66,7 +113,6 @@ def _create_none_aware_checkbox():
 
 def _create_direct_int_widget(current_value: Any = None):
     """Fast path: Create int widget directly without magicgui overhead."""
-    from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import NoneAwareIntEdit
     widget = NoneAwareIntEdit()
     if current_value is not None:
         widget.set_value(current_value)
@@ -177,10 +223,6 @@ WIDGET_REPLACEMENT_REGISTRY: Dict[Type, callable] = {
 # String fallback widget for any type magicgui cannot handle
 def create_string_fallback_widget(current_value: Any, **kwargs) -> QLineEdit:
     """Create string fallback widget for unsupported types."""
-    # Import here to avoid circular imports
-    from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import NoneAwareLineEdit
-
-    # Use NoneAwareLineEdit for proper None handling
     widget = NoneAwareLineEdit()
     widget.set_value(current_value)
     return widget
@@ -343,7 +385,7 @@ class MagicGuiWidgetFactory:
 
         enum_type = get_enum_from_list(param_type)
         widget = CheckboxGroupAdapter()
-        widget.setTitle(param_name.replace('_', ' ').title())
+        # Don't set title - label is added separately in widget_creation_config.py
         layout = QVBoxLayout(widget)
 
         # Populate checkboxes for each enum value
@@ -693,12 +735,8 @@ def _register_path_widget_strategy():
         pass  # Path widget not available
 
 def _register_none_aware_lineedit_strategy():
-    """Register NoneAwareLineEdit strategy dynamically to avoid circular imports."""
-    try:
-        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import NoneAwareLineEdit
-        WIDGET_PLACEHOLDER_STRATEGIES[NoneAwareLineEdit] = _apply_lineedit_placeholder
-    except ImportError:
-        pass  # NoneAwareLineEdit not available
+    """Register NoneAwareLineEdit strategy."""
+    WIDGET_PLACEHOLDER_STRATEGIES[NoneAwareLineEdit] = _apply_lineedit_placeholder
 
 def _register_none_aware_checkbox_strategy():
     """Register NoneAwareCheckBox strategy dynamically to avoid circular imports."""
@@ -990,3 +1028,6 @@ class PyQt6WidgetEnhancer:
                 widget.value = value
         finally:
             widget.blockSignals(False)
+
+
+
