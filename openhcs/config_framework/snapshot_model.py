@@ -20,13 +20,14 @@ import time
 @dataclass(frozen=True)
 class StateSnapshot:
     """Immutable snapshot of a single ObjectState's data.
-    
+
     Captures the resolved values, parameters, and provenance at a point in time.
     No object references - data only for serializability.
     """
     saved_resolved: Dict
     live_resolved: Dict
-    parameters: Dict
+    parameters: Dict  # Current concrete values
+    saved_parameters: Dict  # Concrete values at last save (for concrete dirty detection)
     provenance: Dict
 
 
@@ -74,6 +75,7 @@ class Snapshot:
                     'saved_resolved': ss.saved_resolved,
                     'live_resolved': ss.live_resolved,
                     'parameters': ss.parameters,
+                    'saved_parameters': ss.saved_parameters,
                     'provenance': ss.provenance,
                 }
                 for scope_id, ss in self.all_states.items()
@@ -88,6 +90,7 @@ class Snapshot:
                 saved_resolved=state_data['saved_resolved'],
                 live_resolved=state_data['live_resolved'],
                 parameters=state_data['parameters'],
+                saved_parameters=state_data.get('saved_parameters', state_data['parameters']),  # Fallback for old snapshots
                 provenance=state_data['provenance'],
             )
             for scope_id, state_data in data['states'].items()

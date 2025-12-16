@@ -294,16 +294,23 @@ class FunctionPaneWidget(QWidget):
         step_scope = self.scope_id or "no_scope"
         func_scope_id = ScopeTokenService.build_scope_id(step_scope, self.func)
 
-        # Get parent state (step state) from registry for context inheritance
-        parent_state = ObjectStateRegistry.get_by_scope(step_scope)
-        func_state = ObjectState(
-            object_instance=self.func,
-            scope_id=func_scope_id,
-            parent_state=parent_state,
-            initial_values=self.kwargs,
-        )
-        ObjectStateRegistry.register(func_state)
-        self._func_state = func_state  # Store for cleanup
+        # Check if ObjectState already exists (e.g., from time travel restore)
+        # If so, reuse it to preserve restored state; otherwise create new
+        existing_state = ObjectStateRegistry.get_by_scope(func_scope_id)
+        if existing_state:
+            func_state = existing_state
+            self._func_state = None  # Don't cleanup - we didn't create it
+        else:
+            # Get parent state (step state) from registry for context inheritance
+            parent_state = ObjectStateRegistry.get_by_scope(step_scope)
+            func_state = ObjectState(
+                object_instance=self.func,
+                scope_id=func_scope_id,
+                parent_state=parent_state,
+                initial_values=self.kwargs,
+            )
+            ObjectStateRegistry.register(func_state)
+            self._func_state = func_state  # Store for cleanup
 
         self.form_manager = PyQtParameterFormManager(
             state=func_state,

@@ -675,6 +675,7 @@ class ObjectStateRegistry:
                 saved_resolved=copy.deepcopy(state._saved_resolved),
                 live_resolved=copy.deepcopy(state._live_resolved) if state._live_resolved else {},
                 parameters=copy.deepcopy(state.parameters),
+                saved_parameters=copy.deepcopy(state._saved_parameters),
                 provenance=copy.deepcopy(state._live_provenance),
             )
 
@@ -806,6 +807,8 @@ class ObjectStateRegistry:
                 logger.debug(f"⏱️ TIME_TRAVEL: Moved to limbo: {scope_key}")
 
             # PHASE 2: RE-REGISTER ObjectStates from limbo or graveyard
+            # Track scopes restored in this phase - they shouldn't trigger window reopening
+            scopes_restored_from_limbo: Set[str] = set()
             scopes_to_register = snapshot_scopes - current_scopes
             for scope_key in scopes_to_register:
                 # Try limbo first (time-travel within session), then graveyard (deleted objects)
@@ -821,15 +824,19 @@ class ObjectStateRegistry:
                     continue
                 cls._states[scope_key] = state
                 cls._fire_register_callbacks(scope_key, state)
+                scopes_restored_from_limbo.add(scope_key)
 
             # PHASE 3: RESTORE state for all ObjectStates in snapshot
-            # Track which scopes had actual parameter changes (for PHASE 4)
-            scopes_with_param_changes: Set[str] = set()
+            # Track which scopes need window reopening (for PHASE 4)
+            scopes_needing_window: Set[str] = set()
 
             for scope_key, state_snap in snapshot.all_states.items():
                 state = cls._states.get(scope_key)
                 if not state:
                     continue
+
+                # Was this scope just restored from limbo in PHASE 2?
+                was_restored_from_limbo = scope_key in scopes_restored_from_limbo
 
                 current_params = state.parameters.copy() if state.parameters else {}
                 target_live = state_snap.live_resolved
@@ -842,26 +849,47 @@ class ObjectStateRegistry:
                     if target_live.get(key) != current_live.get(key):
                         changed_paths.add(key)
 
-                # Find changed raw parameters
+                # Find changed raw parameters (ONLY leaf fields, skip container dataclasses)
                 has_param_change = False
+                changed_param_keys = []
                 all_param_keys = set(state_snap.parameters.keys()) | set(current_params.keys())
                 for param_key in all_param_keys:
                     before = current_params.get(param_key)
                     after = state_snap.parameters.get(param_key)
-                    if before != after and not (is_dataclass(before) or is_dataclass(after)):
+                    # Skip container dataclasses - they're structural, not editable values
+                    if is_dataclass(before) or is_dataclass(after):
+                        continue
+                    if before != after:
                         changed_paths.add(param_key)
+                        changed_param_keys.append((param_key, before, after))
                         has_param_change = True
 
-                # Track scopes with parameter changes (for PHASE 4)
-                if has_param_change:
-                    scopes_with_param_changes.add(scope_key)
+                # For CONTINUOUSLY EXISTING scopes: track param changes (user edits being undone/redone)
+                # For LIMBO-RESTORED scopes: don't use param changes (just initialization)
+                if has_param_change and not was_restored_from_limbo:
+                    for pk, pv_before, pv_after in changed_param_keys:
+                        logger.debug(f"⏱️ PARAM_CHANGE: {scope_key} param={pk} before={pv_before!r} after={pv_after!r}")
+                    scopes_needing_window.add(scope_key)
 
-                # RESTORE state
+                # RESTORE state (including saved_parameters for concrete dirty detection)
                 state._saved_resolved = copy.deepcopy(state_snap.saved_resolved)
                 state._live_resolved = copy.deepcopy(state_snap.live_resolved)
                 state._live_provenance = copy.deepcopy(state_snap.provenance)
                 state.parameters = copy.deepcopy(state_snap.parameters)
+                state._saved_parameters = copy.deepcopy(state_snap.saved_parameters)
                 state._sync_materialized_state()
+
+                # ALL scopes: include if CONCRETE dirty after restore (unsaved work exists)
+                # Concrete dirty = parameters != saved_parameters (raw values, not resolved)
+                is_concrete_dirty = state.parameters != state._saved_parameters
+                if is_concrete_dirty:
+                    # Log which params differ for debugging
+                    for k in set(state.parameters.keys()) | set(state._saved_parameters.keys()):
+                        p_val = state.parameters.get(k)
+                        sp_val = state._saved_parameters.get(k)
+                        if p_val != sp_val:
+                            logger.debug(f"⏱️ CONCRETE_DIRTY: {scope_key} param={k} params={p_val!r} saved_params={sp_val!r}")
+                    scopes_needing_window.add(scope_key)
 
                 # Notify UI
                 if changed_paths and state._on_resolved_changed_callbacks:
@@ -869,16 +897,17 @@ class ObjectStateRegistry:
                         callback(changed_paths)
 
             # PHASE 4: Fire time-travel completion callbacks
-            # Only for states where time travel changed parameters.
-            # scopes_with_param_changes tracks scopes where parameters changed during this time travel.
-            if cls._on_time_travel_complete_callbacks and scopes_with_param_changes:
+            # Reopen windows for states that:
+            # - Had param changes during time travel, OR
+            # - Have concrete unsaved work (parameters != saved_parameters)
+            if cls._on_time_travel_complete_callbacks and scopes_needing_window:
                 dirty_states = [
                     (scope_key, cls._states[scope_key])
-                    for scope_key in scopes_with_param_changes
+                    for scope_key in scopes_needing_window
                     if scope_key in cls._states
                 ]
                 if dirty_states:
-                    logger.debug(f"⏱️ TIME_TRAVEL: {len(dirty_states)} states with param changes")
+                    logger.debug(f"⏱️ TIME_TRAVEL: {len(dirty_states)} states needing window")
                     for callback in cls._on_time_travel_complete_callbacks:
                         callback(dirty_states, snapshot.triggering_scope)
         finally:
@@ -1151,6 +1180,7 @@ class ObjectStateRegistry:
                         saved_resolved=state_data['saved_resolved'],
                         live_resolved=state_data['live_resolved'],
                         parameters=state_data['parameters'],
+                        saved_parameters=state_data.get('saved_parameters', state_data['parameters']),  # Fallback for old snapshots
                         provenance=state_data['provenance'],
                     )
 
@@ -1838,8 +1868,8 @@ class ObjectState:
         for name in self._invalid_fields:
             if name not in self.parameters:
                 continue
-            # Skip container entries (value is a dataclass instance)
-            # Container entries are kept in parameters for UI rendering but excluded from snapshots
+            # Safety check: skip any container entries that might have leaked in
+            # (containers should NOT be in parameters — only leaf fields are tracked)
             raw_value = self.parameters[name]
             is_container = raw_value is not None and is_dataclass(type(raw_value))
             if is_container:
