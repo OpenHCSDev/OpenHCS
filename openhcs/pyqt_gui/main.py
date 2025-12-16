@@ -859,24 +859,18 @@ class OpenHCSMainWindow(QMainWindow):
         When time-travel restores state with unsaved changes, this callback
         reopens the appropriate editor windows so the user can see/save the changes.
 
-        Only reopens windows for the scope that triggered the snapshot,
-        NOT cascade-dirty states from inheritance.
+        Opens windows for ALL dirty states, not just the triggering scope.
+        The triggering_scope is passed for logging but not used for filtering.
 
         Args:
             dirty_states: List of (scope_id, ObjectState) tuples with unsaved changes
-            triggering_scope: Scope that triggered the snapshot (None if global/init)
+            triggering_scope: Scope that triggered the snapshot (for logging only)
         """
         from openhcs.pyqt_gui.services.window_manager import WindowManager
 
         logger.debug(f"⏱️ TIME_TRAVEL_CALLBACK: triggering_scope={triggering_scope!r} dirty_count={len(dirty_states)}")
 
         for scope_id, state in dirty_states:
-            # Only reopen window for the scope that actually triggered the snapshot
-            # Skip cascade-dirty states from MRO inheritance
-            # Note: Use 'is not None' because '' (empty string = global scope) is a valid triggering_scope
-            if triggering_scope is not None and scope_id != triggering_scope:
-                continue
-
             # Check if window is already open
             if WindowManager.is_open(scope_id):
                 # Window exists - just focus it

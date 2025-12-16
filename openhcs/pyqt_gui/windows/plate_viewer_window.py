@@ -57,9 +57,10 @@ class PlateViewerWindow(BaseFormDialog):
         self.setWindowTitle(f"Plate Viewer - {plate_name}")
         self.setMinimumSize(1200, 800)
         self.resize(1400, 900)
-        
-        # Make floating window
-        self.setWindowFlags(Qt.WindowType.Window)
+
+        # Make floating window with Dialog hint so tiling WMs don't fullscreen it
+        # Qt.WindowType.Window alone strips the Dialog flag, causing tiling WMs to tile/fullscreen
+        self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.Dialog)
 
         self._setup_ui()
 

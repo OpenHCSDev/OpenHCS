@@ -89,6 +89,10 @@ class SnapshotBrowserWindow(QMainWindow):
         self.setWindowTitle("Snapshot Browser - Time Travel")
         self.resize(700, 500)
 
+        # Add Dialog hint so tiling WMs don't fullscreen this window
+        # QMainWindow defaults to Window type which tiling WMs tile/fullscreen
+        self.setWindowFlags(self.windowFlags() | Qt.WindowType.Dialog)
+
         self.color_scheme = color_scheme or PyQt6ColorScheme()
 
         # Central widget
