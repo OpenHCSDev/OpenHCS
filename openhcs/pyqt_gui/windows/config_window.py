@@ -29,7 +29,7 @@ from openhcs.pyqt_gui.windows.base_form_dialog import BaseFormDialog
 from openhcs.core.config import GlobalPipelineConfig, PipelineConfig
 from openhcs.config_framework import is_global_config_type
 from openhcs.ui.shared.code_editor_form_updater import CodeEditorFormUpdater
-from openhcs.config_framework.object_state import ObjectStateRegistry
+from openhcs.config_framework.object_state_registry import ObjectStateRegistry
 # ❌ REMOVED: require_config_context decorator - enhanced decorator events system handles context automatically
 from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
 
@@ -112,7 +112,8 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
         # This fixes the circular context bug where reset showed old values instead of global defaults
 
         # Create or lookup ObjectState from registry - callers own state directly
-        from openhcs.config_framework.object_state import ObjectState, ObjectStateRegistry
+        from openhcs.config_framework.object_state import ObjectState
+        from openhcs.config_framework.object_state_registry import ObjectStateRegistry
         self.state = ObjectStateRegistry.get_by_scope(self.scope_id)
         if self.state is None:
             self.state = ObjectState(
@@ -479,7 +480,7 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
                 # CRITICAL: Invalidate ALL descendant caches so they re-resolve with the new SAVED thread-local
                 # This is necessary when saving None values - descendants must pick up the new None
                 # instead of continuing to use cached values resolved from the old saved thread-local
-                from openhcs.config_framework.object_state import ObjectStateRegistry
+                from openhcs.config_framework.object_state_registry import ObjectStateRegistry
                 ObjectStateRegistry.increment_token(notify=True)
                 logger.debug(f"Invalidated all descendant caches after updating SAVED thread-local")
 

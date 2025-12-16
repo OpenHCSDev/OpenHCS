@@ -90,7 +90,8 @@ class OpenHCSPyQtApp(QApplication):
         # This was missing and caused placeholder resolution to fall back to static defaults
         from openhcs.config_framework.global_config import set_global_config_for_editing
         from openhcs.config_framework.lazy_factory import ensure_global_config_context
-        from openhcs.config_framework.object_state import ObjectState, ObjectStateRegistry
+        from openhcs.config_framework.object_state import ObjectState
+        from openhcs.config_framework.object_state_registry import ObjectStateRegistry
         from openhcs.core.config import GlobalPipelineConfig
 
         # Set for editing (UI placeholders) - this uses threading.local() storage

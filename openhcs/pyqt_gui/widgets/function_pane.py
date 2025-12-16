@@ -287,7 +287,8 @@ class FunctionPaneWidget(QWidget):
         # - To keep each function pane only as tall as its content, we explicitly
         #   disable the inner scroll area and let the outer FunctionListWidget
         #   handle scrolling for long forms.
-        from openhcs.config_framework.object_state import ObjectState, ObjectStateRegistry
+        from openhcs.config_framework.object_state import ObjectState
+        from openhcs.config_framework.object_state_registry import ObjectStateRegistry
         from openhcs.pyqt_gui.widgets.shared.services.scope_token_service import ScopeTokenService
 
         # Build function-specific scope: step_scope::func_N
@@ -325,7 +326,7 @@ class FunctionPaneWidget(QWidget):
 
     def cleanup_object_state(self) -> None:
         """Unregister ObjectState on widget destruction."""
-        from openhcs.config_framework.object_state import ObjectStateRegistry
+        from openhcs.config_framework.object_state_registry import ObjectStateRegistry
         if hasattr(self, '_func_state') and self._func_state:
             ObjectStateRegistry.unregister(self._func_state)
             self._func_state = None

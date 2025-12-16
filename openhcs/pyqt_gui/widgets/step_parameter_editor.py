@@ -110,7 +110,8 @@ class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
         # The step is the overlay (what's being edited), not the parent context
         # Context hierarchy: GlobalPipelineConfig (thread-local) -> PipelineConfig (context_obj) -> Step (overlay)
         from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import FormManagerConfig
-        from openhcs.config_framework.object_state import ObjectState, ObjectStateRegistry
+        from openhcs.config_framework.object_state import ObjectState
+        from openhcs.config_framework.object_state_registry import ObjectStateRegistry
 
         # Look up ObjectState from registry using scope_id
         # ObjectState MUST be registered by PipelineEditorWidget when step was added
@@ -309,7 +310,7 @@ class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
 
         # Header label (stored for scope accent styling)
         self.header_label = QLabel("Step Parameters")
-        self.header_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_accent)}; font-weight: bold; font-size: 14px;")
+        self.header_label.setObjectName("section_header")
         header_layout.addWidget(self.header_label)
 
         header_layout.addStretch()
