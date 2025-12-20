@@ -1185,6 +1185,15 @@ class ResultParsingError(ToolAdapterError):
 4. **Metric Integration**: Metrics collect automatically via context managers
 5. **Normalized Output**: All tools return BenchmarkResult with same structure
 
+### Revisions (2025-12-19)
+
+- **Pipeline templates**: Use parameterized templates for CellProfiler/ImageJ instead of ad‑hoc generation; map a small, vetted set of benchmark pipelines (e.g., nuclei segmentation, Cell Painting feature set) with explicit option contracts and unit tests for round-trip equivalence.
+- **Dataset path handling**: `PipelineConfig.to_imagej_macro()` must receive the actual dataset item path(s), not `Path()` placeholders; adapters build macros/scripts per item or per batch using the canonical item enumeration from Plan 02.
+- **Correctness metric**: Define tolerance envelopes per pipeline (e.g., object count Δ≤2%, IoU≥0.9, feature Pearson r≥0.98). Adapters must emit raw outputs needed for this metric (masks, measurement tables) and stash them alongside `BenchmarkResult`.
+- **Per-run metrics**: Metrics are instantiated per run; adapters do not reuse collector instances across dataset items/tools.
+- **Provenance**: Each adapter records tool binary path, version, invocation command, pipeline template hash, and temp output dirs into the `BenchmarkResult` metadata so Plan 01 can persist it.
+- **Failure surfacing**: Subprocess adapters capture stdout/stderr and include first/last N lines in `ToolExecutionError` to satisfy the “fail loud” invariant without swallowing context.
+
 ### Integration with Plans 01 & 02
 
 ```python
@@ -1207,4 +1216,3 @@ results = run_benchmark(
 ```
 
 Each plan solves one problem completely. They compose without coupling.
-

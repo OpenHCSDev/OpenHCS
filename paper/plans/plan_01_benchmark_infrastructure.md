@@ -1001,6 +1001,16 @@ class PlotGenerator:
 4. **Reproducible**: Results are versioned, immutable, queryable
 5. **Automated**: Figures generate automatically from result data
 
+### Revisions (2025-12-19)
+
+- **Trial/provenance model**: Introduce `BenchmarkCase` (dataset × pipeline × tool) and `BenchmarkTrial` (one execution, N repeats). Each trial persists `RunMetadata` (hardware/OS, GPU driver/CUDA, OpenHCS git SHA, tool versions, dataset checksum, pipeline hash, cache state, warmup strategy, random seeds, start/end timestamps).
+- **Metric lifecycle**: Treat metrics as *factories*, not reusable instances; instantiate per trial to avoid state leakage. `execution_time` is just another metric key, not a special field.
+- **Methodology**: Require ≥3 cold + warm runs; define inclusion of I/O vs compute; deterministic ordering of items; outlier policy (e.g., drop >3σ or use median-of-means); record whether cache was warm.
+- **Baseline definition**: Select an explicit baseline tool per comparison (default CellProfiler); speedups computed relative to that baseline, not “slowest tool”.
+- **Tables/plots**: Comparison tables/plots show mean ± std (or CI) across repeats; figure generator overlays error bars. `Mean` aggregates over *trials*, not over tools/datasets interchangeably.
+- **Result storage**: Store per-trial JSON under `results/{tool}/{dataset}/{pipeline}/{trial_id}.json` plus aggregated comparisons; keep outputs immutable/append-only.
+- **Determinism hooks**: Runner sets seeds, pins thread counts, and disables nondeterministic backends where possible; records any unavoidable nondeterminism flags.
+
 ### Why This Matters
 
 This isn't "benchmark code for the paper." This is **benchmark infrastructure** that:
@@ -1010,4 +1020,3 @@ This isn't "benchmark code for the paper." This is **benchmark infrastructure** 
 - Is itself publishable as supplementary material
 
 The benchmark platform proves the platform philosophy.
-

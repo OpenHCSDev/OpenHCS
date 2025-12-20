@@ -884,6 +884,15 @@ class ImageFormatError(DatasetAcquisitionError):
 4. **Cached**: Don't re-download if valid copy exists
 5. **Verified**: Checksums + file existence always checked
 
+### Revisions (2025-12-19)
+
+- **Path traversal safety**: Replace raw `extractall()` with safe extraction that validates target paths before writing (reject `..` or absolute members).
+- **Dataset manifests**: Instead of hardcoding long `expected_files` lists, store per-dataset manifest (relative paths + checksums) generated once and versioned; verification uses manifest and reports first N missing/invalid files.
+- **Canonical item enumeration**: Add `DatasetProtocol.items()` yielding deterministic (well,row,field,channel,file) records so adapters can subset consistently and tools can map to their required file layouts.
+- **Subsetting and splits**: Support declarative subsets (e.g., `first_k`, `random_seeded_split`, `plate_ids`) to run quick sanity vs full runs; record subset parameters in provenance.
+- **Checksum + size**: Persist archive checksum, manifest checksum, and uncompressed size in `RunMetadata` for the benchmark platform.
+- **Resume + disk checks**: Keep resume downloads but additionally verify partial file size does not exceed expected; revalidate checksum after resume.
+
 ### Integration with Plan 01
 
 ```python
@@ -904,4 +913,3 @@ class BenchmarkRun:
 ```
 
 Dataset acquisition is orthogonal to benchmark execution. Compose cleanly.
-
