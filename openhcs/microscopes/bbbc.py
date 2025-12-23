@@ -1,14 +1,15 @@
 """
 BBBC (Broad Bioimage Benchmark Collection) microscope implementations.
 
-This module provides handlers for BBBC datasets, which come in different formats:
-- BBBC021: ImageXpress format (TIFF with {Well}_{Site}_{Channel}{UUID}.tif pattern)
-- BBBC038: Kaggle nuclei format (PNG files organized by ImageId folders)
+This module provides handlers for BBBC datasets in different formats:
+- BBBC021: ImageXpress-like format with UUID, files in Week*/Week*_##### subdirectories
+- BBBC038: Simple hex ID filenames in stage1_train/{ImageId}/images/ subdirectories
 
-Each BBBC dataset family gets its own handler class.
+Each dataset gets its own handler following the established MicroscopeHandler pattern.
 """
 
 import logging
+import os
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union, Type
@@ -23,34 +24,39 @@ logger = logging.getLogger(__name__)
 
 
 # ============================================================================
-# BBBC021 Handler (ImageXpress Format)
+# BBBC021 Handler (ImageXpress-like with UUID, in Week subfolders)
 # ============================================================================
 
 class BBBC021FilenameParser(FilenameParser):
     """
     Parser for BBBC021 dataset filenames.
 
-    Format: {Well}_{Site}_{Channel}{UUID}.tif
+    Format: {Well}_s{Site}_w{Channel}{UUID}.tif
     Example: G10_s1_w1BEDC2073-A983-4B98-95E9-84466707A25D.tif
 
     Components:
-    - Well: A01-P24 (plate coordinates)
-    - Site: s1, s2, ... (field of view)
-    - Channel: w1 (DAPI), w2 (Tubulin), w4 (Actin)
-    - UUID: Unique identifier (not used for parsing)
+    - Well: Alphanumeric plate coordinate (e.g., A01, G10, P24)
+    - Site: Numeric site/field ID (e.g., 1, 2, 3)
+    - Channel: Single digit channel ID (1=DAPI, 2=Tubulin, 4=Actin)
+    - UUID: Hex identifier with dashes (ignored for parsing, but part of filename)
+    - z_index: Not in filename, defaults to 1
+    - timepoint: Not in filename, defaults to 1
+
+    Note: Channel 3 is not used in BBBC021 (only 1, 2, 4).
     """
 
-    # Pattern: {Well}_{Site}_{Channel}{UUID}.tif
-    # Well: [A-P]\d{2}
-    # Site: s\d+
-    # Channel: w[124]
-    # UUID: [A-F0-9-]+ (hex with dashes)
+    # Pattern matches both original and virtual workspace filenames:
+    # Original: G10_s1_w1{UUID}.tif
+    # Virtual:  G10_s1_w1_z001_t001.tif
     _pattern = re.compile(
-        r'^(?P<well>[A-P]\d{2})_'
-        r's(?P<site>\d+)_'
-        r'w(?P<channel>[124])'
-        r'(?P<uuid>[A-F0-9-]+)'
-        r'\.(?P<extension>tif|TIF)$'
+        r'^([A-Z]\d+)'           # Well: letter + digits (required)
+        r'_s(\d+)'                # Site: _s + digits (required)
+        r'_w(\d)'                 # Channel: _w + single digit (required)
+        r'(?:_z(\d+))?'          # Z-index: _z + digits (OPTIONAL)
+        r'(?:_t(\d+))?'          # Timepoint: _t + digits (OPTIONAL)
+        r'([A-F0-9-]*)'          # UUID: hex + dashes (OPTIONAL)
+        r'(\.\w+)$',              # Extension (required)
+        re.IGNORECASE
     )
 
     def __init__(self, filemanager=None, pattern_format=None):
@@ -59,12 +65,12 @@ class BBBC021FilenameParser(FilenameParser):
         self.pattern_format = pattern_format
 
     @classmethod
-    def can_parse(cls, filename: str) -> bool:
+    def can_parse(cls, filename: Union[str, Any]) -> bool:
         """Check if filename matches BBBC021 pattern."""
         basename = Path(str(filename)).name
         return cls._pattern.match(basename) is not None
 
-    def parse_filename(self, filename: str) -> Optional[Dict[str, Any]]:
+    def parse_filename(self, filename: Union[str, Any]) -> Optional[Dict[str, Any]]:
         """
         Parse BBBC021 filename into components.
 
@@ -72,21 +78,30 @@ class BBBC021FilenameParser(FilenameParser):
             filename: Filename to parse
 
         Returns:
-            Dict with keys: well, site, channel, z_index, extension
-            (z_index defaults to 1 since BBBC021 has no Z-stacks)
+            Dict with keys: well, site, channel, z_index, timepoint, extension
+            Or None if parsing fails
         """
-        basename = Path(filename).name
+        basename = Path(str(filename)).name
         match = self._pattern.match(basename)
 
         if not match:
+            logger.debug("Could not parse BBBC021 filename: %s", filename)
             return None
 
+        well, site_str, channel_str, z_str, t_str, uuid, ext = match.groups()
+
+        # Parse z_index and timepoint if present (virtual workspace files)
+        # Otherwise None (original files)
+        z_index = int(z_str) if z_str else None
+        timepoint = int(t_str) if t_str else None
+
         return {
-            'well': match.group('well'),
-            'site': int(match.group('site')),
-            'channel': int(match.group('channel')),
-            'z_index': 1,  # BBBC021 has no Z-stacks
-            'extension': f".{match.group('extension')}",
+            'well': well,
+            'site': int(site_str),
+            'channel': int(channel_str),
+            'z_index': z_index,
+            'timepoint': timepoint,
+            'extension': ext,
         }
 
     def extract_component_coordinates(self, component_value: str) -> Tuple[str, str]:
@@ -94,41 +109,89 @@ class BBBC021FilenameParser(FilenameParser):
         Extract row/column from well identifier.
 
         Args:
-            component_value: Well like 'A01', 'B12', etc.
+            component_value: Well like 'A01', 'G10', etc.
 
         Returns:
-            (row, column) tuple like ('A', '01')
+            (row, column) tuple like ('A', '01'), ('G', '10')
         """
         if not component_value or len(component_value) < 2:
             raise ValueError(f"Invalid well format: {component_value}")
 
-        row = component_value[0]  # A-P
-        col = component_value[1:]  # 01-24
+        row = component_value[0]  # First character (letter)
+        col = component_value[1:]  # Remaining digits
+
+        if not row.isalpha() or not col.isdigit():
+            raise ValueError(f"Invalid BBBC021 well format: {component_value}. Expected format like 'A01', 'G10'")
 
         return (row, col)
 
-    def construct_filename(self, extension: str = '.tif', **component_values) -> str:
+    def construct_filename(
+        self,
+        extension: str = '.tif',
+        site_padding: int = 1,  # BBBC021 uses single digits for sites
+        z_padding: int = 3,
+        timepoint_padding: int = 3,
+        **component_values
+    ) -> str:
         """
-        Construct BBBC021 filename from components.
+        Construct BBBC021 filename from components for virtual workspace.
+
+        Note: UUID is NOT reconstructed. Virtual workspace filenames include
+        ALL components (z_index, timepoint) even if not in original filenames.
+        This ensures consistent pattern discovery.
 
         Args:
-            well: Well ID (e.g., 'A01')
-            site: Site number (int or str)
-            channel: Channel number (int or str)
-            extension: File extension (default: '.tif')
-            **component_values: Other component values (ignored)
+            well: Well ID (e.g., 'A01', 'G10')
+            site: Site number
+            channel: Channel number
+            z_index: Z-index (defaults to 1)
+            timepoint: Timepoint (defaults to 1)
+            extension: File extension
+            **component_values: Other component values
 
         Returns:
-            Filename string (without UUID - use existing UUID from original file)
+            Filename: {Well}_s{Site}_w{Channel}_z{Z}_t{T}.tif
         """
-        well = component_values.get('well', 'A01')
-        site = component_values.get('site', 1)
-        channel = component_values.get('channel', 1)
+        well = component_values.get('well')
+        site = component_values.get('site')
+        channel = component_values.get('channel')
+        z_index = component_values.get('z_index')
+        timepoint = component_values.get('timepoint')
 
-        # Format: {Well}_s{Site}_w{Channel}.tif
-        # Note: We omit UUID in constructed filenames since they're unique identifiers
-        # In practice, use original filename or generate minimal pattern
-        return f"{well}_s{site}_w{channel}{extension}"
+        if not well:
+            raise ValueError("Well ID cannot be empty or None.")
+
+        # Default ALL components to 1 (required for virtual workspace)
+        site = 1 if site is None else site
+        channel = 1 if channel is None else channel
+        z_index = 1 if z_index is None else z_index
+        timepoint = 1 if timepoint is None else timepoint
+
+        # Build filename parts
+        parts = [well]
+
+        # Site
+        if isinstance(site, str):
+            parts.append(f"_s{site}")
+        else:
+            parts.append(f"_s{site:0{site_padding}d}")
+
+        # Channel (no padding)
+        parts.append(f"_w{channel}")
+
+        # Z-index (ALWAYS include for virtual workspace)
+        if isinstance(z_index, str):
+            parts.append(f"_z{z_index}")
+        else:
+            parts.append(f"_z{z_index:0{z_padding}d}")
+
+        # Timepoint (ALWAYS include for virtual workspace)
+        if isinstance(timepoint, str):
+            parts.append(f"_t{timepoint}")
+        else:
+            parts.append(f"_t{timepoint:0{timepoint_padding}d}")
+
+        return "".join(parts) + extension
 
 
 class BBBC021MetadataHandler(MetadataHandler):
@@ -136,7 +199,7 @@ class BBBC021MetadataHandler(MetadataHandler):
     Metadata handler for BBBC021 dataset.
 
     BBBC021 metadata comes from CSV files:
-    - BBBC021_v1_image.csv: Image metadata (plate, well, compound, etc.)
+    - BBBC021_v1_image.csv: Image metadata (plate, well, compound, concentration, replicate)
     - BBBC021_v1_compound.csv: Compound structures (SMILES)
     - BBBC021_v1_moa.csv: Mechanism of action labels
     """
@@ -160,7 +223,7 @@ class BBBC021MetadataHandler(MetadataHandler):
         """
         plate_path = Path(plate_path)
 
-        # BBBC021 metadata is in the plate root or parent directory
+        # BBBC021 metadata is typically in plate root or parent directory
         candidates = [
             plate_path / "BBBC021_v1_image.csv",
             plate_path.parent / "BBBC021_v1_image.csv",
@@ -180,8 +243,8 @@ class BBBC021MetadataHandler(MetadataHandler):
         """
         Get grid dimensions for BBBC021.
 
-        BBBC021 uses variable site layouts per well - no fixed grid.
-        Return default (1, 1) and let pattern discovery handle actual sites.
+        BBBC021 uses variable site layouts - no fixed grid.
+        Return (1, 1) and let pattern discovery determine actual sites.
         """
         return (1, 1)
 
@@ -190,7 +253,6 @@ class BBBC021MetadataHandler(MetadataHandler):
         Get pixel size for BBBC021.
 
         BBBC021 is 20x magnification ImageXpress, typical pixel size ~0.65 μm.
-        Exact value not published - return typical value.
         """
         return 0.65  # μm/pixel (typical for 20x ImageXpress)
 
@@ -204,20 +266,15 @@ class BBBC021MetadataHandler(MetadataHandler):
         return {
             "1": "DAPI",
             "2": "Tubulin",
-            "4": "Actin",  # Note: w3 is not used
+            "4": "Actin",  # Note: Channel 3 is not used
         }
 
     def get_well_values(self, plate_path: Union[str, Path]) -> Optional[Dict[str, Optional[str]]]:
-        """
-        Get well metadata from BBBC021_v1_image.csv.
-
-        Would need to parse CSV to map wells to compounds.
-        Return None for now - wells are just coordinates.
-        """
+        """Get well metadata - would require parsing CSV."""
         return None
 
     def get_site_values(self, plate_path: Union[str, Path]) -> Optional[Dict[str, Optional[str]]]:
-        """Get site metadata - none available for BBBC021."""
+        """Get site metadata - none available."""
         return None
 
     def get_z_index_values(self, plate_path: Union[str, Path]) -> Optional[Dict[str, Optional[str]]]:
@@ -227,10 +284,11 @@ class BBBC021MetadataHandler(MetadataHandler):
 
 class BBBC021Handler(MicroscopeHandler):
     """
-    Microscope handler for BBBC021 dataset (ImageXpress format).
+    Microscope handler for BBBC021 dataset.
 
-    BBBC021 is Human MCF7 cells from compound profiling experiment.
-    Format: ImageXpress microscope, TIFF files with UUID pattern.
+    BBBC021: Human MCF7 cells from compound profiling experiment.
+    Format: ImageXpress-like with {Well}_s{Site}_w{Channel}{UUID}.tif pattern.
+    Files are in Week#/Week#_#####/ subdirectories.
     """
 
     _microscope_type = 'bbbc021'
@@ -244,9 +302,10 @@ class BBBC021Handler(MicroscopeHandler):
     @property
     def root_dir(self) -> str:
         """
-        BBBC021 images are at plate root (no subdirectories).
+        BBBC021 virtual workspace is at plate root.
 
-        Returns "." for plate root.
+        Files are physically in Week#/Week#_##### subdirectories,
+        but virtually flattened to plate root.
         """
         return "."
 
@@ -265,33 +324,90 @@ class BBBC021Handler(MicroscopeHandler):
 
     def _build_virtual_mapping(self, plate_path: Path, filemanager: FileManager) -> Path:
         """
-        BBBC021 has no complex directory structure - files are already flat.
+        Build virtual workspace mapping for BBBC021.
 
-        Just ensure consistent naming (optional padding, etc).
-        No virtual mapping needed.
+        Flattens Week#/Week#_##### subdirectory structure to plate root,
+        and adds missing z_index and timepoint components to filenames.
+
+        Args:
+            plate_path: Path to plate directory
+            filemanager: FileManager instance
+
+        Returns:
+            Path to plate root
         """
-        logger.info(f"BBBC021 dataset at {plate_path} - no virtual mapping needed (already flat)")
+        plate_path = Path(plate_path)
 
-        # Save minimal metadata
-        self._save_virtual_workspace_metadata(plate_path, {})
+        logger.info(f"🔄 BUILDING VIRTUAL MAPPING: BBBC021 folder flattening for {plate_path}")
+
+        # Initialize mapping dict (PLATE-RELATIVE paths)
+        workspace_mapping = {}
+
+        # Recursively find all .tif files
+        image_files = filemanager.list_image_files(plate_path, Backend.DISK.value, recursive=True)
+
+        for file_path in image_files:
+            # Get filename
+            if isinstance(file_path, str):
+                filename = os.path.basename(file_path)
+            elif isinstance(file_path, Path):
+                filename = file_path.name
+            else:
+                continue
+
+            # Parse original filename
+            metadata = self.parser.parse_filename(filename)
+            if not metadata:
+                logger.warning(f"Could not parse BBBC021 filename: {filename}")
+                continue
+
+            # Add default z_index and timepoint (missing from original filenames)
+            if metadata['z_index'] is None:
+                metadata['z_index'] = 1
+            if metadata['timepoint'] is None:
+                metadata['timepoint'] = 1
+
+            # Reconstruct filename with all components (standardized)
+            new_filename = self.parser.construct_filename(**metadata)
+
+            # Build PLATE-RELATIVE virtual path (at plate root)
+            virtual_relative = new_filename
+
+            # Build PLATE-RELATIVE real path (in subfolder)
+            real_relative = Path(file_path).relative_to(plate_path).as_posix()
+
+            # Add to mapping
+            workspace_mapping[virtual_relative] = real_relative
+            logger.debug(f"  Mapped: {virtual_relative} → {real_relative}")
+
+        logger.info(f"Built {len(workspace_mapping)} virtual path mappings for BBBC021")
+
+        # Save virtual workspace mapping
+        self._save_virtual_workspace_metadata(plate_path, workspace_mapping)
 
         return plate_path
 
 
 # ============================================================================
-# BBBC038 Handler (Kaggle Nuclei Format - PNG)
+# BBBC038 Handler (Kaggle Nuclei - Hex ID Format)
 # ============================================================================
 
 class BBBC038FilenameParser(FilenameParser):
     """
     Parser for BBBC038 dataset (Kaggle 2018 Data Science Bowl).
 
-    BBBC038 uses folder-based organization, not filename parsing:
-    - stage1_train/{ImageId}/images/{ImageId}.png
-    - stage1_train/{ImageId}/masks/{MaskId}.png
+    Format: {HexID}.png
+    Example: 0a7e06cd488667b8fe53a1521d88ab3f4e8d8a05b5663e89dc5df7b02ca93f38.png
 
-    ImageId is a hex string, not structured like well/site/channel.
+    BBBC038 uses simple hex string identifiers as filenames.
+    Each ImageId represents a unique image (treated as a unique "well").
+
+    Organization: stage1_train/{ImageId}/images/{ImageId}.png
+    Parser only sees the filename, not the full path structure.
     """
+
+    # Pattern: hex string + .png extension
+    _pattern = re.compile(r'^([a-f0-9]+)\.png$', re.IGNORECASE)
 
     def __init__(self, filemanager=None, pattern_format=None):
         super().__init__()
@@ -299,47 +415,80 @@ class BBBC038FilenameParser(FilenameParser):
         self.pattern_format = pattern_format
 
     @classmethod
-    def can_parse(cls, filename: str) -> bool:
-        """
-        BBBC038 uses folder structure, not filename patterns.
+    def can_parse(cls, filename: Union[str, Any]) -> bool:
+        """Check if filename matches BBBC038 pattern (hex ID + .png)."""
+        basename = Path(str(filename)).name
+        return cls._pattern.match(basename) is not None
 
-        Accept .png files only.
+    def parse_filename(self, filename: Union[str, Any]) -> Optional[Dict[str, Any]]:
         """
-        return Path(filename).suffix.lower() == '.png'
+        Parse BBBC038 filename into components.
 
-    def parse_filename(self, filename: str) -> Optional[Dict[str, Any]]:
+        Args:
+            filename: Filename to parse
+
+        Returns:
+            Dict with well=ImageId, site/channel/z all fixed at 1
+            Or None if parsing fails
         """
-        BBBC038 has no structured filenames - just ImageId.png.
+        basename = Path(str(filename)).name
+        match = self._pattern.match(basename)
 
-        Return minimal metadata with well=ImageId (parent folder name).
-        """
-        path = Path(filename)
+        if not match:
+            logger.debug("Could not parse BBBC038 filename: %s", filename)
+            return None
 
-        # Extract ImageId from path: .../ImageId/images/ImageId.png
-        if len(path.parts) >= 2:
-            image_id = path.parts[-3] if 'images' in path.parts[-2] else path.stem
-        else:
-            image_id = path.stem
+        image_id = match.group(1)
 
         return {
-            'well': image_id,  # Use ImageId as "well" identifier
-            'site': 1,
-            'channel': 1,
-            'z_index': 1,
-            'extension': path.suffix,
+            'well': image_id,  # ImageId is the well identifier
+            'site': 1,          # Single image per ID
+            'channel': 1,       # Single channel (nuclei stain)
+            'z_index': None,    # No Z-stacks, will default to 1
+            'timepoint': None,  # No timepoints, will default to 1
+            'extension': '.png',
         }
 
     def extract_component_coordinates(self, component_value: str) -> Tuple[str, str]:
         """
-        BBBC038 has no plate layout - ImageId is not structured.
+        Extract coordinates from ImageId.
 
-        Return ImageId as both row and column.
+        BBBC038 has no spatial grid layout - ImageIds are arbitrary identifiers.
+        Split the hex string for display purposes only.
+
+        Args:
+            component_value: ImageId (hex string)
+
+        Returns:
+            (first_half, second_half) of the hex ID
         """
-        return (component_value[:8], component_value[8:] if len(component_value) > 8 else "")
+        if not component_value:
+            raise ValueError("Invalid ImageId: empty")
 
-    def construct_filename(self, extension: str = '.png', **component_values) -> str:
-        """Construct filename from ImageId."""
-        image_id = component_values.get('well', 'unknown')
+        mid = len(component_value) // 2
+        return (component_value[:mid], component_value[mid:])
+
+    def construct_filename(
+        self,
+        extension: str = '.png',
+        **component_values
+    ) -> str:
+        """
+        Construct BBBC038 filename from components.
+
+        Args:
+            well: ImageId (hex string)
+            extension: File extension
+            **component_values: Other components (ignored)
+
+        Returns:
+            Filename string: {ImageId}.png
+        """
+        image_id = component_values.get('well')
+
+        if not image_id:
+            raise ValueError("ImageId (well) cannot be empty or None.")
+
         return f"{image_id}{extension}"
 
 
@@ -365,6 +514,7 @@ class BBBC038MetadataHandler(MetadataHandler):
             plate_path / "metadata.xlsx",
             plate_path / "stage1_train_labels.csv",
             plate_path.parent / "metadata.xlsx",
+            plate_path.parent / "stage1_train_labels.csv",
         ]
 
         for candidate in candidates:
@@ -377,12 +527,12 @@ class BBBC038MetadataHandler(MetadataHandler):
         )
 
     def get_grid_dimensions(self, plate_path: Union[str, Path]) -> Tuple[int, int]:
-        """BBBC038 has no grid layout."""
+        """BBBC038 has no grid layout - each image is independent."""
         return (1, 1)
 
     def get_pixel_size(self, plate_path: Union[str, Path]) -> float:
-        """BBBC038 pixel size varies - return default."""
-        return 1.0  # No standard pixel size (diverse imaging)
+        """BBBC038 pixel size varies across different imaging conditions."""
+        return 1.0  # No standard pixel size (diverse sources)
 
     def get_channel_values(self, plate_path: Union[str, Path]) -> Optional[Dict[str, Optional[str]]]:
         """BBBC038 is single-channel (nuclei stain)."""
@@ -402,7 +552,8 @@ class BBBC038Handler(MicroscopeHandler):
     """
     Microscope handler for BBBC038 dataset (Kaggle nuclei, PNG format).
 
-    BBBC038 uses folder-based organization, not standard microscopy layout.
+    BBBC038: Nuclei from diverse organisms and imaging conditions.
+    Format: {HexID}.png in stage1_train/{ImageId}/images/ subdirectories.
     """
 
     _microscope_type = 'bbbc038'
@@ -415,7 +566,11 @@ class BBBC038Handler(MicroscopeHandler):
 
     @property
     def root_dir(self) -> str:
-        """BBBC038 images are in stage1_train/*/images/ subdirectories."""
+        """
+        BBBC038 virtual workspace is at stage1_train directory.
+
+        Images are in stage1_train/{ImageId}/images/ subdirectories.
+        """
         return "stage1_train"
 
     @property
@@ -432,16 +587,71 @@ class BBBC038Handler(MicroscopeHandler):
 
     def _build_virtual_mapping(self, plate_path: Path, filemanager: FileManager) -> Path:
         """
-        BBBC038 is organized by ImageId folders.
+        Build virtual workspace mapping for BBBC038.
 
-        No virtual mapping needed - use folder structure as-is.
+        Flattens stage1_train/{ImageId}/images/ structure.
+        Since filenames are already unique (ImageId), just flatten to stage1_train/.
+
+        Args:
+            plate_path: Path to plate directory (contains stage1_train/)
+            filemanager: FileManager instance
+
+        Returns:
+            Path to stage1_train directory
         """
-        logger.info(f"BBBC038 dataset at {plate_path} - folder-based organization")
+        plate_path = Path(plate_path)
+        stage1_path = plate_path / "stage1_train"
 
-        self._save_virtual_workspace_metadata(plate_path, {})
+        if not stage1_path.exists():
+            logger.warning(f"stage1_train directory not found in {plate_path}")
+            return plate_path
 
-        # Return stage1_train directory where images are located
-        return plate_path / "stage1_train"
+        logger.info(f"🔄 BUILDING VIRTUAL MAPPING: BBBC038 folder flattening for {plate_path}")
+
+        # Initialize mapping dict (PLATE-RELATIVE paths)
+        workspace_mapping = {}
+
+        # Find all .png files in images/ subdirectories
+        image_files = filemanager.list_image_files(stage1_path, Backend.DISK.value, recursive=True)
+
+        for file_path in image_files:
+            # Only process files in images/ subdirectories (skip masks/)
+            if '/images/' not in str(file_path):
+                continue
+
+            # Get filename
+            if isinstance(file_path, str):
+                filename = os.path.basename(file_path)
+            elif isinstance(file_path, Path):
+                filename = file_path.name
+            else:
+                continue
+
+            # Parse filename
+            metadata = self.parser.parse_filename(filename)
+            if not metadata:
+                logger.warning(f"Could not parse BBBC038 filename: {filename}")
+                continue
+
+            # Filename is already correct (ImageId.png)
+            # Just flatten to stage1_train/ directory
+
+            # Build PLATE-RELATIVE virtual path (in stage1_train/)
+            virtual_relative = (Path("stage1_train") / filename).as_posix()
+
+            # Build PLATE-RELATIVE real path (in stage1_train/{ImageId}/images/)
+            real_relative = Path(file_path).relative_to(plate_path).as_posix()
+
+            # Add to mapping
+            workspace_mapping[virtual_relative] = real_relative
+            logger.debug(f"  Mapped: {virtual_relative} → {real_relative}")
+
+        logger.info(f"Built {len(workspace_mapping)} virtual path mappings for BBBC038")
+
+        # Save virtual workspace mapping
+        self._save_virtual_workspace_metadata(plate_path, workspace_mapping)
+
+        return stage1_path
 
 
 # Register metadata handler classes for auto-discovery
