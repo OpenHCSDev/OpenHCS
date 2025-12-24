@@ -1,13 +1,17 @@
 """
 Converted from CellProfiler: ConvertObjectsToImage
 Original: convert_objects_to_image
+
+Converts object labels to various image representations (binary, grayscale, color, uint16).
 """
 
 import numpy as np
+from typing import Tuple
 from enum import Enum
-from typing import Tuple, Optional
 from openhcs.core.memory.decorators import numpy
 from openhcs.processing.backends.lib_registry.unified_registry import ProcessingContract
+from openhcs.core.pipeline.function_contracts import special_inputs
+
 
 class ImageMode(Enum):
     BINARY = "binary"
@@ -15,68 +19,89 @@ class ImageMode(Enum):
     COLOR = "color"
     UINT16 = "uint16"
 
+
+def _get_colormap(colormap_name: str, num_labels: int) -> np.ndarray:
+    """Generate colors for labels using matplotlib colormap."""
+    try:
+        from matplotlib import colormaps
+        cmap = colormaps.get_cmap(colormap_name)
+    except (ImportError, ValueError):
+        # Fallback to random colors if matplotlib not available or invalid colormap
+        np.random.seed(42)
+        return np.random.rand(num_labels + 1, 3)
+    
+    colors = np.zeros((num_labels + 1, 3))
+    for i in range(1, num_labels + 1):
+        colors[i] = cmap(i / max(num_labels, 1))[:3]
+    return colors
+
+
 @numpy(contract=ProcessingContract.PURE_2D)
+@special_inputs("labels")
 def convert_objects_to_image(
     image: np.ndarray,
-    image_mode: ImageMode = ImageMode.GRAYSCALE,
-    colormap: str = "viridis"
+    labels: np.ndarray,
+    image_mode: ImageMode = ImageMode.COLOR,
+    colormap_value: str = "jet",
 ) -> np.ndarray:
     """
-    Converts label objects into an image format.
+    Convert object labels to an image representation.
     
     Args:
-        image: The input label image (H, W).
-        image_mode: The output format (Binary, Grayscale, Color, or uint16).
-        colormap: The colormap to use if image_mode is Color.
+        image: Input image (H, W) - used for shape reference
+        labels: Object labels (H, W) - integer labels where 0 is background
+        image_mode: Output image format (BINARY, GRAYSCALE, COLOR, UINT16)
+        colormap_value: Matplotlib colormap name for COLOR mode
     
     Returns:
-        np.ndarray: The converted image.
+        Converted image:
+        - BINARY: (H, W) boolean mask where objects are True
+        - GRAYSCALE: (H, W) float with normalized label values
+        - COLOR: (H, W, 3) RGB image with colored objects
+        - UINT16: (H, W) integer labels
     """
-    labels = image.astype(np.int32)
-    shape = labels.shape
-    mask = labels != 0
-
+    labels = labels.astype(np.int32)
+    h, w = labels.shape
+    
     if image_mode == ImageMode.BINARY:
-        return mask.astype(np.float32)
-
-    if image_mode == ImageMode.GRAYSCALE:
-        # Normalize labels to [0, 1] for grayscale
-        if np.any(mask):
-            res = labels.astype(np.float32)
-            res[mask] = res[mask] / np.max(res)
-            return res
-        return np.zeros(shape, dtype=np.float32)
-
-    if image_mode == ImageMode.UINT16:
-        # Return raw labels cast to uint16
-        return labels.astype(np.uint16)
-
-    if image_mode == ImageMode.COLOR:
-        import matplotlib.pyplot as plt
+        # Binary mask: objects are 1, background is 0
+        pixel_data = (labels > 0).astype(np.float32)
         
-        # Create a normalized version for the colormap
-        if not np.any(mask):
-            return np.zeros(shape + (3,), dtype=np.float32)
+    elif image_mode == ImageMode.GRAYSCALE:
+        # Grayscale: normalize labels to 0-1 range
+        max_label = labels.max()
+        if max_label > 0:
+            pixel_data = labels.astype(np.float32) / max_label
+        else:
+            pixel_data = np.zeros((h, w), dtype=np.float32)
             
-        # We use a shuffled label approach or direct colormap to distinguish objects
-        # To mimic CP behavior, we often use the labels as indices into a colormap
-        norm_labels = labels.astype(np.float32)
-        max_label = np.max(norm_labels)
-        norm_labels[mask] = norm_labels[mask] / max_label
+    elif image_mode == ImageMode.COLOR:
+        # Color: apply colormap to labels
+        max_label = labels.max()
+        colors = _get_colormap(colormap_value, max_label)
         
-        try:
-            cm = plt.get_cmap(colormap)
-        except ValueError:
-            cm = plt.get_cmap("viridis")
-            
-        # Apply colormap (returns RGBA)
-        color_image = cm(norm_labels)
+        # Map labels to colors
+        pixel_data = np.zeros((h, w, 3), dtype=np.float32)
+        for label_id in range(1, max_label + 1):
+            mask = labels == label_id
+            if np.any(mask):
+                pixel_data[mask] = colors[label_id]
         
-        # Strip alpha channel and return RGB
-        rgb_image = color_image[:, :, :3].astype(np.float32)
-        # Set background to black
-        rgb_image[~mask] = 0
+        # For 2D output compatibility, we need to return (H, W)
+        # Convert RGB to grayscale luminance for single-channel output
+        # Or we could return the first channel - using luminance for better representation
+        pixel_data = 0.299 * pixel_data[:, :, 0] + 0.587 * pixel_data[:, :, 1] + 0.114 * pixel_data[:, :, 2]
         
-        return rgb_image
-
-    return image.astype(np.float32)
+    elif image_mode == ImageMode.UINT16:
+        # UINT16: return labels as float (will be cast appropriately downstream)
+        pixel_data = labels.astype(np.float32)
+        
+    else:
+        # Default to grayscale
+        max_label = labels.max()
+        if max_label > 0:
+            pixel_data = labels.astype(np.float32) / max_label
+        else:
+            pixel_data = np.zeros((h, w), dtype=np.float32)
+    
+    return pixel_data

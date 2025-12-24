@@ -379,16 +379,20 @@ class LLMFunctionConverter:
             pass
 
         # Try to extract JSON from within the response (LLM might add explanation)
-        json_match = re.search(r'\{[^{}]*"code"[^{}]*\}', response, re.DOTALL)
-        if json_match:
+        # Find the first { and last } to extract the JSON object
+        first_brace = response.find('{')
+        last_brace = response.rfind('}')
+        if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
             try:
-                data = json.loads(json_match.group())
-                code = data.get("code", "")
-                if code.startswith("```"):
-                    code = re.sub(r'^```\w*\n?', '', code)
-                    code = re.sub(r'```$', '', code)
-                data["code"] = code.strip()
-                return data
+                json_str = response[first_brace:last_brace+1]
+                data = json.loads(json_str)
+                if isinstance(data, dict) and "code" in data:
+                    code = data.get("code", "")
+                    if code.startswith("```"):
+                        code = re.sub(r'^```\w*\n?', '', code)
+                        code = re.sub(r'```$', '', code)
+                    data["code"] = code.strip()
+                    return data
             except json.JSONDecodeError:
                 pass
 

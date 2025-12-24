@@ -75,16 +75,17 @@ class AbsorptionResult:
 class LibraryAbsorber:
     """
     One-time absorption of CellProfiler library into OpenHCS.
-    
+
     Workflow:
-    1. Scan benchmark/cellprofiler_source/library/modules/
-    2. For each _*.py file:
-       a. LLM convert to OpenHCS format
+    1. Scan benchmark/cellprofiler_source/library/modules/_*.py (pure algorithms)
+    2. Scan benchmark/cellprofiler_source/modules/*.py (full classes, for modules not in library)
+    3. For each file:
+       a. LLM convert to OpenHCS format (extracts algorithm from class cruft)
        b. Validate syntax
        c. (Optional) Run contract inference
        d. Write to benchmark/cellprofiler_library/functions/
-    3. Generate registry mapping
-    4. Write contracts.json with inferred contracts
+    4. Generate registry mapping
+    5. Write contracts.json with inferred contracts
     """
     
     def __init__(
@@ -124,28 +125,50 @@ class LibraryAbsorber:
             AbsorptionResult with all absorption details
         """
         result = AbsorptionResult()
-        
+
         # Ensure output directories exist
         functions_dir = self.output_root / "functions"
         functions_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Find all library modules
+
+        # Collect all modules to absorb: (module_file, module_name, is_library_module)
+        modules_to_absorb: List[Tuple[Path, str, bool]] = []
+        absorbed_names: set = set()
+
+        # 1. Library modules first (pure algorithms - preferred source)
         library_modules_dir = self.source_root / "library" / "modules"
-        if not library_modules_dir.exists():
-            logger.error(f"Library modules directory not found: {library_modules_dir}")
-            return result
-        
-        module_files = sorted(library_modules_dir.glob("_*.py"))
-        logger.info(f"Found {len(module_files)} library modules to absorb")
-        
-        for module_file in module_files:
-            if module_file.name == "__init__.py":
-                continue
-            
-            module_name = self._file_to_module_name(module_file.name)
+        if library_modules_dir.exists():
+            for module_file in sorted(library_modules_dir.glob("_*.py")):
+                if module_file.name == "__init__.py":
+                    continue
+                module_name = self._file_to_module_name(module_file.name)
+                modules_to_absorb.append((module_file, module_name, True))
+                absorbed_names.add(module_name.lower())
+            logger.info(f"Found {len(modules_to_absorb)} pure library modules")
+        else:
+            logger.warning(f"Library modules directory not found: {library_modules_dir}")
+
+        # 2. Full module classes (for modules NOT already in library)
+        full_modules_dir = self.source_root / "modules"
+        if full_modules_dir.exists():
+            full_module_count = 0
+            for module_file in sorted(full_modules_dir.glob("*.py")):
+                if module_file.name.startswith("_") or module_file.name == "__init__.py":
+                    continue
+                module_name = self._file_to_module_name(module_file.name)
+                if module_name.lower() not in absorbed_names:
+                    modules_to_absorb.append((module_file, module_name, False))
+                    absorbed_names.add(module_name.lower())
+                    full_module_count += 1
+            logger.info(f"Found {full_module_count} additional full module classes")
+        else:
+            logger.warning(f"Full modules directory not found: {full_modules_dir}")
+
+        logger.info(f"Total modules to absorb: {len(modules_to_absorb)}")
+
+        for module_file, module_name, is_library in modules_to_absorb:
             func_name = self._module_to_function_name(module_name)
             output_file = functions_dir / f"{func_name}.py"
-            
+
             # Skip if exists
             if skip_existing and output_file.exists():
                 logger.info(f"Skipping {module_name} (already exists)")
@@ -160,8 +183,9 @@ class LibraryAbsorber:
                     validated=True,
                 ))
                 continue
-            
+
             # Absorb this module
+            source_type = "library" if is_library else "full-class"
             try:
                 absorbed = self._absorb_module(
                     module_file=module_file,
@@ -171,11 +195,12 @@ class LibraryAbsorber:
                     run_contract_inference=run_contract_inference,
                 )
                 result.absorbed.append(absorbed)
-                
+                logger.info(f"  [{source_type}] {module_name} -> {func_name}")
+
             except Exception as e:
-                logger.error(f"Failed to absorb {module_name}: {e}")
+                logger.error(f"Failed to absorb {module_name} [{source_type}]: {e}")
                 result.failed.append((module_name, str(e)))
-        
+
         # Write registry
         self._write_registry(result)
         
@@ -213,18 +238,39 @@ class LibraryAbsorber:
             source_code=source_code,
         )
         
-        # LLM convert
-        conversion = self.llm_converter.convert(module_block, source_location)
-        
-        if not conversion.success:
-            raise RuntimeError(f"LLM conversion failed: {conversion.error_message}")
-        
-        # Validate syntax and contract compliance
-        validation_errors = self._validate_syntax(conversion.converted_code)
-        if validation_errors:
+        # LLM convert with retry on validation failure
+        max_retries = 2
+        conversion = None
+        validation_errors = []
+
+        for attempt in range(max_retries + 1):
+            if attempt > 0:
+                logger.warning(f"  Retry attempt {attempt}/{max_retries} for {module_name}")
+
+            conversion = self.llm_converter.convert(module_block, source_location)
+
+            if not conversion.success:
+                if attempt < max_retries:
+                    continue
+                raise RuntimeError(f"LLM conversion failed: {conversion.error_message}")
+
+            # Validate syntax and contract compliance
+            validation_errors = self._validate_syntax(conversion.converted_code)
+            if not validation_errors:
+                # Success!
+                break
+
+            # Log validation errors
             for err in validation_errors:
                 logger.error(f"  Validation: {err}")
-            raise RuntimeError(f"Validation failed: {validation_errors}")
+
+            # If this was the last attempt, raise
+            if attempt >= max_retries:
+                raise RuntimeError(f"Validation failed after {max_retries + 1} attempts: {validation_errors}")
+
+        # At this point, conversion succeeded and validation passed
+        assert conversion is not None
+        assert not validation_errors
 
         # Write output (only if valid)
         output_file.write_text(conversion.converted_code)
@@ -413,11 +459,12 @@ class LibraryAbsorber:
         return '\n'.join(lines)
 
     def _file_to_module_name(self, filename: str) -> str:
-        """Convert _threshold.py to Threshold."""
+        """Convert _threshold.py to Threshold or identifyprimaryobjects.py to IdentifyPrimaryObjects."""
         # Remove .py and leading underscore
         name = filename.replace('.py', '').lstrip('_')
-        # Convert to TitleCase
-        return name.title().replace('_', '')
+        # Convert to proper CamelCase (capitalize each word after underscore)
+        parts = name.split('_')
+        return ''.join(word.capitalize() for word in parts)
 
     def _module_to_function_name(self, module_name: str) -> str:
         """Convert ModuleName to module_name (snake_case)."""

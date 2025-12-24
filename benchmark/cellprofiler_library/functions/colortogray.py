@@ -1,86 +1,159 @@
 """
-Converted from CellProfiler: Colortogray
-Original: color_to_gray
+Converted from CellProfiler: ColorToGray
+Original: color_to_gray, split_colortogray
 """
 
 import numpy as np
-from typing import Tuple, List, Union, Optional
+from typing import Tuple
 from enum import Enum
 from openhcs.core.memory.decorators import numpy
 from openhcs.processing.backends.lib_registry.unified_registry import ProcessingContract
 
-class ImageChannelType(Enum):
-    RGB = "RGB"
-    HSV = "HSV"
-    CHANNELS = "Channels"
 
-@numpy(contract=ProcessingContract.PURE_2D)
+class ImageChannelType(Enum):
+    RGB = "rgb"
+    HSV = "hsv"
+    CHANNELS = "channels"
+
+
+class ColorToGrayMode(Enum):
+    COMBINE = "combine"
+    SPLIT = "split"
+
+
+@numpy(contract=ProcessingContract.FLEXIBLE)
 def color_to_gray(
     image: np.ndarray,
+    mode: ColorToGrayMode = ColorToGrayMode.SPLIT,
     image_type: ImageChannelType = ImageChannelType.RGB,
-    should_combine: bool = True,
-    channels: Optional[List[int]] = None,
-    contributions: Optional[List[float]] = None,
+    channel_indices: Tuple[int, ...] = (0, 1, 2),
+    contributions: Tuple[float, ...] = (1.0, 1.0, 1.0),
 ) -> np.ndarray:
     """
-    Converts a color image to grayscale by either combining channels or splitting them.
+    Convert color image to grayscale by combining or splitting channels.
     
     Args:
-        image: Shape (C, H, W) where C is the number of channels.
-        image_type: The color space of the input image.
-        should_combine: If True, returns a single grayscale image (1, H, W).
-                        If False, returns all split channels (C, H, W).
-        channels: List of channel indices to use for combination.
-        contributions: List of weights for each channel in the combination.
+        image: Shape (C, H, W) - color image with channels stacked in dim 0
+               For RGB: (3, H, W), for multichannel: (N, H, W)
+        mode: COMBINE to merge channels into single grayscale,
+              SPLIT to separate channels (returns stacked grayscale images)
+        image_type: RGB, HSV, or CHANNELS - determines how to interpret input
+        channel_indices: Which channels to use when combining (0-indexed)
+        contributions: Weight for each channel when combining (will be normalized)
     
     Returns:
-        np.ndarray: Shape (1, H, W) if combined, or (C, H, W) if split.
+        If mode=COMBINE: Shape (1, H, W) - single grayscale image
+        If mode=SPLIT: Shape (C, H, W) - each channel as separate grayscale
     """
-    # Ensure image is 3D (C, H, W)
-    if image.ndim == 2:
-        image = image[np.newaxis, ...]
-    
-    if should_combine:
-        # Default to equal weighting if not provided
-        if channels is None:
-            channels = list(range(image.shape[0]))
-        if contributions is None:
-            contributions = [1.0 / len(channels)] * len(channels)
-            
-        # Initialize output
-        combined = np.zeros(image.shape[1:], dtype=np.float32)
-        
-        for idx, weight in zip(channels, contributions):
-            if idx < image.shape[0]:
-                combined += image[idx] * weight
-        
-        return combined[np.newaxis, ...]
-
+    if mode == ColorToGrayMode.COMBINE:
+        return _combine_colortogray(image, channel_indices, contributions)
     else:
-        if image_type == ImageChannelType.HSV:
-            # Manual RGB to HSV conversion for the first 3 channels
-            # Note: This assumes input is RGB in range [0, 1]
-            r, g, b = image[0], image[1], image[2]
-            max_c = np.max(image[:3], axis=0)
-            min_c = np.min(image[:3], axis=0)
-            delta = max_c - min_c
-            
-            # Hue
-            h = np.zeros_like(max_c)
-            mask = delta != 0
-            h[mask & (max_c == r)] = (60 * ((g[mask & (max_c == r)] - b[mask & (max_c == r)]) / delta[mask & (max_c == r)]) % 360)
-            h[mask & (max_c == g)] = (60 * ((b[mask & (max_c == g)] - r[mask & (max_c == g)]) / delta[mask & (max_c == g)]) + 120)
-            h[mask & (max_c == b)] = (60 * ((r[mask & (max_c == b)] - g[mask & (max_c == b)]) / delta[mask & (max_c == b)]) + 240)
-            h /= 360.0 # Normalize to [0, 1]
-            
-            # Saturation
-            s = np.zeros_like(max_c)
-            s[max_c != 0] = delta[max_c != 0] / max_c[max_c != 0]
-            
-            # Value
-            v = max_c
-            
-            return np.stack([h, s, v])
-            
-        # For RGB or Channels, we simply return the existing stack
-        return image
+        return _split_colortogray(image, image_type)
+
+
+def _combine_colortogray(
+    image: np.ndarray,
+    channel_indices: Tuple[int, ...],
+    contributions: Tuple[float, ...],
+) -> np.ndarray:
+    """
+    Combine specified channels into a single grayscale image.
+    
+    Args:
+        image: Shape (C, H, W)
+        channel_indices: Which channels to combine
+        contributions: Weights for each channel
+    
+    Returns:
+        Shape (1, H, W) - combined grayscale image
+    """
+    if len(channel_indices) != len(contributions):
+        raise ValueError("channel_indices and contributions must have same length")
+    
+    # Normalize contributions to sum to 1
+    total = sum(contributions)
+    if total == 0:
+        raise ValueError("Contributions cannot all be zero")
+    normalized_weights = [c / total for c in contributions]
+    
+    # Extract and combine channels
+    h, w = image.shape[1], image.shape[2]
+    result = np.zeros((h, w), dtype=np.float32)
+    
+    for idx, weight in zip(channel_indices, normalized_weights):
+        if idx < image.shape[0]:
+            result += image[idx].astype(np.float32) * weight
+    
+    # Return as (1, H, W)
+    return result[np.newaxis, :, :]
+
+
+def _split_colortogray(
+    image: np.ndarray,
+    image_type: ImageChannelType,
+) -> np.ndarray:
+    """
+    Split color image into separate grayscale channels.
+    
+    Args:
+        image: Shape (C, H, W)
+        image_type: How to interpret the channels
+    
+    Returns:
+        Shape (C, H, W) - each channel as grayscale
+    """
+    if image_type == ImageChannelType.RGB:
+        # RGB: just return channels as-is (already separated in dim 0)
+        return image.astype(np.float32)
+    
+    elif image_type == ImageChannelType.HSV:
+        # Convert RGB to HSV then split
+        # Assume input is RGB (3, H, W), convert to HSV
+        if image.shape[0] != 3:
+            raise ValueError("HSV conversion requires 3-channel RGB input")
+        
+        # Transpose to (H, W, C) for conversion
+        rgb = np.transpose(image, (1, 2, 0)).astype(np.float32)
+        
+        # Normalize to 0-1 if needed
+        if rgb.max() > 1.0:
+            rgb = rgb / 255.0
+        
+        # RGB to HSV conversion
+        r, g, b = rgb[:, :, 0], rgb[:, :, 1], rgb[:, :, 2]
+        
+        maxc = np.maximum(np.maximum(r, g), b)
+        minc = np.minimum(np.minimum(r, g), b)
+        v = maxc
+        
+        deltac = maxc - minc
+        s = np.where(maxc != 0, deltac / maxc, 0)
+        
+        # Hue calculation
+        h = np.zeros_like(r)
+        mask = deltac != 0
+        
+        # When max is R
+        idx = (maxc == r) & mask
+        h[idx] = ((g[idx] - b[idx]) / deltac[idx]) % 6
+        
+        # When max is G
+        idx = (maxc == g) & mask
+        h[idx] = (b[idx] - r[idx]) / deltac[idx] + 2
+        
+        # When max is B
+        idx = (maxc == b) & mask
+        h[idx] = (r[idx] - g[idx]) / deltac[idx] + 4
+        
+        h = h / 6.0  # Normalize to 0-1
+        
+        # Stack as (3, H, W)
+        hsv = np.stack([h, s, v], axis=0).astype(np.float32)
+        return hsv
+    
+    elif image_type == ImageChannelType.CHANNELS:
+        # Generic multichannel: just return as-is
+        return image.astype(np.float32)
+    
+    else:
+        raise ValueError(f"Unsupported image type: {image_type}")

@@ -34,35 +34,159 @@ from .functions.reducenoise import reducenoise
 from .functions.savecroppedobjects import savecroppedobjects
 from .functions.threshold import threshold
 from .functions.watershed import watershed
+from .functions.calculatemath import calculatemath
+from .functions.calculatestatistics import calculatestatistics
+from .functions.classifyobjects import classifyobjects
+from .functions.correctilluminationcalculate import correctilluminationcalculate
+from .functions.createbatchfiles import createbatchfiles
+from .functions.definegrid import definegrid
+from .functions.dilateobjects import dilateobjects
+from .functions.displaydataonimage import displaydataonimage
+from .functions.displaydensityplot import displaydensityplot
+from .functions.displayhistogram import displayhistogram
+from .functions.displayplatemap import displayplatemap
+from .functions.displayscatterplot import displayscatterplot
+from .functions.editobjectsmanually import editobjectsmanually
+from .functions.exporttodatabase import exporttodatabase
+from .functions.exporttospreadsheet import exporttospreadsheet
+from .functions.filterobjects import filterobjects
+from .functions.findmaxima import findmaxima
+from .functions.flagimage import flagimage
+from .functions.flipandrotate import flipandrotate
+from .functions.graytocolor import graytocolor
+from .functions.identifydeadworms import identifydeadworms
+from .functions.identifyobjectsingrid import identifyobjectsingrid
+from .functions.identifyobjectsmanually import identifyobjectsmanually
+from .functions.identifyprimaryobjects import identifyprimaryobjects
+from .functions.identifysecondaryobjects import identifysecondaryobjects
+from .functions.identifytertiaryobjects import identifytertiaryobjects
+from .functions.imagemath import imagemath
+from .functions.invertforprinting import invertforprinting
+from .functions.labelimages import labelimages
+from .functions.makeprojection import makeprojection
+from .functions.maskimage import maskimage
+from .functions.maskobjects import maskobjects
+from .functions.matchtemplate import matchtemplate
+from .functions.measurecolocalization import measurecolocalization
+from .functions.measuregranularity import measuregranularity
+from .functions.measureimageareaoccupied import measureimageareaoccupied
+from .functions.measureimageintensity import measureimageintensity
+from .functions.measureimagequality import measureimagequality
+from .functions.measureimageskeleton import measureimageskeleton
+from .functions.measureobjectintensity import measureobjectintensity
+from .functions.measureobjectintensitydistribution import measureobjectintensitydistribution
+from .functions.measureobjectneighbors import measureobjectneighbors
+from .functions.measureobjectoverlap import measureobjectoverlap
+from .functions.measureobjectskeleton import measureobjectskeleton
+from .functions.measuretexture import measuretexture
+from .functions.morph import morph
+from .functions.overlayoutlines import overlayoutlines
+from .functions.relateobjects import relateobjects
+from .functions.removeholes import removeholes
+from .functions.rescaleintensity import rescaleintensity
+from .functions.resize import resize
+from .functions.resizeobjects import resizeobjects
+from .functions.runimagejmacro import runimagejmacro
+from .functions.saveimages import saveimages
+from .functions.shrinktoobjectcenters import shrinktoobjectcenters
+from .functions.smooth import smooth
+from .functions.splitormergeobjects import splitormergeobjects
+from .functions.straightenworms import straightenworms
+from .functions.tile import tile
+from .functions.trackobjects import trackobjects
+from .functions.unmixcolors import unmixcolors
+from .functions.untangleworms import untangleworms
 
 
 # Registry mapping CellProfiler module names to OpenHCS functions
 CELLPROFILER_MODULES: Dict[str, Callable] = {
+    "CalculateMath": calculate_math,
+    "CalculateStatistics": calculate_statistics,
+    "ClassifyObjectsSingleMeasurement": classify_objects_single_measurement,
     "Closing": closing,
-    "Colortogray": colortogray,
+    "ColorToGray": color_to_gray,
     "Combineobjects": combineobjects,
-    "Convertimagetoobjects": convertimagetoobjects,
-    "Convertobjectstoimage": convertobjectstoimage,
-    "Correctilluminationapply": correctilluminationapply,
+    "ComputeAggregateMeasurements": compute_aggregate_measurements,
+    "ConvertImageToObjects": convert_image_to_objects,
+    "ConvertObjectsToImage": convert_objects_to_image,
+    "CorrectIlluminationApply": correct_illumination_apply,
+    "CorrectIlluminationCalculate": correct_illumination_calculate,
+    "CreateBatchFiles": create_batch_files,
     "Crop": crop,
-    "Dilateimage": dilateimage,
-    "Enhanceedges": enhanceedges,
-    "Enhanceorsuppressfeatures": enhanceorsuppressfeatures,
-    "Erodeimage": erodeimage,
-    "Erodeobjects": erodeobjects,
-    "Expandorshrinkobjects": expandorshrinkobjects,
-    "Fillobjects": fillobjects,
-    "Gaussianfilter": gaussianfilter,
+    "DefineGridManual": define_grid_manual,
+    "DilateImage": dilate_image,
+    "DilateObjects": dilate_objects,
+    "DisplayDataOnImage": display_data_on_image,
+    "DisplayDensityPlot": display_density_plot,
+    "DisplayHistogram": display_histogram,
+    "DisplayPlatemap": display_platemap,
+    "DisplayScatterPlot": display_scatter_plot,
+    "EditObjectsManually": edit_objects_manually,
+    "EnhanceEdges": enhance_edges,
+    "EnhanceOrSuppressFeatures": enhance_or_suppress_features,
+    "ErodeImage": erode_image,
+    "ErodeObjects": erode_objects,
+    "ExpandOrShrinkObjects": expand_or_shrink_objects,
+    "ExportToDatabase": export_to_database,
+    "FillObjects": fill_objects,
+    "FilterObjects": filter_objects,
+    "FindMaxima": find_maxima,
+    "FlagImage": flag_image,
+    "FlipAndRotate": flip_and_rotate,
+    "GaussianFilter": gaussian_filter,
+    "GrayToColorRgb": gray_to_color_rgb,
+    "IdentifyDeadWorms": identify_dead_worms,
+    "IdentifyObjectsInGrid": identify_objects_in_grid,
+    "IdentifyObjectsManually": identify_objects_manually,
+    "IdentifyPrimaryObjects": identify_primary_objects,
+    "IdentifySecondaryObjects": identify_secondary_objects,
+    "IdentifyTertiaryObjects": identify_tertiary_objects,
+    "ImageMath": image_math,
+    "InvertForPrinting": invert_for_printing,
+    "LabelImages": label_images,
+    "MakeProjection": make_projection,
+    "MaskImage": mask_image,
+    "MaskObjects": mask_objects,
+    "MatchTemplate": match_template,
+    "MeasureColocalization": measure_colocalization,
+    "MeasureGranularity": measure_granularity,
+    "MeasureImageAreaOccupiedBinary": measure_image_area_occupied_binary,
+    "MeasureImageIntensity": measure_image_intensity,
+    "MeasureImageQuality": measure_image_quality,
+    "MeasureImageSkeleton": measure_image_skeleton,
+    "MeasureObjectIntensity": measure_object_intensity,
+    "MeasureObjectIntensityDistribution": measure_object_intensity_distribution,
+    "MeasureObjectNeighbors": measure_object_neighbors,
+    "MeasureObjectOverlap": measure_object_overlap,
+    "MeasureObjectSizeShape": measure_object_size_shape,
+    "MeasureObjectSkeleton": measure_object_skeleton,
+    "MeasureTexture": measure_texture,
     "Measureimageoverlap": measureimageoverlap,
-    "Measureobjectsizeshape": measureobjectsizeshape,
     "Medialaxis": medialaxis,
     "Medianfilter": medianfilter,
+    "Morph": morph,
     "Morphologicalskeleton": morphologicalskeleton,
     "Opening": opening,
-    "Overlayobjects": overlayobjects,
+    "OverlayObjects": overlay_objects,
+    "OverlayOutlines": overlay_outlines,
     "Reducenoise": reducenoise,
-    "Savecroppedobjects": savecroppedobjects,
+    "RelateObjects": relate_objects,
+    "RemoveHoles": remove_holes,
+    "RescaleIntensity": rescale_intensity,
+    "Resize": resize,
+    "ResizeObjects": resize_objects,
+    "RunImagejMacro": run_imagej_macro,
+    "SaveCroppedObjects": save_cropped_objects,
+    "SaveImages": save_images,
+    "ShrinkToObjectCenters": shrink_to_object_centers,
+    "Smooth": smooth,
+    "SplitOrMergeObjects": split_or_merge_objects,
+    "StraightenWorms": straighten_worms,
     "Threshold": threshold,
+    "Tile": tile,
+    "TrackObjects": track_objects,
+    "UnmixColors": unmix_colors,
+    "UntangleWorms": untangle_worms,
     "Watershed": watershed,
 }
 
@@ -103,4 +227,66 @@ __all__ = [
     "savecroppedobjects",
     "threshold",
     "watershed",
+    "calculatemath",
+    "calculatestatistics",
+    "classifyobjects",
+    "correctilluminationcalculate",
+    "createbatchfiles",
+    "definegrid",
+    "dilateobjects",
+    "displaydataonimage",
+    "displaydensityplot",
+    "displayhistogram",
+    "displayplatemap",
+    "displayscatterplot",
+    "editobjectsmanually",
+    "exporttodatabase",
+    "exporttospreadsheet",
+    "filterobjects",
+    "findmaxima",
+    "flagimage",
+    "flipandrotate",
+    "graytocolor",
+    "identifydeadworms",
+    "identifyobjectsingrid",
+    "identifyobjectsmanually",
+    "identifyprimaryobjects",
+    "identifysecondaryobjects",
+    "identifytertiaryobjects",
+    "imagemath",
+    "invertforprinting",
+    "labelimages",
+    "makeprojection",
+    "maskimage",
+    "maskobjects",
+    "matchtemplate",
+    "measurecolocalization",
+    "measuregranularity",
+    "measureimageareaoccupied",
+    "measureimageintensity",
+    "measureimagequality",
+    "measureimageskeleton",
+    "measureobjectintensity",
+    "measureobjectintensitydistribution",
+    "measureobjectneighbors",
+    "measureobjectoverlap",
+    "measureobjectskeleton",
+    "measuretexture",
+    "morph",
+    "overlayoutlines",
+    "relateobjects",
+    "removeholes",
+    "rescaleintensity",
+    "resize",
+    "resizeobjects",
+    "runimagejmacro",
+    "saveimages",
+    "shrinktoobjectcenters",
+    "smooth",
+    "splitormergeobjects",
+    "straightenworms",
+    "tile",
+    "trackobjects",
+    "unmixcolors",
+    "untangleworms",
 ]

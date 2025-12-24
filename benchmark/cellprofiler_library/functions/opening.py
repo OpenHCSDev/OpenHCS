@@ -1,51 +1,61 @@
 """
 Converted from CellProfiler: Opening
-Original: opening
+Morphological opening operation (erosion followed by dilation)
 """
 
 import numpy as np
-from typing import Tuple
+from typing import Literal
 from openhcs.core.memory.decorators import numpy
 from openhcs.processing.backends.lib_registry.unified_registry import ProcessingContract
+
 
 @numpy(contract=ProcessingContract.PURE_2D)
 def opening(
     image: np.ndarray,
-    structuring_element_shape: str = "disk",
-    structuring_element_size: int = 3
+    structuring_element: Literal["disk", "square", "diamond", "octagon", "star"] = "disk",
+    size: int = 3,
 ) -> np.ndarray:
     """
-    Perform morphological opening on an image.
+    Apply morphological opening to an image.
     
-    Opening is erosion followed by dilation. It is used to remove small objects 
-    and noise from the foreground while preserving the shape and size of larger 
-    objects in the image.
-
+    Opening is erosion followed by dilation. It removes small bright spots
+    (noise) and smooths object boundaries while preserving object size.
+    
     Args:
-        image: Input image (H, W)
-        structuring_element_shape: Shape of the structuring element ('disk', 'square', 'diamond', 'star')
-        structuring_element_size: Radius or size of the structuring element in pixels
-        
+        image: Input image with shape (H, W)
+        structuring_element: Shape of the structuring element.
+            Options: "disk", "square", "diamond", "octagon", "star"
+        size: Size of the structuring element (radius for disk, side length for square, etc.)
+    
     Returns:
-        np.ndarray: The opened image
+        Opened image with shape (H, W)
     """
-    from skimage import morphology
-
-    # Generate structuring element
-    if structuring_element_shape == "disk":
-        selem = morphology.disk(structuring_element_size)
-    elif structuring_element_shape == "square":
-        selem = morphology.square(structuring_element_size * 2 + 1)
-    elif structuring_element_shape == "diamond":
-        selem = morphology.diamond(structuring_element_size)
-    elif structuring_element_shape == "star":
-        selem = morphology.star(structuring_element_size)
+    from skimage.morphology import (
+        opening as skimage_opening,
+        disk,
+        square,
+        diamond,
+        octagon,
+        star,
+    )
+    
+    # Create structuring element based on type
+    if structuring_element == "disk":
+        selem = disk(size)
+    elif structuring_element == "square":
+        selem = square(size)
+    elif structuring_element == "diamond":
+        selem = diamond(size)
+    elif structuring_element == "octagon":
+        # octagon requires two parameters, use size for both
+        selem = octagon(size, size)
+    elif structuring_element == "star":
+        selem = star(size)
     else:
-        # Default to disk if unknown shape provided
-        selem = morphology.disk(structuring_element_size)
-
-    # Perform opening
-    # morphology.opening handles both binary and grayscale images
-    result = morphology.opening(image, selem)
-
-    return result
+        # Default to disk
+        selem = disk(size)
+    
+    # Apply morphological opening
+    result = skimage_opening(image, selem)
+    
+    return result.astype(image.dtype)

@@ -16,7 +16,7 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from .parser import ModuleBlock
 from .settings_binder import SettingsBinder
@@ -126,6 +126,7 @@ from openhcs.processing.materialization import csv_materializer
         pipeline_name: str,
         source_cppipe: Path,
         modules: List[ModuleBlock],
+        skipped_modules: Optional[List[ModuleBlock]] = None,
     ) -> GeneratedPipeline:
         """
         Generate pipeline using absorbed library (instant, no LLM).
@@ -133,11 +134,14 @@ from openhcs.processing.materialization import csv_materializer
         Args:
             pipeline_name: Name for the generated pipeline
             source_cppipe: Path to source .cppipe file
-            modules: ModuleBlocks from .cppipe parser
+            modules: ModuleBlocks from .cppipe parser (processing modules only)
+            skipped_modules: Infrastructure modules that were skipped
 
         Returns:
             GeneratedPipeline using registry functions
         """
+        skipped_modules = skipped_modules or []
+
         # Partition modules into registry-available and missing
         registry_modules = []
         missing_modules = []
@@ -151,6 +155,18 @@ from openhcs.processing.materialization import csv_materializer
 
         # Build imports
         imports = self.IMPORTS_BASE.format(source_file=source_cppipe.name)
+
+        # Add note about skipped infrastructure modules
+        if skipped_modules:
+            skip_note = "\n# Skipped infrastructure modules (handled by OpenHCS):\n"
+            for module in skipped_modules:
+                if module.name == "LoadData":
+                    skip_note += "#   - LoadData → handled by plate_path + openhcs_metadata.json\n"
+                elif module.name == "ExportToSpreadsheet":
+                    skip_note += "#   - ExportToSpreadsheet → handled by @special_outputs(csv_materializer(...))\n"
+                else:
+                    skip_note += f"#   - {module.name}\n"
+            imports += skip_note + "\n"
 
         # Fail-loud if any modules are missing (no LLM fallback)
         if missing_modules:

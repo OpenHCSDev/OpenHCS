@@ -7,35 +7,43 @@ import numpy as np
 from openhcs.core.memory.decorators import numpy
 from openhcs.processing.backends.lib_registry.unified_registry import ProcessingContract
 
+
 @numpy(contract=ProcessingContract.PURE_2D)
-def median_filter(
+def medianfilter(
     image: np.ndarray,
     window_size: int = 3,
-    mode: str = "reflect"
+    mode: str = "reflect",
 ) -> np.ndarray:
     """
-    Apply a median filter to the image.
+    Apply median filter to image for noise reduction.
+    
+    Median filtering is a nonlinear operation that replaces each pixel with
+    the median value of neighboring pixels. It is particularly effective at
+    removing salt-and-pepper noise while preserving edges.
     
     Args:
-        image: Input image (H, W)
-        window_size: The size of the window to use for the median filter. 
-                    Default is 3 (3x3 window).
-        mode: The mode parameter determines how the input array is extended 
-              beyond its boundaries. Default is 'reflect'.
-              
+        image: Input image array with shape (H, W)
+        window_size: Size of the median filter window. Must be odd integer.
+                    Larger values provide more smoothing but may blur edges.
+                    Default: 3
+        mode: How to handle boundaries. Options:
+              - 'reflect': Reflect values at boundary (d c b a | a b c d | d c b a)
+              - 'constant': Pad with constant value (0)
+              - 'nearest': Extend with nearest value (a a a a | a b c d | d d d d)
+              - 'mirror': Mirror values at boundary (d c b | a b c d | c b a)
+              - 'wrap': Wrap around (a b c d | a b c d | a b c d)
+              Default: 'reflect'
+    
     Returns:
-        Filtered image of shape (H, W)
+        Median filtered image with same shape (H, W)
     """
     from scipy.ndimage import median_filter as scipy_median_filter
     
-    # Ensure window_size is an integer
-    size = int(window_size)
+    # Ensure window_size is odd
+    if window_size % 2 == 0:
+        window_size += 1
     
-    # scipy.ndimage.median_filter handles 2D arrays directly
-    filtered_image = scipy_median_filter(
-        image, 
-        size=size, 
-        mode=mode
-    )
+    # Apply median filter
+    filtered = scipy_median_filter(image, size=window_size, mode=mode)
     
-    return filtered_image.astype(image.dtype)
+    return filtered.astype(image.dtype)

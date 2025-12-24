@@ -4,19 +4,29 @@ Original: watershed
 """
 
 import numpy as np
-from typing import Tuple, Literal, Optional
+from typing import Tuple, Literal
+from dataclasses import dataclass
 from openhcs.core.memory.decorators import numpy
 from openhcs.processing.backends.lib_registry.unified_registry import ProcessingContract
-from openhcs.core.pipeline.function_contracts import special_inputs, special_outputs
+from openhcs.core.pipeline.function_contracts import special_outputs
+from openhcs.processing.materialization import csv_materializer
+from openhcs.processing.backends.analysis.cell_counting_cpu import materialize_segmentation_masks
 
-@numpy(contract=ProcessingContract.FLEXIBLE)
-@special_inputs("mask", "intensity_image", "markers_image")
-@special_outputs("labels")
+
+@dataclass
+class WatershedStats:
+    slice_index: int
+    object_count: int
+    mean_area: float
+
+
+@numpy(contract=ProcessingContract.PURE_2D)
+@special_outputs(
+    ("watershed_stats", csv_materializer(fields=["slice_index", "object_count", "mean_area"])),
+    ("labels", materialize_segmentation_masks)
+)
 def watershed(
     image: np.ndarray,
-    mask: Optional[np.ndarray] = None,
-    intensity_image: Optional[np.ndarray] = None,
-    markers_image: Optional[np.ndarray] = None,
     watershed_method: Literal["distance", "intensity", "markers"] = "distance",
     declump_method: Literal["shape", "intensity"] = "shape",
     seed_method: Literal["local", "regional"] = "local",
@@ -34,95 +44,136 @@ def watershed(
         "ball", "cube", "diamond", "disk", "octahedron", "square", "star"
     ] = "disk",
     structuring_element_size: int = 1,
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> Tuple[np.ndarray, WatershedStats, np.ndarray]:
     """
-    Perform watershed segmentation on an image.
+    Apply watershed segmentation to separate touching objects.
     
     Args:
-        image: The primary input image (D, H, W).
-        mask: Optional binary mask.
-        intensity_image: Optional intensity image for 'intensity' method.
-        markers_image: Optional markers for 'markers' method.
+        image: Input binary or grayscale image (H, W)
+        watershed_method: Method for watershed - 'distance' uses distance transform,
+                         'intensity' uses intensity image, 'markers' uses marker image
+        declump_method: Method for declumping - 'shape' or 'intensity'
+        seed_method: Seed detection method - 'local' for local maxima, 'regional' for regional
+        max_seeds: Maximum number of seeds (-1 for unlimited)
+        downsample: Downsampling factor for speed
+        min_distance: Minimum distance between seeds
+        min_intensity: Minimum intensity for seeds
+        footprint: Footprint size for local maxima detection
+        connectivity: Connectivity for watershed (1 or 2)
+        compactness: Compactness parameter for watershed
+        exclude_border: Whether to exclude objects touching border
+        watershed_line: Whether to draw watershed lines between objects
+        gaussian_sigma: Sigma for Gaussian smoothing (0 for no smoothing)
+        structuring_element: Shape of structuring element for morphological operations
+        structuring_element_size: Size of structuring element
+    
+    Returns:
+        Tuple of (original image, watershed statistics, labeled image)
     """
-    from skimage.segmentation import watershed as sk_watershed
+    from scipy.ndimage import distance_transform_edt, gaussian_filter, label as ndi_label
+    from skimage.segmentation import watershed as skimage_watershed
     from skimage.feature import peak_local_max
-    from skimage.filters import gaussian
-    from skimage.measure import label
-    from scipy import ndimage as ndi
-
-    # OpenHCS handles D, H, W. We process slice by slice if D > 1
-    def process_slice(img, msk, int_img, mrk_img):
-        if gaussian_sigma > 0:
-            img = gaussian(img, sigma=gaussian_sigma)
-
-        if watershed_method == "distance":
-            # Distance transform watershed
-            distance = ndi.distance_transform_edt(img > 0)
-            if downsample > 1:
-                distance = distance[::downsample, ::downsample]
-            
-            coords = peak_local_max(
-                distance, 
-                min_distance=min_distance, 
-                threshold_abs=min_intensity,
-                num_peaks=max_seeds if max_seeds > 0 else None,
-                labels=msk
-            )
-            local_markers = np.zeros(distance.shape, dtype=bool)
-            local_markers[tuple(coords.T)] = True
-            markers = label(local_markers)
-            algo_input = -distance
-        
-        elif watershed_method == "markers":
-            markers = mrk_img
-            algo_input = img
-            
-        else: # intensity
-            target = int_img if int_img is not None else img
-            if seed_method == "local":
-                coords = peak_local_max(
-                    target, 
-                    min_distance=min_distance,
-                    num_peaks=max_seeds if max_seeds > 0 else None,
-                    labels=msk
-                )
-                local_markers = np.zeros(target.shape, dtype=bool)
-                local_markers[tuple(coords.T)] = True
-                markers = label(local_markers)
-            else:
-                markers = label(target > min_intensity)
-            algo_input = target
-
-        labels = sk_watershed(
-            algo_input,
-            markers,
-            mask=msk,
-            connectivity=connectivity,
-            compactness=compactness,
-            watershed_line=watershed_line
+    from skimage.morphology import disk, square, diamond, star
+    from skimage.measure import regionprops
+    from skimage.segmentation import clear_border
+    
+    # Handle input - assume binary or use threshold
+    if image.dtype == bool:
+        binary = image.astype(np.float32)
+    else:
+        # Normalize and threshold
+        img_norm = (image - image.min()) / (image.max() - image.min() + 1e-10)
+        binary = (img_norm > 0.5).astype(np.float32)
+    
+    # Apply Gaussian smoothing if specified
+    if gaussian_sigma > 0:
+        binary = gaussian_filter(binary, gaussian_sigma)
+        binary = (binary > 0.5).astype(np.float32)
+    
+    # Get structuring element
+    selem_map = {
+        "disk": disk,
+        "square": square,
+        "diamond": diamond,
+        "star": star,
+    }
+    selem_func = selem_map.get(structuring_element, disk)
+    selem = selem_func(structuring_element_size)
+    
+    # Compute distance transform for watershed
+    if watershed_method == "distance":
+        distance = distance_transform_edt(binary)
+    elif watershed_method == "intensity":
+        # Use inverted intensity as distance
+        distance = 1.0 - (image - image.min()) / (image.max() - image.min() + 1e-10)
+        distance = distance * binary
+    else:
+        # Default to distance transform
+        distance = distance_transform_edt(binary)
+    
+    # Find seeds/markers
+    if seed_method == "local":
+        # Local maxima detection
+        coords = peak_local_max(
+            distance,
+            min_distance=min_distance,
+            footprint=np.ones((footprint, footprint)),
+            labels=binary.astype(int),
+            exclude_border=exclude_border
         )
         
-        if exclude_border:
-            # Simple border clearing
-            border_mask = np.ones(labels.shape, dtype=bool)
-            border_mask[1:-1, 1:-1] = False
-            border_labels = np.unique(labels[border_mask])
-            for bl in border_labels:
-                if bl != 0:
-                    labels[labels == bl] = 0
-                    
-        return labels
-
-    # Handle dimensional iteration
-    depth = image.shape[0]
-    out_labels = np.zeros_like(image, dtype=np.int32)
-    
-    for d in range(depth):
-        s_img = image[d]
-        s_msk = mask[d] if mask is not None else None
-        s_int = intensity_image[d] if intensity_image is not None else None
-        s_mrk = markers_image[d] if markers_image is not None else None
+        # Limit seeds if specified
+        if max_seeds > 0 and len(coords) > max_seeds:
+            # Sort by distance value and keep top seeds
+            distances_at_coords = distance[coords[:, 0], coords[:, 1]]
+            top_indices = np.argsort(distances_at_coords)[-max_seeds:]
+            coords = coords[top_indices]
         
-        out_labels[d] = process_slice(s_img, s_msk, s_int, s_mrk)
-
-    return image, out_labels
+        # Create marker image
+        markers = np.zeros_like(binary, dtype=np.int32)
+        for i, (y, x) in enumerate(coords):
+            markers[y, x] = i + 1
+    else:
+        # Regional maxima - use h-maxima approach
+        from skimage.morphology import reconstruction
+        h = min_intensity if min_intensity > 0 else 0.1
+        seed = distance - h
+        seed = np.clip(seed, 0, None)
+        dilated = reconstruction(seed, distance, method='dilation')
+        markers_binary = (distance - dilated) > 0
+        markers, _ = ndi_label(markers_binary)
+    
+    # Apply watershed
+    labels = skimage_watershed(
+        -distance,
+        markers=markers,
+        mask=binary.astype(bool),
+        connectivity=connectivity,
+        compactness=compactness,
+        watershed_line=watershed_line
+    )
+    
+    # Exclude border objects if specified
+    if exclude_border:
+        labels = clear_border(labels)
+    
+    # Relabel to ensure consecutive labels
+    unique_labels = np.unique(labels)
+    unique_labels = unique_labels[unique_labels > 0]
+    new_labels = np.zeros_like(labels)
+    for new_label, old_label in enumerate(unique_labels, start=1):
+        new_labels[labels == old_label] = new_label
+    labels = new_labels
+    
+    # Compute statistics
+    props = regionprops(labels)
+    object_count = len(props)
+    mean_area = np.mean([p.area for p in props]) if props else 0.0
+    
+    stats = WatershedStats(
+        slice_index=0,
+        object_count=object_count,
+        mean_area=float(mean_area)
+    )
+    
+    return image, stats, labels.astype(np.int32)

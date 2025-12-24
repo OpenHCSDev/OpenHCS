@@ -281,7 +281,47 @@ def measure_objects(image: np.ndarray, labels: np.ndarray) -> Tuple[np.ndarray, 
     return image, MeasurementData(...)
 ```
 
-**With materialization** (for CSV/JSON output):
+**SEGMENTATION FUNCTIONS: Labels must be materialized as BOTH ROIs and CSV**
+
+For segmentation functions (IdentifyPrimaryObjects, IdentifySecondaryObjects, etc.),
+labels MUST be materialized as:
+1. **ROIs** (polygons/contours) - for visualization in napari/Fiji
+2. **CSV** (object measurements) - bounding boxes, centroids, areas, etc.
+
+```python
+from openhcs.processing.materialization import csv_materializer
+from openhcs.processing.backends.analysis.cell_counting_cpu import materialize_segmentation_masks
+
+@dataclass
+class ObjectStats:
+    slice_index: int
+    object_count: int
+    mean_area: float
+
+@numpy(contract=ProcessingContract.PURE_2D)
+@special_outputs(
+    ("object_stats", csv_materializer(fields=["slice_index", "object_count", "mean_area"])),
+    ("labels", materialize_segmentation_masks)  # ROIs for visualization
+)
+def identify_objects(image: np.ndarray, ...) -> Tuple[np.ndarray, ObjectStats, np.ndarray]:
+    from skimage.measure import label, regionprops
+
+    # Segment
+    binary = image > threshold
+    labels = label(binary)
+
+    # Measure
+    props = regionprops(labels)
+    stats = ObjectStats(
+        slice_index=0,
+        object_count=len(props),
+        mean_area=np.mean([p.area for p in props])
+    )
+
+    return image, stats, labels  # image first, then special outputs in order
+```
+
+**Measurement-only functions** (no segmentation, just measurements):
 ```python
 from openhcs.processing.materialization import csv_materializer
 

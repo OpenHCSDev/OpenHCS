@@ -1,5 +1,5 @@
 """
-Converted from CellProfiler: Gaussianfilter
+Converted from CellProfiler: GaussianFilter
 Original: gaussianfilter
 """
 
@@ -7,27 +7,23 @@ import numpy as np
 from openhcs.core.memory.decorators import numpy
 from openhcs.processing.backends.lib_registry.unified_registry import ProcessingContract
 
+
 @numpy(contract=ProcessingContract.PURE_2D)
 def gaussian_filter(
     image: np.ndarray,
-    sigma: float = 1.0
+    sigma: float = 1.0,
 ) -> np.ndarray:
     """
-    Apply a Gaussian filter to an image.
+    Apply Gaussian smoothing filter to an image.
     
     Args:
-        image: Input image slice (H, W).
-        sigma: Standard deviation for Gaussian kernel.
-        
+        image: Input image array with shape (H, W)
+        sigma: Standard deviation for Gaussian kernel. Higher values produce
+               more smoothing. Default is 1.0.
+    
     Returns:
-        Filtered image (H, W).
+        Smoothed image with same shape as input.
     """
-    from scipy.ndimage import gaussian_filter as scipy_gaussian
+    from scipy.ndimage import gaussian_filter as scipy_gaussian_filter
     
-    # Ensure image is float for precise filtering
-    if not np.issubdtype(image.dtype, np.floating):
-        image = image.astype(np.float32)
-        
-    filtered_image = scipy_gaussian(image, sigma=sigma)
-    
-    return filtered_image
+    return scipy_gaussian_filter(image, sigma=sigma)

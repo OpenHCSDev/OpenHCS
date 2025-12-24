@@ -1,5 +1,5 @@
 """
-Converted from CellProfiler: Morphologicalskeleton
+Converted from CellProfiler: MorphologicalSkeleton
 Original: morphologicalskeleton
 """
 
@@ -7,35 +7,90 @@ import numpy as np
 from openhcs.core.memory.decorators import numpy
 from openhcs.processing.backends.lib_registry.unified_registry import ProcessingContract
 
-@numpy(contract=ProcessingContract.FLEXIBLE)
-def morphological_skeleton(
+
+@numpy(contract=ProcessingContract.PURE_2D)
+def morphological_skeleton_2d(
     image: np.ndarray,
-    volumetric: bool = False
 ) -> np.ndarray:
-    """
-    Computes the skeleton of a binary image. 
-    Thinning reduces foreground objects to 1-pixel wide (2D) or 1-voxel wide (3D) 
-    skeletal representations.
+    """Compute morphological skeleton of a 2D binary image.
+    
+    The skeleton is a thin representation of the shape that preserves
+    the topology and is equidistant from the boundaries.
     
     Args:
-        image: Input binary image (D, H, W).
-        volumetric: If True, treats the input as a 3D volume for skeletonization.
-                   If False, processes each slice independently.
+        image: Input binary image with shape (H, W)
+        
+    Returns:
+        Skeletonized binary image with shape (H, W)
+    """
+    from skimage.morphology import skeletonize
+    
+    # Ensure binary input
+    binary = image > 0
+    
+    # Compute skeleton
+    skeleton = skeletonize(binary)
+    
+    return skeleton.astype(np.float32)
+
+
+@numpy(contract=ProcessingContract.PURE_3D)
+def morphological_skeleton_3d(
+    image: np.ndarray,
+) -> np.ndarray:
+    """Compute morphological skeleton of a 3D binary volume.
+    
+    The 3D skeleton preserves topology across the entire volume,
+    considering connectivity in all three dimensions.
+    
+    Args:
+        image: Input binary volume with shape (D, H, W)
+        
+    Returns:
+        Skeletonized binary volume with shape (D, H, W)
+    """
+    from skimage.morphology import skeletonize_3d
+    
+    # Ensure binary input
+    binary = image > 0
+    
+    # Compute 3D skeleton
+    skeleton = skeletonize_3d(binary)
+    
+    return skeleton.astype(np.float32)
+
+
+@numpy(contract=ProcessingContract.FLEXIBLE)
+def morphologicalskeleton(
+    image: np.ndarray,
+    volumetric: bool = False,
+) -> np.ndarray:
+    """Compute morphological skeleton of a binary image or volume.
+    
+    The skeleton is a thin representation of the shape that preserves
+    the topology and is equidistant from the boundaries.
+    
+    Args:
+        image: Input binary image with shape (D, H, W)
+        volumetric: If True, compute 3D skeleton treating the entire
+                   volume as connected. If False, compute 2D skeleton
+                   on each slice independently.
+        
+    Returns:
+        Skeletonized binary image/volume with shape (D, H, W)
     """
     from skimage.morphology import skeletonize, skeletonize_3d
-
-    # Ensure input is boolean for skimage
-    binary_image = image > 0
-
+    
+    # Ensure binary input
+    binary = image > 0
+    
     if volumetric:
-        # PURE_3D logic: Process the entire (D, H, W) volume
-        # skeletonize_3d is specifically for volumetric data
-        skeleton = skeletonize_3d(binary_image)
+        # 3D skeletonization - treats entire volume as connected
+        skeleton = skeletonize_3d(binary)
+        return skeleton.astype(np.float32)
     else:
-        # PURE_2D logic: Process slice by slice
-        # We iterate over dimension 0 (D)
-        skeleton = np.zeros_like(image)
+        # 2D skeletonization - process each slice independently
+        result = np.zeros_like(image, dtype=np.float32)
         for i in range(image.shape[0]):
-            skeleton[i] = skeletonize(binary_image[i])
-
-    return skeleton.astype(image.dtype)
+            result[i] = skeletonize(binary[i]).astype(np.float32)
+        return result

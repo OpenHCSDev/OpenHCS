@@ -67,21 +67,38 @@ def main():
     # Initialize generator (loads absorbed library)
     generator = PipelineGenerator()
 
-    # Check all modules are absorbed
-    missing = [m for m in modules if not generator.has_module(m.name)]
+    # Infrastructure modules that don't map to processing steps
+    INFRASTRUCTURE_MODULES = {
+        'LoadData',  # Handled by plate_path + openhcs_metadata.json
+        'ExportToSpreadsheet',  # Handled by @special_outputs(csv_materializer(...))
+    }
+
+    # Separate processing modules from infrastructure
+    processing_modules = [m for m in modules if m.name not in INFRASTRUCTURE_MODULES]
+    infrastructure_modules = [m for m in modules if m.name in INFRASTRUCTURE_MODULES]
+
+    # Check processing modules are absorbed
+    missing = [m for m in processing_modules if not generator.has_module(m.name)]
     if missing:
-        logger.error("Modules not absorbed:")
+        logger.error("Processing modules not absorbed:")
         for m in missing:
             logger.error(f"  - {m.name}")
         logger.error("")
         logger.error("Run: python -m benchmark.converter.absorb")
         sys.exit(1)
 
+    # Log skipped infrastructure modules
+    if infrastructure_modules:
+        logger.info(f"Skipping {len(infrastructure_modules)} infrastructure modules:")
+        for m in infrastructure_modules:
+            logger.info(f"  - {m.name} (handled by OpenHCS infrastructure)")
+
     # Generate pipeline from registry (instant, no LLM)
     pipeline = generator.generate_from_registry(
         pipeline_name=args.cppipe_file.stem,
         source_cppipe=args.cppipe_file,
-        modules=modules,
+        modules=processing_modules,
+        skipped_modules=infrastructure_modules,
     )
 
     # Save

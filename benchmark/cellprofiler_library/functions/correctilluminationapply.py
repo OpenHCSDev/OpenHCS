@@ -4,54 +4,65 @@ Original: correct_illumination_apply
 """
 
 import numpy as np
+from typing import Tuple
 from enum import Enum
 from openhcs.core.memory.decorators import numpy
 from openhcs.processing.backends.lib_registry.unified_registry import ProcessingContract
-from openhcs.core.pipeline.function_contracts import special_inputs
 
-class Method(Enum):
-    DIVIDE = "Divide"
-    SUBTRACT = "Subtract"
+
+class IlluminationCorrectionMethod(Enum):
+    DIVIDE = "divide"
+    SUBTRACT = "subtract"
+
 
 @numpy(contract=ProcessingContract.FLEXIBLE)
-@special_inputs("illum_function")
 def correct_illumination_apply(
     image: np.ndarray,
-    illum_function: np.ndarray,
-    method_divide_or_subtract: Method = Method.DIVIDE,
+    method: IlluminationCorrectionMethod = IlluminationCorrectionMethod.DIVIDE,
     truncate_low: bool = True,
     truncate_high: bool = True,
 ) -> np.ndarray:
     """
-    Apply an illumination correction function to an image.
+    Apply illumination correction to an image using a provided illumination function.
+    
+    This function corrects uneven illumination by either dividing or subtracting
+    an illumination function from the input image.
     
     Args:
-        image: The input image to be corrected. Shape (D, H, W).
-        illum_function: The illumination correction image. Shape (1, H, W) or (D, H, W).
-        method_divide_or_subtract: Whether to divide or subtract the illumination function.
-        truncate_low: If True, values less than 0 are set to 0.
-        truncate_high: If True, values greater than 1 are set to 1.
-        
+        image: Shape (2, H, W) - two images stacked:
+               image[0] = image to correct
+               image[1] = illumination function
+        method: Method to apply correction - DIVIDE or SUBTRACT
+        truncate_low: Set output values less than 0 equal to 0
+        truncate_high: Set output values greater than 1 equal to 1
+    
     Returns:
-        Corrected image of shape (D, H, W).
+        Corrected image with shape (1, H, W)
     """
-    # Ensure illum_function matches spatial dimensions
-    # If illum_function is (1, H, W) and image is (D, H, W), broadcasting handles it.
+    # Unstack inputs from dimension 0
+    image_pixels = image[0]  # (H, W) - image to correct
+    illum_function = image[1]  # (H, W) - illumination function
     
-    if method_divide_or_subtract == Method.DIVIDE:
-        # Avoid division by zero: CellProfiler typically handles this by 
-        # setting output to 0 where the illumination function is 0.
-        mask = illum_function == 0
-        output_pixels = np.divide(image, illum_function, out=np.zeros_like(image), where=~mask)
-    elif method_divide_or_subtract == Method.SUBTRACT:
-        output_pixels = image - illum_function
+    # Validate shapes match
+    assert image_pixels.shape == illum_function.shape, \
+        f"Input image shape {image_pixels.shape} and illumination function shape {illum_function.shape} must be equal"
+    
+    # Apply illumination correction
+    if method == IlluminationCorrectionMethod.DIVIDE:
+        # Avoid division by zero
+        # Add small epsilon where illumination function is zero
+        safe_illum = np.where(illum_function == 0, 1e-10, illum_function)
+        output_pixels = image_pixels / safe_illum
+    elif method == IlluminationCorrectionMethod.SUBTRACT:
+        output_pixels = image_pixels - illum_function
     else:
-        raise ValueError(f"Unhandled method: {method_divide_or_subtract}")
-
-    if truncate_low:
-        output_pixels = np.maximum(output_pixels, 0)
+        raise ValueError(f"Unhandled option for divide or subtract: {method.value}")
     
+    # Optionally clip values
+    if truncate_low:
+        output_pixels = np.maximum(output_pixels, 0.0)
     if truncate_high:
-        output_pixels = np.minimum(output_pixels, 1)
-
-    return output_pixels
+        output_pixels = np.minimum(output_pixels, 1.0)
+    
+    # Return with shape (1, H, W) to maintain 3D convention
+    return output_pixels[np.newaxis, ...].astype(np.float32)
