@@ -29,33 +29,54 @@ MODEL = "google/gemini-3-flash-preview"  # Cheap and fast
 
 CATEGORIZATION_PROMPT = """You are analyzing a CellProfiler function that has been absorbed into OpenHCS.
 
-Your task: Determine the correct category based on the function's input shape expectations.
+Your task: Determine the correct category based on what the function NEEDS to receive.
+
+CRITICAL SEMANTICS:
+- variable_components controls what dimension 0 of the 3D array represents
+- The orchestrator groups files and stacks them based on variable_components
 
 Categories:
-1. **image_operation**: Function processes each site independently with channels stacked together
-   - Input shape: (C, H, W) where C is channels
-   - Example: segmentation, filtering, thresholding
-   - Maps to: VariableComponents.SITE
+1. **image_operation** (default for most functions)
+   - variable_components=[VariableComponents.SITE]
+   - Orchestrator groups by (well, channel, z) → stacks SITES → (S, H, W)
+   - With PURE_2D contract: unstacks and processes each site independently
+   - Use for: Single-channel operations (segmentation, filtering, thresholding, etc.)
+   - Example: IdentifyPrimaryObjects processes DAPI channel across all sites
 
-2. **z_projection**: Function processes z-stacks, expects z-dimension in dim 0
-   - Input shape: (Z, H, W) where Z is z-slices
-   - Example: max projection, mean projection, 3D operations
-   - Maps to: VariableComponents.Z_INDEX
+2. **z_projection** (for 3D volumetric operations)
+   - variable_components=[VariableComponents.Z_INDEX]
+   - Orchestrator groups by (well, site, channel) → stacks Z-SLICES → (Z, H, W)
+   - Function receives full z-stack and processes it (e.g., max projection)
+   - Use for: Functions that NEED z-stacks (max projection, 3D segmentation)
+   - Example: MakeProjection receives (Z, H, W) and projects to (H, W)
+   - NOT for time-lapse! Time-lapse uses sequential_components, not variable_components
 
-3. **channel_operation**: Function processes each channel independently
-   - Input shape: (S, H, W) where S is sites
-   - Example: per-channel normalization, channel-specific operations
-   - Maps to: VariableComponents.CHANNEL
+3. **channel_operation** (for inherently multichannel operations)
+   - variable_components=[VariableComponents.CHANNEL]
+   - Orchestrator groups by (well, site, z) → stacks CHANNELS → (C, H, W)
+   - Function receives ALL channels together (e.g., RGB composite, colocalization)
+   - Use for: Functions that NEED multiple channels simultaneously
+   - Example: MeasureColocalization needs 2+ channels, GrayToColorRgb needs 3 channels
+   - NOT for single-channel operations!
 
 Function to categorize:
 ```python
 {function_code}
 ```
 
-Analyze the function signature and docstring. Look for:
-- Input shape documentation (e.g., "(Z, H, W)", "(C, H, W)", "(D, H, W)")
-- Keywords: "projection", "z-stack", "3D", "channel", "multi-channel"
-- What dimension 0 represents in the input array
+Analyze the function:
+1. Does it NEED z-stacks? (z_projection)
+2. Does it NEED multiple channels simultaneously? (channel_operation)
+3. Otherwise: image_operation (default)
+
+Key indicators:
+- z_projection: Docstring mentions "(Z, H, W)", "z-stack", "projection", "3D volumetric"
+- channel_operation: Docstring mentions "RGB", "composite", "colocalization", "multiple channels", function expects (C, H, W) with C > 1
+- image_operation: Everything else (single-channel operations, per-site processing)
+
+IMPORTANT:
+- Time-lapse tracking (TrackObjects) is NOT z_projection - it's image_operation with sequential_components
+- Single-channel operations are image_operation, NOT channel_operation
 
 Respond with ONLY a JSON object:
 {{

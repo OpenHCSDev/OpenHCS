@@ -3,16 +3,16 @@
     "function_name": "calculate_math",
     "contract": "unknown",
     "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "The calculate_math function performs pixel-wise arithmetic operations. In the context of CellProfiler/OpenHCS, these operations are typically applied to a single image site where all channels are available (C, H, W) to allow for inter-channel math (e.g., Ratio = Ch1 / Ch2). It does not involve Z-stack reduction or per-site statistical normalization across a batch.",
+    "confidence": 1.0,
+    "reasoning": "The function performs pixel-wise mathematical operations on a single input image. It does not require volumetric data (Z-stacks) or multiple distinct channels to execute its logic; it treats the input as a single entity to be transformed by scalars and exponents.",
     "validated": true
   },
   "CalculateStatistics": {
     "function_name": "calculate_statistics",
     "contract": "pure_2d",
     "category": "image_operation",
-    "confidence": 0.9,
-    "reasoning": "In the context of CellProfiler/OpenHCS statistics and measurement functions, 'image' typically refers to a multi-channel site representation (C, H, W). Since the function calculates statistics across features and objects for a given site, it processes channels together to derive measurements, mapping to VariableComponents.SITE.",
+    "confidence": 1.0,
+    "reasoning": "The function calculates statistics on an image and associated metadata. It does not require a volumetric Z-stack (z_projection) nor does it require multiple channels simultaneously (channel_operation) to perform its core logic. It follows the standard pattern of processing single-channel image data per site.",
     "validated": true
   },
   "ClassifyObjectsSingleMeasurement": {
@@ -27,72 +27,72 @@
     "function_name": "closing",
     "contract": "unknown",
     "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "Morphological closing is a spatial operation typically applied to 2D images or multi-channel images where channels are processed as a stack (C, H, W). It does not involve Z-axis projection or independent per-channel logic that would require site-level iteration.",
+    "confidence": 1.0,
+    "reasoning": "The 'closing' function is a standard morphological operation used for noise removal and smoothing. It operates on a single image (channel/site) at a time and does not inherently require a Z-stack or multiple channels to perform its computation.",
     "validated": true
   },
   "ColorToGray": {
     "function_name": "color_to_gray",
     "contract": "unknown",
-    "category": "image_operation",
+    "category": "channel_operation",
     "confidence": 1.0,
-    "reasoning": "The function 'color_to_gray' processes multi-channel data (RGB or specific channel indices) to produce a grayscale result or split channels. It expects the input array to have channels stacked together (C, H, W) to perform operations like weighted contributions across the channel dimension.",
+    "reasoning": "The function 'color_to_gray' explicitly operates on multiple channels (RGB or specific channel indices) to combine or split them. It requires the orchestrator to stack channels into a (C, H, W) array so it can perform operations like weighted sums (contributions) or splitting across the channel dimension.",
     "validated": true
   },
   "Combineobjects": {
     "function_name": "combineobjects",
     "contract": "pure_2d",
     "category": "image_operation",
-    "confidence": 0.9,
-    "reasoning": "The CombineObjects function in CellProfiler is designed to merge or intersect sets of objects/labels. In the context of OpenHCS image processing, this typically operates on a per-site basis where multiple object masks (represented as channels) are combined into a single output. It does not perform Z-projections or independent per-channel normalization.",
+    "confidence": 1.0,
+    "reasoning": "CombineObjects is a single-channel operation that merges or modifies object labels within a single image or site. It does not require volumetric z-stacks or multiple distinct color channels to perform its logic.",
     "validated": true
   },
   "ConvertImageToObjects": {
     "function_name": "convert_image_to_objects",
     "contract": "unknown",
     "category": "image_operation",
-    "confidence": 0.9,
-    "reasoning": "In CellProfiler and OpenHCS, converting an image to objects (segmentation/labeling) typically treats the input as a single site where channels are processed together or as a single grayscale image. It does not inherently imply z-stack projection or independent per-channel processing across the whole dataset.",
+    "confidence": 1.0,
+    "reasoning": "This function converts a label or binary image into an objects data structure. It operates on a single image input (typically a single channel or a single site) and does not require access to multiple channels or a full Z-stack to perform its logic.",
     "validated": true
   },
   "ConvertObjectsToImage": {
     "function_name": "convert_objects_to_image",
     "contract": "pure_2d",
     "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "The function converts label matrices into images, often using color maps or multi-channel overlays. In the context of CellProfiler-to-OpenHCS conversion, this typically operates on a per-site basis where channels (C) are stacked to create the output image, mapping to VariableComponents.SITE.",
+    "confidence": 1.0,
+    "reasoning": "This function converts a single label matrix (objects) into an image representation. It operates on a per-site basis and does not require a Z-stack or multiple input channels to perform its core logic. Even if it produces a color output, it is a single-channel-to-image transformation that fits the standard image_operation workflow.",
     "validated": true
   },
   "CorrectIlluminationApply": {
     "function_name": "correct_illumination_apply",
     "contract": "unknown",
     "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "Illumination correction is typically applied to a multi-channel image at a single site, where the correction function (divide or subtract) is applied across the channel dimension (C, H, W). It does not involve Z-stack projection or cross-site channel normalization.",
+    "confidence": 1.0,
+    "reasoning": "Illumination correction is a single-channel operation applied to individual images to correct for spatial intensity variations. It does not require access to multiple z-slices or multiple channels simultaneously to perform its calculation.",
     "validated": true
   },
   "CorrectIlluminationCalculate": {
     "function_name": "correct_illumination_calculate",
     "contract": "pure_2d",
-    "category": "channel_operation",
-    "confidence": 0.9,
-    "reasoning": "CorrectIlluminationCalculate in CellProfiler is designed to calculate an illumination correction function (a 'background' or 'shading' map) for a single channel at a time across multiple sites. In the OpenHCS context, this requires processing each channel independently to generate a specific correction profile for that channel, mapping to VariableComponents.CHANNEL.",
+    "category": "image_operation",
+    "confidence": 1.0,
+    "reasoning": "CorrectIlluminationCalculate is designed to calculate an illumination correction function (a 'background' or 'shading' map) for a single channel. It does not require volumetric 3D data (Z-stacks) to function, nor does it compare or combine multiple channels. It processes individual images (or stacks of sites to calculate a mean/median model) to determine spatial intensity variations.",
     "validated": true
   },
   "CreateBatchFiles": {
     "function_name": "create_batch_files",
     "contract": "unknown",
     "category": "image_operation",
-    "confidence": 0.9,
-    "reasoning": "In CellProfiler/OpenHCS, 'create_batch_files' is a utility function that prepares data for cluster processing. It typically operates on the full image state of a single site (all channels bundled) to generate metadata and batch descriptors, making it a site-level operation where C is the leading dimension.",
+    "confidence": 1.0,
+    "reasoning": "The 'create_batch_files' function is a utility for managing file paths and metadata for cluster processing. It does not require volumetric data (Z-stacks) or multiple channels simultaneously to perform its logic. As it operates on standard image data without specific multi-dimensional requirements, it falls under the default image_operation category.",
     "validated": true
   },
   "Crop": {
     "function_name": "crop",
     "contract": "pure_2d",
     "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "Cropping in CellProfiler/OpenHCS typically operates on a per-site basis where all channels are cropped simultaneously to maintain spatial alignment. The input image is treated as a multi-channel 2D array (C, H, W) where the operation is applied across the spatial dimensions for each site.",
+    "confidence": 1.0,
+    "reasoning": "Cropping is a spatial operation performed on individual images. It does not require knowledge of other Z-slices or other channels to execute; it simply removes pixels based on coordinates or a mask. Therefore, it follows the standard image_operation workflow where sites are processed independently.",
     "validated": true
   },
   "DefineGridManual": {
@@ -107,112 +107,112 @@
     "function_name": "dilate_image",
     "contract": "unknown",
     "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "Dilation is a standard morphological operation typically applied to 2D images or multi-channel images where channels are processed as a stack (C, H, W). It does not involve Z-projection logic or independent per-channel normalization across sites.",
+    "confidence": 1.0,
+    "reasoning": "Dilation is a morphological operation typically performed on a single-channel image. It does not inherently require a z-stack (volumetric data) or multiple channels (multispectral data) to function; it processes individual sites/planes independently.",
     "validated": true
   },
   "DilateObjects": {
     "function_name": "dilate_objects",
     "contract": "unknown",
     "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "The function performs morphological dilation on object labels. In the context of CellProfiler/OpenHCS, object dilation is typically a 2D spatial operation applied to a site's label mask. It processes the spatial layout of a single site (which may contain multiple channels/objects) rather than iterating across Z-stacks or treating channels as independent samples.",
+    "confidence": 1.0,
+    "reasoning": "DilateObjects is a morphological operation performed on a single set of labels (and optionally an image). It does not require multiple channels or a Z-stack to function; it processes individual sites/planes independently.",
     "validated": true
   },
   "DisplayDataOnImage": {
     "function_name": "display_data_on_image",
     "contract": "unknown",
     "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "This function visualizes measurements on top of an image. In CellProfiler/OpenHCS, such visualization functions typically operate on a per-site basis where the image input is expected to be a single site (potentially multi-channel) to serve as the background for the labels or text, mapping to VariableComponents.SITE.",
+    "confidence": 1.0,
+    "reasoning": "The function overlays text or color-coded measurements onto a single image or set of labels. It operates on a per-image/per-site basis and does not require access to multiple channels simultaneously or a full Z-stack to perform its logic.",
     "validated": true
   },
   "DisplayDensityPlot": {
     "function_name": "display_density_plot",
     "contract": "unknown",
     "category": "image_operation",
-    "confidence": 0.9,
-    "reasoning": "Density plots in image processing typically visualize the distribution of pixel intensities across multiple channels (C, H, W) to identify correlations or populations. It does not involve Z-stack projection or independent per-channel processing, but rather treats the site's multi-channel data as a single unit for visualization.",
+    "confidence": 1.0,
+    "reasoning": "The function generates a density plot for a single image input. It does not require volumetric z-stacks or multiple channels to perform its core visualization task; it processes a single intensity distribution at a time.",
     "validated": true
   },
   "DisplayHistogram": {
     "function_name": "display_histogram",
     "contract": "unknown",
     "category": "image_operation",
-    "confidence": 0.9,
-    "reasoning": "The function calculates histograms based on image intensities and labels (segmentation masks). In CellProfiler/OpenHCS workflows, this typically involves analyzing a single site's multi-channel data or a specific 2D plane where channels are stacked, mapping to VariableComponents.SITE.",
+    "confidence": 1.0,
+    "reasoning": "The function generates a histogram for a single image and its corresponding labels. It does not require volumetric z-stacks or multiple channels simultaneously to perform its calculation; it processes a single channel/site independently.",
     "validated": true
   },
   "DisplayPlatemap": {
     "function_name": "display_platemap",
     "contract": "pure_2d",
     "category": "image_operation",
-    "confidence": 0.9,
-    "reasoning": "The function visualizes measurements across a plate. In the context of OpenHCS/CellProfiler visualization of 'Images', the standard input is a site-level representation where channels are stacked (C, H, W). It does not perform Z-projections or independent per-channel normalization across sites.",
+    "confidence": 1.0,
+    "reasoning": "The function displays data mapped to a plate layout. It does not require volumetric z-stacks or multiple channels simultaneously to perform its core logic; it processes image-level or object-level measurements which are standard single-channel/per-site operations.",
     "validated": true
   },
   "DisplayScatterPlot": {
     "function_name": "display_scatter_plot",
     "contract": "unknown",
     "category": "image_operation",
-    "confidence": 0.9,
-    "reasoning": "The function visualizes measurements overlaid on or alongside an image. In CellProfiler/OpenHCS contexts, display and visualization functions typically treat the image as a single site unit with multiple channels (C, H, W) to allow for multi-channel overlays (e.g., RGB composites) rather than processing Z-stacks or individual channels in isolation.",
+    "confidence": 1.0,
+    "reasoning": "The function generates a visualization based on measurements from a single image/site. It does not require volumetric data (Z-stacks) or multiple channels simultaneously to perform its core logic of plotting X vs Y measurements.",
     "validated": true
   },
   "EditObjectsManually": {
     "function_name": "edit_objects_manually",
     "contract": "unknown",
     "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "The function processes labels and images to edit objects (segmentation masks). In CellProfiler/OpenHCS, object editing is a site-level operation where channels are typically stacked or processed as a single unit (C, H, W) to maintain spatial correspondence between the image and the labels.",
+    "confidence": 1.0,
+    "reasoning": "EditObjectsManually is a single-channel operation used to refine segmentation labels based on a corresponding image. It does not require a Z-stack for volumetric processing nor multiple channels simultaneously; it processes individual sites/images independently.",
     "validated": true
   },
   "EnhanceEdges": {
     "function_name": "enhance_edges",
     "contract": "pure_2d",
     "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "Enhance edges is a standard image processing filter (Sobel, Canny, etc.) that typically operates on 2D spatial data. In the context of OpenHCS/CellProfiler, these filters are applied to each site independently with channels stacked, fitting the (C, H, W) input shape where the operation is performed per-plane or across the channel stack.",
+    "confidence": 1.0,
+    "reasoning": "EnhanceEdges is a classic image processing filter (Sobel, Canny, etc.) that operates on a single 2D image at a time. It does not require volumetric data (Z-stacks) or multiple color channels to perform its edge detection logic.",
     "validated": true
   },
   "EnhanceOrSuppressFeatures": {
     "function_name": "enhance_or_suppress_features",
     "contract": "pure_2d",
     "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "The function performs morphological and feature-based enhancements (speckles, neurites, DIC) which in CellProfiler/OpenHCS are typically applied to 2D images or multi-channel site images where channels are processed together. It does not involve Z-stack reduction or per-channel independent normalization.",
+    "confidence": 1.0,
+    "reasoning": "EnhanceOrSuppressFeatures is a classic single-channel image processing operation used to highlight specific structures (speckles, neurites, holes) or suppress noise. It operates on individual 2D images or 2D slices independently and does not require access to multiple channels or a full Z-stack to perform its mathematical transformations.",
     "validated": true
   },
   "ErodeImage": {
     "function_name": "erode_image",
     "contract": "unknown",
     "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "Erosion is a standard morphological operation typically applied to 2D images or multi-channel images where spatial structure is preserved. In the context of CellProfiler/OpenHCS, this function processes the spatial dimensions (H, W) of a site, treating the leading dimension as channels (C) to be processed or as a single image plane.",
+    "confidence": 1.0,
+    "reasoning": "Erosion is a morphological operation typically performed on a single-channel image. It does not require multiple channels (channel_operation) or a full z-stack (z_projection) to function; it processes individual image planes independently.",
     "validated": true
   },
   "ErodeObjects": {
     "function_name": "erode_objects",
     "contract": "pure_2d",
     "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "The function performs morphological erosion on labeled objects within an image. In the context of CellProfiler/OpenHCS object processing, this typically operates on a per-site basis where labels and image data are processed together. It does not involve z-stack reduction (projection) or independent per-channel logic that would ignore the spatial relationship of objects across the site.",
+    "confidence": 1.0,
+    "reasoning": "The function performs a morphological erosion on object labels. This is a single-channel operation that does not require access to multiple channels or a full Z-stack to function; it processes individual 2D images (or 3D volumes if provided, but it doesn't 'need' the Z-dimension for its core logic in the context of the orchestrator's stacking).",
     "validated": true
   },
   "ExpandOrShrinkObjects": {
     "function_name": "expand_or_shrink_objects",
     "contract": "pure_2d",
     "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "This function performs morphological operations on labeled objects. In the context of CellProfiler/OpenHCS, object manipulation is typically a site-level operation where all channels (or a specific mask) are processed per site. It does not involve Z-stack projection or independent per-channel processing logic.",
+    "confidence": 1.0,
+    "reasoning": "This function performs morphological operations (expanding or shrinking) on label matrices. It operates on a single channel of objects at a time and does not require volumetric Z-stacks or multiple color channels to perform its logic.",
     "validated": true
   },
   "ExportToDatabase": {
     "function_name": "export_to_database",
     "contract": "unknown",
     "category": "image_operation",
-    "confidence": 0.9,
-    "reasoning": "Exporting data to a database in a high-content screening context typically occurs at the site level after features have been extracted. It requires access to all channels simultaneously to correlate measurements, making it a site-independent operation where channels are stacked (C, H, W).",
+    "confidence": 1.0,
+    "reasoning": "ExportToDatabase is a terminal operation that saves measurements or image metadata. It does not require volumetric z-stacks or multiple channels simultaneously to perform its core logic; it processes data on a per-site basis.",
     "validated": true
   },
   "ComputeAggregateMeasurements": {
@@ -227,88 +227,88 @@
     "function_name": "fill_objects",
     "contract": "unknown",
     "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "The fill_objects function is a morphological operation typically applied to segmented labels or binary images. In the context of CellProfiler/OpenHCS, these operations process individual sites (images) where channels or label sets are treated as independent units or stacked components, mapping to VariableComponents.SITE.",
+    "confidence": 1.0,
+    "reasoning": "The fill_objects function is a morphological operation used to fill holes or convex hulls within segmented objects. It operates on a single label matrix and its corresponding image, processing each site/image independently. It does not require volumetric z-stacks or multiple channels to perform its logic.",
     "validated": true
   },
   "FilterObjects": {
     "function_name": "filter_objects",
     "contract": "unknown",
     "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "The function filters objects based on measurements or labels within a specific site. In CellProfiler/OpenHCS, object filtering is a site-level operation where the image and its corresponding label mask are processed together. It does not involve z-stack projections or independent per-channel processing, but rather operates on the spatial components of a single site (C, H, W).",
+    "confidence": 1.0,
+    "reasoning": "The function filters objects based on measurements or spatial properties. It operates on a single image and its corresponding label mask. It does not require a volumetric Z-stack or multiple channels simultaneously to perform its logic.",
     "validated": true
   },
   "FindMaxima": {
     "function_name": "find_maxima",
     "contract": "unknown",
     "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "The find_maxima function is a standard 2D/3D peak detection algorithm typically used for segmentation or object identification. In the context of CellProfiler/OpenHCS, it processes a single image site (which may contain multiple channels or be a single grayscale image) to identify local intensity peaks. It does not perform z-axis reduction (projection) nor is it inherently a per-channel normalization routine.",
+    "confidence": 1.0,
+    "reasoning": "The find_maxima function is a peak-finding algorithm typically used for identifying seed points or local intensity maxima within a single image. It does not require a volumetric Z-stack to function, nor does it require multiple channels simultaneously; it operates on the intensity values of a single 2D plane (or site) at a time.",
     "validated": true
   },
   "FlagImage": {
     "function_name": "flag_image",
     "contract": "unknown",
     "category": "image_operation",
-    "confidence": 0.9,
-    "reasoning": "The function performs Quality Control flagging based on image measurements. In the context of CellProfiler/OpenHCS, flagging is typically a site-level operation where all channels are evaluated together to determine if a specific site meets quality criteria, mapping to VariableComponents.SITE.",
+    "confidence": 1.0,
+    "reasoning": "The flag_image function performs Quality Control or metadata flagging based on image measurements. It does not require volumetric z-stack data (z_projection) nor does it require multiple channels simultaneously (channel_operation) to evaluate its criteria. It operates on a per-image/per-site basis.",
     "validated": true
   },
   "FlipAndRotate": {
     "function_name": "flip_and_rotate",
     "contract": "pure_2d",
     "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "Geometric transformations like flipping and rotating are typically applied to the entire image at a specific site, where all channels (C, H, W) must be transformed identically to maintain spatial alignment. It does not involve Z-stack reduction or per-channel independent logic.",
+    "confidence": 1.0,
+    "reasoning": "The flip_and_rotate function performs geometric transformations on an image. It does not require volumetric data (z-stacks) or multiple channels simultaneously to perform its logic; it can be applied to individual image planes independently.",
     "validated": true
   },
   "GaussianFilter": {
     "function_name": "gaussian_filter",
     "contract": "unknown",
     "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "Gaussian filtering in CellProfiler/OpenHCS typically treats the input as a multi-channel image (C, H, W) where the filter is applied to each channel/plane. It does not perform z-axis reduction (projection) nor does it inherently require cross-site processing (channel_operation).",
+    "confidence": 1.0,
+    "reasoning": "Gaussian filtering is a standard image processing operation that is applied to individual 2D images or sites independently. It does not require access to multiple channels simultaneously or a full Z-stack to perform its core function.",
     "validated": true
   },
   "GrayToColorRgb": {
     "function_name": "gray_to_color_rgb",
     "contract": "pure_2d",
-    "category": "image_operation",
-    "confidence": 0.0,
-    "reasoning": "Could not load function source code",
+    "category": "channel_operation",
+    "confidence": 1.0,
+    "reasoning": "Combines 3 grayscale images into RGB. Expects (3, H, W) with channels stacked. Inherently multichannel operation.",
     "validated": true
   },
   "IdentifyDeadWorms": {
     "function_name": "identify_dead_worms",
     "contract": "pure_2d",
     "category": "image_operation",
-    "confidence": 0.9,
-    "reasoning": "IdentifyDeadWorms is a specialized segmentation/morphological operation typically applied to a single site's image data. In the context of CellProfiler/OpenHCS, such object identification functions treat the input as a multi-channel or single-channel site (C, H, W) rather than a Z-stack or a collection of independent channels for separate processing.",
+    "confidence": 1.0,
+    "reasoning": "IdentifyDeadWorms is a specialized segmentation/morphology function designed to detect specific shapes (worms) in a single-channel image. It does not require volumetric Z-stacks to function, nor does it require multiple color channels simultaneously to perform its detection logic.",
     "validated": true
   },
   "IdentifyObjectsInGrid": {
     "function_name": "identify_objects_in_grid",
     "contract": "pure_2d",
     "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "The function identifies objects based on a grid layout within a single site. In CellProfiler/OpenHCS, object identification typically operates on a per-site basis where multiple channels (C, H, W) are processed together to define regions of interest, rather than iterating across Z-stacks or treating channels as independent samples.",
+    "confidence": 1.0,
+    "reasoning": "IdentifyObjectsInGrid is a segmentation function that defines a grid of objects based on spatial coordinates. It operates on a single image (site) at a time and does not require volumetric Z-stacks or multiple color channels to define the grid geometry.",
     "validated": true
   },
   "IdentifyObjectsManually": {
     "function_name": "identify_objects_manually",
     "contract": "unknown",
     "category": "image_operation",
-    "confidence": 0.9,
-    "reasoning": "IdentifyObjectsManually is a segmentation task where a user or algorithm defines objects on a per-site basis. In the context of CellProfiler/OpenHCS, such operations typically receive a multi-channel image (C, H, W) to allow the user to see all relevant markers while defining object boundaries.",
+    "confidence": 1.0,
+    "reasoning": "IdentifyObjectsManually is a standard segmentation/annotation task performed on a single image (or site). It does not require a volumetric Z-stack to function, nor does it inherently require multiple channels simultaneously to define object boundaries.",
     "validated": true
   },
   "IdentifyPrimaryObjects": {
     "function_name": "identify_primary_objects",
     "contract": "unknown",
-    "category": "channel_operation",
-    "confidence": 0.9,
-    "reasoning": "IdentifyPrimaryObjects is a core CellProfiler segmentation function designed to detect objects (like nuclei) in a single grayscale image. In the OpenHCS framework, when a function processes a single channel across multiple sites to produce a mask, it maps to VariableComponents.CHANNEL, where dimension 0 represents the site index (S, H, W).",
+    "category": "image_operation",
+    "confidence": 1.0,
+    "reasoning": "IdentifyPrimaryObjects is a classic single-channel segmentation function. It processes an individual grayscale image (typically a nuclear stain like DAPI) to detect objects. It does not require volumetric Z-stacks or multiple color channels simultaneously to perform its core logic.",
     "validated": true
   },
   "IdentifySecondaryObjects": {
@@ -316,7 +316,7 @@
     "contract": "pure_2d",
     "category": "image_operation",
     "confidence": 1.0,
-    "reasoning": "IdentifySecondaryObjects is a segmentation function that expands primary objects (like nuclei) to find secondary objects (like cell bodies) based on an input image. In CellProfiler/OpenHCS, this operation is performed per site using all relevant channel information (C, H, W) to define boundaries, mapping to VariableComponents.SITE.",
+    "reasoning": "IdentifySecondaryObjects is a single-channel segmentation task that expands from existing primary labels using a single intensity image. It does not require multiple channels or a full Z-stack to perform its core logic; it processes individual sites/planes independently.",
     "validated": true
   },
   "IdentifyTertiaryObjects": {
@@ -324,31 +324,31 @@
     "contract": "pure_2d",
     "category": "image_operation",
     "confidence": 1.0,
-    "reasoning": "IdentifyTertiaryObjects is a segmentation operation that subtracts primary objects (e.g., nuclei) from secondary objects (e.g., cells) to define a third region (e.g., cytoplasm). In CellProfiler/OpenHCS, this is a site-level operation where all relevant object masks and image channels for a single field of view are processed together, mapping to (C, H, W) or (H, W) per site.",
+    "reasoning": "IdentifyTertiaryObjects performs a subtraction of primary labels from secondary labels (e.g., identifying the cytoplasm by subtracting the nucleus from the whole cell). This is a single-channel/single-site operation that does not require a Z-stack or multiple image channels simultaneously.",
     "validated": true
   },
   "ImageMath": {
     "function_name": "image_math",
     "contract": "unknown",
     "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "ImageMath in CellProfiler/OpenHCS typically performs pixel-wise arithmetic on images where all channels/components are processed together at a specific site. It does not perform Z-axis reduction (projection) nor does it iterate across channels independently as its primary logic; it treats the input as a multi-channel spatial array (C, H, W) to apply factors and offsets.",
+    "confidence": 1.0,
+    "reasoning": "ImageMath performs pixel-wise arithmetic on an image. It does not require volumetric context (Z-stacks) nor does it inherently require multiple channels to be stacked in the first dimension to function; it operates on the input array provided, typically a single channel per site.",
     "validated": true
   },
   "InvertForPrinting": {
     "function_name": "invert_for_printing",
     "contract": "unknown",
     "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "The function 'invert_for_printing' typically handles multi-channel images to create a composite or color-mapped output for visualization. In the context of CellProfiler/OpenHCS, this involves processing the channels (C) of a single site together to determine the final color representation, mapping to the (C, H, W) input shape.",
+    "confidence": 1.0,
+    "reasoning": "The function performs a visual transformation (inverting for printing) that is typically applied to individual images or sites. It does not require a volumetric z-stack (z_projection) nor does it inherently require multiple input channels to be stacked as a single array (channel_operation) to perform its core logic, as it can process single-channel images independently.",
     "validated": true
   },
   "LabelImages": {
     "function_name": "label_images",
     "contract": "pure_2d",
     "category": "image_operation",
-    "confidence": 0.9,
-    "reasoning": "The function signature lacks parameters for Z-slices or specific channel-wise iteration, and the 'image' input typically represents a single site's multi-channel data (C, H, W) in the context of CellProfiler-to-OpenHCS image labeling/segmentation tasks.",
+    "confidence": 1.0,
+    "reasoning": "The label_images function is a standard image processing operation that adds metadata or labels to individual images. It does not require volumetric z-stacks (Z, H, W) to perform its logic, nor does it require multiple channels (C, H, W) simultaneously to function. It operates on a per-site basis, making it a standard image_operation.",
     "validated": true
   },
   "MakeProjection": {
@@ -356,47 +356,47 @@
     "contract": "unknown",
     "category": "z_projection",
     "confidence": 1.0,
-    "reasoning": "The function name 'make_projection' and the parameter 'projection_type' (e.g., AVERAGE) explicitly indicate a dimensionality reduction operation typically performed on z-stacks. In this context, dimension 0 represents the depth (Z) to be projected into a 2D plane.",
+    "reasoning": "The function 'make_projection' is designed to collapse a 3D volumetric stack into a 2D image. It requires the Z-slices to be stacked along the first dimension (Z, H, W) to perform operations like Average or Maximum projection, which aligns perfectly with the z_projection category.",
     "validated": true
   },
   "MaskImage": {
     "function_name": "mask_image",
     "contract": "unknown",
     "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "The mask_image function typically applies a spatial mask to an image. In the context of CellProfiler/OpenHCS, this is a per-site operation where all channels of a specific site are masked simultaneously or the image is treated as a multi-channel (C, H, W) array. It does not involve z-stack projection or independent per-channel logic that would shift the primary dimension to channels.",
+    "confidence": 1.0,
+    "reasoning": "The function applies a mask to a single image. It does not require volumetric z-stacks or multiple channels simultaneously to perform its core logic; it operates on a per-image/per-site basis.",
     "validated": true
   },
   "MaskObjects": {
     "function_name": "mask_objects",
     "contract": "unknown",
     "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "The function performs object masking based on labels and a mask array. In CellProfiler/OpenHCS logic, masking is a spatial operation typically performed on a per-site basis where all relevant channels (image, labels, and mask) are aligned. It does not involve Z-stack reduction or independent per-channel processing across sites.",
+    "confidence": 1.0,
+    "reasoning": "The function performs a masking operation on a single image/label set. It does not require a volumetric Z-stack to function, nor does it require multiple distinct color channels simultaneously; it operates on a per-site basis where the image and labels correspond to the same field of view.",
     "validated": true
   },
   "MatchTemplate": {
     "function_name": "match_template",
     "contract": "unknown",
     "category": "image_operation",
-    "confidence": 0.9,
-    "reasoning": "The match_template function typically operates on a per-site basis where multiple channels may be present or a single 2D image is processed. In the context of CellProfiler/OpenHCS, template matching is a spatial operation performed on the image plane (H, W) and does not involve Z-stack projection or independent per-channel normalization logic.",
+    "confidence": 1.0,
+    "reasoning": "The match_template function performs template matching (cross-correlation) on a single image channel. It does not require volumetric Z-stacks or multiple color channels to function; it processes a single 2D image against a template.",
     "validated": true
   },
   "MeasureColocalization": {
     "function_name": "measure_colocalization",
     "contract": "pure_2d",
-    "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "Colocalization analysis inherently requires comparing multiple channels (C) for the same spatial site to calculate correlations (Pearson, Manders, Costes). Therefore, the input array must have channels stacked in the first dimension (C, H, W) to allow the function to compare pixel intensities across those channels.",
+    "category": "channel_operation",
+    "confidence": 1.0,
+    "reasoning": "Colocalization analysis inherently requires comparing two or more channels simultaneously to calculate spatial overlap and correlation metrics. Therefore, the function needs the orchestrator to stack channels into the first dimension (C, H, W).",
     "validated": true
   },
   "MeasureGranularity": {
     "function_name": "measure_granularity",
     "contract": "unknown",
     "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "The measure_granularity function (based on the CellProfiler MeasureImageGranularity module) calculates a granulometry spectrum for an image. It typically processes multi-channel images by treating channels as the leading dimension (C, H, W) to compute texture/granularity features per site, rather than performing z-projections or independent per-channel normalization across sites.",
+    "confidence": 1.0,
+    "reasoning": "MeasureGranularity is a texture-based analysis function that calculates a size spectrum of objects within a single image. It operates on a per-channel basis and does not require volumetric Z-stacks or multiple channels simultaneously to perform its calculations.",
     "validated": true
   },
   "MeasureImageAreaOccupiedBinary": {
@@ -411,296 +411,296 @@
     "function_name": "measure_image_intensity",
     "contract": "pure_2d",
     "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "MeasureImageIntensity in CellProfiler typically calculates global statistics for an entire image across all its channels (e.g., TotalIntensity, MeanIntensity). It treats the input as a single site/image unit where channels are stacked, making it an image_operation mapping to VariableComponents.SITE.",
+    "confidence": 1.0,
+    "reasoning": "MeasureImageIntensity calculates statistics (mean, median, min, max) for a single image channel. It does not require a 3D z-stack to function, nor does it require multiple channels simultaneously to compute its metrics. It is a standard single-channel operation applied per site.",
     "validated": true
   },
   "Measureimageoverlap": {
     "function_name": "measureimageoverlap",
     "contract": "unknown",
     "category": "image_operation",
-    "confidence": 0.9,
-    "reasoning": "The function measures overlap between two or more images (channels) within a single site. In CellProfiler/OpenHCS, multi-image comparison functions typically expect channels to be stacked in the first dimension (C, H, W) to compute metrics like Earth Mover's Distance or correlation across the channel stack.",
+    "confidence": 1.0,
+    "reasoning": "MeasureImageOverlap in CellProfiler typically compares two images (often a ground truth and a test segmentation) or measures the overlap of a single image against itself/a reference. It does not inherently require a 3D Z-stack or a multi-channel composite to function; it operates on individual image planes (sites) to calculate spatial overlap metrics.",
     "validated": true
   },
   "MeasureImageQuality": {
     "function_name": "measure_image_quality",
     "contract": "pure_2d",
     "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "MeasureImageQuality in CellProfiler typically evaluates metrics (blur, saturation, intensity) for a single site across all its channels simultaneously to provide a per-image quality score. It treats the input as a multi-channel 2D image (C, H, W) rather than a 3D volume or a single isolated channel.",
+    "confidence": 1.0,
+    "reasoning": "MeasureImageQuality calculates metrics like blur, saturation, and intensity on a per-image basis. It does not require volumetric data (Z-stacks) or multiple channels simultaneously to perform its calculations; it is typically applied to individual grayscale channels across sites.",
     "validated": true
   },
   "MeasureImageSkeleton": {
     "function_name": "measure_image_skeleton",
     "contract": "unknown",
     "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "Skeletonization and morphological measurements in CellProfiler typically operate on 2D images or multi-channel site images where channels are processed together to extract features. It does not perform Z-projections or treat channels as independent batches for the same operation.",
+    "confidence": 1.0,
+    "reasoning": "Skeletonization is a morphological operation performed on a single binary image (or single channel). It does not require multiple channels or a volumetric Z-stack to function; it processes individual sites/images independently.",
     "validated": true
   },
   "MeasureObjectIntensity": {
     "function_name": "measure_object_intensity",
     "contract": "pure_2d",
     "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "Intensity measurement in CellProfiler typically operates on a per-site basis where multiple channels (C, H, W) are measured against a set of labels. It does not perform Z-projections nor does it treat sites as the primary stack dimension for independent channel processing.",
+    "confidence": 1.0,
+    "reasoning": "Measuring object intensity is a single-channel operation performed on a per-image basis. It does not require access to multiple channels simultaneously (channel_operation) nor does it require a full Z-stack to calculate values for a 2D label map (z_projection). It follows the standard pattern of processing one image/site at a time.",
     "validated": true
   },
   "MeasureObjectIntensityDistribution": {
     "function_name": "measure_object_intensity_distribution",
     "contract": "unknown",
     "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "In CellProfiler/OpenHCS, intensity distribution measurements are typically performed on a per-site basis where multiple channels (C, H, W) are processed together to measure intensities within defined object labels. It does not involve Z-stack projection or independent per-channel processing logic that would fit the other categories.",
+    "confidence": 1.0,
+    "reasoning": "MeasureObjectIntensityDistribution calculates spatial distribution of intensities for a single image channel relative to a set of labels. It does not require multiple channels simultaneously nor does it require a 3D z-stack to perform its calculations; it processes a single 2D image/site at a time.",
     "validated": true
   },
   "MeasureObjectNeighbors": {
     "function_name": "measure_object_neighbors",
     "contract": "pure_2d",
     "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "The function measures spatial relationships between objects within a single site. In CellProfiler/OpenHCS, object measurement and segmentation functions typically operate on a per-site basis where channels are stacked (C, H, W) or a single 2D image is provided. It does not perform Z-projections or independent per-channel normalization.",
+    "confidence": 1.0,
+    "reasoning": "MeasureObjectNeighbors calculates spatial relationships between objects within a single image or site. It does not require a volumetric Z-stack to function, nor does it require multiple channels simultaneously; it operates on a single label matrix and its corresponding intensity image. Therefore, it follows the standard per-site processing flow.",
     "validated": true
   },
   "MeasureObjectOverlap": {
     "function_name": "measure_object_overlap",
     "contract": "pure_2d",
     "category": "image_operation",
-    "confidence": 0.9,
-    "reasoning": "The function measures overlap between label sets and an image. In CellProfiler/OpenHCS contexts, object measurement and segmentation functions typically operate on a per-site basis where channels are stacked (C, H, W). It does not involve Z-stack projection or independent per-channel processing across sites.",
+    "confidence": 1.0,
+    "reasoning": "The function measures overlap between ground truth and test labels for a specific image. It does not require a volumetric z-stack to function, nor does it require multiple distinct spectral channels to be stacked in the first dimension; it operates on a per-site basis using the provided image and label sets.",
     "validated": true
   },
   "MeasureObjectSizeShape": {
     "function_name": "measure_object_size_shape",
     "contract": "pure_2d",
     "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "This function measures morphological features of objects within a specific image context. In CellProfiler/OpenHCS, object measurement is performed per site where channels (image) and labels are aligned. It does not perform Z-projections or treat channels as independent samples for the same measurement.",
+    "confidence": 1.0,
+    "reasoning": "This function measures morphological features of objects within a single image and its corresponding label mask. It does not require multiple channels (colocalization) or a Z-stack (volumetric projection) to perform its core logic; it processes a single site's spatial data independently.",
     "validated": true
   },
   "MeasureObjectSkeleton": {
     "function_name": "measure_object_skeleton",
     "contract": "pure_2d",
     "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "The function performs object skeletonization based on seed labels and an image. In CellProfiler/OpenHCS contexts, skeletonization and object measurement are typically 2D operations performed on a per-site basis where multiple channels (image and labels) are processed together to derive features. It does not involve Z-stack projection or independent per-channel normalization.",
+    "confidence": 1.0,
+    "reasoning": "The function performs skeletonization on a single image and its corresponding labels. It does not require a volumetric z-stack or multiple color channels to perform its operation; it processes a single channel/site independently.",
     "validated": true
   },
   "MeasureTexture": {
     "function_name": "measure_texture",
     "contract": "pure_2d",
     "category": "image_operation",
-    "confidence": 0.9,
-    "reasoning": "Texture measurement in CellProfiler typically operates on 2D images or multi-channel stacks where spatial features are extracted per site. It does not perform z-projections or treat channels as independent samples for the same operation; rather, it processes the spatial context of the provided image (C, H, W) to calculate Haralick or Gabor features.",
+    "confidence": 1.0,
+    "reasoning": "Texture measurement is a single-channel operation that analyzes spatial patterns within a single image. It does not require multiple channels simultaneously nor does it require a volumetric z-stack to compute its metrics.",
     "validated": true
   },
   "Medialaxis": {
     "function_name": "medialaxis",
     "contract": "unknown",
     "category": "image_operation",
-    "confidence": 0.9,
-    "reasoning": "The medial axis transform is a morphological operation typically applied to 2D binary images or multi-channel masks. In the context of CellProfiler/OpenHCS, it processes the spatial structure of a site (C, H, W) to find the skeleton or topological skeleton, treating channels as the primary stack rather than Z-slices or independent site-wide channel distributions.",
+    "confidence": 1.0,
+    "reasoning": "The medialaxis function (skeletonization) is a morphological operation performed on a single binary image. It does not require a z-stack or multiple channels to compute the skeleton of an object.",
     "validated": true
   },
   "Medianfilter": {
     "function_name": "medianfilter",
     "contract": "unknown",
     "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "Median filtering is a standard image processing operation typically applied to 2D images or multi-channel stacks where spatial context is preserved. In the context of CellProfiler/OpenHCS, it processes the site's spatial dimensions, treating the leading dimension as channels (C, H, W) to apply the filter across the image plane.",
+    "confidence": 1.0,
+    "reasoning": "Median filtering is a standard image processing operation typically applied to single-channel 2D images. It does not inherently require a Z-stack or multiple channels to function; it processes spatial neighborhoods within a single image plane.",
     "validated": true
   },
   "Morph": {
     "function_name": "morph",
     "contract": "pure_2d",
     "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "The morph function performs morphological operations (like thinning or dilation) which are standard image processing tasks. In the context of CellProfiler/OpenHCS, these operations are typically applied to individual sites where channels are stacked (C, H, W), rather than across Z-stacks or independent channel-wise normalization.",
+    "confidence": 1.0,
+    "reasoning": "The morph function performs morphological operations (like thinning, erosion, or dilation) which are standard single-channel image processing tasks. It does not require volumetric z-stacks or multiple channels simultaneously to function; it processes individual 2D image planes independently.",
     "validated": true
   },
   "Morphologicalskeleton": {
     "function_name": "morphologicalskeleton",
     "contract": "unknown",
     "category": "z_projection",
-    "confidence": 0.9,
-    "reasoning": "The 'volumetric' parameter indicates the function can process 3D data (Z, H, W). In the context of CellProfiler/OpenHCS morphological operations, when volumetric is True, dimension 0 represents the Z-index (depth), making it a z_projection category operation.",
+    "confidence": 0.95,
+    "reasoning": "The function includes a 'volumetric' parameter, indicating it is designed to handle 3D data. In the OpenHCS orchestration model, processing 3D volumes (Z, H, W) requires setting variable_components to Z_INDEX, which corresponds to the 'z_projection' category.",
     "validated": true
   },
   "Opening": {
     "function_name": "opening",
     "contract": "unknown",
     "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "Morphological opening is a spatial operation typically applied to 2D images or multi-channel images where channels are processed as a stack (C, H, W). It does not involve Z-projection or per-channel independent normalization across sites.",
+    "confidence": 1.0,
+    "reasoning": "The 'opening' function is a standard morphological operation used for noise removal or smoothing. It operates on a single image (2D or 3D) and does not inherently require multiple channels or a specific Z-stack projection logic to function. It is a per-image/per-site operation.",
     "validated": true
   },
   "OverlayObjects": {
     "function_name": "overlay_objects",
     "contract": "unknown",
     "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "The function overlays segmentation labels onto an image. In CellProfiler/OpenHCS contexts, this typically involves a multi-channel image (C, H, W) or a single-channel grayscale image where the labels are applied to the spatial dimensions. It does not perform Z-projections or treat channels as independent batches for separate processing.",
+    "confidence": 1.0,
+    "reasoning": "The function overlays a label mask onto a single image. It does not require a volumetric z-stack (Z, H, W) to perform its logic, nor does it inherently require multiple input channels (C, H, W) to be stacked by the orchestrator; it processes a single image and its corresponding label set per site.",
     "validated": true
   },
   "OverlayOutlines": {
     "function_name": "overlay_outlines",
     "contract": "unknown",
     "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "The overlay_outlines function typically operates on a per-site basis where multiple channels (image and labels) are processed together to create a composite visualization. In the context of CellProfiler/OpenHCS, this involves stacking the image data (C, H, W) to map outlines onto the corresponding spatial coordinates of the image.",
+    "confidence": 1.0,
+    "reasoning": "The function overlays outlines onto a single image. It does not require a volumetric Z-stack to function, nor does it inherently require multiple input channels to be stacked together; it processes a single image and its corresponding label map per site.",
     "validated": true
   },
   "Reducenoise": {
     "function_name": "reducenoise",
     "contract": "unknown",
     "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "The 'reducenoise' function (typically implementing Non-Local Means denoising) in CellProfiler/OpenHCS is designed to process multi-channel 2D images at a single site. It treats the first dimension as channels (C, H, W) to leverage cross-channel information for noise reduction, mapping to VariableComponents.SITE.",
+    "confidence": 1.0,
+    "reasoning": "The 'reducenoise' function (typically implementing Non-Local Means or similar denoising) operates on a single image at a time to remove noise. It does not require a Z-stack to function, nor does it require multiple channels simultaneously to perform its calculation. It is a standard single-channel image enhancement operation.",
     "validated": true
   },
   "RelateObjects": {
     "function_name": "relate_objects",
     "contract": "unknown",
     "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "RelateObjects is a standard CellProfiler module used to establish relationships between different object sets (e.g., nuclei and cells) within the same site. It typically operates on 2D label images or multi-channel masks where channels represent different object types, mapping to the (C, H, W) structure of a single site.",
+    "confidence": 1.0,
+    "reasoning": "RelateObjects establishes parent-child relationships between segmented objects (labels). It operates on a per-site basis and does not require volumetric z-stacks or multiple spectral channels simultaneously to perform its core logic.",
     "validated": true
   },
   "RemoveHoles": {
     "function_name": "remove_holes",
     "contract": "unknown",
     "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "The remove_holes function is a morphological operation typically applied to binary or grayscale images. In the context of CellProfiler/OpenHCS, this is a site-level operation where the input image is treated as a single unit (C, H, W) to remove artifacts within objects, rather than a projection across Z or an independent per-channel normalization.",
+    "confidence": 1.0,
+    "reasoning": "The remove_holes function is a morphological operation typically applied to binary or grayscale images to fill small voids. It operates on a single image at a time and does not require access to multiple channels or a full Z-stack to perform its logic.",
     "validated": true
   },
   "RescaleIntensity": {
     "function_name": "rescale_intensity",
     "contract": "unknown",
-    "category": "channel_operation",
-    "confidence": 0.9,
-    "reasoning": "Rescaling intensity is typically performed on a per-channel basis to normalize or stretch the dynamic range of specific markers. In the context of OpenHCS/CellProfiler, this function expects to process individual channels independently across sites to ensure consistent intensity scaling before further analysis.",
+    "category": "image_operation",
+    "confidence": 1.0,
+    "reasoning": "RescaleIntensity is a single-channel operation that adjusts the pixel intensity values of an image. It does not require knowledge of other channels or a full Z-stack to perform its calculation; it can be applied to each site/image independently.",
     "validated": true
   },
   "Resize": {
     "function_name": "resize",
     "contract": "unknown",
     "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "The resize function typically operates on a per-site basis where all channels are resized simultaneously to maintain spatial alignment. In the context of CellProfiler/OpenHCS, spatial transformations that preserve the relationship between channels are treated as image_operations with an input shape of (C, H, W).",
+    "confidence": 1.0,
+    "reasoning": "The resize function operates on the spatial dimensions (H, W) of an image. It does not require access to a full Z-stack or multiple channels simultaneously to perform its operation; it can be applied to each site/channel/z-slice independently.",
     "validated": true
   },
   "ResizeObjects": {
     "function_name": "resize_objects",
     "contract": "pure_2d",
     "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "The function processes image and label arrays based on spatial dimensions (H, W). In the context of CellProfiler/OpenHCS object manipulation, this typically operates on a per-site basis where channels or object masks are stacked, rather than performing z-projections or independent per-channel normalization.",
+    "confidence": 1.0,
+    "reasoning": "The function performs spatial resizing on a single image and its corresponding label mask. It does not require access to multiple channels simultaneously or a full Z-stack to perform its operation; it can process each site/channel/z-slice independently.",
     "validated": true
   },
   "RunImagejMacro": {
     "function_name": "run_imagej_macro",
     "contract": "flexible",
     "category": "image_operation",
-    "confidence": 0.9,
-    "reasoning": "In the context of CellProfiler-to-OpenHCS migrations, general image processing functions (including external macro runners) typically treat the input as a single site with multiple channels stacked in the first dimension (C, H, W). It does not explicitly handle Z-stacks or per-channel iteration logic internally.",
+    "confidence": 0.95,
+    "reasoning": "The run_imagej_macro function is a general-purpose wrapper for external ImageJ scripts. In the context of CellProfiler/OpenHCS, it typically processes individual images (sites) sequentially. It does not inherently require a full Z-stack or multiple channels to function, making it a standard image_operation where each site is processed independently.",
     "validated": true
   },
   "SaveCroppedObjects": {
     "function_name": "save_cropped_objects",
     "contract": "unknown",
     "category": "image_operation",
-    "confidence": 0.9,
-    "reasoning": "The function takes 'image' and 'labels' as inputs to crop objects. In CellProfiler/OpenHCS contexts, object cropping and label-based operations typically treat the input as a multi-channel site (C, H, W) where labels correspond to the spatial dimensions of the image, processing the site as a single unit rather than iterating over Z-slices or independent channels.",
+    "confidence": 1.0,
+    "reasoning": "The function processes a single image and its corresponding label map to export cropped objects. It does not require a volumetric z-stack (Z, H, W) to perform its logic, nor does it require multiple channels (C, H, W) simultaneously; it operates on a per-site, per-channel basis.",
     "validated": true
   },
   "SaveImages": {
     "function_name": "save_images",
     "contract": "pure_2d",
     "category": "image_operation",
-    "confidence": 0.9,
-    "reasoning": "In the context of CellProfiler/OpenHCS, saving an image typically involves handling multi-channel data (C, H, W) for a single site. Since it is not explicitly a Z-projection tool and does not process channels in isolation for the purpose of cross-site normalization, it fits the image_operation pattern where channels are stacked together for output.",
+    "confidence": 1.0,
+    "reasoning": "The SaveImages function is designed to save a single image (or a single channel/site) to disk. It does not require a full Z-stack to perform its operation, nor does it inherently require multiple channels simultaneously to function. In the OpenHCS architecture, saving is treated as a per-site, per-channel operation.",
     "validated": true
   },
   "ShrinkToObjectCenters": {
     "function_name": "shrink_to_object_centers",
     "contract": "pure_2d",
     "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "The function processes labels and images to identify object centers. In CellProfiler/OpenHCS logic, object-based operations are typically performed on a per-site basis where channels (or the label mask) are stacked. It does not involve Z-stack projection or independent per-channel normalization.",
+    "confidence": 1.0,
+    "reasoning": "The function performs morphological operations on labels and images to reduce objects to their centroids. This is a single-channel operation that does not require z-stacks or multiple channels simultaneously; it processes individual sites/images independently.",
     "validated": true
   },
   "Smooth": {
     "function_name": "smooth",
     "contract": "pure_2d",
     "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "Smoothing is a spatial filtering operation typically applied to a single image or a multi-channel image where spatial context (H, W) is preserved. In CellProfiler/OpenHCS, this function processes the spatial dimensions of a site, often handling multiple channels (C, H, W) simultaneously or sequentially within the site context.",
+    "confidence": 1.0,
+    "reasoning": "The 'smooth' function is a standard image processing operation designed to reduce noise or blur a single image. It does not require access to multiple channels simultaneously (channel_operation) nor does it require a full z-stack to perform its operation (z_projection). It operates on a per-image/per-site basis.",
     "validated": true
   },
   "SplitOrMergeObjects": {
     "function_name": "split_or_merge_objects",
     "contract": "pure_2d",
     "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "The function operates on labels and images to perform object manipulation (merging/splitting). In CellProfiler/OpenHCS logic, these operations typically occur on a per-site basis where all relevant channels (image) and the corresponding label mask are processed together. It does not involve Z-stack reduction or independent per-channel normalization.",
+    "confidence": 1.0,
+    "reasoning": "The function performs object manipulation (splitting or merging) based on labels and an optional guide image. It operates on a per-site basis and does not require a full Z-stack or multiple channels to function; even when a guide image is used, it is typically the same channel or a single reference channel for that specific site.",
     "validated": true
   },
   "StraightenWorms": {
     "function_name": "straighten_worms",
     "contract": "flexible",
     "category": "image_operation",
-    "confidence": 0.9,
-    "reasoning": "The function processes worm objects within a site. In CellProfiler/OpenHCS, worm straightening typically requires all color channels (C, H, W) to be present simultaneously to extract intensity measurements or visualize the straightened worm across the full spectral information of that specific site.",
+    "confidence": 1.0,
+    "reasoning": "The function processes a single image and its corresponding labels/control points to straighten worm objects. It does not require volumetric Z-stacks or multiple color channels simultaneously to perform the geometric transformation; it operates on a per-site, per-channel basis.",
     "validated": true
   },
   "Threshold": {
     "function_name": "threshold",
     "contract": "pure_2d",
     "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "Thresholding is a standard image processing operation typically applied to individual sites. In the context of CellProfiler/OpenHCS, it processes the spatial dimensions (H, W) of a site, often handling multiple channels (C) as the leading dimension if they are to be processed together or sequentially within the site context.",
+    "confidence": 1.0,
+    "reasoning": "The threshold function is a standard single-channel operation that calculates a binary mask from an intensity image. It does not require volumetric z-stack information or multiple channels simultaneously to perform its core logic.",
     "validated": true
   },
   "Tile": {
     "function_name": "tile",
     "contract": "pure_2d",
-    "category": "channel_operation",
-    "confidence": 0.9,
-    "reasoning": "The tile function in CellProfiler/OpenHCS is designed to assemble multiple individual site images into a single large grid (montage). In the OpenHCS framework, this operation is performed per-channel to create a tiled image for each specific marker, meaning it processes the site dimension (S) to produce the output. Therefore, dimension 0 represents the sites being tiled.",
+    "category": "image_operation",
+    "confidence": 1.0,
+    "reasoning": "The Tile function is designed to arrange individual images (typically sites/fields of view) into a single large grid. It processes images independently and does not require volumetric Z-stacks or multiple channels simultaneously to perform its core logic. In the OpenHCS context, this is a per-site operation where the orchestrator handles the stacking of sites via variable_components=[VariableComponents.SITE].",
     "validated": true
   },
   "TrackObjects": {
     "function_name": "track_objects",
     "contract": "pure_2d",
-    "category": "z_projection",
-    "confidence": 0.9,
-    "reasoning": "In the context of CellProfiler/OpenHCS tracking, the input array represents a sequence of frames. In OpenHCS's dimension mapping, temporal sequences or depth stacks are treated as the Z/Index dimension (VariableComponents.Z_INDEX), where dim 0 represents the frame/slice index (T or Z) to be processed sequentially.",
+    "category": "image_operation",
+    "confidence": 1.0,
+    "reasoning": "TrackObjects is a single-channel operation that processes frames sequentially over time. It does not require a Z-stack (Z_INDEX) or multiple channels (CHANNEL) to be stacked in the first dimension of the input array. In OpenHCS, time-lapse is handled via sequential_components, making the default image_operation (grouping by SITE) the correct category.",
     "validated": true
   },
   "UnmixColors": {
     "function_name": "unmix_colors",
     "contract": "pure_2d",
-    "category": "image_operation",
+    "category": "channel_operation",
     "confidence": 1.0,
-    "reasoning": "The unmix_colors function (color deconvolution) requires access to all color channels (Red, Green, Blue) simultaneously to calculate stain intensities. Therefore, it must process the image with channels stacked together in the first dimension (C, H, W), which corresponds to the image_operation category.",
+    "reasoning": "The unmix_colors function performs color deconvolution, which requires an RGB input (multiple channels) to separate specific stains. It needs to receive the channels simultaneously (C, H, W) to calculate the absorbance values across the color spectrum.",
     "validated": true
   },
   "UntangleWorms": {
     "function_name": "untangle_worms",
     "contract": "pure_2d",
     "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "UntangleWorms is a segmentation/object-processing function that operates on a per-site basis. In CellProfiler/OpenHCS, such morphological operations expect the input image to be a single site (potentially multi-channel or grayscale) where spatial features are analyzed together, mapping to VariableComponents.SITE.",
+    "confidence": 1.0,
+    "reasoning": "UntangleWorms is a single-channel segmentation/morphology operation designed to identify individual worm objects from a binary or grayscale image. It processes individual sites independently and does not require volumetric Z-stacks or multiple color channels to perform its core logic.",
     "validated": true
   },
   "Watershed": {
     "function_name": "watershed",
     "contract": "unknown",
     "category": "image_operation",
-    "confidence": 0.95,
-    "reasoning": "Watershed is a segmentation algorithm that typically operates on a per-site basis where multiple channels (e.g., primary image and markers/seeds) are processed together. It does not involve Z-stack projection or independent per-channel normalization.",
+    "confidence": 1.0,
+    "reasoning": "Watershed is a segmentation algorithm that operates on a single input image (typically a distance transform or an intensity gradient). It does not inherently require multiple channels or a full Z-stack to function; it processes individual sites/images independently.",
     "validated": true
   }
 }

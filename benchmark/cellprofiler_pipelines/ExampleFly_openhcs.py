@@ -61,7 +61,7 @@ pipeline_steps = [
         }),
         name="IdentifyPrimaryObjects",
         processing_config=LazyProcessingConfig(
-            variable_components=[VariableComponents.CHANNEL]
+            variable_components=[VariableComponents.SITE]
         ),
         # Unmapped settings:
         # use_advanced_settings=True
@@ -152,7 +152,7 @@ pipeline_steps = [
         }),
         name="MeasureColocalization",
         processing_config=LazyProcessingConfig(
-            variable_components=[VariableComponents.SITE]
+            variable_components=[VariableComponents.CHANNEL]
         ),
     ),
     FunctionStep(
