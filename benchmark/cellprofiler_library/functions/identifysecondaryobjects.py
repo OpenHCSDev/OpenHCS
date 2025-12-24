@@ -45,6 +45,60 @@ class SecondaryObjectStats:
 
 def _fill_labeled_holes(labels: np.ndarray) -> np.ndarray:
     """Fill holes in labeled objects."""
+    CellProfiler Parameter Mapping:
+    (CellProfiler setting -> Python parameter)
+        'Select the input objects' -> (pipeline-handled)
+        'Name the objects to be identified' -> (pipeline-handled)
+        'Select the method to identify the secondary objects' -> method
+        'Select the input image' -> (pipeline-handled)
+        'Number of pixels by which to expand the primary objects' -> expansion_distance
+        'Regularization factor' -> regularization
+        'Discard secondary objects touching the border of the image?' -> exclude_border_objects
+        'Discard the associated primary objects?' -> discard_primary
+        'Name the new primary objects' -> (pipeline-handled)
+        'Fill holes in identified objects?' -> fill_holes
+        'Threshold setting version' -> (pipeline-handled)
+        'Threshold strategy' -> threshold_strategy
+        'Thresholding method' -> threshold_method
+        'Threshold smoothing scale' -> threshold_smoothing_scale
+        'Threshold correction factor' -> threshold_correction_factor
+
+    CellProfiler Parameter Mapping:
+    (CellProfiler setting -> Python parameter)
+        'Select the input objects' -> (pipeline-handled)
+        'Name the objects to be identified' -> (pipeline-handled)
+        'Select the method to identify the secondary objects' -> method
+        'Select the input image' -> (pipeline-handled)
+        'Number of pixels by which to expand the primary objects' -> expansion_distance
+        'Regularization factor' -> regularization
+        'Discard secondary objects touching the border of the image?' -> exclude_border_objects
+        'Discard the associated primary objects?' -> discard_primary
+        'Name the new primary objects' -> (pipeline-handled)
+        'Fill holes in identified objects?' -> fill_holes
+        'Threshold setting version' -> (pipeline-handled)
+        'Threshold strategy' -> threshold_strategy
+        'Thresholding method' -> threshold_method
+        'Threshold smoothing scale' -> threshold_smoothing_scale
+        'Threshold correction factor' -> threshold_correction_factor
+
+    CellProfiler Parameter Mapping:
+    (CellProfiler setting -> Python parameter)
+        'Select the input objects' -> (pipeline-handled)
+        'Name the objects to be identified' -> (pipeline-handled)
+        'Select the method to identify the secondary objects' -> method
+        'Select the input image' -> (pipeline-handled)
+        'Number of pixels by which to expand the primary objects' -> expansion_distance
+        'Regularization factor' -> regularization
+        'Discard secondary objects touching the border of the image?' -> exclude_border_objects
+        'Discard the associated primary objects?' -> discard_primary
+        'Name the new primary objects' -> (pipeline-handled)
+        'Fill holes in identified objects?' -> fill_holes
+        'Threshold setting version' -> (pipeline-handled)
+        'Threshold strategy' -> threshold_strategy
+        'Thresholding method' -> threshold_method
+        'Threshold smoothing scale' -> threshold_smoothing_scale
+        'Threshold correction factor' -> threshold_correction_factor
+
     from scipy.ndimage import binary_fill_holes
     
     filled = np.zeros_like(labels)

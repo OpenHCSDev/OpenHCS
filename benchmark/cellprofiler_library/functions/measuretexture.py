@@ -72,6 +72,33 @@ class ObjectTextureMeasurement:
 
 def _compute_glcm(image: np.ndarray, distance: int, direction: int) -> np.ndarray:
     """
+    CellProfiler Parameter Mapping:
+    (CellProfiler setting -> Python parameter)
+        'Select images to measure' -> (pipeline-handled)
+        'Select objects to measure' -> (pipeline-handled)
+        'Enter how many gray levels to measure the texture at' -> gray_levels
+        'Hidden' -> (pipeline-handled)
+        'Measure whole images or objects?' -> (pipeline-handled)
+        'Texture scale to measure' -> scale
+
+    CellProfiler Parameter Mapping:
+    (CellProfiler setting -> Python parameter)
+        'Select images to measure' -> (pipeline-handled)
+        'Select objects to measure' -> (pipeline-handled)
+        'Enter how many gray levels to measure the texture at' -> gray_levels
+        'Hidden' -> (pipeline-handled)
+        'Measure whole images or objects?' -> (pipeline-handled)
+        'Texture scale to measure' -> scale
+
+    CellProfiler Parameter Mapping:
+    (CellProfiler setting -> Python parameter)
+        'Select images to measure' -> (pipeline-handled)
+        'Select objects to measure' -> (pipeline-handled)
+        'Enter how many gray levels to measure the texture at' -> gray_levels
+        'Hidden' -> (pipeline-handled)
+        'Measure whole images or objects?' -> (pipeline-handled)
+        'Texture scale to measure' -> scale
+
     Compute Gray-Level Co-occurrence Matrix for a given direction.
     
     2D directions (y, x offsets):

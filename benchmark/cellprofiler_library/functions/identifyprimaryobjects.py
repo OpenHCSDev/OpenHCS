@@ -75,6 +75,87 @@ def identify_primary_objects(
     limit_erase: bool = False,
 ) -> Tuple[np.ndarray, PrimaryObjectStats, np.ndarray]:
     """
+    CellProfiler Parameter Mapping:
+    (CellProfiler setting -> Python parameter)
+        'Select the input image' -> (pipeline-handled)
+        'Name the primary objects to be identified' -> (pipeline-handled)
+        'Typical diameter of objects, in pixel units (Min,Max)' -> [min_diameter, max_diameter]
+        'Discard objects outside the diameter range?' -> exclude_size
+        'Discard objects touching the border of the image?' -> exclude_border_objects
+        'Method to distinguish clumped objects' -> unclump_method
+        'Method to draw dividing lines between clumped objects' -> watershed_method
+        'Size of smoothing filter' -> smoothing_filter_size
+        'Suppress local maxima that are closer than this minimum allowed distance' -> maxima_suppression_size
+        'Speed up by using lower-resolution image to find local maxima?' -> low_res_maxima
+        'Fill holes in identified objects?' -> fill_holes
+        'Automatically calculate size of smoothing filter for declumping?' -> automatic_smoothing
+        'Automatically calculate minimum allowed distance between local maxima?' -> automatic_suppression
+        'Handling of objects if excessive number of objects identified' -> limit_erase
+        'Maximum number of objects' -> maximum_object_count
+        'Threshold correction factor' -> threshold_correction_factor
+        'Lower bound on threshold' -> threshold_min
+        'Upper bound on threshold' -> threshold_max
+
+    CellProfiler Parameter Mapping:
+    (CellProfiler setting -> Python parameter)
+        'Select the input image' -> (pipeline-handled)
+        'Name the primary objects to be identified' -> (pipeline-handled)
+        'Typical diameter of objects, in pixel units (Min,Max)' -> [min_diameter, max_diameter]
+        'Discard objects outside the diameter range?' -> exclude_size
+        'Discard objects touching the border of the image?' -> exclude_border_objects
+        'Method to distinguish clumped objects' -> unclump_method
+        'Method to draw dividing lines between clumped objects' -> watershed_method
+        'Size of smoothing filter' -> smoothing_filter_size
+        'Suppress local maxima that are closer than this minimum allowed distance' -> maxima_suppression_size
+        'Speed up by using lower-resolution image to find local maxima?' -> low_res_maxima
+        'Fill holes in identified objects?' -> fill_holes
+        'Automatically calculate size of smoothing filter for declumping?' -> automatic_smoothing
+        'Automatically calculate minimum allowed distance between local maxima?' -> automatic_suppression
+        'Handling of objects if excessive number of objects identified' -> limit_erase
+        'Maximum number of objects' -> maximum_object_count
+        'Threshold correction factor' -> threshold_correction_factor
+        'Lower bound on threshold' -> threshold_min
+        'Upper bound on threshold' -> threshold_max
+
+    CellProfiler Parameter Mapping:
+    (CellProfiler setting -> Python parameter)
+        'Select the input image' -> (pipeline-handled)
+        'Name the primary objects to be identified' -> (pipeline-handled)
+        'Typical diameter of objects, in pixel units (Min,Max)' -> [min_diameter, max_diameter]
+        'Discard objects outside the diameter range?' -> exclude_size
+        'Discard objects touching the border of the image?' -> exclude_border_objects
+        'Method to distinguish clumped objects' -> unclump_method
+        'Method to draw dividing lines between clumped objects' -> watershed_method
+        'Size of smoothing filter' -> smoothing_filter_size
+        'Suppress local maxima that are closer than this minimum allowed distance' -> maxima_suppression_size
+        'Speed up by using lower-resolution image to find local maxima?' -> low_res_maxima
+        'Fill holes in identified objects?' -> fill_holes
+        'Automatically calculate size of smoothing filter for declumping?' -> automatic_smoothing
+        'Automatically calculate minimum allowed distance between local maxima?' -> automatic_suppression
+        'Handling of objects if excessive number of objects identified' -> limit_erase
+        'Maximum number of objects' -> maximum_object_count
+
+    CellProfiler Parameter Mapping:
+    (CellProfiler setting -> Python parameter)
+        'Select the input image' -> (pipeline-handled)
+        'Name the primary objects to be identified' -> (pipeline-handled)
+        'Typical diameter of objects, in pixel units (Min,Max)' -> [min_diameter, max_diameter]
+        'Discard objects outside the diameter range?' -> exclude_size
+        'Discard objects touching the border of the image?' -> exclude_border_objects
+        'Method to distinguish clumped objects' -> unclump_method
+        'Method to draw dividing lines between clumped objects' -> watershed_method
+        'Size of smoothing filter' -> smoothing_filter_size
+        'Suppress local maxima that are closer than this minimum allowed distance' -> maxima_suppression_size
+        'Speed up by using lower-resolution image to find local maxima?' -> low_res_maxima
+        'Fill holes in identified objects?' -> fill_holes
+        'Automatically calculate size of smoothing filter for declumping?' -> automatic_smoothing
+        'Automatically calculate minimum allowed distance between local maxima?' -> automatic_suppression
+        'Handling of objects if excessive number of objects identified' -> limit_erase
+        'Maximum number of objects' -> maximum_object_count
+        'Threshold correction factor' -> threshold_correction_factor
+        'Lower bound on threshold' -> threshold_min
+        'Upper bound on threshold' -> threshold_max
+
     Identify primary objects in a grayscale image.
     
     Args:

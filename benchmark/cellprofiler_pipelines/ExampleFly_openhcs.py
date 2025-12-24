@@ -21,8 +21,8 @@ from openhcs.processing.materialization import csv_materializer
 
 
 # Skipped infrastructure modules (handled by OpenHCS):
-#   - LoadData → handled by plate_path + openhcs_metadata.json
-#   - ExportToSpreadsheet → handled by @special_outputs(csv_materializer(...))
+#   - LoadData -> handled by plate_path + openhcs_metadata.json
+#   - ExportToSpreadsheet -> handled by @special_outputs(csv_materializer(...))
 
 # Absorbed CellProfiler functions
 from benchmark.cellprofiler_library import (
@@ -42,53 +42,74 @@ from benchmark.cellprofiler_library import (
 # variable_components derived from LLM-inferred category
 pipeline_steps = [
     FunctionStep(
-        func=identify_primary_objects,
+        func=(identify_primary_objects, {
+            'min_diameter': 10,
+            'max_diameter': 40,
+            'exclude_size': True,
+            'exclude_border_objects': True,
+            'unclump_method': 'Shape',
+            'watershed_method': 'Shape',
+            'smoothing_filter_size': 10,
+            'maxima_suppression_size': 5,
+            'low_res_maxima': True,
+            'fill_holes': 'After both thresholding and declumping',
+            'automatic_smoothing': True,
+            'automatic_suppression': True,
+            'limit_erase': 'Continue',
+            'maximum_object_count': 500,
+            'threshold_correction_factor': 1.0,
+        }),
         name="IdentifyPrimaryObjects",
         processing_config=LazyProcessingConfig(
             variable_components=[VariableComponents.SITE]
         ),
-        # Settings from .cppipe:
-        # select_the_input_image='OrigBlue'
-        # name_the_primary_objects_to_be_identified='Nuclei'
-        # typical_diameter_of_objects_in_pixel_units=(10, 40)
-        # discard_objects_outside_the_diameter_range=True
-        # discard_objects_touching_the_border_of_the_image=True
+        # Unmapped settings:
+        # use_advanced_settings=True
+        # threshold_setting_version=12
+        # threshold_strategy='Global'
     ),
     FunctionStep(
-        func=identify_secondary_objects,
+        func=(identify_secondary_objects, {
+            'method': 'Propagation',
+            'expansion_distance': 10,
+            'regularization': 0.05,
+            'exclude_border_objects': False,
+            'discard_primary': False,
+            'fill_holes': True,
+            'threshold_strategy': 'Global',
+            'threshold_method': 'Otsu',
+            'threshold_smoothing_scale': False,
+            'threshold_correction_factor': True,
+        }),
         name="IdentifySecondaryObjects",
         processing_config=LazyProcessingConfig(
             variable_components=[VariableComponents.SITE]
         ),
-        # Settings from .cppipe:
-        # select_the_input_objects='Nuclei'
-        # name_the_objects_to_be_identified='Cells'
-        # select_the_method_to_identify_the_secondary_objects='Propagation'
-        # select_the_input_image='OrigGreen'
-        # number_of_pixels_by_which_to_expand_the_primary_objects=10
+        # Unmapped settings:
+        # lower_and_upper_bounds_on_threshold=(0, 1)
+        # manual_threshold=False
+        # select_the_measurement_to_threshold_with='None'
     ),
     FunctionStep(
-        func=identify_tertiary_objects,
+        func=(identify_tertiary_objects, {
+            'secondary_labels': 'Cells',
+            'primary_labels': 'Nuclei',
+            'shrink_primary': True,
+        }),
         name="IdentifyTertiaryObjects",
         processing_config=LazyProcessingConfig(
             variable_components=[VariableComponents.SITE]
         ),
-        # Settings from .cppipe:
-        # select_the_larger_identified_objects='Cells'
-        # select_the_smaller_identified_objects='Nuclei'
-        # name_the_tertiary_objects_to_be_identified='Cytoplasm'
-        # shrink_smaller_object_prior_to_subtraction=True
     ),
     FunctionStep(
-        func=measure_object_size_shape,
+        func=(measure_object_size_shape, {
+            'calculate_zernikes': True,
+            'calculate_advanced': False,
+        }),
         name="MeasureObjectSizeShape",
         processing_config=LazyProcessingConfig(
             variable_components=[VariableComponents.SITE]
         ),
-        # Settings from .cppipe:
-        # select_object_sets_to_measure=['Cells', 'Nuclei', 'Cytoplasm']
-        # calculate_the_zernike_features=True
-        # calculate_the_advanced_features=False
     ),
     FunctionStep(
         func=measure_object_intensity,
@@ -96,60 +117,52 @@ pipeline_steps = [
         processing_config=LazyProcessingConfig(
             variable_components=[VariableComponents.SITE]
         ),
-        # Settings from .cppipe:
-        # select_images_to_measure='OrigBlue'
-        # select_objects_to_measure=['Nuclei', 'Cells', 'Cytoplasm']
     ),
     FunctionStep(
-        func=measure_texture,
+        func=(measure_texture, {
+            'gray_levels': 256,
+            'scale': 3,
+        }),
         name="MeasureTexture",
         processing_config=LazyProcessingConfig(
             variable_components=[VariableComponents.SITE]
         ),
-        # Settings from .cppipe:
-        # select_images_to_measure='OrigBlue'
-        # select_objects_to_measure=['Nuclei', 'Cytoplasm', 'Cells']
-        # enter_how_many_gray_levels_to_measure_the_texture_at=256
-        # hidden=True
-        # measure_whole_images_or_objects='Both'
     ),
     FunctionStep(
-        func=measure_object_neighbors,
+        func=(measure_object_neighbors, {
+            'labels': 'Nuclei',
+            'distance_method': 'Within a specified distance',
+            'neighbor_distance': 4,
+            'neighbors_are_same_objects': True,
+        }),
         name="MeasureObjectNeighbors",
         processing_config=LazyProcessingConfig(
             variable_components=[VariableComponents.SITE]
         ),
-        # Settings from .cppipe:
-        # select_objects_to_measure='Nuclei'
-        # select_neighboring_objects_to_measure='Nuclei'
-        # method_to_determine_neighbors='Within a specified distance'
-        # neighbor_distance=4
-        # consider_objects_discarded_for_touching_image_border=True
     ),
     FunctionStep(
-        func=measure_colocalization,
+        func=(measure_colocalization, {
+            'scale_max': 15.0,
+            'correlation': True,
+            'manders_m1': True,
+            'rwc1': True,
+            'overlap': True,
+            'costes_m1': True,
+            'fast_mode': 'Fast',
+        }),
         name="MeasureColocalization",
         processing_config=LazyProcessingConfig(
             variable_components=[VariableComponents.SITE]
         ),
-        # Settings from .cppipe:
-        # select_images_to_measure=['OrigBlue', 'OrigGreen']
-        # set_threshold_as_percentage_of_maximum_intensity_for_the_images=15.0
-        # select_where_to_measure_correlation='Both'
-        # select_objects_to_measure='Nuclei'
-        # run_all_metrics='Accurate'
     ),
     FunctionStep(
-        func=measure_image_intensity,
+        func=(measure_image_intensity, {
+            'calculate_percentiles': False,
+            'percentiles': (10, 90),
+        }),
         name="MeasureImageIntensity",
         processing_config=LazyProcessingConfig(
             variable_components=[VariableComponents.SITE]
         ),
-        # Settings from .cppipe:
-        # select_images_to_measure='OrigBlue'
-        # measure_the_intensity_only_from_areas_enclosed_by_objects=False
-        # select_input_object_sets=''
-        # calculate_custom_percentiles=False
-        # specify_percentiles_to_measure=(10, 90)
     ),
 ]

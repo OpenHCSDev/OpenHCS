@@ -47,6 +47,30 @@ class ObjectSizeShapeResults:
 
 def _get_zernike_indexes(n_max: int) -> List[Tuple[int, int]]:
     """Get Zernike polynomial indexes up to order n_max."""
+    CellProfiler Parameter Mapping:
+    (CellProfiler setting -> Python parameter)
+        'Select object sets to measure' -> (pipeline-handled)
+        'Calculate the Zernike features?' -> calculate_zernikes
+        'Calculate the advanced features?' -> calculate_advanced
+        'Calculate 3D measurements?' -> volumetric
+        'Object spacing' -> spacing
+
+    CellProfiler Parameter Mapping:
+    (CellProfiler setting -> Python parameter)
+        'Select object sets to measure' -> (pipeline-handled)
+        'Calculate the Zernike features?' -> calculate_zernikes
+        'Calculate the advanced features?' -> calculate_advanced
+        'Calculate 3D measurements?' -> volumetric
+        'Object spacing' -> spacing
+
+    CellProfiler Parameter Mapping:
+    (CellProfiler setting -> Python parameter)
+        'Select object sets to measure' -> (pipeline-handled)
+        'Calculate the Zernike features?' -> calculate_zernikes
+        'Calculate the advanced features?' -> calculate_advanced
+        'Calculate 3D measurements?' -> volumetric
+        'Object spacing' -> spacing
+
     indexes = []
     for n in range(n_max + 1):
         for m in range(-n, n + 1, 2):

@@ -14,9 +14,11 @@ Takes parsed .cppipe modules and generates a complete pipeline file with:
 
 import json
 import logging
+import re
+import inspect
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 
 from .parser import ModuleBlock
 from .settings_binder import SettingsBinder
@@ -161,9 +163,9 @@ from openhcs.processing.materialization import csv_materializer
             skip_note = "\n# Skipped infrastructure modules (handled by OpenHCS):\n"
             for module in skipped_modules:
                 if module.name == "LoadData":
-                    skip_note += "#   - LoadData → handled by plate_path + openhcs_metadata.json\n"
+                    skip_note += "#   - LoadData -> handled by plate_path + openhcs_metadata.json\n"
                 elif module.name == "ExportToSpreadsheet":
-                    skip_note += "#   - ExportToSpreadsheet → handled by @special_outputs(csv_materializer(...))\n"
+                    skip_note += "#   - ExportToSpreadsheet -> handled by @special_outputs(csv_materializer(...))\n"
                 else:
                     skip_note += f"#   - {module.name}\n"
             imports += skip_note + "\n"
@@ -232,17 +234,59 @@ from openhcs.processing.materialization import csv_materializer
             # Bind settings to kwargs
             kwargs = self.settings_binder.bind(module.settings)
 
-            lines.append(f"    FunctionStep(")
-            lines.append(f"        func={func_name},")
+            # Parse parameter mapping from function docstring
+            param_mapping = self._parse_parameter_mapping(func_name)
+
+            # Translate kwargs using mapping
+            translated_kwargs = {}
+            unmapped_kwargs = {}
+
+            for cp_setting, value in kwargs.items():
+                if cp_setting in param_mapping:
+                    py_param = param_mapping[cp_setting]
+
+                    # Skip pipeline-handled settings
+                    if py_param is None:
+                        continue
+
+                    # Handle list of parameters (e.g., min/max from tuple)
+                    if isinstance(py_param, list):
+                        if isinstance(value, tuple) and len(value) == len(py_param):
+                            for i, param_name in enumerate(py_param):
+                                translated_kwargs[param_name] = value[i]
+                        else:
+                            # Can't split - use first param
+                            translated_kwargs[py_param[0]] = value
+                    else:
+                        translated_kwargs[py_param] = value
+                else:
+                    # No mapping found - keep as comment
+                    unmapped_kwargs[cp_setting] = value
+
+            # Build func parameter - either just the function or (function, kwargs_dict)
+            if translated_kwargs:
+                # Format kwargs dict
+                kwargs_lines = ["{"]
+                for k, v in translated_kwargs.items():
+                    kwargs_lines.append(f"            {repr(k)}: {repr(v)},")
+                kwargs_lines.append("        }")
+                kwargs_str = "\n".join(kwargs_lines)
+
+                lines.append(f"    FunctionStep(")
+                lines.append(f"        func=({func_name}, {kwargs_str}),")
+            else:
+                lines.append(f"    FunctionStep(")
+                lines.append(f"        func={func_name},")
+
             lines.append(f'        name="{step_name}",')
             lines.append(f"        processing_config=LazyProcessingConfig(")
             lines.append(f"            variable_components=[{var_comp}]")
             lines.append(f"        ),")
 
-            # Add bound settings as step kwargs if any
-            if kwargs:
-                lines.append(f"        # Settings from .cppipe:")
-                for k, v in list(kwargs.items())[:5]:  # Limit for readability
+            # Add unmapped settings as comments (for debugging)
+            if unmapped_kwargs:
+                lines.append(f"        # Unmapped settings:")
+                for k, v in list(unmapped_kwargs.items())[:3]:
                     lines.append(f"        # {k}={repr(v)}")
 
             lines.append(f"    ),")
@@ -253,7 +297,117 @@ from openhcs.processing.materialization import csv_materializer
     def _module_to_function_name(self, module_name: str) -> str:
         """Convert module name to function name (snake_case)."""
         # IdentifyPrimaryObjects -> identify_primary_objects
-        import re
         name = re.sub(r'([A-Z])', r'_\1', module_name).lower().lstrip('_')
         return name
+
+    def _normalize_setting_name(self, setting_name: str) -> str:
+        """
+        Normalize CellProfiler setting name to match SettingsBinder output.
+
+        This EXACTLY matches the normalization done by SettingsBinder._normalize_name():
+        1. Remove parenthetical content: "(Min,Max)" -> ""
+        2. Remove question marks
+        3. Replace special chars with spaces
+        4. Convert to lowercase and split on whitespace
+        5. Join with underscores
+
+        Example:
+            "Select the input image" -> "select_the_input_image"
+            "Typical diameter of objects, in pixel units (Min,Max)" -> "typical_diameter_of_objects_in_pixel_units"
+        """
+        # Remove parenthetical content (CRITICAL - must match SettingsBinder)
+        name = re.sub(r'\([^)]*\)', '', setting_name)
+
+        # Remove question marks
+        name = name.replace('?', '')
+
+        # Replace special chars with spaces
+        name = re.sub(r'[^\w\s]', ' ', name)
+
+        # Convert to lowercase and split
+        words = name.lower().split()
+
+        # Join with underscores
+        return '_'.join(words)
+
+    def _parse_parameter_mapping(self, func_name: str) -> Dict[str, Any]:
+        """
+        Parse parameter mapping from function docstring.
+
+        Returns dict mapping CellProfiler setting names to Python parameter names.
+        Example: {'Typical diameter...' -> ['min_diameter', 'max_diameter']}
+        """
+        try:
+            # Read the file directly (no imports needed - mappings are in the .py files)
+            module_name = func_name.replace('_', '')
+            func_file = Path(__file__).parent.parent / "cellprofiler_library" / "functions" / f"{module_name}.py"
+
+            if not func_file.exists():
+                return {}
+
+            # Read file content
+            content = func_file.read_text()
+
+            # Find the parameter mapping section (anywhere in the file)
+            mapping = {}
+            in_mapping_section = False
+
+            for line in content.split('\n'):
+                stripped = line.strip()
+
+                if 'CellProfiler Parameter Mapping:' in stripped:
+                    in_mapping_section = True
+                    continue
+
+                if in_mapping_section:
+                    # Stop at empty line, next section, or another mapping block
+                    if not stripped:
+                        # Empty line - might be end of section
+                        continue
+                    if (stripped.startswith('Args:') or
+                        stripped.startswith('Returns:') or
+                        stripped.startswith('Identify') or
+                        stripped.startswith('Measure') or
+                        stripped.startswith('"""') or
+                        stripped.startswith('from ') or
+                        stripped.startswith('import ')):
+                        # Reached end of mapping section
+                        if mapping:  # Only break if we've collected some mappings
+                            break
+                        continue
+
+                    # Skip header line
+                    if 'CellProfiler setting' in stripped and 'Python parameter' in stripped:
+                        continue
+
+                    # Parse mapping line: 'Setting Name' -> param_name
+                    # or 'Setting Name' -> [param1, param2]
+                    # or 'Setting Name' -> (pipeline-handled)
+                    if '->' in stripped:
+                        parts = stripped.split('->', 1)
+                        if len(parts) == 2:
+                            cp_setting = parts[0].strip().strip("'\"")
+                            py_param = parts[1].strip()
+
+                            # Normalize the CellProfiler setting name to match SettingsBinder output
+                            # "Select the input image" -> "select_the_input_image"
+                            # "Typical diameter (Min,Max)" -> "typical_diameter_of_objects_in_pixel_units"
+                            normalized_key = self._normalize_setting_name(cp_setting)
+
+                            # Handle (pipeline-handled) or null
+                            if 'pipeline-handled' in py_param or py_param == 'null':
+                                mapping[normalized_key] = None
+                            # Handle list [param1, param2]
+                            elif py_param.startswith('[') and py_param.endswith(']'):
+                                params = py_param[1:-1].split(',')
+                                mapping[normalized_key] = [p.strip() for p in params]
+                            # Handle single parameter
+                            else:
+                                mapping[normalized_key] = py_param
+
+            return mapping
+
+        except Exception as e:
+            logger.warning(f"Could not parse parameter mapping for {func_name}: {e}")
+            return {}
 

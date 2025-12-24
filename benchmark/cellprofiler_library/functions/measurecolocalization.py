@@ -46,6 +46,48 @@ class ColocalizationMeasurements:
 
 def _linear_costes(fi: np.ndarray, si: np.ndarray, scale_max: int = 255, fast_mode: bool = True) -> Tuple[float, float]:
     """Find Costes Automatic Threshold using linear algorithm."""
+    CellProfiler Parameter Mapping:
+    (CellProfiler setting -> Python parameter)
+        'Select images to measure' -> (pipeline-handled)
+        'Set threshold as percentage of maximum intensity for the images' -> scale_max
+        'Select where to measure correlation' -> (pipeline-handled)
+        'Select objects to measure' -> (pipeline-handled)
+        'Run all metrics?' -> (pipeline-handled)
+        'Calculate correlation and slope metrics?' -> correlation
+        'Calculate the Manders coefficients?' -> [manders_m1, manders_m2]
+        'Calculate the Rank Weighted Colocalization coefficients?' -> [rwc1, rwc2]
+        'Calculate the Overlap coefficients?' -> overlap
+        'Calculate the Manders coefficients using Costes auto threshold?' -> [costes_m1, costes_m2]
+        'Method for Costes thresholding' -> fast_mode
+
+    CellProfiler Parameter Mapping:
+    (CellProfiler setting -> Python parameter)
+        'Select images to measure' -> (pipeline-handled)
+        'Set threshold as percentage of maximum intensity for the images' -> scale_max
+        'Select where to measure correlation' -> (pipeline-handled)
+        'Select objects to measure' -> (pipeline-handled)
+        'Run all metrics?' -> (pipeline-handled)
+        'Calculate correlation and slope metrics?' -> correlation
+        'Calculate the Manders coefficients?' -> [manders_m1, manders_m2]
+        'Calculate the Rank Weighted Colocalization coefficients?' -> [rwc1, rwc2]
+        'Calculate the Overlap coefficients?' -> overlap
+        'Calculate the Manders coefficients using Costes auto threshold?' -> [costes_m1, costes_m2]
+        'Method for Costes thresholding' -> fast_mode
+
+    CellProfiler Parameter Mapping:
+    (CellProfiler setting -> Python parameter)
+        'Select images to measure' -> (pipeline-handled)
+        'Set threshold as percentage of maximum intensity for the images' -> scale_max
+        'Select where to measure correlation' -> (pipeline-handled)
+        'Select objects to measure' -> (pipeline-handled)
+        'Run all metrics?' -> (pipeline-handled)
+        'Calculate correlation and slope metrics?' -> correlation
+        'Calculate the Manders coefficients?' -> [manders_m1, manders_m2]
+        'Calculate the Rank Weighted Colocalization coefficients?' -> [rwc1, rwc2]
+        'Calculate the Overlap coefficients?' -> overlap
+        'Calculate the Manders coefficients using Costes auto threshold?' -> [costes_m1, costes_m2]
+        'Method for Costes thresholding' -> fast_mode
+
     i_step = 1 / scale_max
     non_zero = (fi > 0) | (si > 0)
     

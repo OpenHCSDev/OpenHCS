@@ -32,30 +32,53 @@ from benchmark.cellprofiler_library import (
 # variable_components derived from LLM-inferred category
 pipeline_steps = [
     FunctionStep(
-        func=identify_primary_objects,
+        func=(identify_primary_objects, {
+            'min_diameter': 8,
+            'max_diameter': 80,
+            'exclude_size': True,
+            'exclude_border_objects': True,
+            'unclump_method': 'Intensity',
+            'watershed_method': 'Intensity',
+            'smoothing_filter_size': 10,
+            'maxima_suppression_size': 7.0,
+            'low_res_maxima': True,
+            'fill_holes': 'After declumping only',
+            'automatic_smoothing': True,
+            'automatic_suppression': True,
+            'limit_erase': 'Continue',
+            'maximum_object_count': 500,
+            'threshold_correction_factor': 1.0,
+        }),
         name="IdentifyPrimaryObjects",
         processing_config=LazyProcessingConfig(
             variable_components=[VariableComponents.SITE]
         ),
-        # Settings from .cppipe:
-        # select_the_input_image='DNA'
-        # name_the_primary_objects_to_be_identified='Nuclei'
-        # typical_diameter_of_objects_in_pixel_units=(8, 80)
-        # discard_objects_outside_the_diameter_range=True
-        # discard_objects_touching_the_border_of_the_image=True
+        # Unmapped settings:
+        # display_accepted_local_maxima=False
+        # select_maxima_color='Blue'
+        # use_advanced_settings=False
     ),
     FunctionStep(
-        func=identify_secondary_objects,
+        func=(identify_secondary_objects, {
+            'method': 'Propagation',
+            'expansion_distance': 10,
+            'regularization': 0.05,
+            'exclude_border_objects': False,
+            'discard_primary': False,
+            'fill_holes': True,
+            'threshold_strategy': 'Global',
+            'threshold_method': 'Otsu',
+            'threshold_smoothing_scale': 0.0,
+            'threshold_correction_factor': 0.8,
+        }),
         name="IdentifySecondaryObjects",
         processing_config=LazyProcessingConfig(
             variable_components=[VariableComponents.SITE]
         ),
-        # Settings from .cppipe:
-        # select_the_input_objects='Nuclei'
-        # name_the_objects_to_be_identified='Cells'
-        # select_the_method_to_identify_the_secondary_objects='Propagation'
-        # select_the_input_image='cellbody'
-        # number_of_pixels_by_which_to_expand_the_primary_objects=10
+        # Unmapped settings:
+        # lower_and_upper_bounds_on_threshold=(0.0, 1.0)
+        # manual_threshold=0.0
+        # select_the_measurement_to_threshold_with='None'
     ),
     FunctionStep(
         func=measure_object_intensity,
@@ -63,19 +86,15 @@ pipeline_steps = [
         processing_config=LazyProcessingConfig(
             variable_components=[VariableComponents.SITE]
         ),
-        # Settings from .cppipe:
-        # select_images_to_measure=['DNA', 'PH3']
-        # select_objects_to_measure=['Nuclei', 'Cells', 'Cytoplasm']
     ),
     FunctionStep(
-        func=measure_object_size_shape,
+        func=(measure_object_size_shape, {
+            'calculate_zernikes': True,
+            'calculate_advanced': False,
+        }),
         name="MeasureObjectSizeShape",
         processing_config=LazyProcessingConfig(
             variable_components=[VariableComponents.SITE]
         ),
-        # Settings from .cppipe:
-        # select_object_sets_to_measure=['Nuclei', 'Cells', 'Cytoplasm']
-        # calculate_the_zernike_features=True
-        # calculate_the_advanced_features=False
     ),
 ]

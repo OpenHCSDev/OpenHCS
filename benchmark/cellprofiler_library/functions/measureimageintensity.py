@@ -37,6 +37,30 @@ class ImageIntensityMeasurement:
 
 def _parse_percentiles(percentiles_str: str) -> List[int]:
     """Parse comma-separated percentile string into sorted, deduplicated list."""
+    CellProfiler Parameter Mapping:
+    (CellProfiler setting -> Python parameter)
+        'Select images to measure' -> (pipeline-handled)
+        'Measure the intensity only from areas enclosed by objects?' -> (pipeline-handled)
+        'Select input object sets' -> (pipeline-handled)
+        'Calculate custom percentiles' -> calculate_percentiles
+        'Specify percentiles to measure' -> percentiles
+
+    CellProfiler Parameter Mapping:
+    (CellProfiler setting -> Python parameter)
+        'Select images to measure' -> (pipeline-handled)
+        'Measure the intensity only from areas enclosed by objects?' -> (pipeline-handled)
+        'Select input object sets' -> (pipeline-handled)
+        'Calculate custom percentiles' -> calculate_percentiles
+        'Specify percentiles to measure' -> percentiles
+
+    CellProfiler Parameter Mapping:
+    (CellProfiler setting -> Python parameter)
+        'Select images to measure' -> (pipeline-handled)
+        'Measure the intensity only from areas enclosed by objects?' -> (pipeline-handled)
+        'Select input object sets' -> (pipeline-handled)
+        'Calculate custom percentiles' -> calculate_percentiles
+        'Specify percentiles to measure' -> percentiles
+
     percentiles = []
     for p in percentiles_str.replace(" ", "").split(","):
         if p == "":

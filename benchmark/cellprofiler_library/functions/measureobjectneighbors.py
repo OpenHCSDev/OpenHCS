@@ -41,6 +41,48 @@ class NeighborMeasurements:
 
 def _strel_disk(radius: int) -> np.ndarray:
     """Create a disk-shaped structuring element."""
+    CellProfiler Parameter Mapping:
+    (CellProfiler setting -> Python parameter)
+        'Select objects to measure' -> labels
+        'Select neighboring objects to measure' -> (pipeline-handled)
+        'Method to determine neighbors' -> distance_method
+        'Neighbor distance' -> neighbor_distance
+        'Consider objects discarded for touching image border?' -> neighbors_are_same_objects
+        'Retain the image of objects colored by numbers of neighbors?' -> (pipeline-handled)
+        'Name the output image' -> (pipeline-handled)
+        'Select colormap' -> (pipeline-handled)
+        'Retain the image of objects colored by percent of touching pixels?' -> (pipeline-handled)
+        'Name the output image (percent touching)' -> (pipeline-handled)
+        'Select colormap (percent touching)' -> (pipeline-handled)
+
+    CellProfiler Parameter Mapping:
+    (CellProfiler setting -> Python parameter)
+        'Select objects to measure' -> labels
+        'Select neighboring objects to measure' -> (pipeline-handled)
+        'Method to determine neighbors' -> distance_method
+        'Neighbor distance' -> neighbor_distance
+        'Consider objects discarded for touching image border?' -> neighbors_are_same_objects
+        'Retain the image of objects colored by numbers of neighbors?' -> (pipeline-handled)
+        'Name the output image' -> (pipeline-handled)
+        'Select colormap' -> (pipeline-handled)
+        'Retain the image of objects colored by percent of touching pixels?' -> (pipeline-handled)
+        'Name the output image (percent touching)' -> (pipeline-handled)
+        'Select colormap (percent touching)' -> (pipeline-handled)
+
+    CellProfiler Parameter Mapping:
+    (CellProfiler setting -> Python parameter)
+        'Select objects to measure' -> labels
+        'Select neighboring objects to measure' -> (pipeline-handled)
+        'Method to determine neighbors' -> distance_method
+        'Neighbor distance' -> neighbor_distance
+        'Consider objects discarded for touching image border?' -> neighbors_are_same_objects
+        'Retain the image of objects colored by numbers of neighbors?' -> (pipeline-handled)
+        'Name the output image' -> (pipeline-handled)
+        'Select colormap' -> (pipeline-handled)
+        'Retain the image of objects colored by percent of touching pixels?' -> (pipeline-handled)
+        'Name the output image (percent touching)' -> (pipeline-handled)
+        'Select colormap (percent touching)' -> (pipeline-handled)
+
     from skimage.morphology import disk
     return disk(radius)
 
