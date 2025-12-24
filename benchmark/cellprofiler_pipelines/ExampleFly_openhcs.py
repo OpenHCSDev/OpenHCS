@@ -88,8 +88,6 @@ pipeline_steps = [
     ),
     FunctionStep(
         func=(identify_tertiary_objects, {
-            'secondary_labels': 'Cells',
-            'primary_labels': 'Nuclei',
             'shrink_primary': True,
         }),
         name="IdentifyTertiaryObjects",

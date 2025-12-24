@@ -25,28 +25,7 @@ class TertiaryObjectStats:
 
 def _outline(labels: np.ndarray) -> np.ndarray:
     """Find outline pixels of labeled objects.
-    CellProfiler Parameter Mapping:
-    (CellProfiler setting -> Python parameter)
-        'Select the larger identified objects' -> secondary_labels
-        'Select the smaller identified objects' -> primary_labels
-        'Name the tertiary objects to be identified' -> (pipeline-handled)
-        'Shrink smaller object prior to subtraction?' -> shrink_primary
 
-    CellProfiler Parameter Mapping:
-    (CellProfiler setting -> Python parameter)
-        'Select the larger identified objects' -> secondary_labels
-        'Select the smaller identified objects' -> primary_labels
-        'Name the tertiary objects to be identified' -> (pipeline-handled)
-        'Shrink smaller object prior to subtraction?' -> shrink_primary
-
-    CellProfiler Parameter Mapping:
-    (CellProfiler setting -> Python parameter)
-        'Select the larger identified objects' -> secondary_labels
-        'Select the smaller identified objects' -> primary_labels
-        'Name the tertiary objects to be identified' -> (pipeline-handled)
-        'Shrink smaller object prior to subtraction?' -> shrink_primary
-
-    
     An outline pixel is a labeled pixel that has at least one neighbor
     with a different label (including background).
     """
@@ -95,6 +74,13 @@ def identify_tertiary_objects(
         - Original image (passed through)
         - TertiaryObjectStats dataclass with measurements
         - Tertiary label image (ring-shaped objects)
+
+    CellProfiler Parameter Mapping:
+    (CellProfiler setting -> Python parameter)
+        'Select the larger identified objects' -> (pipeline-handled)
+        'Select the smaller identified objects' -> (pipeline-handled)
+        'Name the tertiary objects to be identified' -> (pipeline-handled)
+        'Shrink smaller object prior to subtraction?' -> shrink_primary
     """
     from skimage.measure import regionprops
     
