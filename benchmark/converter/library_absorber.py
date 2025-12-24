@@ -28,20 +28,21 @@ logger = logging.getLogger(__name__)
 @dataclass
 class AbsorbedFunction:
     """A successfully absorbed CellProfiler function."""
-    
+
     # Identity
     cp_module_name: str  # Original CellProfiler module name
     openhcs_function_name: str  # snake_case function name
-    
-    # Contract
-    inferred_contract: str  # ProcessingContract value
+
+    # Contract & Category (LLM-inferred)
+    inferred_contract: str  # ProcessingContract: PURE_2D, PURE_3D, FLEXIBLE, VOLUMETRIC_TO_SLICE
+    category: str  # Semantic category: image_operation, z_projection, channel_operation
     contract_confidence: float
     contract_notes: str = ""
-    
+
     # Source paths
     source_file: str = ""  # Where the converted function is stored
     original_cp_file: str = ""  # Original CellProfiler source
-    
+
     # Status
     validated: bool = False
     validation_errors: List[str] = field(default_factory=list)
@@ -152,6 +153,7 @@ class LibraryAbsorber:
                     cp_module_name=module_name,
                     openhcs_function_name=func_name,
                     inferred_contract="unknown",
+                    category="image_operation",  # default
                     contract_confidence=0.0,
                     source_file=str(output_file),
                     original_cp_file=str(module_file),
@@ -228,25 +230,32 @@ class LibraryAbsorber:
         output_file.write_text(conversion.converted_code)
         logger.info(f"Wrote {output_file}")
 
-        # Default contract
-        inferred_contract = "pure_2d"
-        contract_confidence = 0.5
-        contract_notes = "default (not tested)"
+        # Use LLM-inferred contract and category (the LLM read the source and understood it)
+        inferred_contract = conversion.inferred_contract.lower()  # normalize to lowercase
+        category = conversion.category
+        contract_confidence = conversion.confidence
+        contract_notes = conversion.reasoning
 
-        # Runtime contract inference if enabled
+        logger.info(f"  LLM inference: contract={inferred_contract}, category={category}, confidence={contract_confidence:.2f}")
+
+        # Optional: Runtime contract validation (expensive but validates LLM inference)
         if run_contract_inference and len(validation_errors) == 0:
             contract_result = self._infer_contract_runtime(output_file, func_name)
             if contract_result:
-                inferred_contract = contract_result.contract.value
-                contract_confidence = contract_result.confidence
-                contract_notes = contract_result.notes
-                logger.info(f"  Contract: {inferred_contract} (confidence: {contract_confidence:.2f})")
+                runtime_contract = contract_result.contract.value
+                if runtime_contract != inferred_contract:
+                    logger.warning(f"  Runtime inference ({runtime_contract}) differs from LLM ({inferred_contract})")
+                    # Trust runtime over LLM if they disagree
+                    inferred_contract = runtime_contract
+                    contract_confidence = contract_result.confidence
+                    contract_notes = f"Runtime override: {contract_result.notes}"
 
         # Create result
         absorbed = AbsorbedFunction(
             cp_module_name=module_name,
             openhcs_function_name=func_name,
             inferred_contract=inferred_contract,
+            category=category,
             contract_confidence=contract_confidence,
             contract_notes=contract_notes,
             source_file=str(output_file),
@@ -326,13 +335,15 @@ class LibraryAbsorber:
     
     def _write_registry(self, result: AbsorptionResult) -> None:
         """Write registry files."""
-        # Write contracts.json
+        # Write contracts.json with contract, category, confidence
         contracts_file = self.output_root / "contracts.json"
         contracts_data = {
             f.cp_module_name: {
                 "function_name": f.openhcs_function_name,
                 "contract": f.inferred_contract,
+                "category": f.category,
                 "confidence": f.contract_confidence,
+                "reasoning": f.contract_notes,
                 "validated": f.validated,
             }
             for f in result.absorbed

@@ -8,13 +8,15 @@ Supports two backends:
 OpenRouter provides access to frontier models like MiniMax-01 (456B params).
 """
 
+import json
 import logging
 import os
+import re
 import requests
 from dataclasses import dataclass
 from enum import Enum, auto
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from .parser import ModuleBlock
 from .source_locator import SourceLocation
@@ -68,6 +70,12 @@ class ConversionResult:
     error_message: str = ""
     original_source: str = ""
     settings: Dict[str, str] = None
+
+    # LLM-inferred metadata
+    inferred_contract: str = "PURE_2D"  # PURE_2D, PURE_3D, FLEXIBLE, VOLUMETRIC_TO_SLICE
+    category: str = "image_operation"   # image_operation, z_projection, channel_operation
+    confidence: float = 0.0
+    reasoning: str = ""
 
     def __post_init__(self):
         if self.settings is None:
@@ -212,16 +220,20 @@ class LLMFunctionConverter:
             response.raise_for_status()
 
             result = response.json()
-            generated_code = result.get("response", "")
-            generated_code = self._clean_code(generated_code)
+            raw_response = result.get("response", "")
+            parsed = self._parse_response(raw_response)
 
-            logger.info(f"Successfully converted {module.name}")
+            logger.info(f"Successfully converted {module.name} [contract={parsed.get('contract')}, category={parsed.get('category')}]")
             return ConversionResult(
                 module_name=module.name,
                 success=True,
-                converted_code=generated_code,
+                converted_code=parsed.get("code", ""),
                 original_source=source.source_code,
                 settings=module.settings,
+                inferred_contract=parsed.get("contract", "PURE_2D"),
+                category=parsed.get("category", "image_operation"),
+                confidence=parsed.get("confidence", 0.5),
+                reasoning=parsed.get("reasoning", ""),
             )
 
         except Exception as e:
@@ -288,16 +300,20 @@ class LLMFunctionConverter:
                     settings=module.settings,
                 )
 
-            generated_code = choices[0].get("message", {}).get("content", "")
-            generated_code = self._clean_code(generated_code)
+            raw_response = choices[0].get("message", {}).get("content", "")
+            parsed = self._parse_response(raw_response)
 
-            logger.info(f"Successfully converted {module.name}")
+            logger.info(f"Successfully converted {module.name} [contract={parsed.get('contract')}, category={parsed.get('category')}]")
             return ConversionResult(
                 module_name=module.name,
                 success=True,
-                converted_code=generated_code,
+                converted_code=parsed.get("code", ""),
                 original_source=source.source_code,
                 settings=module.settings,
+                inferred_contract=parsed.get("contract", "PURE_2D"),
+                category=parsed.get("category", "image_operation"),
+                confidence=parsed.get("confidence", 0.5),
+                reasoning=parsed.get("reasoning", ""),
             )
 
         except Exception as e:
@@ -330,13 +346,67 @@ class LLMFunctionConverter:
                 ))
         return results
     
-    def _clean_code(self, code: str) -> str:
-        """Remove markdown formatting from generated code."""
+    def _parse_response(self, raw_response: str) -> Dict[str, Any]:
+        """
+        Parse LLM response as JSON with code, contract, category, confidence, reasoning.
+
+        Falls back to treating entire response as code if JSON parsing fails.
+        """
+        # Clean markdown wrapping if present
+        response = raw_response.strip()
+        if response.startswith("```json"):
+            response = response[len("```json"):].lstrip()
+        if response.startswith("```"):
+            response = response[3:].lstrip()
+        if response.endswith("```"):
+            response = response[:-3].rstrip()
+
+        # Try to parse as JSON
+        try:
+            data = json.loads(response)
+            if isinstance(data, dict) and "code" in data:
+                # Clean the code field of any markdown
+                code = data.get("code", "")
+                if code.startswith("```python"):
+                    code = code[len("```python"):].lstrip()
+                if code.startswith("```"):
+                    code = code[3:].lstrip()
+                if code.endswith("```"):
+                    code = code[:-3].rstrip()
+                data["code"] = code.strip()
+                return data
+        except json.JSONDecodeError:
+            pass
+
+        # Try to extract JSON from within the response (LLM might add explanation)
+        json_match = re.search(r'\{[^{}]*"code"[^{}]*\}', response, re.DOTALL)
+        if json_match:
+            try:
+                data = json.loads(json_match.group())
+                code = data.get("code", "")
+                if code.startswith("```"):
+                    code = re.sub(r'^```\w*\n?', '', code)
+                    code = re.sub(r'```$', '', code)
+                data["code"] = code.strip()
+                return data
+            except json.JSONDecodeError:
+                pass
+
+        # Fallback: treat entire response as code (legacy behavior)
+        logger.warning("Failed to parse JSON response, falling back to raw code extraction")
+        code = response
         if code.startswith("```python"):
             code = code[len("```python"):].lstrip()
         if code.startswith("```"):
             code = code[3:].lstrip()
         if code.endswith("```"):
             code = code[:-3].rstrip()
-        return code.strip()
+
+        return {
+            "code": code.strip(),
+            "contract": "PURE_2D",
+            "category": "image_operation",
+            "confidence": 0.5,
+            "reasoning": "Fallback - could not parse JSON response"
+        }
 

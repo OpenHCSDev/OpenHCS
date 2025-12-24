@@ -1,14 +1,14 @@
 """
 PipelineGenerator - Generate complete runnable OpenHCS pipelines.
 
-TWO MODES:
-1. Registry-based (instant): Uses pre-absorbed cellprofiler_library
-2. LLM-based (fallback): For modules not yet absorbed
+DETERMINISTIC ONLY:
+Uses pre-absorbed cellprofiler_library. No LLM fallback.
+Fails loudly if modules are missing from the absorbed library.
 
-Takes converted functions and generates a complete pipeline file with:
+Takes parsed .cppipe modules and generates a complete pipeline file with:
 - All imports
-- Function references (registry) or definitions (LLM)
-- FunctionStep wrappers
+- Function references from absorbed library
+- FunctionStep wrappers with correct variable_components (from LLM-inferred category)
 - Pipeline configuration
 """
 
@@ -16,10 +16,9 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, List, Optional
+from typing import Dict, List
 
 from .parser import ModuleBlock
-from .llm_converter import ConversionResult
 from .settings_binder import SettingsBinder
 
 logger = logging.getLogger(__name__)
@@ -91,25 +90,32 @@ from openhcs.processing.materialization import csv_materializer
         self.settings_binder = SettingsBinder()
         self._registry = self._load_registry()
 
-    def _load_registry(self) -> Dict[str, str]:
-        """Load module → function mapping from absorbed library."""
+    def _load_registry(self) -> Dict[str, dict]:
+        """Load full module metadata from absorbed library."""
         contracts_file = self.library_root / "contracts.json"
         if not contracts_file.exists():
-            logger.info("No absorbed library found - will use LLM fallback")
-            return {}
+            raise FileNotFoundError(
+                f"No absorbed library found at {contracts_file}. "
+                "Run 'python -m benchmark.converter.absorb' first."
+            )
 
         try:
             data = json.loads(contracts_file.read_text())
+            # Store full metadata, not just function name
             registry = {
-                module_name: info["function_name"]
+                module_name: {
+                    "function_name": info["function_name"],
+                    "contract": info.get("contract", "pure_2d"),
+                    "category": info.get("category", "image_operation"),
+                    "confidence": info.get("confidence", 0.5),
+                }
                 for module_name, info in data.items()
                 if info.get("validated", False)
             }
             logger.info(f"Loaded {len(registry)} absorbed functions from registry")
             return registry
         except Exception as e:
-            logger.warning(f"Failed to load registry: {e}")
-            return {}
+            raise RuntimeError(f"Failed to load registry: {e}")
 
     def has_module(self, module_name: str) -> bool:
         """Check if module exists in absorbed library."""
@@ -146,6 +152,14 @@ from openhcs.processing.materialization import csv_materializer
         # Build imports
         imports = self.IMPORTS_BASE.format(source_file=source_cppipe.name)
 
+        # Fail-loud if any modules are missing (no LLM fallback)
+        if missing_modules:
+            raise ValueError(
+                f"Missing {len(missing_modules)} modules from absorbed library: "
+                f"{[m.name for m in missing_modules]}. "
+                "Re-run absorption with --force to regenerate."
+            )
+
         # Add registry imports for available modules
         if registry_modules:
             func_imports = [
@@ -153,7 +167,7 @@ from openhcs.processing.materialization import csv_materializer
                 "from benchmark.cellprofiler_library import ("
             ]
             for module in registry_modules:
-                func_name = self._registry[module.name]
+                func_name = self._registry[module.name]["function_name"]
                 func_imports.append(f"    {func_name},")
             func_imports.append(")")
             imports += "\n".join(func_imports) + "\n\n"
@@ -172,17 +186,32 @@ from openhcs.processing.materialization import csv_materializer
             failed_modules=[m.name for m in missing_modules],
         )
 
+    # Category → variable_components mapping
+    CATEGORY_TO_VARIABLE_COMPONENTS = {
+        "image_operation": "VariableComponents.SITE",
+        "z_projection": "VariableComponents.Z_INDEX",
+        "channel_operation": "VariableComponents.CHANNEL",
+    }
+
     def _generate_steps_from_registry(self, modules: List[ModuleBlock]) -> str:
         """Generate pipeline_steps using registry functions with bound settings."""
         lines = [
             "# Pipeline Steps",
             "# Settings from .cppipe are bound as default parameters",
+            "# variable_components derived from LLM-inferred category",
             "pipeline_steps = [",
         ]
 
         for module in modules:
-            func_name = self._registry[module.name]
+            meta = self._registry[module.name]
+            func_name = meta["function_name"]
+            category = meta.get("category", "image_operation")
             step_name = module.name
+
+            # Map category to variable_components
+            var_comp = self.CATEGORY_TO_VARIABLE_COMPONENTS.get(
+                category, "VariableComponents.SITE"
+            )
 
             # Bind settings to kwargs
             kwargs = self.settings_binder.bind(module.settings)
@@ -191,7 +220,7 @@ from openhcs.processing.materialization import csv_materializer
             lines.append(f"        func={func_name},")
             lines.append(f'        name="{step_name}",')
             lines.append(f"        processing_config=LazyProcessingConfig(")
-            lines.append(f"            variable_components=[VariableComponents.SITE]")
+            lines.append(f"            variable_components=[{var_comp}]")
             lines.append(f"        ),")
 
             # Add bound settings as step kwargs if any
@@ -205,138 +234,10 @@ from openhcs.processing.materialization import csv_materializer
         lines.append("]")
         return "\n".join(lines)
 
-    def generate(
-        self,
-        pipeline_name: str,
-        source_cppipe: Path,
-        conversion_results: List[ConversionResult],
-        modules: List[ModuleBlock],
-    ) -> GeneratedPipeline:
-        """
-        Generate complete pipeline from LLM conversion results (fallback mode).
-
-        Args:
-            pipeline_name: Name for the generated pipeline
-            source_cppipe: Path to source .cppipe file
-            conversion_results: Results from LLM conversion
-            modules: Original ModuleBlock list (for ordering)
-
-        Returns:
-            GeneratedPipeline with complete code
-        """
-        # Collect successful conversions
-        converted = {r.module_name: r for r in conversion_results if r.success}
-        failed = [r.module_name for r in conversion_results if not r.success]
-
-        # Build code sections
-        imports = self.IMPORTS_BASE.format(source_file=source_cppipe.name)
-
-        # Function definitions
-        function_defs = []
-        for module in modules:
-            if module.name in converted:
-                function_defs.append(f"\n# === {module.name} ===\n")
-                function_defs.append(converted[module.name].converted_code)
-
-        # FunctionStep wrappers
-        steps = self._generate_steps(modules, converted)
-
-        # Combine all sections
-        code = imports + "\n".join(function_defs) + "\n\n" + steps
-
-        return GeneratedPipeline(
-            name=pipeline_name,
-            code=code,
-            source_cppipe=str(source_cppipe),
-            converted_modules=list(converted.keys()),
-            failed_modules=failed,
-        )
-    
-    def _generate_steps(
-        self,
-        modules: List[ModuleBlock],
-        converted: Dict[str, ConversionResult],
-    ) -> str:
-        """Generate pipeline_steps list."""
-        lines = [
-            "# Pipeline Steps",
-            "pipeline_steps = [",
-        ]
-        
-        for module in modules:
-            if module.name in converted:
-                # Derive function name from module name
-                func_name = self._module_to_function_name(module.name)
-                step_name = module.name
-                
-                lines.append(f"    FunctionStep(")
-                lines.append(f"        func={func_name},")
-                lines.append(f'        name="{step_name}",')
-                lines.append(f"        processing_config=LazyProcessingConfig(")
-                lines.append(f"            variable_components=[VariableComponents.SITE]")
-                lines.append(f"        )")
-                lines.append(f"    ),")
-        
-        lines.append("]")
-        return "\n".join(lines)
-    
     def _module_to_function_name(self, module_name: str) -> str:
         """Convert module name to function name (snake_case)."""
         # IdentifyPrimaryObjects -> identify_primary_objects
         import re
         name = re.sub(r'([A-Z])', r'_\1', module_name).lower().lstrip('_')
         return name
-    
-    def generate_stub_pipeline(
-        self,
-        pipeline_name: str,
-        source_cppipe: Path,
-        modules: List[ModuleBlock],
-    ) -> GeneratedPipeline:
-        """
-        Generate stub pipeline without LLM conversion.
-        
-        Creates placeholder functions that need manual implementation.
-        Useful for testing the generator without LLM.
-        """
-        imports = self.IMPORTS.format(source_file=source_cppipe.name)
-        
-        # Generate stub functions
-        stubs = []
-        for module in modules:
-            func_name = self._module_to_function_name(module.name)
-            stubs.append(f'''
-# === {module.name} (STUB - needs implementation) ===
-@numpy(contract=ProcessingContract.PURE_2D)
-def {func_name}(image: np.ndarray) -> np.ndarray:
-    """
-    Stub for {module.name}.
-    
-    Settings from .cppipe:
-{self._format_settings(module.settings)}
-    """
-    # TODO: Implement conversion from CellProfiler
-    return image
-''')
-        
-        # Generate steps
-        steps = self._generate_steps(
-            modules,
-            {m.name: ConversionResult(m.name, True) for m in modules}
-        )
-        
-        code = imports + "\n".join(stubs) + "\n\n" + steps
-        
-        return GeneratedPipeline(
-            name=pipeline_name,
-            code=code,
-            source_cppipe=str(source_cppipe),
-            converted_modules=[],
-            failed_modules=[m.name for m in modules],
-        )
-    
-    def _format_settings(self, settings: Dict[str, str], indent: int = 8) -> str:
-        """Format settings dict for docstring."""
-        prefix = " " * indent
-        return "\n".join(f"{prefix}{k}: {v}" for k, v in settings.items())
 

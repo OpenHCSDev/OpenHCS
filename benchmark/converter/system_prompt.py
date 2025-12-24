@@ -313,7 +313,50 @@ def identify_primary_objects(
 
 # CONVERSION TEMPLATE
 
-Given CellProfiler source code and .cppipe settings, output:
+Given CellProfiler source code and .cppipe settings, output **valid JSON** with this schema:
+
+```json
+{
+  "code": "<complete python code as a string>",
+  "contract": "PURE_2D | PURE_3D | FLEXIBLE | VOLUMETRIC_TO_SLICE",
+  "category": "image_operation | z_projection | channel_operation",
+  "confidence": 0.95,
+  "reasoning": "Brief explanation of why this contract and category"
+}
+```
+
+## Contract Inference Rules
+
+Analyze the algorithm semantics to determine the correct ProcessingContract:
+
+- **PURE_2D**: Algorithm works on single 2D slices independently. Most image filters,
+  thresholding, 2D segmentation, morphology operations. The compiler iterates over dim 0.
+
+- **PURE_3D**: Algorithm requires full 3D volume context. 3D segmentation, 3D connected
+  components, algorithms that need Z-neighbors.
+
+- **FLEXIBLE**: Algorithm handles multiple images stacked in dim 0 and processes them
+  together. Multi-input operations (combine objects, colocalization), channel operations.
+
+- **VOLUMETRIC_TO_SLICE**: Algorithm reduces (D, H, W) → (H, W). Z-projections (max, mean),
+  any operation that collapses the depth dimension.
+
+## Category Inference Rules
+
+Determine what dimension this operation semantically operates on:
+
+- **image_operation**: Per-image processing. Default for most operations.
+  Maps to `variable_components=[SITE]` in pipeline.
+
+- **z_projection**: Operates across Z-slices to produce a single output.
+  Maps to `variable_components=[Z_INDEX]` in pipeline.
+
+- **channel_operation**: Operates across channels (split, combine, colocalization).
+  Maps to `variable_components=[CHANNEL]` in pipeline.
+
+## Code Format
+
+The "code" field must contain complete Python:
 
 ```python
 """
@@ -330,13 +373,13 @@ from openhcs.processing.backends.lib_registry.unified_registry import Processing
 
 # Add dataclass for measurements if needed
 
-@numpy(contract=ProcessingContract.PURE_2D)  # Use PURE_2D for 2D-only functions
+@numpy(contract=ProcessingContract.<INFERRED_CONTRACT>)
 def <function_name>(
     image: np.ndarray,
     <parameters with baked defaults>
 ) -> <return_type>:
     """<docstring>"""
-    # Implementation (can copy from CellProfiler, fixing imports)
+    # Implementation
     ...
     return <image_first>, <optional_measurements>
 ```
@@ -437,17 +480,17 @@ def build_conversion_prompt(
 ) -> str:
     """
     Build complete prompt for LLM conversion.
-    
+
     Args:
         module_name: CellProfiler module name
         source_code: CellProfiler source code to convert
         settings: Settings dict from .cppipe file
-        
+
     Returns:
         Complete prompt string for LLM
     """
     settings_str = "\n".join(f"  {k}: {v}" for k, v in settings.items())
-    
+
     return f'''{SYSTEM_PROMPT}
 
 {EXAMPLE_THRESHOLD_CONVERSION}
@@ -467,7 +510,13 @@ Convert the following CellProfiler module to OpenHCS format.
 ```
 
 ## Output:
-Generate the complete OpenHCS-compatible function. Follow all rules above.
-Output ONLY Python code, no explanations.
+Respond with ONLY valid JSON matching this schema (no markdown, no explanation):
+{{
+  "code": "<complete python code>",
+  "contract": "PURE_2D | PURE_3D | FLEXIBLE | VOLUMETRIC_TO_SLICE",
+  "category": "image_operation | z_projection | channel_operation",
+  "confidence": <0.0-1.0>,
+  "reasoning": "<why this contract and category>"
+}}
 '''
 
