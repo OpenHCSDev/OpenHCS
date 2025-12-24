@@ -682,9 +682,9 @@
   "UnmixColors": {
     "function_name": "unmix_colors",
     "contract": "pure_2d",
-    "category": "channel_operation",
+    "category": "image_operation",
     "confidence": 1.0,
-    "reasoning": "The unmix_colors function performs color deconvolution, which requires an RGB input (multiple channels) to separate specific stains. It needs to receive the channels simultaneously (C, H, W) to calculate the absorbance values across the color spectrum.",
+    "reasoning": "PURE_2D contract means function receives (H, W) and processes each site independently. Cannot be channel_operation because PURE_2D unstacks dimension 0.",
     "validated": true
   },
   "UntangleWorms": {
