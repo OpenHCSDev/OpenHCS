@@ -1,0 +1,415 @@
+"""
+Library Absorber - One-time absorption of CellProfiler's algorithm library.
+
+Converts the entire CellProfiler library to OpenHCS format once, with:
+1. LLM conversion of each function
+2. Runtime contract inference
+3. Syntax validation
+4. Storage in benchmark/cellprofiler_library/
+
+After absorption, .cppipe conversion is instant (no LLM needed).
+"""
+
+import ast
+import json
+import logging
+import re
+from dataclasses import dataclass, field, asdict
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+
+from .source_locator import SourceLocator, SourceLocation
+from .llm_converter import LLMFunctionConverter, ConversionResult
+from .contract_inference import ContractInference, InferredContract, ContractInferenceResult
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class AbsorbedFunction:
+    """A successfully absorbed CellProfiler function."""
+    
+    # Identity
+    cp_module_name: str  # Original CellProfiler module name
+    openhcs_function_name: str  # snake_case function name
+    
+    # Contract
+    inferred_contract: str  # ProcessingContract value
+    contract_confidence: float
+    contract_notes: str = ""
+    
+    # Source paths
+    source_file: str = ""  # Where the converted function is stored
+    original_cp_file: str = ""  # Original CellProfiler source
+    
+    # Status
+    validated: bool = False
+    validation_errors: List[str] = field(default_factory=list)
+
+
+@dataclass
+class AbsorptionResult:
+    """Result of absorbing the CellProfiler library."""
+    
+    absorbed: List[AbsorbedFunction] = field(default_factory=list)
+    failed: List[Tuple[str, str]] = field(default_factory=list)  # (name, error)
+    
+    @property
+    def success_count(self) -> int:
+        return len(self.absorbed)
+    
+    @property
+    def failure_count(self) -> int:
+        return len(self.failed)
+    
+    def to_registry(self) -> Dict[str, str]:
+        """Generate module name → function name mapping."""
+        return {
+            f.cp_module_name: f.openhcs_function_name
+            for f in self.absorbed
+            if f.validated
+        }
+
+
+class LibraryAbsorber:
+    """
+    One-time absorption of CellProfiler library into OpenHCS.
+    
+    Workflow:
+    1. Scan benchmark/cellprofiler_source/library/modules/
+    2. For each _*.py file:
+       a. LLM convert to OpenHCS format
+       b. Validate syntax
+       c. (Optional) Run contract inference
+       d. Write to benchmark/cellprofiler_library/functions/
+    3. Generate registry mapping
+    4. Write contracts.json with inferred contracts
+    """
+    
+    def __init__(
+        self,
+        source_root: Optional[Path] = None,
+        output_root: Optional[Path] = None,
+        llm_converter: Optional[LLMFunctionConverter] = None,
+    ):
+        """
+        Initialize absorber.
+        
+        Args:
+            source_root: Root of CellProfiler source
+            output_root: Where to write absorbed functions
+            llm_converter: LLM converter instance
+        """
+        self.source_root = source_root or Path(__file__).parent.parent / "cellprofiler_source"
+        self.output_root = output_root or Path(__file__).parent.parent / "cellprofiler_library"
+        self.llm_converter = llm_converter
+        
+        self.source_locator = SourceLocator(self.source_root)
+        self.contract_inference = ContractInference()
+    
+    def absorb_all(
+        self,
+        skip_existing: bool = True,
+        run_contract_inference: bool = False,  # Expensive - requires working functions
+    ) -> AbsorptionResult:
+        """
+        Absorb entire CellProfiler library.
+        
+        Args:
+            skip_existing: Skip modules already converted
+            run_contract_inference: Run runtime contract inference (slow)
+            
+        Returns:
+            AbsorptionResult with all absorption details
+        """
+        result = AbsorptionResult()
+        
+        # Ensure output directories exist
+        functions_dir = self.output_root / "functions"
+        functions_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Find all library modules
+        library_modules_dir = self.source_root / "library" / "modules"
+        if not library_modules_dir.exists():
+            logger.error(f"Library modules directory not found: {library_modules_dir}")
+            return result
+        
+        module_files = sorted(library_modules_dir.glob("_*.py"))
+        logger.info(f"Found {len(module_files)} library modules to absorb")
+        
+        for module_file in module_files:
+            if module_file.name == "__init__.py":
+                continue
+            
+            module_name = self._file_to_module_name(module_file.name)
+            func_name = self._module_to_function_name(module_name)
+            output_file = functions_dir / f"{func_name}.py"
+            
+            # Skip if exists
+            if skip_existing and output_file.exists():
+                logger.info(f"Skipping {module_name} (already exists)")
+                result.absorbed.append(AbsorbedFunction(
+                    cp_module_name=module_name,
+                    openhcs_function_name=func_name,
+                    inferred_contract="unknown",
+                    contract_confidence=0.0,
+                    source_file=str(output_file),
+                    original_cp_file=str(module_file),
+                    validated=True,
+                ))
+                continue
+            
+            # Absorb this module
+            try:
+                absorbed = self._absorb_module(
+                    module_file=module_file,
+                    module_name=module_name,
+                    func_name=func_name,
+                    output_file=output_file,
+                    run_contract_inference=run_contract_inference,
+                )
+                result.absorbed.append(absorbed)
+                
+            except Exception as e:
+                logger.error(f"Failed to absorb {module_name}: {e}")
+                result.failed.append((module_name, str(e)))
+        
+        # Write registry
+        self._write_registry(result)
+        
+        return result
+    
+    def _absorb_module(
+        self,
+        module_file: Path,
+        module_name: str,
+        func_name: str,
+        output_file: Path,
+        run_contract_inference: bool,
+    ) -> AbsorbedFunction:
+        """Absorb a single module."""
+        logger.info(f"Absorbing {module_name}...")
+        
+        # Read source
+        source_code = module_file.read_text()
+        
+        # Check LLM converter
+        if self.llm_converter is None:
+            raise RuntimeError("LLM converter not initialized")
+        
+        # Create minimal module block for converter
+        from .parser import ModuleBlock
+        module_block = ModuleBlock(
+            name=module_name,
+            module_num=0,
+            settings={},
+        )
+        
+        source_location = SourceLocation(
+            module_name=module_name,
+            library_module_path=module_file,
+            source_code=source_code,
+        )
+        
+        # LLM convert
+        conversion = self.llm_converter.convert(module_block, source_location)
+        
+        if not conversion.success:
+            raise RuntimeError(f"LLM conversion failed: {conversion.error_message}")
+        
+        # Validate syntax and contract compliance
+        validation_errors = self._validate_syntax(conversion.converted_code)
+        if validation_errors:
+            for err in validation_errors:
+                logger.error(f"  Validation: {err}")
+            raise RuntimeError(f"Validation failed: {validation_errors}")
+
+        # Write output (only if valid)
+        output_file.write_text(conversion.converted_code)
+        logger.info(f"Wrote {output_file}")
+
+        # Default contract
+        inferred_contract = "pure_2d"
+        contract_confidence = 0.5
+        contract_notes = "default (not tested)"
+
+        # Runtime contract inference if enabled
+        if run_contract_inference and len(validation_errors) == 0:
+            contract_result = self._infer_contract_runtime(output_file, func_name)
+            if contract_result:
+                inferred_contract = contract_result.contract.value
+                contract_confidence = contract_result.confidence
+                contract_notes = contract_result.notes
+                logger.info(f"  Contract: {inferred_contract} (confidence: {contract_confidence:.2f})")
+
+        # Create result
+        absorbed = AbsorbedFunction(
+            cp_module_name=module_name,
+            openhcs_function_name=func_name,
+            inferred_contract=inferred_contract,
+            contract_confidence=contract_confidence,
+            contract_notes=contract_notes,
+            source_file=str(output_file),
+            original_cp_file=str(module_file),
+            validated=len(validation_errors) == 0,
+            validation_errors=validation_errors,
+        )
+
+        return absorbed
+
+    def _infer_contract_runtime(self, module_file: Path, func_name: str) -> Optional[ContractInferenceResult]:
+        """
+        Import the converted function and run contract inference with test images.
+        """
+        import importlib.util
+
+        try:
+            # Load module dynamically
+            spec = importlib.util.spec_from_file_location(func_name, module_file)
+            if spec is None or spec.loader is None:
+                logger.warning(f"Could not load {module_file} for contract inference")
+                return None
+
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+
+            # Get the function
+            func = getattr(module, func_name, None)
+            if func is None:
+                logger.warning(f"Function {func_name} not found in {module_file}")
+                return None
+
+            # Run contract inference
+            result = self.contract_inference.infer(func)
+            return result
+
+        except Exception as e:
+            logger.warning(f"Contract inference failed for {func_name}: {e}")
+            return None
+    
+    def _validate_syntax(self, code: str) -> List[str]:
+        """Validate Python syntax and OpenHCS contract compliance."""
+        errors = []
+        try:
+            tree = ast.parse(code)
+        except SyntaxError as e:
+            errors.append(f"Syntax error at line {e.lineno}: {e.msg}")
+            return errors
+
+        # Check function signatures - only for @numpy decorated functions (main entry points)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef):
+                # Only validate functions with @numpy decorator (the main entry point)
+                has_numpy_decorator = any(
+                    (isinstance(d, ast.Call) and isinstance(d.func, ast.Name) and d.func.id == 'numpy')
+                    or (isinstance(d, ast.Name) and d.id == 'numpy')
+                    for d in node.decorator_list
+                )
+                if not has_numpy_decorator:
+                    continue  # Skip helper functions
+                if not node.args.args:
+                    errors.append(f"{node.name}: no parameters (must have 'image' as first)")
+                elif node.args.args[0].arg != 'image':
+                    errors.append(f"{node.name}: first param is '{node.args.args[0].arg}', must be 'image'")
+
+        # Check for hallucinated imports
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                # level > 0 means relative import (level=1 is '.', level=2 is '..')
+                if node.level > 0:
+                    dots = '.' * node.level
+                    errors.append(f"Hallucinated relative import: from {dots}{node.module or ''}")
+                if node.module and 'functions.' in node.module:
+                    errors.append(f"Hallucinated import: from {node.module}")
+
+        return errors
+    
+    def _write_registry(self, result: AbsorptionResult) -> None:
+        """Write registry files."""
+        # Write contracts.json
+        contracts_file = self.output_root / "contracts.json"
+        contracts_data = {
+            f.cp_module_name: {
+                "function_name": f.openhcs_function_name,
+                "contract": f.inferred_contract,
+                "confidence": f.contract_confidence,
+                "validated": f.validated,
+            }
+            for f in result.absorbed
+        }
+        contracts_file.write_text(json.dumps(contracts_data, indent=2))
+        logger.info(f"Wrote {contracts_file}")
+
+        # Write __init__.py with registry
+        init_file = self.output_root / "__init__.py"
+        init_content = self._generate_init(result)
+        init_file.write_text(init_content)
+        logger.info(f"Wrote {init_file}")
+
+    def _generate_init(self, result: AbsorptionResult) -> str:
+        """Generate __init__.py with registry mapping."""
+        lines = [
+            '"""',
+            'CellProfiler Library - Absorbed into OpenHCS',
+            '',
+            'Auto-generated by LibraryAbsorber.',
+            'Maps CellProfiler module names to OpenHCS functions.',
+            '"""',
+            '',
+            'from typing import Dict, Callable',
+            '',
+            '# Function imports',
+        ]
+
+        # Add imports for validated functions
+        for f in result.absorbed:
+            if f.validated:
+                lines.append(f'from .functions.{f.openhcs_function_name} import {f.openhcs_function_name}')
+
+        lines.extend([
+            '',
+            '',
+            '# Registry mapping CellProfiler module names to OpenHCS functions',
+            'CELLPROFILER_MODULES: Dict[str, Callable] = {',
+        ])
+
+        for f in result.absorbed:
+            if f.validated:
+                lines.append(f'    "{f.cp_module_name}": {f.openhcs_function_name},')
+
+        lines.extend([
+            '}',
+            '',
+            '',
+            'def get_function(module_name: str) -> Callable:',
+            '    """Get OpenHCS function for CellProfiler module name."""',
+            '    if module_name not in CELLPROFILER_MODULES:',
+            '        raise KeyError(f"Unknown CellProfiler module: {module_name}")',
+            '    return CELLPROFILER_MODULES[module_name]',
+            '',
+            '',
+            '__all__ = [',
+            '    "CELLPROFILER_MODULES",',
+            '    "get_function",',
+        ])
+
+        for f in result.absorbed:
+            if f.validated:
+                lines.append(f'    "{f.openhcs_function_name}",')
+
+        lines.append(']')
+
+        return '\n'.join(lines)
+
+    def _file_to_module_name(self, filename: str) -> str:
+        """Convert _threshold.py to Threshold."""
+        # Remove .py and leading underscore
+        name = filename.replace('.py', '').lstrip('_')
+        # Convert to TitleCase
+        return name.title().replace('_', '')
+
+    def _module_to_function_name(self, module_name: str) -> str:
+        """Convert ModuleName to module_name (snake_case)."""
+        # Insert underscore before capitals and lowercase
+        return re.sub(r'([A-Z])', r'_\1', module_name).lower().lstrip('_')
+
