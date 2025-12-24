@@ -66,7 +66,7 @@ class FlashConfig:
     target_fps: Optional[int] = None  # None = auto-detect screen refresh rate
 
     # Advanced: Cap refresh rate even if screen supports higher
-    max_fps: Optional[int] = 60# None = no cap, or set to limit (e.g., 60 for power saving)
+    max_fps: Optional[int] = None# None = no cap, or set to limit (e.g., 60 for power saving)
 
     def __post_init__(self):
         """Calculate frame_ms from target_fps or auto-detect screen refresh rate."""
