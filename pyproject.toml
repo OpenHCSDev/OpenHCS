@@ -59,6 +59,7 @@ dependencies = [
     "watchdog>=6.0.0",
     "portalocker>=2.8.2",  # Cross-platform file locking (Windows compatibility for fcntl)
     "requests>=2.31.0",  # HTTP library for LLM service communication
+    "tqdm>=4.66.5",
 
     # System monitoring (required by ui/shared/system_monitor_core.py)
     "psutil>=5.9.0",

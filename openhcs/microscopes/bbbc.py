@@ -19,6 +19,8 @@ from openhcs.io.exceptions import MetadataNotFoundError
 from openhcs.io.filemanager import FileManager
 from openhcs.microscopes.microscope_base import MicroscopeHandler
 from openhcs.microscopes.microscope_interfaces import FilenameParser, MetadataHandler
+from openhcs.microscopes.tiff_metadata_mixin import TiffPixelSizeMixin
+from openhcs.microscopes.detect_mixins import MetadataDetectMixin
 
 logger = logging.getLogger(__name__)
 
@@ -49,13 +51,14 @@ class BBBC021FilenameParser(FilenameParser):
     # Original: G10_s1_w1{UUID}.tif
     # Virtual:  G10_s1_w1_z001_t001.tif
     _pattern = re.compile(
-        r'^([A-Z]\d+)'           # Well: letter + digits (required)
-        r'_s(\d+)'                # Site: _s + digits (required)
-        r'_w(\d)'                 # Channel: _w + single digit (required)
-        r'(?:_z(\d+))?'          # Z-index: _z + digits (OPTIONAL)
-        r'(?:_t(\d+))?'          # Timepoint: _t + digits (OPTIONAL)
-        r'([A-F0-9-]*)'          # UUID: hex + dashes (OPTIONAL)
-        r'(\.\w+)$',              # Extension (required)
+        r'^.*?'                  # Optional prefix (non-greedy)
+        r'([A-P][0-9]{2})'       # Well: letter A-P + two digits
+        r'_s(\d+)'               # Site: _s + digits
+        r'_w(\d)'                # Channel: _w + single digit
+        r'(?:_z(\d+))?'          # Optional z
+        r'(?:_t(\d+))?'          # Optional timepoint
+        r'([A-F0-9-]*)'          # Optional UUID
+        r'(\.\w+)$',             # Extension
         re.IGNORECASE
     )
 
@@ -194,80 +197,39 @@ class BBBC021FilenameParser(FilenameParser):
         return "".join(parts) + extension
 
 
-class BBBC021MetadataHandler(MetadataHandler):
+class BBBC021MetadataHandler(TiffPixelSizeMixin, MetadataHandler):
     """
     Metadata handler for BBBC021 dataset.
 
-    BBBC021 metadata comes from CSV files:
-    - BBBC021_v1_image.csv: Image metadata (plate, well, compound, concentration, replicate)
-    - BBBC021_v1_compound.csv: Compound structures (SMILES)
-    - BBBC021_v1_moa.csv: Mechanism of action labels
+    BBBC021 public mirror ships only TIFFs; we extract metadata from TIFF tags.
     """
 
     def __init__(self, filemanager: FileManager):
         super().__init__()
         self.filemanager = filemanager
 
-    def find_metadata_file(self, plate_path: Union[str, Path]) -> Path:
+    def find_metadata_file(self, plate_path: Union[str, Path]) -> Optional[Path]:
         """
-        Find BBBC021 metadata CSV file.
-
-        Args:
-            plate_path: Path to plate directory
-
-        Returns:
-            Path to BBBC021_v1_image.csv
-
-        Raises:
-            MetadataNotFoundError: If CSV not found
+        BBBC021 ship we have contains no separate metadata files; rely solely on TIFFs.
+        Ensure caller pointed at the expected plate directory.
         """
         plate_path = Path(plate_path)
-
-        # BBBC021 metadata is typically in plate root or parent directory
-        candidates = [
-            plate_path / "BBBC021_v1_image.csv",
-            plate_path.parent / "BBBC021_v1_image.csv",
-            plate_path / "metadata" / "BBBC021_v1_image.csv",
-        ]
-
-        for candidate in candidates:
-            if candidate.exists():
-                return candidate
-
-        raise MetadataNotFoundError(
-            f"BBBC021_v1_image.csv not found in {plate_path} or parent directories. "
-            "Download from https://data.broadinstitute.org/bbbc/BBBC021/"
-        )
+        if plate_path.name != "Week1_22123":
+            raise MetadataNotFoundError(
+                f"BBBC021 plate must be the Week1_22123 directory, got '{plate_path.name}'"
+            )
+        return None
 
     def get_grid_dimensions(self, plate_path: Union[str, Path]) -> Tuple[int, int]:
-        """
-        Get grid dimensions for BBBC021.
-
-        BBBC021 uses variable site layouts - no fixed grid.
-        Return (1, 1) and let pattern discovery determine actual sites.
-        """
+        """No stitching grid needed."""
         return (1, 1)
 
     def get_pixel_size(self, plate_path: Union[str, Path]) -> float:
-        """
-        Get pixel size for BBBC021.
-
-        BBBC021 is 20x magnification ImageXpress, typical pixel size ~0.65 μm.
-        """
-        return 0.65  # μm/pixel (typical for 20x ImageXpress)
+        return self._pixel_size_from_tiff(plate_path, self.filemanager)
 
     def get_channel_values(self, plate_path: Union[str, Path]) -> Optional[Dict[str, Optional[str]]]:
-        """
-        Get channel names for BBBC021.
-
-        Returns:
-            Dict mapping channel numbers to names
-        """
-        return {
-            "1": "DAPI",
-            "2": "Tubulin",
-            "4": "Actin",  # Note: Channel 3 is not used
-        }
+        # Derive channel names from TIFF tag (if present). May return {'1': 'DAPI'} etc.
+        return self._channel_from_tiff(plate_path, self.filemanager)
 
     def get_well_values(self, plate_path: Union[str, Path]) -> Optional[Dict[str, Optional[str]]]:
         """Get well metadata - would require parsing CSV."""
@@ -281,6 +243,10 @@ class BBBC021MetadataHandler(MetadataHandler):
         """Get z-index metadata - BBBC021 has no Z-stacks."""
         return None
 
+    def get_timepoint_values(self, plate_path: Union[str, Path]) -> Optional[Dict[str, Optional[str]]]:
+        """Single timepoint dataset."""
+        return None
+
 
 class BBBC021Handler(MicroscopeHandler):
     """
@@ -292,7 +258,25 @@ class BBBC021Handler(MicroscopeHandler):
     """
 
     _microscope_type = 'bbbc021'
-    _metadata_handler_class = None  # Set after class definition
+    _metadata_handler_class = BBBC021MetadataHandler
+
+    @classmethod
+    def detect(cls, plate_folder: Path, filemanager: FileManager) -> bool:
+        """
+        Detect via metadata CSV first, else via filename parser match.
+        """
+        plate_folder = Path(plate_folder)
+        # Filename signal only (no external metadata shipped)
+        try:
+            files = filemanager.list_files(plate_folder, Backend.DISK.value, recursive=True)
+            parser = BBBC021FilenameParser()
+            for f in files:
+                name = Path(f).name
+                if name.lower().endswith((".tif", ".tiff")) and parser.can_parse(name):
+                    return True
+        except Exception:
+            return False
+        return False
 
     def __init__(self, filemanager: FileManager, pattern_format: Optional[str] = None):
         self.parser = BBBC021FilenameParser(filemanager, pattern_format)
@@ -548,7 +532,7 @@ class BBBC038MetadataHandler(MetadataHandler):
         return None
 
 
-class BBBC038Handler(MicroscopeHandler):
+class BBBC038Handler(MetadataDetectMixin, MicroscopeHandler):
     """
     Microscope handler for BBBC038 dataset (Kaggle nuclei, PNG format).
 
@@ -557,7 +541,21 @@ class BBBC038Handler(MicroscopeHandler):
     """
 
     _microscope_type = 'bbbc038'
-    _metadata_handler_class = None
+    _metadata_handler_class = BBBC038MetadataHandler
+
+    @classmethod
+    def detect(cls, plate_folder: Path, filemanager: FileManager) -> bool:
+        """
+        Detect BBBC038 by presence of stage1_train folder with PNGs.
+        """
+        stage1 = Path(plate_folder) / "stage1_train"
+        if not stage1.exists():
+            return False
+        try:
+            files = filemanager.list_files(stage1, Backend.DISK.value, pattern="*.png", recursive=True)
+            return len(files) > 0
+        except Exception:
+            return False
 
     def __init__(self, filemanager: FileManager, pattern_format: Optional[str] = None):
         self.parser = BBBC038FilenameParser(filemanager, pattern_format)
@@ -652,8 +650,3 @@ class BBBC038Handler(MicroscopeHandler):
         self._save_virtual_workspace_metadata(plate_path, workspace_mapping)
 
         return stage1_path
-
-
-# Register metadata handler classes for auto-discovery
-BBBC021Handler._metadata_handler_class = BBBC021MetadataHandler
-BBBC038Handler._metadata_handler_class = BBBC038MetadataHandler

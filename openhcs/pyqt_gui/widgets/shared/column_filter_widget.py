@@ -239,34 +239,40 @@ class ColumnFilterWidget(QFrame):
         Select all checkboxes.
 
         Args:
-            block_signals: If True, block signals while updating checkboxes
+            block_signals: If True, block final filter_changed signal emission
+                         (checkboxes are always blocked during batch update)
         """
+        # Always block signals during batch update to prevent N emissions
         for checkbox in self.checkboxes.values():
-            if block_signals:
-                checkbox.blockSignals(True)
+            checkbox.blockSignals(True)
             checkbox.setChecked(True)
-            if block_signals:
-                checkbox.blockSignals(False)
+            checkbox.blockSignals(False)
 
-        if block_signals:
-            self._update_count_label()
+        self._update_count_label()
+
+        # Emit single signal at end unless explicitly blocked
+        if not block_signals:
+            self.filter_changed.emit()
 
     def select_none(self, block_signals: bool = False):
         """
         Deselect all checkboxes.
 
         Args:
-            block_signals: If True, block signals while updating checkboxes
+            block_signals: If True, block final filter_changed signal emission
+                         (checkboxes are always blocked during batch update)
         """
+        # Always block signals during batch update to prevent N emissions
         for checkbox in self.checkboxes.values():
-            if block_signals:
-                checkbox.blockSignals(True)
+            checkbox.blockSignals(True)
             checkbox.setChecked(False)
-            if block_signals:
-                checkbox.blockSignals(False)
+            checkbox.blockSignals(False)
 
-        if block_signals:
-            self._update_count_label()
+        self._update_count_label()
+
+        # Emit single signal at end unless explicitly blocked
+        if not block_signals:
+            self.filter_changed.emit()
     
     def get_selected_values(self) -> Set[str]:
         """Get set of selected values."""

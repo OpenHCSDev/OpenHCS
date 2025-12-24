@@ -627,10 +627,12 @@ class OpenHCSMetadataGenerator:
 
 
 from openhcs.microscopes.microscope_base import MicroscopeHandler
+from openhcs.microscopes.detect_mixins import MetadataDetectMixin
+from openhcs.io.exceptions import MetadataNotFoundError
 from openhcs.microscopes.microscope_interfaces import FilenameParser
 
 
-class OpenHCSMicroscopeHandler(MicroscopeHandler):
+class OpenHCSMicroscopeHandler(MetadataDetectMixin, MicroscopeHandler):
     """
     MicroscopeHandler for OpenHCS pre-processed format.
 
@@ -641,7 +643,7 @@ class OpenHCSMicroscopeHandler(MicroscopeHandler):
 
     # Class attributes for automatic registration
     _microscope_type = FIELDS.MICROSCOPE_TYPE  # Override automatic naming
-    _metadata_handler_class = None  # Set after class definition
+    _metadata_handler_class = None  # Set explicitly after class definition
 
     def __init__(self, filemanager: FileManager, pattern_format: Optional[str] = None):
         """

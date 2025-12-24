@@ -215,8 +215,8 @@ class LazyDiscoveryDict(dict):
             # (module imports during discovery might access registry)
             self._discovered = True
 
-            # Try to load from cache first
-            if self._cache_manager:
+            # Try to load from cache first (ONLY if no secondary registries)
+            if self._cache_manager and not self._config.secondary_registries:
                 try:
                     cached_plugins = self._cache_manager.load_cache()
                     if cached_plugins is not None:
@@ -251,8 +251,16 @@ class LazyDiscoveryDict(dict):
 
                 logger.debug(f"Discovered {len(self)} {self._config.registry_name}s")
 
+                # Populate secondary registries based on discovered classes
+                if self._config.secondary_registries:
+                    meta = self._base_class.__class__
+                    register_secondary = getattr(meta, "_register_secondary", None)
+                    if register_secondary:
+                        for key, cls in self.items():
+                            register_secondary(cls, key, self._config.secondary_registries)
+
                 # Save to cache if enabled
-                if self._cache_manager:
+                if self._cache_manager and not self._config.secondary_registries:
                     try:
                         cache_utils = _get_cache_manager()
                         file_mtimes = cache_utils['get_package_file_mtimes'](
@@ -709,4 +717,3 @@ def make_suffix_extractor(suffix: str) -> KeyExtractor:
 # Pre-built extractors for common patterns
 extract_key_from_handler_suffix = make_suffix_extractor('Handler')
 extract_key_from_backend_suffix = make_suffix_extractor('Backend')
-
