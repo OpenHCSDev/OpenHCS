@@ -12,7 +12,6 @@ from typing import Tuple, Optional
 from dataclasses import dataclass
 from enum import Enum
 from openhcs.core.memory.decorators import numpy
-from openhcs.processing.backends.lib_registry.unified_registry import ProcessingContract
 from openhcs.core.pipeline.function_contracts import special_outputs
 from openhcs.processing.materialization import csv_materializer
 
@@ -39,7 +38,7 @@ class ImageOverlapMeasurement:
     earth_movers_distance: float
 
 
-@numpy(contract=ProcessingContract.FLEXIBLE)
+@numpy
 @special_outputs(("overlap_measurements", csv_materializer(
     fields=["slice_index", "true_positive_rate", "false_positive_rate", 
             "false_negative_rate", "true_negative_rate", "precision", 

@@ -10,10 +10,9 @@ the Pearson correlation between the image region and the template.
 import numpy as np
 from typing import Optional
 from openhcs.core.memory.decorators import numpy
-from openhcs.processing.backends.lib_registry.unified_registry import ProcessingContract
 
 
-@numpy(contract=ProcessingContract.FLEXIBLE)
+@numpy
 def match_template(
     image: np.ndarray,
     template: Optional[np.ndarray] = None,

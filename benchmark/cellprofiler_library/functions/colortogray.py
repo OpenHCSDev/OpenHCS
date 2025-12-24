@@ -7,7 +7,6 @@ import numpy as np
 from typing import Tuple
 from enum import Enum
 from openhcs.core.memory.decorators import numpy
-from openhcs.processing.backends.lib_registry.unified_registry import ProcessingContract
 
 
 class ImageChannelType(Enum):
@@ -21,7 +20,7 @@ class ColorToGrayMode(Enum):
     SPLIT = "split"
 
 
-@numpy(contract=ProcessingContract.FLEXIBLE)
+@numpy
 def color_to_gray(
     image: np.ndarray,
     mode: ColorToGrayMode = ColorToGrayMode.SPLIT,

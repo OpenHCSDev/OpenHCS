@@ -12,7 +12,6 @@ from typing import Tuple, List, Optional
 from dataclasses import dataclass
 from enum import Enum
 from openhcs.core.memory.decorators import numpy
-from openhcs.processing.backends.lib_registry.unified_registry import ProcessingContract
 
 
 class StainType(Enum):

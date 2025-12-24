@@ -13,7 +13,6 @@ from dataclasses import dataclass
 from enum import Enum
 import scipy.optimize
 from openhcs.core.memory.decorators import numpy
-from openhcs.processing.backends.lib_registry.unified_registry import ProcessingContract
 from openhcs.core.pipeline.function_contracts import special_outputs
 from openhcs.processing.materialization import csv_materializer
 
@@ -233,7 +232,7 @@ def _calculate_ec50(conc: np.ndarray, responses: np.ndarray, log_transform: bool
     return results
 
 
-@numpy(contract=ProcessingContract.FLEXIBLE)
+@numpy
 @special_outputs(("statistics_results", csv_materializer(
     fields=["feature_name", "object_name", "z_factor", "z_factor_one_tailed", "v_factor", "ec50"],
     analysis_type="statistics"

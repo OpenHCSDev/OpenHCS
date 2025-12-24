@@ -12,7 +12,6 @@ from typing import Tuple
 from dataclasses import dataclass
 from enum import Enum
 from openhcs.core.memory.decorators import numpy
-from openhcs.processing.backends.lib_registry.unified_registry import ProcessingContract
 from openhcs.core.pipeline.function_contracts import special_outputs
 from openhcs.processing.materialization import csv_materializer
 
@@ -55,7 +54,7 @@ class DensityPlotData:
     colorbar_scale: str
 
 
-@numpy(contract=ProcessingContract.FLEXIBLE)
+@numpy
 @special_outputs(("density_plot_data", csv_materializer(
     fields=["slice_index", "x_min", "x_max", "y_min", "y_max", "gridsize", 
             "num_points", "x_scale", "y_scale", "colorbar_scale"],

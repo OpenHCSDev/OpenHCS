@@ -11,7 +11,6 @@ from typing import Tuple, Optional
 from dataclasses import dataclass
 from enum import Enum
 from openhcs.core.memory.decorators import numpy
-from openhcs.processing.backends.lib_registry.unified_registry import ProcessingContract
 from openhcs.core.pipeline.function_contracts import special_inputs, special_outputs
 from openhcs.processing.materialization import csv_materializer
 from openhcs.processing.backends.analysis.cell_counting_cpu import materialize_segmentation_masks
@@ -146,7 +145,7 @@ def _propagate_labels(
     return result
 
 
-@numpy(contract=ProcessingContract.FLEXIBLE)
+@numpy
 @special_inputs("primary_labels")
 @special_outputs(
     ("secondary_stats", csv_materializer(

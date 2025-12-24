@@ -5,7 +5,6 @@ from typing import Tuple, List, Optional
 from dataclasses import dataclass, field
 from enum import Enum
 from openhcs.core.memory.decorators import numpy
-from openhcs.processing.backends.lib_registry.unified_registry import ProcessingContract
 from openhcs.core.pipeline.function_contracts import special_inputs, special_outputs
 from openhcs.processing.materialization import csv_materializer
 
@@ -43,7 +42,7 @@ class ZernikeMeasurement:
     phase: Optional[float] = None
 
 
-@numpy(contract=ProcessingContract.FLEXIBLE)
+@numpy
 @special_inputs("labels")
 @special_outputs(
     ("radial_measurements", csv_materializer(

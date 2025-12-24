@@ -10,7 +10,6 @@ import numpy as np
 from typing import Tuple
 from dataclasses import dataclass
 from openhcs.core.memory.decorators import numpy
-from openhcs.processing.backends.lib_registry.unified_registry import ProcessingContract
 from openhcs.core.pipeline.function_contracts import special_inputs, special_outputs
 from openhcs.processing.materialization import csv_materializer
 
@@ -95,7 +94,7 @@ def _skeleton_length_per_label(labeled_skeleton: np.ndarray, label_range: np.nda
     return np.atleast_1d(lengths).astype(float)
 
 
-@numpy(contract=ProcessingContract.FLEXIBLE)
+@numpy
 @special_inputs("seed_labels")
 @special_outputs(("skeleton_measurements", csv_materializer(
     fields=["slice_index", "object_label", "number_trunks", 

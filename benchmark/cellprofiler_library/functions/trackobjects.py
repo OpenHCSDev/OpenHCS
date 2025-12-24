@@ -12,7 +12,6 @@ from typing import Tuple, Optional, Dict, Any, List
 from dataclasses import dataclass, field
 from enum import Enum
 from openhcs.core.memory.decorators import numpy
-from openhcs.processing.backends.lib_registry.unified_registry import ProcessingContract
 from openhcs.core.pipeline.function_contracts import special_inputs, special_outputs
 from openhcs.processing.materialization import csv_materializer
 
@@ -183,7 +182,7 @@ def _track_by_distance(
     return new_labels, parent_object_numbers, parent_image_numbers, max_object_number
 
 
-@numpy(contract=ProcessingContract.FLEXIBLE)
+@numpy
 @special_inputs("labels")
 @special_outputs(
     ("tracking_results", csv_materializer(

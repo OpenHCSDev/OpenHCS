@@ -142,18 +142,23 @@ pipeline_steps = [
     ),
     FunctionStep(
         func=(measure_colocalization, {
-            'scale_max': 15.0,
-            'correlation': True,
-            'manders_m1': True,
-            'rwc1': True,
-            'overlap': True,
-            'costes_m1': True,
-            'fast_mode': 'Fast',
+            'channel_1, channel_2': ['OrigBlue', 'OrigGreen'],
+            'threshold_percent': 15.0,
+            'do_correlation, do_manders, do_rwc, do_overlap, do_costes': 'Accurate',
+            'do_correlation': True,
+            'do_manders': True,
+            'do_rwc': True,
+            'do_overlap': True,
+            'do_costes': True,
+            'costes_method': 'Fast',
         }),
         name="MeasureColocalization",
         processing_config=LazyProcessingConfig(
             variable_components=[VariableComponents.CHANNEL]
         ),
+        # Unmapped settings:
+        # select_where_to_measure_correlation='Both'
+        # select_objects_to_measure='Nuclei'
     ),
     FunctionStep(
         func=(measure_image_intensity, {

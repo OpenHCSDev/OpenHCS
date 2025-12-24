@@ -21,11 +21,10 @@ import random
 from typing import Tuple, List, Optional
 from dataclasses import dataclass
 from openhcs.core.memory.decorators import numpy
-from openhcs.processing.backends.lib_registry.unified_registry import ProcessingContract
 import skimage.io
 
 
-@numpy(contract=ProcessingContract.FLEXIBLE)
+@numpy
 def run_imagej_macro(
     image: np.ndarray,
     executable_path: str = "/Applications/Fiji.app/Contents/MacOS/ImageJ-macosx",

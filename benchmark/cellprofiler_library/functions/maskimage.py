@@ -11,7 +11,6 @@ import numpy as np
 from typing import Tuple
 from enum import Enum
 from openhcs.core.memory.decorators import numpy
-from openhcs.processing.backends.lib_registry.unified_registry import ProcessingContract
 from openhcs.core.pipeline.function_contracts import special_inputs
 
 
@@ -21,7 +20,7 @@ class MaskSource(Enum):
     IMAGE = "image"      # Use binary/grayscale image as mask
 
 
-@numpy(contract=ProcessingContract.FLEXIBLE)
+@numpy
 @special_inputs("mask")
 def mask_image(
     image: np.ndarray,
@@ -117,7 +116,7 @@ def mask_image_with_binary(
     return binary_mask.astype(np.float32)
 
 
-@numpy(contract=ProcessingContract.FLEXIBLE)
+@numpy
 def mask_image_stacked(
     image: np.ndarray,
     invert_mask: bool = False,

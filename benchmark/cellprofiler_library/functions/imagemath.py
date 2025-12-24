@@ -11,7 +11,6 @@ import numpy as np
 from typing import Tuple
 from enum import Enum
 from openhcs.core.memory.decorators import numpy
-from openhcs.processing.backends.lib_registry.unified_registry import ProcessingContract
 
 
 class MathOperation(Enum):
@@ -39,7 +38,7 @@ BINARY_OUTPUT_OPS = [MathOperation.AND, MathOperation.OR, MathOperation.NOT, Mat
 SINGLE_IMAGE_OPS = [MathOperation.INVERT, MathOperation.LOG_TRANSFORM, MathOperation.LOG_TRANSFORM_LEGACY, MathOperation.NOT, MathOperation.NONE]
 
 
-@numpy(contract=ProcessingContract.FLEXIBLE)
+@numpy
 def image_math(
     image: np.ndarray,
     operation: MathOperation = MathOperation.ADD,

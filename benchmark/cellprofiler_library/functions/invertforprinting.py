@@ -13,7 +13,6 @@ Output: Inverted color image with shape (3, H, W) representing RGB channels
 import numpy as np
 from enum import Enum
 from openhcs.core.memory.decorators import numpy
-from openhcs.processing.backends.lib_registry.unified_registry import ProcessingContract
 
 
 class OutputMode(Enum):
@@ -21,7 +20,7 @@ class OutputMode(Enum):
     GRAYSCALE = "grayscale"
 
 
-@numpy(contract=ProcessingContract.FLEXIBLE)
+@numpy
 def invert_for_printing(
     image: np.ndarray,
     output_mode: OutputMode = OutputMode.COLOR,

@@ -5,7 +5,6 @@ Original: medialaxis
 
 import numpy as np
 from openhcs.core.memory.decorators import numpy as numpy_backend
-from openhcs.processing.backends.lib_registry.unified_registry import ProcessingContract
 
 
 @numpy_backend(contract=ProcessingContract.PURE_2D)

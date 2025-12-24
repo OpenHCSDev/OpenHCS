@@ -8,7 +8,6 @@ from typing import Tuple
 from dataclasses import dataclass
 from enum import Enum
 from openhcs.core.memory.decorators import numpy
-from openhcs.processing.backends.lib_registry.unified_registry import ProcessingContract
 from openhcs.core.pipeline.function_contracts import special_inputs, special_outputs
 from openhcs.processing.materialization import csv_materializer
 
@@ -96,7 +95,7 @@ def _get_cropped_image_pixels(
         return image * mask
 
 
-@numpy(contract=ProcessingContract.FLEXIBLE)
+@numpy
 @special_outputs(
     ("crop_measurements", csv_materializer(
         fields=["slice_index", "original_area", "area_retained", "fraction_retained"],

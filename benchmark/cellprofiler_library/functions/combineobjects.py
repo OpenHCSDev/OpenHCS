@@ -8,7 +8,6 @@ from typing import Tuple
 from dataclasses import dataclass
 from enum import Enum
 from openhcs.core.memory.decorators import numpy
-from openhcs.processing.backends.lib_registry.unified_registry import ProcessingContract
 from openhcs.core.pipeline.function_contracts import special_outputs
 from openhcs.processing.materialization import csv_materializer
 from openhcs.processing.backends.analysis.cell_counting_cpu import materialize_segmentation_masks
@@ -119,7 +118,7 @@ def _segment_objects(labels_x: np.ndarray, labels_y: np.ndarray) -> np.ndarray:
     return segmented.astype(np.int32)
 
 
-@numpy(contract=ProcessingContract.FLEXIBLE)
+@numpy
 @special_outputs(
     ("combine_stats", csv_materializer(
         fields=["slice_index", "method", "input_objects_x", "input_objects_y", "output_objects"],

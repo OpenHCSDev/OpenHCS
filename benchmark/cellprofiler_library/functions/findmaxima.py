@@ -12,7 +12,6 @@ from typing import Tuple
 from dataclasses import dataclass
 from enum import Enum
 from openhcs.core.memory.decorators import numpy
-from openhcs.processing.backends.lib_registry.unified_registry import ProcessingContract
 from openhcs.core.pipeline.function_contracts import special_outputs
 from openhcs.processing.materialization import csv_materializer
 
@@ -102,7 +101,7 @@ def find_maxima(
     return y_data, result
 
 
-@numpy(contract=ProcessingContract.FLEXIBLE)
+@numpy
 @special_outputs(("maxima_results", csv_materializer(
     fields=["slice_index", "maxima_count", "min_distance_used", "threshold_used"],
     analysis_type="maxima_detection"

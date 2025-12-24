@@ -9,7 +9,6 @@ import numpy as np
 from typing import Tuple, Optional
 from enum import Enum
 from openhcs.core.memory.decorators import numpy
-from openhcs.processing.backends.lib_registry.unified_registry import ProcessingContract
 
 
 class RescaleMethod(Enum):
@@ -150,7 +149,7 @@ def _get_source_range(
     return src_min, src_max
 
 
-@numpy(contract=ProcessingContract.FLEXIBLE)
+@numpy
 def rescale_intensity_match_maximum(
     image: np.ndarray,
 ) -> np.ndarray:

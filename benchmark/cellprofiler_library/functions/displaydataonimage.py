@@ -5,7 +5,6 @@ from typing import Tuple, Optional
 from dataclasses import dataclass
 from enum import Enum
 from openhcs.core.memory.decorators import numpy
-from openhcs.processing.backends.lib_registry.unified_registry import ProcessingContract
 from openhcs.core.pipeline.function_contracts import special_inputs
 
 
@@ -30,7 +29,7 @@ class SavedImageContents(Enum):
     FIGURE = "figure"
 
 
-@numpy(contract=ProcessingContract.FLEXIBLE)
+@numpy
 @special_inputs("labels", "measurements")
 def display_data_on_image(
     image: np.ndarray,

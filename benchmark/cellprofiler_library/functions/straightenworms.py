@@ -8,7 +8,6 @@ from typing import Tuple, Optional
 from dataclasses import dataclass
 from enum import Enum
 from openhcs.core.memory.decorators import numpy
-from openhcs.processing.backends.lib_registry.unified_registry import ProcessingContract
 from openhcs.core.pipeline.function_contracts import special_outputs, special_inputs
 from openhcs.processing.materialization import csv_materializer
 from scipy.interpolate import interp1d
@@ -31,7 +30,7 @@ class WormMeasurement:
     std_intensity: float
 
 
-@numpy(contract=ProcessingContract.FLEXIBLE)
+@numpy
 @special_inputs("worm_labels", "control_points")
 @special_outputs(
     ("straightened_labels", None),

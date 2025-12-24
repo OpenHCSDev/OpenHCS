@@ -11,7 +11,6 @@ from typing import Tuple, Optional
 from dataclasses import dataclass
 from enum import Enum
 from openhcs.core.memory.decorators import numpy
-from openhcs.processing.backends.lib_registry.unified_registry import ProcessingContract
 from openhcs.core.pipeline.function_contracts import special_outputs, special_inputs
 from openhcs.processing.materialization import csv_materializer
 import scipy.ndimage
@@ -46,48 +45,6 @@ class ColocalizationMeasurements:
 
 def _linear_costes(fi: np.ndarray, si: np.ndarray, scale_max: int = 255, fast_mode: bool = True) -> Tuple[float, float]:
     """Find Costes Automatic Threshold using linear algorithm."""
-    CellProfiler Parameter Mapping:
-    (CellProfiler setting -> Python parameter)
-        'Select images to measure' -> (pipeline-handled)
-        'Set threshold as percentage of maximum intensity for the images' -> scale_max
-        'Select where to measure correlation' -> (pipeline-handled)
-        'Select objects to measure' -> (pipeline-handled)
-        'Run all metrics?' -> (pipeline-handled)
-        'Calculate correlation and slope metrics?' -> correlation
-        'Calculate the Manders coefficients?' -> [manders_m1, manders_m2]
-        'Calculate the Rank Weighted Colocalization coefficients?' -> [rwc1, rwc2]
-        'Calculate the Overlap coefficients?' -> overlap
-        'Calculate the Manders coefficients using Costes auto threshold?' -> [costes_m1, costes_m2]
-        'Method for Costes thresholding' -> fast_mode
-
-    CellProfiler Parameter Mapping:
-    (CellProfiler setting -> Python parameter)
-        'Select images to measure' -> (pipeline-handled)
-        'Set threshold as percentage of maximum intensity for the images' -> scale_max
-        'Select where to measure correlation' -> (pipeline-handled)
-        'Select objects to measure' -> (pipeline-handled)
-        'Run all metrics?' -> (pipeline-handled)
-        'Calculate correlation and slope metrics?' -> correlation
-        'Calculate the Manders coefficients?' -> [manders_m1, manders_m2]
-        'Calculate the Rank Weighted Colocalization coefficients?' -> [rwc1, rwc2]
-        'Calculate the Overlap coefficients?' -> overlap
-        'Calculate the Manders coefficients using Costes auto threshold?' -> [costes_m1, costes_m2]
-        'Method for Costes thresholding' -> fast_mode
-
-    CellProfiler Parameter Mapping:
-    (CellProfiler setting -> Python parameter)
-        'Select images to measure' -> (pipeline-handled)
-        'Set threshold as percentage of maximum intensity for the images' -> scale_max
-        'Select where to measure correlation' -> (pipeline-handled)
-        'Select objects to measure' -> (pipeline-handled)
-        'Run all metrics?' -> (pipeline-handled)
-        'Calculate correlation and slope metrics?' -> correlation
-        'Calculate the Manders coefficients?' -> [manders_m1, manders_m2]
-        'Calculate the Rank Weighted Colocalization coefficients?' -> [rwc1, rwc2]
-        'Calculate the Overlap coefficients?' -> overlap
-        'Calculate the Manders coefficients using Costes auto threshold?' -> [costes_m1, costes_m2]
-        'Method for Costes thresholding' -> fast_mode
-
     i_step = 1 / scale_max
     non_zero = (fi > 0) | (si > 0)
     
@@ -214,15 +171,17 @@ def _bisection_costes(fi: np.ndarray, si: np.ndarray, scale_max: int = 255) -> T
     return thr_fi_c, thr_si_c
 
 
-@numpy(contract=ProcessingContract.FLEXIBLE)
+@numpy
 @special_outputs(("colocalization_measurements", csv_materializer(
     fields=["slice_index", "correlation", "slope", "overlap", "k1", "k2",
-            "manders_m1", "manders_m2", "rwc1", "rwc2", 
+            "manders_m1", "manders_m2", "rwc1", "rwc2",
             "costes_m1", "costes_m2", "costes_threshold_1", "costes_threshold_2"],
     analysis_type="colocalization"
 )))
 def measure_colocalization(
     image: np.ndarray,
+    channel_1: int = 0,
+    channel_2: int = 1,
     threshold_percent: float = 15.0,
     do_correlation: bool = True,
     do_manders: bool = True,
@@ -233,10 +192,12 @@ def measure_colocalization(
     scale_max: int = 255,
 ) -> Tuple[np.ndarray, ColocalizationMeasurements]:
     """
-    Measure colocalization between two channels stacked in dim 0.
-    
+    Measure colocalization between two channels from an N-channel image.
+
     Args:
-        image: Shape (2, H, W) - two channel images stacked along dim 0
+        image: Shape (N, H, W) - N channel images stacked along dim 0
+        channel_1: Index of first channel to compare (default 0)
+        channel_2: Index of second channel to compare (default 1)
         threshold_percent: Threshold as percentage of max intensity (0-99)
         do_correlation: Calculate Pearson correlation and slope
         do_manders: Calculate Manders coefficients
@@ -245,13 +206,28 @@ def measure_colocalization(
         do_costes: Calculate Manders coefficients using Costes auto threshold
         costes_method: Method for Costes thresholding (faster, fast, accurate)
         scale_max: Maximum scale for Costes calculation (255 for 8-bit, 65535 for 16-bit)
-    
+
     Returns:
         Tuple of (first channel image, ColocalizationMeasurements)
+
+    CellProfiler Parameter Mapping:
+    (CellProfiler setting -> Python parameter)
+        'Select images to measure' -> channel_1, channel_2
+        'Set threshold as percentage of maximum intensity for the images' -> threshold_percent
+        'Run all metrics?' -> do_correlation, do_manders, do_rwc, do_overlap, do_costes
+        'Calculate correlation and slope metrics?' -> do_correlation
+        'Calculate the Manders coefficients?' -> do_manders
+        'Calculate the Rank Weighted Colocalization coefficients?' -> do_rwc
+        'Calculate the Overlap coefficients?' -> do_overlap
+        'Calculate the Manders coefficients using Costes auto threshold?' -> do_costes
+        'Method for Costes thresholding' -> costes_method
     """
-    # Unstack the two channels
-    first_pixels = image[0].astype(np.float64)
-    second_pixels = image[1].astype(np.float64)
+    # Select the two channels to compare
+    if channel_1 >= image.shape[0] or channel_2 >= image.shape[0]:
+        raise ValueError(f"Channel indices ({channel_1}, {channel_2}) out of range for image with {image.shape[0]} channels")
+
+    first_pixels = image[channel_1].astype(np.float64)
+    second_pixels = image[channel_2].astype(np.float64)
     
     # Create mask for valid pixels
     mask = (~np.isnan(first_pixels)) & (~np.isnan(second_pixels))
@@ -369,5 +345,5 @@ def measure_colocalization(
         costes_threshold_2=float(thr_si_c) if not np.isnan(thr_si_c) else 0.0,
     )
     
-    # Return first channel as the output image
-    return image[0:1], measurements
+    # Return first selected channel as the output image
+    return image[channel_1:channel_1+1], measurements

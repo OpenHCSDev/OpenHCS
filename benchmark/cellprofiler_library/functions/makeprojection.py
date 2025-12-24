@@ -10,7 +10,6 @@ from typing import Tuple
 from dataclasses import dataclass
 from enum import Enum
 from openhcs.core.memory.decorators import numpy
-from openhcs.processing.backends.lib_registry.unified_registry import ProcessingContract
 from openhcs.core.pipeline.function_contracts import special_outputs
 from openhcs.processing.materialization import csv_materializer
 
@@ -35,7 +34,7 @@ class ProjectionStats:
     output_mean: float
 
 
-@numpy(contract=ProcessingContract.VOLUMETRIC_TO_SLICE)
+@numpy
 @special_outputs(("projection_stats", csv_materializer(
     fields=["projection_type", "input_slices", "output_min", "output_max", "output_mean"],
     analysis_type="projection"

@@ -5,7 +5,6 @@ Original: morphologicalskeleton
 
 import numpy as np
 from openhcs.core.memory.decorators import numpy
-from openhcs.processing.backends.lib_registry.unified_registry import ProcessingContract
 
 
 @numpy(contract=ProcessingContract.PURE_2D)
@@ -60,7 +59,7 @@ def morphological_skeleton_3d(
     return skeleton.astype(np.float32)
 
 
-@numpy(contract=ProcessingContract.FLEXIBLE)
+@numpy
 def morphologicalskeleton(
     image: np.ndarray,
     volumetric: bool = False,

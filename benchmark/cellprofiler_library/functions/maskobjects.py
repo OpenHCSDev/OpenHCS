@@ -10,7 +10,6 @@ from typing import Tuple
 from dataclasses import dataclass
 from enum import Enum
 from openhcs.core.memory.decorators import numpy
-from openhcs.processing.backends.lib_registry.unified_registry import ProcessingContract
 from openhcs.core.pipeline.function_contracts import special_inputs, special_outputs
 from openhcs.processing.materialization import csv_materializer
 from openhcs.processing.backends.analysis.cell_counting_cpu import materialize_segmentation_masks
@@ -41,7 +40,7 @@ class MaskObjectsStats:
     objects_removed: int
 
 
-@numpy(contract=ProcessingContract.FLEXIBLE)
+@numpy
 @special_inputs("labels", "mask")
 @special_outputs(
     ("mask_stats", csv_materializer(

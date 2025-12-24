@@ -7,7 +7,6 @@ import numpy as np
 from typing import Tuple, Optional
 from enum import Enum
 from openhcs.core.memory.decorators import numpy
-from openhcs.processing.backends.lib_registry.unified_registry import ProcessingContract
 
 
 class TileMethod(Enum):
@@ -143,7 +142,7 @@ def _put_tile(
     ] = pixels[:img_height, :img_width]
 
 
-@numpy(contract=ProcessingContract.FLEXIBLE)
+@numpy
 def tile(
     image: np.ndarray,
     rows: int = 8,

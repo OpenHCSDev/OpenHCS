@@ -13,7 +13,6 @@ from enum import Enum
 import scipy.ndimage
 import skimage.segmentation
 from openhcs.core.memory.decorators import numpy
-from openhcs.processing.backends.lib_registry.unified_registry import ProcessingContract
 from openhcs.core.pipeline.function_contracts import special_inputs, special_outputs
 from openhcs.processing.materialization import csv_materializer
 
@@ -37,7 +36,7 @@ class RelationshipMeasurements:
     mean_minimum_distance: float
 
 
-@numpy(contract=ProcessingContract.FLEXIBLE)
+@numpy
 @special_outputs(
     ("relationship_measurements", csv_materializer(
         fields=["slice_index", "parent_object_count", "child_object_count",
