@@ -77,9 +77,14 @@ class ConversionResult:
     confidence: float = 0.0
     reasoning: str = ""
 
+    # Parameter mapping: CellProfiler setting name → Python parameter name(s)
+    parameter_mapping: Dict[str, any] = None  # str → str | List[str] | None
+
     def __post_init__(self):
         if self.settings is None:
             self.settings = {}
+        if self.parameter_mapping is None:
+            self.parameter_mapping = {}
 
 
 class LLMFunctionConverter:
@@ -234,6 +239,7 @@ class LLMFunctionConverter:
                 category=parsed.get("category", "image_operation"),
                 confidence=parsed.get("confidence", 0.5),
                 reasoning=parsed.get("reasoning", ""),
+                parameter_mapping=parsed.get("parameter_mapping", {}),
             )
 
         except Exception as e:
@@ -314,6 +320,7 @@ class LLMFunctionConverter:
                 category=parsed.get("category", "image_operation"),
                 confidence=parsed.get("confidence", 0.5),
                 reasoning=parsed.get("reasoning", ""),
+                parameter_mapping=parsed.get("parameter_mapping", {}),
             )
 
         except Exception as e:

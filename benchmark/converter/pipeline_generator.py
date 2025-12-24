@@ -74,10 +74,6 @@ from enum import Enum
 from openhcs.core.steps.function_step import FunctionStep
 from openhcs.core.config import LazyProcessingConfig
 from openhcs.constants.constants import VariableComponents, GroupBy
-from openhcs.core.memory.decorators import numpy
-from openhcs.processing.backends.lib_registry.unified_registry import ProcessingContract
-from openhcs.core.pipeline.function_contracts import special_outputs
-from openhcs.processing.materialization import csv_materializer
 
 '''
 
@@ -180,15 +176,15 @@ from openhcs.processing.materialization import csv_materializer
 
         # Add registry imports for available modules
         if registry_modules:
-            func_imports = [
-                "# Absorbed CellProfiler functions",
-                "from benchmark.cellprofiler_library import ("
-            ]
+            imports += "# Absorbed CellProfiler functions (dynamically loaded)\n"
+            imports += "from benchmark.cellprofiler_library import get_function\n\n"
+
+            # Generate function assignments
+            func_assignments = []
             for module in registry_modules:
                 func_name = self._registry[module.name]["function_name"]
-                func_imports.append(f"    {func_name},")
-            func_imports.append(")")
-            imports += "\n".join(func_imports) + "\n\n"
+                func_assignments.append(f'{func_name} = get_function("{module.name}")')
+            imports += "\n".join(func_assignments) + "\n\n"
 
         # Generate steps with bound settings
         steps = self._generate_steps_from_registry(registry_modules)

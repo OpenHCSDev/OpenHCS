@@ -272,8 +272,14 @@ class LibraryAbsorber:
         assert conversion is not None
         assert not validation_errors
 
+        # Inject parameter mapping into docstring
+        code_with_mapping = self._inject_parameter_mapping(
+            conversion.converted_code,
+            conversion.parameter_mapping
+        )
+
         # Write output (only if valid)
-        output_file.write_text(conversion.converted_code)
+        output_file.write_text(code_with_mapping)
         logger.info(f"Wrote {output_file}")
 
         # Use LLM-inferred contract and category (the LLM read the source and understood it)
@@ -465,6 +471,64 @@ class LibraryAbsorber:
         # Convert to proper CamelCase (capitalize each word after underscore)
         parts = name.split('_')
         return ''.join(word.capitalize() for word in parts)
+
+    def _inject_parameter_mapping(self, code: str, mapping: Dict[str, any]) -> str:
+        """
+        Inject parameter mapping into the function's docstring.
+
+        Args:
+            code: The converted Python code
+            mapping: Dict mapping CellProfiler setting names to Python parameter names
+
+        Returns:
+            Code with mapping injected into docstring
+        """
+        if not mapping:
+            return code
+
+        lines = code.split('\n')
+
+        # Find the first docstring (should be the function docstring)
+        docstring_start = None
+        docstring_end = None
+        in_docstring = False
+
+        for i, line in enumerate(lines):
+            if '"""' in line and not in_docstring:
+                docstring_start = i
+                in_docstring = True
+                # Check if it's a one-liner
+                if line.count('"""') == 2:
+                    docstring_end = i
+                    break
+            elif '"""' in line and in_docstring:
+                docstring_end = i
+                break
+
+        if docstring_start is None or docstring_end is None:
+            logger.warning("Could not find docstring to inject parameter mapping")
+            return code
+
+        # Build mapping section
+        mapping_lines = [
+            "",
+            "    CellProfiler Parameter Mapping:",
+            "    (CellProfiler setting → Python parameter)",
+        ]
+
+        for cp_setting, py_param in mapping.items():
+            if py_param is None:
+                mapping_lines.append(f"        '{cp_setting}' → (no mapping - handled by pipeline)")
+            elif isinstance(py_param, list):
+                params_str = ', '.join(py_param)
+                mapping_lines.append(f"        '{cp_setting}' → [{params_str}]")
+            else:
+                mapping_lines.append(f"        '{cp_setting}' → {py_param}")
+
+        # Insert before closing docstring
+        lines.insert(docstring_end, '\n'.join(mapping_lines))
+
+        return '\n'.join(lines)
 
     def _module_to_function_name(self, module_name: str) -> str:
         """Convert ModuleName to module_name (snake_case)."""

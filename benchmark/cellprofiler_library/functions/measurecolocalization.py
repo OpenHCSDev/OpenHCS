@@ -212,9 +212,9 @@ def measure_colocalization(
 
     CellProfiler Parameter Mapping:
     (CellProfiler setting -> Python parameter)
-        'Select images to measure' -> channel_1, channel_2
+        'Select images to measure' -> (pipeline-handled)
         'Set threshold as percentage of maximum intensity for the images' -> threshold_percent
-        'Run all metrics?' -> do_correlation, do_manders, do_rwc, do_overlap, do_costes
+        'Run all metrics?' -> (pipeline-handled)
         'Calculate correlation and slope metrics?' -> do_correlation
         'Calculate the Manders coefficients?' -> do_manders
         'Calculate the Rank Weighted Colocalization coefficients?' -> do_rwc

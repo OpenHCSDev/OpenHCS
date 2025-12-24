@@ -14,18 +14,14 @@ from enum import Enum
 from openhcs.core.steps.function_step import FunctionStep
 from openhcs.core.config import LazyProcessingConfig
 from openhcs.constants.constants import VariableComponents, GroupBy
-from openhcs.core.memory.decorators import numpy
-from openhcs.processing.backends.lib_registry.unified_registry import ProcessingContract
-from openhcs.core.pipeline.function_contracts import special_outputs
-from openhcs.processing.materialization import csv_materializer
 
-# Absorbed CellProfiler functions
-from benchmark.cellprofiler_library import (
-    identify_primary_objects,
-    identify_secondary_objects,
-    measure_object_intensity,
-    measure_object_size_shape,
-)
+# Absorbed CellProfiler functions (dynamically loaded)
+from benchmark.cellprofiler_library import get_function
+
+identify_primary_objects = get_function("IdentifyPrimaryObjects")
+identify_secondary_objects = get_function("IdentifySecondaryObjects")
+measure_object_intensity = get_function("MeasureObjectIntensity")
+measure_object_size_shape = get_function("MeasureObjectSizeShape")
 
 # Pipeline Steps
 # Settings from .cppipe are bound as default parameters

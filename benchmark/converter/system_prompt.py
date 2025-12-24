@@ -338,18 +338,41 @@ def measure(image: np.ndarray, labels: np.ndarray) -> Tuple[np.ndarray, CellMeas
     return image, CellMeasurement(cell_count=count, mean_area=area)
 ```
 
-## Rule 6: Bake .cppipe Settings as Defaults
-The settings from the .cppipe file should become default parameter values:
+## Rule 6: PRESERVE EXACT PARAMETER NAMES (CRITICAL FOR 1:1 MAPPING)
 
+**ABSOLUTELY MANDATORY:** Function parameter names MUST exactly match the CellProfiler setting names
+after normalization to snake_case. This enables automatic binding of .cppipe settings to function kwargs.
+
+**Normalization rules:**
+1. Convert to lowercase
+2. Replace spaces with underscores
+3. Remove parenthetical content: "(Min,Max)" → ""
+4. Remove question marks: "?" → ""
+5. Remove special characters except underscores
+
+**Example:**
 ```python
-# From .cppipe: "Typical diameter of objects, in pixel units (Min,Max):8,80"
+# CellProfiler setting: "Typical diameter of objects, in pixel units (Min,Max):8,80"
+# Normalized name: "typical_diameter_of_objects_in_pixel_units"
+# Parsed value: (8, 80)
+
+# CellProfiler setting: "Discard objects touching the border of the image?:Yes"
+# Normalized name: "discard_objects_touching_the_border_of_the_image"
+# Parsed value: True
+
 def identify_primary_objects(
     image: np.ndarray,
-    min_diameter: int = 8,   # Baked from .cppipe
-    max_diameter: int = 80,  # Baked from .cppipe
+    select_the_input_image: str = "DNA",  # EXACT normalized name
+    name_the_primary_objects_to_be_identified: str = "Nuclei",  # EXACT normalized name
+    typical_diameter_of_objects_in_pixel_units: Tuple[int, int] = (8, 80),  # EXACT normalized name
+    discard_objects_outside_the_diameter_range: bool = True,  # EXACT normalized name
+    discard_objects_touching_the_border_of_the_image: bool = True,  # EXACT normalized name
     ...
 ) -> np.ndarray:
 ```
+
+**DO NOT simplify or rename parameters.** Use the exact normalized CellProfiler setting names.
+This is critical for automatic kwargs binding in the pipeline converter.
 
 # CONVERSION TEMPLATE
 
@@ -556,7 +579,27 @@ Respond with ONLY valid JSON matching this schema (no markdown, no explanation):
   "contract": "PURE_2D | PURE_3D | FLEXIBLE | VOLUMETRIC_TO_SLICE",
   "category": "image_operation | z_projection | channel_operation",
   "confidence": <0.0-1.0>,
-  "reasoning": "<why this contract and category>"
+  "reasoning": "<why this contract and category>",
+  "parameter_mapping": {{
+    "CellProfiler Setting Name": "python_parameter_name",
+    ...
+  }}
 }}
+
+The `parameter_mapping` field should map each CellProfiler setting name (from the settings above) to the corresponding Python parameter name in your converted function. This enables automatic parameter binding when converting .cppipe pipelines.
+
+Example:
+{{
+  "parameter_mapping": {{
+    "Typical diameter of objects, in pixel units (Min,Max)": ["min_diameter", "max_diameter"],
+    "Discard objects touching the border of the image?": "exclude_border_objects",
+    "Select the input image": null
+  }}
+}}
+
+Notes:
+- If a CellProfiler setting maps to multiple parameters (like diameter Min,Max), use an array
+- If a setting doesn't map to any parameter (like "Select the input image" which is handled by pipeline routing), use null
+- If a parameter doesn't have a corresponding CellProfiler setting (internal parameter), omit it from the mapping
 '''
 

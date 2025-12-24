@@ -14,28 +14,24 @@ from enum import Enum
 from openhcs.core.steps.function_step import FunctionStep
 from openhcs.core.config import LazyProcessingConfig
 from openhcs.constants.constants import VariableComponents, GroupBy
-from openhcs.core.memory.decorators import numpy
-from openhcs.processing.backends.lib_registry.unified_registry import ProcessingContract
-from openhcs.core.pipeline.function_contracts import special_outputs
-from openhcs.processing.materialization import csv_materializer
 
 
 # Skipped infrastructure modules (handled by OpenHCS):
 #   - LoadData -> handled by plate_path + openhcs_metadata.json
 #   - ExportToSpreadsheet -> handled by @special_outputs(csv_materializer(...))
 
-# Absorbed CellProfiler functions
-from benchmark.cellprofiler_library import (
-    identify_primary_objects,
-    identify_secondary_objects,
-    identify_tertiary_objects,
-    measure_object_size_shape,
-    measure_object_intensity,
-    measure_texture,
-    measure_object_neighbors,
-    measure_colocalization,
-    measure_image_intensity,
-)
+# Absorbed CellProfiler functions (dynamically loaded)
+from benchmark.cellprofiler_library import get_function
+
+identify_primary_objects = get_function("IdentifyPrimaryObjects")
+identify_secondary_objects = get_function("IdentifySecondaryObjects")
+identify_tertiary_objects = get_function("IdentifyTertiaryObjects")
+measure_object_size_shape = get_function("MeasureObjectSizeShape")
+measure_object_intensity = get_function("MeasureObjectIntensity")
+measure_texture = get_function("MeasureTexture")
+measure_object_neighbors = get_function("MeasureObjectNeighbors")
+measure_colocalization = get_function("MeasureColocalization")
+measure_image_intensity = get_function("MeasureImageIntensity")
 
 # Pipeline Steps
 # Settings from .cppipe are bound as default parameters
@@ -142,9 +138,7 @@ pipeline_steps = [
     ),
     FunctionStep(
         func=(measure_colocalization, {
-            'channel_1, channel_2': ['OrigBlue', 'OrigGreen'],
             'threshold_percent': 15.0,
-            'do_correlation, do_manders, do_rwc, do_overlap, do_costes': 'Accurate',
             'do_correlation': True,
             'do_manders': True,
             'do_rwc': True,
