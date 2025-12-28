@@ -157,13 +157,45 @@ class PlateManagerWidget(AbstractManagerWidget):
         self._execution_complete_signal.connect(self._on_execution_complete)
         self._execution_error_signal.connect(self._on_execution_error)
 
+        # Register time travel callback to clear ephemeral caches
+        ObjectStateRegistry.add_time_travel_complete_callback(self._on_time_travel_complete)
+
         logger.debug("Plate manager widget initialized")
 
     def cleanup(self):
         """Cleanup resources before widget destruction."""
         logger.info("🧹 Cleaning up PlateManagerWidget resources...")
         self._zmq_service.disconnect()
+        # Unregister time travel callback
+        ObjectStateRegistry.remove_time_travel_complete_callback(self._on_time_travel_complete)
         logger.info("✅ PlateManagerWidget cleanup completed")
+
+    def _on_time_travel_complete(self, dirty_states, triggering_scope):
+        """Clear orchestrator cache after time travel - force recreation.
+
+        Called automatically by ObjectStateRegistry when time travel completes.
+
+        Args:
+            dirty_states: List of (scope_id, ObjectState) tuples that changed
+            triggering_scope: The scope that triggered the time travel (if any)
+        """
+        # Clear all orchestrators - they're tied to old timeline
+        # User must re-Init Plate to recreate orchestrator instances
+        # This is CORRECT - orchestrator state (READY, COMPILED, etc) is ephemeral
+        logger.info(f"🕰️ Time travel complete, clearing {len(self.orchestrators)} orchestrator(s)")
+        self.orchestrators.clear()
+
+        # Clear plate configs cache - force reload from ObjectState
+        logger.info(f"🕰️ Clearing {len(self.plate_configs)} plate config cache(s)")
+        self.plate_configs.clear()
+
+        # Note: orchestrator_scope_ids list is restored by time travel automatically
+        # Update button states (Init Plate button should be enabled)
+        self.update_button_states()
+
+        # Update UI to reflect restored state
+        self.update_item_list()
+        logger.info("🕰️ Time travel cleanup complete")
 
     # ========== Root ObjectState Management ==========
 
