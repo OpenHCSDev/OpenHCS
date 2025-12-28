@@ -280,55 +280,354 @@ The 13 studies demonstrate four pattern taxonomies: (1) **type discrimination** 
 
 ### 5.2 Case Study 1: Structurally Identical, Semantically Distinct Types
 
-[TODO: Code-first presentation]
+```python
+@dataclass(frozen=True)
+class WellFilterConfig:
+    """Pipeline-level well filtering."""
+    well_filter: Optional[Union[List[str], str, int]] = None
+    well_filter_mode: WellFilterMode = WellFilterMode.INCLUDE
+
+@dataclass(frozen=True)
+class StepWellFilterConfig(WellFilterConfig):
+    """Step-level well filtering."""
+    pass  # Structurally identical!
+```
+
+These classes are structurally identical but participate in different inheritance hierarchies. The MRO position determines resolution priority in OpenHCS's dual-axis configuration system:
+
+**Context hierarchy:** Global → Pipeline → Step
+**MRO inheritance:** `StepMaterializationConfig → StepWellFilterConfig → PathPlanningConfig → WellFilterConfig`
+
+When resolving `well_filter` on a step, the system walks this MRO. The *position* of `StepWellFilterConfig` vs `WellFilterConfig` in the chain determines which value is returned—structurally identical types at different MRO positions resolve to different values based on scope context.
+
+Under duck typing, both classes have identical attributes (`well_filter`, `well_filter_mode`). There is no way to distinguish them. The system cannot answer "is this the pipeline-level config or step-level config?"—both have the same shape. Nominal typing provides `type(config) is StepWellFilterConfig` as an O(1) check (Theorem 4.1), while duck typing would require Ω(n) inspection of context metadata not present in the object itself.
+
+**Pattern (Table 5.1, Row 1):** Type discrimination via MRO position. Demonstrates Theorem 4.3 (O(1) vs Ω(n) complexity) and serves as the canonical example of structural equivalence failing to capture semantic distinctions.
 
 ### 5.3 Case Study 2: Discriminated Unions via __subclasses__()
 
-[TODO: Problem-first presentation]
+OpenHCS's parameter UI needs to dispatch widget creation based on parameter type structure: `Optional[Dataclass]` parameters need checkboxes, direct `Dataclass` parameters are always visible, and primitive types use simple widgets. The challenge: how does the system enumerate all possible parameter types to ensure exhaustive handling?
+
+```python
+@dataclass
+class OptionalDataclassInfo(ParameterInfoBase):
+    widget_creation_type: str = "OPTIONAL_NESTED"
+
+    @staticmethod
+    def matches(param_type: Type) -> bool:
+        return is_optional(param_type) and is_dataclass(inner_type(param_type))
+
+@dataclass
+class DirectDataclassInfo(ParameterInfoBase):
+    widget_creation_type: str = "NESTED"
+
+    @staticmethod
+    def matches(param_type: Type) -> bool:
+        return is_dataclass(param_type)
+
+@dataclass
+class GenericInfo(ParameterInfoBase):
+    @staticmethod
+    def matches(param_type: Type) -> bool:
+        return True  # Fallback
+```
+
+The factory uses `ParameterInfoBase.__subclasses__()` to enumerate all registered variants at runtime. This provides exhaustiveness: adding a new parameter type (e.g., `EnumInfo`) automatically extends the dispatch table without modifying the factory. Duck typing has no equivalent—there's no way to ask "what are all the types that have a `matches()` method?"
+
+Structural typing would require manually maintaining a registry list. Nominal typing provides it for free via inheritance tracking. The dispatch is O(1) after the initial linear scan to find the matching subclass.
+
+**Pattern (Table 5.1, Row 2):** Discriminated union enumeration. Demonstrates how nominal identity enables exhaustiveness checking that duck typing cannot provide.
 
 ### 5.4 Case Study 3: MemoryTypeConverter Dispatch
 
-[TODO: Code-first presentation]
+```python
+# 6 converter classes auto-generated at module load
+_CONVERTERS = {
+    mem_type: type(
+        f"{mem_type.value.capitalize()}Converter",  # name
+        (MemoryTypeConverter,),                      # bases
+        _TYPE_OPERATIONS[mem_type]                   # namespace
+    )()
+    for mem_type in MemoryType
+}
+
+def convert_memory(data, source_type: str, target_type: str, gpu_id: int):
+    source_enum = MemoryType(source_type)
+    converter = _CONVERTERS[source_enum]  # O(1) lookup by type
+    method = getattr(converter, f"to_{target_type}")
+    return method(data, gpu_id)
+```
+
+This generates `NumpyConverter`, `CupyConverter`, `TorchConverter`, `TensorflowConverter`, `JaxConverter`, `PyclesperantoConverter`—all with identical method signatures (`to_numpy()`, `to_cupy()`, etc.) but completely different implementations.
+
+The nominal type identity created by `type()` allows using converters as dict keys in `_CONVERTERS`. Duck typing would see all converters as structurally identical (same method names), making O(1) dispatch impossible. The system would need to probe each converter with hasattr or maintain a parallel string-based registry.
+
+**Pattern (Table 5.1, Row 3):** Factory-generated types as dictionary keys. Demonstrates Theorem 4.1 (O(1) dispatch) and the necessity of type identity for efficient lookup.
 
 ### 5.5 Case Study 4: Polymorphic Configuration
 
-[TODO: Problem-first presentation]
+The streaming subsystem supports multiple viewers (Napari, Fiji) with different port configurations and backend protocols. How should the orchestrator determine which viewer config is present without fragile attribute checks?
+
+```python
+class StreamingConfig(StreamingDefaults, ABC):
+    @property
+    @abstractmethod
+    def backend(self) -> Backend: pass
+
+# Factory-generated concrete types
+NapariStreamingConfig = create_streaming_config(
+    viewer_name='napari', port=5555, backend=Backend.NAPARI_STREAM)
+FijiStreamingConfig = create_streaming_config(
+    viewer_name='fiji', port=5565, backend=Backend.FIJI_STREAM)
+
+# Orchestrator dispatch
+if isinstance(config, StreamingConfig):
+    registry.get_or_create_tracker(config.port, config.viewer_type)
+```
+
+The codebase documentation explicitly contrasts approaches:
+
+> **Old:** `hasattr(config, 'napari_port')` — fragile (breaks if renamed), no type checking
+> **New:** `isinstance(config, NapariStreamingConfig)` — type-safe, explicit
+
+Duck typing couples the check to attribute names (strings), creating maintenance fragility. Renaming a field breaks all `hasattr()` call sites. Nominal typing couples the check to type identity, which is refactoring-safe.
+
+**Pattern (Table 5.1, Row 4):** Polymorphic dispatch with interface guarantees. Demonstrates how nominal ABC contracts provide fail-loud validation that duck typing's fail-silent probing cannot match.
 
 ### 5.6 Case Study 5: Migration from Duck to Nominal Typing (PR #44)
 
-[TODO: Architectural-change-first presentation]
+PR #44 ("UI Anti-Duck-Typing Refactor", 90 commits, 106 files, +22,609/-7,182 lines) migrated OpenHCS's UI layer from duck typing to nominal ABC contracts. The measured architectural changes:
+
+**Before (duck typing):**
+- ParameterFormManager: 2,653 lines with 47 `hasattr()` dispatch points scattered across methods
+- CrossWindowPreviewMixin: 759 lines with attribute-based widget probing
+- Dispatch tables: ~50 lines mapping string attribute names to handlers
+
+**After (nominal typing):**
+- ParameterFormManager: ~1,200 lines (55% reduction) with single `AbstractFormWidget` ABC
+- CrossWindowPreviewMixin: 139 lines (82% reduction) using explicit widget protocols
+- Dispatch tables: 0 lines (100% elimination) — replaced by `isinstance()` + method calls
+
+**Architectural transformation:**
+```python
+# BEFORE: Duck typing dispatch (scattered across 47 call sites)
+if hasattr(widget, 'isChecked'):
+    return widget.isChecked()
+elif hasattr(widget, 'currentText'):
+    return widget.currentText()
+# ... 45 more cases
+
+# AFTER: Nominal ABC (single definition point)
+class AbstractFormWidget(ABC):
+    @abstractmethod
+    def get_value(self) -> Any: pass
+
+# Error detection: attribute typos caught at import time, not user interaction time
+```
+
+The migration eliminated fail-silent bugs where missing attributes returned `None` instead of raising exceptions. Type errors now surface at class definition time (when ABC contract is violated) rather than at user interaction time (when attribute access fails silently).
+
+**Pattern (Table 5.1, Row 5):** Architecture migration from fail-silent duck typing to fail-loud nominal contracts. Demonstrates measured reduction in error localization complexity (Theorem 4.3): from Ω(47) scattered hasattr checks to O(1) centralized ABC validation.
 
 ### 5.7 Case Study 6: AutoRegisterMeta
 
-[TODO: Pattern-first presentation]
+**Pattern:** Metaclass-based auto-registration uses type identity as the registry key. At class definition time, the metaclass registers each concrete class (skipping ABCs) in a type-keyed dictionary.
+
+```python
+class AutoRegisterMeta(ABCMeta):
+    def __new__(mcs, name, bases, attrs, registry_config=None):
+        new_class = super().__new__(mcs, name, bases, attrs)
+
+        # Skip abstract classes (nominal check via __abstractmethods__)
+        if getattr(new_class, '__abstractmethods__', None):
+            return new_class
+
+        # Register using type as value
+        key = mcs._get_registration_key(name, new_class, registry_config)
+        registry_config.registry_dict[key] = new_class
+        return new_class
+
+# Usage: Define class → auto-registered
+class ImageXpressHandler(MicroscopeHandler, metaclass=MicroscopeHandlerMeta):
+    _microscope_type = 'imagexpress'
+```
+
+This pattern is impossible with duck typing because: (1) type identity is required as dict values—duck typing has no way to reference "the type itself" distinct from instances, (2) skipping abstract classes requires checking `__abstractmethods__`, a class-level attribute inaccessible to duck typing's instance-level probing, and (3) inheritance-based key derivation (extracting "imagexpress" from "ImageXpressHandler") requires class name access.
+
+The metaclass ensures exactly one handler per microscope type. Attempting to define a second `ImageXpressHandler` raises an exception at import time. Duck typing's runtime checks cannot provide this guarantee—duplicates would silently overwrite.
+
+**Pattern (Table 5.1, Row 6):** Auto-registration with type identity. Demonstrates that metaclasses fundamentally depend on nominal typing to distinguish classes from instances.
 
 ### 5.8 Case Study 7: Five-Stage Type Transformation
 
-[TODO: Problem-first presentation]
+The `@global_pipeline_config` decorator chain demonstrates nominal typing's power for systematic type manipulation. Starting from a base config, one decorator invocation spawns a 5-stage type transformation that generates lazy companion types, injects fields into parent configs, and maintains bidirectional registries.
+
+**Stage 1:** `@auto_create_decorator` marks `GlobalPipelineConfig` with `_is_global_config = True` and creates the decorator itself via `setattr(module, 'global_pipeline_config', decorator)`.
+
+**Stage 2:** `@global_pipeline_config(inherit_as_none=True)` on `PathPlanningConfig` triggers lazy type generation: `type("LazyPathPlanningConfig", (PathPlanningConfig, LazyDataclass), namespace)` where namespace contains all fields with `default=None`.
+
+**Stage 3:** Descriptor protocol integration via `__set_name__` injects fields into parent configs. When `Pipeline` defines `path_planning: LazyPathPlanningConfig`, the descriptor automatically adds `path_planning` to `GlobalPipelineConfig` with `default_factory=LazyPathPlanningConfig`.
+
+**Stage 4:** Bidirectional registries link lazy ↔ base types: `_lazy_to_base[LazyPathPlanningConfig] = PathPlanningConfig` and `_base_to_lazy[PathPlanningConfig] = LazyPathPlanningConfig`. Normalization uses these at resolution time.
+
+**Stage 5:** MRO-based resolution walks `type(config).__mro__`, normalizing each type via registry lookup. The sourceType in `(value, scope, sourceType)` carries provenance that duck typing cannot provide.
+
+This 5-stage chain is single-stage generation (not nested metaprogramming). It respects Veldhuizen's (2006) bounds: full power without complexity explosion. The lineage tracking (which lazy type came from which base) is only possible with nominal identity—structurally equivalent types would be indistinguishable.
+
+**Pattern (Table 5.1, Row 7):** Type transformation with lineage tracking. Demonstrates the limits of what duck typing can express: runtime type generation requires `type()`, which returns nominal identities.
 
 ### 5.9 Case Study 8: Dual-Axis Resolution Algorithm
 
-[TODO: Code-first presentation]
+```python
+def resolve_field_inheritance(obj, field_name, scope_stack):
+    mro = [normalize_type(T) for T in type(obj).__mro__]
+
+    for scope in scope_stack:  # X-axis: context hierarchy
+        for mro_type in mro:    # Y-axis: class hierarchy
+            config = get_config_at_scope(scope, mro_type)
+            if config and hasattr(config, field_name):
+                value = getattr(config, field_name)
+                if value is not None:
+                    return (value, scope, mro_type)  # Provenance tuple
+    return (None, None, None)
+```
+
+The algorithm walks two hierarchies simultaneously: scope_stack (global → plate → step) and MRO (child class → parent class). For each (scope, type) pair, it checks if a config of that type exists at that scope with a non-None value for the requested field.
+
+The `mro_type` in the return tuple is the provenance: it records *which type* provided the value. This is only meaningful under nominal typing where `PathPlanningConfig` and `LazyPathPlanningConfig` are distinct despite identical structure. Duck typing sees both as having the same attributes, making `mro_type` meaningless.
+
+MRO position encodes priority: types earlier in the MRO override later types. The dual-axis product (scope × MRO) creates O(|scopes| × |MRO|) checks in worst case, but terminates early on first match. Duck typing would require O(n) sequential attribute probing with no principled ordering.
+
+**Pattern (Table 5.1, Row 8):** Dual-axis resolution with scope × MRO product. Demonstrates that provenance tracking fundamentally requires nominal identity (Corollary 6.3).
 
 ### 5.10 Case Study 9: Custom isinstance() Implementation
 
-[TODO: Code-first presentation]
+```python
+class GlobalConfigMeta(type):
+    def __instancecheck__(cls, instance):
+        # Virtual base class check
+        if hasattr(instance.__class__, '_is_global_config'):
+            return instance.__class__._is_global_config
+        return super().__instancecheck__(instance)
+
+# Usage: isinstance(config, GlobalConfigBase) returns True
+# even if config doesn't inherit from GlobalConfigBase
+```
+
+This metaclass enables "virtual inheritance"—classes can satisfy `isinstance(obj, Base)` without explicitly inheriting from `Base`. The check relies on the `_is_global_config` class attribute (set by `@auto_create_decorator`), creating a nominal marker that duck typing cannot replicate.
+
+Duck typing could check `hasattr(instance, '_is_global_config')`, but this is instance-level. The metaclass pattern requires class-level checks (`instance.__class__._is_global_config`), distinguishing the class from its instances. This is fundamentally nominal: the check is "does this type have this marker?" not "does this instance have this attribute?"
+
+The virtual inheritance enables interface segregation: `GlobalPipelineConfig` advertises conformance to `GlobalConfigBase` without inheriting implementation. This is impossible with duck typing's attribute probing—there's no way to express "this class satisfies this interface" as a runtime-checkable property.
+
+**Pattern (Table 5.1, Row 9):** Custom isinstance via class-level markers. Demonstrates that Python's metaobject protocol is fundamentally nominal.
 
 ### 5.11 Case Study 10: Dynamic Interface Generation
 
-[TODO: Pattern-first presentation]
+**Pattern:** Metaclass-generated abstract base classes create interfaces at runtime based on configuration. The generated ABCs have no methods or attributes—they exist purely for nominal identity.
+
+```python
+class DynamicInterfaceMeta(ABCMeta):
+    _generated_interfaces: Dict[str, Type] = {}
+
+    @classmethod
+    def get_or_create_interface(mcs, interface_name: str) -> Type:
+        if interface_name not in mcs._generated_interfaces:
+            # Generate pure nominal type
+            interface = type(interface_name, (ABC,), {})
+            mcs._generated_interfaces[interface_name] = interface
+        return mcs._generated_interfaces[interface_name]
+
+# Runtime usage
+IStreamingConfig = DynamicInterfaceMeta.get_or_create_interface("IStreamingConfig")
+class NapariConfig(StreamingConfig, IStreamingConfig): pass
+
+# Later: isinstance(config, IStreamingConfig) → True
+```
+
+The generated interfaces have empty namespaces—no methods, no attributes. Their sole purpose is nominal identity: marking that a class explicitly claims to implement an interface. This is pure nominal typing: structural typing would see these interfaces as equivalent to `object` (since they have no distinguishing structure), but nominal typing distinguishes `IStreamingConfig` from `IVideoConfig` even though both are structurally empty.
+
+Duck typing has no equivalent concept. There's no way to express "this class explicitly implements this contract" without actual attributes to probe. The nominal marker enables explicit interface declarations in a dynamically-typed language.
+
+**Pattern (Table 5.1, Row 10):** Runtime-generated interfaces with empty structure. Demonstrates that nominal identity can exist independent of structural content.
 
 ### 5.12 Case Study 11: Framework Detection via Sentinel Type
 
-[TODO: Code-first presentation]
+```python
+# Framework config uses sentinel type as registry key
+_FRAMEWORK_CONFIG = type("_FrameworkConfigSentinel", (), {})()
+
+# Detection: check if sentinel is registered
+def has_framework_config():
+    return _FRAMEWORK_CONFIG in GlobalRegistry.configs
+
+# Alternative approaches fail:
+# hasattr(module, '_FRAMEWORK_CONFIG') → fragile, module probing
+# 'framework' in config_names → string-based, no type safety
+```
+
+The sentinel is a runtime-generated type with empty namespace, instantiated once, and used as a dictionary key. Its nominal identity (memory address) guarantees uniqueness—even if another module creates `type("_FrameworkConfigSentinel", (), {})()`, the two sentinels are distinct objects with distinct identities.
+
+Duck typing cannot replicate this pattern. Attribute-based detection (`hasattr(module, attr_name)`) couples the check to module structure. String-based keys ('framework') lack type safety. The nominal sentinel provides a refactoring-safe, type-safe marker that exists independent of names or attributes.
+
+This pattern appears in framework detection, feature flags, and capability markers—contexts where the existence of a capability needs to be checked without coupling to implementation details.
+
+**Pattern (Table 5.1, Row 11):** Sentinel types for framework detection. Demonstrates nominal identity as a capability marker independent of structure.
 
 ### 5.13 Case Study 12: Dynamic Method Injection
 
-[TODO: Code-first presentation]
+```python
+def inject_conversion_methods(target_type: Type, methods: Dict[str, Callable]):
+    """Inject methods into a type's namespace at runtime."""
+    for method_name, method_impl in methods.items():
+        setattr(target_type, method_name, method_impl)
+
+# Usage: Inject GPU conversion methods into MemoryType converters
+inject_conversion_methods(NumpyConverter, {
+    'to_cupy': lambda self, data, gpu: cupy.asarray(data, gpu),
+    'to_torch': lambda self, data, gpu: torch.tensor(data, device=gpu),
+})
+```
+
+Method injection requires a target type—the type whose namespace will be modified. Duck typing has no concept of "the type itself" as a mutable namespace. It can only access instances. To inject methods duck-style would require modifying every instance's `__dict__`, which doesn't affect future instances.
+
+The nominal type serves as a shared namespace. Injecting `to_cupy` into `NumpyConverter` affects all instances (current and future) because method lookup walks `type(obj).__dict__` before `obj.__dict__`. This is fundamentally nominal: the type is a first-class object with its own namespace, distinct from instance namespaces.
+
+This pattern enables plugins, mixins, and monkey-patching—all requiring types as mutable namespaces. Duck typing's instance-level view cannot express "modify the behavior of all objects of this kind."
+
+**Pattern (Table 5.1, Row 12):** Dynamic method injection into type namespaces. Demonstrates that Python's type system treats types as first-class objects with nominal identity.
 
 ### 5.14 Case Study 13: Bidirectional Type Lookup
 
-[TODO: Problem-first presentation]
+OpenHCS maintains bidirectional registries linking lazy types to base types: `_lazy_to_base[LazyX] = X` and `_base_to_lazy[X] = LazyX`. How should the system prevent desynchronization bugs where the two dicts fall out of sync?
+
+```python
+class BidirectionalTypeRegistry:
+    def __init__(self):
+        self._forward: Dict[Type, Type] = {}  # lazy → base
+        self._reverse: Dict[Type, Type] = {}  # base → lazy
+
+    def register(self, lazy_type: Type, base_type: Type):
+        # Single source of truth: type identity enforces bijection
+        if lazy_type in self._forward:
+            raise ValueError(f"{lazy_type} already registered")
+        if base_type in self._reverse:
+            raise ValueError(f"{base_type} already has lazy companion")
+
+        self._forward[lazy_type] = base_type
+        self._reverse[base_type] = lazy_type
+
+# Type identity as key ensures sync
+registry.register(LazyPathPlanningConfig, PathPlanningConfig)
+# Later: registry.normalize(LazyPathPlanningConfig) → PathPlanningConfig
+#        registry.get_lazy(PathPlanningConfig) → LazyPathPlanningConfig
+```
+
+Duck typing would require maintaining two separate dicts with string keys (class names), introducing synchronization bugs. Renaming `PathPlanningConfig` would break the string-based lookup. The nominal type identity serves as a refactoring-safe key that guarantees both dicts stay synchronized—a type can only be registered once, enforcing bijection.
+
+The registry operations are O(1) lookups by type identity. Duck typing's string-based approach would require O(n) string matching or maintaining parallel indices, both error-prone and slower.
+
+**Pattern (Table 5.1, Row 13):** Bidirectional type registries with synchronization guarantees. Demonstrates that nominal identity as dict key prevents desynchronization bugs inherent to string-based approaches.
 
 ---
 
