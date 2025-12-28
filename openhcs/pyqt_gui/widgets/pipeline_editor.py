@@ -970,6 +970,10 @@ class PipelineEditorWidget(AbstractManagerWidget):
         self.pipeline_steps = [s for s in self.pipeline_steps if id(s) not in steps_to_delete]
         self._normalize_step_scope_tokens()
 
+        # Sync to Pipeline ObjectState
+        if self.current_plate:
+            self._update_pipeline_steps(self.current_plate, self.pipeline_steps)
+
         if self.selected_step in [getattr(step, 'name', '') for step in items]:
             self.selected_step = ""
 
@@ -1061,6 +1065,11 @@ class PipelineEditorWidget(AbstractManagerWidget):
     def _post_reorder(self) -> None:
         """Additional cleanup after reorder - normalize tokens and emit signal."""
         self._normalize_step_scope_tokens()
+
+        # Sync to Pipeline ObjectState
+        if self.current_plate:
+            self._update_pipeline_steps(self.current_plate, self.pipeline_steps)
+
         self.pipeline_changed.emit(self.pipeline_steps)
         # Broadcast to global event bus so open step editors update their colors
         self._broadcast_to_event_bus('pipeline', self.pipeline_steps)
