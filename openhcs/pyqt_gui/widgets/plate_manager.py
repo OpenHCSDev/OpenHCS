@@ -32,6 +32,7 @@ from openhcs.config_framework.global_config import (
 )
 from openhcs.config_framework.context_manager import config_context
 from openhcs.config_framework.object_state import ObjectState, ObjectStateRegistry
+from openhcs.config_framework.collection_containers import RootState
 from openhcs.core.config_cache import _sync_save_config
 from openhcs.core.xdg_paths import get_config_file_path
 from openhcs.debug.pickle_to_python import generate_complete_orchestrator_code
@@ -47,6 +48,9 @@ from openhcs.pyqt_gui.widgets.shared.services.compilation_service import Compila
 from openhcs.pyqt_gui.widgets.shared.scope_visual_config import ListItemType
 
 logger = logging.getLogger(__name__)
+
+# Root ObjectState scope - tracks all plates in the application
+ROOT_SCOPE_ID = ""
 
 
 class PlateManagerWidget(AbstractManagerWidget):
@@ -124,7 +128,7 @@ class PlateManagerWidget(AbstractManagerWidget):
         self.pipeline_editor = None  # Will be set by main window
 
         # Business logic state (extracted from Textual version)
-        self.plates: List[Dict] = []  # List of plate dictionaries
+        # NOTE: self.plates is now a @property that derives from Root ObjectState
         self.selected_plate_path: str = ""
         self.orchestrators: Dict[str, PipelineOrchestrator] = {}
         self.plate_configs: Dict[str, Dict] = {}
@@ -160,6 +164,39 @@ class PlateManagerWidget(AbstractManagerWidget):
         logger.info("🧹 Cleaning up PlateManagerWidget resources...")
         self._zmq_service.disconnect()
         logger.info("✅ PlateManagerWidget cleanup completed")
+
+    # ========== Root ObjectState Management ==========
+
+    def _ensure_root_state(self) -> ObjectState:
+        """Get or create root ObjectState tracking all plates.
+
+        Returns:
+            Root ObjectState with orchestrator_scope_ids parameter
+        """
+        state = ObjectStateRegistry.get_by_scope(ROOT_SCOPE_ID)
+        if not state:
+            root = RootState()
+            state = ObjectState(object_instance=root, scope_id=ROOT_SCOPE_ID)
+            ObjectStateRegistry.register(state)
+        return state
+
+    @property
+    def plates(self) -> List[Dict]:
+        """Derive plate list from root ObjectState.
+
+        Converts orchestrator_scope_ids (List[str]) to List[Dict] for backwards compatibility.
+        Each plate dict has 'name' (derived from path) and 'path' keys.
+        """
+        root_state = self._ensure_root_state()
+        plate_paths = root_state.get_parameter("orchestrator_scope_ids") or []
+
+        return [
+            {
+                'name': Path(path).name,
+                'path': path
+            }
+            for path in plate_paths
+        ]
 
     # ExecutionHost interface
     def emit_status(self, msg: str) -> None: self.status_message.emit(msg)
@@ -327,24 +364,27 @@ class PlateManagerWidget(AbstractManagerWidget):
         added_plates = []
         last_added_path = None
 
+        # Get current plate paths from root ObjectState
+        root_state = self._ensure_root_state()
+        current_paths = root_state.get_parameter("orchestrator_scope_ids") or []
+        new_paths = list(current_paths)  # Copy for mutation
+
         for selected_path in selected_paths:
+            plate_path = str(selected_path)
+
             # Check if plate already exists
-            if any(plate['path'] == str(selected_path) for plate in self.plates):
+            if plate_path in current_paths:
                 continue
 
-            # Add the plate to the list
-            plate_name = selected_path.name
-            plate_path = str(selected_path)
-            plate_entry = {
-                'name': plate_name,
-                'path': plate_path,
-            }
-
-            self.plates.append(plate_entry)
-            added_plates.append(plate_name)
+            # Add plate path to root ObjectState
+            new_paths.append(plate_path)
+            added_plates.append(selected_path.name)
             last_added_path = plate_path
 
+        # Update root ObjectState if any plates were added
         if added_plates:
+            root_state.update_parameter("orchestrator_scope_ids", new_paths)
+
             self.update_item_list()
             # Select the last added plate to ensure pipeline assignment works correctly
             if last_added_path:
@@ -757,7 +797,11 @@ class PlateManagerWidget(AbstractManagerWidget):
         if not plate_paths:
             return
 
-        existing_paths = {str(plate['path']) for plate in self.plates}
+        # Get current plate paths from root ObjectState
+        root_state = self._ensure_root_state()
+        current_paths = root_state.get_parameter("orchestrator_scope_ids") or []
+        existing_paths = set(current_paths)
+        new_paths = list(current_paths)  # Copy for mutation
         added_count = 0
 
         for plate_path in plate_paths:
@@ -766,12 +810,15 @@ class PlateManagerWidget(AbstractManagerWidget):
                 continue
 
             plate_name = Path(plate_str).name or plate_str
-            self.plates.append({'name': plate_name, 'path': plate_str})
+            new_paths.append(plate_str)
             existing_paths.add(plate_str)
             added_count += 1
             logger.info(f"Added plate '{plate_name}' from orchestrator code")
 
         if added_count:
+            # Update root ObjectState
+            root_state.update_parameter("orchestrator_scope_ids", new_paths)
+
             if self.item_list:
                 self.update_item_list()
             status_message = f"Added {added_count} plate(s) from orchestrator code"
@@ -1128,7 +1175,12 @@ class PlateManagerWidget(AbstractManagerWidget):
     def _perform_delete(self, items: List[Any]) -> None:
         """Remove plates from backing list and cleanup orchestrators (required abstract method)."""
         paths_to_delete = {plate['path'] for plate in items}
-        self.plates = [p for p in self.plates if p['path'] not in paths_to_delete]
+
+        # Remove from root ObjectState
+        root_state = self._ensure_root_state()
+        current_paths = root_state.get_parameter("orchestrator_scope_ids") or []
+        new_paths = [p for p in current_paths if p not in paths_to_delete]
+        root_state.update_parameter("orchestrator_scope_ids", new_paths)
 
         # Clean up orchestrators and ObjectStates for deleted plates
         for path in paths_to_delete:
