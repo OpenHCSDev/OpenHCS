@@ -59,8 +59,12 @@ PlateState ObjectState (scope: "plate_A" = plate_path)
   # PipelineConfig already ObjectState - no changes needed
   # Orchestrator NOT stored - recreated on-demand from PlateState
 
-PipelineState ObjectState (scope: "plate_A::pipeline")
-  └── step_scope_ids: List[str] = ["plate_A::step_0", "plate_A::step_1"]
+Pipeline ObjectState (scope: "plate_A::pipeline")
+  └── name: str = "pipeline_for_plate_A"  (existing field)
+  └── description: str (existing field)
+  └── metadata: dict (existing field)
+  └── step_scope_ids: List[str] = ["plate_A::step_0", "plate_A::step_1"]  (NEW - added field)
+  # Pipeline inherits from list, but we track scope_ids not actual steps
 
 FunctionStep ObjectState (scope: "plate_A::step_0")
   └── (already tracked - FunctionStep.func, configs, etc.)
@@ -74,6 +78,35 @@ FunctionStep ObjectState (scope: "plate_A::step_0")
 
 **All captured in snapshots. Time travel restores everything.**
 
+### Why Explicit Schemas? (Rationale)
+
+**Question**: Why create new classes instead of tracking dicts/lists directly in ObjectState?
+
+**Answer**: ObjectState tracks **configuration objects with schemas**, not arbitrary data structures.
+
+**What breaks if we track dicts/lists?**
+1. **No type schema**: `dict` tells you nothing about what keys exist or what they mean
+2. **No MRO**: Dicts don't have inheritance chains for resolution
+3. **Ambiguous nesting**: `{'a': {'b': 1}}` - is that `a.b` or a dict-valued parameter?
+4. **No declaration**: From the Manifesto - "Declarative Supremacy" - configuration IS documentation
+
+**The principle**: If something is important enough to track with ObjectState, it's important enough to **declare what it is**.
+
+```python
+# NOT declarative - ad-hoc data, must guess what keys exist
+{'name': 'plate1', 'path': '/path'}
+
+# Declarative - schema is explicit, inspectable, type-checkable
+@dataclass
+class PlateState:
+    name: str
+    path: str
+```
+
+ObjectState is built around **object-oriented semantics**: attributes, MRO, classes, instances. It walks MRO chains and context stacks. This only makes sense for objects with schemas, not data structures.
+
+**The "indirection" of creating PlateState isn't indirection - it's making implicit structure explicit.**
+
 ### Data Model
 
 Define the container objects that ObjectState will wrap:
@@ -83,7 +116,6 @@ Define the container objects that ObjectState will wrap:
 
 from dataclasses import dataclass, field
 from typing import List
-from pathlib import Path
 
 @dataclass
 class RootState:
@@ -91,6 +123,8 @@ class RootState:
 
     ObjectState wraps this to make plate_scope_ids a tracked parameter.
     No methods - pure data container.
+
+    WHY THIS EXISTS: No Root class exists. We need something to track the plate list.
     """
     plate_scope_ids: List[str] = field(default_factory=list)
 
@@ -105,27 +139,28 @@ class PlateState:
     This REPLACES the Dict entries in PlateManager.plates:
         OLD: {'name': 'plate1', 'path': '/path/to/plate1'}
         NEW: PlateState(name='plate1', plate_path='/path/to/plate1', ...)
+
+    WHY THIS EXISTS: Plates are currently dicts. No Plate class exists.
+    Dicts can't be tracked by ObjectState (no schema, no MRO, no declaration).
     """
     name: str  # Display name (e.g., "plate1")
     plate_path: str  # Absolute path to plate directory (immutable identity, used as scope_id)
-    pipeline_scope_id: str  # e.g., "plate_A::pipeline"
-
-
-@dataclass
-class PipelineState:
-    """Per-pipeline container tracking step relationships.
-
-    ObjectState wraps this to make step_scope_ids a tracked parameter.
-    This REPLACES PipelineEditor.plate_pipelines dict.
-
-    OLD: plate_pipelines[plate_path] = [FunctionStep(...), ...]
-    NEW: PipelineState(step_scope_ids=["plate::step_0", "plate::step_1"])
-          Derive steps via: [ObjectStateRegistry.get_by_scope(sid).object_instance for sid in step_scope_ids]
-    """
-    step_scope_ids: List[str] = field(default_factory=list)
+    pipeline_scope_id: str  # e.g., "/path/to/plate::pipeline"
 ```
 
-**Why dataclasses?** ObjectState already knows how to extract parameters from dataclasses using `dataclass_fields()`. This is the path of least resistance.
+**Why NOT PipelineState?** Pipeline class already exists ([openhcs/core/pipeline/\_\_init\_\_.py:31](openhcs/core/pipeline/__init__.py#L31)):
+
+```python
+class Pipeline(list):
+    """Behaves like List[AbstractStep] but carries metadata."""
+    def __init__(self, steps=None, *, name=None, metadata=None, description=None):
+        super().__init__(steps or [])
+        self.name = name or f"Pipeline_{id(self)}"
+        self.description = description
+        self.metadata = metadata or {}
+```
+
+We'll **use Pipeline directly** and add a `step_scope_ids` attribute. No new class needed.
 
 **Why NOT store orchestrator?** PipelineOrchestrator has:
 - Runtime state (OrchestratorState enum, caches, visualizers)
@@ -145,9 +180,11 @@ class PipelineState:
 
 **File**: `openhcs/config_framework/collection_containers.py` (NEW)
 
-Create RootState, PlateState, PipelineState as shown in Data Model section above.
+Create RootState and PlateState as shown in Data Model section above.
 
 **No dependencies**. These are pure data containers. Can implement and test in isolation.
+
+**Note**: We do NOT create PipelineState - Pipeline class already exists at [openhcs/core/pipeline/\_\_init\_\_.py:31](openhcs/core/pipeline/__init__.py#L31). We'll use it directly.
 
 #### Phase 2: Root ObjectState for Plates
 
@@ -269,7 +306,7 @@ self.plate_pipelines: Dict[str, List[FunctionStep]] = {}  # LEAK
 **Changes**:
 
 ```python
-from openhcs.config_framework.collection_containers import PipelineState
+from openhcs.core.pipeline import Pipeline
 
 def __init__(self):
     # ... existing init ...
@@ -284,7 +321,9 @@ def _ensure_pipeline_state(self, plate_scope: str) -> ObjectState:
     pipeline_scope = f"{plate_scope}::pipeline"
     state = ObjectStateRegistry.get_by_scope(pipeline_scope)
     if not state:
-        pipeline = PipelineState()  # Empty step list initially
+        # Use existing Pipeline class, add step_scope_ids attribute
+        pipeline = Pipeline(name=f"pipeline_for_{plate_scope}")
+        pipeline.step_scope_ids = []  # NEW attribute for tracking scope IDs
         state = ObjectState(object_instance=pipeline, scope_id=pipeline_scope)
         ObjectStateRegistry.register(state)
     return state
@@ -319,13 +358,8 @@ def get_steps(self, plate_scope: str) -> List[FunctionStep]:
         return []
 
     step_scope_ids = pipeline_state.get_parameter("step_scope_ids") or []
-    steps = []
-    for scope_id in step_scope_ids:
-        state = ObjectStateRegistry.get_by_scope(scope_id)
-        if not state:
-            raise KeyError(f"Step ObjectState missing: {scope_id}")  # FAIL LOUD
-        steps.append(state.object_instance)
-    return steps
+    return [ObjectStateRegistry.get_by_scope(sid).object_instance
+            for sid in step_scope_ids]
 
 def _get_backing_items(self) -> List:
     """Override from AbstractManagerWidget - derive from ObjectState instead of self.pipeline_steps."""
@@ -383,7 +417,7 @@ def _perform_delete(self, items: List[PlateState]) -> None:
             [s for s in current if s != plate_scope])
 
         # Cascade unregister (already exists in ObjectStateRegistry)
-        # This automatically removes PlateState, PipelineState, all FunctionSteps
+        # This automatically removes PlateState, Pipeline, all FunctionSteps
         ObjectStateRegistry.unregister_scope_and_descendants(plate_scope)
 
         # Clean up orchestrator cache (ephemeral)
@@ -396,7 +430,7 @@ def _perform_delete(self, items: List[PlateState]) -> None:
 **Reorder** (PipelineEditor):
 ```python
 def _reorder_steps(self, new_order: List[FunctionStep]) -> None:
-    """Reorder steps - update PipelineState.step_scope_ids."""
+    """Reorder steps - update Pipeline.step_scope_ids."""
     if not self.current_plate:
         return
 
@@ -517,17 +551,18 @@ root.plates.append(new_plate)  # Auto-registers, auto-updates scope_ids
 | `plates: List[Dict]` | Root ObjectState with `plate_scope_ids` | plate_manager.py:127-128 |
 | `plate_configs` dict | Keep as cache, clear on time travel | plate_manager.py:131 |
 | `plate_pipelines` dict | Pipeline ObjectState with `step_scope_ids` | pipeline_editor.py:207 |
-| `pipeline_steps` list | Derive from PipelineState via `get_steps()` | pipeline_editor.py:204 |
+| `pipeline_steps` list | Derive from Pipeline via `get_steps()` | pipeline_editor.py:204 |
 | `orchestrators` dict | Keep as cache, clear on time travel | plate_manager.py:129 |
 
 ### Files to Create
 
-1. [openhcs/config_framework/collection_containers.py](openhcs/config_framework/collection_containers.py) - RootState, PlateState, PipelineState dataclasses
+1. [openhcs/config_framework/collection_containers.py](openhcs/config_framework/collection_containers.py) - RootState, PlateState dataclasses (NOT PipelineState - using existing Pipeline class)
 
 ### Files to Modify
 
 1. [openhcs/pyqt_gui/widgets/plate_manager.py](openhcs/pyqt_gui/widgets/plate_manager.py) - Root + PlateState integration
-2. [openhcs/pyqt_gui/widgets/pipeline_editor.py](openhcs/pyqt_gui/widgets/pipeline_editor.py) - PipelineState integration
+2. [openhcs/pyqt_gui/widgets/pipeline_editor.py](openhcs/pyqt_gui/widgets/pipeline_editor.py) - Pipeline integration (add step_scope_ids attribute)
+3. [openhcs/core/pipeline/\_\_init\_\_.py](openhcs/core/pipeline/__init__.py) - Pipeline class (add step_scope_ids attribute tracking - optional, could just set dynamically)
 
 ### Testing Strategy
 
