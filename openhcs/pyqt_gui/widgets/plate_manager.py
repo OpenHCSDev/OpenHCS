@@ -1199,11 +1199,8 @@ class PlateManagerWidget(AbstractManagerWidget):
                 del self.plate_configs[path_str]
                 logger.debug(f"Deleted plate_configs entry for: {path}")
 
-            # Delete pipeline steps (prevents resurrection)
-            if hasattr(self, 'pipeline_editor') and self.pipeline_editor:
-                if path_str in self.pipeline_editor.plate_pipelines:
-                    del self.pipeline_editor.plate_pipelines[path_str]
-                    logger.debug(f"Deleted plate_pipelines entry for: {path}")
+            # NOTE: Pipeline steps are cascade-deleted via unregister_scope_and_descendants above
+            # The Pipeline ObjectState ({path}::pipeline) is automatically cleaned up
 
         if self.selected_plate_path in paths_to_delete:
             self.selected_plate_path = ""

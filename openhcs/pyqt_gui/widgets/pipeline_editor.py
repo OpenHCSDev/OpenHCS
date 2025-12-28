@@ -22,6 +22,7 @@ from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
 from openhcs.core.config import GlobalPipelineConfig
 from openhcs.io.filemanager import FileManager
 from openhcs.core.steps.function_step import FunctionStep
+from openhcs.core.pipeline import Pipeline
 # Mixin imports REMOVED - now in ABC (handle_selection_change_with_prevention, CrossWindowPreviewMixin)
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 from openhcs.pyqt_gui.widgets.shared.scope_visual_config import ListItemType
@@ -204,7 +205,8 @@ class PipelineEditorWidget(AbstractManagerWidget):
         self.pipeline_steps: List[FunctionStep] = []
         self.current_plate: str = ""
         self.selected_step: str = ""
-        self.plate_pipelines: Dict[str, List[FunctionStep]] = {}  # Per-plate pipeline storage
+        # NOTE: plate_pipelines now derived from Pipeline ObjectState (phase 3)
+        # Use _get_steps_from_pipeline_state() and _update_pipeline_steps()
 
         # Reference to plate manager (set externally)
         # Note: orchestrator is looked up dynamically via _get_current_orchestrator()
@@ -231,7 +233,109 @@ class PipelineEditorWidget(AbstractManagerWidget):
 
         # Step-specific signal
         self.pipeline_changed.connect(self.on_pipeline_changed)
-    
+
+    # ========== Pipeline ObjectState Management ==========
+
+    def _ensure_pipeline_state(self, plate_path: str) -> ObjectState:
+        """Get or create Pipeline ObjectState for a plate.
+
+        Args:
+            plate_path: Path of the plate
+
+        Returns:
+            Pipeline ObjectState with step_scope_ids parameter
+        """
+        if not plate_path:
+            return None
+
+        pipeline_scope = f"{plate_path}::pipeline"
+        state = ObjectStateRegistry.get_by_scope(pipeline_scope)
+
+        if not state:
+            # Create new Pipeline instance
+            pipeline = Pipeline(name=Path(plate_path).name)
+            # Add step_scope_ids attribute for tracking steps
+            pipeline.step_scope_ids = []
+
+            # Create ObjectState
+            state = ObjectState(
+                object_instance=pipeline,
+                scope_id=pipeline_scope,
+                parent_state=ObjectStateRegistry.get_by_scope(plate_path)
+            )
+            ObjectStateRegistry.register(state)
+
+        return state
+
+    def _get_steps_from_pipeline_state(self, plate_path: str) -> List[FunctionStep]:
+        """Derive step list from Pipeline ObjectState.
+
+        Args:
+            plate_path: Path of the plate
+
+        Returns:
+            List of FunctionStep objects derived from step_scope_ids
+        """
+        pipeline_state = self._ensure_pipeline_state(plate_path)
+        if not pipeline_state:
+            return []
+
+        step_scope_ids = pipeline_state.get_parameter("step_scope_ids") or []
+
+        steps = []
+        for scope_id in step_scope_ids:
+            step_state = ObjectStateRegistry.get_by_scope(scope_id)
+            if step_state:
+                steps.append(step_state.object_instance)
+
+        return steps
+
+    def _update_pipeline_steps(self, plate_path: str, steps: List[FunctionStep]) -> None:
+        """Update Pipeline ObjectState with new step list.
+
+        Args:
+            plate_path: Path of the plate
+            steps: New list of FunctionStep objects
+        """
+        pipeline_state = self._ensure_pipeline_state(plate_path)
+        if not pipeline_state:
+            return
+
+        # Build scope IDs for all steps
+        step_scope_ids = []
+        for step in steps:
+            scope_id = self._build_step_scope_id(step)
+            step_scope_ids.append(scope_id)
+
+        # Update Pipeline ObjectState parameter
+        pipeline_state.update_parameter("step_scope_ids", step_scope_ids)
+
+    @property
+    def plate_pipelines(self) -> Dict[str, List[FunctionStep]]:
+        """Backwards-compatible property for accessing plate pipelines.
+
+        Derives pipeline steps from Pipeline ObjectState for all registered plates.
+        This allows external code (e.g., plate_manager.py) to access pipelines
+        via self.pipeline_editor.plate_pipelines[plate_path].
+
+        Returns:
+            Dict mapping plate paths to their step lists
+        """
+        # Get all plate paths from root ObjectState
+        root_state = ObjectStateRegistry.get_by_scope("")
+        if not root_state:
+            return {}
+
+        plate_paths = root_state.get_parameter("orchestrator_scope_ids") or []
+
+        # Build dict of plate_path -> steps
+        result = {}
+        for plate_path in plate_paths:
+            steps = self._get_steps_from_pipeline_state(plate_path)
+            result[plate_path] = steps
+
+        return result
+
     # ========== Business Logic Methods (Extracted from Textual) ==========
     
     def format_item_for_display(self, step: FunctionStep, live_context_snapshot=None) -> Tuple[str, str]:
@@ -385,6 +489,10 @@ class PipelineEditorWidget(AbstractManagerWidget):
                 # Step already exists, just update the display
                 self.status_message.emit(f"Updated step: {edited_step.name}")
 
+            # Update Pipeline ObjectState with new step list
+            if self.current_plate:
+                self._update_pipeline_steps(self.current_plate, self.pipeline_steps)
+
             self.update_item_list()
             self.pipeline_changed.emit(self.pipeline_steps)
 
@@ -507,11 +615,10 @@ class PipelineEditorWidget(AbstractManagerWidget):
         self.pipeline_steps = new_pipeline_steps
         self._normalize_step_scope_tokens()
 
-        # Save pipeline to plate_pipelines dict for current plate
-        # This ensures set_current_plate() can reload it later
+        # Update Pipeline ObjectState with new step list
         if self.current_plate:
-            self.plate_pipelines[self.current_plate] = self.pipeline_steps
-            logger.debug(f"Saved pipeline ({len(self.pipeline_steps)} steps) for plate: {self.current_plate}")
+            self._update_pipeline_steps(self.current_plate, self.pipeline_steps)
+            logger.debug(f"Updated Pipeline ObjectState ({len(self.pipeline_steps)} steps) for plate: {self.current_plate}")
 
         self.update_item_list()
         self.pipeline_changed.emit(self.pipeline_steps)
@@ -544,11 +651,10 @@ class PipelineEditorWidget(AbstractManagerWidget):
                 self.pipeline_steps = steps
                 self._normalize_step_scope_tokens()
 
-                # Save pipeline to plate_pipelines dict for current plate
-                # This ensures set_current_plate() can reload it later
+                # Update Pipeline ObjectState with loaded steps
                 if self.current_plate:
-                    self.plate_pipelines[self.current_plate] = self.pipeline_steps
-                    logger.debug(f"Saved pipeline ({len(self.pipeline_steps)} steps) for plate: {self.current_plate}")
+                    self._update_pipeline_steps(self.current_plate, self.pipeline_steps)
+                    logger.debug(f"Updated Pipeline ObjectState ({len(self.pipeline_steps)} steps) for plate: {self.current_plate}")
 
                 self.update_item_list()
                 self.pipeline_changed.emit(self.pipeline_steps)
@@ -580,13 +686,13 @@ class PipelineEditorWidget(AbstractManagerWidget):
     def save_pipeline_for_plate(self, plate_path: str, pipeline: List[FunctionStep]):
         """
         Save pipeline for specific plate (extracted from Textual version).
-        
+
         Args:
             plate_path: Path of the plate
             pipeline: Pipeline steps to save
         """
-        self.plate_pipelines[plate_path] = pipeline
-        logger.debug(f"Saved pipeline for plate: {plate_path}")
+        self._update_pipeline_steps(plate_path, pipeline)
+        logger.debug(f"Updated Pipeline ObjectState for plate: {plate_path}")
     
     def set_current_plate(self, plate_path: str):
         """
@@ -603,11 +709,11 @@ class PipelineEditorWidget(AbstractManagerWidget):
 
         self.current_plate = plate_path
 
-        # Load pipeline for the new plate
+        # Load pipeline for the new plate from Pipeline ObjectState
         if plate_path:
-            plate_pipeline = self.plate_pipelines.get(plate_path, [])
+            plate_pipeline = self._get_steps_from_pipeline_state(plate_path)
             self.pipeline_steps = plate_pipeline
-            logger.info(f"  → Loaded {len(plate_pipeline)} steps for plate")
+            logger.info(f"  → Loaded {len(plate_pipeline)} steps for plate from Pipeline ObjectState")
         else:
             self.pipeline_steps = []
             logger.info(f"  → No plate selected, cleared pipeline")
