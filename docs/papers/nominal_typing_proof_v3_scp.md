@@ -305,6 +305,27 @@ A discipline that gives different compatibility answers depending on which code 
 
 *Proof.* In systems with inheritance ($B \neq \emptyset$): nominal typing ($\{N, B, S\}$) strictly dominates. In systems without inheritance ($B = \emptyset$): structural typing with Protocols ($\{N, S\}$) is coherent and strictly dominates incoherent duck typing. The only "advantage" of duck typing—avoiding interface declaration—is not a capability but deferred work with negative value (lost verification, documentation, composition guarantees). $\blacksquare$
 
+**Theorem 2.10g (Structural Typing Eliminability).** In systems with inheritance ($B \neq \emptyset$), structural typing is eliminable via boundary adaptation.
+
+*Proof.* Let $S$ be a system using Protocol $P$ to accept third-party type $T$ that cannot be modified.
+
+1. **Adapter construction.** Define adapter class: `class TAdapter(T, P_as_ABC): pass`
+2. **Boundary wrapping.** At ingestion, wrap: `adapted = TAdapter(instance)` (for instances) or simply use `TAdapter` as the internal type (for classes)
+3. **Internal nominal typing.** All internal code uses `isinstance(x, P_as_ABC)` with nominal semantics
+4. **Equivalence.** The adapted system $S'$ accepts exactly the same inputs as $S$ but uses nominal typing internally
+
+The systems are equivalent in capability. Structural typing provides no capability that nominal typing with adapters lacks. $\blacksquare$
+
+**Corollary 2.10h (Structural Typing as Convenience).** When $B \neq \emptyset$, structural typing (Protocol) is not a typing necessity but a convenience—it avoids writing the 2-line adapter class. Convenience is not a typing capability.
+
+**Corollary 2.10i (Typing Discipline Hierarchy).** The typing disciplines form a strict hierarchy:
+
+1. **Duck typing** ($\{S\}$, ad-hoc): Incoherent (Theorem 2.10d). Never valid.
+2. **Structural typing** ($\{N, S\}$, Protocol): Coherent but eliminable when $B \neq \emptyset$ (Theorem 2.10g). Valid only when $B = \emptyset$.
+3. **Nominal typing** ($\{N, B, S\}$, ABC): Coherent and necessary. The only non-eliminable discipline for systems with inheritance.
+
+**Remark.** Languages without inheritance (Go) have $B = \emptyset$ by design. For these languages, structural typing with declared interfaces is the correct choice—not because structural typing is superior, but because nominal typing requires $B$ and Go provides none. Go's interfaces are coherent ($\{N, S\}$). Go does not use duck typing.
+
 **Definition 2.11 (Nominal Typing).** A typing discipline is *nominal* if type compatibility requires identity in the inheritance hierarchy:
 $$\text{compatible}_{\text{nominal}}(x, T) \iff T \in \text{ancestors}(\text{type}(x))$$
 
@@ -2499,28 +2520,54 @@ Our theorems establish necessary conditions for provenance-tracking systems, but
 
 **Lean proofs assume well-formedness.** Our Lean 4 verification includes `Registry.wellFormed` and MRO monotonicity as axioms rather than derived properties. We prove theorems *given* these axioms, but do not prove the axioms themselves from more primitive foundations. This is standard practice in mechanized verification (e.g., CompCert assumes well-typed input), but limits the scope of our machine-checked guarantees.
 
-### 8.2 When Structural Typing Is a Valid Concession (And Duck Typing Never Is)
+### 8.2 The Typing Discipline Hierarchy
 
-Theorem 3.1 establishes that structural typing is valid for "namespace-only" classes---those lacking explicit inheritance. However, Theorem 2.10d establishes that *duck typing* (ad-hoc capability probing) is never valid---it is incoherent, not merely dominated.
+Theorem 2.10d establishes that duck typing is incoherent. Theorem 2.10g establishes that structural typing is eliminable when $B \neq \emptyset$. Together, these results collapse the space of valid typing disciplines.
 
-**The critical distinction:**
+**The complete hierarchy:**
 
-| Discipline | Declaration | Coherent? | Valid Concession? |
-|------------|-------------|-----------|-------------------|
-| Structural (Protocol) | Declared interface $T$ | Yes | Yes, when $B = \emptyset$ |
-| Duck typing (hasattr) | No declaration | No | Never |
+| Discipline | Coherent? | Eliminable? | When Valid |
+|------------|-----------|-------------|------------|
+| Duck typing ($\{S\}$) | No (Thm 2.10d) | N/A | Never |
+| Structural ($\{N, S\}$) | Yes | Yes, when $B \neq \emptyset$ (Thm 2.10g) | Only when $B = \emptyset$ |
+| Nominal ($\{N, B, S\}$) | Yes | No | Always (when $B \neq \emptyset$) |
 
-**Structural typing with Protocols** ($\{N, S\}$) is a coherent discipline: you declare interface $T$, then verify $S(\text{type}(x)) \supseteq S(T)$. This is valid when inheritance is unavailable.
+**Duck typing** is incoherent: no declared interface, no complete compatibility predicate, no position on structure-semantics relationship. This is never valid.
 
-**Duck typing** ($\{S\}$, ad-hoc) is incoherent: no interface is declared, compatibility depends on which code path runs, and there is no position on whether structure determines semantics. This is never valid.
+**Structural typing (Protocol)** is coherent but eliminable: for any system using Protocol at boundaries, there exists an equivalent system using nominal typing with explicit adapters (Theorem 2.10g). The only "value" of Protocol is avoiding the 2-line adapter class. Convenience is not a capability.
 
-**Retrofit scenarios.** When integrating independently developed components that share no common base classes, use *Protocols*, not `hasattr`. Protocols declare the required interface, enabling static verification and documentation. Duck typing does neither.
+**Nominal typing (ABC)** is coherent and non-eliminable: it is the only necessary discipline for systems with inheritance.
 
-**Languages without inheritance.** Go's struct types have no inheritance axis (`bases = []`), so *declared interfaces* are both necessary and sufficient. Go uses declared interfaces, not duck typing. This is why Go was designed this way---not because duck typing is acceptable, but because Go provides coherent structural typing via explicit interface declarations.
+**The eliminability argument.** When integrating third-party type $T$ that cannot inherit from your ABC:
 
-**Library boundaries.** At module boundaries where explicit inheritance is unavailable, *Protocols* are the correct tool. Theorem 3.1 applies: the constraint is structural because there is no shared `bases` to use. Duck typing is still wrong---it provides no declaration to verify against.
+```python
+# Structural approach (Protocol) - implicit
+@runtime_checkable
+class Configurable(Protocol):
+    def validate(self) -> bool: ...
 
-To be clear: structural typing with declared interfaces (Protocols) is an acceptable concession when you cannot control the type hierarchy. Duck typing is never acceptable---it is not a typing discipline but the absence of one (Theorem 2.10d). Our contribution includes proving that duck typing is categorically incoherent---not merely suboptimal, but logically ill-formed.
+isinstance(their_obj, Configurable)  # Hope methods match
+```
+
+```python
+# Nominal approach (Adapter) - explicit
+class TheirTypeAdapter(TheirType, ConfigurableABC):
+    pass  # 2 lines. Now in your hierarchy.
+
+adapted = TheirTypeAdapter(their_obj)  # Explicit boundary
+isinstance(adapted, ConfigurableABC)   # Nominal check
+```
+
+The adapter approach is strictly more explicit. "Explicit is better than implicit" (Zen of Python). Protocol's only advantage—avoiding the adapter—is a convenience, not a typing capability.
+
+**Languages without inheritance.** Go's struct types have $B = \emptyset$ by design. Structural typing with declared interfaces is the only coherent option. Go does not use duck typing; Go interfaces are declared. This is why Go's type system is sound despite lacking inheritance.
+
+**The final collapse.** For languages with inheritance ($B \neq \emptyset$):
+- Duck typing: incoherent, never valid
+- Structural typing: coherent but eliminable, valid only as convenience
+- Nominal typing: coherent and necessary
+
+The only *necessary* typing discipline is nominal. Everything else is either incoherent (duck typing) or reducible to nominal with trivial adapters (structural typing).
 
 ### 8.3 Future Work
 
@@ -2573,17 +2620,19 @@ Measures O(1) vs $\Omega$(n) error localization. RD = 1 indicates all dispatch i
 
 Our theorems establish necessary conditions for provenance-tracking systems. This section clarifies when the methodology applies and when shape-based typing is an acceptable concession.
 
-#### 8.6.1 When Structural Typing (Not Duck Typing) Is Acceptable
+#### 8.6.1 Structural Typing Is Eliminable (Theorem 2.10g)
 
-**Critical clarification:** This section concerns *structural typing with declared interfaces* (Protocols), not *duck typing* (ad-hoc `hasattr` probing). Per Theorem 2.10d, duck typing is never acceptable---it is incoherent, not merely dominated.
+**Critical update:** Per Theorem 2.10g, structural typing is *eliminable* when $B \neq \emptyset$. The scenarios below describe when Protocol is *convenient*, not when it is *necessary*. In all cases, the explicit adapter approach (Section 8.2) is available and strictly more explicit.
 
-**Retrofit scenarios.** When integrating independently developed components that share no common base classes, you cannot mandate inheritance from your base classes. Structural typing via Protocols is the correct tool. Duck typing (`hasattr`) is still wrong---use `Protocol` to declare the interface.
+**Retrofit scenarios.** When integrating independently developed components that share no common base classes, you cannot mandate inheritance directly. However, you *can* wrap at the boundary: `class TheirTypeAdapter(TheirType, YourABC): pass`. Protocol is a convenience that avoids this 2-line adapter. Duck typing is never acceptable.
 
-**Language boundaries.** Calling from Python into C libraries, where inheritance relationships are unavailable. The C struct has no `bases` axis, making structural checking the only option. Use `Protocol` or `TypedDict` to declare the expected interface.
+**Language boundaries.** Calling from Python into C libraries, where inheritance relationships are unavailable. The C struct has no `bases` axis. You can still wrap at ingestion: create a Python adapter class that inherits from your ABC and delegates to the C struct. Protocol avoids this wrapper but does not provide capabilities the wrapper lacks.
 
-**Versioning and compatibility.** When newer code must accept older types that predate a base class introduction. Example: A library adds `ConfigBase` in v2.0 but must accept v1.0 configs lacking that base. Use `Protocol` to declare what v1.0 configs must provide.
+**Versioning and compatibility.** When newer code must accept older types that predate a base class introduction, you can create versioned adapters: `class V1ConfigAdapter(V1Config, ConfigBaseV2): pass`. Protocol avoids this but does not provide additional capabilities.
 
 **Type-level programming without runtime overhead.** TypeScript's structural typing enables type checking at compile time without runtime cost. For TypeScript code that never uses `instanceof` or class identity, structural typing is an acceptable design. However, see Section 8.7 for why TypeScript's *class-based* structural typing is problematic.
+
+**Summary.** In all scenarios with $B \neq \emptyset$, the adapter approach is available. Protocol's only advantage is avoiding the adapter. Avoiding the adapter is a convenience, not a typing capability (Corollary 2.10h).
 
 #### 8.6.2 The Greenfield Criterion
 
