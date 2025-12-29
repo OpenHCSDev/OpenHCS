@@ -274,6 +274,37 @@ Shape-based typing projects out the $B$ axis entirely. It cannot distinguish typ
 
 **Remark (Operational Characterization).** In Python, shape-based compatibility reduces to capability probing via `hasattr`: `all(hasattr(x, a) for a in S(T))`. We use `hasattr` (not `getattr`) because shape-based typing is about *capability detection*, not attribute retrieval. `getattr` involves metaprogramming machinery (`__getattr__`, `__getattribute__`, descriptors) orthogonal to type discipline.
 
+**Remark (Partial vs Full Structural Compatibility).** Definition 2.10 uses partial compatibility ($\supseteq$): $x$ has *at least* $T$'s interface. Full compatibility ($=$) requires exact match. Both are $\{S\}$-only disciplines; the capability gap (Theorem 2.17) applies to both. The distinction is a refinement *within* the S axis, not a fourth axis.
+
+**Definition 2.10a (Typing Discipline Coherence).** A typing discipline is *coherent* if it provides a complete, deterministic answer to "when is $x$ compatible with $T$?" for all $x$ and declared $T$. Formally: there exists a predicate $\text{compatible}(x, T)$ that is well-defined for all $(x, T)$ pairs where $T$ is a declared type constraint.
+
+**Definition 2.10b (Structural Typing).** Structural typing with declared interfaces (e.g., `typing.Protocol`) is coherent: $T$ is declared as a Protocol with interface $S(T)$, and compatibility is $S(\text{type}(x)) \supseteq S(T)$. The discipline commits to a position: "structure determines compatibility."
+
+**Definition 2.10c (Duck Typing).** Duck typing is ad-hoc capability probing: `hasattr(x, attr)` for individual attributes without declaring $T$. No interface is specified; the "required interface" is implicit in whichever attributes the code path happens to access.
+
+**Theorem 2.10d (Duck Typing Incoherence).** Duck typing is not a coherent typing discipline.
+
+*Proof.* A coherent discipline requires a well-defined $\text{compatible}(x, T)$ for declared $T$. Duck typing:
+
+1. **Does not declare $T$.** There is no Protocol, no interface, no specification of required capabilities. The "interface" is implicit in the code.
+
+2. **Provides different answers based on code path.** If module $A$ probes `hasattr(x, 'foo')` and module $B$ probes `hasattr(x, 'bar')`, the same object $x$ is "compatible" with $A$'s requirements iff it has `foo`, and "compatible" with $B$'s requirements iff it has `bar`. There is no unified $T$ to check against.
+
+3. **Commits to neither position on structure-semantics relationship:**
+   - "Structure = semantics" would require checking *full* structural compatibility against a declared interface
+   - "Structure ≠ semantics" would require nominal identity via inheritance
+   - Duck typing checks *partial* structure *ad-hoc* without declaration—neither position
+
+A discipline that gives different compatibility answers depending on which code path executes, with no declared $T$ to verify against, is not a discipline. It is the absence of one. $\blacksquare$
+
+**Corollary 2.10e (Duck Typing vs Structural Typing).** Duck typing ($\{S\}$, ad-hoc) is strictly weaker than structural typing with Protocols ($\{N, S\}$, declared). The distinction is not just "dominated" but "incoherent vs coherent."
+
+*Proof.* Protocols declare $T$, enabling static verification, documentation, and composition guarantees. Duck typing declares nothing. A Protocol-based discipline is coherent (Definition 2.10a); duck typing is not (Theorem 2.10d). $\blacksquare$
+
+**Corollary 2.10f (No Valid Context for Duck Typing).** There exists no production context where duck typing is the correct choice.
+
+*Proof.* In systems with inheritance ($B \neq \emptyset$): nominal typing ($\{N, B, S\}$) strictly dominates. In systems without inheritance ($B = \emptyset$): structural typing with Protocols ($\{N, S\}$) is coherent and strictly dominates incoherent duck typing. The only "advantage" of duck typing—avoiding interface declaration—is not a capability but deferred work with negative value (lost verification, documentation, composition guarantees). $\blacksquare$
+
 **Definition 2.11 (Nominal Typing).** A typing discipline is *nominal* if type compatibility requires identity in the inheritance hierarchy:
 $$\text{compatible}_{\text{nominal}}(x, T) \iff T \in \text{ancestors}(\text{type}(x))$$
 
@@ -327,11 +358,11 @@ The three-axis model $(N, B, S)$ induces a lattice of typing disciplines. Each d
 |-------------|------------|---------|
 | $\emptyset$ | Untyped | Accept all |
 | $\{N\}$ | Named-only | Type aliases |
-| $\{S\}$ | Shape-based | Duck typing, hasattr, Protocols |
-| $\{N, S\}$ | Named structural | Named types, structural compat |
-| $\{N, B, S\}$ | Nominal | ABCs, isinstance |
+| $\{S\}$ | Shape-based | Duck typing, `hasattr` |
+| $\{N, S\}$ | Named structural | `typing.Protocol` |
+| $\{N, B, S\}$ | Nominal | ABCs, `isinstance` |
 
-Note: Duck typing uses only $S$ (namespace)—it does not inspect type names. `hasattr(obj, 'foo')` checks namespace membership, not `type(obj).__name__`.
+Note: Duck typing uses only $S$ (namespace)—it does not inspect type names. `hasattr(obj, 'foo')` checks namespace membership, not `type(obj).__name__`. `typing.Protocol` uses $\{N, S\}$: it can see type names and namespaces, but ignores inheritance. Our provenance impossibility theorems use the weaker $\{N, S\}$ constraint to prove stronger results.
 
 **Theorem 2.15 (Axis Lattice Dominance).** For any axis subsets $A \subseteq A' \subseteq \{N, B, S\}$, the capabilities of discipline using $A$ are a subset of capabilities of discipline using $A'$:
 $$\text{capabilities}(A) \subseteq \text{capabilities}(A')$$
@@ -1029,8 +1060,9 @@ Case 3: Greenfield context means nominal is available. By Theorem 3.54, nominal 
 8. Claim "greenfield" is undefined (but Definition 3.57 formalizes it, Theorem 3.59 proves decidability)
 9. Claim the Lean proofs contain errors (2100+ lines are public; verify them)
 10. Claim structural identity equals semantic identity (but Theorem 5.1 proves it doesn't, with production code)
+11. Claim duck typing is a coherent typing discipline (but Theorem 2.10d proves it is not—it declares no interface, provides no complete compatibility predicate, and commits to neither "structure = semantics" nor "structure ≠ semantics")
 
-**We explicitly invite any of these responses.** If a reviewer believes duck typing provides a capability that nominal typing lacks, we request they state it precisely. If they believe our impossibility proofs are flawed, we request they identify the error in the Lean formalization. If they believe "flexibility" is a capability, we request they define it in terms of computable functions over $(N, B, S)$.
+**We explicitly invite any of these responses.** If a reviewer believes duck typing provides a capability that nominal typing lacks, we request they state it precisely. If they believe our impossibility proofs are flawed, we request they identify the error in the Lean formalization. If they believe "flexibility" is a capability, we request they define it in terms of computable functions over $(N, B, S)$. If they believe duck typing is a coherent discipline, we request they exhibit the declared interface $T$ that duck typing verifies against.
 
 Vague appeals to "Pythonic style," "flexibility," or "tradeoffs" are not counterarguments. The burden of proof is now on duck typing advocates to exhibit the capability they claim exists. We predict they cannot, because no such capability exists. This is not arrogance; it is the logical structure of impossibility proofs.
 
@@ -2467,17 +2499,28 @@ Our theorems establish necessary conditions for provenance-tracking systems, but
 
 **Lean proofs assume well-formedness.** Our Lean 4 verification includes `Registry.wellFormed` and MRO monotonicity as axioms rather than derived properties. We prove theorems *given* these axioms, but do not prove the axioms themselves from more primitive foundations. This is standard practice in mechanized verification (e.g., CompCert assumes well-typed input), but limits the scope of our machine-checked guarantees.
 
-### 8.2 When Shape-Based Typing Is a Valid Concession
+### 8.2 When Structural Typing Is a Valid Concession (And Duck Typing Never Is)
 
-Theorem 3.1 establishes that structural typing is valid for "namespace-only" classes---those lacking explicit inheritance. This explains when shape-based typing is an acceptable concession:
+Theorem 3.1 establishes that structural typing is valid for "namespace-only" classes---those lacking explicit inheritance. However, Theorem 2.10d establishes that *duck typing* (ad-hoc capability probing) is never valid---it is incoherent, not merely dominated.
 
-**Retrofit scenarios.** When integrating independently developed components that share no common base classes, you cannot mandate inheritance from your base classes. Structural typing is the only option. This is a concession to code you do not control---not a design choice.
+**The critical distinction:**
 
-**Languages without inheritance.** Go's struct types have no inheritance axis (`bases = []`), so structural typing is both necessary and sufficient. Our Corollary 3.2 formalizes this: structural typing is correct when `bases = []` universally. This is why Go was designed this way---not because structural typing is superior, but because Go lacks inheritance.
+| Discipline | Declaration | Coherent? | Valid Concession? |
+|------------|-------------|-----------|-------------------|
+| Structural (Protocol) | Declared interface $T$ | Yes | Yes, when $B = \emptyset$ |
+| Duck typing (hasattr) | No declaration | No | Never |
 
-**Library boundaries.** At module boundaries where explicit inheritance is unavailable, structural constraints are the only option. Theorem 3.1 applies: the constraint is structural because there is no shared `bases` to use.
+**Structural typing with Protocols** ($\{N, S\}$) is a coherent discipline: you declare interface $T$, then verify $S(\text{type}(x)) \supseteq S(T)$. This is valid when inheritance is unavailable.
 
-To be clear: in these contexts, shape-based typing is an acceptable concession. It is never the correct choice when you control the type hierarchy. Our contribution is proving that shape-based typing is categorically wrong for greenfield systems with provenance requirements---not merely suboptimal, but incapable of providing the required properties.
+**Duck typing** ($\{S\}$, ad-hoc) is incoherent: no interface is declared, compatibility depends on which code path runs, and there is no position on whether structure determines semantics. This is never valid.
+
+**Retrofit scenarios.** When integrating independently developed components that share no common base classes, use *Protocols*, not `hasattr`. Protocols declare the required interface, enabling static verification and documentation. Duck typing does neither.
+
+**Languages without inheritance.** Go's struct types have no inheritance axis (`bases = []`), so *declared interfaces* are both necessary and sufficient. Go uses declared interfaces, not duck typing. This is why Go was designed this way---not because duck typing is acceptable, but because Go provides coherent structural typing via explicit interface declarations.
+
+**Library boundaries.** At module boundaries where explicit inheritance is unavailable, *Protocols* are the correct tool. Theorem 3.1 applies: the constraint is structural because there is no shared `bases` to use. Duck typing is still wrong---it provides no declaration to verify against.
+
+To be clear: structural typing with declared interfaces (Protocols) is an acceptable concession when you cannot control the type hierarchy. Duck typing is never acceptable---it is not a typing discipline but the absence of one (Theorem 2.10d). Our contribution includes proving that duck typing is categorically incoherent---not merely suboptimal, but logically ill-formed.
 
 ### 8.3 Future Work
 
@@ -2530,13 +2573,15 @@ Measures O(1) vs $\Omega$(n) error localization. RD = 1 indicates all dispatch i
 
 Our theorems establish necessary conditions for provenance-tracking systems. This section clarifies when the methodology applies and when shape-based typing is an acceptable concession.
 
-#### 8.6.1 When Shape-Based Typing Is Acceptable
+#### 8.6.1 When Structural Typing (Not Duck Typing) Is Acceptable
 
-**Retrofit scenarios.** When integrating independently developed components that share no common base classes, you cannot mandate inheritance from your base classes. Structural typing is the only option. This is a concession to code you do not control---not a design choice.
+**Critical clarification:** This section concerns *structural typing with declared interfaces* (Protocols), not *duck typing* (ad-hoc `hasattr` probing). Per Theorem 2.10d, duck typing is never acceptable---it is incoherent, not merely dominated.
 
-**Language boundaries.** Calling from Python into C libraries, where inheritance relationships are unavailable. The C struct has no `bases` axis, making structural checking the only option.
+**Retrofit scenarios.** When integrating independently developed components that share no common base classes, you cannot mandate inheritance from your base classes. Structural typing via Protocols is the correct tool. Duck typing (`hasattr`) is still wrong---use `Protocol` to declare the interface.
 
-**Versioning and compatibility.** When newer code must accept older types that predate a base class introduction. Example: A library adds `ConfigBase` in v2.0 but must accept v1.0 configs lacking that base.
+**Language boundaries.** Calling from Python into C libraries, where inheritance relationships are unavailable. The C struct has no `bases` axis, making structural checking the only option. Use `Protocol` or `TypedDict` to declare the expected interface.
+
+**Versioning and compatibility.** When newer code must accept older types that predate a base class introduction. Example: A library adds `ConfigBase` in v2.0 but must accept v1.0 configs lacking that base. Use `Protocol` to declare what v1.0 configs must provide.
 
 **Type-level programming without runtime overhead.** TypeScript's structural typing enables type checking at compile time without runtime cost. For TypeScript code that never uses `instanceof` or class identity, structural typing is an acceptable design. However, see Section 8.7 for why TypeScript's *class-based* structural typing is problematic.
 
@@ -2777,7 +2822,7 @@ Our formal results align with Python's informal design philosophy, codified in P
 
 **"There should be one-- and preferably only one --obvious way to do it"** (Zen line 13). Our decision procedure (Section 2.5.1) provides exactly one obvious way: in greenfield with inheritance, use nominal typing.
 
-**Historical validation:** Python's evolution confirms our theorems. Python 1.0 (1991) had only duck typing. Python 2.6 (2007) added ABCs because duck typing was insufficient for large codebases. Python 3.8 (2019) added Protocols for retrofit scenarios. This evolution from duck $\rightarrow$ nominal $\rightarrow$ hybrid exactly matches our formal predictions.
+**Historical validation:** Python's evolution confirms our theorems. Python 1.0 (1991) had only duck typing---an incoherent non-discipline (Theorem 2.10d). Python 2.6 (2007) added ABCs because duck typing was insufficient for large codebases. Python 3.8 (2019) added Protocols for retrofit scenarios---coherent structural typing to replace incoherent duck typing. This evolution from incoherent $\rightarrow$ nominal $\rightarrow$ nominal+structural exactly matches our formal predictions.
 
 ### 8.10 Connection to Gradual Typing
 
