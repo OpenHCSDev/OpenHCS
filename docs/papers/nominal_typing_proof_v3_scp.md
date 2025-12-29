@@ -48,7 +48,7 @@ These theorems yield four measurable code quality metrics:
 
 | Metric | What it measures | Indicates |
 |--------|------------------|-----------|
-| Duck typing density | `hasattr()` + `getattr()` + `try/except AttributeError` per KLOC | Retrofit patterns (acceptable) or discipline violations (problematic in greenfield) |
+| Duck typing density | `hasattr()` + `getattr()` + `try/except AttributeError` per KLOC | Discipline violations (duck typing is incoherent per Theorem 2.10d) |
 | Nominal typing ratio | `isinstance()` + ABC registrations per KLOC | Explicit type contracts |
 | Provenance capability | Presence of "which type provided this" queries | System requires nominal typing |
 | Resolution determinism | MRO-based dispatch vs runtime probing | O(1) vs $\Omega$(n) error localization |
@@ -480,17 +480,18 @@ Given a language $L$ and development context $C$:
 
 ```
 FUNCTION select_typing_discipline(L, C):
-    IF L has no inheritance syntax (B = $\emptyset$):
-        RETURN structural  # Theorem 3.1: correct for reduced systems
+    IF L has no inheritance syntax (B = ∅):
+        RETURN structural  # Theorem 3.1: correct when B absent
 
-    IF C is retrofit (cannot modify type definitions):
-        RETURN structural  # Concession to external constraints
+    # For all cases where B ≠ ∅:
+    RETURN nominal  # Theorem 2.18: strict dominance
 
-    IF C is greenfield (architect controls types):
-        RETURN nominal  # Theorem 2.18: strict dominance
+    # Note: "retrofit" is not a separate case. When integrating
+    # external types, use explicit adapters (Theorem 2.10j).
+    # Protocol is a convenience, not a correct discipline.
 ```
 
-This is a **decision procedure**, not a preference. The output is determined by the inputs.
+This is a **decision procedure**, not a preference. The output is determined by whether $B = \emptyset$.
 
 ---
 
@@ -902,7 +903,7 @@ We explicitly scope our claims:
 
 **Non-Claim 3.41 (Retrofit).** This paper does not claim nominal typing is superior for retrofitting type constraints onto existing untyped code. Theorem 4.1 establishes gradual typing (Siek & Taha 2006) as the appropriate discipline for that domain.
 
-**Non-Claim 3.42 (Interop Boundaries).** At boundaries with untyped systems (FFI, JSON parsing, external APIs), structural typing via Protocols is appropriate. We formalize this as Theorem 4.3 (Protocol Boundary).
+**Non-Claim 3.42 (Interop Boundaries).** At boundaries with untyped systems (FFI, JSON parsing, external APIs), structural typing via Protocols is *convenient* but not necessary. Per Theorem 2.10j, explicit adapters provide the same functionality with better properties. Protocol is a dominated choice, acceptable only as a migration convenience where the 2-line adapter cost is judged too high.
 
 #### 3.11.6 Generics and Parametric Polymorphism
 
@@ -987,13 +988,12 @@ No mainstream type system feature introduces a fourth axis orthogonal to $(N, B,
 
 The gap exists wherever $B$ exists. $\blacksquare$
 
-**Corollary 3.51 (Scope of Shape Typing).** Shape-based typing is only appropriate when:
+**Corollary 3.51 (Scope of Shape Typing).** Shape-based typing is only *not wrong* when:
 
-1. **No hierarchy exists:** Pure structural systems with no inheritance (rare in practice)
+1. **No hierarchy exists:** $B = \emptyset$ (e.g., Go interfaces, JSON objects)
 2. **Hierarchy is inaccessible:** True FFI boundaries where type metadata is lost
-3. **Hierarchy is deliberately ignored:** Migration convenience, accepting capability loss
 
-These are not cases where "shape is better"—they are cases where nominal is **impossible** or **deliberately sacrificed**.
+When $B \neq \emptyset$, shape-based typing is **always dominated** by nominal typing with adapters (Theorem 2.10j). "Deliberately ignored" is not a valid justification—it is an admission of choosing the dominated option.
 
 **Claim 3.52 (Universal).** For ALL object-oriented systems where inheritance hierarchies exist and are accessible—including legacy codebases, dynamic languages, and functional languages with typeclasses—nominal typing is strictly optimal. Shape-based typing is a **capability sacrifice**, not an alternative with tradeoffs.
 
@@ -2703,13 +2703,15 @@ The greenfield component (`ConfigBase` hierarchy) uses nominal typing. The retro
 
 | Context | Typing Discipline | Justification |
 |---------|------------------|---------------|
-| Greenfield + provenance required | Nominal (mandatory) | Theorem 3.5, Corollary 6.3 |
-| Greenfield + no provenance | Nominal (recommended) | Theorem 3.5 (strict dominance) |
-| Retrofit / external types | Structural (acceptable) | Theorem 3.1 (namespace-only) |
-| Small scripts / prototypes | Duck (acceptable) | Complexity cost is negligible |
-| Language boundaries (C/FFI) | Structural (mandatory) | No inheritance available |
+| $B \neq \emptyset$ (any language with inheritance) | Nominal (mandatory) | Theorem 2.18 (strict dominance), Theorem 2.10j (adapters dominate Protocol) |
+| $B = \emptyset$ (Go, JSON, pure structs) | Structural (correct) | Theorem 3.1 (namespace-only) |
+| Language boundaries (C/FFI) | Structural (mandatory) | No inheritance available ($B = \emptyset$ at boundary) |
 
-The methodology does not claim "always use nominal typing." It claims "in greenfield development, nominal typing is correct; shape-based typing is a concession to constraints, not a design choice."
+**Removed rows:**
+- "Retrofit / external types → Structural (acceptable)" — **Wrong.** Adapters exist. Theorem 2.10j.
+- "Small scripts / prototypes → Duck (acceptable)" — **Wrong.** Duck typing is incoherent (Theorem 2.10d). Incoherent is never acceptable.
+
+The methodology claims: **if $B \neq \emptyset$, nominal typing is correct.** There are no concessions. Protocol is dominated. Duck typing is incoherent. The decision is determined by whether the language has inheritance, not by project size or convenience.
 
 ### 8.7 Case Study: TypeScript's Design Tension
 
@@ -2933,7 +2935,7 @@ Our results connect to the gradual typing literature (Siek & Taha 2006, Wadler &
 
 We have presented a methodology for typing discipline selection in object-oriented systems:
 
-1. **The greenfield-retrofit distinction**: Duck typing is retrofit tooling---appropriate when integrating components without shared base classes. Nominal typing is greenfield tooling---mandatory when you control the class hierarchy. This is not a style choice; it is a correctness criterion (Theorem 3.4).
+1. **The $B = \emptyset$ criterion**: If a language has inheritance ($B \neq \emptyset$), nominal typing is mandatory (Theorem 2.18). If a language lacks inheritance ($B = \emptyset$), structural typing is correct. Duck typing is incoherent in both cases (Theorem 2.10d). For retrofit scenarios with external types, use explicit adapters (Theorem 2.10j).
 
 2. **Measurable code quality metrics**: Four metrics derived from the formal model (duck typing density, nominal typing ratio, provenance capability, resolution determinism) enable automated detection of typing discipline violations in codebases.
 
@@ -2943,13 +2945,13 @@ We have presented a methodology for typing discipline selection in object-orient
 
 5. **Recurring architectural patterns**: Six patterns require nominal typing: metaclass auto-registration, bidirectional type registries, MRO-based priority resolution, runtime class generation with lineage tracking, descriptor protocol integration, and discriminated unions via `__subclasses__()`.
 
-**The methodology in one sentence:** If your system requires knowing *which type* provided a value (provenance), or uses inheritance to determine priority (MRO), or needs types as dictionary keys (identity)---use nominal typing. If you're integrating components you don't control---structural typing is an acceptable concession. Shape-based typing is never correct for greenfield code.
+**The methodology in one sentence:** If $B \neq \emptyset$, use nominal typing with explicit adapters for external types. Duck typing is incoherent. Protocol is dominated. There are no concessions.
 
 ### The Debate Is Over
 
 For decades, typing discipline has been treated as style. "Pythonic" duck typing versus "Java-style" nominal typing, with structural typing positioned as the modern middle ground. This framing is wrong.
 
-The decision procedure does not output "nominal is preferred." It outputs "nominal is required" or "shape-based typing is a concession." There is no case where duck typing or structural typing is the correct choice for greenfield code with provenance requirements.
+The decision procedure does not output "nominal is preferred." It outputs "nominal is required" (when $B \neq \emptyset$) or "structural is required" (when $B = \emptyset$). Duck typing is never output. Protocol is never output when adapters are available.
 
 Two architects examining identical requirements will derive identical discipline choices. Disagreement indicates incomplete requirements or incorrect procedure application—not legitimate difference of opinion. The question of typing discipline is settled by derivation, not preference.
 
