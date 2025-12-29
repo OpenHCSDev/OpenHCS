@@ -26,7 +26,7 @@ Additional contributions:
 - **Theorem 8.1 (Mixin Dominance):** Mixins with C3 MRO strictly dominate object composition for static behavior extension.
 - **Theorem 8.7 (TypeScript Incoherence):** Languages with inheritance syntax but structural typing exhibit formally-defined type system incoherence.
 
-All theorems are machine-checked in Lean 4 (1400+ lines, 75 theorems/lemmas, 0 `sorry` placeholders). Empirical validation uses 13 case studies from a production bioimage analysis platform (OpenHCS, 45K LoC Python).
+All theorems are machine-checked in Lean 4 (2100+ lines, 103 theorems/lemmas, 0 `sorry` placeholders). Empirical validation uses 13 case studies from a production bioimage analysis platform (OpenHCS, 45K LoC Python).
 
 **Keywords:** typing disciplines, nominal typing, structural typing, formal methods, class systems, information theory, impossibility theorems, lower bounds
 
@@ -78,12 +78,12 @@ This paper makes five contributions:
 - Theorem 3.5: Nominal typing strictly dominates shape-based typing in greenfield
 
 **4. Machine-checked verification (Section 6):**
-- 1400+ lines of Lean 4 proofs
-- 75 theorems/lemmas covering typing, architecture, information theory, complexity bounds, impossibility, lower bounds, bulletproofing, generics, exotic features, and universal scope
+- 2100+ lines of Lean 4 proofs across four modules
+- 103 theorems/lemmas covering typing, architecture, information theory, complexity bounds, impossibility, lower bounds, bulletproofing, generics, exotic features, universal scope, discipline vs migration separation, and context formalization
 - Formalized O(1) vs O(k) vs Ω(n) complexity separation with adversary-based lower bound proof
 - Universal extension to 8 languages (Java, C#, Rust, TypeScript, Kotlin, Swift, Scala, C++)
 - Exotic type features covered (intersection, union, row polymorphism, HKT, multiple dispatch)
-- **Zero `sorry` placeholders—all 75 theorems/lemmas complete**
+- **Zero `sorry` placeholders—all 103 theorems/lemmas complete**
 
 **5. Empirical validation (Section 5):**
 - 13 case studies from OpenHCS (45K LoC production Python codebase)
@@ -139,7 +139,7 @@ We do not claim all systems require provenance. We prove that systems requiring 
 
 **Section 5: Empirical validation** — 13 OpenHCS case studies validating theoretical predictions
 
-**Section 6: Machine-checked proofs** — Lean 4 formalization (1400+ lines)
+**Section 6: Machine-checked proofs** — Lean 4 formalization (2100+ lines)
 
 **Section 7: Related work** — Positioning within PL theory literature
 
@@ -347,25 +347,25 @@ $$c \in \mathcal{C}_B \iff c \text{ requires } B$$
 
 **($\Rightarrow$) Each capability in $\mathcal{C}_B$ requires $B$:**
 
-1. **Provenance** ("which type provided value $v$?"): By Definition 2.12, provenance queries require MRO traversal. MRO is the C3 linearization of ancestors, which is the transitive closure over $B$. Without $B$, MRO is undefined. ✓
+1. **Provenance** ("which type provided value $v$?"): By Definition 2.12, provenance queries require MRO traversal. MRO is the C3 linearization of ancestors, which is the transitive closure over $B$. Without $B$, MRO is undefined. $\checkmark$
 
-2. **Identity** ("is $x$ an instance of $T$?"): By Definition 2.11, nominal compatibility requires $T \in \text{ancestors}(\text{type}(x))$. Ancestors is defined as transitive closure over $B$. Without $B$, ancestors is undefined. ✓
+2. **Identity** ("is $x$ an instance of $T$?"): By Definition 2.11, nominal compatibility requires $T \in \text{ancestors}(\text{type}(x))$. Ancestors is defined as transitive closure over $B$. Without $B$, ancestors is undefined. $\checkmark$
 
-3. **Enumeration** ("what are all subtypes of $T$?"): A subtype $S$ of $T$ satisfies $T \in \text{ancestors}(S)$. Enumerating subtypes requires inverting the ancestor relation, which requires $B$. ✓
+3. **Enumeration** ("what are all subtypes of $T$?"): A subtype $S$ of $T$ satisfies $T \in \text{ancestors}(S)$. Enumerating subtypes requires inverting the ancestor relation, which requires $B$. $\checkmark$
 
-4. **Conflict resolution** ("which definition wins in diamond inheritance?"): Diamond inheritance produces multiple paths to a common ancestor. Resolution uses MRO ordering, which requires $B$. ✓
+4. **Conflict resolution** ("which definition wins in diamond inheritance?"): Diamond inheritance produces multiple paths to a common ancestor. Resolution uses MRO ordering, which requires $B$. $\checkmark$
 
 **($\Leftarrow$) No other capability requires $B$:**
 
 We exhaustively enumerate capabilities NOT in $\mathcal{C}_B$ and show none require $B$:
 
-5. **Interface checking** ("does $x$ have method $m$?"): Answered by inspecting $S(\text{type}(x))$. Requires only $S$. Does not require $B$. ✓
+5. **Interface checking** ("does $x$ have method $m$?"): Answered by inspecting $S(\text{type}(x))$. Requires only $S$. Does not require $B$. $\checkmark$
 
-6. **Type naming** ("what is the name of type $T$?"): Answered by inspecting $N(T)$. Requires only $N$. Does not require $B$. ✓
+6. **Type naming** ("what is the name of type $T$?"): Answered by inspecting $N(T)$. Requires only $N$. Does not require $B$. $\checkmark$
 
-7. **Value access** ("what is $x.a$?"): Answered by attribute lookup in $S(\text{type}(x))$. Requires only $S$. Does not require $B$. ✓
+7. **Value access** ("what is $x.a$?"): Answered by attribute lookup in $S(\text{type}(x))$. Requires only $S$. Does not require $B$. $\checkmark$
 
-8. **Method invocation** ("call $x.m()$"): Answered by retrieving $m$ from $S$ and invoking. Requires only $S$. Does not require $B$. ✓
+8. **Method invocation** ("call $x.m()$"): Answered by retrieving $m$ from $S$ and invoking. Requires only $S$. Does not require $B$. $\checkmark$
 
 No capability outside $\mathcal{C}_B$ requires $B$. Therefore $\mathcal{C}_B$ is exactly the $B$-dependent capabilities. $\blacksquare$
 
@@ -873,9 +873,86 @@ These are not cases where "shape is better"—they are cases where nominal is **
 
 **Claim 3.52 (Universal).** For ALL object-oriented systems where inheritance hierarchies exist and are accessible—including legacy codebases, dynamic languages, and functional languages with typeclasses—nominal typing is strictly optimal. Shape-based typing is a **capability sacrifice**, not an alternative with tradeoffs.
 
+#### 3.11.8 Discipline Optimality vs Migration Optimality
+
+A critical distinction that closes a potential attack surface: **discipline optimality** (which typing paradigm has more capabilities) is independent of **migration optimality** (whether migrating an existing codebase is beneficial).
+
+**Definition 3.53 (Pareto Dominance).** Discipline $A$ Pareto dominates discipline $B$ if:
+1. $A$ provides all capabilities of $B$
+2. $A$ provides at least one capability $B$ lacks
+3. The declaration cost of $A$ is at most the declaration cost of $B$
+
+**Theorem 3.54 (Nominal Pareto Dominates Shape).** Nominal typing Pareto dominates shape-based typing.
+
+*Proof.* (Machine-checked in `discipline_migration.lean`)
+1. Shape capabilities = {attributeCheck}
+2. Nominal capabilities = {provenance, identity, enumeration, conflictResolution, attributeCheck}
+3. Shape ⊂ Nominal (strict subset)
+4. Declaration cost: both require one class definition per interface
+5. Therefore nominal Pareto dominates shape. $\blacksquare$
+
+**Theorem 3.55 (Dominance Does Not Imply Migration).** Pareto dominance of discipline $A$ over $B$ does NOT imply that migrating from $B$ to $A$ is beneficial for all codebases.
+
+*Proof.* (Machine-checked in `discipline_migration.lean`)
+Consider migration cost $C(ctx) = \text{codebaseSize}/100 + \text{externalDeps} \times 10$ and capability benefit $B = 4$ (the four additional capabilities).
+
+For a large codebase (50,000 LoC, 20 external dependencies):
+- Migration cost = 500 + 200 = 700
+- Capability benefit = 4
+- Cost > Benefit: migration not beneficial
+
+For a small codebase (50 LoC, 0 external dependencies):
+- Migration cost = 0
+- Capability benefit = 4
+- Benefit > Cost: migration beneficial
+
+Therefore: $\exists ctx_1, ctx_2$ such that migration is beneficial for $ctx_1$ but not for $ctx_2$. $\blacksquare$
+
+**Corollary 3.56 (Discipline vs Migration Independence).** The question "which discipline is better?" (answered by Theorem 3.54) is independent of "should I migrate?" (answered by cost-benefit analysis).
+
+This closes the attack surface where a reviewer might conflate "nominal is better" with "rewrite everything in nominal." The theorems are:
+- **Discipline comparison**: Universal, always true (Theorem 3.54)
+- **Migration decision**: Context-dependent, requires cost-benefit analysis (Theorem 3.55)
+
+#### 3.11.9 Context Formalization: Greenfield and Retrofit
+
+**Definition 3.57 (Greenfield Context).** A development context is *greenfield* if:
+1. All modules are internal (architect can modify type hierarchies)
+2. No constraints require structural typing (e.g., JSON API compatibility)
+
+**Definition 3.58 (Retrofit Context).** A development context is *retrofit* if:
+1. At least one module is external (cannot modify type hierarchies), OR
+2. At least one constraint requires structural typing
+
+**Theorem 3.59 (Context Classification Exclusivity).** Greenfield and retrofit contexts are mutually exclusive.
+
+*Proof.* (Machine-checked in `context_formalization.lean`)
+If a context is greenfield, all modules are internal and no constraints require structural typing. If any module is external or any constraint requires structural typing, the context is retrofit. These conditions are mutually exclusive by construction. $\blacksquare$
+
+**Definition 3.60 (Provenance-Requiring Query).** A system query *requires provenance* if it needs to distinguish between structurally equivalent types. Examples:
+- "Which type provided this value?" (provenance)
+- "Is this the same type?" (identity)
+- "What are all subtypes?" (enumeration)
+- "Which type wins in MRO?" (conflict resolution)
+
+**Theorem 3.61 (Provenance Detection).** Whether a system requires provenance is decidable from its query set.
+
+*Proof.* (Machine-checked in `context_formalization.lean`)
+Each query type is classified as requiring provenance or not. A system requires provenance iff any of its queries requires provenance. This is a finite check over a finite query set. $\blacksquare$
+
+**Theorem 3.62 (Decision Procedure Soundness).** The discipline selection procedure is sound:
+1. If provenance is required → select Nominal (mandatory)
+2. If retrofit context and no provenance → select Shape (concession)
+3. If greenfield context and no provenance → select Nominal (dominance)
+
+*Proof.* (Machine-checked in `context_formalization.lean`)
+Case 1: Provenance requires the Bases axis (Theorem 3.13). Only nominal typing uses Bases. Therefore nominal is mandatory.
+Case 2: Retrofit context means external constraints prevent nominal typing. Shape is the only option.
+Case 3: Greenfield context means nominal is available. By Theorem 3.54, nominal Pareto dominates shape. Therefore nominal is correct. $\blacksquare$
+
 ---
 
-### 3.13 Summary: Attack Surface Closure
+### 3.12 Summary: Attack Surface Closure
 
 | Potential Attack | Defense Theorem |
 |------------------|-----------------|
@@ -892,6 +969,9 @@ These are not cases where "shape is better"—they are cases where nominal is **
 | "Only applies to greenfield" | Theorem 3.50 (Universal Optimality) |
 | "Legacy codebases are different" | Corollary 3.51 (sacrifice, not alternative) |
 | "Claims are too broad" | Non-Claims 3.41-3.42 (true scope limits) |
+| "You can't say rewrite everything" | Theorem 3.55 (Dominance ≠ Migration) |
+| "Greenfield is undefined" | Definitions 3.57-3.58, Theorem 3.59 |
+| "Provenance requirement is circular" | Theorem 3.61 (Provenance Detection) |
 
 A TOPLAS reviewer would have to:
 1. Reject the standard definition of shape-based typing
@@ -902,6 +982,8 @@ A TOPLAS reviewer would have to:
 6. Claim generics escape the model (but we proved they don't)
 7. Claim exotic type features escape the model (but we addressed all of them)
 8. Claim the scope is too narrow (but we expanded to universal)
+9. Conflate discipline optimality with migration optimality (but we proved independence)
+10. Claim greenfield/retrofit is undefined (but we formalized and proved decidability)
 
 None of these are tenable positions. The debate is mathematically foreclosed.
 
@@ -963,7 +1045,7 @@ The theoretical complexity bounds in Theorems 4.1-4.3 are demonstrated empirical
 
 | Level | What it provides | Status |
 |-------|------------------|--------|
-| Formal proofs | Mathematical necessity | Complete (Lean, 1400+ lines, 0 `sorry`) |
+| Formal proofs | Mathematical necessity | Complete (Lean, 2100+ lines, 0 `sorry`) |
 | OpenHCS case studies | Existence proof | 13 patterns documented |
 | Cross-language predictions | Falsifiability | Section 9.2 |
 
@@ -1364,7 +1446,15 @@ The registry operations are O(1) lookups by type identity. Duck typing's string-
 
 ## 6. Formalization and Verification
 
-We provide machine-checked proofs of our core theorems in Lean 4. The complete development (1400+ lines, 0 `sorry` placeholders) is organized in three layers:
+We provide machine-checked proofs of our core theorems in Lean 4. The complete development (2100+ lines across four modules, 0 `sorry` placeholders) is organized as follows:
+
+| Module | Lines | Theorems/Lemmas | Purpose |
+|--------|-------|-----------------|---------|
+| `abstract_class_system.lean` | 1488 | 75 | Core formalization: three-axis model, dominance, complexity |
+| `nominal_resolution.lean` | 284 | 10 | Resolution algorithm proofs |
+| `discipline_migration.lean` | 142 | 11 | Discipline vs migration optimality separation |
+| `context_formalization.lean` | 215 | 7 | Greenfield/retrofit classification, requirement detection |
+| **Total** | **2129** | **103** | |
 
 1. **Language-agnostic layer** (Section 6.12): The three-axis model $(N, B, S)$, axis lattice metatheorem, and strict dominance—proving nominal typing dominates shape-based typing in **any** class system with explicit inheritance. These proofs require no Python-specific axioms.
 
@@ -2102,8 +2192,8 @@ theorem complexity_gap_unbounded :
 
 | Metric | Value |
 |--------|-------|
-| Total lines | 1400+ |
-| Total theorems/lemmas | 75 |
+| Total lines | 2100+ (four modules) |
+| Total theorems/lemmas | 103 |
 | `sorry` placeholders | 0 |
 
 All proofs are complete. The counting lemma for the adversary argument uses a `calc` chain showing filter partition equivalence.
@@ -2179,7 +2269,7 @@ They found that C++ Boost template metaprogramming can be "over-complex" when ab
 1. **Strict dominance as formal theorem** (Theorem 3.5): Nominal typing provides all capabilities of structural typing plus provenance, identity, enumeration—at equivalent declaration cost.
 2. **Information-theoretic completeness** (Theorem 3.12): The capability gap is *derived* from discarding the Bases axis, not enumerated. Any query distinguishing same-shape types requires B. This is mathematically necessary.
 3. **Decision procedure** (Theorems 3.1, 3.4): Greenfield vs retrofit determines which discipline is correct. This is decidable.
-4. **Machine-checked proofs** (Section 6): 1400+ lines of Lean 4, 75 theorems/lemmas, 0 `sorry` placeholders.
+4. **Machine-checked proofs** (Section 6): 2100+ lines of Lean 4, 103 theorems/lemmas, 0 `sorry` placeholders.
 5. **Empirical validation at scale**: 13 case studies from a 45K LoC production system (OpenHCS).
 
 **Our core contribution:** Prior work established that nominal and structural typing have trade-offs. We prove the trade-off is **asymmetric**: nominal typing strictly dominates for greenfield systems with provenance requirements. Duck typing is proven strictly dominated: it cannot provide provenance, identity, or enumeration at any cost—this follows necessarily from discarding the Bases axis.
@@ -2220,7 +2310,7 @@ To be clear: in these contexts, shape-based typing is an acceptable concession. 
 
 **Extension to other nominal languages.** Java, C++, Scala, and Rust all couple nominal typing with inheritance, but their type construction mechanisms differ from Python's `type()`. Formalizing the general principle---provenance requires nominal identity---in a language-agnostic framework remains open.
 
-**Formalization of greenfield-retrofit distinction.** We currently define "greenfield" as "programmer can choose `bases`" and "retrofit" as "no shared `bases` available." A more rigorous treatment would formalize when each regime applies and prove decidability of regime classification.
+**Formalization of greenfield-retrofit distinction.** **COMPLETED:** Definitions 3.57-3.58 formalize greenfield and retrofit contexts. Theorem 3.59 proves mutual exclusivity. Theorem 3.61 proves decidability of provenance detection. All machine-checked in `context_formalization.lean`.
 
 **Gradual nominal/structural typing.** TypeScript supports both nominal (via branding) and structural typing in the same program. Formalizing the interaction between these disciplines, and proving soundness of gradual migration, would enable principled adoption strategies.
 

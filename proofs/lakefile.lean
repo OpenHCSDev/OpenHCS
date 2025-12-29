@@ -36,3 +36,13 @@ lean_lib «abstract_class_system» where
   moreLeanArgs := moreLeanArgs
   weakLeanArgs := weakLeanArgs
   -- Language-independent abstract class system formalization
+
+lean_lib «discipline_migration» where
+  moreLeanArgs := moreLeanArgs
+  weakLeanArgs := weakLeanArgs
+  -- Discipline vs migration optimality separation
+
+lean_lib «context_formalization» where
+  moreLeanArgs := moreLeanArgs
+  weakLeanArgs := weakLeanArgs
+  -- Greenfield/retrofit classification and requirement detection
