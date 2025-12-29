@@ -465,11 +465,27 @@ The three-axis model $(N, B, S)$ induces a lattice of typing disciplines. Each d
 |-------------|------------|---------|
 | $\emptyset$ | Untyped | Accept all |
 | $\{N\}$ | Named-only | Type aliases |
-| $\{S\}$ | Shape-based | Duck typing, `hasattr` |
+| $\{S\}$ | Shape-based (ad-hoc) | Duck typing, `hasattr` |
+| $\{S\}$ | Shape-based (declared) | OCaml `< get : int; .. >` |
 | $\{N, S\}$ | Named structural | `typing.Protocol` |
 | $\{N, B, S\}$ | Nominal | ABCs, `isinstance` |
 
-Note: Duck typing uses only $S$ (namespace)—it does not inspect type names. `hasattr(obj, 'foo')` checks namespace membership, not `type(obj).__name__`. `typing.Protocol` uses $\{N, S\}$: it can see type names and namespaces, but ignores inheritance. Our provenance impossibility theorems use the weaker $\{N, S\}$ constraint to prove stronger results.
+**Critical distinction within $\{S\}$:** The axis subset does not capture whether the interface is *declared*. This is orthogonal to which axes are inspected:
+
+| Discipline | Axes Used | Interface Declared? | Coherent? |
+|------------|-----------|---------------------|-----------|
+| Duck typing | $\{S\}$ | No (ad-hoc `hasattr`) | No (Thm 2.10d) |
+| OCaml structural | $\{S\}$ | Yes (inline type) | Yes |
+| Protocol | $\{N, S\}$ | Yes (named interface) | Yes |
+| Nominal | $\{N, B, S\}$ | Yes (class hierarchy) | Yes |
+
+Duck typing and OCaml structural typing both use $\{S\}$, but duck typing has **no declared interface**—conformance is checked ad-hoc at runtime via `hasattr`. OCaml declares the interface inline: `< get : int; set : int -> unit >` is a complete type specification, statically verified. The interface's "name" is its canonical structure: $N = \text{canonical}(S)$.
+
+**Theorem 2.10d (Incoherence) applies to duck typing, not to OCaml.** The incoherence arises from the lack of a declared interface, not from using axis subset $\{S\}$.
+
+**Theorems 2.10p-q (Metaprogramming Gap) apply to both.** Neither duck typing nor OCaml structural typing can enumerate conforming types or provide definition-time hooks, because neither has a declaration event. This is independent of coherence.
+
+Note: `hasattr(obj, 'foo')` checks namespace membership, not `type(obj).__name__`. `typing.Protocol` uses $\{N, S\}$: it can see type names and namespaces, but ignores inheritance. Our provenance impossibility theorems use the weaker $\{N, S\}$ constraint to prove stronger results.
 
 **Theorem 2.15 (Axis Lattice Dominance).** For any axis subsets $A \subseteq A' \subseteq \{N, B, S\}$, the capabilities of discipline using $A$ are a subset of capabilities of discipline using $A'$:
 $$\text{capabilities}(A) \subseteq \text{capabilities}(A')$$
@@ -1027,7 +1043,7 @@ The capability gap exists at both levels. $\blacksquare$
 **Remark 3.49 (Exotic Type Features).** Intersection types, union types, row polymorphism, higher-kinded types, and multiple dispatch do not escape the $(N, B, S)$ model:
 
 - **Intersection/union types** (TypeScript `A & B`, `A | B`): Refine $N$, combine $B$ and $S$. Still three axes.
-- **Row polymorphism** (OCaml `< x: int; .. >`): Pure structural typing using $S$ only. Our theorems apply directly—row polymorphism loses the four capabilities.
+- **Row polymorphism** (OCaml `< x: int; .. >`): Pure structural typing using $S$ only, but with a *declared* interface (unlike duck typing). OCaml row types are coherent (Theorem 2.10d does not apply) but still lose the four $B$-dependent capabilities (provenance, identity, enumeration, conflict resolution) and cannot provide metaprogramming hooks (Theorem 2.10p).
 - **Higher-kinded types** (Haskell `Functor`, `Monad`): Parameterized $N$ at the type-constructor level. Typeclass hierarchies provide $B$.
 - **Multiple dispatch** (Julia): Type hierarchies exist (`AbstractArray <: Any`). $B$ axis present. Dispatch semantics are orthogonal to type structure.
 - **Prototype-based inheritance** (JavaScript): Prototype chain IS the $B$ axis at object level. `Object.getPrototypeOf()` traverses MRO.
