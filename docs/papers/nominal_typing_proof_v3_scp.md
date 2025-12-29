@@ -133,7 +133,7 @@ We do not claim all systems require provenance. We prove that systems requiring 
 
 **Section 2: Metatheoretic foundations** — The three-axis model, abstract class system formalization, and the Axis Lattice Metatheorem (Theorem 2.9)
 
-**Section 3: Greenfield typing** — Strict dominance (Theorem 3.5) and information-theoretic completeness (Theorem 3.12)
+**Section 3: Greenfield typing** — Strict dominance (Theorem 3.5) and information-theoretic completeness (Theorem 3.19)
 
 **Section 4: Decision procedure** — Deriving typing discipline from system properties
 
@@ -2267,7 +2267,7 @@ They found that C++ Boost template metaprogramming can be "over-complex" when ab
 
 **What we prove that prior work could not:**
 1. **Strict dominance as formal theorem** (Theorem 3.5): Nominal typing provides all capabilities of structural typing plus provenance, identity, enumeration—at equivalent declaration cost.
-2. **Information-theoretic completeness** (Theorem 3.12): The capability gap is *derived* from discarding the Bases axis, not enumerated. Any query distinguishing same-shape types requires B. This is mathematically necessary.
+2. **Information-theoretic completeness** (Theorem 3.19): The capability gap is *derived* from discarding the Bases axis, not enumerated. Any query distinguishing same-shape types requires B. This is mathematically necessary.
 3. **Decision procedure** (Theorems 3.1, 3.4): Greenfield vs retrofit determines which discipline is correct. This is decidable.
 4. **Machine-checked proofs** (Section 6): 2100+ lines of Lean 4, 103 theorems/lemmas, 0 `sorry` placeholders.
 5. **Empirical validation at scale**: 13 case studies from a 45K LoC production system (OpenHCS).
