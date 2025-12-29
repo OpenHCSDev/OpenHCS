@@ -31,3 +31,8 @@ lean_lib «nominal_resolution» where
   moreLeanArgs := moreLeanArgs
   weakLeanArgs := weakLeanArgs
   -- add any library configuration options here
+
+lean_lib «abstract_class_system» where
+  moreLeanArgs := moreLeanArgs
+  weakLeanArgs := weakLeanArgs
+  -- Language-independent abstract class system formalization
