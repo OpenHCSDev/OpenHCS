@@ -101,7 +101,7 @@ OpenHCS is a bioimage analysis platform. Pipelines are compiled before execution
 The system requires knowing *which type* provided a value, not just *what* the value is. Dual-axis resolution walks both the context hierarchy (global $\rightarrow$ plate $\rightarrow$ step) and the class hierarchy (MRO) simultaneously. Every resolved value carries provenance: (value, source_scope, source_type). This is only possible with nominal typing---duck typing cannot answer "which type provided this?"
 
 **Key architectural patterns (detailed in Section 5):**
-- `@global_pipeline_config` decorator chain: one decorator spawns a 5-stage type transformation (Case Study 7)
+- `@auto_create_decorator` → `@global_pipeline_config` cascade: one decorator spawns a 5-stage type transformation (Case Study 7)
 - Dual-axis resolver: MRO *is* the priority system---no custom priority function exists (Case Study 8)
 - Bidirectional type registries: single source of truth with `type()` identity as key (Case Study 13)
 
@@ -271,6 +271,8 @@ where $T$ is the universe of types, taking a name, a set of base types, and a na
 $$\text{compatible}_{\text{shape}}(x, T) \iff S(\text{type}(x)) \supseteq S(T)$$
 
 Shape-based typing projects out the $B$ axis entirely. It cannot distinguish types with identical namespaces.
+
+**Remark (Operational Characterization).** In Python, shape-based compatibility reduces to capability probing via `hasattr`: `all(hasattr(x, a) for a in S(T))`. We use `hasattr` (not `getattr`) because shape-based typing is about *capability detection*, not attribute retrieval. `getattr` involves metaprogramming machinery (`__getattr__`, `__getattribute__`, descriptors) orthogonal to type discipline.
 
 **Definition 2.11 (Nominal Typing).** A typing discipline is *nominal* if type compatibility requires identity in the inheritance hierarchy:
 $$\text{compatible}_{\text{nominal}}(x, T) \iff T \in \text{ancestors}(\text{type}(x))$$
@@ -1398,17 +1400,63 @@ The metaclass ensures exactly one handler per microscope type. Attempting to def
 
 ### 5.8 Case Study 7: Five-Stage Type Transformation
 
-The `@global_pipeline_config` decorator chain demonstrates nominal typing's power for systematic type manipulation. Starting from a base config, one decorator invocation spawns a 5-stage type transformation that generates lazy companion types, injects fields into parent configs, and maintains bidirectional registries.
+The decorator chain demonstrates nominal typing's power for systematic type manipulation. Starting from `@auto_create_decorator`, one decorator invocation spawns a cascade that generates lazy companion types, injects fields into parent configs, and maintains bidirectional registries.
 
-**Stage 1:** `@auto_create_decorator` marks `GlobalPipelineConfig` with `_is_global_config = True` and creates the decorator itself via `setattr(module, 'global_pipeline_config', decorator)`.
+**Stage 1: `@auto_create_decorator` on `GlobalPipelineConfig`**
 
-**Stage 2:** `@global_pipeline_config(inherit_as_none=True)` on `PathPlanningConfig` triggers lazy type generation: `type("LazyPathPlanningConfig", (PathPlanningConfig, LazyDataclass), namespace)` where namespace contains all fields with `default=None`.
+```python
+@auto_create_decorator
+@dataclass(frozen=True)
+class GlobalPipelineConfig:
+    num_workers: int = 1
+```
 
-**Stage 3:** Descriptor protocol integration via `__set_name__` injects fields into parent configs. When `Pipeline` defines `path_planning: LazyPathPlanningConfig`, the descriptor automatically adds `path_planning` to `GlobalPipelineConfig` with `default_factory=LazyPathPlanningConfig`.
+The decorator:
+1. Validates naming convention (must start with "Global")
+2. Marks class: `global_config_class._is_global_config = True`
+3. Calls `create_global_default_decorator(GlobalPipelineConfig)` → returns `global_pipeline_config`
+4. Exports to module: `setattr(module, 'global_pipeline_config', decorator)`
 
-**Stage 4:** Bidirectional registries link lazy $\leftrightarrow$ base types: `_lazy_to_base[LazyPathPlanningConfig] = PathPlanningConfig` and `_base_to_lazy[PathPlanningConfig] = LazyPathPlanningConfig`. Normalization uses these at resolution time.
+**Stage 2: `@global_pipeline_config` applied to nested configs**
 
-**Stage 5:** MRO-based resolution walks `type(config).__mro__`, normalizing each type via registry lookup. The sourceType in `(value, scope, sourceType)` carries provenance that duck typing cannot provide.
+```python
+@global_pipeline_config(inherit_as_none=True)
+@dataclass(frozen=True)
+class PathPlanningConfig(WellFilterConfig):
+    output_dir_suffix: str = ""
+```
+
+The generated decorator:
+1. If `inherit_as_none=True`: rebuilds class with `None` defaults for inherited fields via `rebuild_with_none_defaults()`
+2. Generates lazy class: `LazyDataclassFactory.make_lazy_simple(PathPlanningConfig, "LazyPathPlanningConfig")`
+3. Exports lazy class to module: `setattr(config_module, "LazyPathPlanningConfig", lazy_class)`
+4. Registers for pending field injection into `GlobalPipelineConfig`
+5. Binds lazy resolution to concrete class via `bind_lazy_resolution_to_class()`
+
+**Stage 3: Lazy class generation via `make_lazy_simple`**
+
+Inside `LazyDataclassFactory.make_lazy_simple()`:
+1. Introspects base class fields via `_introspect_dataclass_fields()`
+2. Creates new class: `make_dataclass("LazyPathPlanningConfig", fields, bases=(PathPlanningConfig, LazyDataclass))`
+3. Registers bidirectional type mapping: `register_lazy_type_mapping(lazy_class, base_class)`
+
+**Stage 4: Field injection via `_inject_all_pending_fields`**
+
+At module load completion:
+1. Collects all pending configs registered by `@global_pipeline_config`
+2. Rebuilds `GlobalPipelineConfig` with new fields: `path_planning: LazyPathPlanningConfig = field(default_factory=LazyPathPlanningConfig)`
+3. Preserves `_is_global_config = True` marker on rebuilt class
+
+**Stage 5: Resolution via MRO + context stack**
+
+At runtime, dual-axis resolution walks `type(config).__mro__`, normalizing each type via registry lookup. The `sourceType` in `(value, scope, sourceType)` carries provenance that duck typing cannot provide.
+
+**Nominal typing requirements throughout:**
+- Stage 1: `_is_global_config` marker enables `isinstance(obj, GlobalConfigBase)` via metaclass
+- Stage 2: `inherit_as_none` marker controls lazy factory behavior
+- Stage 3: `type()` identity in bidirectional registries
+- Stage 4: `type()` identity for field injection targeting
+- Stage 5: MRO traversal requires `B` axis
 
 This 5-stage chain is single-stage generation (not nested metaprogramming). It respects Veldhuizen's (2006) bounds: full power without complexity explosion. The lineage tracking (which lazy type came from which base) is only possible with nominal identity---structurally equivalent types would be indistinguishable.
 
