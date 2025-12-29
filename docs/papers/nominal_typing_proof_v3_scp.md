@@ -1039,7 +1039,7 @@ The theoretical complexity bounds in Theorems 4.1-4.3 are demonstrated empirical
 
 **Second: Case studies are theorem instantiations.** Table 5.1 links each case study to the theorem it validates. These are not arbitrary examples---they are empirical instantiations of theoretical predictions. The theory predicts that systems requiring provenance will use nominal typing; the case studies confirm this prediction.
 
-**Third: Falsifiable predictions.** Section 9.2 provides explicit predictions for Django, Spring, Rails, and Go. If these predictions are wrong, our theory is falsified. This is the scientific method: make predictions, test them.
+**Third: Falsifiable predictions.** The decision procedure (Theorem 3.62) makes falsifiable predictions: greenfield systems with provenance requirements should exhibit nominal patterns; retrofit systems should exhibit structural patterns. Any codebase where this prediction fails would falsify our theory.
 
 **The validation structure:**
 
@@ -1047,7 +1047,7 @@ The theoretical complexity bounds in Theorems 4.1-4.3 are demonstrated empirical
 |-------|------------------|--------|
 | Formal proofs | Mathematical necessity | Complete (Lean, 2100+ lines, 0 `sorry`) |
 | OpenHCS case studies | Existence proof | 13 patterns documented |
-| Cross-language predictions | Falsifiability | Section 9.2 |
+| Decision procedure | Falsifiability | Theorem 3.62 (machine-checked) |
 
 OpenHCS is a bioimage analysis platform for high-content screening microscopy. The system was designed from the start with explicit commitment to nominal typing, exposing the consequences of this architectural decision through 13 distinct patterns. These case studies demonstrate the methodology in action: for each pattern, we identify whether it requires provenance tracking, MRO-based resolution, or type identity as dictionary keys---all indicators that nominal typing is mandatory per the formal model.
 
@@ -2659,52 +2659,27 @@ The decision procedure does not output "nominal is preferred." It outputs "nomin
 
 Two architects examining identical requirements will derive identical discipline choices. Disagreement indicates incomplete requirements or incorrect procedure application---not legitimate difference of opinion. The question of typing discipline is settled by derivation, not preference.
 
-### 9.2 Future Work: Cross-Language Validation
+### 9.2 Application: LLM Code Generation
 
-Our theorems make falsifiable predictions for other languages. We invite the community to validate or refute these predictions:
+The decision procedure (Theorem 3.62) has a clean application domain: evaluating LLM-generated code.
 
-**Prediction 1 (Java/Spring).** Spring Framework's dependency injection should exhibit nominal typing patterns. Specifically:
-- Bean registration should use `Class<?>` as keys (type identity)
-- Autowiring should use `instanceof` checks (nominal subtyping)
-- Aspect-oriented programming should use MRO-equivalent dispatch
+**Why LLM generation is a clean test.** When a human prompts an LLM to generate code, the greenfield/retrofit distinction is explicit in the prompt. "Implement a class hierarchy for X" is greenfield. "Integrate with external API Y" is retrofit. Unlike historical codebases---which contain legacy patterns, metaprogramming artifacts, and accumulated technical debt---LLM-generated code represents a fresh choice about typing discipline.
 
-**Falsification criterion:** If Spring's core DI uses structural matching (interface signature comparison) rather than nominal identity, our Theorem 3.5 is falsified for Java.
+**Corollary 9.1 (LLM Discipline Evaluation).** Given an LLM prompt with explicit context:
+1. If the prompt specifies greenfield development with inheritance → isinstance/ABC patterns are correct; hasattr patterns are violations (by Theorem 3.5)
+2. If the prompt specifies retrofit/integration with external types → structural patterns are acceptable (by Theorem 3.1)
+3. Deviation from these patterns is a typing discipline error detectable by the decision procedure
 
-**Prediction 2 (Ruby/Rails).** Rails' ActiveRecord should exhibit nominal typing patterns:
-- Model inheritance should use `ancestors` for MRO-based dispatch
-- Polymorphic associations should use `is_a?` checks
-- Concern composition should use mixin patterns with deterministic ordering
+*Proof.* Direct application of Theorem 3.62. The prompt context maps to the `isGreenfield`/`isRetrofit` classification. The generated code's patterns map to discipline choice. The decision procedure evaluates correctness. $\blacksquare$
 
-**Falsification criterion:** If Rails uses duck typing (`respond_to?`) for core model dispatch rather than nominal checks, our theorems are falsified for Ruby.
+**Implications.** An automated linter applying our decision procedure could:
+- Flag `hasattr()` in LLM-generated greenfield code as a discipline violation
+- Suggest `isinstance()`/ABC replacements
+- Validate that provenance-requiring prompts produce nominal patterns
 
-**Prediction 3 (C#/.NET).** ASP.NET Core's middleware pipeline should exhibit nominal patterns:
-- Middleware registration should use `Type` as keys
-- Dependency injection should use `GetType().IsAssignableFrom()`
-- Configuration binding should use inheritance hierarchies
+This application is clean because the context is unambiguous: the prompt explicitly states whether the developer controls the type hierarchy. The metrics defined in Section 8.5 (DTD, NTR) can be computed on generated code to evaluate discipline adherence.
 
-**Falsification criterion:** If ASP.NET Core uses structural matching for middleware dispatch, our theorems are falsified for C#.
-
-**Prediction 4 (Go).** Go frameworks should exhibit structural patterns (correctly, per Theorem 3.1):
-- Interface satisfaction should be implicit (no `implements` keyword)
-- No MRO-based dispatch (Go has no inheritance)
-- Type identity should be less common than interface satisfaction
-
-**Falsification criterion:** If Go frameworks extensively use type identity (`reflect.TypeOf`) for dispatch, our Theorem 3.1 (structural is correct for reduced systems) is falsified.
-
-**Validation methodology:**
-1. Clone framework source code
-2. Count occurrences of nominal patterns (`isinstance`, `type()`, `__mro__`, `Class<?>`, `is_a?`)
-3. Count occurrences of structural patterns (`hasattr`, `respond_to?`, interface matching)
-4. Calculate NTR (Nominal Typing Ratio) per Section 8.5
-5. Compare to predictions
-
-**Expected outcomes:**
-- Java/Spring: NTR > 0.8 (strongly nominal)
-- Ruby/Rails: NTR > 0.7 (nominal with some duck typing at boundaries)
-- C#/.NET: NTR > 0.8 (strongly nominal)
-- Go: NTR < 0.3 (structural, correctly per Theorem 3.1)
-
-These predictions are falsifiable. If the data contradicts our predictions, our theorems are wrong. This is the scientific method applied to programming language theory.
+**Falsifiability.** If LLM-generated greenfield code with explicit inheritance requirements consistently performs better with structural patterns than nominal patterns, our Theorem 3.5 is falsified. We predict it will not.
 
 ---
 
