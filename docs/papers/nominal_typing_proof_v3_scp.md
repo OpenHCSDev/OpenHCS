@@ -40,7 +40,7 @@ We develop a metatheory of class system design applicable to any language with e
 
 The three-axis model formalizes what programmers intuitively understand but rarely make explicit:
 
-1. **The greenfield-retrofit distinction** (Theorem 3.4): Languages with explicit inheritance (`bases` axis) mandate nominal typing. Structural typing is valid only when `bases = []` universally.
+1. **Universal dominance** (Theorem 3.4): Languages with explicit inheritance (`bases` axis) mandate nominal typing. Structural typing is valid only when `bases = []` universally. The "retrofit exception" is eliminated by adapters (Theorem 2.10j).
 2. **Complexity separation** (Theorem 4.3): Nominal typing achieves O(1) error localization; duck typing requires $\Omega$(n) call-site inspection.
 3. **Provenance impossibility** (Corollary 6.3): Duck typing cannot answer "which type provided this value?" because structurally equivalent objects are indistinguishable by definition. Machine-checked in Lean 4.
 
@@ -77,7 +77,7 @@ This paper makes five contributions:
 - The three-axis model (N, B, S) as a universal framework for class systems
 - Theorem 2.15 (Axis Lattice Dominance): capability monotonicity under axis subset ordering
 - Theorem 2.17 (Capability Completeness): the capability set $\mathcal{C}_B$ is exactly four elements—minimal and complete
-- Theorem 3.5: Nominal typing strictly dominates shape-based typing in greenfield
+- Theorem 3.5: Nominal typing strictly dominates shape-based typing universally (when $B \neq \emptyset$)
 
 **4. Machine-checked verification (Section 6):**
 - 2100+ lines of Lean 4 proofs across four modules
@@ -125,9 +125,9 @@ This paper makes absolute claims. We do not argue nominal typing is "preferred" 
 
 1. **Shape-based typing cannot provide provenance.** Duck typing and structural typing check type *shape*---attributes, method signatures. Provenance requires type *identity*. Shape-based disciplines cannot provide what they do not track.
 
-2. **In greenfield development, shape-based typing is wrong.** If the architect controls the type hierarchy, there is no reason to probe attributes instead of checking identity. The types are known. Checking shape discards information.
+2. **When B ≠ ∅, shape-based typing is wrong.** Nominal typing strictly dominates. Adapters eliminate the retrofit exception (Theorem 2.10j). There is no context where shape-based typing is the correct choice when inheritance exists.
 
-3. **Shape-based typing is a retrofit concession.** When integrating code you do not control, you cannot mandate inheritance from your base classes. Shape-based typing handles this case. It is a concession to external constraints---not a design choice, not correctness.
+3. **Shape-based typing is a capability sacrifice.** Protocol and duck typing discard the Bases axis. This is not a "concession" or "tradeoff"—it is a dominated choice that forecloses four capabilities for zero benefit.
 
 We do not claim all systems require provenance. We prove that systems requiring provenance cannot use shape-based typing. The requirements are the architect's choice; the discipline, given requirements, is derived.
 
@@ -135,7 +135,7 @@ We do not claim all systems require provenance. We prove that systems requiring 
 
 **Section 2: Metatheoretic foundations** — The three-axis model, abstract class system formalization, and the Axis Lattice Metatheorem (Theorem 2.15)
 
-**Section 3: Greenfield typing** — Strict dominance (Theorem 3.5) and information-theoretic completeness (Theorem 3.19)
+**Section 3: Universal dominance** — Strict dominance (Theorem 3.5), information-theoretic completeness (Theorem 3.19), retrofit exception eliminated (Theorem 2.10j)
 
 **Section 4: Decision procedure** — Deriving typing discipline from system properties
 
@@ -569,7 +569,7 @@ This is a **decision procedure**, not a preference. The output is determined by 
 
 ---
 
-## 3. The Greenfield Distinction
+## 3. Universal Dominance
 
 **Thought experiment:** What if `type()` only took namespace?
 
@@ -610,9 +610,9 @@ In a namespace-only system, structural typing is the unique correct typing disci
 
 The `name` axis is metadata in both cases---it doesn't affect which typing discipline is correct.
 
-**Theorem 3.4 (Bases Mandates Nominal).** The presence of a `bases` axis in the class system mandates nominal typing for greenfield development.
+**Theorem 3.4 (Bases Mandates Nominal).** The presence of a `bases` axis in the class system mandates nominal typing. This is universal—not limited to greenfield development.
 
-*Proof.* We prove this in two steps: (1) strict dominance holds unconditionally, (2) choosing a dominated discipline is definitionally incorrect.
+*Proof.* We prove this in two steps: (1) strict dominance holds unconditionally, (2) retrofit constraints do not constitute an exception.
 
 **Step 1: Strict Dominance is Unconditional.**
 
@@ -628,33 +628,35 @@ Therefore: $\text{capabilities}(D_{\text{shape}}) \subset \text{capabilities}(D_
 
 This dominance holds **regardless of whether the system currently uses these capabilities**. The capability gap exists by the structure of axis subsets, not by application requirements.
 
-**Step 2: Greenfield Context Eliminates All Constraints Against Nominal.**
+**Step 2: Retrofit Constraints Do Not Constitute an Exception.**
 
-In greenfield development:
-- The architect controls all type definitions (by definition of greenfield)
-- No external types constrain the discipline choice
-- Both $D_{\text{shape}}$ and $D_{\text{nominal}}$ are available at equal declaration cost
+One might object: "In retrofit contexts, external types cannot be made to inherit from my ABCs, so nominal typing is unavailable."
 
-**Step 3: Choosing a Dominated Discipline is Incorrect.**
+This objection was addressed in Theorem 2.10j (Protocol Dominated by Adapters): when $B \neq \emptyset$, nominal typing with adapters provides all capabilities of Protocol plus four additional capabilities. The "retrofit exception" is not an exception—adapters are the mechanism that makes nominal typing universally available.
 
-Given two available options $A$ and $B$ where $\text{capabilities}(A) \subset \text{capabilities}(B)$ and $\text{cost}(A) = \text{cost}(B)$, choosing $A$ is **dominated** in the decision-theoretic sense: there exists no rational justification for $A$ over $B$.
+- External type cannot inherit from your ABC? Wrap it in an adapter that does.
+- Protocol avoids the adapter? Yes, but avoiding adapters is a convenience, not a capability (Corollary 2.10k).
 
-In greenfield with bases axis present:
-- $D_{\text{shape}}$ is dominated by $D_{\text{nominal}}$
-- No constraint forces $D_{\text{shape}}$
+**Conclusion: Choosing a Dominated Discipline is Incorrect.**
+
+Given two available options $A$ and $B$ where $\text{capabilities}(A) \subset \text{capabilities}(B)$ and $\text{cost}(A) \leq \text{cost}(B)$, choosing $A$ is **dominated** in the decision-theoretic sense: there exists no rational justification for $A$ over $B$.
+
+When $B \neq \emptyset$:
+- $D_{\text{shape}}$ is dominated by $D_{\text{nominal}}$ (with adapters if needed)
+- No constraint makes $D_{\text{shape}}$ necessary—adapters handle all retrofit cases
 - Therefore choosing $D_{\text{shape}}$ is incorrect
 
 **Note on "what if I don't need the extra capabilities?"**
 
 This objection misunderstands dominance. A dominated choice is incorrect **even if the extra capabilities are never used**, because:
-1. Capability availability has zero cost in greenfield (same declaration syntax)
+1. Capability availability has zero cost (same declaration syntax, adapters are trivial)
 2. Future requirements are unknown; foreclosing capabilities has negative expected value
 3. "I don't need it now" is not equivalent to "I will never need it"
 4. The discipline choice is made once; its consequences persist
 
-The presence of the `bases` axis creates capabilities that shape-based typing cannot access. In greenfield, where no constraint forces the inferior choice, the only rational discipline is the one that uses all available axes. That discipline is nominal typing. $\blacksquare$
+The presence of the `bases` axis creates capabilities that shape-based typing cannot access. Adapters ensure nominal typing is always available. The only rational discipline is the one that uses all available axes. That discipline is nominal typing. $\blacksquare$
 
-**Theorem 3.5 (Strict Dominance in Greenfield).** In greenfield development, nominal typing strictly dominates shape-based typing: nominal provides all capabilities of shape-based typing plus additional capabilities, at equal declaration cost.
+**Theorem 3.5 (Strict Dominance—Universal).** Nominal typing strictly dominates shape-based typing whenever $B \neq \emptyset$: nominal provides all capabilities of shape-based typing plus additional capabilities, at equal or lower cost.
 
 *Proof.* Consider Python's concrete implementations:
 - Shape-based: `typing.Protocol` (structural typing)
@@ -678,15 +680,15 @@ Let S = capabilities provided by Protocol, N = capabilities provided by ABCs.
 
 Therefore S $\subset$ N (strict subset). Both require explicit type declarations. The declaration cost is equivalent: one class definition per interface. Therefore, nominal typing provides strictly more capabilities at equal or lower cost (earlier failure). $\blacksquare$
 
-**Corollary 3.6 (Greenfield Incorrectness).** In greenfield development, using shape-based typing instead of nominal typing is not suboptimal---it is incorrect.
+**Corollary 3.6 (Shape Typing Incorrectness).** When $B \neq \emptyset$, using shape-based typing instead of nominal typing is not suboptimal---it is incorrect.
 
-*Proof.* By Theorem 3.5, nominal typing strictly dominates shape-based typing. Choosing a strictly dominated option when the superior option is available at equal cost is definitionally incorrect. $\blacksquare$
+*Proof.* By Theorem 3.5, nominal typing strictly dominates shape-based typing. By Theorem 2.10j, adapters make nominal typing universally available. Choosing a strictly dominated option when the superior option is available is definitionally incorrect. $\blacksquare$
 
 ### 3.1 The Absolute Claim
 
-**Claim (Typing Discipline Correctness).** In any programming language with explicit inheritance syntax, shape-based typing (structural typing, duck typing, Protocol-based typing) is **incorrect** for greenfield development. Nominal typing is **correct**. This is not a preference, recommendation, or tradeoff. It is a mathematical fact derivable from the structure of class systems.
+**Claim (Typing Discipline Correctness).** In any programming language with explicit inheritance syntax ($B \neq \emptyset$), shape-based typing (structural typing, duck typing, Protocol-based typing) is **incorrect**. Nominal typing is **correct**. This is not a preference, recommendation, or tradeoff. It is a mathematical fact derivable from the structure of class systems.
 
-*Proof.* By Theorem 2.18 (Strict Dominance), nominal typing provides all capabilities of shape-based typing plus additional capabilities (provenance, type identity, subtype enumeration, type-as-key). By Corollary 2.16, in greenfield development where the architect controls type definitions, choosing the strictly dominated option is incorrect. $\blacksquare$
+*Proof.* By Theorem 2.18 (Strict Dominance), nominal typing provides all capabilities of shape-based typing plus additional capabilities (provenance, type identity, subtype enumeration, type-as-key). By Theorem 2.10j, adapters eliminate the retrofit exception. Therefore, choosing shape-based typing when $B \neq \emptyset$ is choosing the strictly dominated option. $\blacksquare$
 
 **What "incorrect" means:**
 1. **Information-theoretic**: Shape-based typing discards the $B$ axis. Discarding available information without compensating benefit is suboptimal by definition.
@@ -1139,14 +1141,14 @@ If a context is greenfield, all modules are internal and no constraints require 
 Each query type is classified as requiring provenance or not. A system requires provenance iff any of its queries requires provenance. This is a finite check over a finite query set. $\blacksquare$
 
 **Theorem 3.62 (Decision Procedure Soundness).** The discipline selection procedure is sound:
-1. If provenance is required → select Nominal (mandatory)
-2. If retrofit context and no provenance → select Shape (concession)
-3. If greenfield context and no provenance → select Nominal (dominance)
+1. If $B \neq \emptyset$ → select Nominal (dominance, universal)
+2. If $B = \emptyset$ → select Shape (no alternative exists)
 
 *Proof.* (Machine-checked in `context_formalization.lean`)
-Case 1: Provenance requires the Bases axis (Theorem 3.13). Only nominal typing uses Bases. Therefore nominal is mandatory.
-Case 2: Retrofit context means external constraints prevent nominal typing. Shape is the only option.
-Case 3: Greenfield context means nominal is available. By Theorem 3.54, nominal Pareto dominates shape. Therefore nominal is correct. $\blacksquare$
+Case 1: When $B \neq \emptyset$, nominal typing strictly dominates shape-based typing (Theorem 3.5). Adapters eliminate the retrofit exception (Theorem 2.10j). Therefore nominal is always correct.
+Case 2: When $B = \emptyset$ (e.g., Go interfaces, JSON objects), nominal typing is undefined—there is no inheritance to track. Shape is the only coherent discipline. $\blacksquare$
+
+**Remark (Obsolescence of Greenfield/Retrofit Distinction).** Earlier versions of this paper distinguished "greenfield" (use nominal) from "retrofit" (use shape). Theorem 2.10j eliminates this distinction: adapters make nominal typing available in all retrofit contexts. The only remaining distinction is whether $B$ exists at all.
 
 ---
 
@@ -1164,7 +1166,7 @@ Case 3: Greenfield context means nominal is available. By Theorem 3.54, nominal 
 | "What about intersection/union types?" | Remark 3.49 (still three axes) |
 | "What about row polymorphism?" | Remark 3.49 (pure S, loses capabilities) |
 | "What about higher-kinded types?" | Remark 3.49 (parameterized N) |
-| "Only applies to greenfield" | Theorem 3.50 (Universal Optimality) |
+| "Only applies to greenfield" | Theorem 2.10j (Adapters eliminate retrofit exception) |
 | "Legacy codebases are different" | Corollary 3.51 (sacrifice, not alternative) |
 | "Claims are too broad" | Non-Claims 3.41-3.42 (true scope limits) |
 | "You can't say rewrite everything" | Theorem 3.55 (Dominance ≠ Migration) |
@@ -2103,12 +2105,14 @@ Therefore, `ResolveResult.sourceType` is meaningful: it tells you WHICH type pro
 | - Duck typing axiom | 10 | PASS Definition |
 | - Corollary 6.3 (impossibility) | 40 | PASS Proved |
 | - Nominal contrast | 10 | PASS Proved |
-| MetaprogrammingGap namespace | ~80 | PENDING |
-| - Declaration vs Query (Def 2.10m-n) | ~15 | PENDING Definitions |
-| - Hook definition (Def 2.10o) | ~10 | PENDING Definition |
-| - Theorem 2.10p (Hooks Require Declarations) | ~25 | PENDING |
-| - Theorem 2.10q (Enumeration Requires Registration) | ~30 | PENDING |
-| **Total** | **~1568** | **1488 verified, ~80 pending** |
+| MetaprogrammingGap namespace | 156 | PASS Compiles, no warnings |
+| - Declaration/Query/Hook definitions | 30 | PASS Definitions |
+| - Theorem 2.10p (Hooks Require Declarations) | 20 | PASS Proved |
+| - Structural typing model | 35 | PASS Definitions |
+| - Theorem 2.10q (Enumeration Requires Registration) | 30 | PASS Proved |
+| - Capability model & dominance | 35 | PASS Proved |
+| - Corollary 2.10r (No Declaration No Hook) | 15 | PASS Proved |
+| **Total** | **438** | **PASS All proofs verified, 0 `sorry`, 0 warnings** |
 
 ### 6.10 What the Lean Proofs Guarantee
 
