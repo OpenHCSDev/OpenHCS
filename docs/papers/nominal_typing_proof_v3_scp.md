@@ -350,6 +350,64 @@ Protocol's only "advantage" is avoiding the 2-line adapter class. But avoiding e
 | Protocol | Never (dominated by adapters) | Valid (only coherent option) |
 | Nominal/Adapters | Always | N/A (requires $B$) |
 
+#### 2.4.2a The Metaprogramming Capability Gap
+
+Beyond typing discipline, nominal and structural typing differ in a second, independent dimension: **metaprogramming capability**. This gap is not an implementation accident—it is mathematically necessary.
+
+**Definition 2.10m (Declaration-Time Event).** A *declaration-time event* occurs when a type is defined, before any instance exists. Examples: class definition, inheritance declaration, trait implementation.
+
+**Definition 2.10n (Query-Time Check).** A *query-time check* occurs when type compatibility is evaluated during program execution. Examples: `isinstance()`, Protocol conformance check, structural matching.
+
+**Definition 2.10o (Metaprogramming Hook).** A *metaprogramming hook* is a user-defined function that executes in response to a declaration-time event. Examples: `__init_subclass__()`, metaclass `__new__()`, Rust's `#[derive]`.
+
+**Theorem 2.10p (Hooks Require Declarations).** Metaprogramming hooks require declaration-time events. Structural typing provides no declaration-time events for conformance. Therefore, structural typing cannot provide conformance-based metaprogramming hooks.
+
+*Proof.*
+1. A hook is a function that fires when an event occurs.
+2. In nominal typing, `class C(Base)` is a declaration-time event. The act of writing the inheritance declaration fires hooks: Python's `__init_subclass__()`, metaclass `__new__()`, Java's annotation processors, Rust's derive macros.
+3. In structural typing, "Does $X$ conform to interface $I$?" is evaluated at query time. There is no syntax declaring "$X$ implements $I$"—conformance is inferred from structure.
+4. No declaration → no event. No event → no hook point.
+5. Therefore, structural typing cannot provide hooks that fire when a type "becomes" conformant to an interface. $\blacksquare$
+
+**Theorem 2.10q (Enumeration Requires Registration).** To enumerate all types conforming to interface $I$, a registry mapping types to interfaces is required. Nominal typing provides this registry implicitly via inheritance declarations. Structural typing does not.
+
+*Proof.*
+1. Enumeration requires a finite data structure containing conforming types.
+2. In nominal typing, each declaration `class C(Base)` registers $C$ as a subtype of $\text{Base}$. The transitive closure of declarations forms the registry. `__subclasses__()` queries this registry in $O(k)$ where $k = |\text{subtypes}(T)|$.
+3. In structural typing, no registration occurs. Conformance is computed at query time by checking structural compatibility.
+4. To enumerate conforming types under structural typing, one must iterate over all types in the universe and check conformance for each. In an open system (where new types can be added at any time), $|\text{universe}|$ is unbounded.
+5. Therefore, enumeration under structural typing is $O(|\text{universe}|)$, which is infeasible for open systems. $\blacksquare$
+
+**Corollary 2.10r (Metaprogramming Capability Gap Is Necessary).** The gap between nominal and structural typing in metaprogramming capability is not an implementation choice—it is a logical consequence of declaration vs. query.
+
+| Capability | Nominal Typing | Structural Typing | Why |
+|------------|----------------|-------------------|-----|
+| Definition-time hooks | Yes (`__init_subclass__`, metaclass) | No | Requires declaration event |
+| Enumerate implementers | Yes (`__subclasses__()`, O(k)) | No (O(∞) in open systems) | Requires registration |
+| Auto-registration | Yes (metaclass `__new__`) | No | Requires hook |
+| Derive/generate code | Yes (Rust `#[derive]`, Python descriptors) | No | Requires declaration context |
+
+**Corollary 2.10s (Universal Applicability).** This gap applies to all languages:
+
+| Language | Typing | Enumerate implementers? | Definition-time hooks? |
+|----------|--------|------------------------|------------------------|
+| Go | Structural | No | No |
+| TypeScript | Structural | No | No (decorators are nominal—require `class`) |
+| Python Protocol | Structural | No | No |
+| Python ABC | Nominal | Yes (`__subclasses__()`) | Yes (`__init_subclass__`, metaclass) |
+| Java | Nominal | Yes (reflection) | Yes (annotation processors) |
+| C# | Nominal | Yes (reflection) | Yes (attributes, source generators) |
+| Rust traits | Nominal (`impl`) | Yes | Yes (`#[derive]`, proc macros) |
+| Haskell typeclasses | Nominal (`instance`) | Yes | Yes (deriving, TH) |
+
+**Remark (TypeScript Decorators).** TypeScript decorators appear to be metaprogramming hooks, but they attach to *class declarations*, not structural conformance. A decorator fires when `class C` is defined—this is a nominal event (the class is named and declared). Decorators cannot fire when "some object happens to match interface I"—that is a query, not a declaration.
+
+**Remark (The Two Axes of Dominance).** Nominal typing strictly dominates structural typing on two independent axes:
+1. **Typing capability** (Theorems 2.10j, 2.18): Provenance, identity, enumeration, conflict resolution
+2. **Metaprogramming capability** (Theorems 2.10p, 2.10q): Hooks, registration, code generation
+
+Neither axis is an implementation accident. Both follow from the structure of declaration vs. query. Protocol is dominated on both axes.
+
 **Remark.** Languages without inheritance (Go) have $B = \emptyset$ by design. For these languages, structural typing with declared interfaces is the correct choice—not because structural typing is superior, but because nominal typing requires $B$ and Go provides none. Go's interfaces are coherent ($\{N, S\}$). Go does not use duck typing.
 
 **Remark (Institutional Dysfunction).** Duck typing was accepted as "Pythonic" without formal justification. Rejecting it requires formal proof. This asymmetric burden of proof—defaults require no justification, changing defaults requires proof—is an epistemic failure of the field, not a logical requirement. The theorems in this section exist because institutional inertia demands formal refutation of practices that were never formally justified. The correct response to "duck typing is Pythonic" was always "prove it." No one asked.
@@ -1099,6 +1157,8 @@ Case 3: Greenfield context means nominal is available. By Theorem 3.54, nominal 
 | "Duck typing is coherent" | Theorem 2.10d (Incoherence) |
 | "Protocol is valid for retrofit" | Theorem 2.10j (Dominated by Adapters) |
 | "Avoiding adapters is a benefit" | Corollary 2.10k (Negative Value) |
+| "Protocol has equivalent metaprogramming" | Theorem 2.10p (Hooks Require Declarations) |
+| "You can enumerate Protocol implementers" | Theorem 2.10q (Enumeration Requires Registration) |
 
 **Challenge to reviewers.** To reject this paper, a reviewer must do one of the following:
 
@@ -1113,6 +1173,8 @@ Case 3: Greenfield context means nominal is available. By Theorem 3.54, nominal 
 9. Claim the Lean proofs contain errors (2100+ lines are public; verify them)
 10. Claim structural identity equals semantic identity (but Theorem 5.1 proves it doesn't, with production code)
 11. Claim duck typing is a coherent typing discipline (but Theorem 2.10d proves it is not—it declares no interface, provides no complete compatibility predicate, and commits to neither "structure = semantics" nor "structure ≠ semantics")
+12. Claim structural typing provides equivalent metaprogramming capability (but Theorem 2.10p proves hooks require declarations, and structural typing has no declarations)
+13. Claim you can enumerate structural implementers (but Theorem 2.10q proves enumeration requires registration, which structural typing lacks)
 
 **We explicitly invite any of these responses.** If a reviewer believes duck typing provides a capability that nominal typing lacks, we request they state it precisely. If they believe our impossibility proofs are flawed, we request they identify the error in the Lean formalization. If they believe "flexibility" is a capability, we request they define it in terms of computable functions over $(N, B, S)$. If they believe duck typing is a coherent discipline, we request they exhibit the declared interface $T$ that duck typing verifies against.
 
@@ -2025,7 +2087,12 @@ Therefore, `ResolveResult.sourceType` is meaningful: it tells you WHICH type pro
 | - Duck typing axiom | 10 | PASS Definition |
 | - Corollary 6.3 (impossibility) | 40 | PASS Proved |
 | - Nominal contrast | 10 | PASS Proved |
-| **Total** | **1488** | **PASS All proofs verified, 0 `sorry`** |
+| MetaprogrammingGap namespace | ~80 | PENDING |
+| - Declaration vs Query (Def 2.10m-n) | ~15 | PENDING Definitions |
+| - Hook definition (Def 2.10o) | ~10 | PENDING Definition |
+| - Theorem 2.10p (Hooks Require Declarations) | ~25 | PENDING |
+| - Theorem 2.10q (Enumeration Requires Registration) | ~30 | PENDING |
+| **Total** | **~1568** | **1488 verified, ~80 pending** |
 
 ### 6.10 What the Lean Proofs Guarantee
 
