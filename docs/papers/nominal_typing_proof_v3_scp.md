@@ -324,7 +324,35 @@ The systems are equivalent in capability. Structural typing provides no capabili
 2. **Structural typing** ($\{N, S\}$, Protocol): Coherent but eliminable when $B \neq \emptyset$ (Theorem 2.10g). Valid only when $B = \emptyset$.
 3. **Nominal typing** ($\{N, B, S\}$, ABC): Coherent and necessary. The only non-eliminable discipline for systems with inheritance.
 
+**Theorem 2.10j (Protocol Is Strictly Dominated When B ≠ ∅).** In systems with inheritance, Protocol is strictly dominated by explicit adapters.
+
+*Proof.* Compare the two approaches for accepting third-party type $T$:
+
+| Property | Protocol | Explicit Adapter |
+|----------|----------|------------------|
+| Accepts same inputs | Yes | Yes |
+| Documents adaptation boundary | No (implicit) | Yes (class definition) |
+| Failure mode | Runtime (`isinstance` returns False, or missing method during execution) | Class definition time (if $T$ lacks required methods) |
+| Provenance | No ($T$ not in your hierarchy) | Yes (adapter is in your hierarchy) |
+| Explicit | No | Yes |
+
+The adapter provides strictly more: same inputs, plus explicit documentation, plus fail-loud at definition time, plus provenance. Protocol provides strictly less.
+
+Protocol's only "advantage" is avoiding the 2-line adapter class. But avoiding explicitness is not an advantage—it is negative value. "Explicit is better than implicit" (Zen of Python, line 2). $\blacksquare$
+
+**Corollary 2.10k (Protocol's Value Proposition Is Negative).** When $B \neq \emptyset$, Protocol trades explicitness, fail-loud behavior, and provenance for 2 fewer lines of code. This is not a tradeoff—it is a loss.
+
+**Corollary 2.10l (Complete Typing Discipline Validity).** The complete validity table:
+
+| Discipline | When $B \neq \emptyset$ | When $B = \emptyset$ |
+|------------|-------------------------|----------------------|
+| Duck typing | Never (incoherent) | Never (incoherent) |
+| Protocol | Never (dominated by adapters) | Valid (only coherent option) |
+| Nominal/Adapters | Always | N/A (requires $B$) |
+
 **Remark.** Languages without inheritance (Go) have $B = \emptyset$ by design. For these languages, structural typing with declared interfaces is the correct choice—not because structural typing is superior, but because nominal typing requires $B$ and Go provides none. Go's interfaces are coherent ($\{N, S\}$). Go does not use duck typing.
+
+**Remark (Institutional Dysfunction).** Duck typing was accepted as "Pythonic" without formal justification. Rejecting it requires formal proof. This asymmetric burden of proof—defaults require no justification, changing defaults requires proof—is an epistemic failure of the field, not a logical requirement. The theorems in this section exist because institutional inertia demands formal refutation of practices that were never formally justified. The correct response to "duck typing is Pythonic" was always "prove it." No one asked.
 
 **Definition 2.11 (Nominal Typing).** A typing discipline is *nominal* if type compatibility requires identity in the inheritance hierarchy:
 $$\text{compatible}_{\text{nominal}}(x, T) \iff T \in \text{ancestors}(\text{type}(x))$$
@@ -1068,6 +1096,9 @@ Case 3: Greenfield context means nominal is available. By Theorem 3.54, nominal 
 | "You can't say rewrite everything" | Theorem 3.55 (Dominance ≠ Migration) |
 | "Greenfield is undefined" | Definitions 3.57-3.58, Theorem 3.59 |
 | "Provenance requirement is circular" | Theorem 3.61 (Provenance Detection) |
+| "Duck typing is coherent" | Theorem 2.10d (Incoherence) |
+| "Protocol is valid for retrofit" | Theorem 2.10j (Dominated by Adapters) |
+| "Avoiding adapters is a benefit" | Corollary 2.10k (Negative Value) |
 
 **Challenge to reviewers.** To reject this paper, a reviewer must do one of the following:
 
