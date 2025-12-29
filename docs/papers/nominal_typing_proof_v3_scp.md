@@ -1114,7 +1114,9 @@ This closes the attack surface where a reviewer might conflate "nominal is bette
 - **Discipline comparison**: Universal, always true (Theorem 3.54)
 - **Migration decision**: Context-dependent, requires cost-benefit analysis (Theorem 3.55)
 
-#### 3.11.9 Context Formalization: Greenfield and Retrofit
+#### 3.11.9 Context Formalization: Greenfield and Retrofit (Historical)
+
+**Note.** The following definitions were used in earlier versions of this paper to distinguish contexts where nominal typing was "available" from those where it was not. Theorem 2.10j (Adapters) eliminates this distinction: adapters make nominal typing available in all retrofit contexts. We retain these definitions for completeness and because the Lean formalization verifies them.
 
 **Definition 3.57 (Greenfield Context).** A development context is *greenfield* if:
 1. All modules are internal (architect can modify type hierarchies)
@@ -1128,6 +1130,8 @@ This closes the attack surface where a reviewer might conflate "nominal is bette
 
 *Proof.* (Machine-checked in `context_formalization.lean`)
 If a context is greenfield, all modules are internal and no constraints require structural typing. If any module is external or any constraint requires structural typing, the context is retrofit. These conditions are mutually exclusive by construction. $\blacksquare$
+
+**Corollary 3.59a (Retrofit Does Not Imply Structural).** A retrofit context does not require structural typing. Adapters (Theorem 2.10j) make nominal typing available in all retrofit contexts where $B \neq \emptyset$.
 
 **Definition 3.60 (Provenance-Requiring Query).** A system query *requires provenance* if it needs to distinguish between structurally equivalent types. Examples:
 - "Which type provided this value?" (provenance)
@@ -2697,7 +2701,7 @@ The only *necessary* typing discipline is nominal. Everything else is either inc
 
 ### 8.4 Implications for Language Design
 
-Language designers face a fundamental choice: provide nominal typing (enabling provenance), structural typing (enabling retrofit), or both. Our theorems inform this decision:
+Language designers face a fundamental choice: provide nominal typing (enabling provenance), structural typing (for $B = \emptyset$ boundaries), or both. Our theorems inform this decision:
 
 **Provide both mechanisms.** Languages like TypeScript demonstrate that nominal and structural typing can coexist. TypeScript's "branding" idiom (using private fields to create nominal distinctions) validates our thesis: programmers need nominal identity even in structurally-typed languages. Python provides both ABCs (nominal) and `Protocol` (structural). Our theorems clarify the relationship: when $B \neq \emptyset$, nominal typing (ABCs) strictly dominates Protocol (Theorem 2.10j). Protocol is dominated—it provides a convenience (avoiding adapters) at the cost of four capabilities. This is never the correct choice; it is at best a capability sacrifice for convenience.
 
@@ -2748,7 +2752,7 @@ Our theorems establish necessary conditions for provenance-tracking systems. Thi
 
 **Versioning and compatibility.** When newer code must accept older types that predate a base class introduction, you can create versioned adapters: `class V1ConfigAdapter(V1Config, ConfigBaseV2): pass`. Protocol avoids this but does not provide additional capabilities.
 
-**Type-level programming without runtime overhead.** TypeScript's structural typing enables type checking at compile time without runtime cost. For TypeScript code that never uses `instanceof` or class identity, structural typing is an acceptable design. However, see Section 8.7 for why TypeScript's *class-based* structural typing is problematic.
+**Type-level programming without runtime overhead.** TypeScript's structural typing enables type checking at compile time without runtime cost. For TypeScript code that never uses `instanceof` or class identity (effectively $B = \emptyset$ at runtime), structural typing has no capability gap because there's no $B$ to lose. However, see Section 8.7 for why TypeScript's *class-based* structural typing creates tension—once you have `class extends`, you have $B \neq \emptyset$.
 
 **Summary.** In all scenarios with $B \neq \emptyset$, the adapter approach is available. Protocol's only advantage is avoiding the adapter. Avoiding the adapter is a convenience, not a typing capability (Corollary 2.10h).
 
