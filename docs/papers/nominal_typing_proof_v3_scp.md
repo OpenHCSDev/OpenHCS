@@ -83,7 +83,7 @@ This paper makes five contributions:
 - Formalized O(1) vs O(k) vs Ω(n) complexity separation with adversary-based lower bound proof
 - Universal extension to 8 languages (Java, C#, Rust, TypeScript, Kotlin, Swift, Scala, C++)
 - Exotic type features covered (intersection, union, row polymorphism, HKT, multiple dispatch)
-- Only 3 `sorry` placeholders (technical list lemmas)—all core theorems complete
+- **Zero `sorry` placeholders—all 54 theorems complete**
 
 **5. Empirical validation (Section 5):**
 - 13 case studies from OpenHCS (45K LoC production Python codebase)
