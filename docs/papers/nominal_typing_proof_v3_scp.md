@@ -85,7 +85,7 @@ This paper makes five contributions:
 - Formalized O(1) vs O(k) vs Ω(n) complexity separation with adversary-based lower bound proof
 - Universal extension to 8 languages (Java, C#, Rust, TypeScript, Kotlin, Swift, Scala, C++)
 - Exotic type features covered (intersection, union, row polymorphism, HKT, multiple dispatch)
-- **Zero `sorry` placeholders—all 103 theorems/lemmas complete**
+- **Zero `sorry` placeholders—all 111 theorems/lemmas complete**
 
 **5. Empirical validation (Section 5):**
 - 13 case studies from OpenHCS (45K LoC production Python codebase)
@@ -265,6 +265,10 @@ where $T$ is the universe of types, taking a name, a set of base types, and a na
 
 **Definition 2.9 (Reduced Class System).** A class system is *reduced* if $B = \emptyset$ for all types (no inheritance). Examples: Go (structs only), C (no classes), JavaScript ES5 (prototype-based, no `class` keyword).
 
+**Remark (Implicit Root Classes).** In Python, every class implicitly inherits from `object`: `class X: pass` has `X.__bases__ == (object,)`. Definition 2.9's "$B = \emptyset$" refers to the abstract model where inheritance from a universal root (Python's `object`, Java's `Object`) is elided. Equivalently, $B = \emptyset$ means "no user-declared inheritance beyond the implicit root." The theorems apply when $B \neq \emptyset$ in this sense—i.e., when the programmer explicitly declares inheritance relationships.
+
+**Remark (Go Embedding ≠ Inheritance).** Go's struct embedding provides method forwarding but is not inheritance: (1) embedded methods cannot be overridden—calling `outer.Method()` always invokes the embedded type's implementation, (2) there is no MRO—Go has no linearization algorithm, (3) there is no `super()` equivalent. Embedding is composition with syntactic sugar, not polymorphic inheritance. Therefore Go has $B = \emptyset$.
+
 #### 2.4.2 Typing Disciplines as Axis Projections
 
 **Definition 2.10 (Shape-Based Typing).** A typing discipline is *shape-based* if type compatibility is determined solely by $S$ (namespace):
@@ -276,7 +280,9 @@ Shape-based typing projects out the $B$ axis entirely. It cannot distinguish typ
 
 **Remark (Partial vs Full Structural Compatibility).** Definition 2.10 uses partial compatibility ($\supseteq$): $x$ has *at least* $T$'s interface. Full compatibility ($=$) requires exact match. Both are $\{S\}$-only disciplines; the capability gap (Theorem 2.17) applies to both. The distinction is a refinement *within* the S axis, not a fourth axis.
 
-**Definition 2.10a (Typing Discipline Coherence).** A typing discipline is *coherent* if it provides a complete, deterministic answer to "when is $x$ compatible with $T$?" for all $x$ and declared $T$. Formally: there exists a predicate $\text{compatible}(x, T)$ that is well-defined for all $(x, T)$ pairs where $T$ is a declared type constraint.
+**Definition 2.10a (Typing Discipline Completeness).** A typing discipline is *complete* if it provides a well-defined, deterministic answer to "when is $x$ compatible with $T$?" for all $x$ and declared $T$. Formally: there exists a predicate $\text{compatible}(x, T)$ that is well-defined for all $(x, T)$ pairs where $T$ is a declared type constraint.
+
+**Remark (Completeness vs Coherence).** Definition 2.10a defines *completeness*: whether the discipline answers the compatibility question. Definition 8.3 later defines *coherence*: whether the discipline's answers align with runtime semantics. These are distinct properties. A discipline can be complete but incoherent (TypeScript's structural typing with `class`), or incomplete and thus trivially incoherent (duck typing).
 
 **Definition 2.10b (Structural Typing).** Structural typing with declared interfaces (e.g., `typing.Protocol`) is coherent: $T$ is declared as a Protocol with interface $S(T)$, and compatibility is $S(\text{type}(x)) \supseteq S(T)$. The discipline commits to a position: "structure determines compatibility."
 
@@ -524,6 +530,8 @@ We exhaustively enumerate capabilities NOT in $\mathcal{C}_B$ and show none requ
 6. **Type naming** ("what is the name of type $T$?"): Answered by inspecting $N(T)$. Requires only $N$. Does not require $B$. $\checkmark$
 
 7. **Value access** ("what is $x.a$?"): Answered by attribute lookup in $S(\text{type}(x))$. Requires only $S$. Does not require $B$. $\checkmark$
+
+   **Remark (Inherited Attributes).** For inherited attributes, $S(\text{type}(x))$ means the *effective* namespace including inherited members. Computing this effective namespace initially requires $B$ (to walk the MRO), but once computed, accessing a value from the flattened namespace requires only $S$. The distinction is between *computing* the namespace (requires $B$) and *querying* a computed namespace (requires only $S$). Value access is the latter.
 
 8. **Method invocation** ("call $x.m()$"): Answered by retrieving $m$ from $S$ and invoking. Requires only $S$. Does not require $B$. $\checkmark$
 
@@ -1000,6 +1008,23 @@ These are exhaustive by the structure of lists—there are no other operations o
 
 *Proof.* Any operation on $B$ is an operation on MRO. Any operation on MRO is an operation on a list. List operations are exhaustively {ordering, membership, identity}. $\blacksquare$
 
+**Theorem 3.43b-bis (Capability Reducibility).** Every B-dependent query reduces to a composition of the four primitive capabilities.
+
+*Proof.* Let $q : \text{Type} \to \alpha$ be any B-dependent query (per Definition 3.17). By Definition 3.17, $q$ distinguishes types with identical structure: $\exists A, B: S(A) = S(B) \land q(A) \neq q(B)$.
+
+The only information distinguishing $A$ from $B$ is:
+- $N(A) \neq N(B)$ (name)—but names are part of identity, covered by **type_identity**
+- $B(A) \neq B(B)$ (bases)—distinguishes via:
+  - Ancestor membership: is $T \in \text{ancestors}(A)$? → covered by **provenance**
+  - Subtype enumeration: what are all $T : T <: A$? → covered by **enumeration**
+  - MRO position: which type wins for attribute $a$? → covered by **conflict_resolution**
+
+No other distinguishing information exists (Theorem 3.32: $(N, B, S)$ is complete).
+
+Therefore any B-dependent query $q$ can be computed by composing:
+$$q(T) = f(\text{provenance}(T), \text{identity}(T), \text{enumeration}(T), \text{conflict\_resolution}(T))$$
+for some computable $f$. $\blacksquare$
+
 #### 3.11.6a Adapter Cost Analysis
 
 **Potential objection:** "Adapters cost 2 lines of code. That's overhead."
@@ -1207,19 +1232,20 @@ A critical distinction that closes a potential attack surface: **discipline opti
 **Theorem 3.55 (Dominance Does Not Imply Migration).** Pareto dominance of discipline $A$ over $B$ does NOT imply that migrating from $B$ to $A$ is beneficial for all codebases.
 
 *Proof.* (Machine-checked in `discipline_migration.lean`)
-Consider migration cost $C(ctx) = \text{codebaseSize}/100 + \text{externalDeps} \times 10$ and capability benefit $B = 4$ (the four additional capabilities).
 
-For a large codebase (50,000 LoC, 20 external dependencies):
-- Migration cost = 500 + 200 = 700
-- Capability benefit = 4
-- Cost > Benefit: migration not beneficial
+1. **Dominance is codebase-independent.** $D(A, B)$ ("$A$ dominates $B$") is a relation on typing disciplines. It depends only on capability sets: $\text{Capabilities}(A) \supset \text{Capabilities}(B)$. This is a property of the disciplines themselves, not of any codebase.
 
-For a small codebase (50 LoC, 0 external dependencies):
-- Migration cost = 0
-- Capability benefit = 4
-- Benefit > Cost: migration beneficial
+2. **Migration cost is codebase-dependent.** Let $C(ctx)$ be the cost of migrating codebase $ctx$ from $B$ to $A$. Migration requires modifying: type annotations using $B$-specific constructs, call sites relying on $B$-specific semantics, and external API boundaries (which may be immutable). Each of these quantities is unbounded: there exist codebases with arbitrarily many annotations, call sites, and external dependencies.
 
-Therefore: $\exists ctx_1, ctx_2$ such that migration is beneficial for $ctx_1$ but not for $ctx_2$. $\blacksquare$
+3. **Benefit is bounded.** The benefit of migration is the capability gap: $|\text{Capabilities}(A) \setminus \text{Capabilities}(B)|$. For nominal vs structural, this is 4 (provenance, identity, enumeration, conflict resolution). This is a constant, independent of codebase size.
+
+4. **Unbounded cost vs bounded benefit.** For any fixed benefit $B$, there exists a codebase $ctx$ such that $C(ctx) > B$. This follows from (2) and (3): cost grows without bound, benefit does not.
+
+5. **Existence of both cases.** For small $ctx$: $C(ctx) < B$ (migration beneficial). For large $ctx$: $C(ctx) > B$ (migration not beneficial).
+
+Therefore dominance does not determine migration benefit. $\blacksquare$
+
+**Corollary 3.55a (Category Error).** Conflating "discipline $A$ is better" with "migrate to $A$" is a category error: the former is a property of disciplines (universal), the latter is a property of (discipline, codebase) pairs (context-dependent).
 
 **Corollary 3.56 (Discipline vs Migration Independence).** The question "which discipline is better?" (answered by Theorem 3.54) is independent of "should I migrate?" (answered by cost-benefit analysis).
 
@@ -1524,6 +1550,29 @@ type(config).__mro__.index(StepWellFilterConfig)  # MRO position: O(k)
 - Theorem 4.1: O(1) type identity via `isinstance()`
 - Theorem 4.3: O(1) vs Ω(n) complexity gap
 - The fundamental failure of structural equivalence to capture semantic distinctions
+
+#### 5.2.1 Sentinel Attribute Objection
+
+**Objection:** "Just add a sentinel attribute (e.g., `_scope: str = 'step'`) to distinguish types structurally."
+
+**Theorem 5.2a (Sentinel Attribute Insufficiency).** Let $\sigma : T \to V$ be a sentinel attribute (a structural field intended to distinguish types). Then $\sigma$ cannot recover any B-dependent capability.
+
+*Proof.*
+1. **Sentinel is structural.** By definition, $\sigma$ is an attribute with a value. Therefore $\sigma \in S(T)$ (the structure axis).
+2. **B-dependent capabilities require B.** By Theorem 3.19, provenance, identity, enumeration, and conflict resolution all require the Bases axis $B$.
+3. **S does not contain B.** By the axis independence property (Definition 2.5), the axes $(N, B, S)$ are independent: $S$ carries no information about $B$.
+4. **Therefore $\sigma$ cannot provide B-dependent capabilities.** Since $\sigma \in S$ and B-dependent capabilities require information not in $S$, no sentinel attribute can recover them. $\blacksquare$
+
+**Corollary 5.2b (Specific Sentinel Failures).**
+
+| Capability | Why sentinel fails |
+|------------|-------------------|
+| Enumeration | Requires iterating over types with $\sigma = v$. No type registry exists in structural typing (Theorem 2.10q). Cannot compute `[T for T in ? if T._scope == 'step']`—there is no source for `?`. |
+| Enforcement | $\sigma$ is a runtime value, not a type constraint. Subtypes can set $\sigma$ incorrectly without type error. No enforcement mechanism exists. |
+| Conflict resolution | When multiple mixins define $\sigma$, which wins? This requires MRO, which requires $B$. Sentinel $\sigma \in S$ has no MRO. |
+| Provenance | "Which type provided $\sigma$?" requires MRO traversal. $\sigma$ cannot answer queries about its own origin. |
+
+**Corollary 5.2c (Sentinel Simulates, Cannot Recover).** Sentinel attributes can *simulate* type identity (by convention) but cannot *recover* the capabilities that identity provides. The simulation is unenforced (violable without type error), unenumerable (no registry), and unordered (no MRO for conflicts). This is precisely the capability gap of Theorem 3.19, repackaged. $\blacksquare$
 
 ### 5.3 Case Study 2: Discriminated Unions via __subclasses__()
 
