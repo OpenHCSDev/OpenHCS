@@ -2,21 +2,21 @@
 
 ## Main Paper
 
-**`nominal_typing_proof_v3_scp.md`** - The current submission-ready paper.
+**`nominal_typing_proof.md`** - The current submission-ready paper.
 
 - **Title**: *Nominal Typing Strictly Dominates Structural Typing for Object-Oriented Systems with Inheritance*
 - **Target**: TOPLAS (ACM Transactions on Programming Languages and Systems)
 - **Status**: Ready for review
 
 Generated outputs:
-- `nominal_typing_proof_v3_scp.pdf` - PDF via pandoc/xelatex
-- `nominal_typing_proof_v3_scp.html` - HTML version
+- `nominal_typing_proof.pdf` - PDF via pandoc/xelatex
+- `nominal_typing_proof.html` - HTML version
 
 ### Regenerating PDF
 
 ```bash
 cd docs/papers
-pandoc nominal_typing_proof_v3_scp.md -o nominal_typing_proof_v3_scp.pdf \
+pandoc nominal_typing_proof.md -o nominal_typing_proof.pdf \
   --pdf-engine=xelatex \
   -V geometry:margin=1in \
   -V mainfont="DejaVu Serif" \
@@ -48,9 +48,9 @@ lake build
 
 ```
 docs/papers/
-├── nominal_typing_proof_v3_scp.md   # Main paper (source)
-├── nominal_typing_proof_v3_scp.pdf  # Main paper (PDF)
-├── nominal_typing_proof_v3_scp.html # Main paper (HTML)
+├── nominal_typing_proof.md          # Main paper (source)
+├── nominal_typing_proof.pdf         # Main paper (PDF)
+├── nominal_typing_proof.html        # Main paper (HTML)
 ├── README.md                        # This file
 ├── archive/                         # Previous versions
 │   ├── nominal_typing_proof_v1_draft.md
