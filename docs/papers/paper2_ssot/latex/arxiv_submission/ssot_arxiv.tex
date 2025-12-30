@@ -1,9 +1,31 @@
-\documentclass[acmtoplas,screen,review,anonymous]{acmart}
-
-\usepackage{longtable}
+\documentclass[11pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{graphicx}
+\usepackage{xcolor}
 \usepackage{booktabs}
+\usepackage{longtable}
 \usepackage{array}
 \usepackage{calc}
+\usepackage{fancyvrb}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{url}
+
+\geometry{margin=1in}
+
+% Allow URLs to break at any character
+\makeatletter
+\g@addto@macro{\UrlBreaks}{\UrlOrds}
+\makeatother
+
+% Prevent overfull hboxes
+\sloppy
+
+% Fix for pandoc's \tightlist
+\providecommand{\tightlist}{%
+  \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
 
 % Theorem environments
 \newtheorem{theorem}{Theorem}[section]
@@ -16,18 +38,38 @@
 \newtheorem{example}[theorem]{Example}
 \theoremstyle{remark}
 \newtheorem{remark}[theorem]{Remark}
+\newtheorem{observation}[theorem]{Observation}
 
-% Fix for pandoc's \tightlist
-\providecommand{\tightlist}{%
-  \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+% Hyperref setup
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue,
+  citecolor=blue,
+  urlcolor=blue
+}
+
+\title{Formal Foundations for the Single Source of Truth Principle:\\
+A Language Design Specification Derived from Modification Complexity Bounds}
+
+\author{
+  Tristan Simas\\
+  McGill University\\
+  \texttt{tristan.simas@mail.mcgill.ca}
+}
+
+\date{December 2024}
+
+% arXiv license
+\renewcommand{\thefootnote}{}
+\footnotetext{
+  \textcopyright\ 2024 Tristan Simas. 
+  This work is licensed under CC BY 4.0. 
+  To view a copy of this license, visit \url{https://creativecommons.org/licenses/by/4.0/}
+}
+\renewcommand{\thefootnote}{\arabic{footnote}}
 
 \begin{document}
-
-\title{Formal Foundations for the Single Source of Truth Principle: A Language Design Specification Derived from Modification Complexity Bounds}
-
-\author{Anonymous Author}
-\affiliation{Anonymous Institution}
-\email{anonymous@example.com}
+\maketitle
 
 \begin{abstract}
 We provide the first formal foundations for the ``Don't Repeat Yourself'' (DRY) principle, articulated by Hunt \& Thomas (1999) but never formalized. Our contributions:
@@ -56,31 +98,15 @@ Additional contributions:
 \item \textbf{Theorem 4.3 (Three-Language Theorem):} Exactly three languages satisfy SSOT requirements: Python, Common Lisp (CLOS), and Smalltalk
 \end{itemize}
 
-All theorems machine-checked in Lean 4. Empirical validation: 13 case studies from production bioimage analysis platform (OpenHCS, 45K LoC), mean DOF reduction 14.2x.
+All theorems machine-checked in Lean 4 (1,753 lines across 13 files, 0 \texttt{sorry} placeholders). Empirical validation: 13 case studies from production bioimage analysis platform (OpenHCS, 45K LoC), mean DOF reduction 14.2x.
 
 \textbf{Keywords:} DRY principle, Single Source of Truth, language design, metaprogramming, formal methods, modification complexity
 \end{abstract}
 
-\maketitle
-
-% Content sections will be added here
-% Structure mirrors Paper 1:
-% 1. Introduction
-% 2. Formal Foundations (definitions)
-% 3. SSOT Definition and Optimality
-% 4. Language Requirements (necessity proofs)
-% 5. Language Evaluation (exhaustive)
-% 6. Complexity Bounds
-% 7. Empirical Validation (13 case studies)
-% 8. Related Work
-% 9. Conclusion
-% Appendix A: Preemptive Rebuttals
-% Appendix B: Lean Proofs
-% Appendix C: Case Study Details
 
 \section{Introduction}\label{introduction}
 
-This paper proves that certain programming languages are \emph{incapable} of achieving the Single Source of Truth (SSOT) principle for structural facts. This is not an opinion, recommendation, or style guide. It is a mathematical fact, machine-checked in Lean 4 (678 lines across 8 files, 0 \texttt{sorry} placeholders).
+This paper proves that certain programming languages are \emph{incapable} of achieving the Single Source of Truth (SSOT) principle for structural facts. This is not an opinion, recommendation, or style guide. It is a mathematical fact, machine-checked in Lean 4 (1,753 lines across 13 files, 0 \texttt{sorry} placeholders).
 
 The ``Don't Repeat Yourself'' (DRY) principle has been industry guidance for 25 years:
 
@@ -2053,7 +2079,7 @@ Many ``obvious'' software engineering principles have never been formalized. The
 \section{Lean 4 Proof Listings}\label{sec:lean}
 %==============================================================================
 
-All theorems are machine-checked in Lean 4 (678 lines across 8 files, 0 \texttt{sorry} placeholders). Complete source available at: \texttt{proofs/ssot/}.
+All theorems are machine-checked in Lean 4 (1,753 lines across 13 files, 0 \texttt{sorry} placeholders). Complete source available at: \texttt{proofs/ssot/}.
 
 This appendix presents the actual Lean 4 source code from the repository. Every theorem compiles without \texttt{sorry}. The proofs can be verified by running \texttt{lake build} in the \texttt{proofs/ssot/} directory.
 
@@ -2080,10 +2106,10 @@ This file establishes the core abstractions. We model DOF as a natural number wh
 -- Fact: atomic unit of program specification
 -- Encodes(L, F): L must be updated when F changes
 -- Independent(L): L can diverge (not derived from another location)
--- DOF(C, F) = |{L : encodes(L, F) ∧ independent(L)}|
+-- DOF(C, F) = |{L : encodes(L, F) \and independent(L)}|
 
 -- Theorem 1.6: Correctness Forcing
--- M(C, δ_F) is the MINIMUM number of edits required for correctness
+-- M(C, delta_F) is the MINIMUM number of edits required for correctness
 -- Fewer edits than M leaves at least one encoding location inconsistent
 theorem correctness_forcing (M : Nat) (edits : Nat) (h : edits < M) :
     M - edits > 0 := by
@@ -2096,7 +2122,7 @@ theorem dof_inconsistency_potential (k : Nat) (hk : k > 1) :
 
 -- Corollary 1.10: DOF > 1 implies potential inconsistency
 theorem dof_gt_one_inconsistent (dof : Nat) (h : dof > 1) :
-    dof ≠ 1 := by
+    dof != 1 := by
   omega
 \end{verbatim}
 
@@ -2121,13 +2147,13 @@ theorem ssot_optimality (dof : Nat) (h : satisfies_SSOT dof) :
 
 -- Corollary 2.3: SSOT implies O(1) modification complexity
 theorem ssot_implies_constant_complexity (dof : Nat) (h : satisfies_SSOT dof) :
-    dof ≤ 1 := by
+    dof <= 1 := by
   unfold satisfies_SSOT at h
   omega
 
 -- Theorem: Non-SSOT implies potential inconsistency
 theorem non_ssot_inconsistency (dof : Nat) (h : ¬satisfies_SSOT dof) :
-    dof = 0 ∨ dof > 1 := by
+    dof = 0 or dof > 1 := by
   unfold satisfies_SSOT at h
   omega
 
@@ -2202,15 +2228,15 @@ theorem introspection_necessary_for_verification (L : LanguageFeatures) :
 
 -- THE KEY THEOREM: Both requirements are independently necessary
 theorem both_requirements_independent :
-    ∀ L : LanguageFeatures,
-      (L.has_definition_hooks = true ∧ L.has_introspection = false) →
+    forall  L : LanguageFeatures,
+      (L.has_definition_hooks = true \and L.has_introspection = false) →
       can_enumerate_encodings L = false := by
   intro L ⟨_, h_no_intro⟩
   simp [can_enumerate_encodings, h_no_intro]
 
 theorem both_requirements_independent' :
-    ∀ L : LanguageFeatures,
-      (L.has_definition_hooks = false ∧ L.has_introspection = true) →
+    forall  L : LanguageFeatures,
+      (L.has_definition_hooks = false \and L.has_introspection = true) →
       can_derive_at L Timing.definition = false := by
   intro L ⟨h_no_hooks, _⟩
   simp [can_derive_at, h_no_hooks]
@@ -2236,12 +2262,12 @@ theorem ssot_upper_bound (dof : Nat) (h : satisfies_SSOT dof) :
 
 -- Theorem 6.2: Non-SSOT Lower Bound (Omega(n))
 theorem non_ssot_lower_bound (dof n : Nat) (h : dof = n) (hn : n > 1) :
-    dof ≥ n := by
+    dof >= n := by
   omega
 
 -- Theorem 6.3: Unbounded Complexity Gap
 theorem complexity_gap_unbounded :
-    ∀ bound : Nat, ∃ n : Nat, n > bound := by
+    forall  bound : Nat, exists  n : Nat, n > bound := by
   intro bound
   exact ⟨bound + 1, Nat.lt_succ_self bound⟩
 
@@ -2367,25 +2393,25 @@ import Ssot.Requirements
 
 -- Definition: SSOT-Complete Language
 def ssot_complete (L : LanguageFeatures) : Prop :=
-  L.has_definition_hooks = true ∧ L.has_introspection = true
+  L.has_definition_hooks = true \and L.has_introspection = true
 
 -- Theorem 3.6: Necessary and Sufficient Conditions for SSOT
 theorem ssot_iff (L : LanguageFeatures) :
-    ssot_complete L ↔ (L.has_definition_hooks = true ∧
+    ssot_complete L <-> (L.has_definition_hooks = true \and
                        L.has_introspection = true) := by
   unfold ssot_complete
   rfl
 
 -- Corollary: A language is SSOT-incomplete iff it lacks either feature
 theorem ssot_incomplete_iff (L : LanguageFeatures) :
-    ¬ssot_complete L ↔ (L.has_definition_hooks = false ∨
+    ¬ssot_complete L <-> (L.has_definition_hooks = false or
                         L.has_introspection = false) := by
   -- [proof as before]
 
 -- IMPOSSIBILITY THEOREM (Constructive)
 -- For any language lacking either feature, SSOT is impossible
 theorem impossibility (L : LanguageFeatures)
-    (h : L.has_definition_hooks = false ∨ L.has_introspection = false) :
+    (h : L.has_definition_hooks = false or L.has_introspection = false) :
     ¬ssot_complete L := by
   intro hc
   exact ssot_incomplete_iff L |>.mpr h hc
@@ -2420,13 +2446,17 @@ Completeness.lean & 130 & 11 \\
 Bounds.lean & 55 & 5 \\
 Languages.lean & 108 & 6 \\
 CaseStudies.lean & 148 & 4 \\
+Foundations.lean & 364 & 15 \\
+LangPython.lean & 209 & 8 \\
+LangRust.lean & 184 & 6 \\
+LangStatic.lean & 163 & 5 \\
+LangEvaluation.lean & 155 & 10 \\
 \midrule
-\textbf{Total} & \textbf{678} & \textbf{39} \\
+\textbf{Total} & \textbf{1,753} & \textbf{83} \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-\textbf{All 39 theorems compile without \texttt{sorry} placeholders.} The proofs can be verified by running \texttt{lake build} in the \texttt{proofs/ssot/} directory. Every theorem in the paper corresponds to a machine-checked proof.
+\textbf{All 83 theorems compile without \texttt{sorry} placeholders.} The proofs can be verified by running \texttt{lake build} in the \texttt{proofs/ssot/} directory. Every theorem in the paper corresponds to a machine-checked proof.
 
 \end{document}
-
