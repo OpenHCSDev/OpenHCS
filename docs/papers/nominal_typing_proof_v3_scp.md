@@ -26,7 +26,7 @@ Additional contributions:
 - **Theorem 8.1 (Mixin Dominance):** Mixins with C3 MRO strictly dominate object composition for static behavior extension.
 - **Theorem 8.7 (TypeScript Incoherence):** Languages with inheritance syntax but structural typing exhibit formally-defined type system incoherence.
 
-All theorems are machine-checked in Lean 4 (2100+ lines, 103 theorems/lemmas, 0 `sorry` placeholders). Empirical validation uses 13 case studies from a production bioimage analysis platform (OpenHCS, 45K LoC Python).
+All theorems are machine-checked in Lean 4 (2400+ lines, 111 theorems/lemmas, 0 `sorry` placeholders). Empirical validation uses 13 case studies from a production bioimage analysis platform (OpenHCS, 45K LoC Python).
 
 **Keywords:** typing disciplines, nominal typing, structural typing, formal methods, class systems, information theory, impossibility theorems, lower bounds
 
@@ -34,7 +34,7 @@ All theorems are machine-checked in Lean 4 (2100+ lines, 103 theorems/lemmas, 0 
 
 ## 1. Introduction
 
-This paper proves that nominal typing strictly dominates structural and duck typing for object-oriented systems with inheritance hierarchies. This is not an opinion, recommendation, or style guide. It is a mathematical fact, machine-checked in Lean 4 (2100+ lines, 103 theorems, 0 `sorry` placeholders).
+This paper proves that nominal typing strictly dominates structural and duck typing for object-oriented systems with inheritance hierarchies. This is not an opinion, recommendation, or style guide. It is a mathematical fact, machine-checked in Lean 4 (2400+ lines, 111 theorems, 0 `sorry` placeholders).
 
 We develop a metatheory of class system design applicable to any language with explicit inheritance. The core insight: every class system is characterized by which axes of the three-axis model (N, B, S) it employs. These axes form a lattice under subset ordering, inducing a strict partial order over typing disciplines. Disciplines using more axes strictly dominate those using fewer—a universal principle with implications for typing, architecture, and language design.
 
@@ -80,8 +80,8 @@ This paper makes five contributions:
 - Theorem 3.5: Nominal typing strictly dominates shape-based typing universally (when $B \neq \emptyset$)
 
 **4. Machine-checked verification (Section 6):**
-- 2100+ lines of Lean 4 proofs across four modules
-- 103 theorems/lemmas covering typing, architecture, information theory, complexity bounds, impossibility, lower bounds, bulletproofing, generics, exotic features, universal scope, discipline vs migration separation, and context formalization
+- 2400+ lines of Lean 4 proofs across four modules
+- 111 theorems/lemmas covering typing, architecture, information theory, complexity bounds, impossibility, lower bounds, bulletproofing, generics, exotic features, universal scope, discipline vs migration separation, context formalization, capability exhaustiveness, and adapter amortization
 - Formalized O(1) vs O(k) vs Ω(n) complexity separation with adversary-based lower bound proof
 - Universal extension to 8 languages (Java, C#, Rust, TypeScript, Kotlin, Swift, Scala, C++)
 - Exotic type features covered (intersection, union, row polymorphism, HKT, multiple dispatch)
@@ -141,7 +141,7 @@ We do not claim all systems require provenance. We prove that systems requiring 
 
 **Section 5: Empirical validation** — 13 OpenHCS case studies validating theoretical predictions
 
-**Section 6: Machine-checked proofs** — Lean 4 formalization (2100+ lines)
+**Section 6: Machine-checked proofs** — Lean 4 formalization (2400+ lines)
 
 **Section 7: Related work** — Positioning within PL theory literature
 
@@ -981,7 +981,77 @@ We explicitly scope our claims:
 
 **Non-Claim 3.42 (Interop Boundaries).** At boundaries with untyped systems (FFI, JSON parsing, external APIs), structural typing via Protocols is *convenient* but not necessary. Per Theorem 2.10j, explicit adapters provide the same functionality with better properties. Protocol is a dominated choice, acceptable only as a migration convenience where the 2-line adapter cost is judged too high.
 
-#### 3.11.6 Generics and Parametric Polymorphism
+#### 3.11.6 Capability Exhaustiveness
+
+**Potential objection:** "You cherry-picked 4 capabilities. There might be others."
+
+**Theorem 3.43a (Capability Exhaustiveness).** The four capabilities (provenance, identity, enumeration, conflict resolution) are **exhaustive**—they are the only capabilities derivable from the Bases axis.
+
+*Proof.* (Machine-checked in `nominal_resolution.lean`, Section 6: CapabilityExhaustiveness)
+
+The Bases axis provides MRO, a **list of types**. A list has exactly three queryable properties:
+1. **Ordering**: Which element precedes which? → *Conflict resolution* (C3 linearization selects based on MRO order)
+2. **Membership**: Is element X in the list? → *Enumeration* (subtype iff in some type's MRO)
+3. **Element identity**: Which specific element? → *Provenance* and *type identity* (distinguish structurally-equivalent types by MRO position)
+
+These are exhaustive by the structure of lists—there are no other operations on a list that do not reduce to ordering, membership, or element identity. Therefore, the four capabilities are derived from MRO structure, not enumerated by inspection. $\blacksquare$
+
+**Corollary 3.43b (No Missing Capability).** Any capability claimed to require $B$ reduces to one of the four. There is no "fifth capability" that $B$ provides.
+
+*Proof.* Any operation on $B$ is an operation on MRO. Any operation on MRO is an operation on a list. List operations are exhaustively {ordering, membership, identity}. $\blacksquare$
+
+#### 3.11.6a Adapter Cost Analysis
+
+**Potential objection:** "Adapters cost 2 lines of code. That's overhead."
+
+**Theorem 3.43c (Adapter Declaration is Information-Preserving).** An adapter declares information that is **already true**—that a type conforms to an interface. Declaration does not create the conformance; it makes it explicit.
+
+*Proof.* If `TheirType` does not satisfy `YourABC`'s interface, the adapter fails at definition time (missing method error). If `TheirType` does satisfy the interface, the conformance existed before the adapter. The adapter is not implementation—it is documentation of pre-existing fact. $\blacksquare$
+
+**Theorem 3.43d (Adapter Amortization).** Adapter cost is O(1). Manual capability implementation is O(N) where N is the number of use sites.
+
+*Proof.* (Machine-checked in `nominal_resolution.lean`, Section 7: AdapterAmortization)
+
+Under nominal typing (with adapter):
+- Provenance: Automatic via `type(obj).__mro__` (0 additional code per use)
+- Identity: Automatic via `isinstance()` (0 additional code per use)
+- Enumeration: Automatic via `__subclasses__()` (0 additional code per use)
+- Conflict resolution: Automatic via C3 (0 additional code per use)
+
+Under structural typing (without adapter), to recover any capability manually:
+- Provenance: Must thread source information through call sites (1 additional parameter × N calls)
+- Identity: Must maintain external type registry (1 registry + N registration calls)
+- Enumeration: Must maintain external subtype set (1 set + N insertions)
+- Conflict resolution: Must implement manual dispatch (1 dispatcher + N cases)
+
+The adapter is 2 lines. Manual implementation is $\Omega(N)$. For $N \geq 1$, adapter dominates. $\blacksquare$
+
+**Corollary 3.43e (Negative Adapter Cost).** Adapter "cost" is negative—a net benefit.
+
+*Proof.* The adapter enables automatic capabilities that would otherwise require O(N) manual implementation. The adapter costs O(1). For any system requiring the capabilities, adapter provides net savings of $\Omega(N) - O(1) = \Omega(N)$. The "cost" is negative. $\blacksquare$
+
+**Corollary 3.43f (Adapter Cost Objection is Invalid).** Objecting to adapter cost is objecting to O(1) overhead while accepting O(N) overhead. This is mathematically incoherent.
+
+#### 3.11.6b Methodological Independence
+
+**Potential objection:** "Your evidence is from one codebase (OpenHCS). Single-codebase empirical evidence."
+
+**Theorem 3.43g (Methodological Independence).** The dominance theorems are derived from the structure of $(N, B, S)$, not from any implementation. OpenHCS is an existence proof, not a premise.
+
+*Proof.* Examine the proof chain:
+1. Theorem 2.17 (Capability Gap): Proved from the definition of shape-based typing (uses only $\{S\}$ or $\{N, S\}$)
+2. Theorem 3.5 (Strict Dominance): Proved from Theorem 2.17 + Theorem 2.18
+3. Theorem 2.10j (Adapters): Proved from capability comparison
+
+None of these proofs reference OpenHCS. OpenHCS appears only in:
+- Section 5 (Case Studies): Demonstrating that capabilities are achievable
+- Section 6 (Dual-Axis Resolver): Concrete algorithm example
+
+Removing all OpenHCS references would not invalidate any theorem. The theorems follow from information theory applied to $(N, B, S)$. $\blacksquare$
+
+**Corollary 3.43h (Cross-Codebase Validity).** The theorems apply to any codebase in any language where $B \neq \emptyset$. OpenHCS is a sufficient example, not a necessary one.
+
+#### 3.11.7 Generics and Parametric Polymorphism
 
 **Potential objection:** "Your model doesn't handle generics. What about `List<T>`, `Map<K,V>`, etc.?"
 
@@ -1192,7 +1262,7 @@ Case 2: When $B = \emptyset$ (e.g., Go interfaces, JSON objects), nominal typing
 6. Exhibit a type system feature that escapes $(N, B, S)$ (but Theorem 3.32 proves model completeness)
 7. Conflate "this discipline is optimal" with "rewrite all legacy code" (but Theorem 3.55 proves these are independent)
 8. Claim "greenfield" is undefined (but Definition 3.57 formalizes it, Theorem 3.59 proves decidability)
-9. Claim the Lean proofs contain errors (2100+ lines are public; verify them)
+9. Claim the Lean proofs contain errors (2400+ lines are public; verify them)
 10. Claim structural identity equals semantic identity (but Theorem 5.1 proves it doesn't, with production code)
 11. Claim duck typing is a coherent typing discipline (but Theorem 2.10d proves it is not—it declares no interface, provides no complete compatibility predicate, and commits to neither "structure = semantics" nor "structure ≠ semantics")
 12. Claim structural typing provides equivalent metaprogramming capability (but Theorem 2.10p proves hooks require declarations, and structural typing has no declarations)
@@ -1252,7 +1322,7 @@ The theoretical complexity bounds in Theorems 4.1-4.3 are demonstrated empirical
 
 **Addressing the "n=1" objection:** A potential criticism is that our case studies come from a single codebase (OpenHCS). We address this in three ways:
 
-**First: Claim structure.** This paper makes two distinct types of claims with different validation requirements. *Mathematical claims* (Theorems 3.1–3.62): "Discarding B necessarily loses these capabilities." These are proven by formal derivation in Lean (2100+ lines, 0 `sorry`). Mathematical proofs have no sample size—they are universal by construction. *Existence claims*: "Production systems requiring these capabilities exist." One example suffices for an existential claim. OpenHCS demonstrates that real systems require provenance tracking, MRO-based resolution, and type-identity dispatch—exactly the capabilities Theorem 3.19 proves impossible under structural typing.
+**First: Claim structure.** This paper makes two distinct types of claims with different validation requirements. *Mathematical claims* (Theorems 3.1–3.62): "Discarding B necessarily loses these capabilities." These are proven by formal derivation in Lean (2400+ lines, 0 `sorry`). Mathematical proofs have no sample size—they are universal by construction. *Existence claims*: "Production systems requiring these capabilities exist." One example suffices for an existential claim. OpenHCS demonstrates that real systems require provenance tracking, MRO-based resolution, and type-identity dispatch—exactly the capabilities Theorem 3.19 proves impossible under structural typing.
 
 **Second: Case studies are theorem instantiations.** Table 5.1 links each case study to the theorem it validates. These are not arbitrary examples---they are empirical instantiations of theoretical predictions. The theory predicts that systems requiring provenance will use nominal typing; the case studies confirm this prediction. The 13 patterns are 13 independent architectural decisions, each of which could have used structural typing but provably could not. Packaging these patterns into separate repositories would not add information—it would be technicality theater. The mathematical impossibility results are the contribution; OpenHCS is the existence proof that the impossibility matters.
 
@@ -1262,7 +1332,7 @@ The theoretical complexity bounds in Theorems 4.1-4.3 are demonstrated empirical
 
 | Level | What it provides | Status |
 |-------|------------------|--------|
-| Formal proofs | Mathematical necessity | Complete (Lean, 2100+ lines, 0 `sorry`) |
+| Formal proofs | Mathematical necessity | Complete (Lean, 2400+ lines, 0 `sorry`) |
 | OpenHCS case studies | Existence proof | 13 patterns documented |
 | Decision procedure | Falsifiability | Theorem 3.62 (machine-checked) |
 
@@ -1787,15 +1857,15 @@ The registry operations are O(1) lookups by type identity. Duck typing's string-
 
 ## 6. Formalization and Verification
 
-We provide machine-checked proofs of our core theorems in Lean 4. The complete development (2100+ lines across four modules, 0 `sorry` placeholders) is organized as follows:
+We provide machine-checked proofs of our core theorems in Lean 4. The complete development (2400+ lines across four modules, 0 `sorry` placeholders) is organized as follows:
 
 | Module | Lines | Theorems/Lemmas | Purpose |
 |--------|-------|-----------------|---------|
 | `abstract_class_system.lean` | 1488 | 75 | Core formalization: three-axis model, dominance, complexity |
-| `nominal_resolution.lean` | 284 | 10 | Resolution algorithm proofs |
+| `nominal_resolution.lean` | 556 | 18 | Resolution, capability exhaustiveness, adapter amortization |
 | `discipline_migration.lean` | 142 | 11 | Discipline vs migration optimality separation |
 | `context_formalization.lean` | 215 | 7 | Greenfield/retrofit classification, requirement detection |
-| **Total** | **2129** | **103** | |
+| **Total** | **2401** | **111** | |
 
 1. **Language-agnostic layer** (Section 6.12): The three-axis model $(N, B, S)$, axis lattice metatheorem, and strict dominance—proving nominal typing dominates shape-based typing in **any** class system with explicit inheritance. These proofs require no Python-specific axioms.
 
@@ -2116,7 +2186,17 @@ Therefore, `ResolveResult.sourceType` is meaningful: it tells you WHICH type pro
 | - Theorem 2.10q (Enumeration Requires Registration) | 30 | PASS Proved |
 | - Capability model & dominance | 35 | PASS Proved |
 | - Corollary 2.10r (No Declaration No Hook) | 15 | PASS Proved |
-| **Total** | **438** | **PASS All proofs verified, 0 `sorry`, 0 warnings** |
+| CapabilityExhaustiveness namespace | 42 | PASS Compiles, no warnings |
+| - List operation/capability definitions | 20 | PASS Definitions |
+| - Theorem 3.43a (capability_exhaustiveness) | 12 | PASS Proved |
+| - Corollary 3.43b (no_missing_capability) | 10 | PASS Proved |
+| AdapterAmortization namespace | 60 | PASS Compiles, no warnings |
+| - Cost model definitions | 25 | PASS Definitions |
+| - Theorem 3.43d (adapter_amortization) | 10 | PASS Proved |
+| - Corollary 3.43e (adapter_always_wins) | 10 | PASS Proved |
+| - Theorem (adapter_cost_constant) | 8 | PASS Proved |
+| - Theorem (manual_cost_grows) | 10 | PASS Proved |
+| **Total** | **556** | **PASS All proofs verified, 0 `sorry`, 0 warnings** |
 
 ### 6.10 What the Lean Proofs Guarantee
 
@@ -2540,8 +2620,8 @@ theorem complexity_gap_unbounded :
 
 | Metric | Value |
 |--------|-------|
-| Total lines | 2100+ (four modules) |
-| Total theorems/lemmas | 103 |
+| Total lines | 2400+ (four modules) |
+| Total theorems/lemmas | 111 |
 | `sorry` placeholders | 0 |
 
 All proofs are complete. The counting lemma for the adversary argument uses a `calc` chain showing filter partition equivalence.
@@ -2617,7 +2697,7 @@ They found that C++ Boost template metaprogramming can be "over-complex" when ab
 1. **Strict dominance as formal theorem** (Theorem 3.5): Nominal typing provides all capabilities of structural typing plus provenance, identity, enumeration—at equivalent declaration cost.
 2. **Information-theoretic completeness** (Theorem 3.19): The capability gap is *derived* from discarding the Bases axis, not enumerated. Any query distinguishing same-shape types requires B. This is mathematically necessary.
 3. **Decision procedure** (Theorems 3.1, 3.4): $B \neq \emptyset$ vs $B = \emptyset$ determines which discipline is correct. This is decidable.
-4. **Machine-checked proofs** (Section 6): 2100+ lines of Lean 4, 103 theorems/lemmas, 0 `sorry` placeholders.
+4. **Machine-checked proofs** (Section 6): 2400+ lines of Lean 4, 111 theorems/lemmas, 0 `sorry` placeholders.
 5. **Empirical validation at scale**: 13 case studies from a 45K LoC production system (OpenHCS).
 
 **Our core contribution:** Prior work established that nominal and structural typing have trade-offs. We prove the trade-off is **asymmetric**: when $B \neq \emptyset$, nominal typing strictly dominates—universally, not just in greenfield (Theorem 2.10j eliminates the retrofit exception). Duck typing is proven incoherent (Theorem 2.10d). Protocol is proven dominated (Theorem 2.10j). This follows necessarily from discarding the Bases axis.
