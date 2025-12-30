@@ -48,7 +48,7 @@ Name, Bases, Namespace---induces a lattice of typing disciplines. We
 prove that disciplines using more axes strictly dominate those using
 fewer (Theorem 2.15: Axis Lattice Dominance).
 
-\textbf{The core contribution is three unarguable theorems:}
+\textbf{The core contribution is three theorems with universal scope:}
 
 \begin{enumerate}
 \def\labelenumi{\arabic{enumi}.}
@@ -73,11 +73,11 @@ fewer (Theorem 2.15: Axis Lattice Dominance).
   complexity gap grows without bound.
 \end{enumerate}
 
-These theorems are \textbf{unarguable} because they make claims about
-the universe of possible systems, not our model: - Theorem 3.13:
-Information-theoretic impossibility (input lacks data) - Theorem 3.19:
-Mathematical partition (tertium non datur) - Theorem 3.24: Adversary
-argument (any algorithm can be forced)
+These theorems make claims about the universe of possible systems through
+three proof techniques: - Theorem 3.13: Information-theoretic impossibility
+(input lacks required data) - Theorem 3.19: Mathematical partition
+(tertium non datur) - Theorem 3.24: Adversary argument
+(lower bound applies to any algorithm)
 
 Additional contributions: - \textbf{Theorem 2.17 (Capability
 Completeness):} The capability set
@@ -108,8 +108,7 @@ theorems, lower bounds
 
 This paper proves that nominal typing strictly dominates structural and
 duck typing for object-oriented systems with inheritance hierarchies.
-This is not an opinion, recommendation, or style guide. It is a
-mathematical fact, machine-checked in Lean 4 (2400+ lines, 111 theorems,
+All results are machine-checked in Lean 4 (2400+ lines, 111 theorems,
 0 \texttt{sorry} placeholders).
 
 We develop a metatheory of class system design applicable to any
@@ -184,19 +183,19 @@ explicit ABC contracts.
 
 This paper makes five contributions:
 
-\textbf{1. Unarguable Theorems (Section 3.8):} - \textbf{Theorem 3.13
+\textbf{1. Universal Theorems (Section 3.8):} - \textbf{Theorem 3.13
 (Provenance Impossibility):} No shape discipline can compute
 provenance---information-theoretically impossible. - \textbf{Theorem
 3.19 (Derived Characterization):} Capability gap = B-dependent
 queries---derived from query space partition, not enumerated. -
 \textbf{Theorem 3.24 (Complexity Lower Bound):} Duck typing requires
-$\\Omega$(n) inspections---proved by adversary argument. - These theorems admit
-no counterargument because they make claims about the universe of
-possible systems.
+$\\Omega$(n) inspections---proved by adversary argument. - These theorems
+make claims about the universe of possible systems through
+information-theoretic analysis, mathematical partition, and adversary arguments.
 
 \textbf{2. Bulletproof Theorems (Section 3.11):} - \textbf{Theorem 3.32
 (Model Completeness):} \((N, B, S)\) captures ALL runtime-available type
-information. - \textbf{Theorem 3.34-3.36 (No Tradeoff):}
+information. - \textbf{Theorem 3.34-3.35 (No Tradeoff):}
 \(\mathcal{C}_{\text{duck}} \subsetneq \mathcal{C}_{\text{nom}}\)---nominal
 loses nothing, gains four capabilities. - \textbf{Lemma 3.37 (Axiom
 Justification):} Shape axiom is definitional, not assumptive. -
@@ -282,13 +281,13 @@ Given requirements, the discipline is derived.
   based on declared requirements. A \texttt{@requires\_provenance}
   annotation could mandate nominal patterns at compile time.
 \item
-  \textbf{Ending debates.} ``I prefer duck typing'' is not a valid
-  position when requirements include provenance. Preference is
-  mathematically incorrect for the stated requirements. The procedure
-  resolves the debate.
+  \textbf{Formal constraints.} When requirements include provenance,
+  the mathematics constrains the choice: shape-based typing cannot
+  provide this capability (Theorem 3.13, information-theoretic
+  impossibility). The procedure derives the discipline from requirements.
 \end{enumerate}
 
-\subsubsection{Scope: Absolute Claims}\label{scope-absolute-claims}
+\subsubsection{Scope and Limitations}\label{scope-limitations}
 
 This paper makes absolute claims. We do not argue nominal typing is
 ``preferred'' or ``more elegant.'' We prove:

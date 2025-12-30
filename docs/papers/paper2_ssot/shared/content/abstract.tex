@@ -1,0 +1,33 @@
+\begin{abstract}
+We provide the first formal foundations for the ``Don't Repeat Yourself'' (DRY) principle, articulated by Hunt \& Thomas (1999) but never formalized. Our contributions:
+
+\textbf{Three Core Theorems:}
+
+\begin{enumerate}
+\item \textbf{Theorem 3.6 (SSOT Requirements):} A language enables Single Source of Truth for structural facts if and only if it provides (1) definition-time hooks AND (2) introspectable derivation results. This is \textbf{derived}, not chosen---the logical structure forces these requirements.
+
+\item \textbf{Theorem 4.2 (Python Uniqueness):} Among mainstream languages, Python is the only language satisfying both SSOT requirements. Proved by exhaustive evaluation of top-10 TIOBE languages against formally-defined criteria.
+
+\item \textbf{Theorem 6.3 (Unbounded Complexity Gap):} The ratio of modification complexity between SSOT-incomplete and SSOT-complete languages is unbounded: $O(1)$ vs $\Omega(n)$ where $n$ is the number of use sites.
+\end{enumerate}
+
+These theorems rest on:
+\begin{itemize}
+\item Theorem 3.6: IFF proof---requirements are necessary AND sufficient
+\item Theorem 4.2: Exhaustive evaluation---all mainstream languages checked
+\item Theorem 6.3: Asymptotic analysis---$\lim_{n\to\infty} n/1 = \infty$
+\end{itemize}
+
+Additional contributions:
+\begin{itemize}
+\item \textbf{Definition 1.5 (Modification Complexity):} Formalization of edit cost as DOF in state space
+\item \textbf{Theorem 2.2 (SSOT Optimality):} SSOT guarantees $M(C, \delta_F) = 1$
+\item \textbf{Theorem 4.3 (Three-Language Theorem):} Exactly three languages satisfy SSOT requirements: Python, Common Lisp (CLOS), and Smalltalk
+\end{itemize}
+
+All theorems machine-checked in Lean 4 (1,753 lines across 13 files, 0 \texttt{sorry} placeholders). Empirical validation: 13 case studies from production bioimage analysis platform (OpenHCS, 45K LoC), mean DOF reduction 14.2x.
+
+\textbf{Keywords:} DRY principle, Single Source of Truth, language design, metaprogramming, formal methods, modification complexity
+\end{abstract}
+
+

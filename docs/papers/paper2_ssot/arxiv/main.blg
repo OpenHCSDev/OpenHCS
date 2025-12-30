@@ -1,0 +1,49 @@
+This is BibTeX, Version 0.99d (TeX Live 2026/dev/Arch Linux)
+Capacity: max_strings=200000, hash_size=200000, hash_prime=170003
+The top-level auxiliary file: main.aux
+The style file: plain.bst
+Database file #1: references.bib
+Warning--there's a number but no volume in mccabe1976complexity
+Warning--can't use both volume and number fields in prechelt2000empirical
+You've used 13 entries,
+            2118 wiz_defined-function locations,
+            573 strings with 5467 characters,
+and the built_in function-call counts, 3692 in all, are:
+= -- 361
+> -- 119
+< -- 3
++ -- 54
+- -- 36
+* -- 212
+:= -- 610
+add.period$ -- 40
+call.type$ -- 13
+change.case$ -- 51
+chr.to.int$ -- 0
+cite$ -- 15
+duplicate$ -- 165
+empty$ -- 341
+format.name$ -- 36
+if$ -- 787
+int.to.chr$ -- 0
+int.to.str$ -- 13
+missing$ -- 18
+newline$ -- 68
+num.names$ -- 26
+pop$ -- 81
+preamble$ -- 1
+purify$ -- 44
+quote$ -- 0
+skip$ -- 103
+stack$ -- 0
+substring$ -- 224
+swap$ -- 31
+text.length$ -- 3
+text.prefix$ -- 0
+top$ -- 0
+type$ -- 40
+warning$ -- 2
+while$ -- 40
+width$ -- 15
+write$ -- 140
+(There were 2 warnings)

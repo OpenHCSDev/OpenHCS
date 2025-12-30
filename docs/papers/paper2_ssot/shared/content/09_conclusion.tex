@@ -1,0 +1,51 @@
+\section{Conclusion}\label{sec:conclusion}
+%==============================================================================
+
+We have provided the first formal foundations for the Single Source of Truth principle. The key contributions are:
+
+\textbf{1. Formal Definition:} SSOT is defined as DOF = 1, where DOF (Degrees of Freedom) counts independent encoding locations for a fact. This definition is derived from the structure of the problem, not chosen arbitrarily.
+
+\textbf{2. Language Requirements:} We prove that SSOT for structural facts requires (1) definition-time hooks AND (2) introspectable derivation. Both are necessary; both together are sufficient. This is an if-and-only-if theorem.
+
+\textbf{3. Language Evaluation:} Among mainstream languages, only Python satisfies both requirements. CLOS and Smalltalk also satisfy them but are not mainstream. This is proved by exhaustive evaluation.
+
+\textbf{4. Complexity Bounds:} SSOT achieves $O(1)$ modification complexity; non-SSOT requires $\Omega(n)$. The gap is unbounded: for any constant $k$, there exists a codebase size where SSOT provides at least $k\times$ reduction.
+
+\textbf{5. Empirical Validation:} 13 case studies from OpenHCS (45K LoC) demonstrate a mean 14.2$\times$ DOF reduction, with a maximum of 47$\times$ (PR \#44: hasattr migration).
+
+\textbf{Implications:}
+
+\begin{enumerate}
+\item \textbf{For practitioners:} If SSOT for structural facts is required, Python (or CLOS/Smalltalk) is necessary. Other mainstream languages cannot achieve SSOT within the language.
+
+\item \textbf{For language designers:} Definition-time hooks and introspection should be considered if DRY is a design goal. Their absence is a deliberate choice with consequences.
+
+\item \textbf{For researchers:} Software engineering principles can be formalized and machine-checked. This paper demonstrates the methodology.
+\end{enumerate}
+
+\textbf{Limitations:}
+\begin{itemize}
+\tightlist
+\item Results apply to \emph{structural} facts. Configuration values and runtime state have different characteristics.
+\item Empirical validation is from a single codebase. Replication in other domains would strengthen the findings.
+\item The complexity bounds are asymptotic. Small codebases may not benefit significantly.
+\end{itemize}
+
+\textbf{Future Work:}
+\begin{itemize}
+\tightlist
+\item Extend the formalization to non-structural facts
+\item Develop automated DOF measurement tools
+\item Study the relationship between DOF and other software quality metrics
+\item Investigate SSOT in multi-language systems
+\end{itemize}
+
+All results are machine-checked in Lean 4 with zero \texttt{sorry} placeholders. The proofs are available at \texttt{proofs/ssot/}.
+
+\bibliographystyle{plain}
+\bibliography{references}
+
+%==============================================================================
+\appendix
+%==============================================================================
+

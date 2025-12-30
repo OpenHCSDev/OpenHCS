@@ -74,7 +74,7 @@ A Language Design Specification Derived from Modification Complexity Bounds}
 \begin{abstract}
 We provide the first formal foundations for the ``Don't Repeat Yourself'' (DRY) principle, articulated by Hunt \& Thomas (1999) but never formalized. Our contributions:
 
-\textbf{Three Unarguable Theorems:}
+\textbf{Three Core Theorems:}
 
 \begin{enumerate}
 \item \textbf{Theorem 3.6 (SSOT Requirements):} A language enables Single Source of Truth for structural facts if and only if it provides (1) definition-time hooks AND (2) introspectable derivation results. This is \textbf{derived}, not chosen---the logical structure forces these requirements.
@@ -84,11 +84,11 @@ We provide the first formal foundations for the ``Don't Repeat Yourself'' (DRY) 
 \item \textbf{Theorem 6.3 (Unbounded Complexity Gap):} The ratio of modification complexity between SSOT-incomplete and SSOT-complete languages is unbounded: $O(1)$ vs $\Omega(n)$ where $n$ is the number of use sites.
 \end{enumerate}
 
-These theorems are \textbf{unarguable} because:
+These theorems rest on:
 \begin{itemize}
-\item Theorem 3.6: IFF theorem---requirements are necessary AND sufficient
-\item Theorem 4.2: Exhaustive enumeration---all mainstream languages evaluated
-\item Theorem 6.3: Asymptotic gap---$\lim_{n\to\infty} n/1 = \infty$
+\item Theorem 3.6: IFF proof---requirements are necessary AND sufficient
+\item Theorem 4.2: Exhaustive evaluation---all mainstream languages checked
+\item Theorem 6.3: Asymptotic analysis---$\lim_{n\to\infty} n/1 = \infty$
 \end{itemize}
 
 Additional contributions:
@@ -106,7 +106,7 @@ All theorems machine-checked in Lean 4 (1,753 lines across 13 files, 0 \texttt{s
 
 \section{Introduction}\label{introduction}
 
-This paper proves that certain programming languages are \emph{incapable} of achieving the Single Source of Truth (SSOT) principle for structural facts. This is not an opinion, recommendation, or style guide. It is a mathematical fact, machine-checked in Lean 4 (1,753 lines across 13 files, 0 \texttt{sorry} placeholders).
+This paper proves that certain programming languages are \emph{incapable} of achieving the Single Source of Truth (SSOT) principle for structural facts. All results are machine-checked in Lean 4 (1,753 lines across 13 files, 0 \texttt{sorry} placeholders).
 
 The ``Don't Repeat Yourself'' (DRY) principle has been industry guidance for 25 years:
 
@@ -131,7 +131,7 @@ The core insight: SSOT for \emph{structural facts} (class existence, method sign
 
 These requirements are \textbf{derived}, not chosen. We do not \emph{prefer} definition-time hooks---we \emph{prove} they are necessary. The logical structure forces these requirements as the unique solution.
 
-\subsection{The Three Unarguable Theorems}\label{sec:unarguable}
+\subsection{Core Theorems}\label{sec:core-theorems}
 
 This paper's core contribution is three theorems that admit no counterargument:
 
@@ -140,17 +140,17 @@ This paper's core contribution is three theorems that admit no counterargument:
 \item
   \textbf{Theorem~\ref{thm:ssot-iff} (SSOT Requirements):} A language enables SSOT for structural facts if and only if it provides (1) definition-time hooks AND (2) introspectable derivation results.
 
-  \emph{Why unarguable:} This is an if-and-only-if theorem. The requirements are both necessary (without either, SSOT is impossible) and sufficient (with both, SSOT is achievable). There is no middle ground.
+  \emph{Proof technique:} This is an if-and-only-if theorem. The requirements are both necessary (without either, SSOT is impossible) and sufficient (with both, SSOT is achievable). There is no middle ground.
 
 \item
   \textbf{Theorem~\ref{thm:python-unique} (Python Uniqueness):} Among mainstream languages (top-10 TIOBE, consistent presence over 5+ years), Python is the only language satisfying both SSOT requirements.
 
-  \emph{Why unarguable:} This is proved by exhaustive evaluation. We check every mainstream language against formally-defined criteria. The evaluation is complete---no language is omitted.
+  \emph{Proof technique:} This is proved by exhaustive evaluation. We check every mainstream language against formally-defined criteria. The evaluation is complete---no language is omitted.
 
 \item
   \textbf{Theorem~\ref{thm:unbounded-gap} (Unbounded Complexity Gap):} The ratio of modification complexity between SSOT-incomplete and SSOT-complete architectures grows without bound: $O(1)$ vs $\Omega(n)$ where $n$ is the number of encoding locations.
 
-  \emph{Why unarguable:} $\lim_{n \to \infty} n/1 = \infty$. For any constant $k$, there exists a codebase size such that SSOT provides at least $k\times$ reduction. The gap is not ``large''---it is unbounded.
+  \emph{Proof technique:} Asymptotic analysis shows $\lim_{n \to \infty} n/1 = \infty$. For any constant $k$, there exists a codebase size such that SSOT provides at least $k\times$ reduction. The gap is not ``large''---it is unbounded.
 \end{enumerate}
 
 \subsection{What This Paper Does NOT Claim}\label{sec:non-claims}

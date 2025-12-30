@@ -1,0 +1,176 @@
+\section{Introduction}\label{introduction}
+
+This paper proves that certain programming languages are \emph{incapable} of achieving the Single Source of Truth (SSOT) principle for structural facts. All results are machine-checked in Lean 4 (1,753 lines across 13 files, 0 \texttt{sorry} placeholders).
+
+The ``Don't Repeat Yourself'' (DRY) principle has been industry guidance for 25 years:
+
+\begin{quote}
+``Every piece of knowledge must have a single, unambiguous, authoritative representation within a system.'' --- Hunt \& Thomas, \textit{The Pragmatic Programmer} (1999)
+\end{quote}
+
+Despite widespread acceptance, DRY has never been formalized. No prior work answers: \emph{What language features are necessary to achieve SSOT? What language features are sufficient?} We answer both questions, proving the answer is the same for both---an if-and-only-if theorem.
+
+The core insight: SSOT for \emph{structural facts} (class existence, method signatures, type relationships) requires language features that most mainstream languages lack. Specifically:
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\tightlist
+\item
+  \textbf{Definition-time hooks} (Theorem~\ref{thm:hooks-necessary}): Code must execute when a class/function is \emph{defined}, not when it is \emph{used}. This enables derivation at the moment structure is established.
+\item
+  \textbf{Introspectable derivation} (Theorem~\ref{thm:introspection-necessary}): The program must be able to query what was derived and from what. This enables verification that SSOT holds.
+\item
+  \textbf{Both are necessary} (Theorem~\ref{thm:independence}): Neither feature alone suffices. A language with hooks but no introspection can derive but cannot verify. A language with introspection but no hooks cannot derive at the right moment.
+\end{enumerate}
+
+These requirements are \textbf{derived}, not chosen. We do not \emph{prefer} definition-time hooks---we \emph{prove} they are necessary. The logical structure forces these requirements as the unique solution.
+
+\subsection{Core Theorems}\label{sec:core-theorems}
+
+This paper's core contribution is three theorems that admit no counterargument:
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\item
+  \textbf{Theorem~\ref{thm:ssot-iff} (SSOT Requirements):} A language enables SSOT for structural facts if and only if it provides (1) definition-time hooks AND (2) introspectable derivation results.
+
+  \emph{Proof technique:} This is an if-and-only-if theorem. The requirements are both necessary (without either, SSOT is impossible) and sufficient (with both, SSOT is achievable). There is no middle ground.
+
+\item
+  \textbf{Theorem~\ref{thm:python-unique} (Python Uniqueness):} Among mainstream languages (top-10 TIOBE, consistent presence over 5+ years), Python is the only language satisfying both SSOT requirements.
+
+  \emph{Proof technique:} This is proved by exhaustive evaluation. We check every mainstream language against formally-defined criteria. The evaluation is complete---no language is omitted.
+
+\item
+  \textbf{Theorem~\ref{thm:unbounded-gap} (Unbounded Complexity Gap):} The ratio of modification complexity between SSOT-incomplete and SSOT-complete architectures grows without bound: $O(1)$ vs $\Omega(n)$ where $n$ is the number of encoding locations.
+
+  \emph{Proof technique:} Asymptotic analysis shows $\lim_{n \to \infty} n/1 = \infty$. For any constant $k$, there exists a codebase size such that SSOT provides at least $k\times$ reduction. The gap is not ``large''---it is unbounded.
+\end{enumerate}
+
+\subsection{What This Paper Does NOT Claim}\label{sec:non-claims}
+
+To prevent misreading, we state explicit non-claims:
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\tightlist
+\item
+  \textbf{NOT ``Python is the best language.''} We claim Python satisfies SSOT requirements. We make no claims about performance, safety, or other dimensions.
+\item
+  \textbf{NOT ``SSOT matters for all codebases.''} Small codebases may not benefit. Our complexity bounds are asymptotic---they matter at scale.
+\item
+  \textbf{NOT ``Other languages cannot approximate SSOT.''} External tools (code generators, linters) can help. We claim the \emph{language itself} cannot achieve SSOT without the identified features.
+\item
+  \textbf{NOT ``This is novel wisdom.''} The insight that metaprogramming helps with DRY is old. What is new is the \emph{formalization} and \emph{machine-checked proof} of necessity.
+\end{enumerate}
+
+\subsection{Contributions}\label{sec:contributions}
+
+This paper makes five contributions:
+
+\textbf{1. Formal foundations (Section~\ref{sec:foundations}):}
+\begin{itemize}
+\tightlist
+\item Definition of modification complexity as degrees of freedom (DOF) in state space
+\item Definition of SSOT as DOF = 1
+\item Proof that SSOT is optimal: DOF = 0 means missing specification, DOF $>$ 1 means inconsistency possible
+\end{itemize}
+
+\textbf{2. Language requirements (Section~\ref{sec:requirements}):}
+\begin{itemize}
+\tightlist
+\item Theorem~\ref{thm:hooks-necessary}: Definition-time hooks are necessary
+\item Theorem~\ref{thm:introspection-necessary}: Introspection is necessary
+\item Theorem~\ref{thm:ssot-iff}: Both together are sufficient
+\item Proof that these requirements are forced by the structure of the problem
+\end{itemize}
+
+\textbf{3. Language evaluation (Section~\ref{sec:evaluation}):}
+\begin{itemize}
+\tightlist
+\item Exhaustive evaluation of 10 mainstream languages
+\item Extended evaluation of 3 non-mainstream languages (CLOS, Smalltalk, Ruby)
+\item Theorem~\ref{thm:three-lang}: Exactly three languages satisfy SSOT requirements
+\end{itemize}
+
+\textbf{4. Complexity bounds (Section~\ref{sec:bounds}):}
+\begin{itemize}
+\tightlist
+\item Theorem~\ref{thm:upper-bound}: SSOT achieves $O(1)$ modification complexity
+\item Theorem~\ref{thm:lower-bound}: Non-SSOT requires $\Omega(n)$ modifications
+\item Theorem~\ref{thm:unbounded-gap}: The gap is unbounded
+\end{itemize}
+
+\textbf{5. Empirical validation (Section~\ref{sec:empirical}):}
+\begin{itemize}
+\tightlist
+\item 13 case studies from OpenHCS (45K LoC production Python codebase)
+\item Concrete DOF measurements: 184 total pre-SSOT, 13 total post-SSOT
+\item Mean reduction factor: 14.2$\times$
+\item Detailed before/after code for each case study
+\end{itemize}
+
+\subsection{Empirical Context: OpenHCS}\label{sec:openhcs-context}
+
+\textbf{What it does:} OpenHCS is a bioimage analysis platform for high-content screening. It processes microscopy images through configurable pipelines, with GUI-based design and Python code export. The system requires:
+
+\begin{itemize}
+\tightlist
+\item Automatic registration of analysis components
+\item Type-safe configuration with inheritance
+\item Runtime enumeration of available processors
+\item Provenance tracking for reproducibility
+\end{itemize}
+
+\textbf{Why it matters for this paper:} OpenHCS requires SSOT for structural facts. When a new image processor is added (by subclassing \texttt{BaseProcessor}), it must automatically appear in:
+
+\begin{itemize}
+\tightlist
+\item The GUI component palette
+\item The configuration schema
+\item The serialization registry
+\item The documentation generator
+\end{itemize}
+
+Without SSOT, adding a processor requires updating 4+ locations. With SSOT, only the class definition is needed---Python's \texttt{\_\_init\_subclass\_\_} and \texttt{\_\_subclasses\_\_()} handle the rest.
+
+\textbf{Key finding:} PR \#44 migrated from duck typing (\texttt{hasattr()} checks) to nominal typing (ABC contracts). This eliminated 47 scattered checks, reducing DOF from 47 to 1. The migration validates both:
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\tightlist
+\item The theoretical prediction: DOF reduction is achievable
+\item The practical benefit: Maintenance cost decreased measurably
+\end{enumerate}
+
+\subsection{Decision Procedure, Not Preference}\label{sec:decision}
+
+The contribution of this paper is not the theorems alone, but their consequence: \emph{language selection for SSOT becomes a decision procedure}.
+
+Given requirements:
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\tightlist
+\item If you need SSOT for structural facts, you need definition-time hooks AND introspection
+\item If your language lacks these features, SSOT is impossible within the language
+\item External tooling can help but introduces fragility (not verifiable at runtime)
+\end{enumerate}
+
+\textbf{Implications:}
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\item
+  \textbf{Language design.} Future languages should include definition-time hooks and introspection if DRY is a design goal. Languages designed without these features (Go, Rust, Swift) cannot achieve SSOT for structural facts.
+\item
+  \textbf{Architecture.} When choosing a language for a project requiring SSOT, the choice is constrained by this analysis. ``I prefer Go'' is not valid when SSOT is required.
+\item
+  \textbf{Tooling.} External tools (code generators, macros) can work around language limitations but are not equivalent to language-level support.
+\item
+  \textbf{Pedagogy.} Software engineering courses should teach DRY as a formal principle with language requirements, not as a vague guideline.
+\end{enumerate}
+
+\subsection{Paper Structure}\label{sec:structure}
+
+Section~\ref{sec:foundations} establishes formal definitions: edit space, facts, encoding, degrees of freedom. Section~\ref{sec:ssot} defines SSOT and proves its optimality. Section~\ref{sec:requirements} derives language requirements with necessity proofs. Section~\ref{sec:evaluation} evaluates mainstream languages exhaustively. Section~\ref{sec:bounds} proves complexity bounds. Section~\ref{sec:empirical} presents empirical validation with 13 case studies. Section~\ref{sec:related} surveys related work. Appendix~\ref{sec:rebuttals} addresses anticipated objections. Appendix~\ref{sec:lean} contains complete Lean 4 proof listings.
+
+%==============================================================================
