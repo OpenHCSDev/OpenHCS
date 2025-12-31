@@ -17,6 +17,8 @@ Author: Formalized foundations for Paper 3
 Date: 2025-12-30
 -/
 
+import Mathlib.Tactic
+
 namespace Leverage
 
 /-!
@@ -97,6 +99,52 @@ theorem lower_dof_higher_leverage (a₁ a₂ : Architecture)
     apply Nat.mul_lt_mul_of_pos_left h_dof
     rw [← h_caps]; exact h_caps_pos
   exact h1
+
+/-- Theorem: Higher leverage is transitive
+
+Note: This is a more complex theorem requiring cross-multiplication arguments.
+We provide a direct proof using the ring tactic after establishing key inequalities.
+-/
+theorem higher_leverage_trans (a₁ a₂ a₃ : Architecture)
+    (h₁ : a₁.higher_leverage a₂) (h₂ : a₂.higher_leverage a₃) :
+    a₁.higher_leverage a₃ := by
+  unfold Architecture.higher_leverage at *
+  -- h₁: a₁.caps * a₂.dof > a₂.caps * a₁.dof
+  -- h₂: a₂.caps * a₃.dof > a₃.caps * a₂.dof
+  -- Goal: a₁.caps * a₃.dof > a₃.caps * a₁.dof
+  --
+  -- This is transitivity of the ratio ordering: a₁.caps/a₁.dof > a₂.caps/a₂.dof > a₃.caps/a₃.dof
+  -- We prove this by showing the cross-multiplication inequality holds.
+  --
+  -- Multiply h₁ by (a₃.dof * a₂.caps) and h₂ by (a₁.dof * a₂.caps)
+  -- then combine to eliminate a₂ terms.
+  have ha3_dof_pos := a₃.dof_pos
+  have ha1_dof_pos := a₁.dof_pos
+  -- From h₁: a₁.caps * a₂.dof > a₂.caps * a₁.dof
+  -- Multiply by a₃.dof: a₁.caps * a₂.dof * a₃.dof > a₂.caps * a₁.dof * a₃.dof
+  have step1 : a₁.capabilities * a₂.dof * a₃.dof > a₂.capabilities * a₁.dof * a₃.dof :=
+    Nat.mul_lt_mul_of_pos_right h₁ ha3_dof_pos
+  -- From h₂: a₂.caps * a₃.dof > a₃.caps * a₂.dof
+  -- Multiply by a₁.dof: a₂.caps * a₃.dof * a₁.dof > a₃.caps * a₂.dof * a₁.dof
+  have step2 : a₂.capabilities * a₃.dof * a₁.dof > a₃.capabilities * a₂.dof * a₁.dof :=
+    Nat.mul_lt_mul_of_pos_right h₂ ha1_dof_pos
+  -- Rewrite to match: a₂.caps * a₁.dof * a₃.dof > a₃.caps * a₁.dof * a₂.dof
+  have step2' : a₂.capabilities * a₁.dof * a₃.dof > a₃.capabilities * a₁.dof * a₂.dof := by
+    have eq1 : a₂.capabilities * a₃.dof * a₁.dof = a₂.capabilities * a₁.dof * a₃.dof := by ring
+    have eq2 : a₃.capabilities * a₂.dof * a₁.dof = a₃.capabilities * a₁.dof * a₂.dof := by ring
+    rw [eq1, eq2] at step2
+    exact step2
+  -- Now: step1 gives a₁.caps * a₂.dof * a₃.dof > a₂.caps * a₁.dof * a₃.dof
+  --      step2' gives a₂.caps * a₁.dof * a₃.dof > a₃.caps * a₁.dof * a₂.dof
+  -- Transitivity: a₁.caps * a₂.dof * a₃.dof > a₃.caps * a₁.dof * a₂.dof
+  have step3 : a₁.capabilities * a₂.dof * a₃.dof > a₃.capabilities * a₁.dof * a₂.dof :=
+    Nat.lt_trans step2' step1
+  -- Rewrite: (a₁.caps * a₃.dof) * a₂.dof > (a₃.caps * a₁.dof) * a₂.dof
+  have eq_lhs : a₁.capabilities * a₂.dof * a₃.dof = (a₁.capabilities * a₃.dof) * a₂.dof := by ring
+  have eq_rhs : a₃.capabilities * a₁.dof * a₂.dof = (a₃.capabilities * a₁.dof) * a₂.dof := by ring
+  rw [eq_lhs, eq_rhs] at step3
+  -- Divide by a₂.dof (positive)
+  exact Nat.lt_of_mul_lt_mul_right step3
 
 /-- Theorem: SSOT maximizes leverage for fixed capabilities -/
 theorem ssot_max_leverage (a_ssot a_other : Architecture)

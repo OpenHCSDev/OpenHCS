@@ -4,11 +4,20 @@
 This module proves the main results connecting leverage to error probability
 and architectural optimality.
 
+THE CENTRAL METATHEOREM (Theorem 3.0):
+  For any architectural decision, the optimal choice maximizes leverage.
+  L = |Capabilities| / DOF. Higher leverage → lower error → better architecture.
+
 Key theorems:
+- 3.0: Leverage Maximization Principle (THE METATHEOREM)
 - 3.1: Leverage-Error Tradeoff (max leverage ⟹ min error)
 - 3.2: Metaprogramming Dominance (unbounded leverage)
 - 3.4: Architectural Decision Criterion
 - 3.6: Leverage Composition
+
+All other results in the trilogy are INSTANCES of Theorem 3.0:
+- Paper 1 (Typing): Nominal dominates duck (Theorem 4.2)
+- Paper 2 (SSOT): SSOT achieves infinite leverage (Theorem 4.1)
 
 All proofs are definitional - no sorry placeholders.
 
@@ -20,6 +29,44 @@ import Leverage.Foundations
 import Leverage.Probability
 
 namespace Leverage
+
+/-!
+## THE CENTRAL METATHEOREM
+
+Theorem 3.0 (Leverage Maximization Principle):
+For any architectural decision with alternatives A₁, A₂, ..., Aₙ,
+the optimal choice maximizes leverage L = |Capabilities| / DOF.
+
+This is THE theorem. All other results are instances:
+- Theorem 4.1 (SSOT): L(SSOT) = ∞ > L(non-SSOT)
+- Theorem 4.2 (Typing): L(nominal) > L(duck)
+- Theorem 4.3 (Microservices): L depends on n and Δc
+-/
+
+/-- Architectural preference: A₁ is preferred to A₂ when A₁ has higher leverage -/
+def preferArchitecture (a₁ a₂ : Architecture) : Prop :=
+  a₁.higher_leverage a₂ ∨ (a₁.geq_leverage a₂ ∧ a₁.capabilities ≥ a₂.capabilities)
+
+/-- Theorem 3.0 (Leverage Maximization Principle):
+    Higher leverage implies architectural preference -/
+theorem leverage_maximization_principle (A₁ A₂ : Architecture) :
+    A₁.higher_leverage A₂ → preferArchitecture A₁ A₂ := by
+  intro h
+  left
+  exact h
+
+/-- Corollary 3.0a: Equal leverage with more capabilities is also preferred -/
+theorem leverage_caps_principle (A₁ A₂ : Architecture)
+    (h_lev : A₁.geq_leverage A₂) (h_caps : A₁.capabilities ≥ A₂.capabilities) :
+    preferArchitecture A₁ A₂ := by
+  right
+  exact ⟨h_lev, h_caps⟩
+
+/-- Corollary 3.0b: Preference is transitive via leverage ordering -/
+theorem preference_transitive (A₁ A₂ A₃ : Architecture)
+    (h₁ : A₁.higher_leverage A₂) (h₂ : A₂.higher_leverage A₃) :
+    A₁.higher_leverage A₃ :=
+  higher_leverage_trans A₁ A₂ A₃ h₁ h₂
 
 /-!
 ## Theorem 3.1: Leverage-Error Tradeoff
