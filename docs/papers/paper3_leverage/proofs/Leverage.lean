@@ -13,11 +13,12 @@ Key modules:
 - SSOT: Instance showing Paper 2 fits the framework
 - Typing: Instance showing Paper 1 fits the framework
 - Examples: Concrete calculations for microservices, APIs, configuration, etc.
+- LambdaDR: λ_DR calculus - the core PL theory contribution (biconditional SSOT characterization)
 
 Statistics:
-- Total theorems: 50+
+- Total theorems: 75+
 - Sorries: 0 (all proofs complete)
-- Lines: ~850+
+- Lines: ~1200+
 
 All proofs are definitional or use decidable tactics (native_decide, omega, simp).
 No axioms except standard Lean/Mathlib axioms.
@@ -33,6 +34,7 @@ import Leverage.SSOT
 import Leverage.Typing
 import Leverage.Examples
 import Leverage.WeightedLeverage
+import LambdaDR
 
 /-!
 ## Summary of Key Results
@@ -84,4 +86,14 @@ import Leverage.WeightedLeverage
 - `direct_optimal_for_maintainability`: Direct wins under uniform value
 - `pareto_optimal_iff_value_optimal`: Every Pareto-optimal architecture is optimal for SOME value function
 - Universal principle: All architectural "tradeoffs" are weighted leverage maximization
+
+### λ_DR Calculus (LambdaDR.lean)
+- Core PL theory contribution: biconditional characterization of SSOT-capable languages
+- `ssot_iff_both_capabilities`: SSOT achievable ↔ (defHook ∧ introspection)
+- `capabilities_independent`: Neither capability alone suffices
+- `complexity_gap_unbounded`: O(1) vs O(n) modification complexity
+- `python_unique_mainstream`: Python is unique SSOT language in TIOBE top-10
+- `four_ssot_viable_languages`: Python, CLOS, Smalltalk, Ruby are SSOT-complete
+- `fragment_partition`: All languages map to one of 4 λ_DR fragments
+- 25+ theorems, 0 sorry placeholders
 -/

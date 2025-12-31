@@ -1,0 +1,278 @@
+\section{The $\lambda_{DR}$ Calculus}\label{sec:calculus}
+%==============================================================================
+
+We introduce $\lambda_{DR}$ (lambda with Definitional Reflection), a core calculus that captures the semantic distinction between languages with and without definition-time metaprogramming. This calculus provides the formal foundation for our expressiveness results.
+
+\subsection{Design Rationale}
+
+Existing reflection calculi (Smith~\cite{smith1984reflection}, mirrors~\cite{bracha2004mirrors}) model runtime reflection but do not distinguish \emph{when} reflective operations execute. Our key insight is that for structural facts---class hierarchies, method signatures, type relationships---the \emph{timing} of reflection is crucial.
+
+A language with runtime-only reflection (Java) can query ``what methods does class $C$ have?'' but cannot intercept the moment when $C$ is defined. A language with compile-time macros (Rust) can generate code during compilation but cannot query the result at runtime. Only languages with \emph{definition-time hooks} and \emph{runtime introspection} can both derive structures and verify that derivation was complete.
+
+$\lambda_{DR}$ makes this distinction explicit by including primitives for both capabilities, then studying fragments that lack one or both.
+
+\subsection{Syntax}
+
+\begin{definition}[$\lambda_{DR}$ Syntax]
+\begin{align*}
+\text{Types } \tau &::= \mathbf{1} \mid \mathbf{Bool} \mid \tau \to \tau \mid \tau \times \tau \mid \mathbf{Class}(c) \mid \mathbf{Meta}(\tau) \mid \mathbf{Reg}(\tau) \\[4pt]
+\text{Expressions } e &::= x \mid \lambda x:\tau.e \mid e\;e \mid (e, e) \mid \pi_1\,e \mid \pi_2\,e \\
+&\mid \mathbf{true} \mid \mathbf{false} \mid \mathbf{if}\;e\;\mathbf{then}\;e\;\mathbf{else}\;e \\
+&\mid \mathbf{class}\;c\;\mathbf{extends}\;\bar{c}\;\{\bar{m}\} \mid \mathbf{new}\;c \mid e.m \\
+&\mid \langle e \rangle \mid \tilde{e}  \tag{reify/reflect}\\
+&\mid \mathbf{defhook}(c, e) \mid \mathbf{subclasses}(c) \tag{key primitives}\\
+&\mid \mathbf{register}(r, k, v) \mid \mathbf{lookup}(r, k)
+\end{align*}
+\end{definition}
+
+The critical primitives are:
+\begin{itemize}
+\item $\mathbf{defhook}(c, e)$: When any subclass of $c$ is defined, execute $e$ with the new subclass bound to a distinguished variable.
+\item $\mathbf{subclasses}(c)$: Return the set of all currently-defined subclasses of $c$.
+\end{itemize}
+
+These correspond directly to Python's \texttt{\_\_init\_subclass\_\_} and \texttt{\_\_subclasses\_\_()} respectively.
+
+\subsection{Operational Semantics}
+
+We define a small-step semantics that distinguishes definition-time and runtime evaluation.
+
+\begin{definition}[Evaluation Contexts]
+\begin{align*}
+\text{Class context } \Delta &::= \emptyset \mid \Delta, c \mapsto (\bar{c}, \bar{m}) \\
+\text{Hook context } H &::= \emptyset \mid H, c \mapsto e \\
+\text{Registry context } R &::= \emptyset \mid R, r \mapsto \{k_1 \mapsto v_1, \ldots\}
+\end{align*}
+\end{definition}
+
+\begin{definition}[Class Definition Rule]
+\[
+\frac{\Delta \vdash \bar{c} \text{ defined} \quad c \notin \text{dom}(\Delta) \quad H(c') = e \text{ for some } c' \in \bar{c}}
+{\langle \Delta, H, R, \mathbf{class}\;c\;\mathbf{extends}\;\bar{c}\;\{\bar{m}\} \rangle \longrightarrow \langle \Delta', H, R, e[c/\mathbf{this}] \rangle}
+\]
+where $\Delta' = \Delta, c \mapsto (\bar{c}, \bar{m})$.
+\end{definition}
+
+The key semantic property: when a class is defined, any registered hook fires \emph{immediately}, before control returns to the defining context. This is definition-time execution.
+
+\begin{definition}[Subclass Query Rule]
+\[
+\frac{\Delta \vdash c \text{ defined}}
+{\langle \Delta, H, R, \mathbf{subclasses}(c) \rangle \longrightarrow \langle \Delta, H, R, \{c' \mid c' <: c \in \Delta\} \rangle}
+\]
+\end{definition}
+
+The query returns all classes currently in $\Delta$ that are subclasses of $c$. This is runtime introspection.
+
+\subsection{Language Fragments}
+
+We define four fragments by restricting the available primitives:
+
+\begin{center}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Fragment} & \textbf{defhook} & \textbf{subclasses} & \textbf{Corresponds to} \\
+\midrule
+$\lambda_{DR}$ & \checkmark & \checkmark & Python, CLOS, Smalltalk \\
+$\lambda_{DR}^{-\text{hook}}$ & $\times$ & \checkmark & Java (with reflection) \\
+$\lambda_{DR}^{-\text{intro}}$ & \checkmark & $\times$ & Rust (with proc macros) \\
+$\lambda_{DR}^{--}$ & $\times$ & $\times$ & Go, C \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Note: Java's reflection provides \texttt{getMethods()} but not subclass enumeration. We place it in $\lambda_{DR}^{-\text{hook}}$ because it has \emph{some} introspection, but our theorems show this is insufficient for SSOT. A more refined analysis would place Java closer to $\lambda_{DR}^{--}$.
+
+\subsection{The Encoding Relation}
+
+We formalize when a program location ``encodes'' a fact.
+
+\begin{definition}[Fact]
+A \emph{fact} $F$ is an atomic predicate about program structure: $\text{Subclass}(c_1, c_2)$, $\text{HasMethod}(c, m, \tau)$, $\text{RegisteredAs}(c, k)$, etc.
+\end{definition}
+
+\begin{definition}[Encoding]
+Location $L$ in program $P$ \emph{encodes} fact $F$, written $\text{enc}(L, F)$, iff modifying $L$ can change whether $F$ holds.
+\end{definition}
+
+\begin{definition}[Derived Encoding]
+Encoding $\text{enc}(L_d, F)$ is \emph{derived from} $\text{enc}(L_s, F)$ iff there exists a defhook $h$ such that modifying $L_s$ causes $h$ to fire and update $L_d$. Derived encodings cannot diverge from their source.
+\end{definition}
+
+\begin{definition}[Degrees of Freedom]
+\[
+\text{DOF}(P, F) = |\{L : \text{enc}(L, F) \land \neg\text{derived}(L)\}|
+\]
+The count of \emph{non-derived} (independent) encodings of $F$.
+\end{definition}
+
+\subsection{SSOT as DOF = 1}
+
+\begin{definition}[Single Source of Truth]
+Program $P$ satisfies SSOT for fact $F$ iff $\text{DOF}(P, F) = 1$.
+\end{definition}
+
+\begin{theorem}[SSOT Optimality]\label{thm:ssot-optimal-new}
+For any fact $F$ that must be encoded:
+\begin{enumerate}
+\item $\text{DOF} = 0$: $F$ is not encoded (underspecification)
+\item $\text{DOF} = 1$: Single source of truth (optimal)
+\item $\text{DOF} > 1$: Independent encodings can diverge (inconsistency possible)
+\end{enumerate}
+\end{theorem}
+
+\begin{proof}
+(1) If no location encodes $F$, the program cannot implement behavior depending on $F$.
+(2) With one non-derived encoding, all others are derived and thus consistent.
+(3) With multiple non-derived encodings, each can be modified independently, allowing inconsistent states. \qed
+\end{proof}
+
+%==============================================================================
+\section{Expressiveness Theorems}\label{sec:expressiveness}
+%==============================================================================
+
+We now prove the main results: what each fragment can and cannot express regarding SSOT.
+
+\subsection{Full $\lambda_{DR}$ Expressiveness}
+
+\begin{theorem}[SSOT Achievability]\label{thm:achievability}
+For any fact $F$ and computable derivation function $f: F \to \text{Structure}$, there exists a $\lambda_{DR}$ program $P$ such that:
+\begin{enumerate}
+\item $\text{DOF}(P, F) = 1$
+\item All structures $f(F)$ are present in $P$
+\item All derived structures are consistent with the source
+\end{enumerate}
+\end{theorem}
+
+\begin{proof}
+Construct $P$ as follows:
+\begin{enumerate}
+\item Define a base class $B$ with a defhook that computes $f$ and stores results in a registry
+\item Define the source encoding as a subclass $C$ of $B$ with $F$ encoded in class attributes
+\item When $C$ is defined, the defhook fires, computing $f(F)$ and storing derived structures
+\end{enumerate}
+
+The class definition is the single source. Registry entries are derived via defhook. By Definition~\ref{def:derived}, derived encodings do not contribute to DOF. Therefore $\text{DOF}(P, F) = 1$. \qed
+\end{proof}
+
+\subsection{$\lambda_{DR}^{-\text{hook}}$ Inexpressibility}
+
+\begin{theorem}[Registration Requires Hooks]\label{thm:hooks-required}
+In $\lambda_{DR}^{-\text{hook}}$, for any program $P$ encoding a registration pattern (class $C$ registered under key $k$):
+\[
+\text{DOF}(P, \text{RegisteredAs}(C, k)) \geq 2
+\]
+\end{theorem}
+
+\begin{proof}
+A registration pattern requires:
+\begin{enumerate}
+\item The class definition (location $L_1$) establishing that $C$ exists
+\item The registry entry (location $L_2$) mapping $k \to C$
+\end{enumerate}
+
+In $\lambda_{DR}^{-\text{hook}}$, no code executes when $C$ is defined. Therefore $L_2$ must be written explicitly---it cannot be derived from $L_1$.
+
+By Definition~\ref{def:independent}, $L_1$ and $L_2$ are independent: modifying $L_1$ does not automatically update $L_2$. Both are non-derived encodings.
+
+Therefore $\text{DOF} \geq 2$. \qed
+\end{proof}
+
+\begin{corollary}[Java Cannot Achieve SSOT for Registration]
+Java programs encoding format$\to$handler mappings have $\text{DOF} \geq 2$.
+\end{corollary}
+
+\subsection{$\lambda_{DR}^{-\text{intro}}$ Unverifiability}
+
+\begin{theorem}[Verification Requires Introspection]\label{thm:intro-required}
+In $\lambda_{DR}^{-\text{intro}}$, the property ``SSOT holds for fact $F$'' is undecidable at runtime.
+\end{theorem}
+
+\begin{proof}
+Verifying SSOT requires:
+\begin{enumerate}
+\item Enumerating all encodings of $F$
+\item Checking that all but one are derived
+\end{enumerate}
+
+Step (1) requires answering ``what classes encode $F$?'' For structural facts, this means ``what subclasses of $B$ exist?''
+
+In $\lambda_{DR}^{-\text{intro}}$, $\mathbf{subclasses}$ is not available. The program cannot enumerate subclasses. Step (1) is impossible.
+
+Without enumeration, verification cannot proceed. SSOT may hold, but the program cannot confirm it. \qed
+\end{proof}
+
+\begin{corollary}[Rust Cannot Verify SSOT]
+Rust programs using proc macros cannot verify at runtime that all handlers are registered.
+\end{corollary}
+
+\subsection{Independence of Requirements}
+
+\begin{theorem}[Requirements are Independent]\label{thm:independence-new}
+Neither $\mathbf{defhook}$ nor $\mathbf{subclasses}$ implies the other. Specifically:
+\begin{enumerate}
+\item $\lambda_{DR}^{-\text{intro}}$ has hooks but cannot verify SSOT
+\item $\lambda_{DR}^{-\text{hook}}$ has introspection but cannot achieve SSOT
+\end{enumerate}
+\end{theorem}
+
+\begin{proof}
+(1) By Theorem~\ref{thm:intro-required}.
+(2) By Theorem~\ref{thm:hooks-required}. \qed
+\end{proof}
+
+\subsection{The Central Characterization}
+
+\begin{theorem}[SSOT If and Only If]\label{thm:ssot-iff-new}
+A language $L$ enables verifiable SSOT for structural facts if and only if $L$ includes both:
+\begin{enumerate}
+\item Definition-time hooks (expressible by $\mathbf{defhook}$)
+\item Runtime introspection (expressible by $\mathbf{subclasses}$)
+\end{enumerate}
+\end{theorem}
+
+\begin{proof}
+$(\Rightarrow)$ Suppose $L$ enables verifiable SSOT.
+\begin{itemize}
+\item By Theorem~\ref{thm:hooks-required}, $L$ must have hooks (else DOF $\geq 2$)
+\item By Theorem~\ref{thm:intro-required}, $L$ must have introspection (else unverifiable)
+\end{itemize}
+
+$(\Leftarrow)$ Suppose $L$ has both hooks and introspection.
+\begin{itemize}
+\item By Theorem~\ref{thm:achievability}, SSOT is achievable
+\item Introspection enables enumeration; verification is decidable
+\end{itemize}
+
+The biconditional holds. \qed
+\end{proof}
+
+%==============================================================================
+\section{Complexity Analysis}\label{sec:complexity-new}
+%==============================================================================
+
+The expressiveness results have complexity consequences.
+
+\begin{theorem}[Complexity Separation]\label{thm:complexity-sep}
+Let $M_{\text{eff}}(P, F)$ denote the number of manual edits required when fact $F$ changes.
+\begin{enumerate}
+\item In $\lambda_{DR}$: $M_{\text{eff}}(P, F) = O(1)$
+\item In $\lambda_{DR}^{--}$: $M_{\text{eff}}(P, F) = \Omega(n)$ where $n$ = encoding locations
+\end{enumerate}
+\end{theorem}
+
+\begin{proof}
+(1) With SSOT, only the source requires manual update. Derived locations update automatically. Total: 1 edit.
+
+(2) Without hooks, all $n$ encoding locations are independent. Each requires manual update. Total: $n$ edits. \qed
+\end{proof}
+
+\begin{theorem}[Unbounded Gap]
+\[
+\lim_{n \to \infty} \frac{M_{\text{eff}}^{\lambda_{DR}^{--}}(n)}{M_{\text{eff}}^{\lambda_{DR}}} = \lim_{n \to \infty} \frac{n}{1} = \infty
+\]
+\end{theorem}
+
+This is not ``Python is slightly better.'' It is a fundamental complexity class separation: $O(1)$ vs $\Omega(n)$.
+
+%==============================================================================
