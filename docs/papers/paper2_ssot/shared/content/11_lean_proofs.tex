@@ -44,7 +44,7 @@ theorem dof_inconsistency_potential (k : Nat) (hk : k > 1) :
 
 -- Corollary 1.10: DOF > 1 implies potential inconsistency
 theorem dof_gt_one_inconsistent (dof : Nat) (h : dof > 1) :
-    dof != 1 := by
+    dof != 1 := by  -- Lean 4: != is notation for \neq
   omega
 \end{verbatim}
 
@@ -69,13 +69,13 @@ theorem ssot_optimality (dof : Nat) (h : satisfies_SSOT dof) :
 
 -- Corollary 2.3: SSOT implies O(1) modification complexity
 theorem ssot_implies_constant_complexity (dof : Nat) (h : satisfies_SSOT dof) :
-    dof <= 1 := by
+    dof <= 1 := by  -- Lean 4: <= is notation for \leq
   unfold satisfies_SSOT at h
   omega
 
 -- Theorem: Non-SSOT implies potential inconsistency
-theorem non_ssot_inconsistency (dof : Nat) (h : ¬satisfies_SSOT dof) :
-    dof = 0 or dof > 1 := by
+theorem non_ssot_inconsistency (dof : Nat) (h : Not (satisfies_SSOT dof)) :
+    dof = 0 \/ dof > 1 := by  -- Lean 4: \/ is notation for Or
   unfold satisfies_SSOT at h
   omega
 
@@ -333,8 +333,8 @@ theorem ssot_incomplete_iff (L : LanguageFeatures) :
 -- IMPOSSIBILITY THEOREM (Constructive)
 -- For any language lacking either feature, SSOT is impossible
 theorem impossibility (L : LanguageFeatures)
-    (h : L.has_definition_hooks = false or L.has_introspection = false) :
-    ¬ssot_complete L := by
+    (h : L.has_definition_hooks = false \/ L.has_introspection = false) :
+    Not (ssot_complete L) := by
   intro hc
   exact ssot_incomplete_iff L |>.mpr h hc
 
