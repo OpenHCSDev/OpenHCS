@@ -1,0 +1,831 @@
+\section{Discussion}\label{discussion}
+
+\subsection{Limitations}\label{limitations}
+
+Our theorems establish necessary conditions for provenance-tracking
+systems, but several limitations warrant explicit acknowledgment:
+
+\textbf{Diamond inheritance.} Our theorems assume well-formed MRO
+produced by C3 linearization. Pathological diamond inheritance patterns
+can break C3 entirely---Python raises \texttt{TypeError} when
+linearization fails. Such cases require manual resolution or interface
+redesign. Our complexity bounds apply only when C3 succeeds.
+
+\textbf{Runtime overhead.} Provenance tracking stores
+\texttt{(value,\ scope\_id,\ source\_type)} tuples for each resolved
+field. This introduces memory overhead proportional to the number of
+lazy fields. In OpenHCS, this overhead is negligible (\textless{} 1\% of
+total memory usage), but systems with millions of configuration objects
+may need to consider this cost.
+
+\textbf{Scope: systems where \(B \neq \emptyset\).} Simple scripts where
+the entire program fits in working memory may not require provenance
+tracking. But provenance is just one of four capabilities (Theorem
+2.17). Even without provenance requirements, nominal typing dominates
+because it provides identity, enumeration, and conflict resolution at no
+additional cost. Our theorems apply universally when
+\(B \neq \emptyset\).
+
+\textbf{Python as canonical model.} The formalization uses Python's
+\texttt{type(name,\ bases,\ namespace)} because it is the clearest
+expression of the three-axis model. This is a strength, not a
+limitation: Python's explicit constructor exposes what other languages
+obscure with syntax. Table 2.2 demonstrates that 8 major languages
+(Java, C\#, Rust, TypeScript, Kotlin, Swift, Scala, C++) are isomorphic
+to this model. Theorem 3.50 proves universality.
+
+\textbf{Metaclass complexity.} The \texttt{@global\_pipeline\_config}
+chain (Case Study 7) requires understanding five metaprogramming stages:
+decorator invocation, metaclass \texttt{\_\_prepare\_\_}, descriptor
+\texttt{\_\_set\_name\_\_}, field injection, and type registration. This
+complexity is manageable in OpenHCS because it's encapsulated in a
+single decorator, but unconstrained metaclass composition can lead to
+maintenance challenges.
+
+\textbf{Lean proofs assume well-formedness.} Our Lean 4 verification
+includes \texttt{Registry.wellFormed} and MRO monotonicity as axioms
+rather than derived properties. We prove theorems \emph{given} these
+axioms, but do not prove the axioms themselves from more primitive
+foundations. This is standard practice in mechanized verification (e.g.,
+CompCert assumes well-typed input), but limits the scope of our
+machine-checked guarantees.
+
+\paragraph{8.1.1 Axiom Methodology}\label{axiom-methodology}
+
+\textbf{Theorem 8.1a (Axiom Scope).} The axioms
+\texttt{Registry.wellFormed} and MRO monotonicity are \emph{descriptive}
+of well-formed programs, not \emph{restrictive} of the proof's scope.
+Programs violating these axioms are rejected by the language runtime
+before execution.
+
+\emph{Proof.} We enumerate each axiom and its enforcement:
+
+\small
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep) * \real{0.1522}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep) * \real{0.3913}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep) * \real{0.4565}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Axiom
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+What It Requires
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Language Enforcement
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\texttt{Registry.wellFormed} & No duplicate ABC registrations, no cycles
+& \texttt{ABCMeta.register()} raises on duplicates; Python rejects
+cyclic inheritance \\
+MRO monotonicity & If A \textless: B, A precedes B in MRO & C3
+linearization guarantees this; violation raises \texttt{TypeError} at
+class definition \\
+MRO totality & Every class has a linearizable MRO & C3 fails for
+unlinearizable diamonds; \texttt{TypeError} at class definition \\
+\texttt{isinstance} correctness & \texttt{isinstance(x,\ T)} iff
+\texttt{type(x)} in T's subclass set & Definitional in Python's data
+model \\
+\end{longtable}
+
+A program violating any of these axioms fails at class definition time
+with \texttt{TypeError}. Such a program is not a valid Python
+program---it cannot be executed. Therefore, our theorems apply to
+\emph{all valid programs}. \(\blacksquare\)
+
+\textbf{Corollary 8.1b (Axiom Scope).} A claim that the axioms are too
+strong would require exhibiting: 1. A valid, executable Python program
+where the axioms fail, AND 2. A scenario where this program requires
+typing discipline analysis.
+
+Programs where axioms fail are not valid programs---they crash at
+definition time. The axioms characterize well-formed programs, which is
+the standard scope for type system analysis.
+
+\textbf{Comparison to prior art.} This methodology is standard in
+mechanized verification: - \textbf{CompCert} (verified C compiler):
+Assumes input is well-typed C - \textbf{seL4} (verified microkernel):
+Assumes hardware behaves according to spec - \textbf{CakeML} (verified
+ML compiler): Assumes input parses successfully
+
+We follow the same pattern: assume the input is a valid program
+(accepted by Python's runtime), prove properties of that program.
+Proving that Python's parser and class system are correct is out of
+scope---and unnecessary, as Python's semantics are the \emph{definition}
+of what we're modeling.
+
+\subsection{The Typing Discipline
+Hierarchy}\label{the-typing-discipline-hierarchy}
+
+Theorem 2.10d establishes that duck typing is incoherent. Theorem 2.10g
+establishes that structural typing is eliminable when
+\(B \neq \emptyset\). Together, these results collapse the space of
+valid typing disciplines.
+
+\textbf{The complete hierarchy:}
+
+\small
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{0.2500}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{0.2292}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{0.2708}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{0.2500}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Discipline
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Coherent?
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Eliminable?
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+When Valid
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+Duck typing (\(\{S\}\)) & No (Thm 2.10d) & N/A & Never \\
+Structural (\(\{N, S\}\)) & Yes & Yes, when \(B \neq \emptyset\) (Thm
+2.10g) & Only when \(B = \emptyset\) \\
+Nominal (\(\{N, B, S\}\)) & Yes & No & Always (when
+\(B \neq \emptyset\)) \\
+\end{longtable}
+
+\textbf{Duck typing} is incoherent: no declared interface, no complete
+compatibility predicate, no position on structure-semantics
+relationship. This is never valid.
+
+\textbf{Structural typing (Protocol)} is coherent but eliminable: for
+any system using Protocol at boundaries, there exists an equivalent
+system using nominal typing with explicit adapters (Theorem 2.10g). The
+only ``value'' of Protocol is avoiding the 2-line adapter class.
+Convenience is not a capability.
+
+\textbf{Nominal typing (ABC)} is coherent and non-eliminable: it is the
+only necessary discipline for systems with inheritance.
+
+\textbf{The eliminability argument.} When integrating third-party type
+\(T\) that cannot inherit from your ABC:
+
+\begin{verbatim}
+\# Structural approach (Protocol) {- implicit}
+@runtime\_checkable
+class Configurable(Protocol):
+    def validate(self) {-\textgreater{}} bool: ...
+
+isinstance(their\_obj, Configurable)  \# Hope methods match
+\end{verbatim}
+
+\begin{verbatim}
+\# Nominal approach (Adapter) {- explicit}
+class TheirTypeAdapter(TheirType, ConfigurableABC):
+    pass  \# 2 lines. Now in your hierarchy.
+
+adapted = TheirTypeAdapter(their\_obj)  \# Explicit boundary
+isinstance(adapted, ConfigurableABC)   \# Nominal check
+\end{verbatim}
+
+The adapter approach is strictly more explicit. ``Explicit is better
+than implicit'' (Zen of Python). Protocol's only advantage---avoiding
+the adapter---is a convenience, not a typing capability.
+
+\textbf{Languages without inheritance.} Go's struct types have
+\(B = \emptyset\) by design. Structural typing with declared interfaces
+is the only coherent option. Go does not use duck typing; Go interfaces
+are declared. This is why Go's type system is sound despite lacking
+inheritance.
+
+\textbf{The final collapse.} For languages with inheritance
+(\(B \neq \emptyset\)): - Duck typing: incoherent, never valid -
+Structural typing: coherent but eliminable, valid only as convenience -
+Nominal typing: coherent and necessary
+
+The only \emph{necessary} typing discipline is nominal. Everything else
+is either incoherent (duck typing) or reducible to nominal with trivial
+adapters (structural typing).
+
+\subsection{Future Work}\label{future-work}
+
+\textbf{Gradual nominal/structural typing.} TypeScript supports both
+nominal (via branding) and structural typing in the same program.
+Formalizing the interaction between these disciplines, and proving
+soundness of gradual migration, would enable principled adoption
+strategies.
+
+\textbf{Trait systems.} Rust traits and Scala traits provide multiple
+inheritance of behavior without nominal base classes. Our theorems apply
+to Python's MRO, but trait resolution uses different algorithms.
+Extending our complexity bounds to trait systems would broaden
+applicability.
+
+\textbf{Automated complexity inference.} Given a type system
+specification, can we automatically compute whether error localization
+is O(1) or \(\Omega\)(n)? Such a tool would help language designers
+evaluate typing discipline tradeoffs during language design.
+
+\subsection{Implications for Language
+Design}\label{implications-for-language-design}
+
+Language designers face a fundamental choice: provide nominal typing
+(enabling provenance), structural typing (for \(B = \emptyset\)
+boundaries), or both. Our theorems inform this decision:
+
+\textbf{Provide both mechanisms.} Languages like TypeScript demonstrate
+that nominal and structural typing can coexist. TypeScript's
+``branding'' idiom (using private fields to create nominal distinctions)
+validates our thesis: programmers need nominal identity even in
+structurally-typed languages. Python provides both ABCs (nominal) and
+\texttt{Protocol} (structural). Our theorems clarify the relationship:
+when \(B \neq \emptyset\), nominal typing (ABCs) strictly dominates
+Protocol (Theorem 2.10j). Protocol is dominated---it provides a
+convenience (avoiding adapters) at the cost of four capabilities. This
+is never the correct choice; it is at best a capability sacrifice for
+convenience.
+
+\textbf{MRO-based resolution is near-optimal.} Python's descriptor
+protocol combined with C3 linearization achieves O(1) field resolution
+while preserving provenance. Languages designing new metaobject
+protocols should consider whether they can match this complexity bound.
+
+\textbf{Explicit \texttt{bases} mandates nominal typing.} If a language
+exposes explicit inheritance declarations (\texttt{class\ C(Base)}),
+Theorem 3.4 applies: structural typing becomes insufficient. Language
+designers cannot add inheritance to a structurally-typed language
+without addressing the provenance requirement.
+
+\subsection{Derivable Code Quality
+Metrics}\label{derivable-code-quality-metrics}
+
+The formal model yields four measurable metrics that can be computed
+statically from source code:
+
+\textbf{Metric 1: Duck Typing Density (DTD)}
+
+\begin{verbatim}
+DTD = (hasattr_calls + getattr_calls + try_except_attributeerror) / KLOC
+\end{verbatim}
+
+Measures ad-hoc runtime probing. High DTD where \(B \neq \emptyset\)
+indicates discipline violation. High DTD at \(B = \emptyset\) boundaries
+(JSON, FFI) is expected.
+
+\textbf{Metric 2: Nominal Typing Ratio (NTR)}
+
+\begin{verbatim}
+NTR = (isinstance_calls + type_as_dict_key + abc_registrations) / KLOC
+\end{verbatim}
+
+Measures explicit type contracts. High NTR indicates intentional use of
+inheritance hierarchy.
+
+\textbf{Metric 3: Provenance Capability (PC)} Binary metric: does the
+codebase contain queries of the form ``which type provided this value''?
+Presence of \texttt{(value,\ scope,\ source\_type)} tuples, MRO
+traversal for resolution, or \texttt{type(obj).\_\_mro\_\_} inspection
+indicates PC = 1. If PC = 1, nominal typing is mandatory (Corollary
+6.3).
+
+\textbf{Metric 4: Resolution Determinism (RD)}
+
+\begin{verbatim}
+RD = mro_based_dispatch / (mro_based_dispatch + runtime_probing_dispatch)
+\end{verbatim}
+
+Measures O(1) vs \(\Omega\)(n) error localization. RD = 1 indicates all
+dispatch is MRO-based (nominal). RD = 0 indicates all dispatch is
+runtime probing (duck).
+
+\textbf{Tool implications:} These metrics enable automated linters. A
+linter could flag \texttt{hasattr()} in any code where
+\(B \neq \emptyset\) (DTD violation), suggest \texttt{isinstance()}
+replacements, and verify that provenance-tracking codebases maintain NTR
+above a threshold.
+
+\textbf{Empirical application:} In OpenHCS, DTD dropped from 47 calls in
+the UI layer (before PR \#44) to 0 after migration. NTR increased
+correspondingly. PC = 1 throughout (dual-axis resolver requires
+provenance). RD = 1 (all dispatch is MRO-based).
+
+\subsection{Hybrid Systems and Methodology
+Scope}\label{hybrid-systems-and-methodology-scope}
+
+Our theorems establish necessary conditions for provenance-tracking
+systems. This section clarifies when the methodology applies and when
+shape-based typing is an acceptable concession.
+
+\paragraph{8.6.1 Structural Typing Is Eliminable (Theorem
+2.10g)}\label{structural-typing-is-eliminable-theorem-2.10g}
+
+\textbf{Critical update:} Per Theorem 2.10g, structural typing is
+\emph{eliminable} when \(B \neq \emptyset\). The scenarios below
+describe when Protocol is \emph{convenient}, not when it is
+\emph{necessary}. In all cases, the explicit adapter approach (Section
+8.2) is available and strictly more explicit.
+
+\textbf{Retrofit scenarios.} When integrating independently developed
+components that share no common base classes, you cannot mandate
+inheritance directly. However, you \emph{can} wrap at the boundary:
+\texttt{class\ TheirTypeAdapter(TheirType,\ YourABC):\ pass}. Protocol
+is a convenience that avoids this 2-line adapter. Duck typing is never
+acceptable.
+
+\textbf{Language boundaries.} Calling from Python into C libraries,
+where inheritance relationships are unavailable. The C struct has no
+\texttt{bases} axis. You can still wrap at ingestion: create a Python
+adapter class that inherits from your ABC and delegates to the C struct.
+Protocol avoids this wrapper but does not provide capabilities the
+wrapper lacks.
+
+\textbf{Versioning and compatibility.} When newer code must accept older
+types that predate a base class introduction, you can create versioned
+adapters:
+\texttt{class\ V1ConfigAdapter(V1Config,\ ConfigBaseV2):\ pass}.
+Protocol avoids this but does not provide additional capabilities.
+
+\textbf{Type-level programming without runtime overhead.} TypeScript's
+structural typing enables type checking at compile time without runtime
+cost. For TypeScript code that never uses \texttt{instanceof} or class
+identity (effectively \(B = \emptyset\) at runtime), structural typing
+has no capability gap because there's no \(B\) to lose. However, see
+Section 8.7 for why TypeScript's \emph{class-based} structural typing
+creates tension---once you have \texttt{class\ extends}, you have
+\(B \neq \emptyset\).
+
+\textbf{Summary.} In all scenarios with \(B \neq \emptyset\), the
+adapter approach is available. Protocol's only advantage is avoiding the
+adapter. Avoiding the adapter is a convenience, not a typing capability
+(Corollary 2.10h).
+
+\paragraph{\texorpdfstring{8.6.2 The \(B \neq \emptyset\) vs
+\(B = \emptyset\)
+Criterion}{8.6.2 The B \backslash neq \backslash emptyset vs B = \backslash emptyset Criterion}}\label{the-b-neq-emptyset-vs-b-emptyset-criterion}
+
+The only relevant question is whether inheritance exists:
+
+\textbf{\(B \neq \emptyset\) (inheritance exists):} Nominal typing is
+correct. Adapters handle external types (Theorem 2.10j). Examples: -
+OpenHCS config hierarchy:
+\texttt{class\ PathPlanningConfig(GlobalConfigBase)} - External library
+types: wrap with
+\texttt{class\ TheirTypeAdapter(TheirType,\ YourABC):\ pass}
+
+\textbf{\(B = \emptyset\) (no inheritance):} Structural typing is the
+only option. Examples: - JSON objects from external APIs - Go interfaces
+- C structs via FFI
+
+The ``greenfield vs retrofit'' framing is obsolete (see Remark after
+Theorem 3.62).
+
+\paragraph{8.6.3 System Boundaries}\label{system-boundaries}
+
+Systems have \(B \neq \emptyset\) components (internal hierarchies) and
+\(B = \emptyset\) boundaries (external data):
+
+\begin{verbatim}
+\# B $\\neq$ $\\emptyset$: internal config hierarchy (use nominal)
+class ConfigBase(ABC):
+    @abstractmethod
+    def validate(self) {-\textgreater{}} bool: pass
+
+class PathPlanningConfig(ConfigBase):
+    well\_filter: Optional[str]
+
+\# B = $\\emptyset$: parse external JSON (structural is only option)
+def load\_config\_from\_json(json\_dict: Dict[str, Any]) {-\textgreater{}} ConfigBase:
+    \# JSON has no inheritance—structural validation at boundary
+    if "well\_filter" in json\_dict:
+        return PathPlanningConfig(**json\_dict)  \# Returns nominal type
+    raise ValueError("Invalid config")
+\end{verbatim}
+
+The JSON parsing layer is \(B = \emptyset\) (JSON has no inheritance).
+The return value is \(B \neq \emptyset\) (ConfigBase hierarchy). This is
+correct: structural at data boundaries where \(B = \emptyset\), nominal
+everywhere else.
+
+\paragraph{8.6.4 Scope Summary}\label{scope-summary}
+
+\small
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep) * \real{0.2143}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep) * \real{0.4286}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep) * \real{0.3571}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Context
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Typing Discipline
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Justification
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\(B \neq \emptyset\) (any language with inheritance) & Nominal
+(mandatory) & Theorem 2.18 (strict dominance), Theorem 2.10j (adapters
+dominate Protocol) \\
+\(B = \emptyset\) (Go, JSON, pure structs) & Structural (correct) &
+Theorem 3.1 (namespace-only) \\
+Language boundaries (C/FFI) & Structural (mandatory) & No inheritance
+available (\(B = \emptyset\) at boundary) \\
+\end{longtable}
+
+\textbf{Removed rows:} - ``Retrofit / external types $\\rightarrow$ Structural
+(acceptable)'' --- \textbf{Wrong.} Adapters exist. Theorem 2.10j. -
+``Small scripts / prototypes $\\rightarrow$ Duck (acceptable)'' --- \textbf{Wrong.}
+Duck typing is incoherent (Theorem 2.10d). Incoherent is never
+acceptable.
+
+The methodology claims: \textbf{if \(B \neq \emptyset\), nominal typing
+is correct.} There are no concessions. Protocol is dominated. Duck
+typing is incoherent. The decision is determined by whether the language
+has inheritance, not by project size or convenience.
+
+\subsection{Case Study: TypeScript's Design
+Tension}\label{case-study-typescripts-design-tension}
+
+TypeScript presents a puzzle: it has explicit inheritance
+(\texttt{class\ B\ extends\ A}) but uses structural subtyping. Is this a
+valid design tradeoff, or an architectural tension with measurable
+consequences?
+
+\textbf{Definition 8.3 (Type System Coherence).} A type system is
+\emph{coherent} with respect to a language construct if the type
+system's judgments align with the construct's runtime semantics.
+Formally: if construct \(C\) creates a runtime distinction between
+entities \(A\) and \(B\), a coherent type system also distinguishes
+\(A\) and \(B\).
+
+\textbf{Definition 8.4 (Type System Tension).} A type system exhibits
+\emph{tension} when it is incoherent (per Definition 8.3) AND users
+create workarounds to restore the missing distinctions.
+
+\paragraph{8.7.1 The Tension Analysis}\label{the-tension-analysis}
+
+TypeScript's design exhibits three measurable tensions:
+
+\textbf{Tension 1: Incoherence per Definition 8.3.}
+
+\begin{verbatim}
+class A \{ x: number = 1; \}
+class B \{ x: number = 1; \}
+
+// Runtime: instanceof creates distinction
+const b = new B();
+console.log(b instanceof A);  // false {- different classes}
+
+// Type system: no distinction
+function f(a: A) \{ \}
+f(new B());  // OK {- same structure}
+\end{verbatim}
+
+The \texttt{class} keyword creates a runtime distinction
+(\texttt{instanceof} returns \texttt{false}). The type system does not
+reflect this distinction. Per Definition 8.3, this is incoherence: the
+construct (\texttt{class}) creates a runtime distinction that the type
+system ignores.
+
+\textbf{Tension 2: Workaround existence per Definition 8.4.}
+
+TypeScript programmers use ``branding'' to restore nominal distinctions:
+
+\begin{verbatim}
+// Workaround: add a private field to force nominal distinction
+class StepWellFilterConfig extends WellFilterConfig \{
+    private \_\_brand!: void;  // Forces nominal identity
+\}
+
+// Now TypeScript treats them as distinct (private field differs)
+\end{verbatim}
+
+The existence of this workaround demonstrates Definition 8.4: users
+create patterns to restore distinctions the type system fails to
+provide. TypeScript GitHub issues \#202 (2014) and \#33038 (2019)
+document community requests for native nominal types, confirming the
+workaround is widespread.
+
+\textbf{Tension 3: Measurable consequence.}
+
+The \texttt{extends} keyword is provided but ignored by the type
+checker. This is information-theoretically suboptimal per our framework:
+the programmer declares a distinction (\texttt{extends}), the type
+system discards it, then the programmer re-introduces a synthetic
+distinction (\texttt{\_\_brand}). The same information is encoded twice
+with different mechanisms.
+
+\paragraph{8.7.2 Formal Characterization}\label{formal-characterization}
+
+\textbf{Theorem 8.7 (TypeScript Incoherence).} TypeScript's class-based
+type system is incoherent per Definition 8.3.
+
+\emph{Proof.} 1. TypeScript's \texttt{class\ A} creates a runtime entity
+with nominal identity (JavaScript prototype) 2. \texttt{instanceof\ A}
+checks this nominal identity at runtime 3. TypeScript's type system uses
+structural compatibility for class types 4. Therefore: runtime
+distinguishes \texttt{A} from structurally-identical \texttt{B}; type
+system does not 5. Per Definition 8.3, this is incoherence.
+\(\blacksquare\)
+
+\textbf{Corollary 8.7.1 (Branding Validates Tension).} The prevalence of
+branding patterns in TypeScript codebases empirically validates the
+tension per Definition 8.4.
+
+\emph{Evidence.} TypeScript GitHub issues \#202 (2014, 1,200+ reactions)
+and \#33038 (2019) request native nominal types. The \texttt{@types}
+ecosystem includes branded type utilities (\texttt{ts-brand},
+\texttt{io-ts}). This is not theoretical---it is measured community
+behavior.
+
+\paragraph{8.7.3 Implications for Language
+Design}\label{implications-for-language-design-1}
+
+TypeScript's tension is an intentional design decision for JavaScript
+interoperability. The structural type system allows gradual adoption in
+untyped JavaScript codebases. However, TypeScript has \texttt{class}
+with \texttt{extends}---meaning \(B \neq \emptyset\). Our theorems
+apply: nominal typing strictly dominates (Theorem 3.5).
+
+The tension manifests in practice: programmers use \texttt{class}
+expecting nominal semantics, receive structural semantics, then add
+branding to restore nominal behavior. Our theorems predict this: Theorem
+3.4 states the presence of \texttt{bases} mandates nominal typing;
+TypeScript violates this, causing measurable friction. The branding
+idiom is programmers manually recovering what the language should
+provide.
+
+\textbf{The lesson:} Languages adding \texttt{class} syntax should
+consider whether their type system will be coherent (per Definition 8.3)
+with the runtime semantics of class identity. Structural typing is
+correct for languages without inheritance (Go). For languages with
+inheritance, coherence requires nominal typing or explicit documentation
+of the intentional tension.
+
+\subsection{Mixins with MRO Strictly Dominate Object
+Composition}\label{mixins-with-mro-strictly-dominate-object-composition}
+
+The ``composition over inheritance'' principle from the Gang of Four
+(1994) has become software engineering dogma. We demonstrate this
+principle is incorrect for behavior extension in languages with explicit
+MRO.
+
+\paragraph{8.8.1 Formal Model: Mixin vs
+Composition}\label{formal-model-mixin-vs-composition}
+
+\textbf{Definition 8.1 (Mixin).} A mixin is a class designed to provide
+behavior via inheritance, with no standalone instantiation. Mixins are
+composed via the bases axis, resolved deterministically via MRO.
+
+\begin{verbatim}
+\# Mixin: behavior provider via inheritance
+class LoggingMixin:
+    def process(self):
+        print(f"Logging: \{self\}")
+        super().process()
+
+class CachingMixin:
+    def process(self):
+        if cached := self.\_check\_cache():
+            return cached
+        result = super().process()
+        self.\_cache(result)
+        return result
+
+\# Composition via bases (single decision point)
+class Handler(LoggingMixin, CachingMixin, BaseHandler):
+    pass  \# MRO: Handler $\backslash{rightarrow$ Logging $\backslash{}rightarrow$ Caching $\backslash{}rightarrow$ Base}
+\end{verbatim}
+
+\textbf{Definition 8.2 (Object Composition).} Object composition
+delegates to contained objects, with manual call-site dispatch for each
+behavior.
+
+\begin{verbatim}
+\# Composition: behavior provider via delegation
+class Handler:
+    def \_\_init\_\_(self):
+        self.logger = Logger()
+        self.cache = Cache()
+
+    def process(self):
+        self.logger.log(self)  \# Manual dispatch point 1
+        if cached := self.cache.check():  \# Manual dispatch point 2
+            return cached
+        result = self.\_do\_process()
+        self.cache.store(key, result)  \# Manual dispatch point 3
+        return result
+\end{verbatim}
+
+\paragraph{8.8.2 Capability Analysis}\label{capability-analysis}
+
+\textbf{What composition provides:} 1. {[}PASS{]} Behavior extension
+(via delegation) 2. {[}PASS{]} Multiple behaviors combined
+
+\textbf{What mixins provide:} 1. {[}PASS{]} Behavior extension (via
+super() linearization) 2. {[}PASS{]} Multiple behaviors combined 3.
+{[}PASS{]} \textbf{Deterministic conflict resolution} (C3 MRO) ---
+\textbf{composition cannot provide} 4. {[}PASS{]} \textbf{Single
+decision point} (class definition) --- \textbf{composition has n call
+sites} 5. {[}PASS{]} \textbf{Provenance via MRO} (which mixin provided
+this behavior?) --- \textbf{composition cannot provide} 6. {[}PASS{]}
+\textbf{Exhaustive enumeration} (list all mixed-in behaviors via
+\texttt{\_\_mro\_\_}) --- \textbf{composition cannot provide}
+
+\textbf{Addressing runtime swapping:} A common objection is that
+composition allows ``swapping implementations at runtime''
+(\texttt{handler.cache\ =\ NewCache()}). This is orthogonal to the
+dominance claim for two reasons:
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\item
+  \textbf{Mixins can also swap at runtime} via class mutation:
+  \texttt{Handler.\_\_bases\_\_\ =\ (NewLoggingMixin,\ CachingMixin,\ BaseHandler)}
+  or via \texttt{type()} to create a new class dynamically. Python's
+  class system is mutable.
+\item
+  \textbf{Runtime swapping is a separate axis.} The dominance claim
+  concerns \emph{static behavior extension}---adding logging, caching,
+  validation to a class. Whether to also support runtime reconfiguration
+  is an orthogonal requirement. Systems requiring runtime swapping can
+  use mixins for static extension AND composition for swappable
+  components. The two patterns are not mutually exclusive.
+\end{enumerate}
+
+Therefore: \textbf{Mixin capabilities \(\supset\) Composition
+capabilities} (strict superset) for static behavior extension.
+
+\textbf{Theorem 8.1 (Mixin Dominance).} For static behavior extension in
+languages with deterministic MRO, mixin composition strictly dominates
+object composition.
+
+\emph{Proof.} Let \(\mathcal{M}\) = capabilities of mixin composition
+(inheritance + MRO). Let \(\mathcal{C}\) = capabilities of object
+composition (delegation).
+
+Mixins provide: 1. Behavior extension (same as composition) 2.
+Deterministic conflict resolution via MRO (composition cannot provide)
+3. Provenance via MRO position (composition cannot provide) 4. Single
+decision point for ordering (composition has \(n\) decision points) 5.
+Exhaustive enumeration via \texttt{\_\_mro\_\_} (composition cannot
+provide)
+
+Therefore \(\mathcal{C} \subset \mathcal{M}\) (strict subset). By the
+same argument as Theorem 3.5 (Strict Dominance), choosing composition
+forecloses capabilities for zero benefit. \(\blacksquare\)
+
+\textbf{Corollary 8.1.1 (Runtime Swapping Is Orthogonal).} Runtime
+implementation swapping is achievable under both patterns: via object
+attribute assignment (composition) or via class mutation/dynamic type
+creation (mixins). Neither pattern forecloses this capability.
+
+\paragraph{8.8.3 Connection to Typing
+Discipline}\label{connection-to-typing-discipline}
+
+\textbf{The parallel to Theorem 3.5 is exact:}
+
+\small
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\linewidth - 2\tabcolsep) * \real{0.4634}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 2\tabcolsep) * \real{0.5366}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Typing Disciplines
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Architectural Patterns
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+Structural typing checks only namespace (shape) & Composition checks
+only namespace (contained objects) \\
+Nominal typing checks namespace + bases (MRO) & Mixins check namespace +
+bases (MRO) \\
+Structural cannot provide provenance & Composition cannot provide
+provenance \\
+Nominal strictly dominates & Mixins strictly dominate \\
+\end{longtable}
+
+\textbf{Theorem 8.2 (Unified Dominance Principle).} In class systems
+with explicit inheritance (bases axis), mechanisms using bases strictly
+dominate mechanisms using only namespace.
+
+\emph{Proof.} Let \(B\) = bases axis, \(S\) = namespace axis. Let
+\(D_S\) = discipline using only \(S\) (structural typing or
+composition). Let \(D_B\) = discipline using \(B + S\) (nominal typing
+or mixins).
+
+\(D_S\) can only distinguish types/behaviors by namespace content.
+\(D_B\) can distinguish by namespace content AND position in inheritance
+hierarchy.
+
+Therefore \(\text{capabilities}(D_S) \subset \text{capabilities}(D_B)\)
+(strict subset). \(\blacksquare\)
+
+\subsection{Validation: Alignment with Python's Design
+Philosophy}\label{validation-alignment-with-pythons-design-philosophy}
+
+Our formal results align with Python's informal design philosophy,
+codified in PEP 20 (``The Zen of Python''). This alignment validates
+that the abstract model captures real constraints.
+
+\textbf{``Explicit is better than implicit''} (Zen line 2). ABCs require
+explicit inheritance declarations (\texttt{class\ Config(ConfigBase)}),
+making type relationships visible in code. Duck typing relies on
+implicit runtime checks
+(\texttt{hasattr(obj,\ \textquotesingle{}validate\textquotesingle{})}),
+hiding conformance assumptions. Our Theorem 3.5 formalizes this:
+explicit nominal typing provides capabilities that implicit shape-based
+typing cannot.
+
+\textbf{``In the face of ambiguity, refuse the temptation to guess''}
+(Zen line 12). Duck typing \emph{guesses} interface conformance via
+runtime attribute probing. Nominal typing refuses to guess, requiring
+declared conformance. Our provenance impossibility result (Corollary
+6.3) proves that guessing cannot distinguish structurally identical
+types with different inheritance.
+
+\textbf{``Errors should never pass silently''} (Zen line 10). ABCs
+fail-loud at instantiation
+(\texttt{TypeError:\ Can\textquotesingle{}t\ instantiate\ abstract\ class\ with\ abstract\ method\ validate}).
+Duck typing fails-late at attribute access, possibly deep in the call
+stack. Our complexity theorems (Section 4) formalize this: nominal
+typing has O(1) error localization, while duck typing has \(\Omega\)(n)
+error sites.
+
+\textbf{``There should be one-- and preferably only one --obvious way to
+do it''} (Zen line 13). Our decision procedure (Section 2.5.1) provides
+exactly one obvious way: when \(B \neq \emptyset\), use nominal typing.
+
+\textbf{Historical validation:} Python's evolution confirms our
+theorems. Python 1.0 (1991) had only duck typing---an incoherent
+non-discipline (Theorem 2.10d). Python 2.6 (2007) added ABCs because
+duck typing was insufficient for large codebases. Python 3.8 (2019)
+added Protocols for retrofit scenarios---coherent structural typing to
+replace incoherent duck typing. This evolution from incoherent
+\(\rightarrow\) nominal \(\rightarrow\) nominal+structural exactly
+matches our formal predictions.
+
+\subsection{Connection to Gradual
+Typing}\label{connection-to-gradual-typing}
+
+Our results connect to the gradual typing literature (Siek \& Taha 2006,
+Wadler \& Findler 2009). Gradual typing addresses adding types to
+existing untyped code. Our theorems address which discipline to use when
+\(B \neq \emptyset\).
+
+\textbf{The complementary relationship:}
+
+\small
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep) * \real{0.2564}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep) * \real{0.3846}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep) * \real{0.3590}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Scenario
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Gradual Typing
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Our Theorems
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+Untyped code (\(B = \emptyset\)) & {[}PASS{]} Applicable & {[}N/A{]} No
+inheritance \\
+Typed code (\(B \neq \emptyset\)) & {[}N/A{]} Already typed & {[}PASS{]}
+Nominal dominates \\
+\end{longtable}
+
+\textbf{Gradual typing's insight:} When adding types to untyped code,
+the dynamic type \texttt{?} allows gradual migration. This applies when
+\(B = \emptyset\) (no inheritance structure exists yet).
+
+\textbf{Our insight:} When \(B \neq \emptyset\), nominal typing strictly
+dominates. This includes ``retrofit'' scenarios with external
+types---adapters make nominal typing available (Theorem 2.10j).
+
+\textbf{The unified view:} Gradual typing and nominal typing address
+orthogonal concerns: - Gradual typing: Typed vs untyped
+(\(B = \emptyset\) $\\rightarrow$ \(B \neq \emptyset\) migration) - Our theorems:
+Which discipline when \(B \neq \emptyset\) (answer: nominal)
+
+\textbf{Theorem 8.3 (Gradual-Nominal Complementarity).} Gradual typing
+and nominal typing are complementary, not competing. Gradual typing
+addresses the presence of types; our theorems address which types to
+use.
+
+\emph{Proof.} Gradual typing's dynamic type \texttt{?} allows structural
+compatibility with untyped code where \(B = \emptyset\). Once
+\(B \neq \emptyset\) (inheritance exists), our theorems apply: nominal
+typing strictly dominates (Theorem 3.5), and adapters eliminate the
+retrofit exception (Theorem 2.10j). The two address different questions.
+\(\blacksquare\)
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+

@@ -1,0 +1,5 @@
+# Lake build artifacts
+.lake/
+lake-packages/
+build/
+

@@ -1,0 +1,120 @@
+\section{Conclusion}\label{conclusion}
+
+We have presented a methodology for typing discipline selection in
+object-oriented systems:
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\item
+  \textbf{The \(B = \emptyset\) criterion}: If a language has
+  inheritance (\(B \neq \emptyset\)), nominal typing is mandatory
+  (Theorem 2.18). If a language lacks inheritance (\(B = \emptyset\)),
+  structural typing is correct. Duck typing is incoherent in both cases
+  (Theorem 2.10d). For retrofit scenarios with external types, use
+  explicit adapters (Theorem 2.10j).
+\item
+  \textbf{Measurable code quality metrics}: Four metrics derived from
+  the formal model (duck typing density, nominal typing ratio,
+  provenance capability, resolution determinism) enable automated
+  detection of typing discipline violations in codebases.
+\item
+  \textbf{Formal foundation}: Nominal typing achieves O(1) error
+  localization versus duck typing's \(\Omega\)(n) (Theorem 4.3). Duck
+  typing cannot provide provenance because structurally equivalent
+  objects are indistinguishable by definition (Corollary 6.3,
+  machine-checked in Lean 4).
+\item
+  \textbf{13 case studies demonstrating methodology application}: Each
+  case study identifies the indicators (provenance requirement,
+  MRO-based resolution, type identity as key) that determine which
+  typing discipline is correct. Measured outcomes include elimination of
+  scattered \texttt{hasattr()} checks when migrating from duck typing to
+  nominal contracts.
+\item
+  \textbf{Recurring architectural patterns}: Six patterns require
+  nominal typing: metaclass auto-registration, bidirectional type
+  registries, MRO-based priority resolution, runtime class generation
+  with lineage tracking, descriptor protocol integration, and
+  discriminated unions via \texttt{\_\_subclasses\_\_()}.
+\end{enumerate}
+
+\textbf{The methodology in one sentence:} If \(B \neq \emptyset\), nominal typing
+is the capability-maximizing choice, with explicit adapters for external types.
+
+\subsubsection{Summary of Results}\label{summary-of-results}
+
+For decades, typing discipline has been treated as style. ``Pythonic''
+duck typing versus ``Java-style'' nominal typing, with structural typing
+positioned as the modern middle ground. This paper provides the first
+formal capability comparison.
+
+The decision procedure (Theorem 3.62) outputs ``nominal typing'' when
+\(B \neq \emptyset\) and ``structural typing'' when \(B = \emptyset\).
+This is not a preference recommendation---it is a capability comparison.
+
+Two architects examining identical requirements will derive identical
+discipline choices. Disagreement indicates incomplete requirements or
+different analysis---the formal framework provides a basis for resolution.
+
+\textbf{On capability vs. aesthetics.} We do not claim nominal typing is
+aesthetically superior, more elegant, or more readable. We prove---with
+machine-checked formalization---that it provides strictly more
+capabilities. Choosing fewer capabilities is a valid engineering decision
+when justified by other constraints (e.g., interoperability with systems
+that lack type metadata). Appendix~\ref{appendix:historical} discusses
+the historical context of typing discipline selection.
+
+\textbf{On PEP 20 (The Zen of Python).} PEP 20 is sometimes cited to
+justify duck typing. However, several Zen principles align with nominal
+typing: ``Explicit is better than implicit'' (ABCs are explicit; hasattr
+is implicit), and ``In the face of ambiguity, refuse the temptation to
+guess'' (duck typing infers interface conformance; nominal typing verifies
+it). We discuss this alignment in Section 8.9.
+
+\subsection{Application: LLM Code
+Generation}\label{application-llm-code-generation}
+
+The decision procedure (Theorem 3.62) has a clean application domain:
+evaluating LLM-generated code.
+
+\textbf{Why LLM generation is a clean test.} When a human prompts an LLM
+to generate code, the \(B \neq \emptyset\) vs \(B = \emptyset\)
+distinction is explicit in the prompt. ``Implement a class hierarchy for
+X'' has \(B \neq \emptyset\). ``Parse this JSON schema'' has
+\(B = \emptyset\). Unlike historical codebases---which contain legacy
+patterns, metaprogramming artifacts, and accumulated technical
+debt---LLM-generated code represents a fresh choice about typing
+discipline.
+
+\textbf{Corollary 9.1 (LLM Discipline Evaluation).} Given an LLM prompt
+with explicit context: 1. If the prompt involves inheritance
+(\(B \neq \emptyset\)) $\\rightarrow$ isinstance/ABC patterns are correct; hasattr
+patterns are violations (by Theorem 3.5) 2. If the prompt involves pure
+data without inheritance (\(B = \emptyset\), e.g., JSON) $\\rightarrow$ structural
+patterns are the only option 3. External types requiring integration $\\rightarrow$
+use adapters to achieve nominal (Theorem 2.10j) 4. Deviation from these
+patterns is a typing discipline error detectable by the decision
+procedure
+
+\emph{Proof.} Direct application of Theorem 3.62. The generated code's
+patterns map to discipline choice. The decision procedure evaluates
+correctness based on whether \(B \neq \emptyset\). \(\blacksquare\)
+
+\textbf{Implications.} An automated linter applying our decision
+procedure could: - Flag \texttt{hasattr()} in any code with inheritance
+as a discipline violation - Suggest \texttt{isinstance()}/ABC
+replacements - Validate that provenance-requiring prompts produce
+nominal patterns - Flag Protocol usage as a capability sacrifice
+(Theorem 2.10j)
+
+This application is clean because the context is unambiguous: the prompt
+explicitly states whether the developer controls the type hierarchy. The
+metrics defined in Section 8.5 (DTD, NTR) can be computed on generated
+code to evaluate discipline adherence.
+
+\textbf{Falsifiability.} If code with \(B \neq \emptyset\) consistently
+performs better with structural patterns than nominal patterns, our
+Theorem 3.5 is falsified. We predict it will not.
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
