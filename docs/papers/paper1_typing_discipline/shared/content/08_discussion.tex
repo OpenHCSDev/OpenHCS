@@ -50,12 +50,7 @@ foundations. This is standard practice in mechanized verification (e.g.,
 CompCert assumes well-typed input), but limits the scope of our
 machine-checked guarantees.
 
-\paragraph{8.1.1 Axiom Methodology (Preemptive
-Defense)}\label{axiom-methodology-preemptive-defense}
-
-\textbf{Potential objection:} ``Your Lean proofs assume well-formedness
-axioms. These could be too strong, limiting the theorems'
-applicability.''
+\paragraph{8.1.1 Axiom Methodology}\label{axiom-methodology}
 
 \textbf{Theorem 8.1a (Axiom Scope).} The axioms
 \texttt{Registry.wellFormed} and MRO monotonicity are \emph{descriptive}
@@ -100,15 +95,14 @@ with \texttt{TypeError}. Such a program is not a valid Python
 program---it cannot be executed. Therefore, our theorems apply to
 \emph{all valid programs}. \(\blacksquare\)
 
-\textbf{Corollary 8.1b (Axiom Challenge Refutation).} A reviewer
-claiming ``your axioms are too strong'' must exhibit: 1. A valid,
-executable Python program where the axioms fail, AND 2. A scenario where
-this program requires typing discipline analysis
+\textbf{Corollary 8.1b (Axiom Scope).} A claim that the axioms are too
+strong would require exhibiting: 1. A valid, executable Python program
+where the axioms fail, AND 2. A scenario where this program requires
+typing discipline analysis.
 
-No such program exists. Programs where axioms fail are not valid
-programs---they crash at definition time. The axiom challenge reduces
-to: ``Your theorems don't apply to programs that don't compile.'' This
-is not a limitation; it is the definition of well-formedness.
+Programs where axioms fail are not valid programs---they crash at
+definition time. The axioms characterize well-formed programs, which is
+the standard scope for type system analysis.
 
 \textbf{Comparison to prior art.} This methodology is standard in
 mechanized verification: - \textbf{CompCert} (verified C compiler):

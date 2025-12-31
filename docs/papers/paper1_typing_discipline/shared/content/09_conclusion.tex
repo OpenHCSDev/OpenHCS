@@ -38,53 +38,38 @@ object-oriented systems:
   discriminated unions via \texttt{\_\_subclasses\_\_()}.
 \end{enumerate}
 
-\textbf{The methodology in one sentence:} If \(B \neq \emptyset\), use
-nominal typing with explicit adapters for external types. Duck typing is
-incoherent. Protocol is dominated. There are no concessions.
+\textbf{The methodology in one sentence:} If \(B \neq \emptyset\), nominal typing
+is the capability-maximizing choice, with explicit adapters for external types.
 
-\subsubsection{The Debate Is Over}\label{the-debate-is-over}
+\subsubsection{Summary of Results}\label{summary-of-results}
 
 For decades, typing discipline has been treated as style. ``Pythonic''
 duck typing versus ``Java-style'' nominal typing, with structural typing
-positioned as the modern middle ground. This framing is wrong.
+positioned as the modern middle ground. This paper provides the first
+formal capability comparison.
 
-The decision procedure does not output ``nominal is preferred.'' It
-outputs ``nominal is required'' (when \(B \neq \emptyset\)) or
-``structural is required'' (when \(B = \emptyset\)). Duck typing is
-never output. Protocol is never output when adapters are available.
+The decision procedure (Theorem 3.62) outputs ``nominal typing'' when
+\(B \neq \emptyset\) and ``structural typing'' when \(B = \emptyset\).
+This is not a preference recommendation---it is a capability comparison.
 
 Two architects examining identical requirements will derive identical
 discipline choices. Disagreement indicates incomplete requirements or
-incorrect procedure application---not legitimate difference of opinion.
-The question of typing discipline is settled by derivation, not
-preference.
+different analysis---the formal framework provides a basis for resolution.
 
-\textbf{On ``preference'' and ``style.''} Some will object that this
-paper is too prescriptive, that typing discipline should be a matter of
-team preference or language culture. This objection misunderstands the
-nature of mathematical proof. We do not claim nominal typing is
+\textbf{On capability vs. aesthetics.} We do not claim nominal typing is
 aesthetically superior, more elegant, or more readable. We prove---with
 machine-checked formalization---that it provides strictly more
-capabilities. Preferring fewer capabilities is not a valid engineering
-position; it is a capability sacrifice that requires justification. The
-burden of proof is on those who would discard capabilities to explain
-what they gain in return. We prove they gain nothing.
+capabilities. Choosing fewer capabilities is a valid engineering decision
+when justified by other constraints (e.g., interoperability with systems
+that lack type metadata). Appendix~\ref{appendix:historical} discusses
+the historical context of typing discipline selection.
 
-\textbf{On the ``Pythonic'' defense.} PEP 20 (``The Zen of Python'') is
-frequently cited to justify duck typing. We address this in Section 8.9
-and show that the Zen actually supports nominal typing: ``Explicit is
-better than implicit'' (ABCs are explicit; hasattr is implicit), ``In
-the face of ambiguity, refuse the temptation to guess'' (duck typing
-guesses interface conformance; nominal typing refuses to guess). The
-Pythonic defense is a misreading of the Zen.
-
-\textbf{On future objections.} If a reader believes they have found a
-counterexample---a capability that duck typing provides and nominal
-typing lacks---we invite them to formalize it as a query
-\(q : \text{Type} \to \alpha\) and prove it is not computable from
-\((N, B, S)\). We predict they cannot, because Theorem 3.32 proves
-\((N, B, S)\) is the complete runtime information available to any class
-system. There is no hidden fourth axis. There is no escape hatch.
+\textbf{On PEP 20 (The Zen of Python).} PEP 20 is sometimes cited to
+justify duck typing. However, several Zen principles align with nominal
+typing: ``Explicit is better than implicit'' (ABCs are explicit; hasattr
+is implicit), and ``In the face of ambiguity, refuse the temptation to
+guess'' (duck typing infers interface conformance; nominal typing verifies
+it). We discuss this alignment in Section 8.9.
 
 \subsection{Application: LLM Code
 Generation}\label{application-llm-code-generation}

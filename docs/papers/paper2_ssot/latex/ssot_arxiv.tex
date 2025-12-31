@@ -98,7 +98,7 @@ Additional contributions:
 \item \textbf{Theorem 4.3 (Three-Language Theorem):} Exactly three languages satisfy SSOT requirements: Python, Common Lisp (CLOS), and Smalltalk
 \end{itemize}
 
-All theorems machine-checked in Lean 4 (1,753 lines across 13 files, 0 \texttt{sorry} placeholders). Empirical validation: 13 case studies from production bioimage analysis platform (OpenHCS, 45K LoC), mean DOF reduction 14.2x.
+All theorems machine-checked in Lean 4 (1,811 lines across 13 files, 0 \texttt{sorry} placeholders). Empirical validation: 13 case studies from production bioimage analysis platform (OpenHCS, 45K LoC), mean DOF reduction 14.2x.
 
 \textbf{Keywords:} DRY principle, Single Source of Truth, language design, metaprogramming, formal methods, modification complexity
 \end{abstract}
@@ -106,7 +106,7 @@ All theorems machine-checked in Lean 4 (1,753 lines across 13 files, 0 \texttt{s
 
 \section{Introduction}\label{introduction}
 
-This paper proves that certain programming languages are \emph{incapable} of achieving the Single Source of Truth (SSOT) principle for structural facts. All results are machine-checked in Lean 4 (1,753 lines across 13 files, 0 \texttt{sorry} placeholders).
+This paper proves that certain programming languages are \emph{incapable} of achieving the Single Source of Truth (SSOT) principle for structural facts. All results are machine-checked in Lean 4 (1,811 lines across 13 files, 0 \texttt{sorry} placeholders).
 
 The ``Don't Repeat Yourself'' (DRY) principle has been industry guidance for 25 years:
 
@@ -931,6 +931,17 @@ Without verifiable SSOT, the programmer cannot confirm SSOT holds. They must tru
 \item \textbf{Go}: No type registry. Cannot enumerate types implementing an interface.
 \end{itemize}
 
+\begin{remark}[Achievable vs. Verifiable SSOT]\label{rem:achievable-vs-verifiable}
+This paper concerns \emph{verifiable} SSOT: the property that a program can confirm its own DOF = 1 at runtime. A language may \emph{achieve} SSOT (through compile-time mechanisms) without being able to \emph{verify} it. Unverifiable SSOT is weaker because:
+\begin{enumerate}
+\tightlist
+\item Bugs in derivation logic are undetectable at runtime
+\item The programmer must trust rather than confirm
+\item Refactoring can break SSOT silently
+\end{enumerate}
+All impossibility theorems in this paper concern verifiable SSOT.
+\end{remark}
+
 \subsection{Independence of Requirements}\label{sec:independence}
 
 The two requirements---definition-time hooks and introspection---are independent. Neither implies the other.
@@ -954,26 +965,29 @@ Therefore, the requirements are independent. \qed
 \subsection{The Completeness Theorem}\label{sec:completeness}
 
 \begin{theorem}[Necessary and Sufficient Conditions for SSOT]\label{thm:ssot-iff}
-A language $L$ enables complete SSOT for structural facts if and only if:
+A language $L$ enables SSOT for structural facts if and only if:
 \begin{enumerate}
 \tightlist
 \item $L$ provides definition-time hooks, AND
-\item $L$ provides introspectable derivation results
+\item $L$ provides introspectable derivation results, AND
+\item $L$ provides structural modification capability (can add/modify class attributes at definition time)
 \end{enumerate}
 \end{theorem}
 
 \begin{proof}
-$(\Rightarrow)$ \textbf{Necessity:} Suppose $L$ enables complete SSOT for structural facts.
+$(\Rightarrow)$ \textbf{Necessity:} Suppose $L$ enables SSOT for structural facts.
 \begin{itemize}
 \tightlist
 \item By Theorem~\ref{thm:hooks-necessary}, $L$ must provide definition-time hooks
 \item By Theorem~\ref{thm:introspection-necessary}, $L$ must provide introspection
+\item For structural facts that require derived attributes (e.g., registry entries, computed methods), $L$ must be able to add structure at definition time
 \end{itemize}
 
-$(\Leftarrow)$ \textbf{Sufficiency:} Suppose $L$ provides both definition-time hooks and introspection.
+$(\Leftarrow)$ \textbf{Sufficiency:} Suppose $L$ provides all three capabilities.
 \begin{itemize}
 \tightlist
 \item Definition-time hooks enable derivation at the right moment (when structure is fixed)
+\item Structural modification enables adding derived attributes to classes
 \item Introspection enables verification that all secondary encodings are derived
 \item Therefore, SSOT is achievable: create one source, derive all others, verify completeness
 \end{itemize}
@@ -982,8 +996,12 @@ The if-and-only-if follows. \qed
 \end{proof}
 
 \begin{corollary}[SSOT-Complete Languages]\label{cor:ssot-complete}
-A language is \emph{SSOT-complete} iff it satisfies both requirements. A language is \emph{SSOT-incomplete} otherwise.
+A language is \emph{SSOT-complete} iff it satisfies all three requirements. A language is \emph{SSOT-incomplete} otherwise.
 \end{corollary}
+
+\begin{remark}[Partial SSOT]\label{rem:partial-ssot}
+A language with DEF + INTRO but limited STRUCT (e.g., Ruby) can achieve SSOT for \emph{read-only} structural facts (querying inheritance, enumerating methods) but not for facts requiring structural modification (adding computed attributes, auto-registering handlers). We call this \emph{read-only SSOT}.
+\end{remark}
 
 \subsection{The Logical Chain (Summary)}\label{sec:chain}
 
@@ -1092,6 +1110,19 @@ The fact that $E_2$ was \emph{generated from} $E_1$ does not make it a derivatio
 \item $E_2$ must be separately compiled
 \item The generation process is external to the language and can be bypassed
 \end{enumerate}
+
+\textbf{Counterargument:} ``If generation is mandatory and deterministic, functional equivalence to derivation holds.''
+
+\textbf{Response:} The file system introduces failure modes \emph{not present in in-memory derivation}:
+\begin{itemize}
+\tightlist
+\item \textbf{Staleness:} Source changed but generation not re-run. The file system can be in a state where $E_1$ and $E_2$ encode different values.
+\item \textbf{Independent modification:} $E_2$ can be hand-edited, bypassing the source. The language cannot prevent this.
+\item \textbf{Build system failure:} Generation step fails silently, stale $E_2$ is compiled. Tests may pass with old behavior.
+\item \textbf{Cache invalidation:} Build system incorrectly caches $E_2$, skipping regeneration.
+\end{itemize}
+
+In-memory derivation has none of these failure modes: the derived value exists \emph{only} as a consequence of the source definition, with no intermediate checkpoint that could diverge. The language runtime guarantees the relationship.
 
 Contrast with Python, where the registry entry exists only in memory, created by the class statement itself. There is no second file. DOF $= 1$. \qed
 \end{proof}
@@ -1279,17 +1310,19 @@ Go's design philosophy explicitly rejects metaprogramming:
 
 \textbf{HIER:} $\times$. Interfaces are implicit (structural typing). Cannot enumerate implementers.
 
-\subsubsection{Rust: No SSOT Support}
+\subsubsection{Rust: Unverifiable SSOT}
 
 Rust's procedural macros are compile-time and opaque:
 
-\textbf{DEF:} $\times$. Procedural macros execute at compile time, not definition time. The generated code is not introspectable at runtime.
+\textbf{DEF:} Partial. Procedural macros execute at compile time. This \emph{is} a form of definition-time hook---code runs when the struct/impl is compiled.
 
-\textbf{INTRO:} $\times$. No runtime type introspection. \texttt{std::any::TypeId} provides minimal information.
+\textbf{INTRO:} $\times$. No runtime type introspection. \texttt{std::any::TypeId} provides minimal information. The program cannot query what the macro generated.
 
 \textbf{STRUCT:} $\times$. Cannot modify type structure at runtime.
 
 \textbf{HIER:} $\times$. Cannot enumerate trait implementers.
+
+\textbf{Critical distinction:} Rust's macros may \emph{achieve} SSOT (the derivation happens at compile time), but cannot \emph{verify} it (the program cannot confirm the derivation occurred). Our theorems concern \emph{verifiable} SSOT. Unverifiable SSOT is weaker: it might work, but bugs in derivation logic are undetectable at runtime.
 
 \begin{theorem}[Python Uniqueness in Mainstream]\label{thm:python-unique}
 Among mainstream languages, Python is the only language satisfying all SSOT requirements.
@@ -1353,14 +1386,14 @@ Ruby provides hooks but with limitations:
 
 \textbf{HIER:} \checkmark. \texttt{subclasses} enumerates subclasses.
 
-Ruby is close to full SSOT support but the structural modification limitations prevent complete SSOT for some use cases.
+Ruby achieves \emph{read-only SSOT} (Remark~\ref{rem:partial-ssot}): it can derive facts from structural queries but cannot add computed attributes during definition. This is sufficient for some SSOT use cases but not all.
 
 \begin{theorem}[Three-Language Theorem]\label{thm:three-lang}
-Exactly three languages in common use satisfy complete SSOT requirements: Python, Common Lisp (CLOS), and Smalltalk.
+Exactly three languages in common use satisfy complete SSOT requirements (DEF $\land$ INTRO $\land$ STRUCT): Python, Common Lisp (CLOS), and Smalltalk.
 \end{theorem}
 
 \begin{proof}
-By exhaustive evaluation of mainstream and notable non-mainstream languages. Python, CLOS, and Smalltalk satisfy all four criteria. Ruby satisfies three of four (partial STRUCT). All other evaluated languages fail at least two criteria. \qed
+By exhaustive evaluation of mainstream and notable non-mainstream languages against the three requirements of Theorem~\ref{thm:ssot-iff}. Python, CLOS, and Smalltalk satisfy all three. Ruby satisfies DEF and INTRO but only partially STRUCT, achieving read-only SSOT. All other evaluated languages fail at least two requirements. \qed
 \end{proof}
 
 \subsection{Implications for Language Selection}\label{sec:implications}
@@ -2079,7 +2112,7 @@ Many ``obvious'' software engineering principles have never been formalized. The
 \section{Lean 4 Proof Listings}\label{sec:lean}
 %==============================================================================
 
-All theorems are machine-checked in Lean 4 (1,753 lines across 13 files, 0 \texttt{sorry} placeholders). Complete source available at: \texttt{proofs/ssot/}.
+All theorems are machine-checked in Lean 4 (1,811 lines across 13 files, 0 \texttt{sorry} placeholders). Complete source available at: \texttt{proofs/ssot/}.
 
 This appendix presents the actual Lean 4 source code from the repository. Every theorem compiles without \texttt{sorry}. The proofs can be verified by running \texttt{lake build} in the \texttt{proofs/ssot/} directory.
 
@@ -2436,27 +2469,27 @@ theorem rust_impossibility (L : LanguageFeatures)
 \begin{center}
 \begin{tabular}{lcc}
 \toprule
-\textbf{File} & \textbf{Lines} & \textbf{Theorems} \\
+\textbf{File} & \textbf{Lines} & \textbf{Defs/Thms} \\
 \midrule
 Basic.lean & 47 & 3 \\
-SSOT.lean & 37 & 3 \\
-Derivation.lean & 41 & 2 \\
-Requirements.lean & 112 & 5 \\
-Completeness.lean & 130 & 11 \\
-Bounds.lean & 55 & 5 \\
-Languages.lean & 108 & 6 \\
-CaseStudies.lean & 148 & 4 \\
-Foundations.lean & 364 & 15 \\
-LangPython.lean & 209 & 8 \\
-LangRust.lean & 184 & 6 \\
-LangStatic.lean & 163 & 5 \\
-LangEvaluation.lean & 155 & 10 \\
+SSOT.lean & 37 & 4 \\
+Derivation.lean & 41 & 3 \\
+Requirements.lean & 112 & 12 \\
+Completeness.lean & 167 & 17 \\
+Bounds.lean & 76 & 10 \\
+Languages.lean & 108 & 16 \\
+CaseStudies.lean & 148 & 22 \\
+Foundations.lean & 364 & 37 \\
+LangPython.lean & 209 & 21 \\
+LangRust.lean & 184 & 15 \\
+LangStatic.lean & 163 & 11 \\
+LangEvaluation.lean & 155 & 8 \\
 \midrule
-\textbf{Total} & \textbf{1,753} & \textbf{83} \\
+\textbf{Total} & \textbf{1,811} & \textbf{179} \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-\textbf{All 83 theorems compile without \texttt{sorry} placeholders.} The proofs can be verified by running \texttt{lake build} in the \texttt{proofs/ssot/} directory. Every theorem in the paper corresponds to a machine-checked proof.
+\textbf{All 179 definitions/theorems compile without \texttt{sorry} placeholders.} The proofs can be verified by running \texttt{lake build} in the \texttt{proofs/ssot/} directory. Every theorem in the paper corresponds to a machine-checked proof.
 
 \end{document}

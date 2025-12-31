@@ -87,11 +87,11 @@ $\\Omega$(n) inspections---proved by adversary argument. - These theorems
 make claims about the universe of possible systems through
 information-theoretic analysis, mathematical partition, and adversary arguments.
 
-\textbf{2. Bulletproof Theorems (Section 3.11):} - \textbf{Theorem 3.32
-(Model Completeness):} \((N, B, S)\) captures ALL runtime-available type
-information. - \textbf{Theorem 3.34-3.35 (No Tradeoff):}
+\textbf{2. Completeness and Robustness Theorems (Section 3.11):} - \textbf{Theorem 3.32
+(Model Completeness):} \((N, B, S)\) captures all runtime-available type
+information. - \textbf{Theorem 3.34-3.35 (Capability Comparison):}
 \(\mathcal{C}_{\text{duck}} \subsetneq \mathcal{C}_{\text{nom}}\)---nominal
-loses nothing, gains four capabilities. - \textbf{Lemma 3.37 (Axiom
+provides all duck typing capabilities plus four additional. - \textbf{Lemma 3.37 (Axiom
 Justification):} Shape axiom is definitional, not assumptive. -
 \textbf{Theorem 3.39 (Extension Impossibility):} No computable extension
 to duck typing recovers provenance. - \textbf{Theorems 3.43-3.47
@@ -111,7 +111,7 @@ universally (when \(B \neq \emptyset\))
 \textbf{4. Machine-checked verification (Section 6):} - 2400+ lines of
 Lean 4 proofs across four modules - 111 theorems/lemmas covering typing,
 architecture, information theory, complexity bounds, impossibility,
-lower bounds, bulletproofing, generics, exotic features, universal
+lower bounds, completeness analysis, generics, exotic features, universal
 scope, discipline vs migration separation, context formalization,
 capability exhaustiveness, and adapter amortization - Formalized O(1) vs
 O(k) vs $\\Omega$(n) complexity separation with adversary-based lower bound
@@ -194,15 +194,14 @@ This paper makes absolute claims. We do not argue nominal typing is
   signatures. Provenance requires type \emph{identity}. Shape-based
   disciplines cannot provide what they do not track.
 \item
-  \textbf{When B $\\neq$ $\\emptyset$, shape-based typing is wrong.} Nominal typing
-  strictly dominates. Adapters eliminate the retrofit exception (Theorem
-  2.10j). There is no context where shape-based typing is the correct
-  choice when inheritance exists.
+  \textbf{When B $\neq$ $\emptyset$, nominal typing dominates.} Nominal typing
+  provides strictly more capabilities. Adapters eliminate the retrofit exception (Theorem
+  2.10j). When inheritance exists, nominal typing is the capability-maximizing choice.
 \item
   \textbf{Shape-based typing is a capability sacrifice.} Protocol and
   duck typing discard the Bases axis. This is not a ``concession'' or
-  ``tradeoff''---it is a dominated choice that forecloses four
-  capabilities for zero benefit.
+  ``tradeoff''---it is a dominated choice that removes four
+  capabilities without providing alternatives.
 \end{enumerate}
 
 We do not claim all systems require provenance. We prove that systems

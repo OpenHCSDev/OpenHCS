@@ -7,62 +7,87 @@ import Ssot.Requirements
 
 -- Definition: SSOT-Complete Language
 -- A language that can achieve verifiable SSOT for all structural facts
+-- Requires THREE capabilities: DEF ∧ INTRO ∧ STRUCT
 def ssot_complete (L : LanguageFeatures) : Prop :=
-  L.has_definition_hooks = true ∧ L.has_introspection = true
+  L.has_definition_hooks = true ∧
+  L.has_introspection = true ∧
+  L.has_structural_modification = true
+
+-- Definition: Read-Only SSOT (Partial)
+-- A language with DEF ∧ INTRO but not STRUCT can achieve SSOT for
+-- read-only structural facts (queries) but not modifiable ones
+def ssot_readonly (L : LanguageFeatures) : Prop :=
+  L.has_definition_hooks = true ∧
+  L.has_introspection = true ∧
+  L.has_structural_modification = false
 
 -- Theorem 3.6: Necessary and Sufficient Conditions for SSOT
 -- A language L enables complete SSOT for structural facts IFF
--- it has definition-time hooks AND introspectable derivation
+-- it has definition-time hooks AND introspection AND structural modification
 theorem ssot_iff (L : LanguageFeatures) :
-    ssot_complete L ↔ (L.has_definition_hooks = true ∧ L.has_introspection = true) := by
+    ssot_complete L ↔ (L.has_definition_hooks = true ∧
+                       L.has_introspection = true ∧
+                       L.has_structural_modification = true) := by
   unfold ssot_complete
   rfl
 
 -- Direction 1: Sufficiency (⟸)
--- Given both features, SSOT is achievable and verifiable
+-- Given all three features, SSOT is achievable and verifiable
 theorem ssot_sufficient (L : LanguageFeatures)
     (h_hooks : L.has_definition_hooks = true)
-    (h_intro : L.has_introspection = true) :
+    (h_intro : L.has_introspection = true)
+    (h_struct : L.has_structural_modification = true) :
     ssot_complete L := by
   unfold ssot_complete
-  exact ⟨h_hooks, h_intro⟩
+  exact ⟨h_hooks, h_intro, h_struct⟩
 
 -- Direction 2: Necessity (⟹)
--- If SSOT is achievable, both features must be present
+-- If SSOT is achievable, all three features must be present
 theorem ssot_necessary (L : LanguageFeatures)
     (h : ssot_complete L) :
-    L.has_definition_hooks = true ∧ L.has_introspection = true := by
+    L.has_definition_hooks = true ∧
+    L.has_introspection = true ∧
+    L.has_structural_modification = true := by
   exact h
 
 -- The IFF is the key theorem: these are DERIVED requirements
 -- We didn't choose them; correctness forcing determined them
 
--- Corollary: A language is SSOT-incomplete iff it lacks either feature
+-- Corollary: A language is SSOT-incomplete iff it lacks any feature
 theorem ssot_incomplete_iff (L : LanguageFeatures) :
-    ¬ssot_complete L ↔ (L.has_definition_hooks = false ∨ L.has_introspection = false) := by
+    ¬ssot_complete L ↔ (L.has_definition_hooks = false ∨
+                        L.has_introspection = false ∨
+                        L.has_structural_modification = false) := by
   unfold ssot_complete
   constructor
   · intro h
-    -- h : ¬(hooks = true ∧ intro = true)
-    -- Need to show: hooks = false ∨ intro = false
+    -- h : ¬(hooks = true ∧ intro = true ∧ struct = true)
     cases hd : L.has_definition_hooks with
     | false => left; rfl
     | true =>
       cases hi : L.has_introspection with
-      | false => right; rfl
+      | false => right; left; rfl
       | true =>
-        have : L.has_definition_hooks = true ∧ L.has_introspection = true := ⟨hd, hi⟩
-        exact absurd this h
-  · intro h ⟨h1, h2⟩
+        cases hs : L.has_structural_modification with
+        | false => right; right; rfl
+        | true =>
+          have : L.has_definition_hooks = true ∧ L.has_introspection = true ∧
+                 L.has_structural_modification = true := ⟨hd, hi, hs⟩
+          exact absurd this h
+  · intro h ⟨h1, h2, h3⟩
     cases h with
     | inl hf => rw [hf] at h1; exact Bool.false_ne_true h1
-    | inr hf => rw [hf] at h2; exact Bool.false_ne_true h2
+    | inr h' =>
+      cases h' with
+      | inl hf => rw [hf] at h2; exact Bool.false_ne_true h2
+      | inr hf => rw [hf] at h3; exact Bool.false_ne_true h3
 
 -- IMPOSSIBILITY THEOREM (Constructive)
--- For any language lacking either feature, SSOT is impossible
--- This is not "Java is worse" - it is "Java CANNOT achieve SSOT"
+-- For any language lacking any feature, complete SSOT is impossible
 theorem impossibility (L : LanguageFeatures)
-    (h : L.has_definition_hooks = false ∨ L.has_introspection = false) :
+    (h : L.has_definition_hooks = false ∨
+         L.has_introspection = false ∨
+         L.has_structural_modification = false) :
     ¬ssot_complete L := by
   intro hc
   exact ssot_incomplete_iff L |>.mpr h hc
@@ -81,7 +106,19 @@ theorem rust_impossibility (L : LanguageFeatures)
     (_ : L.has_definition_hooks = true)
     (h_no_intro : L.has_introspection = false) :
     ¬ssot_complete L := by
-  exact impossibility L (Or.inr h_no_intro)
+  exact impossibility L (Or.inr (Or.inl h_no_intro))
+
+-- Ruby case: Has DEF + INTRO but only partial STRUCT
+-- Achieves read-only SSOT, not complete SSOT
+theorem ruby_readonly_ssot (L : LanguageFeatures)
+    (h_hooks : L.has_definition_hooks = true)
+    (h_intro : L.has_introspection = true)
+    (h_no_struct : L.has_structural_modification = false) :
+    ssot_readonly L ∧ ¬ssot_complete L := by
+  constructor
+  · unfold ssot_readonly
+    exact ⟨h_hooks, h_intro, h_no_struct⟩
+  · exact impossibility L (Or.inr (Or.inr h_no_struct))
 
 -- THEOREM: Generated Files Are Second Encodings
 -- A generated source file is a second encoding, not a derivation
