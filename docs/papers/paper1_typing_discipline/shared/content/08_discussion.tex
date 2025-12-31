@@ -269,10 +269,9 @@ validates our thesis: programmers need nominal identity even in
 structurally-typed languages. Python provides both ABCs (nominal) and
 \texttt{Protocol} (structural). Our theorems clarify the relationship:
 when \(B \neq \emptyset\), nominal typing (ABCs) strictly dominates
-Protocol (Theorem 2.10j). Protocol is dominated---it provides a
-convenience (avoiding adapters) at the cost of four capabilities. This
-is never the correct choice; it is at best a capability sacrifice for
-convenience.
+Protocol (Theorem 2.10j). Protocol provides convenience (avoiding adapters)
+but this is not a capability---ABCs can also integrate external types via
+adapters. Protocol is dominated: it provides a strict subset of capabilities.
 
 \textbf{MRO-based resolution is near-optimal.} Python's descriptor
 protocol combined with C3 linearization achieves O(1) field resolution
@@ -463,16 +462,15 @@ Language boundaries (C/FFI) & Structural (mandatory) & No inheritance
 available (\(B = \emptyset\) at boundary) \\
 \end{longtable}
 
-\textbf{Removed rows:} - ``Retrofit / external types $\\rightarrow$ Structural
-(acceptable)'' --- \textbf{Wrong.} Adapters exist. Theorem 2.10j. -
-``Small scripts / prototypes $\\rightarrow$ Duck (acceptable)'' --- \textbf{Wrong.}
-Duck typing is incoherent (Theorem 2.10d). Incoherent is never
-acceptable.
+\textbf{Removed rows:} - ``Retrofit / external types $\rightarrow$ Structural
+(acceptable)'' --- Adapters exist (Theorem 2.10j); structural is dominated. -
+``Small scripts / prototypes $\rightarrow$ Duck (acceptable)'' ---
+Duck typing is incoherent for B-dependent queries (Theorem 2.10d).
 
-The methodology claims: \textbf{if \(B \neq \emptyset\), nominal typing
-is correct.} There are no concessions. Protocol is dominated. Duck
-typing is incoherent. The decision is determined by whether the language
-has inheritance, not by project size or convenience.
+The methodology states: \textbf{if \(B \neq \emptyset\), nominal typing
+is the capability-maximizing choice.} Protocol is dominated. Duck typing
+is incoherent. The decision follows from the capability analysis, not
+from project size or aesthetic preference.
 
 \subsection{Case Study: TypeScript's Design
 Tension}\label{case-study-typescripts-design-tension}

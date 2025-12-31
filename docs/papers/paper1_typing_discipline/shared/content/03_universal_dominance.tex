@@ -205,10 +205,9 @@ dominated option is irrational.
 \subsection{Information-Theoretic
 Foundations}\label{information-theoretic-foundations}
 
-This section establishes the \textbf{unarguable} foundation of our
-results. We prove three theorems that transform our claims from
-``observations about our model'' to ``universal truths about information
-structure.''
+This section establishes the formal foundation of our
+results. We prove three theorems that make claims about all possible
+typing disciplines, not just our particular model.
 
 \paragraph{3.8.1 The Impossibility
 Theorem}\label{the-impossibility-theorem}
@@ -507,10 +506,10 @@ scan of call sites achieves \(O(n)\). Therefore the bound is tight.
 
 \begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
 
-\subsection{Summary: The Unarguable
-Core}\label{summary-the-unarguable-core}
+\subsection{Summary: Core Formal
+Results}\label{summary-core-formal-results}
 
-We have established three theorems that admit no counterargument:
+We have established three theorems with universal scope:
 
 \small
 \begin{longtable}[]{@{}
@@ -523,7 +522,7 @@ Theorem
 \end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
 Statement
 \end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-Why It's Unarguable
+Proof Technique
 \end{minipage} \\
 \midrule\noalign{}
 \endhead
@@ -533,7 +532,7 @@ Why It's Unarguable
 provenance & Information-theoretic: input lacks required data \\
 \textbf{3.19 (Derived Characterization)} & Capability gap = B-dependent
 queries & Mathematical: query space partitions exactly \\
-\textbf{3.24 (Lower Bound)} & Duck typing requires $\\Omega$(n) inspections &
+\textbf{3.24 (Lower Bound)} & Duck typing requires $\Omega$(n) inspections &
 Adversary argument: any algorithm can be forced \\
 \end{longtable}
 
@@ -763,8 +762,9 @@ available (Theorem 2.10j).
 systems (FFI, JSON parsing, external APIs), structural typing via
 Protocols is \emph{convenient} but not necessary. Per Theorem 2.10j,
 explicit adapters provide the same functionality with better properties.
-Protocol is a dominated choice, acceptable only as a migration
-convenience where the 2-line adapter cost is judged too high.
+Protocol is a dominated choice---a concession, not an alternative
+(Corollary 2.10k'). Choosing Protocol accepts reduced capabilities to
+defer adapter work.
 
 \paragraph{3.11.6 Capability
 Exhaustiveness}\label{capability-exhaustiveness}

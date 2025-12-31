@@ -46,3 +46,8 @@ lean_lib «context_formalization» where
   moreLeanArgs := moreLeanArgs
   weakLeanArgs := weakLeanArgs
   -- Greenfield/retrofit classification and requirement detection
+
+lean_lib «python_instantiation» where
+  moreLeanArgs := moreLeanArgs
+  weakLeanArgs := weakLeanArgs
+  -- Python-specific instantiation: type(), C3 MRO, complexity costs

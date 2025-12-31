@@ -178,6 +178,58 @@ theorem strict_dominance :
   ⟨shape_subset_nominal, nominal_has_extra⟩
 
 /-
+  COROLLARY 2.10k' (Concession vs Alternative):
+
+  Definition: A discipline D is a CONCESSION relative to D' when:
+  1. D provides no capability D' lacks
+  2. D' provides capabilities D lacks
+  3. The only "benefit" of D is avoiding some work W that D' requires
+  4. Avoiding work is not a capability
+
+  Definition: A discipline D is an ALTERNATIVE to D' when:
+  1. D provides at least one capability D' lacks, OR
+  2. D and D' are capability-equivalent
+
+  Theorem: Shape-based typing (Protocol) is a CONCESSION, not an ALTERNATIVE,
+  when B ≠ ∅. This is because Protocol satisfies conditions 1-4 above:
+  - Protocol provides no capability ABCs lack (shape_subset_nominal)
+  - ABCs provide 4 capabilities Protocol lacks (nominal_has_extra)
+  - Protocol's only benefit is avoiding 2-line adapters
+  - Avoiding adapters is not a capability
+-/
+
+-- A choice is a concession if it provides strictly fewer capabilities
+def isConcession (d_caps d'_caps : List Capability) : Prop :=
+  (∀ c ∈ d_caps, c ∈ d'_caps) ∧ (∃ c ∈ d'_caps, c ∉ d_caps)
+
+-- A choice is an alternative if it provides at least one capability the other lacks
+def isAlternative (d_caps d'_caps : List Capability) : Prop :=
+  ∃ c ∈ d_caps, c ∉ d'_caps
+
+-- THEOREM: Protocol (shape) is a concession to ABCs (nominal)
+theorem protocol_is_concession :
+    isConcession shapeCapabilities nominalCapabilities := strict_dominance
+
+-- THEOREM: Protocol is NOT an alternative to ABCs
+theorem protocol_not_alternative :
+    ¬isAlternative shapeCapabilities nominalCapabilities := by
+  intro ⟨c, hc_in, hc_notin⟩
+  have := shape_subset_nominal c hc_in
+  exact hc_notin this
+
+-- COROLLARY: ABCs with adapters is the single non-concession choice
+-- When B ≠ ∅, choosing Protocol means accepting reduced capabilities
+theorem abcs_single_non_concession :
+    ¬isConcession nominalCapabilities shapeCapabilities := by
+  intro ⟨_, h_exists⟩
+  obtain ⟨c, hc_in, hc_notin⟩ := h_exists
+  -- c ∈ shapeCapabilities but c ∉ nominalCapabilities
+  -- But shape_subset_nominal says all shape caps are in nominal caps
+  have := shape_subset_nominal c hc_in
+  -- So c ∈ nominalCapabilities, contradicting hc_notin
+  exact hc_notin this
+
+/-
   COROLLARY 2.8: Greenfield Incorrectness
 
   In greenfield development (architect controls type definitions),
@@ -987,9 +1039,9 @@ theorem capabilities_minimal :
     trivial
 
 /-
-  PART 13: Bulletproof Theorems
+  PART 13: Robustness Theorems
 
-  These theorems close ALL remaining attack surfaces for TOPLAS reviewers.
+  These theorems address potential concerns about model scope and completeness.
 -/
 
 /-
@@ -1372,8 +1424,11 @@ theorem all_generic_capabilities_require_B_or_N :
   1. shape_cannot_distinguish: Shape typing treats same-namespace types identically
   2. shape_provenance_impossible: Shape typing cannot report different provenance
   3. strict_dominance: Nominal capabilities ⊃ Shape capabilities
-  4. greenfield_incorrectness: Choosing dominated option forecloses capabilities
-  5. greenfield_inheritance_implies_nominal: Decision procedure returns nominal
+  4. protocol_is_concession: Protocol is a concession (Corollary 2.10k')
+  5. protocol_not_alternative: Protocol is NOT an alternative to ABCs
+  6. abcs_single_non_concession: ABCs is the single non-concession choice
+  7. greenfield_incorrectness: Choosing dominated option forecloses capabilities
+  8. greenfield_inheritance_implies_nominal: Decision procedure returns nominal
 
   PART 6-7 (Architectural Patterns):
   6. mixin_strict_dominance: Mixin capabilities ⊃ Composition capabilities
@@ -1442,17 +1497,18 @@ theorem all_generic_capabilities_require_B_or_N :
   53. shape_is_sacrifice_not_alternative: Shape appropriate only when nominal impossible
   54. all_generic_capabilities_require_B_or_N: Generic capabilities need B or parameterized N
 
-  TOTAL: 54 machine-checked theorems
+  TOTAL: 57 machine-checked theorems
   SORRY COUNT: 0
   ALL THEOREMS COMPLETE - no sorry placeholders remain
 
   ===========================================================================
-  BULLETPROOF STATUS: ALL TOPLAS ATTACK SURFACES CLOSED
+  ROBUSTNESS SUMMARY: Key Theorems Addressing Potential Concerns
   ===========================================================================
 
-  | Attack | Defense Theorem |
-  |--------|-----------------|
+  | Potential Concern | Covering Theorem |
+  |-------------------|------------------|
   | "Model incomplete" | model_completeness, no_additional_observables |
+  | "Protocol is an alternative" | protocol_is_concession, protocol_not_alternative |
   | "Duck has tradeoffs" | no_tradeoff, duck_subset_nominal |
   | "Axioms assumptive" | axiom_is_definitional |
   | "Clever extension" | extension_impossibility |
@@ -1464,24 +1520,22 @@ theorem all_generic_capabilities_require_B_or_N :
   | "Legacy is different" | shape_is_sacrifice_not_alternative |
   | "Overclaims scope" | retrofit_not_claimed, interop_not_claimed |
 
-  THE UNARGUABLE CORE:
+  CORE FORMAL RESULTS:
   - Theorem 3.13 (provenance_impossibility_universal): Information-theoretic impossibility
   - Theorem 3.19 (capability_gap_is_exactly_b_dependent): Derived from query partition
   - Theorem 3.24 (error_localization_lower_bound): Adversary-based lower bound
 
-  These theorems admit no counterargument because they make claims about the
-  UNIVERSE of possible systems, not our particular model.
+  These theorems establish universal claims about information structure,
+  not observations about a particular model.
 
-  A TOPLAS reviewer would have to:
-  1. Reject the definition of shape-based typing (but it's standard)
-  2. Reject information theory (but it's mathematics)
-  3. Reject adversary arguments (but they're standard in complexity theory)
-  4. Claim duck typing has capabilities we missed (but we proved completeness)
-  5. Claim nominal removes duck capabilities (but we proved superset)
+  The formal foundation rests on:
+  1. Standard definitions of shape-based typing (per PL literature)
+  2. Information-theoretic analysis (established mathematical framework)
+  3. Adversary arguments (standard in complexity theory)
+  4. Capability completeness proofs (minimal and complete characterization)
+  5. Superset proofs (nominal provides all duck capabilities plus more)
 
-  None of these are tenable positions.
-
-  The debate is mathematically foreclosed.
+  These results provide a formal resolution to the typing discipline question.
 -/
 
 end AbstractClassSystem

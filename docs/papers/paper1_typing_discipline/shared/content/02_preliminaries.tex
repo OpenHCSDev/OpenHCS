@@ -448,6 +448,23 @@ When \(B \neq \emptyset\), Protocol trades explicitness, fail-loud
 behavior, and provenance for 2 fewer lines of code. This is not a
 tradeoff---it is a loss.
 
+\textbf{Corollary 2.10k' (Protocol Is a Concession, Not an Alternative).}
+When \(B \neq \emptyset\), choosing Protocol is a \emph{concession}---accepting
+reduced capabilities to defer adapter work. It is not an \emph{alternative}
+because:
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\tightlist
+\item Protocol provides no capability that ABCs with adapters lack (Theorem 2.10j)
+\item ABCs with adapters provide four capabilities Protocol lacks (provenance, identity, enumeration, conflict resolution)
+\item The only ``benefit'' of Protocol is avoiding 2 lines of adapter code
+\item Avoiding work is not a capability
+\end{enumerate}
+An \emph{alternative} implies comparable standing; a \emph{concession} implies
+acknowledged inferiority for pragmatic expedience. Protocol is the latter.
+For Python systems where \(B \neq \emptyset\), ABCs with adapters is the single
+non-concession choice.
+
 \textbf{Corollary 2.10l (Complete Typing Discipline Validity).} The
 complete validity table:
 

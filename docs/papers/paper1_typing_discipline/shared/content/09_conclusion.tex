@@ -7,11 +7,11 @@ object-oriented systems:
 \def\labelenumi{\arabic{enumi}.}
 \item
   \textbf{The \(B = \emptyset\) criterion}: If a language has
-  inheritance (\(B \neq \emptyset\)), nominal typing is mandatory
-  (Theorem 2.18). If a language lacks inheritance (\(B = \emptyset\)),
+  inheritance (\(B \neq \emptyset\)), nominal typing is the capability-maximizing
+  choice (Theorem 2.18). If a language lacks inheritance (\(B = \emptyset\)),
   structural typing is correct. Duck typing is incoherent in both cases
-  (Theorem 2.10d). For retrofit scenarios with external types, use
-  explicit adapters (Theorem 2.10j).
+  (Theorem 2.10d). For retrofit scenarios with external types, adapters
+  achieve nominal capabilities (Theorem 2.10j).
 \item
   \textbf{Measurable code quality metrics}: Four metrics derived from
   the formal model (duck typing density, nominal typing ratio,
@@ -101,11 +101,10 @@ patterns map to discipline choice. The decision procedure evaluates
 correctness based on whether \(B \neq \emptyset\). \(\blacksquare\)
 
 \textbf{Implications.} An automated linter applying our decision
-procedure could: - Flag \texttt{hasattr()} in any code with inheritance
+procedure could: - Flag \texttt{hasattr()} in code with inheritance
 as a discipline violation - Suggest \texttt{isinstance()}/ABC
 replacements - Validate that provenance-requiring prompts produce
-nominal patterns - Flag Protocol usage as a capability sacrifice
-(Theorem 2.10j)
+nominal patterns - Flag Protocol usage as dominated (Theorem 2.10j)
 
 This application is clean because the context is unambiguous: the prompt
 explicitly states whether the developer controls the type hierarchy. The

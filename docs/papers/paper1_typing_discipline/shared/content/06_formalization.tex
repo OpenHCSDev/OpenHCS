@@ -824,10 +824,10 @@ nominal typing's advantage approaches infinity:
 This is not merely ``nominal is better''---it is \textbf{asymptotically
 dominant}. The complexity gap grows without bound.
 
-\subsection{The Unarguable Theorems (Lean
-Formalization)}\label{the-unarguable-theorems-lean-formalization}
+\subsection{Core Theorems (Lean
+Formalization)}\label{core-theorems-lean-formalization}
 
-Section 3.8 presented three theorems that admit no counterargument. Here
+Section 3.8 presented three theorems with universal scope. Here
 we provide their machine-checked formalizations.
 
 \textbf{Theorem 6.12 (Provenance Impossibility --- Lean).} No shape
@@ -863,10 +863,10 @@ theorem provenance\_impossibility\_universal :
   exact h\_neq (h\_shape A B h\_eq)
 \end{verbatim}
 
-\textbf{Why this is unarguable:} The proof shows that IF two types have
+\textbf{Formal justification:} The proof shows that IF two types have
 the same namespace but require different provenance answers, THEN no
-shape-respecting function can compute provenance. This is a direct
-logical consequence---no assumption can be challenged.
+shape-respecting function can compute provenance. This follows directly
+from the definition of shape-respecting functions.
 
 \textbf{Theorem 6.13 (Query Space Partition --- Lean).} Every query is
 either shape-respecting or B-dependent:
@@ -892,7 +892,7 @@ theorem query\_space\_partition (ns : Namespace) (q : SingleQuery) :
     exact h\_neq h\_same
 \end{verbatim}
 
-\textbf{Why this is unarguable:} The proof is pure logic---either a
+\textbf{Formal justification:} The proof is pure logic---either a
 property holds universally (\(\forall\)) or it has a counterexample
 (\(\exists \neg\)). Tertium non datur. The capability gap is derived
 from this partition, not enumerated.
@@ -925,10 +925,10 @@ theorem complexity\_gap\_unbounded :
   omega
 \end{verbatim}
 
-\textbf{Why this is unarguable:} The adversary argument shows that ANY
-algorithm can be forced to make $\\Omega$(n) inspections---the adversary answers
-consistently but adversarially. No clever algorithm can escape this
-bound.
+\textbf{Formal justification:} The adversary argument shows that ANY
+algorithm can be forced to make $\Omega$(n) inspections---the adversary answers
+consistently but adversarially. This is a standard lower bound proof technique
+from complexity theory.
 
 \textbf{Summary of Lean Statistics:}
 

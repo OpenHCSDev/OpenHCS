@@ -5,8 +5,8 @@
   - Discipline optimality: abstract capability comparison (universal)
   - Migration optimality: practical cost-benefit decision (context-dependent)
 
-  This closes the attack surface where reviewers conflate
-  "nominal is better" with "rewrite everything in nominal."
+  This distinction clarifies that capability dominance (Section 3) is separate
+  from migration cost analysis (practical decision depends on codebase context).
 -/
 
 -- Capabilities that a typing discipline can provide

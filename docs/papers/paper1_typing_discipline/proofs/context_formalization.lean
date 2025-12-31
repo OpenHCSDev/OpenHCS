@@ -6,9 +6,9 @@
   2. Provenance requirements are detectable from system queries
   3. Decision procedure is sound
 
-  This closes attack surfaces:
-  - "Greenfield is undefined"
-  - "Circular reasoning about requirements"
+  Addresses potential concerns:
+  - Provides precise definitions for greenfield/retrofit distinction
+  - Eliminates circularity by deriving requirements from observable queries
 -/
 
 -- ═══════════════════════════════════════════════════════════════════
