@@ -45,19 +45,21 @@ Formal Analysis
 
 \subsection{Detailed Analysis of Each Concern}\label{appendix:detailed-concerns}
 
-For each identified concern, we provide the formal analysis demonstrating
-why it does not affect our conclusions.
+We expand the most common concerns below; the remaining items in the table
+above are direct corollaries of the referenced results.
 
 \paragraph{Concern 1: Model Completeness.}
 \emph{Potential concern:} The (N, B, S) model may fail to capture relevant
 aspects of type systems.
 
-\emph{Analysis:} Theorem 3.32 establishes model completeness by demonstrating
-that any type system feature expressible in a Turing-complete language
-maps to operations on (N, B, S). At runtime, a class system can observe exactly three
-things about a type $T$: the identifier (N), the declared parent types (B), and
-the declared attributes (S). Any other observation is either derivable from
-$(N, B, S)$ or not available at runtime.
+\emph{Analysis:} Theorem~\ref{thm:model-completeness} establishes model completeness by constitutive
+definition. In Python, \texttt{type(name, bases, namespace)} is the universal
+type constructor---a type does not merely \emph{have} $(N, B, S)$; a type
+\emph{is} $(N, B, S)$. Any computable function over types is therefore
+definitionally a function of this triple. Properties like \texttt{\_\_mro\_\_}
+or \texttt{\_\_module\_\_} are not counterexamples: they are derived from or
+stored within $(N, B, S)$. This is definitional closure, not empirical
+enumeration---no ``fourth axis'' can exist because the triple is constitutive.
 
 \paragraph{Concern 2: Duck Typing Tradeoffs.}
 \emph{Potential concern:} Duck typing has flexibility that nominal typing lacks.
@@ -65,20 +67,27 @@ $(N, B, S)$ or not available at runtime.
 \emph{Analysis:} Theorems 3.34-3.36 establish that nominal typing provides a
 strict superset of duck typing capabilities. Duck typing's ``acceptance'' of
 structurally-equivalent types is not a capability---it is the \emph{absence}
-of the capability to distinguish them.
+of the capability to distinguish them. We treat ``capability'' as the set of
+definable operations/predicates available to the system, not the cost of
+retrofitting legacy code; migration/retrofit cost is handled separately
+(Theorem~\ref{thm:dominance-not-migration}, adapter results in Theorem~\ref{thm:protocol-strictly-dominated}).
 
 \paragraph{Concern 3: Axiom Circularity.}
 \emph{Potential concern:} The axioms are chosen to guarantee the conclusion.
 
-\emph{Analysis:} Lemma 3.37 establishes that the axiom ``shape-based typing treats
+\emph{Analysis:} Lemma~\ref{lem:shape-axiom-definitional} establishes that the axiom ``shape-based typing treats
 same-namespace types identically'' is not an assumption---it is the
 \emph{definition} of shape-based typing (Definition 2.10).
 
 \paragraph{Concern 4: Future Extensions.}
 \emph{Potential concern:} A clever extension to duck typing could recover provenance.
 
-\emph{Analysis:} Theorem 3.39 proves that any computable extension over $\{N, S\}$
+\emph{Analysis:} Theorem~\ref{thm:extension-impossibility} proves that any computable extension over $\{N, S\}$
 alone cannot recover provenance. The limitation is structural, not technical.
+A common response is ``just check \texttt{type(x)}''---but this proves the point:
+inspecting \texttt{type(x)} consults the type's identity (N) or inheritance (B).
+Once you consult N or B, you have left shape-only duck typing and moved to
+nominal or named-structural typing. The ``fix'' is the adoption of our thesis.
 
 \paragraph{Concern 5: Generics and Parametric Polymorphism.}
 \emph{Potential concern:} The model doesn't handle generics.
@@ -90,14 +99,31 @@ orthogonal to $(N, B, S)$.
 \paragraph{Concern 6: Single Codebase Evidence.}
 \emph{Potential concern:} Evidence is from one codebase (OpenHCS).
 
-\emph{Analysis:} Theorem 3.43g establishes methodological independence. The
-dominance theorems are derived from the structure of $(N, B, S)$, not from
-any implementation. OpenHCS is an existence proof, not a premise.
+\emph{Analysis:} This objection conflates \textbf{existential witnesses} with
+\textbf{premises}---a category error. In logic, a premise is something the
+conclusion depends on; an existential witness demonstrates satisfiability.
+
+The dominance theorems are proven from the \emph{definition} of shape-based
+typing (Lemma~\ref{lem:shape-axiom-definitional}: the axiom is definitional). Examine the proof of Theorem~\ref{thm:provenance-impossibility} (Provenance Impossibility): it proceeds by showing that $(N, S)$ contains
+insufficient information to compute provenance. This is an
+information-theoretic argument that references no codebase. You could prove
+this theorem before any codebase existed.
+
+OpenHCS appears only to demonstrate that the four capabilities are
+\emph{achievable}---that a real system uses provenance, identity, enumeration,
+and conflict resolution. This is an existence proof (``such systems exist''),
+not a premise (``if OpenHCS works, then the theorems hold'').
+
+\textbf{Analogy:} Proving ``comparison-based sorting requires $\Omega(n \log n)$
+comparisons'' does not require testing on multiple arrays. The proof is
+structural. Exhibiting quicksort demonstrates the bound is achievable, not that
+the theorem is true. Similarly, our theorems follow from (N, B, S) structure;
+OpenHCS demonstrates achievability.
 
 \paragraph{Concern 7: Scope Confusion.}
 \emph{Potential concern:} Discipline dominance implies migration recommendation.
 
-\emph{Analysis:} Theorem 3.55 formally proves that Pareto dominance of discipline
+\emph{Analysis:} Theorem~\ref{thm:dominance-not-migration} formally proves that Pareto dominance of discipline
 A over B does NOT imply that migrating from B to A is beneficial for all
 codebases. Dominance is codebase-independent; migration cost is codebase-dependent.
 
@@ -120,10 +146,11 @@ The Lean formalization is publicly available for verification.
 \subsection{On the Treatment of Defaults}\label{appendix:defaults}
 
 Duck typing was accepted as ``Pythonic'' without formal justification.
-The theorems in this paper exist because institutional inertia demands
-formal refutation of practices that were never formally justified. This
-asymmetry---defaults require no justification, changing defaults requires
-proof---is a methodological observation, not a logical requirement.
+This asymmetry---conventions often require no proof, while changing
+conventions demands proof---is a methodological observation about
+community standards, not a logical requirement. The theorems in this
+paper provide the formal foundation that was absent from the original
+adoption of duck typing as a default.
 
 \subsection{Why Formal Treatment Was Delayed}\label{appendix:delay}
 

@@ -50,6 +50,36 @@ foundations. This is standard practice in mechanized verification (e.g.,
 CompCert assumes well-typed input), but limits the scope of our
 machine-checked guarantees.
 
+\textbf{Empirical validation scope.} The formal results (Theorems 3.5,
+3.13, Corollary 6.3) are proven universally for any system where
+\(B \neq \emptyset\). These proofs establish \emph{what is impossible}:
+provenance cannot be computed without the bases axis
+(information-theoretically impossible, not merely difficult). The
+empirical measurements (DTD reduction, error rate correlation, DOF
+improvement) are drawn from OpenHCS. However, the \emph{direction} of
+the empirical claims---that capability gaps translate to measurable
+error reduction---follows from the formalism: if provenance is
+impossible without nominal typing (Corollary 6.3), and provenance is
+required (PC = 1), then errors \emph{must} occur under duck typing. The
+\emph{magnitude} of the effect is codebase-specific; the
+\emph{existence} of the effect is not. We distinguish:
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Universal (proven):} Capability gap exists, provenance is
+  impossible under duck typing, nominal typing strictly dominates.
+\item
+  \textbf{Singular (measured):} 47 \texttt{hasattr()} calls eliminated,
+  14.2$\times$ DOF reduction, $r = -0.85$ error correlation.
+\end{itemize}
+
+We call for replication studies on other codebases to measure the
+magnitude of the effect across different architectural patterns. The
+formal results predict that \emph{some} positive effect will be
+observed in any \(B \neq \emptyset\) system requiring provenance; the
+specific multipliers are empirical questions.
+
 \paragraph{8.1.1 Axiom Methodology}\label{axiom-methodology}
 
 \textbf{Theorem 8.1a (Axiom Scope).} The axioms

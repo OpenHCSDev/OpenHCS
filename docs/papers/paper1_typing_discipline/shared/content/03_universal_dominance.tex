@@ -235,7 +235,7 @@ function} is:
 \(\text{prov}(T, a)\) returns the type in \(T\)'s MRO that provides
 attribute \(a\).
 
-\textbf{Theorem 3.13 (Provenance Impossibility --- Universal).} Let
+\textbf{Theorem 3.13 (Provenance Impossibility --- Universal).}\label{thm:provenance-impossibility} Let
 \(\mathcal{D}\) be ANY shape discipline (typing discipline over
 \(\{N, S\}\) only). Then \(\mathcal{D}\) cannot compute \(\text{prov}\).
 
@@ -603,26 +603,41 @@ of the model's coverage.
 
 \paragraph{3.11.1 Model Completeness}\label{model-completeness}
 
-\textbf{Theorem 3.32 (Model Completeness).} The \((N, B, S)\) model
-captures all information available to a class system at runtime.
+\textbf{Theorem 3.32 (Model Completeness).}\label{thm:model-completeness} The \((N, B, S)\) model
+captures all information constitutive of a type. Any computable function
+over types is expressible as a function of \((N, B, S)\).
 
-\emph{Proof.} At runtime, a class system can observe exactly three
-things about a type \(T\): 1. \textbf{Name (N):} The identifier of \(T\)
-(e.g., \texttt{type(obj).\_\_name\_\_}) 2. \textbf{Bases (B):} The
-declared parent types (e.g., \texttt{type(obj).\_\_bases\_\_},
-\texttt{type(obj).\_\_mro\_\_}) 3. \textbf{Namespace (S):} The declared
-attributes (e.g., \texttt{dir(obj)}, \texttt{hasattr})
+\emph{Proof.} The proof proceeds by constitutive definition, not empirical
+enumeration.
 
-Any other observation (source file location, definition order,
-docstrings) is either: - Derivable from \((N, B, S)\), or - Not
-available at runtime (only at parse/compile time)
+In Python, \texttt{type(name, bases, namespace)} is the universal type
+constructor. Every type \(T\) is created by some invocation
+\texttt{type(n, b, s)}---either explicitly or via the \texttt{class}
+statement (which is syntactic sugar for \texttt{type()}). A type does not
+merely \emph{have} \((N, B, S)\); a type \emph{is} \((N, B, S)\). There is
+no other information constitutive of a type object.
 
-Therefore, any runtime-computable function on types is a function of
-\((N, B, S)\). \(\blacksquare\)
+Therefore, for any computable function \(g : \text{Type} \to \alpha\):
+\[g(T) = g(\texttt{type}(n, b, s)) = h(n, b, s)\]
+for some computable \(h\). Any function of a type is definitionally a
+function of the triple that constitutes it.
+
+\textbf{Remark (Derived vs.\ Constitutive).} Properties like
+\texttt{\_\_mro\_\_} (method resolution order) or \texttt{\_\_module\_\_}
+are not counterexamples: MRO is computed from \(B\) by C3 linearization;
+\texttt{\_\_module\_\_} is stored in the namespace \(S\). These are
+\emph{derived from} or \emph{contained in} \((N, B, S)\), not independent
+of it.
+
+This is a definitional closure: a critic cannot exhibit a ``fourth axis''
+because any proposed axis is either (a) stored in \(S\), (b) computable
+from \((N, B, S)\), or (c) not part of the type's semantic identity
+(e.g., memory address). \(\blacksquare\)
 
 \textbf{Corollary 3.33 (No Hidden Information).} There exists no
 ``fourth axis'' that shape-based typing could use to recover provenance.
-The information is structurally absent.
+The information is structurally absent---not because we failed to model
+it, but because types \emph{are} \((N, B, S)\) by construction.
 
 \paragraph{3.11.2 Capability Comparison}\label{capability-comparison}
 
@@ -685,7 +700,7 @@ identity.
 
 \paragraph{3.11.3 Axiom Justification}\label{axiom-justification}
 
-\textbf{Lemma 3.37 (Shape Axiom is Definitional).} The axiom
+\textbf{Lemma 3.37 (Shape Axiom is Definitional).}\label{lem:shape-axiom-definitional} The axiom
 ``shape-based typing treats same-namespace types identically'' is not an
 assumption---it is the \textbf{definition} of shape-based typing.
 
@@ -709,7 +724,7 @@ shape-based.
 \paragraph{3.11.4 Extension
 Impossibility}\label{extension-impossibility}
 
-\textbf{Theorem 3.39 (Extension Impossibility).} Let \(\mathcal{D}\) be
+\textbf{Theorem 3.39 (Extension Impossibility).}\label{thm:extension-impossibility} Let \(\mathcal{D}\) be
 any duck typing system. Let \(\mathcal{D}'\) be \(\mathcal{D}\) extended
 with any computable function \(f : \text{Namespace} \to \alpha\). Then
 \(\mathcal{D}'\) still cannot compute provenance.
@@ -861,22 +876,42 @@ overhead. This is mathematically incoherent.
 \paragraph{3.11.6b Methodological
 Independence}\label{b-methodological-independence}
 
-\textbf{Theorem 3.43g (Methodological Independence).} The dominance
+\textbf{Theorem 3.43g (Methodological Independence).}\label{thm:methodological-independence} The dominance
 theorems are derived from the structure of \((N, B, S)\), not from any
-implementation. OpenHCS is an existence proof, not a premise.
+implementation. OpenHCS is an existential witness, not a premise.
 
-\emph{Proof.} Examine the proof chain: 1. Theorem 2.17 (Capability Gap):
-Proved from the definition of shape-based typing (uses only \(\{S\}\) or
-\(\{N, S\}\)) 2. Theorem 3.5 (Strict Dominance): Proved from Theorem
-2.17 + Theorem 2.18 3. Theorem 2.10j (Adapters): Proved from capability
-comparison
+\emph{Proof.} We distinguish two logical roles:
+\begin{itemize}
+\tightlist
+\item \textbf{Premise:} A proposition the conclusion depends on. If false,
+  the conclusion may not follow.
+\item \textbf{Existential witness:} A concrete example demonstrating
+  satisfiability. Removing it does not affect the theorem's validity.
+\end{itemize}
 
-None of these proofs reference OpenHCS. OpenHCS appears only in: -
-Section 5 (Case Studies): Demonstrating that capabilities are achievable
-- Section 6 (Dual-Axis Resolver): Concrete algorithm example
+Examine the proof of Theorem 3.13 (Provenance Impossibility): it shows
+that \((N, S)\) contains insufficient information to compute provenance.
+This is an information-theoretic argument referencing no codebase. The
+proof could be written before any codebase existed.
 
-Removing all OpenHCS references would not invalidate any theorem. The
-theorems follow from information theory applied to \((N, B, S)\).
+\textbf{Proof chain (no OpenHCS references):}
+\begin{enumerate}
+\tightlist
+\item Theorem 2.17 (Capability Gap): Proved from the definition of
+  shape-based typing
+\item Theorem 3.5 (Strict Dominance): Proved from Theorem 2.17 + Theorem 2.18
+\item Theorem 2.10j (Adapters): Proved from capability comparison
+\end{enumerate}
+
+OpenHCS appears only to demonstrate that the four capabilities are
+\emph{achievable}---that real systems use provenance, identity,
+enumeration, and conflict resolution. This is an existence proof
+(``such systems exist''), not a premise (``if OpenHCS works, then
+the theorems hold'').
+
+\textbf{Analogy:} Proving ``comparison-based sorting requires
+\(\Omega(n \log n)\)'' does not require testing on multiple arrays.
+Exhibiting quicksort demonstrates achievability, not theorem validity.
 \(\blacksquare\)
 
 \textbf{Corollary 3.43h (Cross-Codebase Validity).} The theorems apply
@@ -1178,7 +1213,7 @@ attributeCheck\} 3. Shape $\\subset$ Nominal (strict subset) 4. Declaration cost
 both require one class definition per interface 5. Therefore nominal
 Pareto dominates shape. \(\blacksquare\)
 
-\textbf{Theorem 3.55 (Dominance Does Not Imply Migration).} Pareto
+\textbf{Theorem 3.55 (Dominance Does Not Imply Migration).}\label{thm:dominance-not-migration} Pareto
 dominance of discipline \(A\) over \(B\) does NOT imply that migrating
 from \(B\) to \(A\) is beneficial for all codebases.
 
