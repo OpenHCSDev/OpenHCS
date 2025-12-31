@@ -128,6 +128,17 @@ Java's annotations are metadata, not executable hooks:
 
 \textbf{HIER:} $\times$. Cannot enumerate subclasses without external libraries (Reflections, ClassGraph).
 
+\textbf{Why annotation processors don't count:}
+\begin{enumerate}
+\tightlist
+\item They run at compile time, not definition time---the class being processed is already fixed
+\item They cannot modify the class being defined; they generate \emph{new} classes
+\item Generated classes are separate compilation units, not derived facts within the source
+\item Results are not introspectable at runtime---you cannot query ``was this method generated?''
+\end{enumerate}
+
+\textbf{Why Lombok doesn't count:} Lombok approximates SSOT but violates it: the Lombok configuration becomes a second source of truth. Changes require updating both source and Lombok annotations. The tool can fail, be misconfigured, or be bypassed.
+
 \subsubsection{C++: No SSOT Support}
 
 C++ templates are compile-time, not definition-time:
@@ -163,6 +174,17 @@ Rust's procedural macros are compile-time and opaque:
 \textbf{STRUCT:} $\times$. Cannot modify type structure at runtime.
 
 \textbf{HIER:} $\times$. Cannot enumerate trait implementers.
+
+\textbf{Why procedural macros don't count:}
+\begin{enumerate}
+\tightlist
+\item They execute at compile time, not definition time---the generated code is baked into the binary
+\item \texttt{\#[derive(Debug)]} generates code, but you cannot query ``does this type derive Debug?'' at runtime
+\item Verification requires source inspection or documentation, not runtime query
+\item No equivalent to Python's \texttt{\_\_subclasses\_\_()}---you cannot enumerate trait implementers
+\end{enumerate}
+
+\textbf{Consequence:} Rust achieves \emph{compile-time} SSOT but not \emph{runtime} SSOT. For applications requiring runtime reflection (ORMs, serialization frameworks, dependency injection), Rust requires manual synchronization or external codegen tools.
 
 \begin{theorem}[Python Uniqueness in Mainstream]\label{thm:python-unique}
 Among mainstream languages, Python is the only language satisfying all SSOT requirements.

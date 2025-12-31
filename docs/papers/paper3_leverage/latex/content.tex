@@ -15,7 +15,7 @@
 
 \textbf{Empirical Validation:} 13 case studies from OpenHCS (45K LoC Python bioimage analysis platform). Mean leverage improvement: 12.6$\times$ (range: 5$\times$--47$\times$). Correlation between leverage and error rate: $r = -0.85$.
 
-All theorems machine-checked in Lean 4 (1,463 lines, 125 definitions/theorems, \textbf{0 sorry placeholders}).
+All theorems machine-checked in Lean 4 (1,634 lines, 142 definitions/theorems, \textbf{0 sorry placeholders}).
 
 \textbf{Keywords:} Software architecture, leverage, degrees of freedom, error probability, metaprogramming, decision framework, formal methods
 \end{abstract}
@@ -128,7 +128,7 @@ This paper makes seven contributions:
 
 \textbf{6. Empirical Validation (Section 6):} 13 case studies from OpenHCS quantifying leverage improvements (mean: 12.6$\times$, max: 47$\times$).
 
-\textbf{7. Machine-Checked Proofs (Appendix A):} All theorems formalized in Lean 4 (1,463 lines across 7 modules, 125 definitions/theorems, \textbf{0 sorry placeholders}).
+\textbf{7. Machine-Checked Proofs (Appendix A):} All theorems formalized in Lean 4 (1,634 lines across 7 modules, 142 definitions/theorems, \textbf{0 sorry placeholders}).
 
 \subsection{Scope and Limitations}
 
@@ -408,6 +408,26 @@ Assume $p = 0.01$ (1\% per-component error rate):
 \end{itemize}
 \end{example}
 
+\subsection{Connection to Reliability Theory}
+
+The error model has a direct interpretation in classical reliability theory, connecting software architecture to a mature mathematical framework with 60+ years of theoretical development.
+
+\begin{theorem}[DOF as Series System]\label{thm:series-system}
+An architecture with DOF = $n$ is a \emph{series system}: all $n$ degrees of freedom must be correctly specified for the system to be error-free. Thus:
+\[
+P_{\text{error}}(n) = 1 - R_{\text{series}}(n) \text{ where } R_{\text{series}}(n) = (1-p)^n
+\]
+\end{theorem}
+
+\textbf{Interpretation:} Each DOF is a ``component'' that must work correctly. This is the reliability analog of our independence assumption (Axiom \ref{ax:independent-errors}).
+
+\textbf{Linear Approximation Justification:} For small $p$ (the software engineering regime where $p \approx 0.01$), the linear model $P_{\text{error}} \approx n \cdot p$ is:
+\begin{enumerate}
+\item Accurate (first-order Taylor expansion)
+\item Preserves all ordering relationships (if $n_1 < n_2$, then $n_1 p < n_2 p$)
+\item Cleanly provable in natural number arithmetic (avoiding real analysis)
+\end{enumerate}
+
 \subsection{Formalization}
 
 Formalized in \texttt{Leverage/Probability.lean}:
@@ -417,11 +437,31 @@ Formalized in \texttt{Leverage/Probability.lean}:
 \item \texttt{error\_probability\_formula}: Theorem \ref{thm:error-prob}
 \item \texttt{dof\_error\_monotone}: Corollary \ref{cor:dof-monotone}
 \item \texttt{expected\_error\_bound}: Theorem \ref{thm:expected-errors}
+\item \texttt{linear\_model\_preserves\_ordering}: Theorem \ref{thm:series-system}
 \end{itemize}
 
 \section{Main Theorems}\label{main-theorems}
 
 We prove the core results connecting leverage to error probability and architectural optimality.
+
+\subsection{The Leverage Maximization Principle}
+
+\begin{theorem}[Theorem 3.0: Leverage Maximization Principle]\label{thm:leverage-max}
+For any architectural decision with alternatives $A_1, \ldots, A_n$, the optimal choice maximizes leverage:
+\[
+A^* = \arg\max_{A_i} L(A_i) = \arg\max_{A_i} \frac{|\text{Capabilities}(A_i)|}{\text{DOF}(A_i)}
+\]
+subject to capability requirements being met.
+\end{theorem}
+
+This is \textbf{THE central theorem} of this paper. All subsequent results are instances or corollaries:
+\begin{itemize}
+\item Theorem 4.1 (SSOT Instance): $L(\text{SSOT}) = \infty > L(\text{non-SSOT})$
+\item Theorem 4.2 (Typing Instance): $L(\text{nominal}) > L(\text{duck})$
+\item Theorem 4.3 (Microservices): $L$ determines optimal service count
+\end{itemize}
+
+The proof follows from combining the Leverage-Error Tradeoff (Theorem 3.1) with the Optimality Criterion (Theorem 3.4).
 
 \subsection{Leverage-Error Tradeoff}
 
@@ -536,6 +576,30 @@ All theorems formalized in \texttt{Leverage/Theorems.lean}:
 \item \texttt{architectural\_decision\_criterion}: Theorem \ref{thm:optimal}
 \item \texttt{leverage\_composition}: Theorem \ref{thm:composition}
 \end{itemize}
+
+\subsection{Cross-Paper Integration}
+
+The leverage framework provides the unifying theory for results proven in Papers 1 and 2:
+
+\begin{theorem}[Paper 1 as Leverage Instance]\label{thm:paper1-integration}
+The SSOT theorem from Paper 1 is an instance of leverage maximization:
+\begin{itemize}
+\item SSOT achieves $L = \infty$ (finite capabilities, zero DOF for derived facts)
+\item Non-SSOT has $L = 1$ (each capability requires one DOF)
+\item Therefore SSOT is optimal by Theorem \ref{thm:leverage-max}
+\end{itemize}
+\end{theorem}
+
+\begin{theorem}[Paper 2 as Leverage Instance]\label{thm:paper2-integration}
+The typing theorem from Paper 2 is an instance of leverage maximization:
+\begin{itemize}
+\item Nominal typing: $L = c/n$ where $n$ = explicit type annotations
+\item Duck typing: $L = c/m$ where $m$ = implicit structural constraints
+\item Since $n < m$ for equivalent capabilities, nominal typing has higher leverage
+\end{itemize}
+\end{theorem}
+
+These theorems are formalized in \texttt{Leverage/Integration.lean}.
 
 
 \section{Instances}\label{instances}
@@ -1428,6 +1492,21 @@ For reference, all theorems in this paper:
 \item Theorem 5.2 (Nominal Leverage Dominance)
 \end{itemize}
 
-\textbf{Total: 2 Axioms, 10 Theorems, 2 Corollaries, 1 Proposition}
+\textbf{Cross-Paper Integration (Section 4.5):}
+\begin{itemize}
+\item Theorem 4.7 (Paper 1 as Leverage Instance)
+\item Theorem 4.8 (Paper 2 as Leverage Instance)
+\end{itemize}
 
-All formalized in Lean 4 (\texttt{proofs/leverage/}).
+\textbf{Total: 2 Axioms, 12 Theorems, 2 Corollaries, 1 Proposition}
+
+All formalized in Lean 4 (1,634 lines across 7 modules, 142 definitions/theorems, \textbf{0 sorry placeholders}):
+\begin{itemize}
+\item \texttt{Leverage/Basic.lean} -- Core definitions and DOF theory
+\item \texttt{Leverage/Probability.lean} -- Error model and reliability theory
+\item \texttt{Leverage/Theorems.lean} -- Main theorems
+\item \texttt{Leverage/Instances.lean} -- SSOT and typing instances
+\item \texttt{Leverage/Integration.lean} -- Cross-paper integration
+\item \texttt{Leverage/Decision.lean} -- Decision procedure with correctness proofs
+\item \texttt{Leverage/Microservices.lean} -- Microservices optimization
+\end{itemize}

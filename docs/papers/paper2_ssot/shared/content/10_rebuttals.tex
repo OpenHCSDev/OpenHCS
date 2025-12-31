@@ -121,4 +121,24 @@ Our contribution is the formal analysis, not a recommendation. We provide the to
 
 Many ``obvious'' software engineering principles have never been formalized. The contribution is demonstrating that formalization is possible and valuable, not that the mathematics is difficult.
 
+\subsection{Objection: Just Use Make/Bazel/Code Generation}
+
+\textbf{Objection:} ``External build tools can achieve SSOT without language support. Generate the code at build time.''
+
+\textbf{Response:} External tools \emph{shift} the SSOT problem, they don't \emph{solve} it:
+
+\begin{enumerate}
+\item \textbf{Two sources of truth:} The build tool configuration becomes a second source. Changes require updating both the source AND the build config. Formally: let $C$ be a codebase using tool $T$. Then $\text{DOF}(C \cup T, F) \geq 2$ because both source and tool config encode $F$.
+
+\item \textbf{Not verifiable at runtime:} Generated code is not introspectable as \emph{derived}. You cannot query ``was this method generated or hand-written?'' The program loses provenance information.
+
+\item \textbf{Build cache invalidation:} The build tool must track dependencies, introducing its own consistency problem. Stale caches cause bugs that don't exist with language-native derivation.
+
+\item \textbf{Development friction:} Every edit requires a build step. Language-native SSOT (Python metaclasses) executes during \texttt{import}---no separate build, no cache, no configuration.
+\end{enumerate}
+
+External tools are a \emph{mitigation}, not a \emph{solution}. They reduce DOF from $n$ to $k$ where $k$ is the number of tool configurations, but $k > 1$ still violates SSOT.
+
+\textbf{When external tools are acceptable:} For cross-language code generation (e.g., protobuf generating Python, Java, Go), external tools are the only option since no single language can control another's type definitions. Our analysis focuses on single-language SSOT.
+
 %==============================================================================

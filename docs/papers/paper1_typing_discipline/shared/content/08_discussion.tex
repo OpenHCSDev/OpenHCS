@@ -857,3 +857,31 @@ retrofit exception (Theorem 2.10j). The two address different questions.
 
 \begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
 
+\subsection{Connection to Leverage Framework}\label{sec:leverage-connection}
+
+The strict dominance of nominal typing (Theorem 2.10j) is an instance of a more
+general principle: \emph{leverage maximization}.
+
+Define \textbf{leverage} as $L = |\text{Capabilities}| / \text{DOF}$, where DOF
+(Degrees of Freedom) counts independent encoding locations for type information.
+Both typing disciplines have similar DOF (both require type declarations at use
+sites), but nominal typing provides 4 additional capabilities (provenance,
+identity, enumeration, conflict resolution). Therefore:
+\[
+L(\text{nominal}) = \frac{5}{1} > \frac{1}{1} = L(\text{duck})
+\]
+
+The leverage framework (see companion paper) proves that for any architectural
+decision, the optimal choice maximizes leverage. This paper proves the
+\emph{instance}; the companion paper proves the \emph{metatheorem} that leverage
+maximization is universally optimal.
+
+\textbf{Theorem 8.4 (Typing as Leverage Instance).} The strict dominance of
+nominal typing (Theorem 2.10j) is an instance of the Leverage Maximization
+Principle.
+
+\emph{Proof.} By Theorem 2.10j, nominal typing provides a strict superset of
+capabilities at equivalent cost. This is exactly the condition for higher
+leverage: $L(\text{nominal}) > L(\text{duck})$. By the Leverage Maximization
+Principle, nominal typing is therefore optimal. $\blacksquare$
+

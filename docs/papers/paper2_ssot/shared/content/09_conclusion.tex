@@ -40,6 +40,15 @@ We have provided the first formal foundations for the Single Source of Truth pri
 \item Investigate SSOT in multi-language systems
 \end{itemize}
 
+\textbf{Connection to Leverage Framework:}
+
+SSOT achieves \emph{infinite leverage} in the framework of the companion paper on leverage-driven architecture:
+\[
+L(\text{SSOT}) = \frac{|\text{Derivations}|}{1} \to \infty
+\]
+
+A single source derives arbitrarily many facts. This is the theoretical maximum---no architecture can exceed infinite leverage. The leverage framework provides a unified view: this paper (SSOT) and the companion paper on typing discipline selection are both instances of leverage maximization. The metatheorem---``maximize leverage''---subsumes both results.
+
 All results are machine-checked in Lean 4 with zero \texttt{sorry} placeholders. The proofs are available at \texttt{proofs/ssot/}.
 
 \bibliographystyle{plain}
