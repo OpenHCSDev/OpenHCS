@@ -180,4 +180,30 @@ theorem complexity_gap_unbounded :
 /-- Theorem: Nominal is always O(1) -/
 theorem nominal_constant_complexity : nominal_type_check_complexity = 1 := rfl
 
+/-!
+## Cross-Paper Reference: Paper 1 as Leverage Instance
+
+This section explicitly connects Paper 1 (Typing Discipline Selection) to the
+leverage framework established in Paper 3.
+
+Theorem 4.2 (Paper 3): Nominal typing dominance is an instance of leverage maximization.
+-/
+
+/-- Paper 1 Instance: Nominal typing dominance is leverage maximization -/
+theorem paper1_is_leverage_instance :
+    let nom := TypingDiscipline.Nominal.toArchitecture
+    let duck := TypingDiscipline.Duck.toArchitecture
+    nom.higher_leverage duck :=
+  nominal_dominates_duck
+
+/-- Paper 1 Instance: Capability gap drives the dominance -/
+theorem paper1_capability_gap_is_four :
+    TypingDiscipline.Nominal.capabilities - TypingDiscipline.Duck.capabilities =
+    b_dependent_capability_count :=
+  capability_gap
+
+/-- Paper 1 Instance: Same DOF means pure capability advantage -/
+theorem paper1_same_dof :
+    TypingDiscipline.Nominal.dof = TypingDiscipline.Duck.dof := rfl
+
 end Leverage.Typing

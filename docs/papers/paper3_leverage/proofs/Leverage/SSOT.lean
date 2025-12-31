@@ -159,4 +159,34 @@ def python_capability : LanguageCapability := .definition_time_hooks
 theorem python_achieves_ssot : achieves_structural_ssot python_capability = true := by
   native_decide
 
+/-!
+## Cross-Paper Reference: Paper 2 as Leverage Instance
+
+This section explicitly connects Paper 2 (Single Source of Truth) to the
+leverage framework established in Paper 3.
+
+Theorem 4.1 (Paper 3): SSOT dominance is an instance of leverage maximization.
+-/
+
+/-- Paper 2 Instance: SSOT dominance is leverage maximization -/
+theorem paper2_is_leverage_instance (n caps : Nat) (h_n : n > 1) (h_caps : caps > 0) :
+    let ssot := SSOTArch caps
+    let non := NonSSOTArch n caps (by omega)
+    ssot.higher_leverage non :=
+  ssot_leverage_dominance n caps h_n h_caps
+
+/-- Paper 2 Instance: Leverage ratio equals replication factor -/
+theorem paper2_leverage_ratio (n caps : Nat) (h_n : n > 0) :
+    let ssot := SSOTArch caps
+    let non := NonSSOTArch n caps h_n
+    non.dof = n * ssot.dof := by
+  simp [SSOTArch, NonSSOTArch]
+
+/-- Paper 2 Instance: Error advantage grows with replication -/
+theorem paper2_error_advantage (n caps : Nat) (h_n : n > 1) (p : ErrorRate) (h_p : p.numerator > 0) :
+    let ssot := SSOTArch caps
+    let non := NonSSOTArch n caps (by omega)
+    expected_errors_lt (expected_errors ssot p) (expected_errors non p) :=
+  ssot_error_advantage n caps h_n p h_p
+
 end Leverage.SSOT
