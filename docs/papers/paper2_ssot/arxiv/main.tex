@@ -46,14 +46,13 @@ A Language Design Specification Derived from Modification Complexity Bounds}
 \begin{document}
 \maketitle
 
-% arXiv license
-\renewcommand{\thefootnote}{}
-\footnotetext{
-  \textcopyright\ 2024 Tristan Simas.
-  This work is licensed under CC BY 4.0.
-  To view a copy of this license, visit \url{https://creativecommons.org/licenses/by/4.0/}
-}
-\renewcommand{\thefootnote}{\arabic{footnote}}
+% arXiv license - use \thanks style footnote without number
+\begingroup
+\renewcommand{\thefootnote}{\fnsymbol{footnote}}
+\footnotetext[0]{\textcopyright\ 2024 Tristan Simas.
+This work is licensed under CC BY 4.0.
+To view a copy of this license, visit \url{https://creativecommons.org/licenses/by/4.0/}}
+\endgroup
 
 \input{../shared/content/abstract}
 \input{../shared/content/01_introduction}

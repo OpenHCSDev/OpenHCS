@@ -29,7 +29,7 @@ The number of derived locations $k$ may grow with codebase size, but the number 
 
 \textbf{Note on ``effective'' vs. ``total'' complexity:} Total modification complexity $M(C, \delta_F)$ counts all locations that change. Effective modification complexity counts only manual edits. With SSOT, total complexity may be $O(n)$ (many derived locations change), but effective complexity is $O(1)$ (one manual edit).
 
-\subsection{Lower Bound: Non-SSOT Requires $\Omega(n)$}\label{sec:lower-bound}
+\subsection{Lower Bound: Non-SSOT Requires \texorpdfstring{$\Omega(n)$}{Omega(n)}}\label{sec:lower-bound}
 
 \begin{theorem}[Non-SSOT Lower Bound]\label{thm:lower-bound}
 For a codebase \emph{not} satisfying SSOT for fact $F$, if $F$ is encoded at $n$ independent locations:
