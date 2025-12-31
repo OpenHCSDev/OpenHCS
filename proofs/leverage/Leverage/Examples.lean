@@ -10,152 +10,175 @@ Examples:
 - Configuration systems
 - Database normalization
 
+All examples use definitional proofs - no sorry placeholders.
+
 Author: Examples for Paper 3
 Date: 2025-12-30
 -/
 
 import Leverage.Foundations
 import Leverage.Theorems
+import Leverage.Probability
 
 namespace Leverage.Examples
 
-/-- Example 1: Microservices Architecture -/
-section Microservices
+/-!
+## Example 1: Microservices vs Monolith
+-/
 
-/-- Monolithic architecture: single deployment unit -/
-def monolith_arch (caps : Set String) : Architecture :=
-  { components := sorry  -- Single component
-  , requirements := caps }
+/-- Monolithic architecture: DOF = 1, limited caps -/
+def monolith (base_caps : Nat) : Architecture where
+  dof := 1
+  capabilities := base_caps
+  dof_pos := by decide
 
-/-- Microservices architecture: n independent services -/
-def microservices_arch (n : Nat) (caps : Set String) : Architecture :=
-  { components := sorry  -- n components
-  , requirements := caps }
+/-- Microservices architecture: DOF = n, more caps -/
+def microservices (n : Nat) (h : n > 0) (extra_caps : Nat) : Architecture where
+  dof := n
+  capabilities := 1 + extra_caps  -- base + microservice-specific
+  dof_pos := h
 
-/-- Calculate DOF for monolith -/
-axiom monolith_dof : (monolith_arch sorry).dof = 1
+/-- Microservices gain 5 additional capabilities -/
+def microservice_extra_caps : Nat := 5
+-- independent_scaling, independent_deployment, fault_isolation, team_autonomy, polyglot_persistence
 
-/-- Calculate DOF for n microservices -/
-axiom microservices_dof (n : Nat) : (microservices_arch n sorry).dof = n
+/-- Example: 5 microservices -/
+example : let mono := monolith 1
+          let micro := microservices 5 (by decide) microservice_extra_caps
+          micro.capabilities > mono.capabilities := by
+  simp [monolith, microservices, microservice_extra_caps]
 
-/-- Capabilities gained by microservices -/
-def microservice_capabilities : Set String :=
-  { "independent_scaling"
-  , "independent_deployment"
-  , "fault_isolation"
-  , "team_autonomy"
-  , "polyglot_persistence" }
+/-- Example: Monolith has higher leverage when caps are equal -/
+example : let mono := monolith 6
+          let micro := microservices 5 (by decide) 5
+          mono.higher_leverage micro := by
+  simp only [monolith, microservices, Architecture.higher_leverage]
+  native_decide
 
-/-- Example calculation: 5 microservices -/
-example :
-    let mono := monolith_arch {"basic_functionality"}
-    let micro := microservices_arch 5 ({"basic_functionality"} ∪ microservice_capabilities)
-    micro.capabilities.ncard > mono.capabilities.ncard ∧
-    micro.dof > mono.dof := by
-  sorry
+/-!
+## Example 2: REST API Design
+-/
 
-end Microservices
+/-- Specific endpoints: one per use case, DOF = n -/
+def specific_api (n : Nat) (h : n > 0) : Architecture where
+  dof := n
+  capabilities := n  -- Each endpoint handles one use case
+  dof_pos := h
 
-/-- Example 2: REST API Design -/
-section APIs
+/-- Generic endpoint: single endpoint handles all, DOF = 1 -/
+def generic_api (n : Nat) : Architecture where
+  dof := 1
+  capabilities := n  -- Handles n use cases
+  dof_pos := by decide
 
-/-- Specific endpoints: one per use case -/
-def specific_api (n_usecases : Nat) : Architecture :=
-  { components := sorry  -- n endpoints
-  , requirements := sorry }
+/-- Example: 10 use cases - generic has higher leverage -/
+example : let spec := specific_api 10 (by decide)
+          let gen := generic_api 10
+          gen.higher_leverage spec := by
+  simp only [specific_api, generic_api, Architecture.higher_leverage]
+  native_decide
 
-/-- Generic endpoint: handles many use cases -/
-def generic_api (n_usecases : Nat) : Architecture :=
-  { components := sorry  -- 1 generic endpoint
-  , requirements := sorry }
+/-- Leverage ratio for generic vs specific -/
+theorem generic_api_leverage_ratio (n : Nat) (h : n > 1) :
+    let spec := specific_api n (by omega)
+    let gen := generic_api n
+    gen.capabilities * spec.dof = n * n ∧
+    spec.capabilities * gen.dof = n * 1 := by
+  simp [specific_api, generic_api]
 
-axiom specific_api_dof (n : Nat) : (specific_api n).dof = n
-axiom generic_api_dof (n : Nat) : (generic_api n).dof = 1
+/-!
+## Example 3: Configuration Systems
+-/
 
-/-- Example: 10 use cases -/
-example :
-    let spec := specific_api 10
-    let gen := generic_api 10
-    gen.leverage > spec.leverage := by
-  sorry
-  -- L(gen) = 10/1 = 10
-  -- L(spec) = 10/10 = 1
-  -- 10 > 1
+/-- Explicit configuration: DOF = n (must set all) -/
+def explicit_config (n : Nat) (h : n > 0) : Architecture where
+  dof := n
+  capabilities := n
+  dof_pos := h
 
-end APIs
+/-- Convention over configuration: DOF = overrides only -/
+def convention_config (total_params overrides : Nat) (h : overrides > 0) : Architecture where
+  dof := overrides
+  capabilities := total_params  -- Can configure all, only set overrides
+  dof_pos := h
 
-/-- Example 3: Configuration Systems -/
-section Configuration
+/-- Example: 100 parameters, 5 overrides - convention wins -/
+example : let explicit := explicit_config 100 (by decide)
+          let convention := convention_config 100 5 (by decide)
+          convention.higher_leverage explicit := by
+  simp only [explicit_config, convention_config, Architecture.higher_leverage]
+  native_decide
 
-/-- Explicit configuration: must set every parameter -/
-def explicit_config (n_params : Nat) : Architecture :=
-  { components := sorry
-  , requirements := sorry }
+/-- Leverage improvement factor -/
+theorem convention_leverage_improvement (total overrides : Nat)
+    (h1 : total > 0) (h2 : overrides > 0) (h3 : overrides < total) :
+    let explicit := explicit_config total h1
+    let convention := convention_config total overrides h2
+    convention.capabilities * explicit.dof > explicit.capabilities * convention.dof := by
+  simp [explicit_config, convention_config]
+  -- total * total > total * overrides when overrides < total
+  have : total * total > total * overrides := Nat.mul_lt_mul_of_pos_left h3 h1
+  omega
 
-/-- Convention over configuration: only set overrides -/
-def convention_config (n_params : Nat) (n_overrides : Nat) : Architecture :=
-  { components := sorry
-  , requirements := sorry }
+/-!
+## Example 4: Database Schema Design
+-/
 
-axiom explicit_config_dof (n : Nat) : (explicit_config n).dof = n
-axiom convention_config_dof (n m : Nat) : (convention_config n m).dof = m
+/-- Denormalized schema: n redundant copies, DOF = n -/
+def denormalized (n : Nat) (h : n > 0) (caps : Nat) : Architecture where
+  dof := n
+  capabilities := caps
+  dof_pos := h
 
-/-- Example: 100 parameters, 5 overrides -/
-example :
-    let explicit := explicit_config 100
-    let convention := convention_config 100 5
-    convention.leverage > explicit.leverage := by
-  sorry
-  -- Same capabilities (100 parameters configurable)
-  -- L(explicit) = 100/100 = 1
-  -- L(convention) = 100/5 = 20
-  -- 20 > 1
+/-- Normalized schema: single source, DOF = 1 -/
+def normalized (caps : Nat) : Architecture where
+  dof := 1
+  capabilities := caps
+  dof_pos := by decide
 
-end Configuration
+/-- Example: 3 redundant tables vs 1 normalized - same caps -/
+example : let denorm := denormalized 3 (by decide) 10
+          let norm := normalized 10
+          norm.higher_leverage denorm := by
+  simp only [denormalized, normalized, Architecture.higher_leverage]
+  native_decide
 
-/-- Example 4: Database Schema Design -/
-section Database
+/-- Normalized always wins for same capabilities -/
+theorem normalized_wins (n caps : Nat) (h : n > 1) :
+    let denorm := denormalized n (by omega) caps
+    let norm := normalized caps
+    norm.dof < denorm.dof := by
+  simp only [denormalized, normalized]
+  exact h
 
-/-- Denormalized schema: redundant data -/
-def denormalized_schema (n_redundant : Nat) : Architecture :=
-  { components := sorry
-  , requirements := sorry }
+/-!
+## Example 5: Error Probability Calculations
+-/
 
-/-- Normalized schema: single source of truth for each fact -/
-def normalized_schema : Architecture :=
-  { components := sorry
-  , requirements := sorry }
+/-- Standard error rate: 1% = 1/100 -/
+def p_one_percent : ErrorRate where
+  numerator := 1
+  denominator := 100
+  rate_valid := by decide
 
-axiom denorm_dof (n : Nat) : (denormalized_schema n).dof = n
-axiom norm_dof : normalized_schema.dof = 1
+/-- DOF = 1: Expected errors = 1/100 -/
+example : expected_errors (Architecture.mk 1 10 (by decide)) p_one_percent = (1, 100) := rfl
 
-/-- Example: Customer address stored in 3 tables (denorm) vs 1 (norm) -/
-example :
-    let denorm := denormalized_schema 3
-    let norm := normalized_schema
-    norm.leverage > denorm.leverage := by
-  sorry
+/-- DOF = 10: Expected errors = 10/100 = 0.1 -/
+example : expected_errors (Architecture.mk 10 10 (by decide)) p_one_percent = (10, 100) := rfl
 
-end Database
+/-- DOF = 100: Expected errors = 100/100 = 1.0 -/
+example : expected_errors (Architecture.mk 100 10 (by decide)) p_one_percent = (100, 100) := rfl
 
-/-- Example 5: Error Probability Calculation -/
-section ErrorProbability
-
-open Probability
-
-/-- Given p = 0.01 (1% error per component) -/
-axiom example_error_rate : per_component_error_rate = 0.01
-
-/-- Calculate error probability for various DOF -/
-example : error_probability 1 < 0.01 := by sorry
-example : error_probability 10 < 0.10 := by sorry
-example : error_probability 100 < 1.0 := by sorry
-
-/-- Show error grows approximately linearly for small p -/
-example (h : per_component_error_rate = 0.01) :
-    |error_probability 10 - 0.10| < 0.005 := by
-  sorry
-
-end ErrorProbability
+/-- Error scales linearly with DOF -/
+theorem error_linear_scaling (d₁ d₂ : Nat) (h₁ : d₁ > 0) (h₂ : d₂ > 0) :
+    let a₁ := Architecture.mk d₁ 1 h₁
+    let a₂ := Architecture.mk d₂ 1 h₂
+    (expected_errors a₁ p_one_percent).1 * d₂ =
+    (expected_errors a₂ p_one_percent).1 * d₁ := by
+  simp only [expected_errors, p_one_percent, Architecture.mk]
+  -- d₁ * 1 * d₂ = d₂ * 1 * d₁
+  simp only [Nat.mul_one]
+  exact Nat.mul_comm d₁ d₂
 
 end Leverage.Examples

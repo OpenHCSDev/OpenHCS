@@ -1,15 +1,12 @@
 import Lake
 open Lake DSL
 
-package «leverage» {
-  -- add package configuration options here
-}
-
-lean_lib «Leverage» {
-  -- add library configuration options here
-}
+package «leverage» where
+  leanOptions := #[
+    ⟨`pp.unicode.fun, true⟩
+  ]
 
 @[default_target]
-lean_exe «leverage» {
-  root := `Main
-}
+lean_lib «Leverage» where
+  globs := #[.submodules `Leverage]
+  srcDir := "."
