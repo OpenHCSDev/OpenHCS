@@ -146,4 +146,59 @@ theorem compose_increases_error (a₁ a₂ : Architecture) :
   have h2 := a₂.dof_pos
   constructor <;> omega
 
+/-!
+## Connection to Reliability Theory
+
+The DOF-based error model connects directly to classical reliability theory:
+
+### Series System Analogy
+- **Series system**: All n components must work for system to work
+  - R_series(n) = (1-p)^n  (reliability)
+  - P_error(n) = 1 - (1-p)^n  (failure probability)
+
+- **DOF interpretation**: Each degree of freedom is a "component" that must be
+  correctly specified. If any one is wrong, the system has an error.
+
+### Linear Approximation
+For small p (typical in software: p ≈ 0.01):
+  P_error(n) = 1 - (1-p)^n ≈ n*p  (first-order Taylor expansion)
+
+This is exactly our model: E[errors] = DOF × p
+
+The linear model is:
+1. Accurate for small p (which is the software engineering regime)
+2. Cleanly provable with natural number arithmetic
+3. Sufficient to establish all leverage ordering results
+
+### Why We Use the Linear Model
+The exponential model 1-(1-p)^n requires real number arithmetic for clean proofs.
+The linear approximation n*p:
+- Preserves all ordering relationships (if n₁ < n₂, then n₁*p < n₂*p)
+- Is exactly correct for expected value E[errors]
+- Avoids the complexity of real analysis in Lean
+
+This is a deliberate engineering choice: prove what matters cleanly,
+rather than forcing complex machinery for marginal precision gains.
+-/
+
+/-- The linear error model is the first-order approximation of series reliability.
+    For small p: 1 - (1-p)^n ≈ n*p
+    Our model: E[errors] = DOF * p -/
+theorem linear_model_interpretation (a : Architecture) (p : ErrorRate) :
+    (expected_errors a p).1 = a.dof * p.numerator :=
+  expected_errors_linear a p
+
+/-- Key property: Linear model preserves error ordering.
+    If DOF₁ < DOF₂, then errors₁ < errors₂ (when p > 0) -/
+theorem linear_model_preserves_ordering (a₁ a₂ : Architecture) (p : ErrorRate)
+    (h_dof : a₁.dof < a₂.dof) (h_p : p.numerator > 0) :
+    (expected_errors a₁ p).1 < (expected_errors a₂ p).1 := by
+  simp only [expected_errors]
+  exact Nat.mul_lt_mul_of_pos_right h_dof h_p
+
+/-- The series system interpretation: each DOF is a component that must work -/
+theorem dof_as_series_components (a : Architecture) :
+    a.modification_complexity = a.dof :=
+  modification_eq_dof a
+
 end Leverage
