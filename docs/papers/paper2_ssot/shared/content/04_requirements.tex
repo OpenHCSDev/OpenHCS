@@ -390,6 +390,9 @@ Test: If we delete or modify \texttt{HandlerRegistry.java}, does the system's be
 Test: If we modify the annotation, does the system's behavior change? \textbf{Yes}---the generated file will have different content.
 
 Therefore, $E_1$ and $E_2$ are independent encodings. DOF $= 2$.
+Formally: if an artifact $r$ is absent from the program's runtime
+equality relation (cannot be queried or mutated in-process), then
+$\text{encodes}(r,F)$ introduces an independent DOF.
 
 The fact that $E_2$ was \emph{generated from} $E_1$ does not make it a derivation in the SSOT sense, because:
 \begin{enumerate}

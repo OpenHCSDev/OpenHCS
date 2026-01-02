@@ -1,0 +1,82 @@
+\documentclass[11pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{calc}
+\usepackage{fancyvrb}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+
+\geometry{margin=1in}
+
+% Allow URLs to break at any character
+\makeatletter
+\g@addto@macro{\UrlBreaks}{\UrlOrds}
+\makeatother
+
+% Prevent overfull hboxes in references
+\sloppy
+
+% Fix for pandoc's \tightlist
+\providecommand{\tightlist}{%
+  \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+
+% Theorem environments
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{corollary}[theorem]{Corollary}
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{axiom}[theorem]{Axiom}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{example}[theorem]{Example}
+\newtheorem{problem}[theorem]{Problem}
+\theoremstyle{remark}
+\newtheorem{remark}[theorem]{Remark}
+\newtheorem{observation}[theorem]{Observation}
+
+% Hyperref setup
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue,
+  citecolor=blue,
+  urlcolor=blue
+}
+
+% Complexity class macros
+\newcommand{\coNP}{\textsf{coNP}}
+\newcommand{\NP}{\textsf{NP}}
+\newcommand{\SigmaP}[1]{\Sigma_{#1}^{\textsf{P}}}
+\newcommand{\PiP}[1]{\Pi_{#1}^{\textsf{P}}}
+\newcommand{\Pclass}{\textsf{P}}
+\newcommand{\Opt}{\text{Opt}}
+
+\title{The Complexity of Decision-Relevant Uncertainty:\\
+Why Identifying What Matters Is Harder Than Knowing Everything}
+
+\author{Anonymous Author \\
+Anonymous Institution \\
+\texttt{anonymous@example.com}}
+
+\date{}
+
+\begin{document}
+
+\maketitle
+
+% SINGLE SOURCE OF TRUTH: All content in content.tex
+\input{content.tex}
+
+\bibliographystyle{plain}
+\bibliography{references}
+
+\end{document}
+

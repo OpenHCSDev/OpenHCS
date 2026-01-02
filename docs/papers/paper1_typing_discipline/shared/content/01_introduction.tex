@@ -2,7 +2,7 @@
 
 This paper proves that nominal typing strictly dominates structural and
 duck typing for object-oriented systems with inheritance hierarchies.
-All results are machine-checked in Lean 4 (2400+ lines, 111 theorems,
+All results are machine-checked in Lean 4 (2600+ lines, 127 theorems,
 0 \texttt{sorry} placeholders).
 
 We develop a metatheory of class system design applicable to any
@@ -108,8 +108,8 @@ ordering - Theorem 2.17 (Capability Completeness): the capability set
 Theorem 3.5: Nominal typing strictly dominates shape-based typing
 universally (when \(B \neq \emptyset\))
 
-\textbf{4. Machine-checked verification (Section 6):} - 2400+ lines of
-Lean 4 proofs across four modules - 111 theorems/lemmas covering typing,
+\textbf{4. Machine-checked verification (Section 6):} - 2600+ lines of
+Lean 4 proofs across five modules - 127 theorems/lemmas covering typing,
 architecture, information theory, complexity bounds, impossibility,
 lower bounds, completeness analysis, generics, exotic features, universal
 scope, discipline vs migration separation, context formalization,
@@ -118,7 +118,7 @@ O(k) vs $\\Omega$(n) complexity separation with adversary-based lower bound
 proof - Universal extension to 8 languages (Java, C\#, Rust, TypeScript,
 Kotlin, Swift, Scala, C++) - Exotic type features covered (intersection,
 union, row polymorphism, HKT, multiple dispatch) - \textbf{Zero
-\texttt{sorry} placeholders---all 111 theorems/lemmas complete}
+\texttt{sorry} placeholders---all 127 theorems/lemmas complete}
 
 \textbf{5. Empirical validation (Section 5):} - 13 case studies from
 OpenHCS (45K LoC production Python codebase) - Demonstrates theoretical
@@ -204,6 +204,13 @@ This paper makes absolute claims. We do not argue nominal typing is
   providing any compensating capability---a dominated choice when \(B \neq \emptyset\).
 \end{enumerate}
 
+Boundary scope (pulled forward for clarity): when \(B = \emptyset\)
+(no user-declared inheritance)---e.g., pure JSON/FFI payloads or
+languages intentionally designed without inheritance---structural typing
+is the coherent choice. Our dominance claims apply whenever \(B \neq
+\emptyset\) \emph{and} inheritance metadata is accessible; FFI or
+opaque-runtime boundaries that erase \(B\) fall outside the claim.
+
 We do not claim all systems require provenance. We prove that systems
 requiring provenance cannot use shape-based typing. The requirements are
 the architect's choice; the discipline, given requirements, is derived.
@@ -225,7 +232,7 @@ from system properties
 validating theoretical predictions
 
 \textbf{Section 6: Machine-checked proofs} --- Lean 4 formalization
-(2400+ lines)
+(2600+ lines)
 
 \textbf{Section 7: Related work} --- Positioning within PL theory
 literature
@@ -238,4 +245,3 @@ Zen alignment
 practice
 
 \begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
-

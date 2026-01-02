@@ -865,7 +865,7 @@ Test: If we delete or modify `HandlerRegistry.java`, does the system's behavior 
 
 Test: If we modify the annotation, does the system's behavior change? **Yes**---the generated file will have different content.
 
-Therefore, $E_1$ and $E_2$ are independent encodings. DOF $= 2$.
+Therefore, $E_1$ and $E_2$ are independent encodings. DOF $= 2$. Formally: if an artifact $r$ is absent from the program's runtime equality relation (cannot be queried or mutated in-process), then $\text{encodes}(r,F)$ introduces an independent DOF.
 
 The fact that $E_2$ was *generated from* $E_1$ does not make it a derivation in the SSOT sense, because:
 
@@ -931,7 +931,11 @@ We evaluate languages on four criteria, derived from the SSOT requirements:
 
 -   $\times$ = No support: The feature is absent or fundamentally cannot be used for SSOT
 
-**Note:** For mainstream languages, we do not use "Partial" ratings---a language either has the capability or it does not. For non-mainstream languages in Section [5.4](#sec:non-mainstream){reference-type="ref" reference="sec:non-mainstream"}, we note partial support where relevant since these languages are not our primary focus. For INTRO, we require *subclass enumeration*---the ability to answer "what classes inherit from X?" at runtime. Java's `getMethods()` does not satisfy this because it cannot enumerate subclasses without classpath scanning via external libraries.
+-   $\triangle$ = Partial/insufficient: Feature exists but fails a requirement (e.g., needs external tooling or lacks runtime reach)
+
+**Methodology note (tooling exclusions):** We exclude capabilities that require external build tools or libraries (annotation processors, Lombok, `reflect-metadata`+`ts-transformer`, `ts-json-schema-generator`, etc.). Only language-native, runtime-verifiable features count toward DEF/INTRO/STRUCT/HIER.
+
+**Note:** We use $\triangle$ sparingly for mainstream languages only when a built-in mechanism exists but fails SSOT (e.g., requires compile-time tooling or lacks runtime reach). For non-mainstream languages in Section [5.4](#sec:non-mainstream){reference-type="ref" reference="sec:non-mainstream"}, we note partial support where relevant since these languages are not our primary focus. For INTRO, we require *subclass enumeration*---the ability to answer "what classes inherit from X?" at runtime. Java's `getMethods()` does not satisfy this because it cannot enumerate subclasses without classpath scanning via external libraries.
 
 ## Mainstream Language Definition {#sec:mainstream-def}
 
@@ -952,19 +956,21 @@ This definition excludes niche languages (Haskell, Erlang, Clojure) while includ
 ## Mainstream Language Evaluation {#sec:mainstream-eval}
 
 ::: center
-  **Language**    **DEF**    **INTRO**   **STRUCT**   **HIER**   **SSOT?**
-  -------------- ---------- ----------- ------------ ---------- -----------
-  Python                                                          **YES**
-  JavaScript      $\times$   $\times$     $\times$    $\times$      NO
-  Java            $\times$   $\times$     $\times$    $\times$      NO
-  C++             $\times$   $\times$     $\times$    $\times$      NO
-  C#              $\times$   $\times$     $\times$    $\times$      NO
-  TypeScript      $\times$   $\times$     $\times$    $\times$      NO
-  Go              $\times$   $\times$     $\times$    $\times$      NO
-  Rust            $\times$   $\times$     $\times$    $\times$      NO
-  Kotlin          $\times$   $\times$     $\times$    $\times$      NO
-  Swift           $\times$   $\times$     $\times$    $\times$      NO
+  **Language**      **DEF**      **INTRO**    **STRUCT**   **HIER**   **SSOT?**
+  -------------- ------------- ------------- ------------ ---------- -----------
+  Python                                                               **YES**
+  JavaScript       $\times$      $\times$      $\times$    $\times$      NO
+  Java             $\times$      $\times$      $\times$    $\times$      NO
+  C++              $\times$      $\times$      $\times$    $\times$      NO
+  C#               $\times$      $\times$      $\times$    $\times$      NO
+  TypeScript      $\triangle$   $\triangle$    $\times$    $\times$      NO
+  Go               $\times$      $\times$      $\times$    $\times$      NO
+  Rust             $\times$      $\times$      $\times$    $\times$      NO
+  Kotlin           $\times$      $\times$      $\times$    $\times$      NO
+  Swift            $\times$      $\times$      $\times$    $\times$      NO
 :::
+
+TypeScript earns $\triangle$ for DEF/INTRO because decorators plus `reflect-metadata` can run at class decoration time and expose limited metadata, but (a) they require compiler flags/transformers instead of being always-on language features, (b) they cannot enumerate implementers at runtime, and (c) they are erased for plain JavaScript consumers. Consequently SSOT remains impossible without external tooling, so the overall verdict stays NO.
 
 ### Python: Full SSOT Support
 

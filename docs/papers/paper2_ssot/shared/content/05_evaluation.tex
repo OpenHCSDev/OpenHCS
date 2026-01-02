@@ -27,9 +27,24 @@ Hierarchy queries & HIER & Can the program enumerate subclasses/implementers? \\
 \tightlist
 \item \checkmark = Full support: The feature is available, usable for SSOT, and does not require external tools
 \item $\times$ = No support: The feature is absent or fundamentally cannot be used for SSOT
+\item $\triangle$ = Partial/insufficient: Feature exists but fails a requirement (e.g., needs external tooling or lacks runtime reach)
 \end{itemize}
 
-\textbf{Note:} For mainstream languages, we do not use ``Partial'' ratings---a language either has the capability or it does not. For non-mainstream languages in Section~\ref{sec:non-mainstream}, we note partial support where relevant since these languages are not our primary focus. For INTRO, we require \emph{subclass enumeration}---the ability to answer ``what classes inherit from X?'' at runtime. Java's \texttt{getMethods()} does not satisfy this because it cannot enumerate subclasses without classpath scanning via external libraries.
+\textbf{Methodology note (tooling exclusions):} We exclude capabilities
+that require external build tools or libraries (annotation processors,
+Lombok, \texttt{reflect-metadata}+\texttt{ts-transformer},
+\texttt{ts-json-schema-generator}, etc.). Only language-native,
+runtime-verifiable features count toward DEF/INTRO/STRUCT/HIER.
+
+\textbf{Note:} We use $\triangle$ sparingly for mainstream languages
+only when a built-in mechanism exists but fails SSOT (e.g., requires
+compile-time tooling or lacks runtime reach). For non-mainstream
+languages in Section~\ref{sec:non-mainstream}, we note partial support
+where relevant since these languages are not our primary focus. For
+INTRO, we require \emph{subclass enumeration}---the ability to answer
+``what classes inherit from X?'' at runtime. Java's
+\texttt{getMethods()} does not satisfy this because it cannot enumerate
+subclasses without classpath scanning via external libraries.
 
 \subsection{Mainstream Language Definition}\label{sec:mainstream-def}
 
@@ -58,7 +73,7 @@ JavaScript & $\times$ & $\times$ & $\times$ & $\times$ & NO \\
 Java & $\times$ & $\times$ & $\times$ & $\times$ & NO \\
 C++ & $\times$ & $\times$ & $\times$ & $\times$ & NO \\
 C\# & $\times$ & $\times$ & $\times$ & $\times$ & NO \\
-TypeScript & $\times$ & $\times$ & $\times$ & $\times$ & NO \\
+TypeScript & $\triangle$ & $\triangle$ & $\times$ & $\times$ & NO \\
 Go & $\times$ & $\times$ & $\times$ & $\times$ & NO \\
 Rust & $\times$ & $\times$ & $\times$ & $\times$ & NO \\
 Kotlin & $\times$ & $\times$ & $\times$ & $\times$ & NO \\
@@ -66,6 +81,14 @@ Swift & $\times$ & $\times$ & $\times$ & $\times$ & NO \\
 \bottomrule
 \end{tabular}
 \end{center}
+
+TypeScript earns $\triangle$ for DEF/INTRO because decorators plus
+\texttt{reflect-metadata} can run at class decoration time and expose
+limited metadata, but (a) they require compiler flags/transformers
+instead of being always-on language features, (b) they cannot enumerate
+implementers at runtime, and (c) they are erased for plain JavaScript
+consumers. Consequently SSOT remains impossible without external
+tooling, so the overall verdict stays NO.
 
 \subsubsection{Python: Full SSOT Support}
 

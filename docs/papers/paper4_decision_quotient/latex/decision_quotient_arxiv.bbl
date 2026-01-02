@@ -1,0 +1,19 @@
+\begin{thebibliography}{1}
+
+\bibitem{blum1997selection}
+Avrim~L. Blum and Pat Langley.
+\newblock Selection of relevant features and examples in machine learning.
+\newblock {\em Artificial Intelligence}, 97(1-2):245--271, 1997.
+
+\bibitem{howard1966information}
+Ronald~A. Howard.
+\newblock Information value theory.
+\newblock {\em IEEE Transactions on Systems Science and Cybernetics},
+  2(1):22--26, 1966.
+
+\bibitem{papadimitriou1994complexity}
+Christos~H. Papadimitriou.
+\newblock {\em Computational Complexity}.
+\newblock Addison-Wesley, 1994.
+
+\end{thebibliography}

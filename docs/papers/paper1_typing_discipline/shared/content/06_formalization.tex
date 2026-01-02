@@ -2,7 +2,7 @@
 Verification}\label{formalization-and-verification}
 
 We provide machine-checked proofs of our core theorems in Lean 4. The
-complete development (2400+ lines across four modules, 0 \texttt{sorry}
+complete development (2600+ lines across five modules, 0 \texttt{sorry}
 placeholders) is organized as follows:
 
 \small
@@ -25,15 +25,17 @@ Purpose
 \endhead
 \bottomrule\noalign{}
 \endlastfoot
-\texttt{abstract\_class\_system.lean} & 1488 & 75 & Core formalization:
+\texttt{abstract\_class\_system.lean} & 1542 & 78 & Core formalization:
 three-axis model, dominance, complexity \\
-\texttt{nominal\_resolution.lean} & 556 & 18 & Resolution, capability
+\texttt{nominal\_resolution.lean} & 556 & 21 & Resolution, capability
 exhaustiveness, adapter amortization \\
 \texttt{discipline\_migration.lean} & 142 & 11 & Discipline vs migration
 optimality separation \\
 \texttt{context\_formalization.lean} & 215 & 7 & Greenfield/retrofit
 classification, requirement detection \\
-\textbf{Total} & \textbf{2401} & \textbf{111} & \\
+\texttt{python\_instantiation.lean} & 158 & 10 & Python-specific
+instantiation of abstract model \\
+\textbf{Total} & \textbf{2613} & \textbf{127} & \\
 \end{longtable}
 
 \begin{enumerate}
@@ -940,8 +942,8 @@ Metric & Value \\
 \endhead
 \bottomrule\noalign{}
 \endlastfoot
-Total lines & 2400+ (four modules) \\
-Total theorems/lemmas & 111 \\
+Total lines & 2613 (five modules) \\
+Total theorems/lemmas & 127 \\
 \texttt{sorry} placeholders & 0 \\
 \end{longtable}
 

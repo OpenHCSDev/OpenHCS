@@ -75,6 +75,9 @@ This paper makes absolute claims. We do not argue nominal typing is "preferred" 
 
 3.  **Shape-based typing is a capability sacrifice.** Protocol and duck typing discard the Bases axis. This eliminates four capabilities (provenance, identity, enumeration, conflict resolution) without providing any compensating capability---a dominated choice when $B \neq \emptyset$.
 
+Boundary scope (pulled forward for clarity): when $B = \emptyset$ (no user-declared inheritance)---e.g., pure JSON/FFI payloads or languages intentionally designed without inheritance---structural typing is the coherent choice. Our dominance claims apply whenever $B \neq
+\emptyset$ *and* inheritance metadata is accessible; FFI or opaque-runtime boundaries that erase $B$ fall outside the claim.
+
 We do not claim all systems require provenance. We prove that systems requiring provenance cannot use shape-based typing. The requirements are the architect's choice; the discipline, given requirements, is derived.
 
 ## Roadmap

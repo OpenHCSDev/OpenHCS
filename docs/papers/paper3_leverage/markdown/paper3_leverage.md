@@ -16,6 +16,16 @@ This paper provides the first formal framework for architectural decision-making
 
 > **Architectural quality is fundamentally about leverage: the ratio of capabilities provided to degrees of freedom incurred.**
 
+## Axiom Zero
+
+Before formalizing leverage, we state the primitive axiom from which the framework derives:
+
+> **Axiom 0:** *Mattering is the only thing that matters.*
+
+This is not a tautology. It is a *selection* from possible objective functions. One could optimize for comfort, approval, safety, or process compliance. Axiom 0 asserts that impact—whether an action contributes to outcomes that matter—is the sole criterion for evaluation.
+
+The leverage framework operationalizes Axiom 0: if mattering is what matters, then we should maximize the ratio of impact to cost. Every degree of freedom that doesn't contribute to capabilities is a violation of Axiom 0. Every architectural decision that increases DOF without proportional capability gain is waste.
+
 ## The Leverage Principle
 
 **Definition (Informal):** *Leverage* is the ratio of capabilities to degrees of freedom: $$L = \frac{|\text{Capabilities}|}{\text{DOF}}$$
@@ -110,7 +120,7 @@ This paper makes seven contributions:
 
 -   Database normalization (Instance 5.6)
 
-**6. Empirical Validation (Section 6):** 13 case studies from OpenHCS quantifying leverage improvements (mean: 12.6$\times$, max: 47$\times$).
+**6. Empirical Validation (Section 6):** 13 structural witnesses from OpenHCS; DOF collapses yield $\rho$ factors 5$\times$--120$\times$ (many collapse to a single locus).
 
 **7. Machine-Checked Proofs (Appendix A):** All theorems formalized in Lean 4 (1,634 lines across 7 modules, 142 definitions/theorems, **0 sorry placeholders**).
 
@@ -837,112 +847,71 @@ L(\text{Denormalized}) &= c / 3
 
 **Pattern:** High leverage architectures achieve $n$-fold improvement where $n$ is the consolidation factor (use sites, services, endpoints, parameters, or redundant storage).
 
-# Empirical Validation
+# Empirical Validation (Structural Quantification) {#empirical-validation}
 
-We validate the leverage framework through 13 case studies from OpenHCS, a production bioimage analysis platform (45K lines of Python).
+We validate the leverage framework by *instantiating* its formal quantities---degrees of freedom (DOF), leverage, and modification complexity---on 13 refactorings from OpenHCS (a production 45K LoC Python bioimage analysis platform). This section uses *structural measurement*, not statistical inference: each refactoring is a witness that (1) DOF is computable in a real system and (2) leverage improves by the consolidation factor actually achieved.
 
-## Methodology
+## Structural Measurement Protocol
 
-For each architectural decision in OpenHCS:
+For a before/after pair $A_{\text{pre}}, A_{\text{post}}$ define the **structural leverage factor**: $$\rho := \frac{\mathrm{DOF}(A_{\text{pre}})}{\mathrm{DOF}(A_{\text{post}})}.$$ If capabilities are preserved, $|\mathrm{Cap}(A_{\text{pre}})| = |\mathrm{Cap}(A_{\text{post}})|$, then leverage scales exactly by $\rho$: $$\frac{L(A_{\text{post}})}{L(A_{\text{pre}})} = \rho.$$ If capabilities increase (common in refactoring), $\rho$ is a *lower bound* on leverage improvement.
 
-1.  Identify the decision point (before/after comparison)
+#### What counts as a DOF?
 
-2.  Calculate DOF (count independent modification points)
+Independent *definition loci*: manual registration sites, independent override parameters, separately defined endpoints/handlers/rules, duplicated schema/format definitions. The unit is "how many places can drift apart," not lines of code.
 
-3.  Enumerate capabilities
-
-4.  Compute leverage $L = |\text{Capabilities}|/\text{DOF}$
-
-5.  Measure actual modification complexity in practice
-
-## Case Studies
+## Worked Examples
 
 ### CS1: Metaclass Auto-Registration (SSOT)
 
-**Before:** Plugin classes manually registered in 23 scattered locations.
+Let $n_{\text{reg}}$ be the number of manual registration sites.
 
--   DOF $= 23$
+Before: $\mathrm{DOF}=n_{\text{reg}}$ (define + register). After: $\mathrm{DOF}=1$ (define; metaclass registers). $\rho = n_{\text{reg}}$. In OpenHCS, $n_{\text{reg}}=23 \Rightarrow \rho=23\times$; one instance eliminated 47 scattered dispatch checks.
 
--   $M(\text{add plugin}) = 2$ (define class + register)
+### CS2: Configuration Consolidation (Convention)
 
-**After:** Metaclass automatically registers classes at definition time.
+Let $m$ be explicit parameters; $k$ overrides after defaults. Before: $\mathrm{DOF}=m$. After: $\mathrm{DOF}=k$. $\rho = m/k$. In OpenHCS, $m=50$, $k=5 \Rightarrow \rho=10\times$.
 
--   DOF $= 1$ (metaclass definition)
+### CS3: REST API Genericization
 
--   $M(\text{add plugin}) = 1$ (define class, auto-registered)
+Let $n$ be specific endpoints; $k$ generic endpoints after refactor. Before: $\mathrm{DOF}=n$. After: $\mathrm{DOF}=k$. $\rho = n/k$. In OpenHCS, $n=15$, $k=3 \Rightarrow \rho=5\times$.
 
-**Leverage improvement:** $23/1 = 23\times$
-
-**Actual impact (PR #44):** Eliminated 47 `hasattr()` checks, consolidated dispatch logic. Measured modification complexity reduction: $47\times$.
-
-### CS2: Configuration Consolidation
-
-**Before:** 50 explicit configuration parameters across 12 files.
-
--   DOF $= 50$
-
-**After:** Convention-based defaults, 5 override parameters.
-
--   DOF $= 5$
-
-**Leverage improvement:** $50/5 = 10\times$
-
-### CS3: REST API Refactoring
-
-**Before:** 15 specific endpoints (`/users`, `/images`, `/analyses`, \...).
-
--   DOF $= 15$
-
-**After:** 3 generic endpoints (`/resources/:type`, `/operations/:op`, `/results/:id`).
-
--   DOF $= 3$
-
-**Leverage improvement:** $15/3 = 5\times$
-
-### CS4--CS13: Additional Case Studies
+## CS4--CS13: Structural Witnesses
 
 ::: {#tab:case-studies}
-  **Case Study**                 **DOF Before**   **DOF After**      **Leverage**        **Type**
-  ----------------------------- ---------------- --------------- -------------------- ---------------
-  CS1: Metaclass Registration          23               1             23$\times$           SSOT
-  CS2: Configuration                   50               5             10$\times$        Convention
-  CS3: REST API                        15               3             5$\times$           Generic
-  CS4: Database Schema                 8                1             8$\times$        Normalization
-  CS5: Type Annotations               120               1            120$\times$       SSOT (types)
-  CS6: Error Handling                  30               2             15$\times$        Centralized
-  CS7: Logging Format                  18               1             18$\times$           SSOT
-  CS8: Validation Rules                25               1             25$\times$          Derived
-  CS9: Serialization                   12               1             12$\times$          Generic
-  CS10: Auth Middleware                7                1             7$\times$         Centralized
-  CS11: Cache Strategy                 9                1             9$\times$           Unified
-  CS12: Query Builder                  20               2             10$\times$          Generic
-  CS13: Event Handlers                 14               1             14$\times$           SSOT
-  **Mean**                             --              --          **12.6$\times$**         --
-  **Median**                           --              --           **10$\times$**          --
-  **Range**                            --              --         **5--120$\times$**        --
+  **Case Study**                 **DOF Pre**   **DOF Post**   **$\rho$**    **Archetype**
+  ----------------------------- ------------- -------------- ------------- ---------------
+  CS1: Metaclass Registration        23             1         23$\times$        SSOT
+  CS2: Configuration                 50             5         10$\times$     Convention
+  CS3: REST API                      15             3          5$\times$       Generic
+  CS4: Database Schema                8             1          8$\times$    Normalization
+  CS5: Type Annotations              120            1         120$\times$   SSOT (types)
+  CS6: Error Handling                30             2         15$\times$     Centralized
+  CS7: Logging Format                18             1         18$\times$        SSOT
+  CS8: Validation Rules              25             1         25$\times$       Derived
+  CS9: Serialization                 12             1         12$\times$       Generic
+  CS10: Auth Middleware               7             1          7$\times$     Centralized
+  CS11: Cache Strategy                9             1          9$\times$       Unified
+  CS12: Query Builder                20             2         10$\times$       Generic
+  CS13: Event Handlers               14             1         14$\times$        SSOT
 
-  : OpenHCS case study results
+  : Structural leverage factors ($\rho$) for 13 OpenHCS refactorings
 :::
 
-## Results
+## Structural Summary
 
-**Mean leverage improvement:** 12.6$\times$ (geometric mean: 11.2$\times$)
+\(1\) DOF is computable and yields large factors: $\rho$ ranges from 5$\times$ to 120$\times$; many refactorings collapse to a single locus.
 
-**Range:** 5$\times$ (REST API consolidation) to 120$\times$ (type annotation derivation)
+\(2\) Error improvement is theorem-level, not regression: with per-DOF error rate $p$, $\mathbb{E}[\#\text{errors}] = p \cdot \mathrm{DOF}$. Thus $\mathbb{E}_{\text{pre}}/\mathbb{E}_{\text{post}} = \rho$ whenever capabilities are preserved; $\rho$ is conservative when capabilities increase.
 
-**Error rate correlation:** We tracked bug reports before/after each refactoring. Higher leverage architectures had significantly lower error rates ($r = -0.85$, $p < 0.001$).
+\(3\) Modification complexity scales with the same factor when a change targets the consolidated concern.
 
-**Modification cost:** Measured time to implement requirement changes. High-leverage architectures reduced modification time by mean factor of 8.3$\times$ (range: 3$\times$--40$\times$).
+## Threats to Validity (Structural)
 
-## Threats to Validity
+**Single codebase:** All witnesses from OpenHCS; other domains could reveal different archetype frequencies but do not affect the correctness of each $\rho$.
 
-**Single codebase:** All case studies from OpenHCS. External validity requires replication across diverse projects.
+**DOF operationalization:** Counting independent definition loci is coarse but robust for registries, endpoints, overrides, duplicated schemas.
 
-**Python-specific:** Some instances (SSOT) rely on Python features. Generalization to other languages remains open question.
-
-**Per-component error rate assumption:** We assumed constant $p \approx 0.01$. Actual error rates may vary by component type.
-
-**Capability quantification:** We counted capabilities qualitatively. Weighted capabilities might yield different results.
+**Capability growth:** Some refactorings increase capabilities; in those cases $\rho$ is a lower bound on leverage gain.
 
 # Related Work
 
@@ -1100,7 +1069,7 @@ We provided the first formal framework for architectural decision-making based o
 
 **5. New Instances:** Applied framework to microservices, REST APIs, configuration, and database schemas.
 
-**6. Empirical Validation:** 13 case studies from OpenHCS showing mean leverage improvement of 12.6$\times$ with strong negative correlation between leverage and error rate ($r = -0.85$).
+**6. Empirical Validation:** 13 structural witnesses from OpenHCS with DOF collapses yielding $\rho$ factors from 5$\times$ to 120$\times$ (many to a single locus).
 
 ## Decision Procedure
 
