@@ -27,6 +27,9 @@
 \providecommand{\tightlist}{%
   \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
 
+% Disable proof environment's automatic QED (we use inline blacksquare)
+\renewcommand{\qedsymbol}{}
+
 % Theorem environments
 \newtheorem{theorem}{Theorem}[section]
 \newtheorem{lemma}[theorem]{Lemma}

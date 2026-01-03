@@ -101,7 +101,7 @@ We develop a metatheory applicable to any classification system. The core insigh
 
 The model formalizes what programmers intuitively understand but rarely make explicit:
 
-1.  **Universal dominance** (Theorem 3.4): For languages with explicit inheritance (`bases` axis), nominal typing Pareto-dominates structural typing in greenfield development (provides strictly more capabilities with zero tradeoffs). Structural typing is appropriate only when `bases = ``[``]` universally (e.g., Go) or in retrofit/interop scenarios. The decision is **derived** from capability analysis, not preference.
+1.  **Universal dominance** (Theorem 3.4): For languages with explicit inheritance (`bases` axis), nominal typing Pareto-dominates structural typing in greenfield development (provides strictly more capabilities with zero tradeoffs). Structural typing loses nothing only when `bases = ``[``]` universally (e.g., Go); in retrofit scenarios it remains a sacrifice, not an alternative. The decision is **derived** from capability analysis, not preference.
 
 2.  **Complexity separation** (Theorem 4.3): Nominal typing achieves O(1) error localization; duck typing requires $\Omega(n)$ call-site inspection.
 
@@ -220,10 +220,9 @@ This paper makes absolute claims. We do not argue nominal typing is "preferred" 
 
 **Fixed-axis vs. axis-parametric correctness.** The above results establish dominance *within* fixed-axis type systems. However, any fixed-axis system is fundamentally incomplete (Theorem 3.77, Fixed Axis Incompleteness): there exist domains requiring axes outside the fixed set. The truly *correct* approach is axis-parametric---deriving the minimal axis set from domain requirements (Section [\[axis-parametric-theory\]](#axis-parametric-theory){reference-type="ref" reference="axis-parametric-theory"}). Fixed-axis maximization (choosing nominal over structural when $B \neq \emptyset$) is coherent only when the axis-parametric option is unavailable. Put simply: axis-parametric is correct; fixed-axis nominal is less wrong than fixed-axis structural; but both fixed options remain incomplete.
 
-**Boundary scope** (pulled forward for clarity): when $B = \emptyset$ (no user-declared inheritance), e.g., pure JSON/FFI payloads or languages intentionally designed without inheritance, structural typing is the coherent choice. Our dominance claims apply whenever $B \neq
-\emptyset$ *and* inheritance metadata is accessible; FFI or opaque-runtime boundaries that erase $B$ fall outside the claim.
+**Boundary scope** (pulled forward for clarity): when $B = \emptyset$ (no user-declared inheritance), e.g., pure JSON/FFI payloads or languages intentionally designed without inheritance, structural typing is the coherent choice. Whenever $B \neq \emptyset$ and inheritance metadata is accessible, nominal typing strictly dominates. Systems where $B = \emptyset$ are not exceptions---they simply do not require the B axis, and thus shape-based typing loses nothing (but gains nothing either).
 
-We do not claim all systems require provenance. We prove that systems requiring provenance cannot use shape-based typing. The requirements are the architect's choice; the discipline, given requirements, is derived.
+The requirements determine the axes; the axes determine the discipline. Systems requiring provenance cannot use shape-based typing---this is not a design recommendation but a mathematical constraint.
 
 ## Roadmap
 
@@ -555,12 +554,12 @@ then any adequate representation for $Q_D$ must carry at least one bit distingui
 #### 2.4.4 Cross-Language Instantiation
 
 ::: {#tab:nbs-cross}
-  Language   N (Name)                 B (Bases)                              S (Namespace)                       Type system
-  ---------- ------------------------ -------------------------------------- ----------------------------------- -------------
-  Python     `type(x).__name__`       `__bases__`; `__mro__`                 `__dict__`; `dir()`                 Nominal
-  Java       `getClass().getName()`   `getSuperclass()`, `getInterfaces()`   `getDeclaredMethods()`              Nominal
-  Ruby       `obj.class.name`         `ancestors` (ordered)                  `methods`, `instance_variables`     Nominal
-  C#         `GetType().Name`         `BaseType`, `GetInterfaces()`          `GetProperties()`, `GetMethods()`   Nominal
+  Lang.    N (Name)                    B (Bases)                              S (Namespace)                       Type
+  -------- --------------------------- -------------------------------------- ----------------------------------- ---------
+  Python   `type(x).` `__name__`       `__bases__`; `__mro__`                 `__dict__`; `dir()`                 Nominal
+  Java     `getClass()` `.getName()`   `getSuperclass()`, `getInterfaces()`   `getDeclaredMethods()`              Nominal
+  Ruby     `obj.class` `.name`         `ancestors` (ordered)                  `methods`, `instance_variables`     Nominal
+  C#       `GetType()` `.Name`         `BaseType`, `GetInterfaces()`          `GetProperties()`, `GetMethods()`   Nominal
 
   : Cross-language instantiation of the (B, S) model
 :::
@@ -1144,15 +1143,7 @@ No computable extension over $\{S\}$ (even with the leaf of $B$) can recover pro
 
 **Corollary 3.40 (No Future Fix).** No future language feature, library, or tool operating within the duck typing paradigm can provide provenance. The limitation is structural, not technical.
 
-#### 3.11.5 Scope Boundaries
-
-We explicitly scope our claims:
-
-**Non-Claim 3.41 (Untyped Code).** This paper does not claim nominal typing applies to systems where $B = \emptyset$ (no inheritance). For untyped code being gradually typed (Siek & Taha 2006), the dynamic type `?` is appropriate. However, for retrofit scenarios where $B \neq \emptyset$, adapters make nominal typing available (Theorem 2.10j).
-
-**Non-Claim 3.42 (Interop Boundaries).** At boundaries with untyped systems (FFI, JSON parsing, external APIs), structural typing via Protocols is *convenient* but not necessary. Per Theorem 2.10j, explicit adapters provide the same functionality with better properties. Protocol is a dominated choice---a concession, not an alternative (Corollary 2.10k'). Choosing Protocol accepts reduced capabilities to defer adapter work.
-
-#### 3.11.6 Capability Exhaustiveness
+#### 3.11.5 Capability Exhaustiveness
 
 **Theorem 3.43a (Capability Exhaustiveness).** The four capabilities (provenance, identity, enumeration, conflict resolution) are **exhaustive**---they are the only capabilities derivable from the Bases axis.
 
@@ -1527,7 +1518,7 @@ Each transition adds exactly the capabilities predicted by Theorem 3.82.
   "What about higher-kinded types?"           Remark 3.49 (parameterized N)
   "Only applies to greenfield"                Theorem 2.10j (Adapters eliminate retrofit exception)
   "Legacy codebases are different"            Corollary 3.51 (sacrifice, not alternative)
-  "Claims are too broad"                      Non-Claims 3.41-3.42 (true scope limits)
+  "Claims are too broad"                      Theorem 2.6 (axis requirements are domain-derived)
   "You can't say rewrite everything"          Theorem 3.55 (Dominance $\neq$ Migration)
   "Greenfield is undefined"                   Definitions 3.57-3.58, Theorem 3.59
   "Provenance requirement is circular"        Theorem 3.61 (Provenance Detection)
@@ -2943,7 +2934,7 @@ Measures O(1) vs $\Omega$(n) error localization. RD = 1 indicates all dispatch i
 
 ## Hybrid Systems and Methodology Scope
 
-Our theorems establish necessary conditions for provenance-tracking systems. This section clarifies when the methodology applies and when shape-based typing is an acceptable concession.
+Our theorems establish necessary conditions for provenance-tracking systems. This section clarifies the relationship between dominance and practical constraints---shape-based typing is never an alternative, only a sacrifice forced by external constraints.
 
 #### 8.6.1 Structural Typing Is Eliminable (Theorem 2.10g)
 
@@ -3240,7 +3231,7 @@ Two architects examining identical requirements will derive identical discipline
 
 For type systems specifically: this work does not contribute to the debate over typing disciplines. It resolves it. For classification systems generally: the "which taxonomy should we use" question has a mathematical answer given the domain.
 
-**On capability vs. aesthetics.** We do not claim nominal typing is aesthetically superior, more elegant, or more readable. We prove (with machine-checked formalization) that it provides strictly more capabilities. Choosing fewer capabilities is a valid engineering decision when justified by other constraints (e.g., interoperability with systems that lack type metadata). Appendix [\[appendix:historical\]](#appendix:historical){reference-type="ref" reference="appendix:historical"} discusses the historical context of typing discipline selection.
+**On capability vs. aesthetics.** Aesthetics, elegance, and readability are orthogonal to capability. The theorems establish that nominal typing provides strictly more capabilities---this is a mathematical fact, not a stylistic preference. Choosing fewer capabilities is a sacrifice, not an alternative. If constraints force that sacrifice (e.g., interoperability with systems lacking type metadata), the sacrifice is justified---but it remains a sacrifice.
 
 **On PEP 20 (The Zen of Python).** PEP 20 is sometimes cited to justify duck typing. However, several Zen principles align with nominal typing: "Explicit is better than implicit" (ABCs are explicit; hasattr is implicit), and "In the face of ambiguity, refuse the temptation to guess" (duck typing infers interface conformance; nominal typing verifies it). We discuss this alignment in Section 8.9.
 
@@ -3298,7 +3289,7 @@ We identify the major categories of potential concerns and demonstrate why each 
   "What about higher-kinded types?"        Remark 3.49 (parameterized N)
   "Only applies to greenfield"             Theorem 2.10j (Adapters eliminate retrofit exception)
   "Legacy codebases are different"         Corollary 3.51 (sacrifice, not alternative)
-  "Claims are too broad"                   Non-Claims 3.41-3.42 (true scope limits)
+  "Claims are too broad"                   Theorem 2.6 (axis requirements are domain-derived)
   "Dominance $\neq$ migration"             Theorem 3.55 (Dominance $\neq$ Migration)
   "Greenfield is undefined"                Definitions 3.57-3.58, Theorem 3.59
   "Provenance requirement is circular"     Theorem 3.61 (Provenance Detection)

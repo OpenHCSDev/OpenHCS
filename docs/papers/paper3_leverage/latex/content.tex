@@ -77,7 +77,7 @@ The linear model $P_{\text{error}}(n, p) \approx np$ preserves all pairwise orde
 \end{theorem}
 
 \begin{proof}
-Taylor expansion: $(1-p)^n = 1 - np + \binom{n}{2}p^2 - \cdots$. For $p < 0.05$, higher-order terms $< 0.025n^2p^2$. Ordering preservation: if $n_1 < n_2$, then $n_1p < n_2p$ (strict monotonicity). \qed
+Taylor expansion: $(1-p)^n = 1 - np + \binom{n}{2}p^2 - \cdots$. For $p < 0.05$, higher-order terms $< 0.025n^2p^2$. Ordering preservation: if $n_1 < n_2$, then $n_1p < n_2p$ (strict monotonicity). \(\blacksquare\)
 \end{proof}
 
 \subsection{Leverage Gap}
@@ -94,7 +94,7 @@ Therefore:
 \end{theorem}
 
 \begin{proof}
-Each DOF is an independent modification point. When fact $F$ changes, each location encoding $F$ requires update. Expected modifications = (number of locations) $\times$ (probability of change). \qed
+Each DOF is an independent modification point. When fact $F$ changes, each location encoding $F$ requires update. Expected modifications = (number of locations) $\times$ (probability of change). \(\blacksquare\)
 \end{proof}
 
 \subsection{Subsumption of Prior Results}
@@ -110,7 +110,7 @@ This recovers the SSOT uniqueness result: $\text{DOF} = 1$ is the unique minimal
 \end{theorem}
 
 \begin{proof}
-Definition-time hooks enable derivation at source definition. $n$ derived locations require 0 independent modifications (hooks maintain consistency). Therefore $\text{DOF} = 1$. Capabilities scale with derivations: $|C| = n$. Thus $L = n/1 = n$. \qed
+Definition-time hooks enable derivation at source definition. $n$ derived locations require 0 independent modifications (hooks maintain consistency). Therefore $\text{DOF} = 1$. Capabilities scale with derivations: $|C| = n$. Thus $L = n/1 = n$. \(\blacksquare\)
 \end{proof}
 
 \begin{theorem}[Paper 1 as Instance]\label{thm:paper1-instance}
@@ -126,7 +126,7 @@ This recovers the nominal dominance result.
 \end{theorem}
 
 \begin{proof}
-Nominal typing provides 4 B-dependent capabilities impossible with duck typing (provenance, identity, enumeration, conflict resolution). DOF comparable (both are type systems). Therefore $L_{\text{nominal}} = (c+4)/d > c/d = L_{\text{duck}}$. \qed
+Nominal typing provides 4 B-dependent capabilities impossible with duck typing (provenance, identity, enumeration, conflict resolution). DOF comparable (both are type systems). Therefore $L_{\text{nominal}} = (c+4)/d > c/d = L_{\text{duck}}$. \(\blacksquare\)
 \end{proof}
 
 \subsection{Organization}
@@ -203,7 +203,7 @@ where $A_1 \oplus A_2 = (C_1 \cup C_2, S_1 \times S_2, T_1 \times T_2, R_1 \cup 
 \end{proposition}
 
 \begin{proof}
-$\dim(S_1 \times S_2) = \dim(S_1) + \dim(S_2)$ by standard linear algebra. \qed
+$\dim(S_1 \times S_2) = \dim(S_1) + \dim(S_2)$ by standard linear algebra. \(\blacksquare\)
 \end{proof}
 
 \begin{example}[DOF Calculations]
@@ -299,7 +299,7 @@ with equality when $\delta R$ affects all components.
 \end{theorem}
 
 \begin{proof}
-Each change modifies at most one DOF. Since there are $\text{DOF}(A)$ independent modification points, the maximum number of changes is $\text{DOF}(A)$. \qed
+Each change modifies at most one DOF. Since there are $\text{DOF}(A)$ independent modification points, the maximum number of changes is $\text{DOF}(A)$. \(\blacksquare\)
 \end{proof}
 
 \begin{example}[SSOT vs Scattered]
@@ -353,7 +353,7 @@ Therefore:
 P(\text{error in } A_i \land \text{error in } A_j) = P(\text{error in } A_i) \cdot P(\text{error in } A_j)
 \]
 
-This is the definition of statistical independence. \qed
+This is the definition of statistical independence. \(\blacksquare\)
 \end{proof}
 
 \begin{corollary}[DOF = Independent Error Sources]\label{cor:dof-errors}
@@ -365,7 +365,7 @@ For a system to be correct, all $n$ independent axes must be error-free. Errors 
 \end{theorem}
 
 \begin{proof}
-By Paper 2's coherence theorem, incoherence in any axis violates system correctness. An error in axis $A_i$ introduces incoherence along $A_i$. Therefore, correctness requires $\bigwedge_{i=1}^{n} \neg\text{error}(A_i)$. By Theorem~\ref{thm:error-independence}, this probability is $(1-p)^n$. \qed
+By Paper 2's coherence theorem, incoherence in any axis violates system correctness. An error in axis $A_i$ introduces incoherence along $A_i$. Therefore, correctness requires $\bigwedge_{i=1}^{n} \neg\text{error}(A_i)$. By Theorem~\ref{thm:error-independence}, this probability is $(1-p)^n$. \(\blacksquare\)
 \end{proof}
 
 \subsection{Error Probability Formula}
@@ -384,7 +384,7 @@ P_{\text{correct}}(n) = (1-p)^n
 \]
 Therefore:
 \[
-P_{\text{error}}(n) = 1 - P_{\text{correct}}(n) = 1 - (1-p)^n \qed
+P_{\text{error}}(n) = 1 - P_{\text{correct}}(n) = 1 - (1-p)^n \(\blacksquare\)
 \]
 \end{proof}
 
@@ -399,7 +399,7 @@ with relative error less than $10\%$.
 \begin{proof}
 Using Taylor expansion: $(1-p)^n = e^{n \ln(1-p)} \approx e^{-np}$ for small $p$.
 Further: $e^{-np} \approx 1 - np$ for $np < 1$.
-Therefore: $P_{\text{error}}(n) = 1 - (1-p)^n \approx 1 - (1 - np) = np$. \qed
+Therefore: $P_{\text{error}}(n) = 1 - (1-p)^n \approx 1 - (1 - np) = np$. \(\blacksquare\)
 \end{proof}
 
 \begin{corollary}[DOF-Error Monotonicity]\label{cor:dof-monotone}
@@ -410,7 +410,7 @@ For architectures $A_1, A_2$:
 \end{corollary}
 
 \begin{proof}
-$P_{\text{error}}(n) = 1 - (1-p)^n$ is strictly increasing in $n$ for $p \in (0,1)$. \qed
+$P_{\text{error}}(n) = 1 - (1-p)^n$ is strictly increasing in $n$ for $p \in (0,1)$. \(\blacksquare\)
 \end{proof}
 
 \subsection{Expected Errors}
@@ -425,7 +425,7 @@ Expected number of errors in architecture $A$:
 \begin{proof}
 By linearity of expectation:
 \[
-\mathbb{E}[\text{\# errors}] = \sum_{i=1}^{\text{DOF}(A)} P(\text{error in DOF}_i) = \sum_{i=1}^{\text{DOF}(A)} p = p \cdot \text{DOF}(A) \qed
+\mathbb{E}[\text{\# errors}] = \sum_{i=1}^{\text{DOF}(A)} P(\text{error in DOF}_i) = \sum_{i=1}^{\text{DOF}(A)} p = p \cdot \text{DOF}(A) \(\blacksquare\)
 \]
 \end{proof}
 
@@ -542,7 +542,7 @@ With $|\text{Cap}(A_1)| = |\text{Cap}(A_2)|$:
 
 By Corollary \ref{cor:dof-monotone}:
 \[
-\text{DOF}(A_1) < \text{DOF}(A_2) \implies P_{\text{error}}(A_1) < P_{\text{error}}(A_2) \qed
+\text{DOF}(A_1) < \text{DOF}(A_2) \implies P_{\text{error}}(A_1) < P_{\text{error}}(A_2) \(\blacksquare\)
 \]
 \end{proof}
 
@@ -565,7 +565,7 @@ As capabilities grow: $|\text{Cap}(M)| \to \infty$
 
 Therefore:
 \[
-L(M) = \frac{|\text{Cap}(M)|}{\text{DOF}(M)} = \frac{|\text{Cap}(M)|}{1} \to \infty \qed
+L(M) = \frac{|\text{Cap}(M)|}{\text{DOF}(M)} = \frac{|\text{Cap}(M)|}{1} \to \infty \(\blacksquare\)
 \]
 \end{proof}
 
@@ -582,7 +582,7 @@ Given requirements $R$, architecture $A^*$ is optimal if and only if:
 \begin{proof}
 ($\Leftarrow$) Suppose $A^*$ satisfies (1) and (2). Then $A^*$ is feasible and has maximum leverage among feasible architectures. By Theorem \ref{thm:leverage-error}, this minimizes error probability, so $A^*$ is optimal.
 
-($\Rightarrow$) Suppose $A^*$ is optimal but violates (1) or (2). If (1) fails, $A^*$ doesn't meet requirements (contradiction). If (2) fails, there exists $A'$ with $L(A') > L(A^*)$, so $P_{\text{error}}(A') < P_{\text{error}}(A^*)$ by Theorem \ref{thm:leverage-error} (contradiction). \qed
+($\Rightarrow$) Suppose $A^*$ is optimal but violates (1) or (2). If (1) fails, $A^*$ doesn't meet requirements (contradiction). If (2) fails, there exists $A'$ with $L(A') > L(A^*)$, so $P_{\text{error}}(A') < P_{\text{error}}(A^*)$ by Theorem \ref{thm:leverage-error} (contradiction). \(\blacksquare\)
 \end{proof}
 
 \textbf{Decision Procedure:}
@@ -616,7 +616,7 @@ Assume WLOG $L(A_1) \leq L(A_2)$, i.e., $c_1/n_1 \leq c_2/n_2$.
 
 Then:
 \[
-\frac{c_1 + c_2}{n_1 + n_2} \geq \frac{c_1 + c_1 \cdot (n_2/n_1)}{n_1 + n_2} = \frac{c_1(n_1 + n_2)}{n_1(n_1 + n_2)} = \frac{c_1}{n_1} = L(A_1) \qed
+\frac{c_1 + c_2}{n_1 + n_2} \geq \frac{c_1 + c_1 \cdot (n_2/n_1)}{n_1 + n_2} = \frac{c_1(n_1 + n_2)}{n_1(n_1 + n_2)} = \frac{c_1}{n_1} = L(A_1) \(\blacksquare\)
 \]
 \end{proof}
 
@@ -718,7 +718,7 @@ L(A_{\text{non-SSOT}}) &= c/n
 
 Ratio:
 \[
-\frac{L(A_{\text{SSOT}})}{L(A_{\text{non-SSOT}})} = \frac{c}{c/n} = n \qed
+\frac{L(A_{\text{SSOT}})}{L(A_{\text{non-SSOT}})} = \frac{c}{c/n} = n \(\blacksquare\)
 \]
 \end{proof}
 
@@ -795,7 +795,7 @@ By Observation (similar DOF):
 
 Therefore:
 \[
-L(\text{Nominal}) = \frac{c_{\text{duck}} + 4}{d} > \frac{c_{\text{duck}}}{d} = L(\text{Duck}) \qed
+L(\text{Nominal}) = \frac{c_{\text{duck}} + 4}{d} > \frac{c_{\text{duck}}}{d} = L(\text{Duck}) \(\blacksquare\)
 \]
 \end{proof}
 

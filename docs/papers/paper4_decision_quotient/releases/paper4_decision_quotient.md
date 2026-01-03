@@ -261,7 +261,7 @@ Coordinate set $I$ is sufficient iff: $$s_I = s'_I \implies \Opt(s) = \Opt(s')$$
 
 This holds iff configurations agreeing on parameters in $I$ exhibit identical behaviors.
 
-Therefore, "does parameter subset $I$ preserve all behaviors?" is exactly SUFFICIENCY-CHECK for the constructed decision problem. 0◻ ◻
+Therefore, "does parameter subset $I$ preserve all behaviors?" is exactly SUFFICIENCY-CHECK for the constructed decision problem. $\blacksquare$ ◻
 :::
 
 ::: remark
@@ -315,7 +315,7 @@ For concrete threshold: when $n = 20$ parameters, exhaustive search requires $2^
 
 Since $2^n$ grows faster than any polynomial in $k$ or $n$, there exists $n_0$ such that for all $n > n_0$: $$C_{\text{over}}(k) \ll C_{\text{find}}(n)$$
 
-Adding underspecification risk $C_{\text{under}}$ (production failures from missing parameters), which can be arbitrarily large, makes over-specification strictly dominant. 0◻ ◻
+Adding underspecification risk $C_{\text{under}}$ (production failures from missing parameters), which can be arbitrarily large, makes over-specification strictly dominant. $\blacksquare$ ◻
 :::
 
 ::: corollary
@@ -329,7 +329,7 @@ Adding underspecification risk $C_{\text{under}}$ (production failures from miss
 :::
 
 ::: proof
-*Proof.* Such an algorithm would solve MINIMUM-SUFFICIENT-SET in polynomial time, contradicting Theorem [\[thm:minsuff-conp\]](#thm:minsuff-conp){reference-type="ref" reference="thm:minsuff-conp"} (assuming $\Pclass \neq \coNP$). 0◻ ◻
+*Proof.* Such an algorithm would solve MINIMUM-SUFFICIENT-SET in polynomial time, contradicting Theorem [\[thm:minsuff-conp\]](#thm:minsuff-conp){reference-type="ref" reference="thm:minsuff-conp"} (assuming $\Pclass \neq \coNP$). $\blacksquare$ ◻
 :::
 
 ::: remark

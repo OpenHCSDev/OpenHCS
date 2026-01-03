@@ -61,7 +61,7 @@ where $P_{\text{error}}(n, p) = 1 - (1-p)^n$ (standard reliability theory [@pat
 :::
 
 ::: proof
-*Proof.* Taylor expansion: $(1-p)^n = 1 - np + \binom{n}{2}p^2 - \cdots$. For $p < 0.05$, higher-order terms $< 0.025n^2p^2$. Ordering preservation: if $n_1 < n_2$, then $n_1p < n_2p$ (strict monotonicity). 0◻ ◻
+*Proof.* Taylor expansion: $(1-p)^n = 1 - np + \binom{n}{2}p^2 - \cdots$. For $p < 0.05$, higher-order terms $< 0.025n^2p^2$. Ordering preservation: if $n_1 < n_2$, then $n_1p < n_2p$ (strict monotonicity). $\blacksquare$ ◻
 :::
 
 ## Leverage Gap
@@ -71,7 +71,7 @@ where $P_{\text{error}}(n, p) = 1 - (1-p)^n$ (standard reliability theory [@pat
 :::
 
 ::: proof
-*Proof.* Each DOF is an independent modification point. When fact $F$ changes, each location encoding $F$ requires update. Expected modifications = (number of locations) $\times$ (probability of change). 0◻ ◻
+*Proof.* Each DOF is an independent modification point. When fact $F$ changes, each location encoding $F$ requires update. Expected modifications = (number of locations) $\times$ (probability of change). $\blacksquare$ ◻
 :::
 
 ## Building on Prior Results
@@ -91,7 +91,7 @@ This paper does not *subsume* Papers 1 and 2---it *builds on* their epistemic fo
 :::
 
 ::: proof
-*Proof.* Paper 2 proves: $\text{DOF} > 1$ for a fact $F$ implies oracles can diverge (incoherence). Therefore coherent architecture requires $\text{DOF}(F) = 1$ for each fact $F$. Given this constraint, architectures differ in how many capabilities they derive from coherent representation. This ratio is leverage. 0◻ ◻
+*Proof.* Paper 2 proves: $\text{DOF} > 1$ for a fact $F$ implies oracles can diverge (incoherence). Therefore coherent architecture requires $\text{DOF}(F) = 1$ for each fact $F$. Given this constraint, architectures differ in how many capabilities they derive from coherent representation. This ratio is leverage. $\blacksquare$ ◻
 :::
 
 ::: theorem
@@ -99,7 +99,7 @@ This paper does not *subsume* Papers 1 and 2---it *builds on* their epistemic fo
 :::
 
 ::: proof
-*Proof.* By Paper 1, axes are orthogonal, so errors are independent (Theorem [\[thm:error-independence\]](#thm:error-independence){reference-type="ref" reference="thm:error-independence"}). Nominal typing adds 4 B-dependent capabilities impossible with duck typing. DOF is comparable (both are type systems with similar annotation burden). Therefore $L_{\text{nominal}} = (c+4)/d > c/d = L_{\text{duck}}$. 0◻ ◻
+*Proof.* By Paper 1, axes are orthogonal, so errors are independent (Theorem [\[thm:error-independence\]](#thm:error-independence){reference-type="ref" reference="thm:error-independence"}). Nominal typing adds 4 B-dependent capabilities impossible with duck typing. DOF is comparable (both are type systems with similar annotation burden). Therefore $L_{\text{nominal}} = (c+4)/d > c/d = L_{\text{duck}}$. $\blacksquare$ ◻
 :::
 
 ## Organization
@@ -168,7 +168,7 @@ We formalize the core concepts: architecture state spaces, degrees of freedom, c
 :::
 
 ::: proof
-*Proof.* $\dim(S_1 \times S_2) = \dim(S_1) + \dim(S_2)$ by standard linear algebra. 0◻ ◻
+*Proof.* $\dim(S_1 \times S_2) = \dim(S_1) + \dim(S_2)$ by standard linear algebra. $\blacksquare$ ◻
 :::
 
 ::: example
@@ -256,7 +256,7 @@ $A_1$ *strictly dominates* $A_2$ (written $A_1 \succ A_2$) if $A_1 \succeq A_2$ 
 :::
 
 ::: proof
-*Proof.* Each change modifies at most one DOF. Since there are $\text{DOF}(A)$ independent modification points, the maximum number of changes is $\text{DOF}(A)$. 0◻ ◻
+*Proof.* Each change modifies at most one DOF. Since there are $\text{DOF}(A)$ independent modification points, the maximum number of changes is $\text{DOF}(A)$. $\blacksquare$ ◻
 :::
 
 ::: example
@@ -309,7 +309,7 @@ An *error along axis $A_i$* is a deviation from specification in the dimension $
 
 Therefore: $$P(\text{error in } A_i \land \text{error in } A_j) = P(\text{error in } A_i) \cdot P(\text{error in } A_j)$$
 
-This is the definition of statistical independence. 0◻ ◻
+This is the definition of statistical independence. $\blacksquare$ ◻
 :::
 
 ::: corollary
@@ -317,7 +317,7 @@ This is the definition of statistical independence. 0◻ ◻
 :::
 
 ::: proof
-*Proof.* DOF counts independent axes (Paper 2, Definition [\[def:dof\]](#def:dof){reference-type="ref" reference="def:dof"}). By Theorem [\[thm:error-independence\]](#thm:error-independence){reference-type="ref" reference="thm:error-independence"}, independent axes have independent errors. 0◻ ◻
+*Proof.* DOF counts independent axes (Paper 2, Definition [\[def:dof\]](#def:dof){reference-type="ref" reference="def:dof"}). By Theorem [\[thm:error-independence\]](#thm:error-independence){reference-type="ref" reference="thm:error-independence"}, independent axes have independent errors. $\blacksquare$ ◻
 :::
 
 ::: theorem
@@ -325,7 +325,7 @@ This is the definition of statistical independence. 0◻ ◻
 :::
 
 ::: proof
-*Proof.* By Paper 2's coherence theorem (`oracle_arbitrary`), incoherence in any axis violates system correctness. An error in axis $A_i$ introduces incoherence along $A_i$. Therefore, correctness requires $\bigwedge_{i=1}^{n} \neg\text{error}(A_i)$. By Theorem [\[thm:error-independence\]](#thm:error-independence){reference-type="ref" reference="thm:error-independence"}, this probability is $(1-p)^n$. 0◻ ◻
+*Proof.* By Paper 2's coherence theorem (`oracle_arbitrary`), incoherence in any axis violates system correctness. An error in axis $A_i$ introduces incoherence along $A_i$. Therefore, correctness requires $\bigwedge_{i=1}^{n} \neg\text{error}(A_i)$. By Theorem [\[thm:error-independence\]](#thm:error-independence){reference-type="ref" reference="thm:error-independence"}, this probability is $(1-p)^n$. $\blacksquare$ ◻
 :::
 
 ## Error Probability Formula
@@ -335,7 +335,7 @@ This is the definition of statistical independence. 0◻ ◻
 :::
 
 ::: proof
-*Proof.* By Theorem [\[thm:error-independence\]](#thm:error-independence){reference-type="ref" reference="thm:error-independence"} (derived from Paper 1's orthogonality), each DOF has independent error probability $p$, so each is correct with probability $(1-p)$. By Theorem [\[thm:error-compound\]](#thm:error-compound){reference-type="ref" reference="thm:error-compound"}, all $n$ DOF must be correct: $$P_{\text{correct}}(n) = (1-p)^n$$ Therefore: $$P_{\text{error}}(n) = 1 - P_{\text{correct}}(n) = 1 - (1-p)^n \qed$$ ◻
+*Proof.* By Theorem [\[thm:error-independence\]](#thm:error-independence){reference-type="ref" reference="thm:error-independence"} (derived from Paper 1's orthogonality), each DOF has independent error probability $p$, so each is correct with probability $(1-p)$. By Theorem [\[thm:error-compound\]](#thm:error-compound){reference-type="ref" reference="thm:error-compound"}, all $n$ DOF must be correct: $$P_{\text{correct}}(n) = (1-p)^n$$ Therefore: $$P_{\text{error}}(n) = 1 - P_{\text{correct}}(n) = 1 - (1-p)^n$$ $\blacksquare$ ◻
 :::
 
 ::: corollary
@@ -343,7 +343,7 @@ This is the definition of statistical independence. 0◻ ◻
 :::
 
 ::: proof
-*Proof.* Using Taylor expansion: $(1-p)^n = e^{n \ln(1-p)} \approx e^{-np}$ for small $p$. Further: $e^{-np} \approx 1 - np$ for $np < 1$. Therefore: $P_{\text{error}}(n) = 1 - (1-p)^n \approx 1 - (1 - np) = np$. 0◻ ◻
+*Proof.* Using Taylor expansion: $(1-p)^n = e^{n \ln(1-p)} \approx e^{-np}$ for small $p$. Further: $e^{-np} \approx 1 - np$ for $np < 1$. Therefore: $P_{\text{error}}(n) = 1 - (1-p)^n \approx 1 - (1 - np) = np$. $\blacksquare$ ◻
 :::
 
 ::: corollary
@@ -351,7 +351,7 @@ This is the definition of statistical independence. 0◻ ◻
 :::
 
 ::: proof
-*Proof.* $P_{\text{error}}(n) = 1 - (1-p)^n$ is strictly increasing in $n$ for $p \in (0,1)$. 0◻ ◻
+*Proof.* $P_{\text{error}}(n) = 1 - (1-p)^n$ is strictly increasing in $n$ for $p \in (0,1)$. $\blacksquare$ ◻
 :::
 
 ## Expected Errors
@@ -361,7 +361,7 @@ This is the definition of statistical independence. 0◻ ◻
 :::
 
 ::: proof
-*Proof.* By linearity of expectation: $$\mathbb{E}[\text{\# errors}] = \sum_{i=1}^{\text{DOF}(A)} P(\text{error in DOF}_i) = \sum_{i=1}^{\text{DOF}(A)} p = p \cdot \text{DOF}(A) \qed$$ ◻
+*Proof.* By linearity of expectation: $$\mathbb{E}[\text{\# errors}] = \sum_{i=1}^{\text{DOF}(A)} P(\text{error in DOF}_i) = \sum_{i=1}^{\text{DOF}(A)} p = p \cdot \text{DOF}(A)$$ $\blacksquare$ ◻
 :::
 
 ::: example
@@ -470,7 +470,7 @@ Since $L(A) = |\text{Cap}(A)|/\text{DOF}(A)$ and capabilities are equal: $$\frac
 
 With $|\text{Cap}(A_1)| = |\text{Cap}(A_2)|$: $$\frac{1}{\text{DOF}(A_1)} > \frac{1}{\text{DOF}(A_2)} \implies \text{DOF}(A_1) < \text{DOF}(A_2)$$
 
-By Corollary [\[cor:dof-monotone\]](#cor:dof-monotone){reference-type="ref" reference="cor:dof-monotone"}: $$\text{DOF}(A_1) < \text{DOF}(A_2) \implies P_{\text{error}}(A_1) < P_{\text{error}}(A_2) \qed$$ ◻
+By Corollary [\[cor:dof-monotone\]](#cor:dof-monotone){reference-type="ref" reference="cor:dof-monotone"}: $$\text{DOF}(A_1) < \text{DOF}(A_2) \implies P_{\text{error}}(A_1) < P_{\text{error}}(A_2)$$ $\blacksquare$ ◻
 :::
 
 **Corollary:** Maximizing leverage minimizes error probability (for fixed capabilities).
@@ -490,7 +490,7 @@ By Corollary [\[cor:dof-monotone\]](#cor:dof-monotone){reference-type="ref" refe
 
 As capabilities grow: $|\text{Cap}(M)| \to \infty$
 
-Therefore: $$L(M) = \frac{|\text{Cap}(M)|}{\text{DOF}(M)} = \frac{|\text{Cap}(M)|}{1} \to \infty \qed$$ ◻
+Therefore: $$L(M) = \frac{|\text{Cap}(M)|}{\text{DOF}(M)} = \frac{|\text{Cap}(M)|}{1} \to \infty$$ $\blacksquare$ ◻
 :::
 
 ## Architectural Decision Criterion
@@ -506,7 +506,7 @@ Therefore: $$L(M) = \frac{|\text{Cap}(M)|}{\text{DOF}(M)} = \frac{|\text{Cap}(M)
 ::: proof
 *Proof.* ($\Leftarrow$) Suppose $A^*$ satisfies (1) and (2). Then $A^*$ is feasible and has maximum leverage among feasible architectures. By Theorem [\[thm:leverage-error\]](#thm:leverage-error){reference-type="ref" reference="thm:leverage-error"}, this minimizes error probability, so $A^*$ is optimal.
 
-($\Rightarrow$) Suppose $A^*$ is optimal but violates (1) or (2). If (1) fails, $A^*$ doesn't meet requirements (contradiction). If (2) fails, there exists $A'$ with $L(A') > L(A^*)$, so $P_{\text{error}}(A') < P_{\text{error}}(A^*)$ by Theorem [\[thm:leverage-error\]](#thm:leverage-error){reference-type="ref" reference="thm:leverage-error"} (contradiction). 0◻ ◻
+($\Rightarrow$) Suppose $A^*$ is optimal but violates (1) or (2). If (1) fails, $A^*$ doesn't meet requirements (contradiction). If (2) fails, there exists $A'$ with $L(A') > L(A^*)$, so $P_{\text{error}}(A') < P_{\text{error}}(A^*)$ by Theorem [\[thm:leverage-error\]](#thm:leverage-error){reference-type="ref" reference="thm:leverage-error"} (contradiction). $\blacksquare$ ◻
 :::
 
 **Decision Procedure:**
@@ -536,7 +536,7 @@ Then: $$L(A) = \frac{c_1 + c_2}{n_1 + n_2}$$
 
 Assume WLOG $L(A_1) \leq L(A_2)$, i.e., $c_1/n_1 \leq c_2/n_2$.
 
-Then: $$\frac{c_1 + c_2}{n_1 + n_2} \geq \frac{c_1 + c_1 \cdot (n_2/n_1)}{n_1 + n_2} = \frac{c_1(n_1 + n_2)}{n_1(n_1 + n_2)} = \frac{c_1}{n_1} = L(A_1) \qed$$ ◻
+Then: $$\frac{c_1 + c_2}{n_1 + n_2} \geq \frac{c_1 + c_1 \cdot (n_2/n_1)}{n_1 + n_2} = \frac{c_1(n_1 + n_2)}{n_1(n_1 + n_2)} = \frac{c_1}{n_1} = L(A_1)$$ $\blacksquare$ ◻
 :::
 
 **Interpretation:** Combining architectures yields leverage at least as good as the worst submodule.
@@ -635,7 +635,7 @@ L(A_{\text{SSOT}}) &= c/1 = c \\
 L(A_{\text{non-SSOT}}) &= c/n
 \end{aligned}$$
 
-Ratio: $$\frac{L(A_{\text{SSOT}})}{L(A_{\text{non-SSOT}})} = \frac{c}{c/n} = n \qed$$ ◻
+Ratio: $$\frac{L(A_{\text{SSOT}})}{L(A_{\text{non-SSOT}})} = \frac{c}{c/n} = n$$ $\blacksquare$ ◻
 :::
 
 ::: corollary
@@ -699,7 +699,7 @@ By Theorem 3.19 (published): $$c_{\text{nominal}} = c_{\text{duck}} + 4$$
 
 By Observation (similar DOF): $$\text{DOF}(\text{Nominal}) \approx \text{DOF}(\text{Duck}) = d$$
 
-Therefore: $$L(\text{Nominal}) = \frac{c_{\text{duck}} + 4}{d} > \frac{c_{\text{duck}}}{d} = L(\text{Duck}) \qed$$ ◻
+Therefore: $$L(\text{Nominal}) = \frac{c_{\text{duck}} + 4}{d} > \frac{c_{\text{duck}}}{d} = L(\text{Duck})$$ $\blacksquare$ ◻
 :::
 
 **Connection to Prior Work:** Our published Theorem 3.5 (Strict Dominance) showed nominal typing provides strictly more capabilities for same DOF cost. Theorem [\[thm:nominal-leverage\]](#thm:nominal-leverage){reference-type="ref" reference="thm:nominal-leverage"} provides the leverage formulation.

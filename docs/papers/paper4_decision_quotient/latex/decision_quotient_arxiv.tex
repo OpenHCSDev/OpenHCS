@@ -29,6 +29,9 @@
 \providecommand{\tightlist}{%
   \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
 
+% Disable proof environment's automatic QED (we use inline blacksquare)
+\renewcommand{\qedsymbol}{}
+
 % Theorem environments
 \newtheorem{theorem}{Theorem}[section]
 \newtheorem{lemma}[theorem]{Lemma}
@@ -62,15 +65,26 @@
 \title{The Complexity of Decision-Relevant Uncertainty:\\
 Why Identifying What Matters Is Harder Than Knowing Everything}
 
-\author{Anonymous Author \\
-Anonymous Institution \\
-\texttt{anonymous@example.com}}
+\author{
+  Tristan Simas\\
+  McGill University\\
+  \texttt{tristan.simas@mail.mcgill.ca}
+}
 
 \date{January 3, 2026}
 
 \begin{document}
 
 \maketitle
+
+% arXiv license footnote
+\renewcommand{\thefootnote}{}
+\footnotetext{
+  \textcopyright\ 2026 Tristan Simas.
+  This work is licensed under CC BY 4.0.
+  License: \url{https://creativecommons.org/licenses/by/4.0/}
+}
+\renewcommand{\thefootnote}{\arabic{footnote}}
 
 % SINGLE SOURCE OF TRUTH: All content in content.tex
 \input{content.tex}
