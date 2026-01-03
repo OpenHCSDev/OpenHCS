@@ -1,32 +1,35 @@
 \section{Introduction}\label{introduction}
 
-This paper proves that nominal typing strictly dominates structural and
-duck typing for object-oriented systems with inheritance hierarchies.
-All results are machine-checked in Lean 4 (2600+ lines, 127 theorems,
-0 \texttt{sorry} placeholders).
+\subsection{Metatheoretic Foundations}\label{metatheoretic-foundations}
 
-We develop a metatheory of class system design applicable to any
-language with explicit inheritance. The core insight: every class system
-is characterized by which axes of the three-axis model (N, B, S) it
-employs. These axes form a lattice under subset ordering, inducing a
-strict partial order over typing disciplines. Disciplines using more
-axes strictly dominate those using fewer---a universal principle with
-implications for typing, architecture, and language design.
+This work follows the tradition of Liskov \& Wing~\cite{liskov1994behavioral}, who formalized correctness criteria for subtyping in their foundational TOPLAS paper. Where Liskov \& Wing asked ``what makes subtyping \emph{correct}?'', we ask ``what makes typing discipline selection \emph{correct}?''
 
-The three-axis model formalizes what programmers intuitively understand
-but rarely make explicit:
+Our contribution is not recommending specific typing disciplines, but deriving what constitutes a correct choice from formal requirements. We prove the (B, S) model (Bases and Namespace) \textbf{completes} the semantic structure of class-based object-oriented systems, enabling derivation rather than preference-based selection.
+
+\subsection{Overview}\label{overview}
+
+This paper proves that for object-oriented systems with inheritance hierarchies, typing discipline selection is \textbf{derivable} from requirements rather than a matter of preference. All results are machine-checked in Lean 4 (2600+ lines, 127 theorems, 0 \texttt{sorry} placeholders).
+
+We develop a metatheory of class system design applicable to any language with explicit inheritance. The core insight: every class system is characterized by which axes of the (B, S) model it employs; names are syntactic sugar and contribute no observables. These axes form a recursive lattice: $\emptyset < S < (B,S)$, where each increment strictly dominates the previous. For runtime context systems, the model extends to $(B, S, \text{Scope})$, a third orthogonal axis capturing hierarchical containment (e.g., global $\to$ module $\to$ function).
+
+\textbf{The pay-as-you-go principle:} Each axis increment adds capabilities without cognitive load increase until those capabilities are invoked. Duck typing uses $S$; nominal uses $(B,S)$ with the same \texttt{isinstance()} API; scoped resolution uses $(B,S,\text{Scope})$ with one optional parameter.
+
+The model formalizes what programmers intuitively understand but rarely make explicit:
 
 \begin{enumerate}
 \def\labelenumi{\arabic{enumi}.}
 \tightlist
 \item
-  \textbf{Universal dominance} (Theorem 3.4): Languages with explicit
-  inheritance (\texttt{bases} axis) mandate nominal typing. Structural
-  typing is valid only when \texttt{bases\ =\ {[}{]}} universally. The
-  ``retrofit exception'' is eliminated by adapters (Theorem 2.10j).
+  \textbf{Universal dominance} (Theorem 3.4): For languages with explicit
+  inheritance (\texttt{bases} axis), nominal typing Pareto-dominates
+  structural typing in greenfield development (provides strictly more
+  capabilities with zero tradeoffs). Structural typing is appropriate
+  only when \texttt{bases\ =\ {[}{]}} universally (e.g., Go) or in
+  retrofit/interop scenarios. The decision is \textbf{derived} from
+  capability analysis, not preference.
 \item
   \textbf{Complexity separation} (Theorem 4.3): Nominal typing achieves
-  O(1) error localization; duck typing requires \(\Omega\)(n) call-site
+  O(1) error localization; duck typing requires $\Omega(n)$ call-site
   inspection.
 \item
   \textbf{Provenance impossibility} (Corollary 6.3): Duck typing cannot
@@ -54,22 +57,23 @@ Indicates
 \endhead
 \bottomrule\noalign{}
 \endlastfoot
-Duck typing density & \texttt{hasattr()} + \texttt{getattr()} +
-\texttt{try/except\ AttributeError} per KLOC & Discipline violations
-(duck typing is incoherent per Theorem 2.10d) \\
+Duck typing density & \texttt{hasattr()} per KLOC & Discipline
+violations (duck typing is incoherent per Theorem 2.10d; other
+\texttt{getattr()} / \texttt{AttributeError} patterns may be valid
+metaprogramming) \\
 Nominal typing ratio & \texttt{isinstance()} + ABC registrations per
 KLOC & Explicit type contracts \\
 Provenance capability & Presence of ``which type provided this'' queries
 & System requires nominal typing \\
 Resolution determinism & MRO-based dispatch vs runtime probing & O(1) vs
-\(\Omega\)(n) error localization \\
+$\Omega(n)$ error localization \\
 \end{longtable}
 
-The methodology is validated through 13 case studies from OpenHCS, a
+The methodology is validated through case studies from OpenHCS~\cite{openhcs2025}, a
 production bioimage analysis platform. The system's architecture exposed
 the formal necessity of nominal typing through patterns ranging from
 metaclass auto-registration to bidirectional type registries. A
-migration from duck typing to nominal contracts (PR \#44) eliminated 47
+migration from duck typing to nominal contracts (PR \#44~\cite{openhcsPR44}) eliminated 47
 scattered \texttt{hasattr()} checks and consolidated dispatch logic into
 explicit ABC contracts.
 
@@ -79,18 +83,18 @@ This paper makes five contributions:
 
 \textbf{1. Universal Theorems (Section 3.8):} - \textbf{Theorem 3.13
 (Provenance Impossibility):} No shape discipline can compute
-provenance---information-theoretically impossible. - \textbf{Theorem
+provenance (information-theoretically impossible). - \textbf{Theorem
 3.19 (Derived Characterization):} Capability gap = B-dependent
-queries---derived from query space partition, not enumerated. -
+queries (derived from query space partition, not enumerated). -
 \textbf{Theorem 3.24 (Complexity Lower Bound):} Duck typing requires
-$\\Omega$(n) inspections---proved by adversary argument. - These theorems
+$\Omega(n)$ inspections (proved by adversary argument). - These theorems
 make claims about the universe of possible systems through
 information-theoretic analysis, mathematical partition, and adversary arguments.
 
 \textbf{2. Completeness and Robustness Theorems (Section 3.11):} - \textbf{Theorem 3.32
-(Model Completeness):} \((N, B, S)\) captures all runtime-available type
+(Model Completeness):} \((B, S)\) captures all runtime-available type
 information. - \textbf{Theorem 3.34-3.35 (Capability Comparison):}
-\(\mathcal{C}_{\text{duck}} \subsetneq \mathcal{C}_{\text{nom}}\)---nominal
+\(\mathcal{C}_{\text{duck}} \subsetneq \mathcal{C}_{\text{nom}}\). Nominal
 provides all duck typing capabilities plus four additional. - \textbf{Lemma 3.37 (Axiom
 Justification):} Shape axiom is definitional, not assumptive. -
 \textbf{Theorem 3.39 (Extension Impossibility):} No computable extension
@@ -100,13 +104,13 @@ theorems extend to generic types. Erasure is irrelevant (type checking
 at compile time). - \textbf{Non-Claims 3.41-3.42, Claim 3.48 (Scope):}
 Explicit limits and claims.
 
-\textbf{3. Metatheoretic foundations (Sections 2-3):} - The three-axis
-model (N, B, S) as a universal framework for class systems - Theorem
-2.15 (Axis Lattice Dominance): capability monotonicity under axis subset
-ordering - Theorem 2.17 (Capability Completeness): the capability set
-\(\mathcal{C}_B\) is exactly four elements---minimal and complete -
-Theorem 3.5: Nominal typing strictly dominates shape-based typing
-universally (when \(B \neq \emptyset\))
+\textbf{3. Metatheoretic foundations (Sections 2-3):} - The two-axis
+model (B, S) as a universal framework for class systems (names are
+syntactic sugar) - Theorem 2.15 (Axis Lattice Dominance): capability
+monotonicity under axis subset ordering - Theorem 2.17 (Capability
+Completeness): the capability set \(\mathcal{C}_B\) is exactly four
+elements (complete) - Theorem 3.5: Nominal typing strictly dominates
+shape-based typing universally (when \(B \neq \emptyset\))
 
 \textbf{4. Machine-checked verification (Section 6):} - 2600+ lines of
 Lean 4 proofs across five modules - 127 theorems/lemmas covering typing,
@@ -114,11 +118,11 @@ architecture, information theory, complexity bounds, impossibility,
 lower bounds, completeness analysis, generics, exotic features, universal
 scope, discipline vs migration separation, context formalization,
 capability exhaustiveness, and adapter amortization - Formalized O(1) vs
-O(k) vs $\\Omega$(n) complexity separation with adversary-based lower bound
+O(k) vs $\Omega(n)$ complexity separation with adversary-based lower bound
 proof - Universal extension to 8 languages (Java, C\#, Rust, TypeScript,
 Kotlin, Swift, Scala, C++) - Exotic type features covered (intersection,
 union, row polymorphism, HKT, multiple dispatch) - \textbf{Zero
-\texttt{sorry} placeholders---all 127 theorems/lemmas complete}
+\texttt{sorry} placeholders (all 127 theorems/lemmas complete)}
 
 \textbf{5. Empirical validation (Section 5):} - 13 case studies from
 OpenHCS (45K LoC production Python codebase) - Demonstrates theoretical
@@ -129,7 +133,7 @@ derivable code quality metrics (DTD, NTR, PC, RD)
 OpenHCS}\label{empirical-context-openhcs}
 
 \textbf{What it does:} OpenHCS is a bioimage analysis platform.
-Pipelines are compiled before execution---errors surface at definition
+Pipelines are compiled before execution. Errors surface at definition
 time, not after processing starts. The GUI and Python code are
 interconvertible: design in GUI, export to code, edit, re-import.
 Changes to parent config propagate automatically to all child windows.
@@ -140,12 +144,12 @@ Dual-axis resolution walks both the context hierarchy (global
 \(\rightarrow\) plate \(\rightarrow\) step) and the class hierarchy
 (MRO) simultaneously. Every resolved value carries provenance: (value,
 source\_scope, source\_type). This is only possible with nominal
-typing---duck typing cannot answer ``which type provided this?''
+typing. Duck typing cannot answer ``which type provided this?''
 
 \textbf{Key architectural patterns (detailed in Section 5):} -
-\texttt{@auto\_create\_decorator} $\\rightarrow$ \texttt{@global\_pipeline\_config}
+\texttt{@auto_create_decorator} $\rightarrow$ \texttt{@global_pipeline_config}
 cascade: one decorator spawns a 5-stage type transformation (Case Study
-7) - Dual-axis resolver: MRO \emph{is} the priority system---no custom
+7) - Dual-axis resolver: MRO \emph{is} the priority system. No custom
 priority function exists (Case Study 8) - Bidirectional type registries:
 single source of truth with \texttt{type()} identity as key (Case Study
 13)
@@ -190,7 +194,7 @@ This paper makes absolute claims. We do not argue nominal typing is
 \def\labelenumi{\arabic{enumi}.}
 \item
   \textbf{Shape-based typing cannot provide provenance.} Duck typing and
-  structural typing check type \emph{shape}---attributes, method
+  structural typing check type \emph{shape}: attributes, method
   signatures. Provenance requires type \emph{identity}. Shape-based
   disciplines cannot provide what they do not track.
 \item
@@ -201,12 +205,12 @@ This paper makes absolute claims. We do not argue nominal typing is
   \textbf{Shape-based typing is a capability sacrifice.} Protocol and
   duck typing discard the Bases axis. This eliminates four capabilities
   (provenance, identity, enumeration, conflict resolution) without
-  providing any compensating capability---a dominated choice when \(B \neq \emptyset\).
+  providing any compensating capability (a dominated choice when \(B \neq \emptyset\)).
 \end{enumerate}
 
 Boundary scope (pulled forward for clarity): when \(B = \emptyset\)
-(no user-declared inheritance)---e.g., pure JSON/FFI payloads or
-languages intentionally designed without inheritance---structural typing
+(no user-declared inheritance), e.g., pure JSON/FFI payloads or
+languages intentionally designed without inheritance. Structural typing
 is the coherent choice. Our dominance claims apply whenever \(B \neq
 \emptyset\) \emph{and} inheritance metadata is accessible; FFI or
 opaque-runtime boundaries that erase \(B\) fall outside the claim.
@@ -217,9 +221,9 @@ the architect's choice; the discipline, given requirements, is derived.
 
 \subsection{Roadmap}\label{roadmap}
 
-\textbf{Section 2: Metatheoretic foundations} --- The three-axis model,
-abstract class system formalization, and the Axis Lattice Metatheorem
-(Theorem 2.15)
+\textbf{Section 2: Metatheoretic foundations} --- The two-axis model
+(B, S) with names as sugar, abstract class system formalization, and the
+Axis Lattice Metatheorem (Theorem 2.15)
 
 \textbf{Section 3: Universal dominance} --- Strict dominance (Theorem
 3.5), information-theoretic completeness (Theorem 3.19), retrofit

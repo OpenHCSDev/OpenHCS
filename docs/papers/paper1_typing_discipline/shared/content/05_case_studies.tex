@@ -1,33 +1,32 @@
-\section{Case Studies: Applying the
-Methodology}\label{case-studies-applying-the-methodology}
+\section{Methodology}\label{case-studies-applying-the-methodology}
 
 \subsection{Empirical Validation
 Strategy}\label{empirical-validation-strategy}
 
 \textbf{Addressing the ``n=1'' objection:} A potential criticism is that
-our case studies come from a single codebase (OpenHCS). We address this
+our case studies come from a single codebase (OpenHCS~\cite{openhcs2025}). We address this
 in three ways:
 
 \textbf{First: Claim structure.} This paper makes two distinct types of
 claims with different validation requirements. \emph{Mathematical
 claims} (Theorems 3.1--3.62): ``Discarding B necessarily loses these
 capabilities.'' These are proven by formal derivation in Lean (2600+
-lines, 0 \texttt{sorry}). Mathematical proofs have no sample size---they
+lines, 0 \texttt{sorry}). Mathematical proofs have no sample size: they
 are universal by construction. \emph{Existence claims}: ``Production
 systems requiring these capabilities exist.'' One example suffices for
 an existential claim. OpenHCS demonstrates that real systems require
 provenance tracking, MRO-based resolution, and type-identity
-dispatch---exactly the capabilities Theorem 3.19 proves impossible under
+dispatch, exactly the capabilities Theorem 3.19 proves impossible under
 structural typing.
 
 \textbf{Second: Case studies are theorem instantiations.} Table 5.1
 links each case study to the theorem it validates. These are not
-arbitrary examples---they are empirical instantiations of theoretical
+arbitrary examples: they are empirical instantiations of theoretical
 predictions. The theory predicts that systems requiring provenance will
 use nominal typing; the case studies confirm this prediction. The 13
 patterns are 13 independent architectural decisions, each of which could
 have used structural typing but provably could not. Packaging these
-patterns into separate repositories would not add information---it would
+patterns into separate repositories would not add information: it would
 be technicality theater. The mathematical impossibility results are the
 contribution; OpenHCS is the existence proof that the impossibility
 matters.
@@ -69,7 +68,7 @@ commitment to nominal typing, exposing the consequences of this
 architectural decision through 13 distinct patterns. These case studies
 demonstrate the methodology in action: for each pattern, we identify
 whether it requires provenance tracking, MRO-based resolution, or type
-identity as dictionary keys---all indicators that nominal typing is
+identity as dictionary keys: all indicators that nominal typing is
 mandatory per the formal model.
 
 Duck typing fails for all 13 patterns because they fundamentally require
@@ -78,7 +77,7 @@ Configuration resolution needs to know \emph{which type} provided a
 value (provenance tracking, Corollary 6.3). MRO-based priority needs
 inheritance relationships preserved (Theorem 3.4). Metaclass
 registration needs types as dictionary keys (type identity as hash).
-These requirements are not implementation details---they are
+These requirements are not implementation details. They are
 architectural necessities proven impossible under duck typing's
 structural equivalence axiom.
 
@@ -114,7 +113,7 @@ Validation Type
 \endhead
 \bottomrule\noalign{}
 \endlastfoot
-1 & Type discrimination & Theorem 3.4 (Bases Mandates Nominal) & MRO
+1 & Type discrimination & Theorem 3.4 (Nominal Pareto-Dominance) & MRO
 position distinguishes structurally identical types \\
 2 & Discriminated unions & Theorem 3.5 (Strict Dominance) &
 \texttt{\_\_subclasses\_\_()} provides exhaustiveness \\
@@ -128,7 +127,7 @@ Definition-time vs runtime failure \\
 \texttt{\_\_init\_subclass\_\_} hook \\
 7 & Type transformation & Corollary 6.3 (Provenance Impossibility) &
 5-stage \texttt{type()} chain tracks lineage \\
-8 & Dual-axis resolution & Theorem 3.4 (Bases Mandates Nominal) & Scope
+8 & Dual-axis resolution & Theorem 3.4 (Nominal Pareto-Dominance) & Scope
 \(\times\) MRO product requires MRO \\
 9 & Custom isinstance & Theorem 3.5 (Strict Dominance) &
 \texttt{\_\_instancecheck\_\_} override \\
@@ -266,9 +265,9 @@ StepMaterializationConfig.\_\_mro\_\_ = (
 \end{verbatim}
 
 When resolving \texttt{sub\_dir}: 1.
-\texttt{StepMaterializationConfig.sub\_dir\ =\ "checkpoints"} $\\rightarrow$
+\texttt{StepMaterializationConfig.sub\_dir\ =\ "checkpoints"} $\rightarrow$
 \textbf{step-level value} 2.
-\texttt{PathPlanningConfig.sub\_dir\ =\ "images"} $\\rightarrow$ pipeline-level value
+\texttt{PathPlanningConfig.sub\_dir\ =\ "images"} $\rightarrow$ pipeline-level value
 (shadowed)
 
 The system answers ``which scope provided this value?'' by walking the
@@ -298,18 +297,18 @@ Duck typing's verdict: \textbf{identical}. Same attributes, same values.
 \def\labelenumi{\arabic{enumi}.}
 \tightlist
 \item
-  ``Is this config pipeline-level or step-level?'' $\\rightarrow$ Determines
+  ``Is this config pipeline-level or step-level?'' $\rightarrow$ Determines
   resolution priority
 \item
-  ``Which type in the MRO provided \texttt{sub\_dir}?'' $\\rightarrow$ Provenance for
+  ``Which type in the MRO provided \texttt{sub\_dir}?'' $\rightarrow$ Provenance for
   debugging
 \item
-  ``Can I use \texttt{isinstance(config,\ StepWellFilterConfig)}?'' $\\rightarrow$
+  ``Can I use \texttt{isinstance(config,\ StepWellFilterConfig)}?'' $\rightarrow$
   Scope discrimination
 \end{enumerate}
 
 Duck typing cannot answer ANY of these questions. The information is
-\textbf{not in the structure}---it is in the \textbf{type identity} and
+\textbf{not in the structure}: it is in the \textbf{type identity} and
 \textbf{MRO position}.
 
 \textbf{Nominal typing answers all three in O(1):}
@@ -324,7 +323,7 @@ type(config).\_\_mro\_\_.index(StepWellFilterConfig)  \# MRO position: O(k)
 system that encodes scope semantics in inheritance hierarchies (where
 structurally-identical types at different MRO positions have different
 meanings) \textbf{requires} nominal typing. Duck typing makes such
-architectures impossible---not difficult, \textbf{impossible}.
+architectures impossible (not difficult, \textbf{impossible}).
 
 \emph{Proof.} Duck typing defines equivalence as
 \(S(A) = S(B) \Rightarrow A \equiv B\). If \(A\) and \(B\) are
@@ -341,7 +340,7 @@ duck typing, this system \textbf{cannot exist}.
 
 \textbf{Pattern (Table 5.1, Row 1):} Type discrimination via MRO
 position. This case study demonstrates: - Theorem 4.1: O(1) type
-identity via \texttt{isinstance()} - Theorem 4.3: O(1) vs $\\Omega$(n)
+identity via \texttt{isinstance()} - Theorem 4.3: O(1) vs $\Omega(n)$
 complexity gap - The fundamental failure of structural equivalence to
 capture semantic distinctions
 
@@ -362,7 +361,7 @@ B-dependent capability.
 (the structure axis). 2. \textbf{B-dependent capabilities require B.} By
 Theorem 3.19, provenance, identity, enumeration, and conflict resolution
 all require the Bases axis \(B\). 3. \textbf{S does not contain B.} By
-the axis independence property (Definition 2.5), the axes \((N, B, S)\)
+the axis independence property (Definition 2.5), the axes \((B, S)\)
 are independent: \(S\) carries no information about \(B\). 4.
 \textbf{Therefore \(\sigma\) cannot provide B-dependent capabilities.}
 Since \(\sigma \in S\) and B-dependent capabilities require information
@@ -386,7 +385,7 @@ Why sentinel fails
 \endlastfoot
 Enumeration & Requires iterating over types with \(\sigma = v\). No type
 registry exists in structural typing (Theorem 2.10q). Cannot compute
-\texttt{{[}T\ for\ T\ in\ ?\ if\ T.\_scope\ ==\ \textquotesingle{}step\textquotesingle{}{]}}---there
+\texttt{{[}T\ for\ T\ in\ ?\ if\ T.\_scope\ ==\ \textquotesingle{}step\textquotesingle{}{]}}. There
 is no source for \texttt{?}. \\
 Enforcement & \(\sigma\) is a runtime value, not a type constraint.
 Subtypes can set \(\sigma\) incorrectly without type error. No
@@ -444,7 +443,7 @@ The factory uses \texttt{ParameterInfoBase.\_\_subclasses\_\_()} to
 enumerate all registered variants at runtime. This provides
 exhaustiveness: adding a new parameter type (e.g., \texttt{EnumInfo})
 automatically extends the dispatch table without modifying the factory.
-Duck typing has no equivalent---there's no way to ask ``what are all the
+Duck typing has no equivalent. There is no way to ask ``what are all the
 types that have a \texttt{matches()} method?''
 
 Structural typing would require manually maintaining a registry list.
@@ -479,7 +478,7 @@ def convert\_memory(data, source\_type: str, target\_type: str, gpu\_id: int):
 
 This generates \texttt{NumpyConverter}, \texttt{CupyConverter},
 \texttt{TorchConverter}, \texttt{TensorflowConverter},
-\texttt{JaxConverter}, \texttt{PyclesperantoConverter}---all with
+\texttt{JaxConverter}, \texttt{PyclesperantoConverter}, all with
 identical method signatures (\texttt{to\_numpy()}, \texttt{to\_cupy()},
 etc.) but completely different implementations.
 
@@ -541,9 +540,8 @@ validation that duck typing's fail-silent probing cannot match.
 (PR
 \#44)}\label{case-study-5-migration-from-duck-to-nominal-typing-pr-44}
 
-PR \#44 (``UI Anti-Duck-Typing Refactor'', 90 commits, 106 files,
-+22,609/-7,182 lines) migrated OpenHCS's UI layer from duck typing to
-nominal ABC contracts. The measured architectural changes:
+PR \#44~\cite{openhcsPR44} (``UI Anti-Duck-Typing Refactor'') migrated OpenHCS's UI layer from duck typing to
+nominal ABC contracts. The architectural changes:
 
 \textbf{Before (duck typing):} - ParameterFormManager: 47
 \texttt{hasattr()} dispatch points scattered across methods -
@@ -580,8 +578,8 @@ than at user interaction time (when attribute access fails silently).
 
 \textbf{Pattern (Table 5.1, Row 5):} Architecture migration from
 fail-silent duck typing to fail-loud nominal contracts. Demonstrates
-measured reduction in error localization complexity (Theorem 4.3): from
-\(\Omega\)(47) scattered hasattr checks to O(1) centralized ABC
+the complexity reduction predicted by Theorem 4.3: scattered
+\texttt{hasattr()} checks (n=47) were replaced with O(1) centralized ABC
 validation.
 
 \subsection{Case Study 6:
@@ -611,7 +609,7 @@ class ImageXpressHandler(MicroscopeHandler, metaclass=MicroscopeHandlerMeta):
 \end{verbatim}
 
 This pattern is impossible with duck typing because: (1) type identity
-is required as dict values---duck typing has no way to reference ``the
+is required as dict values. Duck typing has no way to reference ``the
 type itself'' distinct from instances, (2) skipping abstract classes
 requires checking \texttt{\_\_abstractmethods\_\_}, a class-level
 attribute inaccessible to duck typing's instance-level probing, and (3)
@@ -621,7 +619,7 @@ inheritance-based key derivation (extracting ``imagexpress'' from
 The metaclass ensures exactly one handler per microscope type.
 Attempting to define a second \texttt{ImageXpressHandler} raises an
 exception at import time. Duck typing's runtime checks cannot provide
-this guarantee---duplicates would silently overwrite.
+this guarantee. Duplicates would silently overwrite.
 
 \textbf{Pattern (Table 5.1, Row 6):} Auto-registration with type
 identity. Demonstrates that metaclasses fundamentally depend on nominal
@@ -649,7 +647,7 @@ class GlobalPipelineConfig:
 The decorator: 1. Validates naming convention (must start with
 ``Global'') 2. Marks class:
 \texttt{global\_config\_class.\_is\_global\_config\ =\ True} 3. Calls
-\texttt{create\_global\_default\_decorator(GlobalPipelineConfig)} $\\rightarrow$
+\texttt{create\_global\_default\_decorator(GlobalPipelineConfig)} $\rightarrow$
 returns \texttt{global\_pipeline\_config} 4. Exports to module:
 \texttt{setattr(module,\ \textquotesingle{}global\_pipeline\_config\textquotesingle{},\ decorator)}
 
@@ -710,7 +708,7 @@ traversal requires \texttt{B} axis
 This 5-stage chain is single-stage generation (not nested
 metaprogramming). It respects Veldhuizen's (2006) bounds: full power
 without complexity explosion. The lineage tracking (which lazy type came
-from which base) is only possible with nominal identity---structurally
+from which base) is only possible with nominal identity. Structurally
 equivalent types would be indistinguishable.
 
 \textbf{Pattern (Table 5.1, Row 7):} Type transformation with lineage
@@ -773,7 +771,7 @@ class GlobalConfigMeta(type):
 \# even if config doesn\textquotesingle{t inherit from GlobalConfigBase}
 \end{verbatim}
 
-This metaclass enables ``virtual inheritance''---classes can satisfy
+This metaclass enables ``virtual inheritance''. Classes can satisfy
 \texttt{isinstance(obj,\ Base)} without explicitly inheriting from
 \texttt{Base}. The check relies on the \texttt{\_is\_global\_config}
 class attribute (set by \texttt{@auto\_create\_decorator}), creating a
@@ -790,7 +788,7 @@ this instance have this attribute?''
 The virtual inheritance enables interface segregation:
 \texttt{GlobalPipelineConfig} advertises conformance to
 \texttt{GlobalConfigBase} without inheriting implementation. This is
-impossible with duck typing's attribute probing---there's no way to
+impossible with duck typing's attribute probing. There's no way to
 express ``this class satisfies this interface'' as a runtime-checkable
 property.
 
@@ -803,7 +801,7 @@ Generation}\label{case-study-10-dynamic-interface-generation}
 
 \textbf{Pattern:} Metaclass-generated abstract base classes create
 interfaces at runtime based on configuration. The generated ABCs have no
-methods or attributes---they exist purely for nominal identity.
+methods or attributes (they exist purely for nominal identity).
 
 \begin{verbatim}
 class DynamicInterfaceMeta(ABCMeta):
@@ -824,7 +822,7 @@ class NapariConfig(StreamingConfig, IStreamingConfig): pass
 \# Later: isinstance(config, IStreamingConfig) $\backslash{rightarrow$ True}
 \end{verbatim}
 
-The generated interfaces have empty namespaces---no methods, no
+The generated interfaces have empty namespaces: no methods, no
 attributes. Their sole purpose is nominal identity: marking that a class
 explicitly claims to implement an interface. This is pure nominal
 typing: structural typing would see these interfaces as equivalent to
@@ -859,7 +857,7 @@ def has\_framework\_config():
 
 The sentinel is a runtime-generated type with empty namespace,
 instantiated once, and used as a dictionary key. Its nominal identity
-(memory address) guarantees uniqueness---even if another module creates
+(memory address) guarantees uniqueness. Even if another module creates
 \texttt{type("\_FrameworkConfigSentinel",\ (),\ \{\})()}, the two
 sentinels are distinct objects with distinct identities.
 
@@ -870,7 +868,7 @@ sentinel provides a refactoring-safe, type-safe marker that exists
 independent of names or attributes.
 
 This pattern appears in framework detection, feature flags, and
-capability markers---contexts where the existence of a capability needs
+capability markers. Contexts where the existence of a capability needs
 to be checked without coupling to implementation details.
 
 \textbf{Pattern (Table 5.1, Row 11):} Sentinel types for framework
@@ -893,7 +891,7 @@ inject\_conversion\_methods(NumpyConverter, \{
 \)}
 \end{verbatim}
 
-Method injection requires a target type---the type whose namespace will
+Method injection requires a target type: the type whose namespace will
 be modified. Duck typing has no concept of ``the type itself'' as a
 mutable namespace. It can only access instances. To inject methods
 duck-style would require modifying every instance's
@@ -906,7 +904,7 @@ The nominal type serves as a shared namespace. Injecting
 is fundamentally nominal: the type is a first-class object with its own
 namespace, distinct from instance namespaces.
 
-This pattern enables plugins, mixins, and monkey-patching---all
+This pattern enables plugins, mixins, and monkey-patching. All
 requiring types as mutable namespaces. Duck typing's instance-level view
 cannot express ``modify the behavior of all objects of this kind.''
 
@@ -948,7 +946,7 @@ Duck typing would require maintaining two separate dicts with string
 keys (class names), introducing synchronization bugs. Renaming
 \texttt{PathPlanningConfig} would break the string-based lookup. The
 nominal type identity serves as a refactoring-safe key that guarantees
-both dicts stay synchronized---a type can only be registered once,
+both dicts stay synchronized (a type can only be registered once,
 enforcing bijection.
 
 The registry operations are O(1) lookups by type identity. Duck typing's
@@ -960,4 +958,3 @@ synchronization guarantees. Demonstrates that nominal identity as dict
 key prevents desynchronization bugs inherent to string-based approaches.
 
 \begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
-

@@ -153,13 +153,14 @@ We formalize class systems independently of any specific language. This
 establishes that our theorems apply to \textbf{any} language with
 explicit inheritance, not just Python.
 
-\paragraph{2.4.1 The Three-Axis Model}\label{the-three-axis-model}
+\paragraph{2.4.1 Axes (names as sugar)}\label{the-two-axis-model}
 
 \textbf{Definition 2.7 (Abstract Class System).} A class system is a
-tuple \((N, B, S)\) where: - \(N\): Name --- the identifier for a type -
-\(B\): Bases --- the set of explicitly declared parent types
-(inheritance) - \(S\): Namespace --- the set of (attribute, value) pairs
-defining the type's interface
+tuple \((B, S)\) where: - \(B\): Bases --- the set of explicitly
+declared parent types (inheritance) - \(S\): Namespace --- the set of
+(attribute, value) pairs defining the type's interface. Names are
+treated as syntactic sugar (aliases for structures already captured by
+\(S\)) and do not add observable power; we elide them henceforth.
 
 \textbf{Definition 2.8 (Class Constructor).} A class constructor is a
 function: \[\text{class}: N \times \mathcal{P}(T) \times S \to T\] where
@@ -220,7 +221,7 @@ inheritance beyond the implicit root.'' The theorems apply when
 \(B \neq \emptyset\) in this sense---i.e., when the programmer
 explicitly declares inheritance relationships.
 
-\textbf{Remark (Go Embedding $\\neq$ Inheritance).} Go's struct embedding
+\textbf{Remark (Go Embedding $\neq$ Inheritance).} Go's struct embedding
 provides method forwarding but is not inheritance: (1) embedded methods
 cannot be overridden---calling \texttt{outer.Method()} always invokes
 the embedded type's implementation, (2) there is no MRO---Go has no
@@ -271,16 +272,17 @@ structural typing with \texttt{class}), or incomplete and thus trivially
 incoherent (duck typing).
 
 \textbf{Definition 2.10b (Structural Typing).} Structural typing with
-declared interfaces (e.g., \texttt{typing.Protocol}) is coherent: \(T\)
-is declared as a Protocol with interface \(S(T)\), and compatibility is
+declared interfaces (e.g., \texttt{typing.Protocol}
+\cite{pep544,pep484}) is coherent: \(T\) is declared as a Protocol with
+interface \(S(T)\), and compatibility is
 \(S(\text{type}(x)) \supseteq S(T)\). The discipline commits to a
 position: ``structure determines compatibility.''
 
 \textbf{Definition 2.10c (Duck Typing).} Duck typing is ad-hoc
-capability probing: \texttt{hasattr(x,\ attr)} for individual attributes
-without declaring \(T\). No interface is specified; the ``required
-interface'' is implicit in whichever attributes the code path happens to
-access.
+capability probing: \texttt{hasattr(x,\ attr)}
+\cite{pythonBuiltinsHasattr} for individual attributes without
+declaring \(T\). No interface is specified; the ``required interface''
+is implicit in whichever attributes the code path happens to access.
 
 \textbf{Theorem 2.10d (Duck Typing Incoherence).} Duck typing is not a
 coherent typing discipline.
@@ -313,7 +315,7 @@ coherent typing discipline.
     ``Structure = semantics'' would require checking \emph{full}
     structural compatibility against a declared interface
   \item
-    ``Structure $\\neq$ semantics'' would require nominal identity via
+    ``Structure $\neq$ semantics'' would require nominal identity via
     inheritance
   \item
     Duck typing checks \emph{partial} structure \emph{ad-hoc} without
@@ -324,6 +326,17 @@ coherent typing discipline.
 A discipline that gives different compatibility answers depending on
 which code path executes, with no declared \(T\) to verify against, is
 not a discipline. It is the absence of one. \(\blacksquare\)
+
+\textbf{Related work (duck typing formalization).} Refinement-based
+analyses and logics for dynamic languages approximate duck-typed
+behaviour statically (e.g., \cite{chugh2012nested,systemDArxiv}) and
+empirical interface extraction for dynamic checks has been explored
+\cite{lamaison2012duck}. These systems aim to prove safety for specific
+programs, not to define a globally coherent predicate
+\(\text{compatible}(x,T)\) for undeclared \(T\) that is stable across
+code paths. Our incoherence result concerns that global typing-discipline
+property (Definition 8.3); it does not deny the usefulness of such
+analyses for individual programs.
 
 \textbf{Corollary 2.10e (Duck Typing vs Structural Typing).} Duck typing
 (\(\{S\}\), ad-hoc) is strictly weaker than structural typing with
@@ -445,8 +458,8 @@ avoiding explicitness is not an advantage---it is negative value.
 
 \textbf{Corollary 2.10k (Protocol's Value Proposition Is Negative).}
 When \(B \neq \emptyset\), Protocol trades explicitness, fail-loud
-behavior, and provenance for 2 fewer lines of code. This is not a
-tradeoff---it is a loss.
+behavior, and provenance for 2 fewer lines of code. Protocol's value
+proposition is negative.
 
 \textbf{Corollary 2.10k' (Protocol Is a Concession, Not an Alternative).}
 When \(B \neq \emptyset\), choosing Protocol is a \emph{concession}---accepting
@@ -527,7 +540,7 @@ Python's \texttt{\_\_init\_subclass\_\_()}, metaclass
 macros. 3. In structural typing, ``Does \(X\) conform to interface
 \(I\)?'' is evaluated at query time. There is no syntax declaring
 ``\(X\) implements \(I\)''---conformance is inferred from structure. 4.
-No declaration $\\rightarrow$ no event. No event $\\rightarrow$ no hook point. 5. Therefore,
+No declaration $\rightarrow$ no event. No event $\rightarrow$ no hook point. 5. Therefore,
 structural typing cannot provide hooks that fire when a type ``becomes''
 conformant to an interface. \(\blacksquare\)
 
@@ -578,7 +591,7 @@ Why
 Definition-time hooks & Yes (\texttt{\_\_init\_subclass\_\_}, metaclass)
 & No & Requires declaration event \\
 Enumerate implementers & Yes (\texttt{\_\_subclasses\_\_()}, O(k)) & No
-(O($\\infty$) in open systems) & Requires registration \\
+(O($\infty$) in open systems) & Requires registration \\
 Auto-registration & Yes (metaclass \texttt{\_\_new\_\_}) & No & Requires
 hook \\
 Derive/generate code & Yes (Rust \texttt{\#{[}derive{]}}, Python
@@ -681,47 +694,25 @@ Theorem 2.13, provenance requires \(B\). Shape-based typing has no
 access to \(B\). Therefore shape-based typing cannot provide provenance.
 \(\blacksquare\)
 
-\paragraph{2.4.4 Cross-Language
-Instantiation}\label{cross-language-instantiation}
+\paragraph{2.4.4 Cross-Language Instantiation}\label{cross-language-instantiation}
 
-\textbf{Table 2.1: Cross-Language Instantiation of the (N, B, S) Model}
-
+\begin{table}[h]
+\caption{Cross-language instantiation of the (B, S) model}
+\label{tab:nbs-cross}
 \small
-\begin{longtable}[]{@{}
-  >{\raggedright\arraybackslash}p{(\linewidth - 8\tabcolsep) * \real{0.1695}}
-  >{\raggedright\arraybackslash}p{(\linewidth - 8\tabcolsep) * \real{0.1695}}
-  >{\raggedright\arraybackslash}p{(\linewidth - 8\tabcolsep) * \real{0.1864}}
-  >{\raggedright\arraybackslash}p{(\linewidth - 8\tabcolsep) * \real{0.2542}}
-  >{\raggedright\arraybackslash}p{(\linewidth - 8\tabcolsep) * \real{0.2203}}@{}}
-\toprule\noalign{}
-\begin{minipage}[b]{\linewidth}\raggedright
-Language
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-N (Name)
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-B (Bases)
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-S (Namespace)
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-Type System
-\end{minipage} \\
-\midrule\noalign{}
-\endhead
-\bottomrule\noalign{}
-\endlastfoot
-Python & \texttt{type(x).\_\_name\_\_} & \texttt{\_\_bases\_\_},
-\texttt{\_\_mro\_\_} & \texttt{\_\_dict\_\_}, \texttt{dir()} &
-Nominal \\
-Java & \texttt{getClass().getName()} & \texttt{getSuperclass()},
-\texttt{getInterfaces()} & \texttt{getDeclaredMethods()} & Nominal \\
-Ruby & \texttt{obj.class.name} & \texttt{ancestors} (include order) &
-\texttt{methods}, \texttt{instance\_variables} & Nominal \\
-C\# & \texttt{GetType().Name} & \texttt{BaseType},
-\texttt{GetInterfaces()} & \texttt{GetProperties()},
-\texttt{GetMethods()} & Nominal \\
-\end{longtable}
+\begin{tabular}{@{}p{1.7cm}p{3.0cm}p{3.1cm}p{3.4cm}p{1.3cm}@{}}
+\toprule
+Language & N (Name) & B (Bases) & S (Namespace) & Type system \\
+\midrule
+Python & \texttt{type(x).\_\_name\_\_} & \texttt{\_\_bases\_\_}; \texttt{\_\_mro\_\_} & \texttt{\_\_dict\_\_}; \texttt{dir()} & Nominal \\
+Java   & \texttt{getClass().getName()} & \texttt{getSuperclass()}, \texttt{getInterfaces()} & \texttt{getDeclaredMethods()} & Nominal \\
+Ruby   & \texttt{obj.class.name} & \texttt{ancestors} (ordered) & \texttt{methods}, \texttt{instance\_variables} & Nominal \\
+C\#    & \texttt{GetType().Name} & \texttt{BaseType}, \texttt{GetInterfaces()} & \texttt{GetProperties()}, \texttt{GetMethods()} & Nominal \\
+\bottomrule
+\end{tabular}
+\end{table}
 
-All four languages provide \textbf{runtime access to all three axes}.
+All four languages provide \textbf{runtime access to both axes (N is derivable from B)}.
 The critical difference lies in which axes the \textbf{type system}
 inspects.
 
@@ -769,13 +760,13 @@ C++ & \texttt{vector\textless{}T\textgreater{}} & Parameterized N:
 \textbf{Key observation:} No major language invented a fourth axis for
 generics. All encode type parameters as an extension of the Name axis:
 \(N_{\text{generic}} = (G, [T_1, \ldots, T_k])\) where \(G\) is the base
-name and \([T_i]\) are type arguments. The \((N, B, S)\) model is
+name and \([T_i]\) are type arguments. The \((B, S)\) model is
 \textbf{universal} across generic type systems.
 
 \subsection{The Axis Lattice
 Metatheorem}\label{the-axis-lattice-metatheorem}
 
-The three-axis model \((N, B, S)\) induces a lattice of typing
+The two-axis model \((B, S)\) induces a lattice of typing
 disciplines. Each discipline is characterized by which axes it inspects:
 
 \small
@@ -970,10 +961,10 @@ Given a language \(L\) and development context \(C\):
 
 \begin{verbatim}
 FUNCTION select_typing_discipline(L, C):
-    IF L has no inheritance syntax (B = $\\emptyset$):
+    IF L has no inheritance syntax (B = {}):
         RETURN structural  # Theorem 3.1: correct when B absent
 
-    # For all cases where B $\\neq$ $\\emptyset$:
+    # For all cases where B != {}:
     RETURN nominal  # Theorem 2.18: strict dominance
 
     # Note: "retrofit" is not a separate case. When integrating
@@ -985,4 +976,3 @@ This is a \textbf{decision procedure}, not a preference. The output is
 determined by whether \(B = \emptyset\).
 
 \begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
-

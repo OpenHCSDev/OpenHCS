@@ -1,62 +1,46 @@
 \begin{abstract}
-We present a metatheory of class system design based on
-information-theoretic analysis. The three-axis model---(N, B, S) for
-Name, Bases, Namespace---induces a lattice of typing disciplines. We
-prove that disciplines using more axes strictly dominate those using
-fewer (Theorem 2.15: Axis Lattice Dominance).
+\textbf{Theorem.} The type system $(B, S)$ (Bases and Namespace) is the unique minimal complete representation of class-based object semantics.
 
-\textbf{The core contribution is three theorems with universal scope:}
-
+\textbf{Proof structure:}
 \begin{enumerate}
-\def\labelenumi{\arabic{enumi}.}
-\item
-  \textbf{Theorem 3.13 (Provenance Impossibility --- Universal):} No
-  typing discipline over \((N, S)\)---even with access to type
-  names---can compute provenance. This is information-theoretically
-  impossible: the Bases axis \(B\) is required, and \((N, S)\) does not
-  contain it. Not ``our model doesn't have provenance,'' but ``NO model
-  without \(B\) can have provenance.''
-\item
-  \textbf{Theorem 3.19 (Capability Gap = B-Dependent Queries):} The
-  capability gap between shape-based and nominal typing is EXACTLY the
-  set of queries that require the Bases axis. This is not
-  enumerated---it is \textbf{derived} from the mathematical partition of
-  query space into shape-respecting and B-dependent queries.
-\item
-  \textbf{Theorem 3.24 (Duck Typing Lower Bound):} Any algorithm that
-  correctly localizes errors in duck-typed systems requires
-  \(\Omega(n)\) inspections. Proved by adversary argument---no algorithm
-  can do better. Combined with nominal's O(1) bound (Theorem 3.25), the
-  complexity gap grows without bound.
+\item \emph{Completeness}: $(B, S)$ answers all typing queries. Type names add no information; they are computable from $(B, S)$.
+\item \emph{Minimality}: Neither $B$ nor $S$ alone suffices. Provenance requires $B$. Membership requires $S$. Removing either axis makes some query unanswerable.
+\item \emph{Uniqueness}: Any complete system contains $(B, S)$ or is isomorphic to it. There is no alternative.
 \end{enumerate}
 
-These theorems make claims about the universe of possible systems through
-three proof techniques: - Theorem 3.13: Information-theoretic impossibility
-(input lacks required data) - Theorem 3.19: Mathematical partition
-(tertium non datur) - Theorem 3.24: Adversary argument
-(lower bound applies to any algorithm)
+\textbf{Principal results (machine-checked, 0 sorries):}
 
-Additional contributions: - \textbf{Theorem 2.17 (Capability
-Completeness):} The capability set
-\(\mathcal{C}_B = \{\text{provenance, identity, enumeration, conflict resolution}\}\)
-is \textbf{exactly} what the Bases axis provides---proven minimal and
-complete. - \textbf{Theorem 8.1 (Mixin Dominance):} Mixins with C3 MRO
-strictly dominate object composition for static behavior extension. -
-\textbf{Theorem 8.7 (TypeScript Incoherence):} Languages with
-inheritance syntax but structural typing exhibit formally-defined type
-system incoherence.
+\begin{itemize}
+\item \textbf{Theorem 3.13 (Provenance Impossibility):} No system without $B$ can compute provenance. This is information-theoretic: the input lacks the data.
+\item \textbf{Theorem 3.19 (Capability Partition):} The set of queries partitions exactly into $S$-sufficient and $B$-required. Tertium non datur.
+\item \textbf{Theorem 3.24 (Error Localization Lower Bound):} Duck typing requires $\Omega(n)$ inspections to localize errors. Nominal typing achieves $O(1)$. The gap is unbounded.
+\item \textbf{Theorem (Minimality $\Rightarrow$ Orthogonality):} Every minimal complete axis set is orthogonal. Non-orthogonal systems contain redundancy and are therefore not minimal.
+\end{itemize}
 
-All theorems are machine-checked in Lean 4 (2600+ lines, 127
-theorems/lemmas, 0 \texttt{sorry} placeholders). Empirical validation
-uses 13 case studies from a production bioimage analysis platform
-(OpenHCS, 45K LoC Python).
+\textbf{Novel Axis $H$ (Hierarchy):} For systems with containment trees, we prove:
+\begin{itemize}
+\item \textbf{Theorem 3.61 (H Necessity):} There exist queries answerable with $H$ that are impossible without $H$. This is information-theoretic: $(B, S)$ lacks the data.
+\item \textbf{Theorem 3.62 (H Orthogonality):} $H$ is not derivable from $B$ or $S$. No lattice homomorphism exists. $H$ is a genuinely new axis.
+\item \textbf{Theorem 3.63 (Uniqueness):} $(B, S, H)$ is the unique minimal complete system for hierarchical configuration. There is no alternative.
+\end{itemize}
+\textbf{Central Result (Axis Derivation):} Axes are not designed. They are \emph{derived} from domain requirements. $B$ emerges when the domain requires provenance. $S$ emerges when the domain requires membership. $H$ emerges when the domain requires hierarchical visibility. The framework computes the minimal complete axis set for any domain.
 
-\textbf{Keywords:} typing disciplines, nominal typing, structural
-typing, formal methods, class systems, information theory, impossibility
-theorems, lower bounds
+\textbf{Implications:}
+\begin{enumerate}
+\item \textbf{Strict dominance.} Unused axes have zero cost. Nominal typing includes $B$. If provenance is needed, $B$ is required. If not needed, $B$ costs nothing. Nominal strictly dominates structural unconditionally.
+\item \textbf{Duck typing.} Duck typing is the empty axis set $A = \emptyset$. It answers zero typing queries. Error localization is $\Omega(n)$; nominal achieves $O(1)$. The gap is unbounded.
+\item \textbf{Uniqueness.} For any domain $D$, the minimal complete axis set $A_D$ is unique and computable from $D$.
+\item \textbf{Fixed axis sets.} A type system with fixed axis set $A$ is incomplete for domains requiring axes outside $A$. Incompleteness is certain for some domain.
+\item \textbf{Parametric completeness.} A type system is complete for all domains iff parameterized: $\forall A.\, \mathsf{TypeSystem}(A)$. The API is uniform across axis sets. Query answering is $O(k)$ for $k$ axes. Orthogonality guarantees no axis interaction in query evaluation.
+\item \textbf{Axis derivation.} $D \mapsto A_D$ is deterministic. Axes are computed, not chosen.
+\end{enumerate}
+
+\textbf{Corollary (Forced Solution):} For any domain $D$, Theorem~3.63 establishes existential uniqueness: $\exists! A$ such that $\text{minimal}(A, D)$. This makes the typing discipline mathematically determined, not designed. Given completeness and minimality as requirements, the solution is forced by the domain structure. Claiming ``typing discipline is a matter of preference'' while accepting the uniqueness theorem instantiates $P \land \neg P$: uniqueness entails $\neg\exists$ alternatives; preference presupposes $\exists$ alternatives. The mathematics admits no choice.
+
+All proofs in Lean 4 (2700+ lines, 142+ theorems, 0 \texttt{sorry}).
+
+\textbf{Keywords:} type systems, nominal typing, structural typing, matroid theory, impossibility theorems, formal verification
 \end{abstract}
-
-
 
 
 

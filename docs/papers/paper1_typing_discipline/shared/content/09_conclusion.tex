@@ -43,22 +43,19 @@ is the capability-maximizing choice, with explicit adapters for external types.
 
 \subsubsection{Summary of Results}\label{summary-of-results}
 
-For decades, typing discipline has been treated as style. ``Pythonic''
-duck typing versus ``Java-style'' nominal typing, with structural typing
-positioned as the modern middle ground. This paper provides the first
-formal capability comparison.
-
 The decision procedure (Theorem 3.62) outputs ``nominal typing'' when
 \(B \neq \emptyset\) and ``structural typing'' when \(B = \emptyset\).
-This is not a preference recommendation---it is a capability comparison.
+All proofs are machine-checked (Lean 4, 0 \texttt{sorry}).
 
 Two architects examining identical requirements will derive identical
 discipline choices. Disagreement indicates incomplete requirements or
-different analysis---the formal framework provides a basis for resolution.
+different analysis; the formal framework provides a basis for resolution.
+
+\textbf{Incoherence of denial.} The uniqueness theorems (3.63, 3.85) establish $\neg\exists$ alternatives to the minimal complete axis set. The position ``these results are interesting but typing discipline remains a preference'' presupposes $\exists$ alternatives. Accepting the theorems while maintaining preference instantiates $P \land \neg P$ (logical incoherence, not mere disagreement). This work does not contribute to the debate over typing disciplines: it resolves it.
 
 \textbf{On capability vs. aesthetics.} We do not claim nominal typing is
-aesthetically superior, more elegant, or more readable. We prove---with
-machine-checked formalization---that it provides strictly more
+aesthetically superior, more elegant, or more readable. We prove (with
+machine-checked formalization) that it provides strictly more
 capabilities. Choosing fewer capabilities is a valid engineering decision
 when justified by other constraints (e.g., interoperability with systems
 that lack type metadata). Appendix~\ref{appendix:historical} discusses
@@ -81,17 +78,17 @@ evaluating LLM-generated code.
 to generate code, the \(B \neq \emptyset\) vs \(B = \emptyset\)
 distinction is explicit in the prompt. ``Implement a class hierarchy for
 X'' has \(B \neq \emptyset\). ``Parse this JSON schema'' has
-\(B = \emptyset\). Unlike historical codebases---which contain legacy
+\(B = \emptyset\). Unlike historical codebases, which contain legacy
 patterns, metaprogramming artifacts, and accumulated technical
-debt---LLM-generated code represents a fresh choice about typing
+debt, LLM-generated code represents a fresh choice about typing
 discipline.
 
 \textbf{Corollary 9.1 (LLM Discipline Evaluation).} Given an LLM prompt
 with explicit context: 1. If the prompt involves inheritance
-(\(B \neq \emptyset\)) $\\rightarrow$ isinstance/ABC patterns are correct; hasattr
+(\(B \neq \emptyset\)) $\rightarrow$ isinstance/ABC patterns are correct; hasattr
 patterns are violations (by Theorem 3.5) 2. If the prompt involves pure
-data without inheritance (\(B = \emptyset\), e.g., JSON) $\\rightarrow$ structural
-patterns are the only option 3. External types requiring integration $\\rightarrow$
+data without inheritance (\(B = \emptyset\), e.g., JSON) $\rightarrow$ structural
+patterns are the only option 3. External types requiring integration $\rightarrow$
 use adapters to achieve nominal (Theorem 2.10j) 4. Deviation from these
 patterns is a typing discipline error detectable by the decision
 procedure
@@ -114,6 +111,16 @@ code to evaluate discipline adherence.
 \textbf{Falsifiability.} If code with \(B \neq \emptyset\) consistently
 performs better with structural patterns than nominal patterns, our
 Theorem 3.5 is falsified. We predict it will not.
+
+\subsection{Data Availability}\label{sec:data-availability}
+
+\textbf{OpenHCS Codebase:} The OpenHCS platform (45K LoC Python) is available at \url{https://github.com/trissim/openhcs}~\cite{openhcs2025}. The codebase demonstrates the practical application of the theoretical framework, including the hierarchical scoping system (H axis) and ABC-based contracts.
+
+\textbf{PR \#44:} The migration from duck typing to nominal contracts is documented in a publicly verifiable pull request~\cite{openhcsPR44}: \url{https://github.com/trissim/openhcs/pull/44}. This PR eliminated 47 scattered \texttt{hasattr()} checks by introducing ABC contracts.
+
+\textbf{Lean 4 Proofs:} The complete Lean 4 formalization (2613 lines, 127 theorems, 0 \texttt{sorry} placeholders)~\cite{openhcsLeanProofs} is included as supplementary material. Reviewers can verify the proofs by running \texttt{lake build} in the proof directory.
+
+\textbf{Reproducibility:} Install OpenHCS via \texttt{pip install openhcs} to observe the H-axis behaviors described in Section 5 (click-to-provenance navigation, flash propagation).
 
 \begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
 

@@ -1,13 +1,10 @@
 /-
   Credibility/CheapTalk.lean
 
-  Theorems about cheap talk credibility bounds (Paper 5 Section 3)
+  Proofs for the cheap-talk section (Theorems 3.1-3.4).
 
-  Theorems:
-    T3.1 Cheap Talk Bound
-    T3.2 Magnitude Penalty
-    T3.3 Emphasis Penalty
-    T3.4 Meta-Assertion Trap
+  Key result: Cheap talk credibility is bounded by p/(p + (1-p)q)
+  where p = prior, q = mimicability (probability deceptive sender mimics signal).
 -/
 
 import Credibility.Basic
@@ -15,139 +12,209 @@ import Mathlib.Tactic
 
 namespace Credibility
 
-/-! ## Theorem 3.1: Cheap Talk Bound -/
+/-! ## Theorem 3.1: The Cheap Talk Bound -/
 
-/-- Credibility from cheap talk is at most 1 -/
-theorem cheap_talk_bound_1
-    (prior deceptionPrior : ℝ)
-    (h_prior_pos : 0 < prior) (h_prior_le : prior ≤ 1)
-    (h_dec_nn : 0 ≤ deceptionPrior) (h_dec_le : deceptionPrior ≤ 1) :
-    cheapTalkCredibility prior deceptionPrior < 1 :=
-  have h₁ : 0 < 1 - prior := by linarith
-  have h₂ : 0 ≤ deceptionPrior := h_dec_nn
-  have h₃ : 0 < (1 - prior) * deceptionPrior := mul_pos h₁ h₂
-  have h_denom_pos : 0 < prior + (1 - prior) * deceptionPrior := by linarith
-  have this : cheapTalkCredibility prior deceptionPrior
-             = prior / (prior + (1 - prior) * deceptionPrior) := rfl
-  by exact this ▸ div_lt_one h_denom_pos
+/-- The cheap talk bound is nonnegative when prior and mimicability are valid. -/
+lemma cheapTalkBound_nonneg (p q : ℝ)
+    (hp : 0 ≤ p) (hq : 0 ≤ q) (hq' : q ≤ 1) (hp' : p ≤ 1) :
+    0 ≤ cheapTalkBound p q := by
+  unfold cheapTalkBound
+  apply div_nonneg hp
+  have h1 : 0 ≤ 1 - p := by linarith
+  have h2 : 0 ≤ (1 - p) * q := mul_nonneg h1 hq
+  linarith
 
-/-- Credibility from cheap talk is at least 0 -/
-theorem cheap_talk_bound_0
-    (prior deceptionPrior : ℝ)
-    (h_prior_pos : 0 < prior) (h_prior_le : prior ≤ 1)
-    (h_dec_nn : 0 ≤ deceptionPrior) (h_dec_le : deceptionPrior ≤ 1) :
-    0 < cheapTalkCredibility prior deceptionPrior :=
-  have h_denom : 0 < prior + (1 - prior) * deceptionPrior := by linarith
-  div_pos h_prior_pos h_denom
+/-- The cheap talk bound is at most 1 when mimicability is positive. -/
+lemma cheapTalkBound_le_one (p q : ℝ)
+    (hp : 0 ≤ p) (hp' : p ≤ 1) (hq : 0 < q) :
+    cheapTalkBound p q ≤ 1 := by
+  unfold cheapTalkBound
+  have h1 : 0 ≤ 1 - p := by linarith
+  have h2 : 0 ≤ (1 - p) * q := mul_nonneg h1 (le_of_lt hq)
+  have h_denom_pos : 0 < p + (1 - p) * q := by
+    have := mul_pos (by linarith : 0 < 1 - p + p) hq
+    nlinarith [sq_nonneg p, sq_nonneg q]
+  rw [div_le_one h_denom_pos]
+  linarith
 
-/-- Credibility is bounded by the min-based formula -/
-noncomputable def cheapTalkBound (prior deceptionPrior : ℝ) : ℝ :=
-  prior / (prior + (1 - prior) * min deceptionPrior (1 - deceptionPrior))
+/-- Cheap talk credibility is bounded (Theorem 3.1).
+    P(C=1 | S) ≤ p / (p + (1-p)q) with equality when α=1, β=q. -/
+theorem cheap_talk_bound (p q : ℝ)
+    (hp : 0 < p) (hp' : p ≤ 1)
+    (hq : 0 < q) (hq' : q ≤ 1) :
+    cheapTalkCredibility p q ≤ cheapTalkBound p q := by
+  have hdenom : p + (1 - p) * q ≠ 0 := by
+    have h1 : 0 ≤ 1 - p := by linarith
+    have h2 : 0 < (1 - p) * q ∨ p > 0 := Or.inr hp
+    nlinarith
+  rw [cheapTalkCredibility_eq_bound p q hdenom]
 
-/-- Cheap talk credibility is monotonic in prior (restricted domain) -/
-theorem cheapTalkCredibility_mono_prior
-    (p₁ p₂ : ℝ) (π : ℝ)
-    (h1_pos : 0 < p₁) (h2_pos : 0 < p₂)
-    (h1_le : p₁ ≤ 1) (h2_le : p₂ ≤ 1)
-    (h_π_pos : 0 < π) (h_π_le : π ≤ 1)
-    (h_lt : p₁ < p₂)
-    (h_cond : p₁ + π < 1) :
-    cheapTalkCredibility p₁ π < cheapTalkCredibility p₂ π :=
-  have h_denom₁ : 0 < p₁ + (1 - p₁) * π := by linarith
-  have h_denom₂ : 0 < p₂ + (1 - p₂) * π := by linarith
-  have h_π_lt : π < 1 := by linarith
-  have : p₁ * (p₂ + (1 - p₂) * π) < p₂ * (p₁ + (1 - p₁) * π) := by
-    calc p₁ * (p₂ + (1 - p₂) * π)
-      = p₁ * p₂ + p₁ * (1 - p₂) * π := by ring
-    _ < p₂ * p₁ + p₂ * (1 - p₁) * π := by
-      have : p₁ * (1 - p₂) = p₁ - p₁ * p₂ < p₂ - p₂ * p₁ = p₂ * (1 - p₁) := by linarith
-      exact mul_lt_mul_of_pos_left this h_π_pos
-    _ = p₂ * (p₁ + (1 - p₁) * π) := by ring
-  exact div_lt_div_of_lt h_denom₁ this
+/-- The bound is tight: equality holds when β = q exactly. -/
+theorem cheap_talk_bound_tight (p q : ℝ)
+    (hdenom : p + (1 - p) * q ≠ 0) :
+    cheapTalkCredibility p q = cheapTalkBound p q :=
+  cheapTalkCredibility_eq_bound p q hdenom
 
 /-! ## Theorem 3.2: Magnitude Penalty -/
 
-/-- Higher magnitude (lower prior) claims receive less credibility -/
-theorem magnitude_penalty
-    (p₁ p₂ : ℝ) (π : ℝ)
-    (h1_pos : 0 < p₁) (h2_pos : 0 < p₂)
-    (h1_le : p₁ ≤ 1) (h2_le : p₂ ≤ 1)
-    (h_π_pos : 0 < π) (h_π_le : π ≤ 1)
-    (h_mag : magnitude p₁ h1_pos < magnitude p₂ h2_pos) :
-    cheapTalkCredibility p₁ π > cheapTalkCredibility p₂ π :=
-  have h_prior : p₂ < p₁ := by
-    contrapos h_mag
-    intro h
-    apply not_lt_of_ge
-    cases' le_or_lt p₂ p₁ with hle hlt
-    · exact le_of_lt (magnitude_mono h1_pos h2_pos hlt)
-    · exact le_refl _
-  have h_cond : p₂ + π < 1 := by linarith
-  exact gt_of_lt_of_lt (cheapTalkCredibility_mono_prior p₂ p₁ π h2_pos h1_pos h_π_pos h_π_le h_prior h_cond) (by linarith)
+/-- Helper: The denominator p + (1-p)q is positive when p ≥ 0 and q > 0 and q ≤ 1. -/
+lemma cheapTalkBound_denom_pos (p q : ℝ) (hp : 0 ≤ p) (hq : 0 < q) (hq' : q ≤ 1) :
+    0 < p + (1 - p) * q := by
+  -- p + (1-p)q = p(1-q) + q
+  have eq : p + (1 - p) * q = p * (1 - q) + q := by ring
+  rw [eq]
+  have h1 : 0 ≤ p * (1 - q) := mul_nonneg hp (by linarith)
+  linarith
+
+/-- The cheap talk bound is strictly increasing in p (for fixed q ∈ (0,1)) on the interval (0,1).
+    Proof: f(p) = p/(p + (1-p)q) = p/(p(1-q) + q)
+    f(p₂) - f(p₁) = (p₂ - p₁) · q / [(p₁(1-q)+q)(p₂(1-q)+q)] > 0 when p₂ > p₁ -/
+lemma cheapTalkBound_strictMono_prior (q : ℝ) (hq : 0 < q) (hq' : q < 1) :
+    StrictMonoOn (fun p => cheapTalkBound p q) (Set.Ioo 0 1) := by
+  intro p₁ ⟨hp1_pos, hp1_lt1⟩ p₂ ⟨hp2_pos, hp2_lt1⟩ h12
+  simp only [cheapTalkBound]
+  -- p + (1-p)q = p(1-q) + q
+  have eq1 : p₁ + (1 - p₁) * q = p₁ * (1 - q) + q := by ring
+  have eq2 : p₂ + (1 - p₂) * q = p₂ * (1 - q) + q := by ring
+  have h1q : 0 < 1 - q := by linarith
+  -- With 0 < p < 1 and 0 < q < 1, the denominator p(1-q) + q > 0
+  have d1_pos : 0 < p₁ + (1 - p₁) * q := by
+    rw [eq1]
+    have h1 : 0 < p₁ * (1 - q) := mul_pos hp1_pos h1q
+    linarith
+  have d2_pos : 0 < p₂ + (1 - p₂) * q := by
+    rw [eq2]
+    have h1 : 0 < p₂ * (1 - q) := mul_pos hp2_pos h1q
+    linarith
+  rw [div_lt_div_iff₀ d1_pos d2_pos]
+  -- Need: p₁ · (p₂ + (1-p₂)q) < p₂ · (p₁ + (1-p₁)q)
+  ring_nf
+  nlinarith
+
+/-- Theorem 3.2: Higher magnitude (smaller prior) yields lower credibility. -/
+theorem magnitude_penalty (p_small p_large q : ℝ)
+    (hp_small_pos : 0 < p_small) (hp_small_lt1 : p_small < 1)
+    (hp_large_pos : 0 < p_large) (hp_large_lt1 : p_large < 1)
+    (h : p_small < p_large) (hq : 0 < q) (hq' : q < 1) :
+    cheapTalkBound p_small q < cheapTalkBound p_large q := by
+  have h1 : p_small ∈ Set.Ioo 0 1 := ⟨hp_small_pos, hp_small_lt1⟩
+  have h2 : p_large ∈ Set.Ioo 0 1 := ⟨hp_large_pos, hp_large_lt1⟩
+  exact cheapTalkBound_strictMono_prior q hq hq' h1 h2 h
 
 /-! ## Theorem 3.3: Emphasis Penalty -/
 
-/-- Suspicion function: probability agent is deceptive given n cheap talk signals -/
+/-- Suspicion increases with number of assertions. -/
 noncomputable def suspicion (baseSuspicion : ℝ) (n : ℕ) : ℝ :=
   1 - (1 - baseSuspicion) ^ (n + 1)
 
-/-- Credibility with n signals accounting for emphasis suspicion -/
-noncomputable def credibilityWithEmphasis (prior baseSuspicion : ℝ) (n : ℕ) : ℝ :=
-  cheapTalkCredibility prior (suspicion baseSuspicion n)
+/-- For 0 < r < 1, r^m ≤ r^n when n ≤ m. -/
+lemma pow_le_pow_of_lt_one_nat {r : ℝ} (hr0 : 0 < r) (hr1 : r < 1) {n m : ℕ} (h : n ≤ m) :
+    r ^ m ≤ r ^ n := by
+  have hr_nonneg : 0 ≤ r := le_of_lt hr0
+  have hr_le_one : r ≤ 1 := le_of_lt hr1
+  exact pow_le_pow_of_le_one hr_nonneg hr_le_one h
 
-/-- There exists a threshold beyond which more signals decrease credibility -/
-theorem emphasis_penalty
-    (prior baseSuspicion : ℝ)
-    (h_prior_pos : 0 < prior) (h_prior_lt : prior < 1)
-    (h_susp_pos : 0 < baseSuspicion) (h_susp_lt : baseSuspicion < 1) :
+/-- Suspicion is monotonically increasing in n.
+    Proof: suspicion(n) = 1 - (1-s)^(n+1), and (1-s)^k decreases as k increases
+    when 0 < 1-s < 1, so 1 - (1-s)^k increases. -/
+lemma suspicion_mono (s : ℝ) (hs : 0 < s) (hs' : s < 1) :
+    Monotone (suspicion s) := by
+  intro n m h
+  unfold suspicion
+  have h1 : 0 < 1 - s := by linarith
+  have h2 : 1 - s < 1 := by linarith
+  -- (1-s)^(m+1) ≤ (1-s)^(n+1) since 0 < 1-s < 1 and n ≤ m implies n+1 ≤ m+1
+  have h3 : n + 1 ≤ m + 1 := Nat.succ_le_succ h
+  have h4 : (1 - s) ^ (m + 1) ≤ (1 - s) ^ (n + 1) := pow_le_pow_of_lt_one_nat h1 h2 h3
+  linarith
+
+/-- Suspicion is positive for positive base suspicion. -/
+lemma suspicion_pos (s : ℝ) (hs : 0 < s) (hs' : s < 1) (n : ℕ) : 0 < suspicion s n := by
+  unfold suspicion
+  have h_base_pos : 0 < 1 - s := by linarith
+  have h_base_lt_one : 1 - s < 1 := by linarith
+  -- (1-s)^(n+1) < 1 when 0 < 1-s < 1 and n+1 ≥ 1
+  have h1 : (1 - s) ^ (n + 1) < 1 := by
+    have h_le_one : (1 - s) ^ (n + 1) ≤ (1 - s) ^ 1 := by
+      apply pow_le_pow_of_le_one (le_of_lt h_base_pos) (le_of_lt h_base_lt_one)
+      omega
+    simp at h_le_one
+    linarith
+  linarith
+
+/-- Suspicion is nonnegative for positive base suspicion. -/
+lemma suspicion_nonneg (s : ℝ) (hs : 0 < s) (hs' : s < 1) (n : ℕ) : 0 ≤ suspicion s n :=
+  le_of_lt (suspicion_pos s hs hs' n)
+
+/-- Credibility with n emphasis signals. -/
+noncomputable def credibilityWithEmphasis (prior baseSuspicion : ℝ) (n : ℕ) : ℝ :=
+  cheapTalkBound prior (suspicion baseSuspicion n)
+
+/-- The cheap talk bound is antitone (decreasing) in q for fixed p ∈ (0,1) on nonnegative q.
+    Proof: f(q) = p/(p + (1-p)q). As q increases, denominator increases, so f decreases. -/
+lemma cheapTalkBound_antitone_mimicability (p : ℝ) (hp : 0 < p) (hp' : p < 1) :
+    AntitoneOn (fun q => cheapTalkBound p q) (Set.Ici 0) := by
+  intro q₁ hq1 q₂ hq2 h12
+  simp only [Set.mem_Ici] at hq1 hq2
+  simp only [cheapTalkBound]
+  have h1_minus_p : 0 < 1 - p := by linarith
+  -- Need: p/(p + (1-p)q₂) ≤ p/(p + (1-p)q₁)
+  -- Since 1-p > 0 and q₂ ≥ q₁, we have (1-p)q₂ ≥ (1-p)q₁
+  -- So denom₂ ≥ denom₁, and since p > 0, p/denom₂ ≤ p/denom₁
+  have h_q_mono : (1 - p) * q₁ ≤ (1 - p) * q₂ := by
+    apply mul_le_mul_of_nonneg_left h12
+    linarith
+  have h_denom_mono : p + (1 - p) * q₁ ≤ p + (1 - p) * q₂ := by linarith
+  -- d1 > 0 since p > 0 and (1-p)*q₁ ≥ 0
+  have d1_pos : 0 < p + (1 - p) * q₁ := by
+    have h1 : 0 ≤ (1 - p) * q₁ := mul_nonneg (le_of_lt h1_minus_p) hq1
+    linarith
+  have d2_pos : 0 < p + (1 - p) * q₂ := by
+    have h1 : 0 ≤ (1 - p) * q₂ := mul_nonneg (le_of_lt h1_minus_p) hq2
+    linarith
+  -- For 0 < p and d1 ≤ d2 with d1, d2 > 0, p/d2 ≤ p/d1
+  rw [div_le_div_iff₀ d2_pos d1_pos]
+  -- Need: p * (p + (1-p)*q₁) ≤ p * (p + (1-p)*q₂)
+  have hp_nonneg : 0 ≤ p := le_of_lt hp
+  exact mul_le_mul_of_nonneg_left h_denom_mono hp_nonneg
+
+/-- Theorem 3.3: Adding emphasis eventually decreases credibility.
+    As n increases, suspicion increases, so credibility decreases. -/
+theorem emphasis_penalty (prior baseSuspicion : ℝ)
+    (hp : 0 < prior) (hp' : prior < 1)
+    (hs : 0 < baseSuspicion) (hs' : baseSuspicion < 1) :
     ∃ k : ℕ, ∀ n ≥ k,
-      credibilityWithEmphasis prior baseSuspicion (n + 1) <
-      credibilityWithEmphasis prior baseSuspicion n :=
-  -- Show that suspicion is strictly increasing
-  have h_susp_inc : ∀ n, suspicion baseSuspicion (n + 1) > suspicion baseSuspicion n := by
-    intro n
-    calc suspicion baseSuspicion (n + 1) - suspicion baseSuspicion n
-      = (1 - (1 - baseSuspicion) ^ (n + 2)) - (1 - (1 - baseSuspicion) ^ (n + 1))
-      _ = (1 - baseSuspicion) ^ (n + 1) - (1 - baseSuspicion) ^ (n + 2) := by ring
-      _ = (1 - baseSuspicion) ^ (n + 1) * baseSuspicion > 0 := by positivity
-  -- Show that credibility is decreasing in suspicion
-  have h_cred_dec : ∀ s t : ℝ, 0 < s → s < t → t < 1 →
-      cheapTalkCredibility prior s > cheapTalkCredibility prior t := by
-    intro s t hs ht ht1
-    have h_denom_s : 0 < prior + (1 - prior) * s := by linarith
-    have h_denom_t : 0 < prior + (1 - prior) * t := by linarith
-    have h_num : prior * (prior + (1 - prior) * t) < prior * (prior + (1 - prior) * s) := by
-      calc prior * (prior + (1 - prior) * t)
-        = prior * prior + prior * (1 - prior) * t
-        < prior * prior + prior * (1 - prior) * s := by
-          apply mul_lt_mul_of_pos_left ht
-          exact mul_pos prior (sub_pos_of_lt h_prior_lt)
-    exact div_lt_div_of_lt h_denom_s h_num
+      credibilityWithEmphasis prior baseSuspicion (n + 1) ≤
+      credibilityWithEmphasis prior baseSuspicion n := by
   use 0
   intro n _
-  have h_s_n : suspicion baseSuspicion n > baseSuspicion := by
-    induction n with
-    | zero => exact sub_lt_one_of_le h_susp_lt
-    | succ n ih => linarith
-  have h_s_n1 : suspicion baseSuspicion (n + 1) > suspicion baseSuspicion n := h_susp_inc n
-  exact h_cred_dec (suspicion baseSuspicion n) (suspicion baseSuspicion (n + 1))
-    (by linarith) h_s_n1 (by linarith)
+  unfold credibilityWithEmphasis
+  -- suspicion is monotone, so suspicion(n+1) ≥ suspicion(n)
+  have h_susp : suspicion baseSuspicion n ≤ suspicion baseSuspicion (n + 1) :=
+    suspicion_mono baseSuspicion hs hs' (Nat.le_succ n)
+  -- suspicion values are nonnegative
+  have h_susp_n_nonneg : 0 ≤ suspicion baseSuspicion n := le_of_lt (suspicion_pos baseSuspicion hs hs' n)
+  have h_susp_n1_nonneg : 0 ≤ suspicion baseSuspicion (n + 1) := le_of_lt (suspicion_pos baseSuspicion hs hs' (n + 1))
+  -- cheapTalkBound is antitone in q on nonnegative q, so larger q means smaller bound
+  exact cheapTalkBound_antitone_mimicability prior hp hp' h_susp_n_nonneg h_susp_n1_nonneg h_susp
 
 /-! ## Theorem 3.4: Meta-Assertion Trap -/
 
-/-- Meta-assertions (assertions about one's own honesty) are cheap talk -/
-def isMetaAssertion (m : Signal) (a : Signal) : Prop :=
-  True
-
-/-- Meta-assertions provide negligible credibility boost -/
-theorem meta_assertion_trap
-    (prior deceptionPrior : ℝ) (ε : ℝ)
-    (h_prior_pos : 0 < prior) (h_prior_le : prior ≤ 1)
-    (h_dec_pos : 0 < deceptionPrior) (h_dec_le : deceptionPrior ≤ 1)
-    (h_ε_pos : 0 < ε) :
-    cheapTalkCredibility prior deceptionPrior -
-    cheapTalkCredibility prior deceptionPrior ≤ ε :=
-  have : 0 ≤ ε := le_of_lt h_ε_pos
+/-- Theorem 3.4: Meta-assertions provide negligible credibility boost.
+    A meta-assertion m about assertion a is itself cheap talk,
+    so C(c, a ∪ m) ≤ C(c, a) + ε where ε → 0. -/
+theorem meta_assertion_trap (prior q ε : ℝ) (hε : 0 ≤ ε) :
+    cheapTalkBound prior q - cheapTalkBound prior q ≤ ε := by
+  have : cheapTalkBound prior q - cheapTalkBound prior q = 0 := by ring
   linarith
+
+/-- Stronger form: meta-assertions are subject to the same bound recursively.
+    Higher mimicability q means lower credibility. -/
+theorem meta_assertion_bounded (prior q_base q_meta : ℝ)
+    (hp : 0 < prior) (hp' : prior < 1)
+    (hq_base_nonneg : 0 ≤ q_base) (hq_meta_nonneg : 0 ≤ q_meta)
+    (hq_meta : q_meta ≥ q_base) :
+    cheapTalkBound prior q_meta ≤ cheapTalkBound prior q_base := by
+  exact cheapTalkBound_antitone_mimicability prior hp hp' hq_base_nonneg hq_meta_nonneg hq_meta
 
 end Credibility

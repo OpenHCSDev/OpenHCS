@@ -20,125 +20,100 @@ $>$1 & Multiple sources can diverge (inconsistency risk) \\
 \end{tabular}
 \end{center}
 
-There is no ``acceptable level of duplication'' in the formal sense. DOF = 2 means two locations can hold different values for the same fact. Whether this causes problems in practice depends on discipline, but the \emph{possibility} of inconsistency exists.
+DOF = 2 means two locations can hold different values for the same fact. The \emph{possibility} of inconsistency exists. The definition is mathematical: SSOT requires DOF = 1. Systems with DOF $>$ 1 may be pragmatically acceptable but do not satisfy SSOT.
 
-The definition is not a recommendation---it is a mathematical characterization. You may choose to accept DOF $>$ 1 for pragmatic reasons, but you cannot claim SSOT while doing so.
+\subsection{External Tools vs Language-Level SSOT}
 
-\subsection{Objection: Other Languages Can Approximate SSOT}
-
-\textbf{Objection:} ``Java with annotations, C++ with templates, or Rust with macros can achieve similar results. Your analysis is too narrow.''
-
-\textbf{Response:} Approximation $\neq$ guarantee. External tools and compile-time mechanisms differ from language-level support in three ways:
+External tools (annotation processors, code generators, build systems) can approximate SSOT behavior. These differ from language-level SSOT in three dimensions:
 
 \begin{enumerate}
-\item \textbf{Not part of the language:} Annotation processors, code generators, and build tools are external. They can fail, be misconfigured, or be bypassed.
+\item \textbf{External to language semantics:} Build tools can fail, be misconfigured, or be bypassed. They operate outside the language model.
 
-\item \textbf{Not verifiable at runtime:} The program cannot confirm that derivation occurred correctly. In Python, \texttt{\_\_subclasses\_\_()} can verify registration completeness at runtime. In Java, there is no equivalent.
+\item \textbf{No runtime verification:} The program cannot confirm that derivation occurred correctly. Python's \texttt{\_\_subclasses\_\_()} verifies registration completeness at runtime. External tools provide no runtime guarantee.
 
-\item \textbf{Not portable:} External tools are project-specific. Python's \texttt{\_\_init\_subclass\_\_} works in any Python environment without configuration.
+\item \textbf{Configuration-dependent:} External tools require project-specific setup. Python's \texttt{\_\_init\_subclass\_\_} works in any environment without configuration.
 \end{enumerate}
 
-We do not claim other languages \emph{cannot} achieve SSOT-like results. We claim they cannot achieve SSOT \emph{within the language} with runtime verification.
+The analysis characterizes SSOT \emph{within language semantics}, where DOF = 1 holds at runtime.
 
-\subsection{Objection: This is Just Advocacy for Python}
+\subsection{Derivation Order}
 
-\textbf{Objection:} ``This paper is thinly-veiled Python advocacy dressed up as formal analysis.''
-
-\textbf{Response:} The derivation runs in the opposite direction:
+The analysis proceeds from definition to language evaluation:
 
 \begin{enumerate}
-\item We define SSOT mathematically (DOF = 1)
-\item We prove what language features are necessary (definition-time hooks, introspection)
-\item We evaluate languages against these criteria
-\item Python, CLOS, and Smalltalk satisfy the criteria
+\item Define SSOT mathematically (DOF = 1)
+\item Prove necessary language features (definition-time hooks + introspection)
+\item Evaluate languages against derived criteria
+\item Result: Python, CLOS, and Smalltalk satisfy both requirements
 \end{enumerate}
 
-If we were advocating for Python, we would not include CLOS and Smalltalk. The fact that three languages satisfy the criteria---and that two are not mainstream---validates that our criteria identify a genuine language capability class, not a Python-specific feature set.
+Three languages satisfy the criteria. Two (CLOS, Smalltalk) are not mainstream. This validates that the requirements characterize a genuine language capability class. The requirements are derived from SSOT's definition, independent of any particular language's feature set.
 
-The analysis would produce the same results if Python did not exist. The requirements are derived from the definition of SSOT, not from Python's feature set.
+\subsection{Empirical Validation}
 
-\subsection{Objection: The Case Studies are Cherry-Picked}
+The case studies demonstrate patterns, with publicly verifiable instances:
 
-\textbf{Objection:} ``You selected case studies that show dramatic improvements. Real codebases have more modest results.''
-
-\textbf{Response:} The 13 case studies are \textbf{exhaustive} for one codebase. We identified \emph{all} structural facts in OpenHCS and measured DOF for each. No case study was excluded.
-
-The results include:
 \begin{itemize}
 \tightlist
-\item The largest reduction (47$\times$, PR \#44)
-\item The smallest reduction (5$\times$, Error Handler Chain)
-\item The median reduction (11$\times$)
+\item PR \#44: 47 \texttt{hasattr()} checks → 1 ABC definition (verifiable via GitHub diff)
+\item Three general patterns: contract enforcement, automatic registration, automatic discovery
+\item Each pattern represents a mechanism, applicable to codebases exhibiting similar structure
 \end{itemize}
 
-If anything, the case studies are \emph{conservative}. We only counted structural facts with clear before/after states. Many smaller improvements were not counted.
+The theoretical contribution is the formal proof. The examples demonstrate applicability.
 
-\subsection{Objection: Complexity Bounds are Theoretical}
+\subsection{Asymptotic Analysis}
 
-\textbf{Objection:} ``Asymptotic bounds like $O(1)$ vs $\Omega(n)$ don't matter in practice. Real codebases are finite.''
-
-\textbf{Response:} The case studies provide concrete numbers:
+The complexity bounds are derived from the mechanism:
 
 \begin{itemize}
 \tightlist
-\item Total pre-SSOT DOF: 184
-\item Total post-SSOT DOF: 13
-\item Concrete reduction: 14.2$\times$
+\item SSOT: changing a fact requires 1 edit (the single source)
+\item Non-SSOT: changing a fact requires $n$ edits (one per encoding location)
+\item The ratio $n/1$ grows unbounded as $n$ increases
 \end{itemize}
 
-These are measured values, not asymptotic predictions. The 47$\times$ reduction in PR \#44 is a real number from a real codebase.
+PR \#44 demonstrates the mechanism at $n = 47$: 47 \texttt{hasattr()} checks → 1 ABC definition. The 47$\times$ reduction is observable via GitHub diff. The gap widens as codebases grow.
 
-The asymptotic bounds explain \emph{why} the concrete numbers are what they are. As codebases grow, the gap widens. A codebase with 1000 encoding locations would show even larger reductions.
+\subsection{Cost-Benefit Analysis}
 
-\subsection{Objection: SSOT Has Costs}
-
-\textbf{Objection:} ``Metaprogramming is complex, hard to debug, and has performance overhead. The cure is worse than the disease.''
-
-\textbf{Response:} This is a valid concern, but orthogonal to our claims. We prove that SSOT \emph{requires} certain features. We do not claim SSOT is always worth the cost.
-
-The decision to use SSOT involves trade-offs:
+SSOT involves trade-offs:
 \begin{itemize}
 \tightlist
-\item \textbf{Benefit:} Reduced modification complexity ($O(1)$ vs $\Omega(n)$)
+\item \textbf{Benefit:} Modification complexity $O(1)$ vs $\Omega(n)$
 \item \textbf{Cost:} Metaprogramming complexity, potential performance overhead
 \end{itemize}
 
-For small codebases or rarely-changing facts, the cost may exceed the benefit. For large codebases with frequently-changing structural facts, the benefit is substantial.
+The analysis characterizes what SSOT requires. The decision to use SSOT depends on codebase scale and change frequency.
 
-Our contribution is the formal analysis, not a recommendation. We provide the tools to make an informed decision.
+\subsection{Machine-Checked Formalization}
 
-\subsection{Objection: The Lean Proofs are Trivial}
-
-\textbf{Objection:} ``The Lean proofs just formalize obvious definitions. There's no deep mathematics here.''
-
-\textbf{Response:} The value is not in the difficulty of the proofs but in their \emph{existence}. Machine-checked proofs provide:
+The proofs formalize definitions precisely. Machine-checked proofs provide:
 
 \begin{enumerate}
-\item \textbf{Precision:} Informal arguments can be vague. Lean requires every step to be explicit.
-\item \textbf{Verification:} The proofs are checked by a computer. Human error is eliminated.
-\item \textbf{Reproducibility:} Anyone can run the proofs and verify the results.
+\item \textbf{Precision:} Lean requires every step to be explicit
+\item \textbf{Verification:} Computer-checked, eliminating human error
+\item \textbf{Reproducibility:} Anyone can run the proofs and verify results
 \end{enumerate}
 
-Many ``obvious'' software engineering principles have never been formalized. The contribution is demonstrating that formalization is possible and valuable, not that the mathematics is difficult.
+The contribution is formalization itself: converting informal principles into machine-verifiable theorems. Simple proofs from precise definitions are the goal.
 
-\subsection{Objection: Just Use Make/Bazel/Code Generation}
+\subsection{Build Tool Analysis}
 
-\textbf{Objection:} ``External build tools can achieve SSOT without language support. Generate the code at build time.''
-
-\textbf{Response:} External tools \emph{shift} the SSOT problem, they don't \emph{solve} it:
+External build tools shift the SSOT problem:
 
 \begin{enumerate}
-\item \textbf{Two sources of truth:} The build tool configuration becomes a second source. Changes require updating both the source AND the build config. Formally: let $C$ be a codebase using tool $T$. Then $\text{DOF}(C \cup T, F) \geq 2$ because both source and tool config encode $F$.
+\item \textbf{DOF $\geq$ 2:} Build tool configuration becomes a second source. Let $C$ be codebase, $T$ be tool. Then $\text{DOF}(C \cup T, F) \geq 2$ because both source and config encode $F$.
 
-\item \textbf{Not verifiable at runtime:} Generated code is not introspectable as \emph{derived}. You cannot query ``was this method generated or hand-written?'' The program loses provenance information.
+\item \textbf{No runtime verification:} Generated code lacks derivation provenance. Cannot query ``was this method generated or hand-written?''
 
-\item \textbf{Build cache invalidation:} The build tool must track dependencies, introducing its own consistency problem. Stale caches cause bugs that don't exist with language-native derivation.
+\item \textbf{Cache invalidation:} Build tools must track dependencies. Stale caches cause bugs absent from language-native derivation.
 
-\item \textbf{Development friction:} Every edit requires a build step. Language-native SSOT (Python metaclasses) executes during \texttt{import}---no separate build, no cache, no configuration.
+\item \textbf{Build latency:} Every edit requires build step. Language-native SSOT (Python metaclasses) executes during \texttt{import}.
 \end{enumerate}
 
-External tools are a \emph{mitigation}, not a \emph{solution}. They reduce DOF from $n$ to $k$ where $k$ is the number of tool configurations, but $k > 1$ still violates SSOT.
+External tools reduce DOF from $n$ to $k$ where $k$ is the number of tool configurations. Since $k > 1$, SSOT (DOF = 1) is not satisfied.
 
-\textbf{When external tools are acceptable:} For cross-language code generation (e.g., protobuf generating Python, Java, Go), external tools are the only option since no single language can control another's type definitions. Our analysis focuses on single-language SSOT.
+Cross-language code generation (e.g., protobuf) requires external tools. The analysis characterizes single-language SSOT.
 
 %==============================================================================

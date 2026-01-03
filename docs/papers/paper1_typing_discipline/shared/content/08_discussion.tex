@@ -1,5 +1,39 @@
 \section{Discussion}\label{discussion}
 
+\subsection{Methodology and Disclosure}\label{methodology-disclosure}
+
+\textbf{Role of LLMs in this work.} This paper was developed through
+human-AI collaboration. The author provided the core intuitions,
+conjectures, and architectural insights; large language models (Claude,
+GPT-4) served as implementation partners---drafting proofs, suggesting
+formalizations, and generating code. The Lean 4 proofs were iteratively
+refined through this collaboration: the author specified what should be
+proved, the LLM proposed proof strategies, and the Lean compiler served
+as the ultimate arbiter of correctness.
+
+This methodology aligns with the paper's thesis: the Lean proofs are
+\emph{costly signals} (per the companion paper on credibility) because
+they require computational verification regardless of how they were
+generated. A proof that compiles is correct; the generation method is
+epistemically irrelevant to validity. The LLM accelerated exploration
+and drafting; the theorems stand or fall on their machine-checked
+proofs alone.
+
+\textbf{What the author contributed:} The $(B, S)$ decomposition,
+the strict dominance conjecture, the provenance impossibility claim,
+the connection to complexity bounds, the case study selection, and the
+architectural framing.
+
+\textbf{What LLMs contributed:} LaTeX drafting, Lean tactic suggestions,
+literature search assistance, prose refinement, and exploration of proof
+strategies.
+
+\textbf{Why this disclosure matters:} Academic norms around authorship
+and originality are evolving. We believe transparency about methodology
+strengthens rather than weakens the work. The proofs are machine-checked;
+the claims are falsifiable; the contribution is the insight, not the
+typing.
+
 \subsection{Limitations}\label{limitations}
 
 Our theorems establish necessary conditions for provenance-tracking
@@ -28,7 +62,7 @@ additional cost. Our theorems apply universally when
 
 \textbf{Python as canonical model.} The formalization uses Python's
 \texttt{type(name,\ bases,\ namespace)} because it is the clearest
-expression of the three-axis model. This is a strength, not a
+expression of the two-axis model. This is a strength, not a
 limitation: Python's explicit constructor exposes what other languages
 obscure with syntax. Table 2.2 demonstrates that 8 major languages
 (Java, C\#, Rust, TypeScript, Kotlin, Swift, Scala, C++) are isomorphic
@@ -50,15 +84,14 @@ foundations. This is standard practice in mechanized verification (e.g.,
 CompCert assumes well-typed input), but limits the scope of our
 machine-checked guarantees.
 
-\textbf{Empirical validation scope.} The formal results (Theorems 3.5,
+\textbf{Validation scope.} The formal results (Theorems 3.5,
 3.13, Corollary 6.3) are proven universally for any system where
 \(B \neq \emptyset\). These proofs establish \emph{what is impossible}:
 provenance cannot be computed without the bases axis
 (information-theoretically impossible, not merely difficult). The
-empirical measurements (DTD reduction, error rate correlation, DOF
-improvement) are drawn from OpenHCS. However, the \emph{direction} of
-the empirical claims---that capability gaps translate to measurable
-error reduction---follows from the formalism: if provenance is
+case studies (Section 5) demonstrate these theorems in a production
+codebase. The \emph{direction} of the claims---that capability gaps
+translate to error reduction---follows from the formalism: if provenance is
 impossible without nominal typing (Corollary 6.3), and provenance is
 required (PC = 1), then errors \emph{must} occur under duck typing. The
 \emph{magnitude} of the effect is codebase-specific; the
@@ -70,8 +103,8 @@ required (PC = 1), then errors \emph{must} occur under duck typing. The
   \textbf{Universal (proven):} Capability gap exists, provenance is
   impossible under duck typing, nominal typing strictly dominates.
 \item
-  \textbf{Singular (measured):} 47 \texttt{hasattr()} calls eliminated,
-  14.2$\times$ DOF reduction, $r = -0.85$ error correlation.
+  \textbf{Singular (observed):} 47 \texttt{hasattr()} calls eliminated,
+  centralized error detection via ABC contracts.
 \end{itemize}
 
 We call for replication studies on other codebases to measure the
@@ -224,8 +257,8 @@ the adapter---is a convenience, not a typing capability.
 \textbf{Languages without inheritance.} Go's struct types have
 \(B = \emptyset\) by design. Structural typing with declared interfaces
 is the only coherent option. Go does not use duck typing; Go interfaces
-are declared. This is why Go's type system is sound despite lacking
-inheritance.
+are declared \cite{goSpec}. This is why Go's type system is sound
+despite lacking inheritance.
 
 \textbf{The final collapse.} For languages with inheritance
 (\(B \neq \emptyset\)): - Duck typing: incoherent, never valid -
@@ -278,11 +311,12 @@ protocol combined with C3 linearization achieves O(1) field resolution
 while preserving provenance. Languages designing new metaobject
 protocols should consider whether they can match this complexity bound.
 
-\textbf{Explicit \texttt{bases} mandates nominal typing.} If a language
+\textbf{Explicit \texttt{bases} makes nominal typing strictly optimal.} If a language
 exposes explicit inheritance declarations (\texttt{class\ C(Base)}),
-Theorem 3.4 applies: structural typing becomes insufficient. Language
-designers cannot add inheritance to a structurally-typed language
-without addressing the provenance requirement.
+Theorem 3.4 (Nominal Pareto-Dominance) applies: nominal typing strictly
+dominates structural typing. Language designers cannot add inheritance
+to a structurally-typed language without creating capability gaps that
+nominal typing would eliminate.
 
 \subsection{Derivable Code Quality
 Metrics}\label{derivable-code-quality-metrics}
@@ -293,12 +327,21 @@ statically from source code:
 \textbf{Metric 1: Duck Typing Density (DTD)}
 
 \begin{verbatim}
-DTD = (hasattr_calls + getattr_calls + try_except_attributeerror) / KLOC
+DTD = hasattr_calls / KLOC
 \end{verbatim}
 
-Measures ad-hoc runtime probing. High DTD where \(B \neq \emptyset\)
-indicates discipline violation. High DTD at \(B = \emptyset\) boundaries
-(JSON, FFI) is expected.
+Measures ad-hoc capability probing. High DTD where \(B \neq \emptyset\)
+indicates discipline violation. We count only \texttt{hasattr()}, not
+\texttt{getattr()} or \texttt{try/except AttributeError}, because
+\texttt{hasattr()} is specifically capability detection (``does this
+object have this attribute?'')---the operational signature of duck
+typing (Definition 2.10c). \texttt{getattr()} without a fallback is
+explicit attribute access; \texttt{getattr()} with a fallback or
+\texttt{try/except AttributeError} may indicate duck typing but also
+appear in legitimate metaprogramming (descriptors, \texttt{\_\_getattr\_\_}
+hooks, optional feature detection at system boundaries). The theorem
+backing (Theorem 2.10d) establishes \texttt{hasattr()} as the incoherent
+probe; other patterns require case-by-case analysis.
 
 \textbf{Metric 2: Nominal Typing Ratio (NTR)}
 
@@ -413,19 +456,19 @@ Systems have \(B \neq \emptyset\) components (internal hierarchies) and
 \(B = \emptyset\) boundaries (external data):
 
 \begin{verbatim}
-\# B $\\neq$ $\\emptyset$: internal config hierarchy (use nominal)
+# B != {}: internal config hierarchy (use nominal)
 class ConfigBase(ABC):
     @abstractmethod
-    def validate(self) {-\textgreater{}} bool: pass
+    def validate(self) -> bool: pass
 
 class PathPlanningConfig(ConfigBase):
-    well\_filter: Optional[str]
+    well_filter: Optional[str]
 
-\# B = $\\emptyset$: parse external JSON (structural is only option)
-def load\_config\_from\_json(json\_dict: Dict[str, Any]) {-\textgreater{}} ConfigBase:
-    \# JSON has no inheritance—structural validation at boundary
-    if "well\_filter" in json\_dict:
-        return PathPlanningConfig(**json\_dict)  \# Returns nominal type
+# B = {}: parse external JSON (structural is only option)
+def load_config_from_json(json_dict: Dict[str, Any]) -> ConfigBase:
+    # JSON has no inheritance—structural validation at boundary
+    if "well_filter" in json_dict:
+        return PathPlanningConfig(**json_dict)  # Returns nominal type
     raise ValueError("Invalid config")
 \end{verbatim}
 
@@ -479,6 +522,11 @@ TypeScript presents a puzzle: it has explicit inheritance
 (\texttt{class\ B\ extends\ A}) but uses structural subtyping. Is this a
 valid design tradeoff, or an architectural tension with measurable
 consequences?
+The runtime model (JavaScript prototypes) preserves \(B\) and nominal
+identity (via \texttt{instanceof}), while the static checker erases \(B\)
+when computing compatibility
+\cite{tsHandbookTypeCompatibility,bierman2014typescript}. Per
+Definition 8.3 this is incoherence.
 
 \textbf{Definition 8.3 (Type System Coherence).} A type system is
 \emph{coherent} with respect to a language construct if the type
@@ -531,9 +579,9 @@ class StepWellFilterConfig extends WellFilterConfig \{
 
 The existence of this workaround demonstrates Definition 8.4: users
 create patterns to restore distinctions the type system fails to
-provide. TypeScript GitHub issues \#202 (2014) and \#33038 (2019)
-document community requests for native nominal types, confirming the
-workaround is widespread.
+provide. TypeScript GitHub issue \#202 (2014) and PR \#33038 (2019)
+request or experiment with native nominal types
+\cite{tsIssue202,tsPR33038}, confirming the workaround is widespread.
 
 \textbf{Tension 3: Measurable consequence.}
 
@@ -561,11 +609,11 @@ system does not 5. Per Definition 8.3, this is incoherence.
 branding patterns in TypeScript codebases empirically validates the
 tension per Definition 8.4.
 
-\emph{Evidence.} TypeScript GitHub issues \#202 (2014, 1,200+ reactions)
-and \#33038 (2019) request native nominal types. The \texttt{@types}
-ecosystem includes branded type utilities (\texttt{ts-brand},
-\texttt{io-ts}). This is not theoretical---it is measured community
-behavior.
+\emph{Evidence.} TypeScript GitHub issue \#202 (2014, 1,200+ reactions)
+and PR \#33038 (2019) request native nominal types
+\cite{tsIssue202,tsPR33038}. The \texttt{@types} ecosystem includes
+branded type utilities (\texttt{ts-brand}, \texttt{io-ts}). This is
+observed community behavior consistent with the predicted tension.
 
 \paragraph{8.7.3 Implications for Language
 Design}\label{implications-for-language-design-1}
@@ -579,10 +627,10 @@ apply: nominal typing strictly dominates (Theorem 3.5).
 The tension manifests in practice: programmers use \texttt{class}
 expecting nominal semantics, receive structural semantics, then add
 branding to restore nominal behavior. Our theorems predict this: Theorem
-3.4 states the presence of \texttt{bases} mandates nominal typing;
-TypeScript violates this, causing measurable friction. The branding
-idiom is programmers manually recovering what the language should
-provide.
+3.4 shows that when \texttt{bases} exist, nominal typing strictly
+dominates structural typing; TypeScript violates this optimality,
+causing measurable friction. The branding idiom is programmers manually
+recovering capabilities the language architecture foreclosed.
 
 \textbf{The lesson:} Languages adding \texttt{class} syntax should
 consider whether their type system will be coherent (per Definition 8.3)
@@ -594,8 +642,7 @@ of the intentional tension.
 \subsection{Mixins with MRO Strictly Dominate Object
 Composition}\label{mixins-with-mro-strictly-dominate-object-composition}
 
-The ``composition over inheritance'' principle from the Gang of Four
-(1994) has become software engineering dogma. We demonstrate this
+The ``composition over inheritance'' principle from the Gang of Four~\cite{gamma1994design} has become software engineering dogma. We demonstrate this
 principle is incorrect for behavior extension in languages with explicit
 MRO.
 
@@ -840,7 +887,7 @@ types---adapters make nominal typing available (Theorem 2.10j).
 
 \textbf{The unified view:} Gradual typing and nominal typing address
 orthogonal concerns: - Gradual typing: Typed vs untyped
-(\(B = \emptyset\) $\\rightarrow$ \(B \neq \emptyset\) migration) - Our theorems:
+(\(B = \emptyset\) $\rightarrow$ \(B \neq \emptyset\) migration) - Our theorems:
 Which discipline when \(B \neq \emptyset\) (answer: nominal)
 
 \textbf{Theorem 8.3 (Gradual-Nominal Complementarity).} Gradual typing
@@ -884,4 +931,3 @@ Principle.
 capabilities at equivalent cost. This is exactly the condition for higher
 leverage: $L(\text{nominal}) > L(\text{duck})$. By the Leverage Maximization
 Principle, nominal typing is therefore optimal. $\blacksquare$
-

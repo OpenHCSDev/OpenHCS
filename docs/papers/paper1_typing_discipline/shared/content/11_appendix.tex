@@ -31,7 +31,7 @@ Formal Analysis
 ``What about generics?'' & Theorems 3.43-3.48, Table 2.2 (Parameterized N) \\
 ``Erasure changes things'' & Theorems 3.46-3.47 (Compile-Time Type Checking) \\
 ``Only works for some languages'' & Theorem 3.47 (8 languages), Remark 3.49 (exotic features) \\
-``What about intersection/union types?'' & Remark 3.49 (still three axes) \\
+``What about intersection/union types?'' & Remark 3.49 (still two axes) \\
 ``What about row polymorphism?'' & Remark 3.49 (pure S, loses capabilities) \\
 ``What about higher-kinded types?'' & Remark 3.49 (parameterized N) \\
 ``Only applies to greenfield'' & Theorem 2.10j (Adapters eliminate retrofit exception) \\
@@ -49,24 +49,24 @@ We expand the most common concerns below; the remaining items in the table
 above are direct corollaries of the referenced results.
 
 \paragraph{Concern 1: Model Completeness.}
-\emph{Potential concern:} The (N, B, S) model may fail to capture relevant
+\emph{Potential concern:} The (B, S) model may fail to capture relevant
 aspects of type systems.
 
 \emph{Analysis:} Theorem~\ref{thm:model-completeness} establishes model completeness by constitutive
 definition. In Python, \texttt{type(name, bases, namespace)} is the universal
-type constructor---a type does not merely \emph{have} $(N, B, S)$; a type
-\emph{is} $(N, B, S)$. Any computable function over types is therefore
+type constructor. A type does not merely \emph{have} $(B, S)$; a type
+\emph{is} $(B, S)$. Any computable function over types is therefore
 definitionally a function of this triple. Properties like \texttt{\_\_mro\_\_}
 or \texttt{\_\_module\_\_} are not counterexamples: they are derived from or
-stored within $(N, B, S)$. This is definitional closure, not empirical
-enumeration---no ``fourth axis'' can exist because the triple is constitutive.
+stored within $(B, S)$. This is definitional closure, not empirical
+enumeration. No ``fourth axis'' can exist because the triple is constitutive.
 
 \paragraph{Concern 2: Duck Typing Tradeoffs.}
 \emph{Potential concern:} Duck typing has flexibility that nominal typing lacks.
 
 \emph{Analysis:} Theorems 3.34-3.36 establish that nominal typing provides a
 strict superset of duck typing capabilities. Duck typing's ``acceptance'' of
-structurally-equivalent types is not a capability---it is the \emph{absence}
+structurally-equivalent types is not a capability: it is the \emph{absence}
 of the capability to distinguish them. We treat ``capability'' as the set of
 definable operations/predicates available to the system, not the cost of
 retrofitting legacy code; migration/retrofit cost is handled separately
@@ -76,7 +76,7 @@ retrofitting legacy code; migration/retrofit cost is handled separately
 \emph{Potential concern:} The axioms are chosen to guarantee the conclusion.
 
 \emph{Analysis:} Lemma~\ref{lem:shape-axiom-definitional} establishes that the axiom ``shape-based typing treats
-same-namespace types identically'' is not an assumption---it is the
+same-namespace types identically'' is not an assumption: it is the
 \emph{definition} of shape-based typing (Definition 2.10).
 
 \paragraph{Concern 4: Future Extensions.}
@@ -84,7 +84,7 @@ same-namespace types identically'' is not an assumption---it is the
 
 \emph{Analysis:} Theorem~\ref{thm:extension-impossibility} proves that any computable extension over $\{N, S\}$
 alone cannot recover provenance. The limitation is structural, not technical.
-A common response is ``just check \texttt{type(x)}''---but this proves the point:
+A common response is ``just check \texttt{type(x)}'', but this proves the point:
 inspecting \texttt{type(x)} consults the type's identity (N) or inheritance (B).
 Once you consult N or B, you have left shape-only duck typing and moved to
 nominal or named-structural typing. The ``fix'' is the adoption of our thesis.
@@ -94,30 +94,30 @@ nominal or named-structural typing. The ``fix'' is the adoption of our thesis.
 
 \emph{Analysis:} Theorems 3.43-3.48 establish that generics preserve the axis
 structure. Type parameters are a refinement of N, not additional information
-orthogonal to $(N, B, S)$.
+orthogonal to $(B, S)$.
 
 \paragraph{Concern 6: Single Codebase Evidence.}
 \emph{Potential concern:} Evidence is from one codebase (OpenHCS).
 
 \emph{Analysis:} This objection conflates \textbf{existential witnesses} with
-\textbf{premises}---a category error. In logic, a premise is something the
+\textbf{premises}. A category error. In logic, a premise is something the
 conclusion depends on; an existential witness demonstrates satisfiability.
 
 The dominance theorems are proven from the \emph{definition} of shape-based
-typing (Lemma~\ref{lem:shape-axiom-definitional}: the axiom is definitional). Examine the proof of Theorem~\ref{thm:provenance-impossibility} (Provenance Impossibility): it proceeds by showing that $(N, S)$ contains
+typing (Lemma~\ref{lem:shape-axiom-definitional}: the axiom is definitional). Examine the proof of Theorem~\ref{thm:provenance-impossibility} (Provenance Impossibility): it proceeds by showing that $(S)$ contains
 insufficient information to compute provenance. This is an
 information-theoretic argument that references no codebase. You could prove
 this theorem before any codebase existed.
 
 OpenHCS appears only to demonstrate that the four capabilities are
-\emph{achievable}---that a real system uses provenance, identity, enumeration,
+\emph{achievable}. That a real system uses provenance, identity, enumeration,
 and conflict resolution. This is an existence proof (``such systems exist''),
 not a premise (``if OpenHCS works, then the theorems hold'').
 
 \textbf{Analogy:} Proving ``comparison-based sorting requires $\Omega(n \log n)$
 comparisons'' does not require testing on multiple arrays. The proof is
 structural. Exhibiting quicksort demonstrates the bound is achievable, not that
-the theorem is true. Similarly, our theorems follow from (N, B, S) structure;
+the theorem is true. Similarly, our theorems follow from (B, S) structure;
 OpenHCS demonstrates achievability.
 
 \paragraph{Concern 7: Scope Confusion.}
@@ -146,8 +146,8 @@ The Lean formalization is publicly available for verification.
 \subsection{On the Treatment of Defaults}\label{appendix:defaults}
 
 Duck typing was accepted as ``Pythonic'' without formal justification.
-This asymmetry---conventions often require no proof, while changing
-conventions demands proof---is a methodological observation about
+This asymmetry (conventions often require no proof, while changing
+conventions demands proof) is a methodological observation about
 community standards, not a logical requirement. The theorems in this
 paper provide the formal foundation that was absent from the original
 adoption of duck typing as a default.

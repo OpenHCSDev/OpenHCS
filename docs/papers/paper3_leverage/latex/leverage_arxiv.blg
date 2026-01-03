@@ -1,48 +1,46 @@
 This is BibTeX, Version 0.99d (TeX Live 2026/dev/Arch Linux)
 Capacity: max_strings=200000, hash_size=200000, hash_prime=170003
 The top-level auxiliary file: leverage_arxiv.aux
-I found no \citation commands---while reading file leverage_arxiv.aux
-I found no \bibdata command---while reading file leverage_arxiv.aux
-I found no \bibstyle command---while reading file leverage_arxiv.aux
-You've used 0 entries,
-            0 wiz_defined-function locations,
-            83 strings with 502 characters,
-and the built_in function-call counts, 0 in all, are:
-= -- 0
-> -- 0
-< -- 0
-+ -- 0
-- -- 0
-* -- 0
-:= -- 0
-add.period$ -- 0
-call.type$ -- 0
-change.case$ -- 0
+The style file: plain.bst
+Database file #1: references.bib
+You've used 32 entries,
+            2118 wiz_defined-function locations,
+            669 strings with 8311 characters,
+and the built_in function-call counts, 9959 in all, are:
+= -- 978
+> -- 418
+< -- 6
++ -- 177
+- -- 134
+* -- 619
+:= -- 1646
+add.period$ -- 99
+call.type$ -- 32
+change.case$ -- 152
 chr.to.int$ -- 0
-cite$ -- 0
-duplicate$ -- 0
-empty$ -- 0
-format.name$ -- 0
-if$ -- 0
+cite$ -- 32
+duplicate$ -- 409
+empty$ -- 838
+format.name$ -- 134
+if$ -- 2105
 int.to.chr$ -- 0
-int.to.str$ -- 0
-missing$ -- 0
-newline$ -- 0
-num.names$ -- 0
-pop$ -- 0
-preamble$ -- 0
-purify$ -- 0
+int.to.str$ -- 32
+missing$ -- 40
+newline$ -- 164
+num.names$ -- 64
+pop$ -- 209
+preamble$ -- 1
+purify$ -- 131
 quote$ -- 0
-skip$ -- 0
+skip$ -- 273
 stack$ -- 0
-substring$ -- 0
-swap$ -- 0
-text.length$ -- 0
+substring$ -- 598
+swap$ -- 79
+text.length$ -- 6
 text.prefix$ -- 0
 top$ -- 0
-type$ -- 0
+type$ -- 104
 warning$ -- 0
-while$ -- 0
-width$ -- 0
-write$ -- 0
-(There were 3 error messages)
+while$ -- 101
+width$ -- 34
+write$ -- 344

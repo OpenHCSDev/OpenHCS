@@ -51,3 +51,23 @@ lean_lib «python_instantiation» where
   moreLeanArgs := moreLeanArgs
   weakLeanArgs := weakLeanArgs
   -- Python-specific instantiation: type(), C3 MRO, complexity costs
+
+lean_lib «typescript_instantiation» where
+  moreLeanArgs := moreLeanArgs
+  weakLeanArgs := weakLeanArgs
+  -- TypeScript-specific instantiation: structural + branded nominal axes
+
+lean_lib «java_instantiation» where
+  moreLeanArgs := moreLeanArgs
+  weakLeanArgs := weakLeanArgs
+  -- Java-specific instantiation: nominal class tags, reflection observers
+
+lean_lib «rust_instantiation» where
+  moreLeanArgs := moreLeanArgs
+  weakLeanArgs := weakLeanArgs
+  -- Rust-specific instantiation: trait sets, type_id-based downcast
+
+lean_lib «axis_framework» where
+  moreLeanArgs := moreLeanArgs
+  weakLeanArgs := weakLeanArgs
+  -- Axis-parametric framework: generic minimality and uniqueness proofs

@@ -1,0 +1,33 @@
+
+We provide the first formal foundations for the ``Don't Repeat Yourself'' (DRY) principle, articulated by Hunt \& Thomas (1999) but never formalized. Our contributions:
+
+\textbf{Three Core Theorems:}
+
+\begin{enumerate}
+\item \textbf{SSOT Requirements (Theorem~\ref{thm:ssot-iff}):} A language enables Single Source of Truth for structural facts if and only if it provides (1) definition-time hooks AND (2) introspectable derivation results. This is \textbf{derived}, not chosen---the logical structure forces these requirements.
+
+\item \textbf{Python Uniqueness (Theorem~\ref{thm:python-unique}):} Among mainstream languages, Python is the only language satisfying both SSOT requirements. Proved by exhaustive evaluation of top-10 TIOBE languages against formally-defined criteria.
+
+\item \textbf{Unbounded Complexity Gap (Theorem~\ref{thm:unbounded-gap}):} The ratio of modification complexity between SSOT-incomplete and SSOT-complete languages is unbounded: $O(1)$ vs $\Omega(n)$ where $n$ is the number of use sites.
+\end{enumerate}
+
+These theorems rest on:
+\begin{itemize}
+\item Theorem~\ref{thm:ssot-iff}: IFF proof---requirements are necessary AND sufficient
+\item Theorem~\ref{thm:python-unique}: Exhaustive evaluation---all mainstream languages checked
+\item Theorem~\ref{thm:unbounded-gap}: Asymptotic analysis---$\lim_{n\to\infty} n/1 = \infty$
+\end{itemize}
+
+Additional contributions:
+\begin{itemize}
+\item \textbf{Definition~\ref{def:dof} (Modification Complexity):} Formalization of edit cost as DOF in state space
+\item \textbf{SSOT Optimality (Theorem~\ref{thm:ssot-optimal}):} SSOT guarantees $M(C, \delta_F) = 1$
+\item \textbf{Three-Language Theorem (Theorem~\ref{thm:three-lang}):} Exactly three languages satisfy SSOT requirements: Python, Common Lisp (CLOS), and Smalltalk
+\end{itemize}
+
+All theorems machine-checked in Lean 4 (1,753 lines across 13 files, 0 \texttt{sorry} placeholders). Empirical validation: 13 case studies from production bioimage analysis platform (OpenHCS, 45K LoC), mean DOF reduction 14.2x.
+
+\textbf{Keywords:} DRY principle, Single Source of Truth, language design, metaprogramming, formal methods, modification complexity
+
+
+

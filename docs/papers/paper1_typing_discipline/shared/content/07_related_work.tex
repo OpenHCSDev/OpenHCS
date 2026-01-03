@@ -3,7 +3,7 @@
 \subsection{Type Theory
 Foundations}\label{type-theory-foundations}
 
-\textbf{Malayeri \& Aldrich (ECOOP 2008, ESOP 2009).} The foundational
+\textbf{Malayeri \& Aldrich~\cite{malayeri2008integrating,malayeri2009esop}.} The foundational
 work on integrating nominal and structural subtyping. Their ECOOP 2008
 paper ``Integrating Nominal and Structural Subtyping'' proves type
 safety for a combined system, but explicitly states that neither
@@ -16,7 +16,7 @@ observe that structural typing excels at \textbf{retrofitting}
 (integrating independently-developed components), whereas nominal typing
 aligns with \textbf{planned, integrated designs}. Their ESOP 2009
 empirical study found that adding structural typing to Java would
-benefit many codebases---but they also note \emph{``there are situations
+benefit many codebases, but they also note \emph{``there are situations
 where nominal types are more appropriate''} and that without structural
 typing, interface proliferation would explode by \textasciitilde300\%.
 
@@ -26,13 +26,13 @@ hierarchies), nominal typing is not just ``appropriate'' but
 \emph{necessary} for capabilities like provenance tracking and MRO-based
 resolution. Adapters eliminate the retrofit exception (Theorem 2.10j).
 
-\textbf{Abdelgawad \& Cartwright (ENTCS 2014).} Their domain-theoretic
+\textbf{Abdelgawad \& Cartwright~\cite{abdelgawad2014noop}.} Their domain-theoretic
 model NOOP proves that in nominal languages, \textbf{inheritance and
-subtyping become identical}---formally validating the intuition that
+subtyping become identical}. Formally validating the intuition that
 declaring a subclass makes it a subtype. They contrast this with Cook et
-al.~(1990)'s structural claim that ``inheritance is not subtyping,''
+al.~\cite{cook1990inheritance}'s structural claim that ``inheritance is not subtyping,''
 showing that the structural view ignores nominal identity. Key insight:
-purely structural OO typing admits \textbf{spurious subtyping}---a type
+purely structural OO typing admits \textbf{spurious subtyping}: a type
 can accidentally be a subtype due to shape alone, violating intended
 contracts.
 
@@ -42,11 +42,11 @@ precisely because MRO encodes the inheritance hierarchy as a total
 order. If subtyping and inheritance could diverge (as in structural
 systems), the algorithm would be unsound.
 
-\textbf{Abdelgawad (arXiv 2016).} The essay ``Why Nominal-Typing Matters
+\textbf{Abdelgawad~\cite{abdelgawad2016nominal}.} The essay ``Why Nominal-Typing Matters
 in OOP'' argues that nominal typing provides \textbf{information
 centralization}: \emph{``objects and their types carry class names
 information as part of their meaning''} and those names correspond to
-behavioral contracts. Type names aren't just shapes---they imply
+behavioral contracts. Type names aren't just shapes. They imply
 specific intended semantics. Structural typing, treating objects as mere
 records, \emph{``cannot naturally convey such semantic intent.''}
 
@@ -59,8 +59,8 @@ is essential. Duck typing loses this information after attribute access.
 \subsection{Practical Hybrid
 Systems}\label{practical-hybrid-systems}
 
-\textbf{Gil \& Maman (OOPSLA 2008).} Whiteoak adds structural typing to
-Java for \textbf{retrofitting}---treating classes as subtypes of
+\textbf{Gil \& Maman~\cite{gil2008whiteoak}.} Whiteoak adds structural typing to
+Java for \textbf{retrofitting}: treating classes as subtypes of
 structural interfaces without modifying source. Their motivation:
 \emph{``many times multiple classes have no common supertype even though
 they could share an interface.''} This supports the Malayeri-Aldrich
@@ -69,7 +69,7 @@ observation that structural typing's benefits are context-dependent.
 \textbf{Our contribution:} OpenHCS demonstrates the capabilities that
 nominal typing enables: MRO-based resolution, bidirectional type
 registries, provenance tracking. These are impossible under structural
-typing regardless of whether the system is new or legacy---the
+typing regardless of whether the system is new or legacy. The
 capability gap is information-theoretic (Theorem 3.19).
 
 \textbf{Go (2012) and TypeScript (2012+).} Both adopt structural typing
@@ -79,7 +79,7 @@ integrate with JavaScript's untyped ecosystem.
 
 However, both face the \textbf{accidental compatibility problem}.
 TypeScript developers use ``branding'' (adding nominal tag properties)
-to differentiate structurally identical types---a workaround that
+to differentiate structurally identical types: a workaround that
 \textbf{reintroduces nominal typing}. The TypeScript issue tracker has
 open requests for native nominal types.
 
@@ -92,9 +92,9 @@ generates \texttt{LazyPathPlanningConfig} as a distinct type from
 \subsection{Metaprogramming
 Complexity}\label{metaprogramming-complexity}
 
-\textbf{Veldhuizen (2006).} ``Tradeoffs in Metaprogramming'' proves that
+\textbf{Veldhuizen~\cite{veldhuizen2006tradeoffs}.} ``Tradeoffs in Metaprogramming'' proves that
 sufficiently expressive metaprogramming can yield \textbf{unbounded
-savings} in code length---Blum (1967) showed that restricting a powerful
+savings} in code length. Blum~\cite{blum1967size} showed that restricting a powerful
 language causes non-computable blow-up in program size. This formally
 underpins our use of \texttt{make\_dataclass()} to generate companion
 types.
@@ -104,11 +104,11 @@ than one-stage generation for the class of computable functions.
 
 \textbf{Our contribution:} The 5-stage
 \texttt{@global\_pipeline\_config} chain is not nested metaprogramming
-(programs generating programs generating programs)---it's a single-stage
+(programs generating programs generating programs). It's a single-stage
 generation that happens to have 5 sequential phases. This aligns with
 Veldhuizen's bound: we achieve full power without complexity explosion.
 
-\textbf{Damaševičius \& Štuikys (2010).} They define metrics for
+\textbf{Damaševičius \& Štuikys~\cite{damasevicius2010complexity}.} They define metrics for
 metaprogram complexity: - \textbf{Relative Kolmogorov Complexity (RKC):}
 compressed/actual size - \textbf{Cognitive Difficulty (CD):} chunks of
 meta-information to hold simultaneously
@@ -124,7 +124,7 @@ read as declarative annotations, not as complex template metaprograms.
 
 \subsection{Behavioral Subtyping}\label{behavioral-subtyping}
 
-\textbf{Liskov \& Wing (1994).} The Liskov Substitution Principle
+\textbf{Liskov \& Wing~\cite{liskov1994behavioral}.} The Liskov Substitution Principle
 formally defines behavioral subtyping: \emph{``any property proved about
 supertype objects should hold for its subtype objects.''} Nominal typing
 enables this by requiring explicit \texttt{is-a} declarations.
@@ -153,7 +153,7 @@ typing formalization''
 \emph{Date range:} 1988--2024 (Cardelli's foundational work to present)
 
 \emph{Inclusion criteria:} Peer-reviewed publications or major arXiv
-preprints with $\\geq$10 citations; addresses nominal vs structural typing
+preprints with $\geq$10 citations; addresses nominal vs structural typing
 comparison with formal or semi-formal claims
 
 \emph{Exclusion criteria:} Tutorials/surveys without new theorems;
@@ -161,8 +161,9 @@ language-specific implementations without general claims; blog posts and
 informal essays (except Abdelgawad 2016, included for completeness as
 most-cited informal argument)
 
-\emph{Result:} 31 papers reviewed. None satisfy the equivalence criteria
-defined below.
+\emph{Result:} We reviewed the publications listed in the references
+under the inclusion criteria above; none satisfied the equivalence
+criteria defined below.
 
 \paragraph{7.5.2 Equivalence Criteria}\label{equivalence-criteria}
 
@@ -232,22 +233,22 @@ Score
 \endhead
 \bottomrule\noalign{}
 \endlastfoot
-Cardelli (1988) & --- & --- & --- & --- & --- & 0/5 \\
-Cook et al.~(1990) & --- & --- & --- & --- & --- & 0/5 \\
-Liskov \& Wing (1994) & --- & --- & --- & --- & --- & 0/5 \\
-Pierce TAPL (2002) & --- & --- & --- & --- & --- & 0/5 \\
-Malayeri \& Aldrich (2008) & --- & --- & --- & --- & --- & 0/5 \\
-Gil \& Maman (2008) & --- & --- & --- & --- & --- & 0/5 \\
-Malayeri \& Aldrich (2009) & --- & --- & --- & --- & --- & 0/5 \\
-Abdelgawad \& Cartwright (2014) & --- & --- & --- & --- & --- & 0/5 \\
-Abdelgawad (2016) & --- (essay) & --- & --- & --- & --- & 0/5 \\
+Cardelli~\cite{cardelli1988semantics} & --- & --- & --- & --- & --- & 0/5 \\
+Cook et al.~\cite{cook1990inheritance} & --- & --- & --- & --- & --- & 0/5 \\
+Liskov \& Wing~\cite{liskov1994behavioral} & --- & --- & --- & --- & --- & 0/5 \\
+Pierce~\cite{pierce2002types} & --- & --- & --- & --- & --- & 0/5 \\
+Malayeri \& Aldrich~\cite{malayeri2008integrating} & --- & --- & --- & --- & --- & 0/5 \\
+Gil \& Maman~\cite{gil2008whiteoak} & --- & --- & --- & --- & --- & 0/5 \\
+Malayeri \& Aldrich~\cite{malayeri2009esop} & --- & --- & --- & --- & --- & 0/5 \\
+Abdelgawad \& Cartwright~\cite{abdelgawad2014noop} & --- & --- & --- & --- & --- & 0/5 \\
+Abdelgawad~\cite{abdelgawad2016nominal} & --- (essay) & --- & --- & --- & --- & 0/5 \\
 \textbf{This paper} & Thm 3.5 & 2600+ lines & Thm 3.43a & Thm 3.19 & Thm
 2.10j & \textbf{5/5} \\
 \end{longtable}
 
-\textbf{Observation:} No prior work scores above 0/5. This paper is the
-first to satisfy any of the five criteria, and the first to satisfy all
-five.
+\textbf{Observation:} In our survey, none of the works met any of the
+five criteria (all scored 0/5). To our knowledge, this paper is the
+first to satisfy all five.
 
 \paragraph{7.5.4 Open Challenge}\label{open-challenge}
 
@@ -275,8 +276,8 @@ of the following:
 \end{enumerate}
 
 To our knowledge, no such publication exists. We welcome citations. The
-absence of any work scoring $\\geq$1/5 in Table 7.5.3 is not a gap in our
-literature search---it reflects the state of the field.
+absence of any work scoring $\geq$1/5 in Table 7.5.3 is not a gap in our
+literature search. It reflects the state of the field.
 \end{quote}
 
 \paragraph{7.5.5 Summary Table}\label{summary-table}
@@ -301,29 +302,29 @@ Our Extension
 \endhead
 \bottomrule\noalign{}
 \endlastfoot
-Malayeri \& Aldrich (2008, 2009) & Qualitative trade-offs, empirical
+Malayeri \& Aldrich~\cite{malayeri2008integrating,malayeri2009esop} & Qualitative trade-offs, empirical
 analysis & No formal proof of dominance & Strict dominance as formal
 theorem \\
-Abdelgawad \& Cartwright (2014) & Inheritance = subtyping in nominal &
+Abdelgawad \& Cartwright~\cite{abdelgawad2014noop} & Inheritance = subtyping in nominal &
 No decision procedure & \(B \neq \emptyset\) vs \(B = \emptyset\)
 criterion \\
-Abdelgawad (2016) & Information centralization (essay) & Not
+Abdelgawad~\cite{abdelgawad2016nominal} & Information centralization (essay) & Not
 peer-reviewed, no machine proofs & Machine-checked Lean 4
 formalization \\
-Gil \& Maman (2008) & Whiteoak structural extension to Java & Hybrid
+Gil \& Maman~\cite{gil2008whiteoak} & Whiteoak structural extension to Java & Hybrid
 justification, not dominance & Dominance when Bases axis exists \\
-Veldhuizen (2006) & Metaprogramming bounds & Type system specific &
+Veldhuizen~\cite{veldhuizen2006tradeoffs} & Metaprogramming bounds & Type system specific &
 Cross-cutting application \\
-Liskov \& Wing (1994) & Behavioral subtyping & Assumed nominal context &
+Liskov \& Wing~\cite{liskov1994behavioral} & Behavioral subtyping & Assumed nominal context &
 Field inheritance enforcement \\
 \end{longtable}
 
 \textbf{The novelty gap in prior work.} A comprehensive survey of
 1988--2024 literature found: \emph{``No single publication formally
 proves nominal typing strictly dominates structural typing when
-\(B \neq \emptyset\).''} Malayeri \& Aldrich (2008) observed trade-offs
-qualitatively; Abdelgawad (2016) argued for nominal benefits in an
-essay; Gil \& Maman (2008) provided hybrid systems. None proved
+\(B \neq \emptyset\).''} Malayeri \& Aldrich~\cite{malayeri2008integrating} observed trade-offs
+qualitatively; Abdelgawad~\cite{abdelgawad2016nominal} argued for nominal benefits in an
+essay; Gil \& Maman~\cite{gil2008whiteoak} provided hybrid systems. None proved
 \textbf{strict dominance} as a theorem. None provided
 \textbf{machine-checked verification}. None \textbf{derived} the
 capability gap from information structure rather than enumerating it.
@@ -333,7 +334,7 @@ None proved \textbf{adapters eliminate the retrofit exception} (Theorem
 \textbf{What we prove that prior work could not:} 1. \textbf{Strict
 dominance as formal theorem} (Theorem 3.5): Nominal typing provides all
 capabilities of structural typing plus provenance, identity,
-enumeration---at equivalent declaration cost. 2.
+enumeration at equivalent declaration cost. 2.
 \textbf{Information-theoretic completeness} (Theorem 3.19): The
 capability gap is \emph{derived} from discarding the Bases axis, not
 enumerated. Any query distinguishing same-shape types requires B. This
@@ -347,15 +348,17 @@ proofs} (Section 6): 2600+ lines of Lean 4, 127 theorems/lemmas, 0
 \textbf{Our core contribution:} Prior work established that nominal and
 structural typing have trade-offs. We prove the trade-off is
 \textbf{asymmetric}: when \(B \neq \emptyset\), nominal typing strictly
-dominates---universally, not just in greenfield (Theorem 2.10j
+dominates universally, not just in greenfield (Theorem 2.10j
 eliminates the retrofit exception). Duck typing is proven incoherent
 (Theorem 2.10d). Protocol is proven dominated (Theorem 2.10j). This
 follows necessarily from discarding the Bases axis.
 
-\textbf{Corollary 7.1 (Prior Work Comparison).} A claim that these results
-were already established would require exhibiting a publication
-scoring $\geq$1/5 in Table 7.5.3. The 0/5 scores across all surveyed work are
-not a gap in our search---they are the gap this paper fills.
+\textbf{Corollary 7.1 (Prior Work Comparison).} A claim that these
+results were already established would need to exhibit a publication
+scoring $\geq$1/5 in Table 7.5.3; we did not find one. If such a paper
+exists, we welcome a citation.
 
 \begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
 
+% Include the full set of 31 reviewed papers in the bibliography, even when only summarized in tables.
+\nocite{*}

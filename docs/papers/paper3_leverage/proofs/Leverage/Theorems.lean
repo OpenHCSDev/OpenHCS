@@ -15,7 +15,7 @@ Key theorems:
 - 3.4: Architectural Decision Criterion
 - 3.6: Leverage Composition
 
-All other results in the trilogy are INSTANCES of Theorem 3.0:
+All other results in the pentalogy are INSTANCES of Theorem 3.0:
 - Paper 1 (Typing): Nominal dominates duck (Theorem 4.2)
 - Paper 2 (SSOT): SSOT achieves infinite leverage (Theorem 4.1)
 

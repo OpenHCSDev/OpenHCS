@@ -1,67 +1,31 @@
-\section{Empirical Validation}\label{sec:empirical}
+\section{Practical Demonstration}\label{sec:empirical}
 %==============================================================================
 
-We validate theoretical predictions with 13 case studies from OpenHCS, a production bioimage analysis platform (45K LoC Python). Each case study demonstrates a concrete DOF reduction achieved through SSOT architecture.
+We demonstrate the theoretical results with concrete before/after examples from OpenHCS~\cite{openhcs2025}, a production bioimage analysis platform. These examples show how Python's definition-time hooks achieve SSOT for structural facts.
 
-\subsection{Methodology}\label{sec:methodology}
+\textbf{Methodology:} This case study follows established guidelines for software engineering case studies~\cite{runeson2009guidelines}. We use a single-case embedded design with multiple units of analysis (DOF measurements, code changes, maintenance metrics).
 
-Our methodology follows a systematic process:
+The value of these examples is \emph{qualitative}: they show the pattern, not aggregate statistics. Each example demonstrates a specific SSOT mechanism. Readers can verify the pattern applies to their own codebases.
+
+\subsection{SSOT Patterns}\label{sec:ssot-patterns-practical}
+
+Three patterns recur in SSOT architectures:
 
 \begin{enumerate}
-\item \textbf{Identify structural facts:} Enumerate all facts about class existence, inheritance relationships, method signatures, and type registrations.
-\item \textbf{Count pre-SSOT encodings:} For each fact, count the number of independent locations where it is encoded in the original architecture.
-\item \textbf{Apply SSOT refactoring:} Refactor to use Python's definition-time hooks (\texttt{\_\_init\_subclass\_\_}, ABCs, metaclasses).
-\item \textbf{Count post-SSOT encodings:} Verify that DOF = 1 for each fact.
-\item \textbf{Calculate reduction factor:} Compute pre-DOF / post-DOF.
+\item \textbf{Contract enforcement via ABC:} Replace scattered \texttt{hasattr()} checks with a single abstract base class. The ABC is the single source; \texttt{isinstance()} checks are derived.
+
+\item \textbf{Automatic registration via \texttt{\_\_init\_subclass\_\_}:} Replace manual registry dictionaries with automatic registration at class definition time. The class definition is the single source; the registry entry is derived.
+
+\item \textbf{Automatic discovery via \texttt{\_\_subclasses\_\_()}:} Replace explicit import lists with runtime enumeration of subclasses. The inheritance relationship is the single source; the plugin list is derived.
 \end{enumerate}
 
-\textbf{Counting rules:}
-\begin{itemize}
-\tightlist
-\item Each \texttt{hasattr()} check counts as 1 encoding (duck typing)
-\item Each manual registry entry counts as 1 encoding
-\item Each \texttt{isinstance()} check counts as 1 encoding (unless derived from ABC)
-\item ABC definitions count as 1 encoding (the source)
-\item \texttt{\_\_subclasses\_\_()} calls count as 0 (derived, not independent)
-\end{itemize}
+\subsection{Detailed Examples}\label{sec:detailed-cases}
 
-\subsection{Case Study Summary}\label{sec:case-summary}
+We present three examples showing before/after code for each pattern.
 
-\begin{center}
-\begin{tabular}{clccc}
-\toprule
-\textbf{\#} & \textbf{Structural Fact} & \textbf{Pre-DOF} & \textbf{Post-DOF} & \textbf{Reduction} \\
-\midrule
-1 & MRO Position Discrimination & 12 & 1 & 12$\times$ \\
-2 & Discriminated Unions & 8 & 1 & 8$\times$ \\
-3 & MemoryTypeConverter Registry & 15 & 1 & 15$\times$ \\
-4 & Polymorphic Config & 9 & 1 & 9$\times$ \\
-5 & hasattr Migration (PR \#44) & 47 & 1 & 47$\times$ \\
-6 & Stitcher Interface & 6 & 1 & 6$\times$ \\
-7 & TileLoader Registry & 11 & 1 & 11$\times$ \\
-8 & Pipeline Stage Protocol & 8 & 1 & 8$\times$ \\
-9 & GPU Backend Switch & 14 & 1 & 14$\times$ \\
-10 & Metadata Serialization & 23 & 1 & 23$\times$ \\
-11 & Cache Key Generation & 7 & 1 & 7$\times$ \\
-12 & Error Handler Chain & 5 & 1 & 5$\times$ \\
-13 & Plugin Discovery & 19 & 1 & 19$\times$ \\
-\midrule
-& \textbf{Total} & \textbf{184} & \textbf{13} & \textbf{14.2$\times$} \\
-\bottomrule
-\end{tabular}
-\end{center}
+\subsubsection{Pattern 1: Contract Enforcement (PR \#44~\cite{openhcsPR44})}
 
-\begin{theorem}[Empirical Validation]\label{thm:empirical}
-All 13 case studies achieve $\text{DOF} = 1$ post-refactoring, confirming SSOT is achievable in practice for structural facts in Python.
-\end{theorem}
-
-\subsection{Detailed Case Studies}\label{sec:detailed-cases}
-
-We present three case studies in detail, showing before/after code.
-
-\subsubsection{Case Study 5: hasattr Migration (PR \#44)}
-
-This case study shows the largest DOF reduction: 47 $\to$ 1.
+This example is from a publicly verifiable pull request~\cite{openhcsPR44}. The PR eliminated 47 scattered \texttt{hasattr()} checks by introducing ABC contracts, reducing DOF from 47 to 1.
 
 \textbf{The Problem:} The codebase used duck typing to check for optional capabilities:
 
@@ -109,7 +73,7 @@ if isinstance(processor, GPUCapable):
         use_gpu_path(processor)
 \end{verbatim}
 
-The ABC is the single source. The \texttt{isinstance()} check is derived---it queries the ABC's \texttt{\_\_subclasshook\_\_} or MRO, not an independent encoding.
+The ABC is the single source. The \texttt{isinstance()} check is derived. It queries the ABC's \texttt{\_\_subclasshook\_\_} or MRO, not an independent encoding.
 
 \textbf{DOF Analysis:}
 \begin{itemize}
@@ -119,12 +83,14 @@ The ABC is the single source. The \texttt{isinstance()} check is derived---it qu
 \item Reduction: 47$\times$
 \end{itemize}
 
-\subsubsection{Case Study 3: MemoryTypeConverter Registry}
+\subsubsection{Pattern 2: Automatic Registration}
+
+This pattern applies whenever classes must be registered in a central location.
 
 \textbf{The Problem:} Type converters were registered in a manual dictionary:
 
 \begin{verbatim}
-# BEFORE: Manual registry (DOF = 15)
+# BEFORE: Manual registry (DOF = n, where n = number of converters)
 
 # In converters.py
 class NumpyConverter:
@@ -137,12 +103,11 @@ class TorchConverter:
 CONVERTERS = {
     'numpy': NumpyConverter,
     'torch': TorchConverter,
-    'cupy': CuPyConverter,
-    # ... 12 more entries
+    # ... more entries that must be maintained manually
 }
 \end{verbatim}
 
-Adding a new converter requires: (1) defining the class, (2) adding to the registry. Two independent edits.
+Adding a new converter requires: (1) defining the class, (2) adding to the registry. Two independent edits, violating SSOT.
 
 \textbf{The Solution:} Use \texttt{\_\_init\_subclass\_\_} for automatic registration:
 
@@ -173,35 +138,37 @@ class TorchConverter(Converter, format='torch'):
 \textbf{DOF Analysis:}
 \begin{itemize}
 \tightlist
-\item Pre-refactoring: 15 manual registry entries (1 per converter)
+\item Pre-refactoring: $n$ manual registry entries (1 per converter)
 \item Post-refactoring: 1 base class with \texttt{\_\_init\_subclass\_\_}
-\item Reduction: 15$\times$
+\item The single source is the class definition; the registry entry is derived
 \end{itemize}
 
-\subsubsection{Case Study 13: Plugin Discovery}
+\subsubsection{Pattern 3: Automatic Discovery}
+
+This pattern applies whenever all subclasses of a type must be enumerated.
 
 \textbf{The Problem:} Plugins were discovered via explicit imports:
 
 \begin{verbatim}
-# BEFORE: Explicit plugin list (DOF = 19)
+# BEFORE: Explicit plugin list (DOF = n, where n = number of plugins)
 
 # In plugin_loader.py
 from plugins import (
     DetectorPlugin,
     SegmenterPlugin,
     FilterPlugin,
-    # ... 16 more imports
+    # ... more imports that must be maintained
 )
 
 PLUGINS = [
     DetectorPlugin,
     SegmenterPlugin,
     FilterPlugin,
-    # ... 16 more entries
+    # ... more entries that must match the imports
 ]
 \end{verbatim}
 
-Adding a plugin requires: (1) creating the plugin file, (2) adding the import, (3) adding to the list. Three edits for one fact.
+Adding a plugin requires: (1) creating the plugin file, (2) adding the import, (3) adding to the list. Three edits for one fact, violating SSOT.
 
 \textbf{The Solution:} Use \texttt{\_\_subclasses\_\_()} for automatic discovery:
 
@@ -224,63 +191,110 @@ class DetectorPlugin(Plugin):
 \textbf{DOF Analysis:}
 \begin{itemize}
 \tightlist
-\item Pre-refactoring: 19 explicit entries (imports + list)
+\item Pre-refactoring: $n$ explicit entries (imports + list)
 \item Post-refactoring: 1 base class definition
-\item Reduction: 19$\times$
+\item The single source is the inheritance relationship; the plugin list is derived
 \end{itemize}
 
-\subsection{Statistical Analysis}\label{sec:statistics}
+\subsubsection{Pattern 4: Introspection-Driven Code Generation}
 
-\begin{center}
-\begin{tabular}{lr}
-\toprule
-\textbf{Metric} & \textbf{Value} \\
-\midrule
-Total case studies & 13 \\
-Total pre-SSOT DOF & 184 \\
-Total post-SSOT DOF & 13 \\
-Mean reduction factor & 14.2$\times$ \\
-Median reduction factor & 11$\times$ \\
-Maximum reduction factor & 47$\times$ \\
-Minimum reduction factor & 5$\times$ \\
-\bottomrule
-\end{tabular}
-\end{center}
+This pattern demonstrates why both SSOT requirements (definition-time hooks \emph{and} introspection) are necessary. The code is from \texttt{openhcs/debug/pickle\_to\_python.py}, which converts serialized Python objects to runnable Python scripts.
 
-\textbf{Key findings:}
+\textbf{The Problem:} Given a runtime object (dataclass instance, enum value, function with arguments), generate valid Python code that reconstructs it. The generated code must include:
+
+\begin{itemize}
+\item Import statements for all referenced types
+\item Default values for function parameters
+\item Field definitions for dataclasses
+\item Module paths for enums
+\end{itemize}
+
+\textbf{Without SSOT:} Manual maintenance lists
+
+\begin{verbatim}
+# Hypothetical non-introspectable language
+IMPORTS = {
+    "sklearn.filters": ["gaussian", "sobel"],
+    "numpy": ["array"],
+    # Must manually update when types change
+}
+
+DEFAULT_VALUES = {
+    "gaussian": {"sigma": 1.0, "mode": "reflect"},
+    # Must manually update when signatures change
+}
+\end{verbatim}
+
+Every type, every function parameter, every enum. Each requires a manual entry. When a function signature changes, both the function \emph{and} the metadata list must be updated. DOF $>$ 1.
+
+\textbf{With SSOT (Python):} Derive everything from introspection
+
+\begin{verbatim}
+def collect_imports_from_data(data_obj):
+    """Traverse structure, derive imports from metadata."""
+    if isinstance(obj, Enum):
+        # Enum definition is single source
+        module = obj.__class__.__module__
+        name = obj.__class__.__name__
+        enum_imports[module].add(name)
+
+    elif is_dataclass(obj):
+        # Dataclass definition is single source
+        function_imports[obj.__class__.__module__].add(
+            obj.__class__.__name__)
+        # Fields are derived via introspection
+        for f in fields(obj):
+            register_imports(getattr(obj, f.name))
+
+def generate_dataclass_repr(instance):
+    """Generate constructor call from field metadata."""
+    for field in dataclasses.fields(instance):
+        current_value = getattr(instance, field.name)
+        # Field name, type, default all come from definition
+        lines.append(f"{field.name}={repr(current_value)}")
+\end{verbatim}
+
+\textbf{The Key Insight:} The class definition at definition-time establishes facts:
+\begin{itemize}
+\item \texttt{@dataclass} decorator $\to$ \texttt{dataclasses.fields()} returns field metadata
+\item \texttt{Enum} definition $\to$ \texttt{\_\_module\_\_}, \texttt{\_\_name\_\_} attributes exist
+\item Function signature $\to$ \texttt{inspect.signature()} returns parameter defaults
+\end{itemize}
+
+Each manual metadata entry is replaced by an introspection query. The definition is the single source; the generated code is derived.
+
+\textbf{Why This Requires Both SSOT Properties:}
 
 \begin{enumerate}
-\item \textbf{All case studies achieved DOF = 1.} This confirms that SSOT is achievable in practice for structural facts in Python.
+\item \textbf{Definition-time hooks:} The \texttt{@dataclass} decorator executes at class definition time, storing field metadata that didn't exist before. Without this hook, \texttt{fields()} would have nothing to query.
 
-\item \textbf{Reduction factors vary widely (5$\times$ to 47$\times$).} The variation reflects the original architecture's degree of duplication. More scattered encodings yield larger reductions.
-
-\item \textbf{The mean reduction (14.2$\times$) matches theoretical predictions.} The $\Omega(n)$ lower bound for non-SSOT architectures is observable in practice.
+\item \textbf{Introspection:} The \texttt{fields()}, \texttt{\_\_module\_\_}, \texttt{inspect.signature()} APIs query the stored metadata. Without introspection, the metadata would exist but be inaccessible.
 \end{enumerate}
 
-\subsection{Threats to Validity}\label{sec:threats}
+\textbf{Impossibility in Non-SSOT Languages:}
 
-\textbf{Internal validity:}
 \begin{itemize}
-\tightlist
-\item DOF counting is manual and may contain errors
-\item Some encodings may be missed or double-counted
-\item Mitigation: Two independent counts were performed and reconciled
+\item \textbf{Go:} No decorator hooks, no field introspection. Would require external code generation (separate tool maintaining parallel metadata).
+
+\item \textbf{Rust:} Procedural macros can inspect at compile-time but metadata is erased at runtime. Cannot query field names from a runtime struct instance.
+
+\item \textbf{Java:} Reflection provides introspection but no mechanism to store arbitrary metadata at definition-time without annotations (which themselves require manual specification).
 \end{itemize}
 
-\textbf{External validity:}
+The pattern is simple: traverse an object graph, query definition-time metadata via introspection, emit Python code. But this simplicity \emph{depends} on both SSOT requirements. Remove either, and the pattern breaks.
+
+\subsection{Summary}\label{sec:practical-summary}
+
+These four patterns (contract enforcement, automatic registration, automatic discovery, and introspection-driven generation) demonstrate how Python's definition-time hooks achieve SSOT for structural facts:
+
 \begin{itemize}
-\tightlist
-\item Results are from a single codebase (OpenHCS)
-\item Other codebases may have different characteristics
-\item Mitigation: OpenHCS is representative of scientific Python applications
+\item \textbf{PR \#44 is verifiable:} The 47 $\to$ 1 reduction can be confirmed by inspecting the public pull request.
+
+\item \textbf{The patterns are general:} Each pattern applies whenever the corresponding structural relationship exists (capability checking, type registration, subclass enumeration, code generation from metadata).
+
+\item \textbf{The mechanism is the same:} In all cases, the class definition becomes the single source, and secondary representations (registry entries, plugin lists, capability checks, generated code) become derived via Python's definition-time hooks and introspection.
 \end{itemize}
 
-\textbf{Construct validity:}
-\begin{itemize}
-\tightlist
-\item DOF may not capture all aspects of modification complexity
-\item Other factors (code readability, performance) are not measured
-\item Mitigation: DOF is a lower bound on modification complexity
-\end{itemize}
+The theoretical prediction (that SSOT requires definition-time hooks and introspection) is confirmed by these examples. The patterns shown here are instances of the general mechanism proved in Section~\ref{sec:requirements}.
 
 %==============================================================================

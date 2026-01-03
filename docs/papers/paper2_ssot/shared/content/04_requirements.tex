@@ -3,11 +3,11 @@
 
 We now derive the language features necessary and sufficient for achieving SSOT. This section answers: \emph{What must a language provide for SSOT to be possible?}
 
-The answer is derived, not chosen. We do not \emph{prefer} certain features---we \emph{prove} they are necessary.
+The requirements are derived from SSOT's definition. The proofs establish necessity.
 
 \subsection{The Foundational Axiom}\label{sec:axiom}
 
-The entire derivation rests on one axiom. This axiom is not an assumption we make---it is a definitional truth about how programming languages work:
+The derivation rests on one axiom, which follows from how programming languages work:
 
 \begin{axiom}[Structural Fixation]\label{axiom:fixation}
 Structural facts are fixed at definition time. After a class/type is defined, its inheritance relationships, method signatures, and other structural properties cannot be retroactively changed.
@@ -107,6 +107,8 @@ Therefore, derivation for structural facts must occur at definition time ($t_D =
 A \emph{definition-time hook} is a language construct that executes arbitrary code when a definition (class, function, module) is \emph{created}, not when it is \emph{used}.
 \end{definition}
 
+This concept has theoretical foundations in metaobject protocols~\cite{kiczales1991art}, where class initialization in CLOS allows arbitrary code execution at definition time. Python's implementation of this capability is derived from the same tradition.
+
 \textbf{Python's definition-time hooks:}
 
 \begin{center}
@@ -166,7 +168,7 @@ Contrapositive: If a language lacks definition-time hooks, SSOT for structural f
 
 \subsection{Requirement 2: Introspectable Derivation}\label{sec:introspection}
 
-Definition-time hooks enable derivation. But SSOT also requires \emph{verification}---the ability to confirm that DOF = 1.
+Definition-time hooks enable derivation. But SSOT also requires \emph{verification}---the ability to confirm that DOF = 1. This requires \emph{computational reflection}---the ability of a program to reason about its own structure~\cite{smith1984reflection}.
 
 \begin{definition}[Introspectable Derivation]\label{def:introspection}
 Derivation is \emph{introspectable} iff the program can query:
@@ -416,7 +418,7 @@ Verification of SSOT requires answering: ``Is every encoding of $F$ derived from
 
 This requires enumerating all encodings. If expansion is opaque, the program cannot query what was generated.
 
-In Rust, after \texttt{#[derive(Handler)]} expands, the program cannot ask ``what did this macro generate?'' The expansion is compiled into the binary but not introspectable.
+In Rust, after \texttt{\#[derive(Handler)]} expands, the program cannot ask ``what did this macro generate?'' The expansion is compiled into the binary but not introspectable.
 
 Without introspection, the program cannot verify DOF $= 1$. SSOT may hold but cannot be confirmed. \qed
 \end{proof}

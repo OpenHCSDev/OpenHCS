@@ -17,12 +17,12 @@ A \emph{location} $L \in C$ is a syntactically identifiable region of code: a cl
 For a codebase $C$, the \emph{edit space} $E(C)$ is the set of all syntactically valid modifications to $C$. Each edit $\delta \in E(C)$ transforms $C$ into a new codebase $C' = \delta(C)$.
 \end{definition}
 
-The edit space is large---exponential in codebase size. But we are not interested in arbitrary edits. We are interested in edits that \emph{change a specific fact}.
+The edit space is large (exponential in codebase size). But we are not interested in arbitrary edits. We are interested in edits that \emph{change a specific fact}.
 
 \subsection{Facts: Atomic Units of Specification}\label{sec:facts}
 
 \begin{definition}[Fact]\label{def:fact}
-A \emph{fact} $F$ is an atomic unit of program specification---a single piece of knowledge that can be independently modified. Facts are the indivisible units of meaning in a specification.
+A \emph{fact} $F$ is an atomic unit of program specification: a single piece of knowledge that can be independently modified. Facts are the indivisible units of meaning in a specification.
 \end{definition}
 
 The granularity of facts is determined by the specification, not the implementation. If two pieces of information must always change together, they constitute a single fact. If they can change independently, they are separate facts.
@@ -62,7 +62,7 @@ Formally:
 where $\delta_F$ is an edit targeting fact $F$.
 \end{definition}
 
-\textbf{Key insight:} This definition is \textbf{forced} by correctness, not chosen. We do not decide what encodes what---correctness requirements determine it. If failing to update location $L$ when fact $F$ changes produces an incorrect program, then $L$ encodes $F$. This is an objective, observable property.
+\textbf{Key insight:} This definition is \textbf{forced} by correctness, not chosen. We do not decide what encodes what. Correctness requirements determine it. If failing to update location $L$ when fact $F$ changes produces an incorrect program, then $L$ encodes $F$. This is an objective, observable property.
 
 \begin{example}[Encoding in Practice]\label{ex:encoding}
 Consider a type registry:
@@ -123,7 +123,7 @@ By Definition~\ref{def:encodes}, the program is incorrect. Therefore, all $k$ lo
 Not all encoding locations are created equal. Some are \emph{derived} from others.
 
 \begin{definition}[Independent Locations]\label{def:independent}
-Locations $L_1, L_2$ are \emph{independent} for fact $F$ iff they can diverge---updating $L_1$ does not automatically update $L_2$, and vice versa.
+Locations $L_1, L_2$ are \emph{independent} for fact $F$ iff they can diverge. Updating $L_1$ does not automatically update $L_2$, and vice versa.
 
 Formally: $L_1$ and $L_2$ are independent iff there exists a sequence of edits that makes $L_1$ and $L_2$ encode different values for $F$.
 \end{definition}

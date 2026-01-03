@@ -26,7 +26,7 @@ Purpose
 \bottomrule\noalign{}
 \endlastfoot
 \texttt{abstract\_class\_system.lean} & 1542 & 78 & Core formalization:
-three-axis model, dominance, complexity \\
+two-axis model, dominance, complexity \\
 \texttt{nominal\_resolution.lean} & 556 & 21 & Resolution, capability
 exhaustiveness, adapter amortization \\
 \texttt{discipline\_migration.lean} & 142 & 11 & Discipline vs migration
@@ -41,26 +41,26 @@ instantiation of abstract model \\
 \begin{enumerate}
 \def\labelenumi{\arabic{enumi}.}
 \item
-  \textbf{Language-agnostic layer} (Section 6.12): The three-axis model
-  \((N, B, S)\), axis lattice metatheorem, and strict
-  dominance---proving nominal typing dominates shape-based typing in
+  \textbf{Language-agnostic layer} (Section 6.12): The two-axis model
+  \((B, S)\), axis lattice metatheorem, and strict
+  dominance: proving nominal typing dominates shape-based typing in
   \textbf{any} class system with explicit inheritance. These proofs
   require no Python-specific axioms.
 \item
   \textbf{Python instantiation layer} (Sections 6.1--6.11): The
   dual-axis resolution algorithm, provenance preservation, and
-  OpenHCS-specific invariants---proving that Python's
+  OpenHCS-specific invariants: proving that Python's
   \texttt{type(name,\ bases,\ namespace)} and C3 linearization correctly
   instantiate the abstract model.
 \item
   \textbf{Complexity bounds layer} (Section 6.13): Formalization of O(1)
-  vs O(k) vs $\\Omega$(n) complexity separation. Proves that nominal error
-  localization is O(1), structural is O(k), duck is $\\Omega$(n), and the gap
+  vs O(k) vs $\Omega(n)$ complexity separation. Proves that nominal error
+  localization is O(1), structural is O(k), duck is $\Omega(n)$, and the gap
   grows without bound.
 \end{enumerate}
 
 The abstract layer establishes that our theorems apply to Java, C\#,
-Ruby, Scala, and any language with the \((N, B, S)\) structure. The
+Ruby, Scala, and any language with the \((B, S)\) structure. The
 Python layer demonstrates concrete realization. The complexity layer
 proves the asymptotic dominance is machine-checkable, not informal.
 
@@ -290,9 +290,9 @@ theorem structEq\_trans (a b c : DuckObject) :
 
 Any function operating on duck objects must respect structural
 equivalence. If two objects have the same structure, they are
-indistinguishable. This is not an assumption---it is the
-\emph{definition} of duck typing: ``If it walks like a duck and quacks
-like a duck, it IS a duck.''
+indistinguishable. This follows from the \emph{definition} of duck
+typing: ``If it walks like a duck and quacks like a duck, it IS a
+duck.''
 
 \begin{verbatim}
 {-{-} A duck{-}respecting function treats structurally equivalent objects identically}
@@ -390,7 +390,7 @@ Status
 \bottomrule\noalign{}
 \endlastfoot
 AbstractClassSystem namespace & 475 & PASS Compiles, no warnings \\
-- Three-axis model (N, B, S) & 80 & PASS Definitions \\
+- Three-axis model (B, S) & 80 & PASS Definitions \\
 - Typing discipline capabilities & 100 & PASS Proved \\
 - Strict dominance (Theorem 2.18) & 60 & PASS Proved \\
 - Mixin dominance (Theorem 8.1) & 80 & PASS Proved \\
@@ -478,6 +478,38 @@ establish that \emph{given} a well-formed registry and MRO, the
 resolution algorithm is correct and provides provenance that duck typing
 cannot.
 
+\subsection{On the Nature of Foundational Proofs}\label{foundational-proofs}
+
+A reader examining the Lean source code will notice that most proofs are remarkably short, often 1-3 lines. For example, the provenance impossibility theorem (Theorem 3.13) has a one-line proof: \texttt{exact h\_shape A B h\_same\_ns}. This brevity is not an accident or a sign of triviality. It is the hallmark of \emph{foundational} work, where the insight lies in the formalization, not the derivation.
+
+\textbf{Definitional vs. derivational proofs.} Our core theorems establish \emph{definitional} impossibilities, not algorithmic complexities. When we prove that no shape-respecting function can compute provenance (Theorem 3.13), we are not saying ``all known algorithms fail'' or ``the problem is NP-hard.'' We are saying something stronger: \emph{it is information-theoretically impossible}. The proof follows immediately from the definition of shape-respecting functions. If two types have the same shape, any shape-respecting function must treat them identically. This is not a complex derivation; it is an unfolding of definitions.
+
+\textbf{Precedent in foundational CS.} This pattern appears throughout foundational computer science:
+
+\begin{itemize}
+\item \textbf{Turing's Halting Problem (1936):} The proof is a simple diagonal argument, perhaps 10 lines in modern notation. Yet it establishes a fundamental limit on computation that no future algorithm can overcome.
+\item \textbf{Brewer's CAP Theorem (2000):} The impossibility proof is straightforward: if a partition occurs, a system cannot be both consistent and available. The insight is in the \emph{formalization} of what consistency, availability, and partition-tolerance mean, not in the proof steps.
+\item \textbf{Curry-Howard Correspondence (1958/1969):} The isomorphism between types and propositions is almost definitional once the right abstractions are identified. The profundity is in recognizing the correspondence, not deriving it.
+\end{itemize}
+
+\textbf{Why simplicity indicates strength.} A definitional impossibility is \emph{stronger} than a computational lower bound. Proving that sorting requires $\Omega(n \log n)$ comparisons in the worst case (decision tree argument) leaves open the possibility of non-comparison-based algorithms (radix sort, counting sort). Proving that provenance is not shape-respecting \emph{closes all loopholes}. No algorithm, no external state, no future language feature can make shape-based typing compute provenance without abandoning the definition of ``shape-based.''
+
+\textbf{Where the insight lies.} The semantic contribution of our formalization is threefold:
+
+\begin{enumerate}
+\item \textbf{Precision forcing.} Formalizing ``shape-based typing'' in Lean requires stating exactly what it means for a function to be shape-respecting (Definition: \texttt{ShapeRespecting}). This precision eliminates ambiguity. Informal arguments can wave hands; formal proofs cannot.
+
+\item \textbf{Completeness guarantee.} The query space partition (Theorem 3.19) proves that \emph{every} query is either shape-respecting or Bases-dependent. The partition is mathematical (tertium non datur), deriving the capability gap from logic.
+
+\item \textbf{Universal scope.} The proofs apply to \emph{any} shape-based typing discipline, not just specific implementations. The impossibility holds for duck typing (Python), structural typing (TypeScript), Protocols (PEP 544), and any future system that discards the Bases axis.
+\end{enumerate}
+
+\textbf{What machine-checking guarantees.} The Lean compiler verifies that every proof step is valid, every definition is consistent, and no axioms are added beyond Lean's foundations (classical logic, extensionality). Zero \texttt{sorry} placeholders means zero unproven claims. The 2600+ lines establish a verified chain from axioms to theorems. Reviewers need not trust our informal explanations. They can run \texttt{lake build} and verify the proofs themselves.
+
+\textbf{Comparison to informal arguments.} Prior work on typing disciplines (Cook et al.~\cite{cook1990inheritance}, Abadi \& Cardelli~\cite{abadi1996theory}) presents compelling informal arguments but lacks machine-checked proofs. Our contribution is not new \emph{wisdom}. The insight that nominal typing provides capabilities structural typing lacks is old. Our contribution is \emph{formalization}: making the argument precise enough to mechanize, closing loopholes, and proving the claims hold universally within scope.
+
+This is the tradition of metatheory established by Liskov \& Wing~\cite{liskov1994behavioral} for behavioral subtyping and Reynolds~\cite{reynolds1983types} for parametricity. The goal is not to prove that specific programs are correct, but to establish what is \emph{possible} within a formal framework. Simple proofs from precise definitions are the gold standard of this work.
+
 \subsection{External Provenance Map
 Rebuttal}\label{external-provenance-map-rebuttal}
 
@@ -487,7 +519,7 @@ external map:
 
 \textbf{Rebuttal:} This objection conflates \emph{object identity} with
 \emph{type identity}. The external map tracks which specific object
-instance came from where---not which \emph{type} in the MRO provided a
+instance came from where (not which \emph{type} in the MRO provided a
 value.
 
 Consider:
@@ -506,7 +538,7 @@ print(b.x)  \# Prints 1. Which type provided this?
 An external provenance map could record
 \texttt{provenance\_map{[}id(b){]}\ =\ B}. But this doesn't answer the
 question ``which type in B's MRO provided \texttt{x}?'' The answer is
-\texttt{A}, and this requires MRO traversal---which requires the Bases
+\texttt{A}, and this requires MRO traversal, which requires the Bases
 axis.
 
 \textbf{Formal statement:} Let
@@ -532,9 +564,10 @@ The abstract class system model (Section 2.4) is formalized in Lean 4
 with complete proofs (no \texttt{sorry} placeholders):
 
 \begin{verbatim}
-{-{-} The three axes of a class system}
+{-{-} The two axes of a class system
+    NOTE: "Name" (N) is NOT an independent axis: it is derivable from B.
+    If a type has a name, it has B. The minimal model is (B, S). -}
 inductive Axis where
-  | Name       {-{-} N: type identifier}
   | Bases      {-{-} B: inheritance hierarchy}
   | Namespace  {-{-} S: attribute declarations (shape)}
 deriving DecidableEq, Repr
@@ -543,8 +576,8 @@ deriving DecidableEq, Repr
 abbrev AxisSet := List Axis
 
 {-{-} Canonical axis sets}
-def shapeAxes : AxisSet := [.Name, .Namespace]  {-{-} Structural/duck typing}
-def nominalAxes : AxisSet := [.Name, .Bases, .Namespace]  {-{-} Full nominal}
+def shapeAxes : AxisSet := [.Namespace]  {-{-} S-only: structural typing (duck typing is incoherent S)
+def nominalAxes : AxisSet := [.Bases, .Namespace]  {-{-} (B, S): full nominal}
 
 {-{-} Unified capability (combines typing and architecture domains)}
 inductive UnifiedCapability where
@@ -558,7 +591,6 @@ deriving DecidableEq, Repr
 {-{-} Capabilities enabled by each axis}
 def axisCapabilities (a : Axis) : List UnifiedCapability :=
   match a with
-  | .Name =\textgreater{ [.interfaceCheck]}
   | .Bases =\textgreater{ [.identity, .provenance, .enumeration, .conflictResolution]}
   | .Namespace =\textgreater{ [.interfaceCheck]}
 
@@ -629,9 +661,9 @@ def nonBasesCapabilities : List Capability :=
 
 {-{-} THEOREM: Bases capabilities are exactly \{provenance, identity, enumeration, conflictResolution\}}
 theorem bases\_capabilities\_complete :
-    $\\forall$ c : Capability,
-      (c $\\in$ basesRequiredCapabilities $\\leftrightarrow$
-       c = .provenance $\\vee$ c = .identity $\\vee$ c = .enumeration $\\vee$ c = .conflictResolution) := by
+    $\forall$ c : Capability,
+      (c $\in$ basesRequiredCapabilities $\leftrightarrow$
+       c = .provenance $\vee$ c = .identity $\vee$ c = .enumeration $\vee$ c = .conflictResolution) := by
   intro c
   constructor
   · intro h
@@ -643,9 +675,9 @@ theorem bases\_capabilities\_complete :
 
 {-{-} THEOREM: Non{-}Bases capabilities are exactly \{interfaceCheck, typeNaming, valueAccess, methodInvocation\}}
 theorem non\_bases\_capabilities\_complete :
-    $\\forall$ c : Capability,
-      (c $\\in$ nonBasesCapabilities $\\leftrightarrow$
-       c = .interfaceCheck $\\vee$ c = .typeNaming $\\vee$ c = .valueAccess $\\vee$ c = .methodInvocation) := by
+    $\forall$ c : Capability,
+      (c $\in$ nonBasesCapabilities $\leftrightarrow$
+       c = .interfaceCheck $\vee$ c = .typeNaming $\vee$ c = .valueAccess $\vee$ c = .methodInvocation) := by
   intro c
   constructor
   · intro h
@@ -657,9 +689,9 @@ theorem non\_bases\_capabilities\_complete :
 
 {-{-} THEOREM: Every capability is in exactly one category (partition)}
 theorem capability\_partition :
-    $\\forall$ c : Capability,
-      (c $\\in$ basesRequiredCapabilities $\\vee$ c $\\in$ nonBasesCapabilities) $\\wedge$
-      $\\neg$(c $\\in$ basesRequiredCapabilities $\\wedge$ c $\\in$ nonBasesCapabilities) := by
+    $\forall$ c : Capability,
+      (c $\in$ basesRequiredCapabilities $\vee$ c $\in$ nonBasesCapabilities) $\wedge$
+      $\neg$(c $\in$ basesRequiredCapabilities $\wedge$ c $\in$ nonBasesCapabilities) := by
   intro c
   cases c \textless{;\textgreater{} simp [basesRequiredCapabilities, nonBasesCapabilities]}
 
@@ -672,283 +704,32 @@ This formalizes Theorem 2.17 (Capability Completeness): the capability
 set \(\mathcal{C}_B\) is \textbf{exactly} four elements, proven by
 exhaustive enumeration with machine-checked partition. The
 \texttt{capability\_partition} theorem proves that every capability
-falls into exactly one category---Bases-required or not---with no
+falls into exactly one category (Bases-required or not) with no
 overlap and no gaps.
 
-\subsection{Complexity Bounds
-Formalization}\label{complexity-bounds-formalization}
+\textbf{Scope as observational quotient.} We model ``scope'' as a set of
+allowed observers \(\text{Obs} \subseteq (W \to O)\) and define
+observational equivalence
+\(x \approx y \;:\!\!\iff\; \forall f \in \text{Obs}, f(x) = f(y)\). The
+induced quotient \(W/{\approx}\) is the canonical object for that scope,
+and every in-scope observer factors through it (see
+\texttt{observer\_factors} in \texttt{abstract\_class\_system.lean}).
+Once the observer set is fixed, no argument can appeal to information
+outside that quotient; adding a new observable is literally expanding
+\(\text{Obs}\).
 
-We formalize the O(1) vs O(k) vs $\\Omega$(n) complexity claims from Section
-2.1. The key insight: \textbf{constraint checking has a location}, and
-the number of locations determines error localization cost.
+\textbf{Protocol runtime observer (shape-only).} We also formalize the
+restricted Protocol/isinstance observer that checks only for required
+members. The predicate \texttt{protoCheck} ignores protocol identity and
+is proved shape-respecting (\texttt{protoCheck\_in\_shapeQuerySet} in
+\texttt{abstract\_class\_system.lean}), so two protocols with identical
+member sets are indistinguishable to that observer. Distinguishing them
+requires adding an observable discriminator (brand/tag/nominality),
+i.e., moving to another axis.
 
-\textbf{Definition 6.1 (Program Model).} A program consists of class
-definitions and call sites:
-
-\begin{verbatim}
-{-{-} A program has classes and call sites}
-structure Program where
-  classes : List Nat      {-{-} Class IDs}
-  callSites : List Nat    {-{-} Call site IDs}
-  {-{-} Which call sites use which attribute}
-  callSiteAttribute : Nat $\\rightarrow$ String
-  {-{-} Which class declares a constraint}
-  constraintClass : String $\\rightarrow$ Nat
-
-{-{-} A constraint is a requirement on an attribute}
-structure Constraint where
-  attribute : String
-  declaringSite : Nat  {-{-} The class that declares the constraint}
-\end{verbatim}
-
-\textbf{Definition 6.2 (Check Location).} A location where constraint
-checking occurs:
-
-\begin{verbatim}
-inductive CheckLocation where
-  | classDefinition : Nat $\\rightarrow$ CheckLocation  {-{-} Checked at class definition}
-  | callSite : Nat $\\rightarrow$ CheckLocation         {-{-} Checked at call site}
-deriving DecidableEq
-\end{verbatim}
-
-\textbf{Definition 6.3 (Checking Strategy).} A typing discipline
-determines WHERE constraints are checked:
-
-\begin{verbatim}
-{-{-} Nominal: check at the single class definition point}
-def nominalCheckLocations (p : Program) (c : Constraint) : List CheckLocation :=
-  [.classDefinition c.declaringSite]
-
-{-{-} Structural: check at each implementing class (we model k implementing classes)}
-def structuralCheckLocations (p : Program) (c : Constraint)
-    (implementingClasses : List Nat) : List CheckLocation :=
-  implementingClasses.map CheckLocation.classDefinition
-
-{-{-} Duck: check at each call site that uses the attribute}
-def duckCheckLocations (p : Program) (c : Constraint) : List CheckLocation :=
-  p.callSites.filter (fun cs =\textgreater{ p.callSiteAttribute cs == c.attribute)}
-             |\textgreater{.map CheckLocation.callSite}
-\end{verbatim}
-
-\textbf{Theorem 6.5 (Nominal O(1)).} Nominal typing checks exactly 1
-location per constraint:
-
-\begin{verbatim}
-theorem nominal\_check\_count\_is\_1 (p : Program) (c : Constraint) :
-    (nominalCheckLocations p c).length = 1 := by
-  simp [nominalCheckLocations]
-\end{verbatim}
-
-\textbf{Theorem 6.6 (Structural O(k)).} Structural typing checks k
-locations (k = implementing classes):
-
-\begin{verbatim}
-theorem structural\_check\_count\_is\_k (p : Program) (c : Constraint)
-    (implementingClasses : List Nat) :
-    (structuralCheckLocations p c implementingClasses).length =
-    implementingClasses.length := by
-  simp [structuralCheckLocations]
-\end{verbatim}
-
-\textbf{Theorem 6.7 (Duck $\\Omega$(n)).} Duck typing checks n locations (n =
-relevant call sites):
-
-\begin{verbatim}
-{-{-} Helper: count call sites using an attribute}
-def relevantCallSites (p : Program) (attr : String) : List Nat :=
-  p.callSites.filter (fun cs =\textgreater{ p.callSiteAttribute cs == attr)}
-
-theorem duck\_check\_count\_is\_n (p : Program) (c : Constraint) :
-    (duckCheckLocations p c).length =
-    (relevantCallSites p c.attribute).length := by
-  simp [duckCheckLocations, relevantCallSites]
-\end{verbatim}
-
-\textbf{Theorem 6.8 (Strict Ordering).} For non-trivial programs (k $\\geq$ 1,
-n $\\geq$ k), the complexity ordering is strict:
-
-\begin{verbatim}
-{-{-} 1 $\\leq$ k: Nominal dominates structural when there\textquotesingle{}s at least one implementing class}
-theorem nominal\_leq\_structural (p : Program) (c : Constraint)
-    (implementingClasses : List Nat) (h : implementingClasses $\\neq$ []) :
-    (nominalCheckLocations p c).length $\\leq$
-    (structuralCheckLocations p c implementingClasses).length := by
-  simp [nominalCheckLocations, structuralCheckLocations]
-  exact Nat.one\_le\_iff\_ne\_zero.mpr (List.length\_pos\_of\_ne\_nil h |\textgreater{ Nat.not\_eq\_zero\_of\_lt)}
-
-{-{-} k $\\leq$ n: Structural dominates duck when call sites outnumber implementing classes}
-theorem structural\_leq\_duck (p : Program) (c : Constraint)
-    (implementingClasses : List Nat)
-    (h : implementingClasses.length $\\leq$ (relevantCallSites p c.attribute).length) :
-    (structuralCheckLocations p c implementingClasses).length $\\leq$
-    (duckCheckLocations p c).length := by
-  simp [structuralCheckLocations, duckCheckLocations, relevantCallSites]
-  exact h
-\end{verbatim}
-
-\textbf{Theorem 6.9 (Unbounded Duck Complexity).} Duck typing complexity
-is unbounded---for any n, there exists a program requiring n checks:
-
-\begin{verbatim}
-{-{-} Duck complexity can be arbitrarily large}
-theorem duck\_complexity\_unbounded :
-    $\\forall$ n : Nat, $\\exists$ p c, (duckCheckLocations p c).length $\\geq$ n := by
-  intro n
-  {-{-} Construct program with n call sites all using attribute "foo"}
-  let p : Program := \{
-    classes := [0],
-    callSites := List.range n,
-    callSiteAttribute := fun \_ =\textgreater{ "foo",}
-    constraintClass := fun \_ =\textgreater{ 0}
-  \}
-  let c : Constraint := \{ attribute := "foo", declaringSite := 0 \}
-  use p, c
-  simp [duckCheckLocations, relevantCallSites, p, c]
-\end{verbatim}
-
-\textbf{Theorem 6.10 (Error Localization Gap).} The error localization
-gap between nominal and duck typing grows linearly with program size:
-
-\begin{verbatim}
-{-{-} The gap: duck requires n checks where nominal requires 1}
-theorem error\_localization\_gap (p : Program) (c : Constraint)
-    (h : (relevantCallSites p c.attribute).length = n) (hn : n $\\geq$ 1) :
-    (duckCheckLocations p c).length {- (nominalCheckLocations p c).length = n {-} 1 := by}
-  simp [duckCheckLocations, nominalCheckLocations, relevantCallSites] at *
-  omega
-\end{verbatim}
-
-\textbf{Corollary 6.4 (Asymptotic Dominance).} As program size grows,
-nominal typing's advantage approaches infinity:
-
-\[\lim_{n \to \infty} \frac{\text{DuckCost}(n)}{\text{NominalCost}} = \lim_{n \to \infty} \frac{n}{1} = \infty\]
-
-This is not merely ``nominal is better''---it is \textbf{asymptotically
-dominant}. The complexity gap grows without bound.
-
-\subsection{Core Theorems (Lean
-Formalization)}\label{core-theorems-lean-formalization}
-
-Section 3.8 presented three theorems with universal scope. Here
-we provide their machine-checked formalizations.
-
-\textbf{Theorem 6.12 (Provenance Impossibility --- Lean).} No shape
-discipline can compute provenance:
-
-\begin{verbatim}
-{-{-} THEOREM 3.13: Provenance is not shape{-}respecting when distinct types share namespace}
-{-{-} Therefore no shape discipline can compute provenance}
-theorem provenance\_not\_shape\_respecting (ns : Namespace) (bases : Bases)
-    {-{-} Premise: there exist two types with same namespace but different bases}
-    (A B : Typ)
-    (h\_same\_ns : shapeEquivalent ns A B)
-    (h\_diff\_bases : bases A $\\neq$ bases B)
-    {-{-} Any provenance function that distinguishes them}
-    (prov : ProvenanceFunction)
-    (h\_distinguishes : prov A "x" $\\neq$ prov B "x") :
-    {-{-} Cannot be computed by a shape discipline}
-    $\\neg$ShapeRespecting ns (fun T =\textgreater{ prov T "x") := by}
-  intro h\_shape\_resp
-  {-{-} If prov were shape{-}respecting, then prov A "x" = prov B "x"}
-  have h\_eq : prov A "x" = prov B "x" := h\_shape\_resp A B h\_same\_ns
-  {-{-} But we assumed prov A "x" $\\neq$ prov B "x"}
-  exact h\_distinguishes h\_eq
-
-{-{-} COROLLARY: Provenance impossibility is universal}
-theorem provenance\_impossibility\_universal :
-    $\\forall$ (ns : Namespace) (A B : Typ),
-      shapeEquivalent ns A B $\\rightarrow$
-      $\\forall$ (prov : ProvenanceFunction),
-        prov A "x" $\\neq$ prov B "x" $\\rightarrow$
-        $\\neg$ShapeRespecting ns (fun T =\textgreater{ prov T "x") := by}
-  intro ns A B h\_eq prov h\_neq h\_shape
-  exact h\_neq (h\_shape A B h\_eq)
-\end{verbatim}
-
-\textbf{Formal justification:} The proof shows that IF two types have
-the same namespace but require different provenance answers, THEN no
-shape-respecting function can compute provenance. This follows directly
-from the definition of shape-respecting functions.
-
-\textbf{Theorem 6.13 (Query Space Partition --- Lean).} Every query is
-either shape-respecting or B-dependent:
-
-\begin{verbatim}
-{-{-} Query space partitions EXACTLY into shape{-}respecting and B{-}dependent}
-{-{-} This is Theorem 3.18 (Query Space Partition)}
-theorem query\_space\_partition (ns : Namespace) (q : SingleQuery) :
-    (ShapeRespectingSingle ns q $\\vee$ BasesDependentQuery ns q) $\\wedge$
-    $\\neg$(ShapeRespectingSingle ns q $\\wedge$ BasesDependentQuery ns q) := by
-  constructor
-  · {-{-} Exhaustiveness: either shape{-}respecting or bases{-}dependent}
-    by\_cases h : ShapeRespectingSingle ns q
-    · left; exact h
-    · right
-      simp only [ShapeRespectingSingle, not\_forall] at h
-      obtain ⟨A, B, h\_eq, h\_neq⟩ := h
-      exact ⟨A, B, h\_eq, h\_neq⟩
-  · {-{-} Mutual exclusion: cannot be both}
-    intro ⟨h\_shape, h\_bases⟩
-    obtain ⟨A, B, h\_eq, h\_neq⟩ := h\_bases
-    have h\_same : q A = q B := h\_shape A B h\_eq
-    exact h\_neq h\_same
-\end{verbatim}
-
-\textbf{Formal justification:} The proof is pure logic---either a
-property holds universally (\(\forall\)) or it has a counterexample
-(\(\exists \neg\)). Tertium non datur. The capability gap is derived
-from this partition, not enumerated.
-
-\textbf{Theorem 6.14 (Complexity Lower Bound --- Lean).} Duck typing
-requires $\\Omega$(n) inspections:
-
-\begin{verbatim}
-{-{-} THEOREM: In the worst case, finding the error source requires n{-}1 inspections}
-theorem error\_localization\_lower\_bound (n : Nat) (hn : n $\\geq$ 1) :
-    {-{-} For any sequence of n{-}2 or fewer inspections...}
-    $\\forall$ (inspections : List (Fin n)),
-      inspections.length \textless{ n {-} 1 $\\rightarrow$}
-      {-{-} There exist two different error configurations}
-      {-{-} that are consistent with all inspection results}
-      $\\exists$ (src1 src2 : Fin n),
-        src1 $\\neq$ src2 $\\wedge$
-        src1 $\\notin$ inspections $\\wedge$ src2 $\\notin$ inspections := by
-  intro inspections h\_len
-  {-{-} Counting argument: if |inspections| \textless{} n{-}1, then |uninspected| $\\geq$ 2}
-  have h\_uninspected : n {- inspections.length $\\geq$ 2 := by omega}
-  {-{-} Therefore at least 2 uninspected sites exist (adversary\textquotesingle{}s freedom)}
-  {-{-} Pigeonhole counting argument (fully formalized in actual Lean file)}
-
-{-{-} COROLLARY: The complexity gap is unbounded}
-theorem complexity\_gap\_unbounded :
-    $\\forall$ (k : Nat), $\\exists$ (n : Nat), n {- 1 \textgreater{} k := by}
-  intro k
-  use k + 2
-  omega
-\end{verbatim}
-
-\textbf{Formal justification:} The adversary argument shows that ANY
-algorithm can be forced to make $\Omega$(n) inspections---the adversary answers
-consistently but adversarially. This is a standard lower bound proof technique
-from complexity theory.
-
-\textbf{Summary of Lean Statistics:}
-
-\small
-\begin{longtable}[]{@{}ll@{}}
-\toprule\noalign{}
-Metric & Value \\
-\midrule\noalign{}
-\endhead
-\bottomrule\noalign{}
-\endlastfoot
-Total lines & 2613 (five modules) \\
-Total theorems/lemmas & 127 \\
-\texttt{sorry} placeholders & 0 \\
-\end{longtable}
-
-All proofs are complete. The counting lemma for the adversary argument
-uses a \texttt{calc} chain showing filter partition equivalence.
-
-\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
-
+\textbf{All Python object-model observables factor through axes.} In
+the Python instantiation we prove that core runtime discriminators are
+functions of \((B,S)\): metaclass selection depends only on \texttt{bases}
+(\texttt{metaclass\_depends\_on\_bases}); attribute presence and dispatch
+depend only on the namespace (\texttt{getattr\_depends\_on\_ns}); together
+they yield \texttt{observ

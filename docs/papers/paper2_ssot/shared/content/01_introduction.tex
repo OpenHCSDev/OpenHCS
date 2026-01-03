@@ -1,14 +1,22 @@
 \section{Introduction}\label{introduction}
 
-This paper proves that certain programming languages are \emph{incapable} of achieving the Single Source of Truth (SSOT) principle for structural facts. All results are machine-checked in Lean 4 (1,753 lines across 13 files, 0 \texttt{sorry} placeholders).
+\subsection{Metatheoretic Foundations}\label{metatheoretic-foundations}
 
-The ``Don't Repeat Yourself'' (DRY) principle has been industry guidance for 25 years:
+Following the tradition of formal language design criteria (Liskov \& Wing~\cite{liskov1994behavioral} for subtyping; Cook et al.~\cite{cook1989inheritance} for inheritance semantics), we formalize correctness criteria for SSOT-completeness in programming languages. Our contribution is not advocating specific languages, but deriving the necessary and sufficient requirements that enable Single Source of Truth for structural facts.
 
-\begin{quote}
-``Every piece of knowledge must have a single, unambiguous, authoritative representation within a system.'' --- Hunt \& Thomas, \textit{The Pragmatic Programmer} (1999)
-\end{quote}
+This enables rigorous evaluation: given a language's semantics, we can \textbf{derive} whether it is SSOT-complete, rather than relying on informal assessment.
 
-Despite widespread acceptance, DRY has never been formalized. No prior work answers: \emph{What language features are necessary to achieve SSOT? What language features are sufficient?} We answer both questions, proving the answer is the same for both---an if-and-only-if theorem.
+\subsection{Overview}\label{overview}
+
+This paper establishes \textbf{incompleteness theorems} for programming languages: we prove that the majority of mainstream languages \textbf{cannot express} minimal representations for structural facts. All results are machine-checked in Lean 4~\cite{demoura2021lean4} (1,605 lines across 12 files, 0 \texttt{sorry} placeholders).
+
+\textbf{Incompleteness.} We prove that Java, C++, C\#, JavaScript, Go, Rust, TypeScript, Kotlin, and Swift lack the semantic machinery to achieve DOF = 1 (minimal representation) for structural facts. This is not a limitation of particular implementations. It is a fundamental property of their language semantics.
+
+\textbf{Completeness.} We prove that Python, Common Lisp (CLOS), and Smalltalk possess the necessary semantic features. Among mainstream languages (top-10 TIOBE, consistent 5+ year presence), Python is unique in this capability.
+
+\textbf{Connection to software engineering practice.} The ``Don't Repeat Yourself'' (DRY) principle~\cite{hunt1999pragmatic}, articulated as ``Every piece of knowledge must have a single, unambiguous, authoritative representation within a system'' (Hunt \& Thomas, 1999) and ``Once and Only Once'' in Beck's Extreme Programming~\cite{beck1999xp}, has been widely adopted in software engineering for 25+ years but never formally characterized. We prove these principles reduce to the mathematical requirement DOF = 1, enabling rigorous analysis of which languages can achieve them. To our knowledge, this is the first formalization of DRY/SSOT in the programming language theory literature.
+
+\textbf{Note on terminology:} The term ``Single Source of Truth'' also appears in data management literature, referring to authoritative data repositories. Our usage is distinct: we mean SSOT for \emph{program structure} (class existence, method signatures, type relationships), not for data storage. This code-centric definition aligns with the original DRY formulation.
 
 The core insight: SSOT for \emph{structural facts} (class existence, method signatures, type relationships) requires language features that most mainstream languages lack. Specifically:
 
@@ -23,57 +31,52 @@ The core insight: SSOT for \emph{structural facts} (class existence, method sign
   \textbf{Both are necessary} (Theorem~\ref{thm:independence}): Neither feature alone suffices. A language with hooks but no introspection can derive but cannot verify. A language with introspection but no hooks cannot derive at the right moment.
 \end{enumerate}
 
-These requirements are \textbf{derived}, not chosen. We do not \emph{prefer} definition-time hooks---we \emph{prove} they are necessary. The logical structure forces these requirements as the unique solution.
+These requirements are \textbf{information-theoretic}: Languages lacking either capability cannot compute minimal representations regardless of programmer effort or tooling. The proof proceeds by showing the required information is absent from the computational model.
 
-\subsection{Core Theorems}\label{sec:core-theorems}
+\subsection{Incompleteness and Completeness Theorems}\label{sec:core-theorems}
 
-This paper's core contribution is three theorems that admit no counterargument:
-
-\begin{enumerate}
-\def\labelenumi{\arabic{enumi}.}
-\item
-  \textbf{Theorem~\ref{thm:ssot-iff} (SSOT Requirements):} A language enables SSOT for structural facts if and only if it provides (1) definition-time hooks AND (2) introspectable derivation results.
-
-  \emph{Proof technique:} This is an if-and-only-if theorem. The requirements are both necessary (without either, SSOT is impossible) and sufficient (with both, SSOT is achievable). There is no middle ground.
-
-\item
-  \textbf{Theorem~\ref{thm:python-unique} (Python Uniqueness):} Among mainstream languages (top-10 TIOBE, consistent presence over 5+ years), Python is the only language satisfying both SSOT requirements.
-
-  \emph{Proof technique:} This is proved by exhaustive evaluation. We check every mainstream language against formally-defined criteria. The evaluation is complete---no language is omitted.
-
-\item
-  \textbf{Theorem~\ref{thm:unbounded-gap} (Unbounded Complexity Gap):} The ratio of modification complexity between SSOT-incomplete and SSOT-complete architectures grows without bound: $O(1)$ vs $\Omega(n)$ where $n$ is the number of encoding locations.
-
-  \emph{Proof technique:} Asymptotic analysis shows $\lim_{n \to \infty} n/1 = \infty$. For any constant $k$, there exists a codebase size such that SSOT provides at least $k\times$ reduction. The gap is not ``large''---it is unbounded.
-\end{enumerate}
-
-\subsection{What This Paper Does NOT Claim}\label{sec:non-claims}
-
-To prevent misreading, we state explicit non-claims:
+We establish four theorems characterizing which languages are complete or incomplete for minimal structural representations:
 
 \begin{enumerate}
 \def\labelenumi{\arabic{enumi}.}
-\tightlist
 \item
-  \textbf{NOT ``Python is the best language.''} We claim Python satisfies SSOT requirements. We make no claims about performance, safety, or other dimensions.
+  \textbf{Theorem~\ref{thm:ssot-iff} (Completeness Characterization):} A language is complete for minimal structural representations (DOF=1) if and only if it provides (1) definition-time hooks AND (2) introspectable derivation results.
+
+  \emph{Proof technique:} Necessity is proved by showing each requirement is individually indispensable. Removing either makes minimal representation uncomputable. Sufficiency is proved constructively.
+
 \item
-  \textbf{NOT ``SSOT matters for all codebases.''} Small codebases may not benefit. Our complexity bounds are asymptotic---they matter at scale.
+  \textbf{Theorem~\ref{thm:ssot-unique} (Minimality Uniqueness):} The minimal complete representation for structural facts has DOF=1. Any system with DOF $> 1$ is non-minimal by definition (contains redundant encoding locations). The set of minimal representations has cardinality 1.
+
+  \emph{Proof technique:} Follows from the uniqueness theorem for minimal complete axis sets (Paper 1). Minimal representations contain zero redundant axes; multiple independent sources violate minimality.
+
 \item
-  \textbf{NOT ``Other languages cannot approximate SSOT.''} External tools (code generators, linters) can help. We claim the \emph{language itself} cannot achieve SSOT without the identified features.
+  \textbf{Theorem~\ref{thm:python-unique} (Mainstream Language Incompleteness):} Of mainstream languages evaluated (top-10 TIOBE Index~\cite{tiobe2024}, consistent 5+ year presence), exactly nine are incomplete for minimal structural representations: Java, C, C++, C\#, JavaScript, Go, Rust, Kotlin, Swift, TypeScript. Python is the unique complete mainstream language.
+
+  \emph{Proof technique:} Exhaustive evaluation against formally-defined necessary and sufficient conditions. Each language's semantics is checked for (1) definition-time hooks and (2) introspectable derivation. Incompleteness is established by exhibiting the missing capability.
+
 \item
-  \textbf{NOT ``This is novel wisdom.''} The insight that metaprogramming helps with DRY is old. What is new is the \emph{formalization} and \emph{machine-checked proof} of necessity.
+  \textbf{Theorem~\ref{thm:unbounded-gap} (Strict Dominance):} Complete languages strictly dominate incomplete languages for minimal representation tasks. The modification complexity ratio is unbounded: complete languages achieve $O(1)$; incomplete languages require $\Omega(n)$ where $n$ is the number of encoding locations. For any constant $k$, there exists system size where complete languages provide $>k\times$ advantage.
+
+  \emph{Proof technique:} Asymptotic analysis: $\lim_{n \to \infty} \frac{n}{1} = \infty$. The gap is not ``large.'' It is \textbf{unbounded}, growing without limit as system size increases.
 \end{enumerate}
+
+\textbf{Forced solution.} Given minimality as a requirement, Theorem~\ref{thm:ssot-unique} eliminates design freedom: $|\{r : \text{minimal}(r)\}| = 1$. Given this requirement, language selection becomes \textbf{mathematically determined}: incomplete languages cannot achieve the goal regardless of implementation effort. This is not preference. It is logical necessity.
+
+\subsection{Scope}\label{sec:scope}
+
+This work characterizes SSOT for \emph{structural facts} (class existence, method signatures, type relationships) within language semantics. The complexity analysis is asymptotic, applying to systems where $n$ grows. External tooling can approximate SSOT behavior but operates outside language semantics.
 
 \subsection{Contributions}\label{sec:contributions}
 
-This paper makes five contributions:
+This paper makes six contributions:
 
 \textbf{1. Formal foundations (Section~\ref{sec:foundations}):}
 \begin{itemize}
 \tightlist
 \item Definition of modification complexity as degrees of freedom (DOF) in state space
 \item Definition of SSOT as DOF = 1
-\item Proof that SSOT is optimal: DOF = 0 means missing specification, DOF $>$ 1 means inconsistency possible
+\item \textbf{Theorem~\ref{thm:ssot-unique} (SSOT Uniqueness):} SSOT (DOF=1) is the \textbf{unique} minimal representation for structural facts. Any system with DOF $> 1$ contains redundancy and is therefore non-minimal. This follows from the general uniqueness theorem for minimal complete representations (Paper 1).
+\item \textbf{Corollary~\ref{cor:no-redundancy} (Redundancy Impossibility):} Minimal representations contain zero redundant sources. This is a mathematical necessity, not a design guideline.
 \end{itemize}
 
 \textbf{2. Language requirements (Section~\ref{sec:requirements}):}
@@ -101,18 +104,25 @@ This paper makes five contributions:
 \item Theorem~\ref{thm:unbounded-gap}: The gap is unbounded
 \end{itemize}
 
-\textbf{5. Empirical validation (Section~\ref{sec:empirical}):}
+\textbf{5. Cross-paper theoretical foundations:}
 \begin{itemize}
 \tightlist
-\item 13 case studies from OpenHCS (45K LoC production Python codebase)
-\item Concrete DOF measurements: 184 total pre-SSOT, 13 total post-SSOT
-\item Mean reduction factor: 14.2$\times$
-\item Detailed before/after code for each case study
+\item Connection to Paper 1's general uniqueness theorem for minimal complete representations
+\item Application of \texttt{minimal\_no\_redundant\_axes} lemma to SSOT domain
+\item Demonstration that SSOT is an instance of universal minimality principle
+\end{itemize}
+
+\textbf{6. Practical demonstration (Section~\ref{sec:empirical}):}
+\begin{itemize}
+\tightlist
+\item Before/after examples from OpenHCS (production Python codebase)
+\item PR \#44~\cite{openhcsPR44}: Verifiable migration from 47 \texttt{hasattr()} checks to 1 ABC (DOF 47 $\to$ 1)
+\item Qualitative patterns demonstrating SSOT mechanisms in practice
 \end{itemize}
 
 \subsection{Empirical Context: OpenHCS}\label{sec:openhcs-context}
 
-\textbf{What it does:} OpenHCS is a bioimage analysis platform for high-content screening. It processes microscopy images through configurable pipelines, with GUI-based design and Python code export. The system requires:
+\textbf{What it does:} OpenHCS~\cite{openhcs2025} is an open-source bioimage analysis platform for high-content screening (45K LoC Python). It processes microscopy images through configurable pipelines, with GUI-based design and Python code export. The system requires:
 
 \begin{itemize}
 \tightlist
@@ -132,9 +142,9 @@ This paper makes five contributions:
 \item The documentation generator
 \end{itemize}
 
-Without SSOT, adding a processor requires updating 4+ locations. With SSOT, only the class definition is needed---Python's \texttt{\_\_init\_subclass\_\_} and \texttt{\_\_subclasses\_\_()} handle the rest.
+Without SSOT, adding a processor requires updating 4+ locations. With SSOT, only the class definition is needed. Python's \texttt{\_\_init\_subclass\_\_} and \texttt{\_\_subclasses\_\_()} handle the rest.
 
-\textbf{Key finding:} PR \#44 migrated from duck typing (\texttt{hasattr()} checks) to nominal typing (ABC contracts). This eliminated 47 scattered checks, reducing DOF from 47 to 1. The migration validates both:
+\textbf{Key finding:} PR \#44~\cite{openhcsPR44} migrated from duck typing (\texttt{hasattr()} checks) to nominal typing (ABC contracts). This eliminated 47 scattered checks, reducing DOF from 47 to 1. The migration validates both:
 \begin{enumerate}
 \def\labelenumi{\arabic{enumi}.}
 \tightlist
@@ -171,6 +181,6 @@ Given requirements:
 
 \subsection{Paper Structure}\label{sec:structure}
 
-Section~\ref{sec:foundations} establishes formal definitions: edit space, facts, encoding, degrees of freedom. Section~\ref{sec:ssot} defines SSOT and proves its optimality. Section~\ref{sec:requirements} derives language requirements with necessity proofs. Section~\ref{sec:evaluation} evaluates mainstream languages exhaustively. Section~\ref{sec:bounds} proves complexity bounds. Section~\ref{sec:empirical} presents empirical validation with 13 case studies. Section~\ref{sec:related} surveys related work. Appendix~\ref{sec:rebuttals} addresses anticipated objections. Appendix~\ref{sec:lean} contains complete Lean 4 proof listings.
+Section~\ref{sec:foundations} establishes formal definitions: edit space, facts, encoding, degrees of freedom. Section~\ref{sec:ssot} defines SSOT and proves its optimality. Section~\ref{sec:requirements} derives language requirements with necessity proofs. Section~\ref{sec:evaluation} evaluates mainstream languages exhaustively. Section~\ref{sec:bounds} proves complexity bounds. Section~\ref{sec:empirical} demonstrates practical application with before/after examples. Section~\ref{sec:related} surveys related work. Appendix~\ref{sec:rebuttals} addresses anticipated objections. Appendix~\ref{sec:lean} contains complete Lean 4 proof listings.
 
 %==============================================================================

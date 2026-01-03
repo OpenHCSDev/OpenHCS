@@ -41,7 +41,7 @@ only when a built-in mechanism exists but fails SSOT (e.g., requires
 compile-time tooling or lacks runtime reach). For non-mainstream
 languages in Section~\ref{sec:non-mainstream}, we note partial support
 where relevant since these languages are not our primary focus. For
-INTRO, we require \emph{subclass enumeration}---the ability to answer
+INTRO, we require \emph{subclass enumeration}: the ability to answer
 ``what classes inherit from X?'' at runtime. Java's
 \texttt{getMethods()} does not satisfy this because it cannot enumerate
 subclasses without classpath scanning via external libraries.
@@ -52,7 +52,7 @@ subclasses without classpath scanning via external libraries.
 A language is \emph{mainstream} iff it appears in the top 20 of at least two of the following indices consistently over 5+ years:
 \begin{enumerate}
 \tightlist
-\item TIOBE Index (monthly language popularity)
+\item TIOBE Index~\cite{tiobe2024} (monthly language popularity)
 \item Stack Overflow Developer Survey (annual)
 \item GitHub Octoverse (annual repository statistics)
 \item RedMonk Programming Language Rankings (quarterly)
@@ -141,11 +141,11 @@ JavaScript lacks definition-time hooks:
 
 \subsubsection{Java: No SSOT Support}
 
-Java's annotations are metadata, not executable hooks:
+Java's annotations are metadata, not executable hooks~\cite{gosling2021java}:
 
 \textbf{DEF:} $\times$. Annotations are processed by external tools (annotation processors), not by the JVM at class loading. The class is already fully defined when annotation processing occurs.
 
-\textbf{INTRO:} $\times$. \texttt{Class.getMethods()}, \texttt{Class.getInterfaces()}, \texttt{Class.getSuperclass()} exist but \emph{cannot enumerate subclasses}. The JVM does not track subclass relationships. External libraries (Reflections, ClassGraph) provide this via classpath scanning---but that is external tooling, not a language feature.
+\textbf{INTRO:} $\times$. \texttt{Class.getMethods()}, \texttt{Class.getInterfaces()}, \texttt{Class.getSuperclass()} exist but \emph{cannot enumerate subclasses}. The JVM does not track subclass relationships. External libraries (Reflections, ClassGraph) provide this via classpath scanning, but that is external tooling, not a language feature.
 
 \textbf{STRUCT:} $\times$. Cannot modify class structure at runtime. Bytecode manipulation (ASM, ByteBuddy) is external tooling, not language-level support.
 
@@ -154,17 +154,17 @@ Java's annotations are metadata, not executable hooks:
 \textbf{Why annotation processors don't count:}
 \begin{enumerate}
 \tightlist
-\item They run at compile time, not definition time---the class being processed is already fixed
+\item They run at compile time, not definition time. The class being processed is already fixed
 \item They cannot modify the class being defined; they generate \emph{new} classes
 \item Generated classes are separate compilation units, not derived facts within the source
-\item Results are not introspectable at runtime---you cannot query ``was this method generated?''
+\item Results are not introspectable at runtime. You cannot query ``was this method generated?''
 \end{enumerate}
 
 \textbf{Why Lombok doesn't count:} Lombok approximates SSOT but violates it: the Lombok configuration becomes a second source of truth. Changes require updating both source and Lombok annotations. The tool can fail, be misconfigured, or be bypassed.
 
 \subsubsection{C++: No SSOT Support}
 
-C++ templates are compile-time, not definition-time:
+C++ templates are compile-time, not definition-time~\cite{stroustrup2013cpp}:
 
 \textbf{DEF:} $\times$. Templates expand at compile time but do not execute arbitrary code. \texttt{constexpr} functions are evaluated at compile time but cannot hook into class definition.
 
@@ -176,7 +176,7 @@ C++ templates are compile-time, not definition-time:
 
 \subsubsection{Go: No SSOT Support}
 
-Go's design philosophy explicitly rejects metaprogramming:
+Go's design philosophy explicitly rejects metaprogramming~\cite{gospec2024}:
 
 \textbf{DEF:} $\times$. No hook mechanism. Types are defined declaratively. No code executes at type definition.
 
@@ -188,7 +188,7 @@ Go's design philosophy explicitly rejects metaprogramming:
 
 \subsubsection{Rust: No SSOT Support}
 
-Rust's procedural macros are compile-time and opaque:
+Rust's procedural macros are compile-time and opaque~\cite{rustref2024}:
 
 \textbf{DEF:} $\times$. Procedural macros execute at compile time, not definition time. The generated code is not introspectable at runtime.
 
@@ -201,10 +201,10 @@ Rust's procedural macros are compile-time and opaque:
 \textbf{Why procedural macros don't count:}
 \begin{enumerate}
 \tightlist
-\item They execute at compile time, not definition time---the generated code is baked into the binary
+\item They execute at compile time, not definition time. The generated code is baked into the binary
 \item \texttt{\#[derive(Debug)]} generates code, but you cannot query ``does this type derive Debug?'' at runtime
 \item Verification requires source inspection or documentation, not runtime query
-\item No equivalent to Python's \texttt{\_\_subclasses\_\_()}---you cannot enumerate trait implementers
+\item No equivalent to Python's \texttt{\_\_subclasses\_\_()}. You cannot enumerate trait implementers
 \end{enumerate}
 
 \textbf{Consequence:} Rust achieves \emph{compile-time} SSOT but not \emph{runtime} SSOT. For applications requiring runtime reflection (ORMs, serialization frameworks, dependency injection), Rust requires manual synchronization or external codegen tools.
@@ -214,7 +214,7 @@ Among mainstream languages, Python is the only language satisfying all SSOT requ
 \end{theorem}
 
 \begin{proof}
-By exhaustive evaluation. We checked all 10 mainstream languages against the four criteria. Only Python satisfies all four. The evaluation is complete---no mainstream language is omitted. \qed
+By exhaustive evaluation. We checked all 10 mainstream languages against the four criteria. Only Python satisfies all four. The evaluation is complete. No mainstream language is omitted. \qed
 \end{proof}
 
 \subsection{Non-Mainstream Languages}\label{sec:non-mainstream}
@@ -261,7 +261,7 @@ Smalltalk pioneered many of these concepts:
 
 \subsubsection{Ruby}
 
-Ruby provides hooks but with limitations:
+Ruby provides hooks but with limitations~\cite{flanagan2020ruby}:
 
 \textbf{DEF:} \checkmark. \texttt{inherited}, \texttt{included}, \texttt{extended} hooks execute at definition time.
 

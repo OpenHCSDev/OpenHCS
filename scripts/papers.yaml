@@ -1,0 +1,97 @@
+# Unified metadata for all TOPLAS papers
+# Single source of truth for paper structure, build requirements, and statistics
+
+papers:
+  paper1:
+    name: "Typing Discipline"
+    full_name: "A Universal Typing Discipline for Polymorphic Abstraction"
+    dir: "paper1_typing_discipline"
+    latex_dir: "toplas"
+    latex_file: "main.tex"
+    lean_lines: 2666
+    lean_theorems: 127
+    lean_sorry: 0
+    content_files:
+      - "01_introduction.tex"
+      - "02_preliminaries.tex"
+      - "03_universal_dominance.tex"
+      - "04_core_theorems.tex"
+      - "05_case_studies.tex"
+      - "06_formalization.tex"
+      - "07_related_work.tex"
+      - "08_discussion.tex"
+      - "09_conclusion.tex"
+
+  paper2:
+    name: "SSOT Foundations"
+    full_name: "Formal Foundations for the Single Source of Truth Principle"
+    dir: "paper2_ssot"
+    latex_dir: "toplas"
+    latex_file: "main.tex"
+    lean_lines: 1811
+    lean_theorems: 96
+    lean_sorry: 0
+    content_files:
+      - "01_introduction.tex"
+      - "02_foundations.tex"
+      - "03_ssot.tex"
+      - "04_requirements.tex"
+      - "05_evaluation.tex"
+      - "06_bounds.tex"
+      - "07_case_studies.tex"
+      - "08_related_work.tex"
+      - "09_conclusion.tex"
+      - "10_rebuttals.tex"
+
+  paper3:
+    name: "Leverage Framework"
+    full_name: "Leverage-Driven Software Architecture"
+    dir: "paper3_leverage"
+    latex_dir: "latex"
+    latex_file: "leverage_arxiv.tex"
+    lean_lines: 2091
+    lean_theorems: 50
+    lean_sorry: 0
+    content_files:
+      - "01_introduction.tex"
+      - "02_preliminaries.tex"
+      - "03_leverage.tex"
+      - "04_metatheorem.tex"
+      - "05_case_studies.tex"
+      - "06_related_work.tex"
+      - "07_conclusion.tex"
+
+  paper4:
+    name: "Decision Quotient"
+    full_name: "Decision Quotient: Formal Semantics of Architectural Choice"
+    dir: "paper4_decision_quotient"
+    latex_dir: "latex"
+    latex_file: "decision_quotient_arxiv.tex"
+    lean_lines: 1500
+    lean_theorems: 40
+    lean_sorry: 0
+    content_files:
+      - "01_introduction.tex"
+      - "02_preliminaries.tex"
+      - "03_decision_quotient.tex"
+      - "04_case_studies.tex"
+      - "05_related_work.tex"
+      - "06_conclusion.tex"
+
+  paper5:
+    name: "Credibility"
+    full_name: "Credibility: Formal Verification of Architectural Claims"
+    dir: "paper5_credibility"
+    latex_dir: "latex"
+    latex_file: "credibility_arxiv.tex"
+    lean_lines: 1200
+    lean_theorems: 35
+    lean_sorry: 0
+    content_files:
+      - "01_introduction.tex"
+      - "02_preliminaries.tex"
+      - "03_credibility.tex"
+      - "04_case_studies.tex"
+      - "05_related_work.tex"
+      - "06_conclusion.tex"
+

@@ -57,19 +57,19 @@ A Language Design Specification Derived from Modification Complexity Bounds}
   \texttt{tristan.simas@mail.mcgill.ca}
 }
 
-\date{December 2024}
+\date{January 2, 2026}
 
-% arXiv license
+\begin{document}
+\maketitle
+
+% arXiv license footnote
 \renewcommand{\thefootnote}{}
 \footnotetext{
   \textcopyright\ 2024 Tristan Simas. 
   This work is licensed under CC BY 4.0. 
-  To view a copy of this license, visit \url{https://creativecommons.org/licenses/by/4.0/}
+  License: \url{https://creativecommons.org/licenses/by/4.0/}
 }
 \renewcommand{\thefootnote}{\arabic{footnote}}
-
-\begin{document}
-\maketitle
 
 \begin{abstract}
 We provide the first formal foundations for the ``Don't Repeat Yourself'' (DRY) principle, articulated by Hunt \& Thomas (1999) but never formalized. Our contributions:
@@ -1138,7 +1138,7 @@ Verification of SSOT requires answering: ``Is every encoding of $F$ derived from
 
 This requires enumerating all encodings. If expansion is opaque, the program cannot query what was generated.
 
-In Rust, after \texttt{#[derive(Handler)]} expands, the program cannot ask ``what did this macro generate?'' The expansion is compiled into the binary but not introspectable.
+In Rust, after \texttt{\#[derive(Handler)]} expands, the program cannot ask ``what did this macro generate?'' The expansion is compiled into the binary but not introspectable.
 
 Without introspection, the program cannot verify DOF $= 1$. SSOT may hold but cannot be confirmed. \qed
 \end{proof}

@@ -29,7 +29,7 @@ Our analysis explains \emph{why} languages with MOPs (CLOS, Smalltalk, Python) a
 
 \textbf{Reflection:} Smith~\cite{smith1984reflection} introduced computational reflection in Lisp. Reflection enables programs to reason about themselves, which is essential for introspectable derivation.
 
-\textbf{Python Metaclasses:} Van Rossum~\cite{vanrossum2003unifying} unified types and classes in Python 2.2, enabling the metaclass system that powers Python's SSOT capabilities. The \texttt{\_\_init\_subclass\_\_} hook (PEP 487, Python 3.6) simplified definition-time hooks.
+\textbf{Python Metaclasses:} Van Rossum~\cite{vanrossum2003unifying} unified types and classes in Python 2.2, enabling the metaclass system that powers Python's SSOT capabilities. The \texttt{\_\_init\_subclass\_\_} hook~\cite{pep487} (Python 3.6) simplified definition-time hooks, making SSOT patterns accessible without metaclass complexity.
 
 \subsection{Software Complexity Metrics}\label{sec:related-complexity}
 
@@ -37,7 +37,7 @@ Our analysis explains \emph{why} languages with MOPs (CLOS, Smalltalk, Python) a
 
 \textbf{Coupling and Cohesion:} Stevens et al.~\cite{stevens1974structured} introduced coupling and cohesion as design quality metrics. High DOF indicates high coupling (many locations must change together) and low cohesion (related information is scattered).
 
-\textbf{Code Duplication:} Fowler~\cite{fowler1999refactoring} identified code duplication as a ``code smell'' requiring refactoring. Our DOF metric formalizes this: DOF $>$ 1 is the formal definition of duplication for a fact.
+\textbf{Code Duplication:} Fowler~\cite{fowler1999refactoring} identified code duplication as a ``code smell'' requiring refactoring. Our DOF metric formalizes this: DOF $>$ 1 is the formal definition of duplication for a fact. Roy \& Cordy~\cite{roy2007survey} survey clone detection techniques; Juergens et al.~\cite{juergens2009clones} empirically demonstrated that code clones lead to maintenance problems---our DOF metric provides a theoretical foundation for why this occurs.
 
 \subsection{Information Hiding}\label{sec:related-hiding}
 
@@ -57,7 +57,9 @@ SSOT and information hiding are complementary: information hiding determines \em
 
 \textbf{Program Semantics:} Winskel~\cite{winskel1993semantics} formalized programming language semantics. Our formalization of SSOT is in the same tradition: making informal concepts precise.
 
-\textbf{Verified Software:} The CompCert project~\cite{leroy2009compcert} demonstrated that production software can be formally verified. Our Lean 4 proofs are in this tradition, though at a higher level of abstraction.
+\textbf{Verified Software:} The CompCert project~\cite{leroy2009compcert} demonstrated that production software can be formally verified. Our Lean 4~\cite{demoura2021lean4} proofs are in this tradition, though at a higher level of abstraction.
+
+\textbf{Generative Programming:} Czarnecki \& Eisenecker~\cite{czarnecki2000generative} established generative programming as a paradigm for automatic program generation. Our SSOT patterns are a specific application: generating derived structures from single sources at definition time.
 
 \subsection{Language Comparison Studies}\label{sec:related-comparison}
 

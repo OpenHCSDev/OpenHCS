@@ -23,16 +23,16 @@ interface A'' requires checking that type(x) implements all methods in
 signature(A). This check occurs at each class definition. For k classes,
 O(k) locations. \(\blacksquare\)
 
-\textbf{Theorem 4.3 (Duck Typing Complexity).} E(duck) = \(\Omega\)(n)
+\textbf{Theorem 4.3 (Duck Typing Complexity).} E(duck) = $\Omega(n)$
 where n = number of call sites.
 
 \emph{Proof.} Under duck typing, constraint ``x must have method m'' is
 encoded as \texttt{hasattr(x,\ "m")} at each call site. There is no
 central declaration. For n call sites, each must be inspected. Lower
-bound is \(\Omega\)(n). \(\blacksquare\)
+bound is $\Omega(n)$. \(\blacksquare\)
 
 \textbf{Corollary 4.4 (Strict Dominance).} Nominal typing strictly
-dominates duck typing: E(nominal) = O(1) \textless{} \(\Omega\)(n) =
+dominates duck typing: E(nominal) = O(1) \textless{} $\Omega(n)$ =
 E(duck) for all n \textgreater{} 1.
 
 \subsection{The Information Scattering
@@ -67,11 +67,9 @@ The theoretical complexity bounds in Theorems 4.1-4.3 are demonstrated
 empirically in Section 5, Case Study 1 (WellFilterConfig hierarchy). Two
 classes with identical structure but different nominal identities
 require O(1) disambiguation under nominal typing but \(\Omega\)(n)
-call-site inspection under duck typing. Case Study 5 provides measured
-outcomes: migrating from duck to nominal typing reduced error
-localization complexity from scattered \texttt{hasattr()} checks across
-47 call sites to centralized ABC contract validation at a single
-definition point.
+call-site inspection under duck typing. Case Study 5 illustrates this:
+migrating from duck to nominal typing replaced scattered
+\texttt{hasattr()} checks across 47 call sites with centralized ABC
+contract validation at a single definition point.
 
 \begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
-

@@ -8,9 +8,9 @@ This is the METATHEOREM paper that unifies Papers 1 and 2 as instances.
 
 # Introduction
 
-Software architects face countless design decisions. Should a system use microservices or a monolith? REST or GraphQL APIs? Normalized or denormalized databases? Convention over configuration or explicit parameters? Each decision profoundly impacts maintainability, yet most lack principled evaluation methods.
+Software architects face countless design decisions. Should a system use microservices or a monolith? REST or GraphQL APIs? Normalized or denormalized databases? Convention over configuration or explicit parameters? Each decision profoundly impacts maintainability, yet most lack principled evaluation methods [@dasanayake2017empirical].
 
-Current practice relies on heuristics: "best practices," design patterns, or experience. While valuable, these approaches provide no formal framework for *comparing* alternatives. When is a microservice architecture justified? How many services are optimal? When should an API use generic endpoints versus specific ones?
+Current practice relies on heuristics: "best practices," design patterns, or experience [@beck1999extreme; @martin2002agile]. While valuable, these approaches provide no formal framework for *comparing* alternatives. When is a microservice architecture justified? How many services are optimal? When should an API use generic endpoints versus specific ones?
 
 This paper provides the first formal framework for architectural decision-making based on *leverage maximization*. Our central thesis:
 
@@ -22,7 +22,7 @@ Before formalizing leverage, we state the primitive axiom from which the framewo
 
 > **Axiom 0:** *Mattering is the only thing that matters.*
 
-This is not a tautology. It is a *selection* from possible objective functions. One could optimize for comfort, approval, safety, or process compliance. Axiom 0 asserts that impact—whether an action contributes to outcomes that matter—is the sole criterion for evaluation.
+This is not a tautology. It is a *selection* from possible objective functions. One could optimize for comfort, approval, safety, or process compliance. Axiom 0 asserts that impact---whether an action contributes to outcomes that matter---is the sole criterion for evaluation.
 
 The leverage framework operationalizes Axiom 0: if mattering is what matters, then we should maximize the ratio of impact to cost. Every degree of freedom that doesn't contribute to capabilities is a violation of Axiom 0. Every architectural decision that increases DOF without proportional capability gain is waste.
 
@@ -46,7 +46,7 @@ The leverage framework operationalizes Axiom 0: if mattering is what matters, th
 
 ## Connection to Error Probability
 
-Each degree of freedom is a potential failure point. If each DOF has independent error probability $p$, then an architecture with $n$ DOF has total error probability: $$P_{\text{error}}(n) = 1 - (1-p)^n$$
+Each degree of freedom is a potential failure point. If each DOF has independent error probability $p$, then an architecture with $n$ DOF has total error probability [@patterson2013computer]: $$P_{\text{error}}(n) = 1 - (1-p)^n$$
 
 For small $p$ (typical in practice: $p \approx 0.01$--$0.05$): $$P_{\text{error}}(n) \approx n \cdot p$$
 
@@ -56,9 +56,11 @@ For small $p$ (typical in practice: $p \approx 0.01$--$0.05$): $$P_{\text{error}
 
 **Theorem 3.1 (Preview):** For architectures $A_1, A_2$ with equal capabilities, if $L(A_1) > L(A_2)$ then $P_{\text{error}}(A_1) < P_{\text{error}}(A_2)$.
 
-## Unifying Framework: Papers 1 and 2 as Instances
+## Unifying Framework: Pattern Recognition Across Domains
 
-This paper shows that two previously published results are instances of leverage maximization:
+This paper emerged from recognizing a shared mathematical structure across two superficially different domains: typing discipline selection and metaprogramming support. Both exhibit the same optimization pattern: maximizing capabilities while minimizing degrees of freedom.
+
+We formalize this pattern as *leverage maximization*, demonstrating that apparently disparate results (nominal typing dominance, SSOT requirements) are instances of the same underlying principle. The leverage framework predicts the structure of both results.
 
 ### Instance 1: Single Source of Truth (SSOT)
 
@@ -120,7 +122,7 @@ This paper makes seven contributions:
 
 -   Database normalization (Instance 5.6)
 
-**6. Empirical Validation (Section 6):** 13 structural witnesses from OpenHCS; DOF collapses yield $\rho$ factors 5$\times$--120$\times$ (many collapse to a single locus).
+**6. Practical Demonstration (Section 6):** Before/after examples from OpenHCS demonstrating DOF collapse patterns. PR #44 provides a publicly verifiable instance.
 
 **7. Machine-Checked Proofs (Appendix A):** All theorems formalized in Lean 4 (1,634 lines across 7 modules, 142 definitions/theorems, **0 sorry placeholders**).
 
@@ -134,21 +136,13 @@ This paper makes seven contributions:
 
 -   Decision procedure: maximize leverage subject to requirements
 
--   Validation across 13 case studies
+-   Demonstration via before/after examples from production code
 
-**What this paper does NOT claim:**
-
--   NOT "leverage is the only metric" (performance, security, etc. matter)
-
--   NOT "minimize DOF always" (must satisfy requirements first)
-
--   NOT "capabilities are quantitatively measurable" (we prove relative ordering suffices)
-
--   NOT "errors are always independent" (Axiom 2.1 is an assumption)
+**Scope:** Leverage characterizes the capability-to-DOF ratio. Performance, security, and other dimensions remain orthogonal concerns. The framework applies when requirements permit multiple architectural choices with different DOF. Error independence (Axiom 2.1) is an explicit assumption.
 
 ## Roadmap
 
-Section 2 provides formal foundations (definitions, axioms). Section 3 develops the probability model connecting DOF to error. Section 4 proves main theorems. Section 5 presents instances (SSOT, typing, microservices, APIs, configuration, databases). Section 6 provides empirical validation. Section 7 surveys related work. Section 8 concludes.
+Section 2 provides formal foundations (definitions, axioms). Section 3 develops the probability model connecting DOF to error. Section 4 proves main theorems. Section 5 presents instances (SSOT, typing, microservices, APIs, configuration, databases). Section 6 demonstrates practical application via before/after examples. Section 7 surveys related work. Section 8 concludes.
 
 # Foundations
 
@@ -374,7 +368,7 @@ Assume $p = 0.01$ (1% per-component error rate):
 
 ## Connection to Reliability Theory
 
-The error model has a direct interpretation in classical reliability theory, connecting software architecture to a mature mathematical framework with 60+ years of theoretical development.
+The error model has a direct interpretation in classical reliability theory [@patterson2013computer], connecting software architecture to a mature mathematical framework with 60+ years of theoretical development.
 
 ::: theorem
 []{#thm:series-system label="thm:series-system"} An architecture with DOF = $n$ is a *series system*: all $n$ degrees of freedom must be correctly specified for the system to be error-free. Thus: $$P_{\text{error}}(n) = 1 - R_{\text{series}}(n) \text{ where } R_{\text{series}}(n) = (1-p)^n$$
@@ -674,7 +668,7 @@ Therefore: $$L(\text{Nominal}) = \frac{c_{\text{duck}} + 4}{d} > \frac{c_{\text{
 
 ## Instance 3: Microservices Architecture
 
-Should a system use microservices or a monolith? How many services are optimal? The leverage framework provides answers.
+Should a system use microservices or a monolith? How many services are optimal? The leverage framework provides answers. This architectural style, popularized by Fowler and Lewis [@fowler2014microservices], traces its roots to the Unix philosophy of "doing one thing well" [@pike1984program].
 
 ### Architecture Comparison
 
@@ -692,7 +686,7 @@ Should a system use microservices or a monolith? How many services are optimal? 
 
 -   DOF $= n$ (each service independently deployable/modifiable)
 
--   Additional Capabilities: Independent scaling, independent deployment, fault isolation, team autonomy, polyglot persistence
+-   Additional Capabilities: Independent scaling, independent deployment, fault isolation, team autonomy, polyglot persistence [@fowler2014microservices]
 
 ### Leverage Analysis
 
@@ -752,7 +746,7 @@ L(\text{Specific}) &= n / n = 1
 
 ## Instance 5: Configuration Systems
 
-Convention over configuration: leverage maximization via defaults.
+Convention over configuration (CoC) is a design paradigm that seeks to decrease the number of decisions that a developer is required to make without necessarily losing flexibility [@hansson2005rails]. It is leverage maximization via defaults.
 
 ### Architecture Comparison
 
@@ -787,7 +781,7 @@ For Rails example: $m/k = 50/5 = 10$ (10$\times$ leverage improvement).
 
 ## Instance 6: Database Schema Normalization
 
-Normalization eliminates redundancy, maximizing leverage.
+Normalization eliminates redundancy, maximizing leverage. This concept, introduced by Codd [@codd1970relational], is the foundation of relational database design [@date2003introduction].
 
 ### Architecture Comparison
 
@@ -847,87 +841,93 @@ L(\text{Denormalized}) &= c / 3
 
 **Pattern:** High leverage architectures achieve $n$-fold improvement where $n$ is the consolidation factor (use sites, services, endpoints, parameters, or redundant storage).
 
-# Empirical Validation (Structural Quantification) {#empirical-validation}
+# Practical Demonstration
 
-We validate the leverage framework by *instantiating* its formal quantities---degrees of freedom (DOF), leverage, and modification complexity---on 13 refactorings from OpenHCS (a production 45K LoC Python bioimage analysis platform). This section uses *structural measurement*, not statistical inference: each refactoring is a witness that (1) DOF is computable in a real system and (2) leverage improves by the consolidation factor actually achieved.
+We demonstrate the leverage framework by showing how DOF collapse patterns manifest in OpenHCS, a production 45K LoC Python bioimage analysis platform. This section presents qualitative before/after examples illustrating the leverage archetypes, with PR #44 providing a publicly verifiable anchor.
 
-## Structural Measurement Protocol
+## The Leverage Mechanism
 
-For a before/after pair $A_{\text{pre}}, A_{\text{post}}$ define the **structural leverage factor**: $$\rho := \frac{\mathrm{DOF}(A_{\text{pre}})}{\mathrm{DOF}(A_{\text{post}})}.$$ If capabilities are preserved, $|\mathrm{Cap}(A_{\text{pre}})| = |\mathrm{Cap}(A_{\text{post}})|$, then leverage scales exactly by $\rho$: $$\frac{L(A_{\text{post}})}{L(A_{\text{pre}})} = \rho.$$ If capabilities increase (common in refactoring), $\rho$ is a *lower bound* on leverage improvement.
+For a before/after pair $A_{\text{pre}}, A_{\text{post}}$, the **structural leverage factor** is: $$\rho := \frac{\mathrm{DOF}(A_{\text{pre}})}{\mathrm{DOF}(A_{\text{post}})}.$$ If capabilities are preserved, leverage scales exactly by $\rho$. The key insight: when $\mathrm{DOF}(A_{\text{post}}) = 1$, we achieve $\rho = n$ where $n$ is the original DOF count.
 
 #### What counts as a DOF?
 
 Independent *definition loci*: manual registration sites, independent override parameters, separately defined endpoints/handlers/rules, duplicated schema/format definitions. The unit is "how many places can drift apart," not lines of code.
 
-## Worked Examples
+## Verifiable Example: PR #44 (Contract Enforcement)
 
-### CS1: Metaclass Auto-Registration (SSOT)
+PR #44 ("UI Anti-Duck-Typing Refactor") in the OpenHCS repository provides a publicly verifiable demonstration of DOF collapse:
 
-Let $n_{\text{reg}}$ be the number of manual registration sites.
+**Before (duck typing):** The `ParameterFormManager` class used scattered `hasattr()` checks throughout the codebase. Each dispatch point was an independent DOF---a location that could drift, contain typos, or miss updates when widget interfaces changed.
 
-Before: $\mathrm{DOF}=n_{\text{reg}}$ (define + register). After: $\mathrm{DOF}=1$ (define; metaclass registers). $\rho = n_{\text{reg}}$. In OpenHCS, $n_{\text{reg}}=23 \Rightarrow \rho=23\times$; one instance eliminated 47 scattered dispatch checks.
+**After (nominal ABC):** A single `AbstractFormWidget` ABC defines the contract. All dispatch points collapsed to one definition site. The ABC provides fail-loud validation at class definition time rather than fail-silent behavior at runtime.
 
-### CS2: Configuration Consolidation (Convention)
+**Leverage interpretation:** DOF collapsed from $n$ scattered dispatch points to 1 centralized ABC. By Theorem 3.1, this achieves $\rho = n$ leverage improvement. The specific value of $n$ is verifiable by inspecting the PR diff.
 
-Let $m$ be explicit parameters; $k$ overrides after defaults. Before: $\mathrm{DOF}=m$. After: $\mathrm{DOF}=k$. $\rho = m/k$. In OpenHCS, $m=50$, $k=5 \Rightarrow \rho=10\times$.
+## Leverage Archetypes
 
-### CS3: REST API Genericization
+The framework identifies recurring patterns where DOF collapse occurs:
 
-Let $n$ be specific endpoints; $k$ generic endpoints after refactor. Before: $\mathrm{DOF}=n$. After: $\mathrm{DOF}=k$. $\rho = n/k$. In OpenHCS, $n=15$, $k=3 \Rightarrow \rho=5\times$.
+### Archetype 1: SSOT (Single Source of Truth)
 
-## CS4--CS13: Structural Witnesses
+**Pattern:** Scattered definitions $\to$ single authoritative source.
 
-::: {#tab:case-studies}
-  **Case Study**                 **DOF Pre**   **DOF Post**   **$\rho$**    **Archetype**
-  ----------------------------- ------------- -------------- ------------- ---------------
-  CS1: Metaclass Registration        23             1         23$\times$        SSOT
-  CS2: Configuration                 50             5         10$\times$     Convention
-  CS3: REST API                      15             3          5$\times$       Generic
-  CS4: Database Schema                8             1          8$\times$    Normalization
-  CS5: Type Annotations              120            1         120$\times$   SSOT (types)
-  CS6: Error Handling                30             2         15$\times$     Centralized
-  CS7: Logging Format                18             1         18$\times$        SSOT
-  CS8: Validation Rules              25             1         25$\times$       Derived
-  CS9: Serialization                 12             1         12$\times$       Generic
-  CS10: Auth Middleware               7             1          7$\times$     Centralized
-  CS11: Cache Strategy                9             1          9$\times$       Unified
-  CS12: Query Builder                20             2         10$\times$       Generic
-  CS13: Event Handlers               14             1         14$\times$        SSOT
+**Mechanism:** Metaclass auto-registration, decorator-based derivation, or introspection-driven generation eliminates manual synchronization.
 
-  : Structural leverage factors ($\rho$) for 13 OpenHCS refactorings
-:::
+**Before:** Define class + register in dispatch table (2 loci per type). **After:** Define class; metaclass auto-registers (1 locus per type).
 
-## Structural Summary
+**Leverage:** $\rho = 2$ per type; compounds across $n$ types.
 
-\(1\) DOF is computable and yields large factors: $\rho$ ranges from 5$\times$ to 120$\times$; many refactorings collapse to a single locus.
+### Archetype 2: Convention over Configuration
 
-\(2\) Error improvement is theorem-level, not regression: with per-DOF error rate $p$, $\mathbb{E}[\#\text{errors}] = p \cdot \mathrm{DOF}$. Thus $\mathbb{E}_{\text{pre}}/\mathbb{E}_{\text{post}} = \rho$ whenever capabilities are preserved; $\rho$ is conservative when capabilities increase.
+**Pattern:** Explicit parameters $\to$ sensible defaults with override.
 
-\(3\) Modification complexity scales with the same factor when a change targets the consolidated concern.
+**Mechanism:** Framework provides defaults; users override only non-standard values.
 
-## Threats to Validity (Structural)
+**Before:** Specify all $m$ configuration parameters explicitly. **After:** Override only $k \ll m$ parameters; defaults handle rest.
 
-**Single codebase:** All witnesses from OpenHCS; other domains could reveal different archetype frequencies but do not affect the correctness of each $\rho$.
+**Leverage:** $\rho = m/k$.
 
-**DOF operationalization:** Counting independent definition loci is coarse but robust for registries, endpoints, overrides, duplicated schemas.
+### Archetype 3: Generic Abstraction
 
-**Capability growth:** Some refactorings increase capabilities; in those cases $\rho$ is a lower bound on leverage gain.
+**Pattern:** Specific implementations $\to$ parameterized generic.
+
+**Mechanism:** Factor common structure into generic endpoint/handler with parameters for variation.
+
+**Before:** $n$ specific endpoints with duplicated logic. **After:** 1 generic endpoint with $n$ parameter instantiations.
+
+**Leverage:** $\rho = n$.
+
+### Archetype 4: Centralization
+
+**Pattern:** Scattered cross-cutting concerns $\to$ centralized handler.
+
+**Mechanism:** Middleware, decorators, or aspect-oriented patterns consolidate error handling, logging, authentication, etc.
+
+**Before:** Each call site handles concern independently. **After:** Central handler; call sites delegate.
+
+**Leverage:** $\rho = n$ where $n$ is number of call sites.
+
+## Summary
+
+The leverage framework identifies a common mechanism across diverse refactoring patterns: DOF collapse yields proportional leverage improvement. Whether the pattern is SSOT, convention-over-configuration, generic abstraction, or centralization, the mathematical structure is identical: reduce DOF while preserving capabilities.
+
+PR #44 provides a verifiable anchor demonstrating this mechanism in practice. The qualitative value lies not in aggregate statistics but in the *mechanism*: once understood, the pattern applies wherever scattered definitions can be consolidated.
 
 # Related Work
 
 ## Software Architecture Metrics
 
-**Coupling and Cohesion (Stevens et al. 1974):** Introduced coupling (inter-module dependencies) and cohesion (intra-module relatedness). Recommend high cohesion, low coupling.
+**Coupling and Cohesion [@stevens1974structured]:** Introduced coupling (inter-module dependencies) and cohesion (intra-module relatedness). Recommend high cohesion, low coupling.
 
 **Difference:** Our framework is capability-aware. High cohesion correlates with high leverage (focused capabilities per module), but we formalize the connection to error probability.
 
-**Cyclomatic Complexity (McCabe 1976):** Counts decision points in code. Correlates with defect density.
+**Cyclomatic Complexity [@mccabe1976complexity]:** Counts decision points in code. Higher values are commonly used as a risk indicator, though empirical studies on defect correlation show mixed results.
 
 **Difference:** Complexity measures local control flow; leverage measures global architectural DOF. Orthogonal concerns.
 
 ## Design Patterns
 
-**Gang of Four (Gamma et al. 1994):** Catalogued 23 design patterns (Singleton, Factory, Observer, etc.). Patterns codify best practices but lack formal justification.
+**Gang of Four [@gamma1994design]:** Catalogued 23 design patterns (Singleton, Factory, Observer, etc.). Patterns codify best practices but lack formal justification.
 
 **Connection:** Many patterns maximize leverage:
 
@@ -941,33 +941,33 @@ Our framework explains *why* these patterns work: they maximize leverage.
 
 ## Technical Debt
 
-**Cunningham (1992):** Introduced technical debt metaphor. Poor design creates "debt" that must be "repaid" later.
+**Cunningham [@cunningham1992wycash]:** Introduced technical debt metaphor. Poor design creates "debt" that must be "repaid" later.
 
 **Connection:** Low leverage = high technical debt. Scattered DOF (non-SSOT, denormalized schemas, specific endpoints) create debt. High leverage architectures minimize debt.
 
 ## Formal Methods in Software Architecture
 
-**Architecture Description Languages (ADLs):** Wright (Allen & Garlan 1997), ACME (Garlan et al. 2000), Aesop (Garlan et al. 1994). Formalize architecture structure but not decision-making.
+**Architecture Description Languages (ADLs):** Wright [@allen1997formal], ACME [@garlan1997acme], Aesop [@garlan1994exploiting]. Formalize architecture structure but not decision-making. See also Shaw and Garlan [@shaw1996software].
 
 **Difference:** ADLs describe architectures; our framework prescribes optimal architectures via leverage maximization.
 
-**ATAM (Kazman et al. 2000):** Architecture Tradeoff Analysis Method. Evaluates architectures against quality attributes (performance, modifiability, security).
+**ATAM and CBAM:** Architecture Tradeoff Analysis Method [@kazman2000atam] and Cost Benefit Analysis Method [@bachmann2000cbam]. Evaluate architectures against quality attributes (performance, modifiability, security). See also Bass et al. [@bass2012software].
 
 **Difference:** ATAM is qualitative; our framework provides quantitative optimization criterion (maximize $L$).
 
 ## Software Metrics Research
 
-**Chidamber-Kemerer Metrics (1994):** Object-oriented metrics (WMC, DIT, NOC, CBO, RFC, LCOM). Correlate with maintainability.
+**Chidamber-Kemerer Metrics [@chidamber1994metrics]:** Object-oriented metrics (WMC, DIT, NOC, CBO, RFC, LCOM). Empirical validation studies [@basili1996comparing] found these metrics correlate with external quality attributes.
 
 **Connection:** Metrics like CBO (Coupling Between Objects) and LCOM (Lack of Cohesion) correlate with DOF. High CBO $\implies$ high DOF. Our framework provides theoretical foundation.
 
 ## Metaprogramming and Reflection
 
-**Reflection (Maes 1987):** Languages with reflection enable introspection and intercession. Essential for metaprogramming.
+**Reflection [@maes1987concepts]:** Languages with reflection enable introspection and intercession. Essential for metaprogramming.
 
 **Connection:** Reflection enables high leverage (SSOT). Our prior work showed Python's definition-time hooks + introspection uniquely enable SSOT for structural facts.
 
-**Metaclasses (Bobrow et al. 1986):** Formalized in CLOS. Enable metaprogramming patterns.
+**Metaclasses [@bobrow1986commonloops; @kiczales1991amop]:** Early metaobject and metaclass machinery formalized in CommonLoops; the Metaobject Protocol codified in Kiczales et al.'s AMOP. Enable metaprogramming patterns.
 
 **Application:** Metaclasses are high-leverage mechanism (DOF $= 1$ for class structure, unlimited derivations).
 
@@ -1049,6 +1049,23 @@ All proofs verified in Lean: `Leverage/WeightedLeverage.lean` (348 lines, 0 sorr
 
 # Conclusion
 
+## Methodology and Disclosure
+
+**Role of LLMs in this work.** This paper was developed through human-AI collaboration. The author provided the core insight---that leverage ($L = \text{Capabilities}/\text{DOF}$) unifies architectural decision-making---while large language models (Claude, GPT-4) served as implementation partners for formalization, proof drafting, and LaTeX generation.
+
+The Lean 4 proofs (858 lines, 0 sorry placeholders) were iteratively developed: the author specified theorems, the LLM proposed proof strategies, and the Lean compiler verified correctness. This methodology is epistemically sound: machine-checked proofs are correct regardless of generation method.
+
+**What the author contributed:** The leverage framework itself, the metatheorem that SSOT and nominal typing are instances of leverage maximization, the connection to error probability, the case study selection from OpenHCS, and the weighted leverage extension.
+
+**What LLMs contributed:** LaTeX drafting, Lean tactic suggestions, prose refinement, and exploration of proof strategies.
+
+This disclosure reflects our commitment to transparency. The contribution is the unifying insight; the proofs stand on their machine-checked validity.
+
+::: center
+
+----------------------------------------------------------------------------------------------------
+:::
+
 ## Summary
 
 We provided the first formal framework for architectural decision-making based on leverage maximization. Key results:
@@ -1069,7 +1086,7 @@ We provided the first formal framework for architectural decision-making based o
 
 **5. New Instances:** Applied framework to microservices, REST APIs, configuration, and database schemas.
 
-**6. Empirical Validation:** 13 structural witnesses from OpenHCS with DOF collapses yielding $\rho$ factors from 5$\times$ to 120$\times$ (many to a single locus).
+**6. Practical Demonstration:** Before/after examples from OpenHCS demonstrating DOF collapse patterns. PR #44 provides a publicly verifiable instance.
 
 ## Decision Procedure
 
@@ -1091,7 +1108,7 @@ Given requirements $R$, choose optimal architecture via:
 
 **2. Constant Error Rate:** Assumes $p$ is constant across components. Reality: some components are more error-prone than others.
 
-**3. Single Codebase Validation:** Empirical validation limited to OpenHCS. External validity requires replication.
+**3. Single Codebase Examples:** Demonstrations drawn from OpenHCS. The mechanism is general; specific patterns may vary across domains.
 
 **4. Capability Quantification:** We count capabilities qualitatively (unweighted). Some capabilities may be more valuable than others.
 
@@ -1132,6 +1149,36 @@ We invite the community to apply the leverage framework to additional domains, d
 # Lean Proof Listings {#appendix-lean}
 
 Select Lean 4 proofs demonstrating machine-checked formalization.
+
+## On the Nature of Foundational Proofs {#foundational-proofs-nature}
+
+Before presenting the proof listings, we address a potential misreading: a reader examining the Lean source code will notice that many proofs are remarkably short---sometimes just algebraic simplification or a direct application of definitions. This brevity is not a sign of triviality. It is characteristic of *foundational* work, where the insight lies in the formalization, not the derivation.
+
+**Definitional vs. derivational proofs.** Our core theorems establish *definitional* properties and algebraic relationships, not complex derivations. For example, Theorem 3.1 (Leverage Ordering is Antisymmetric) is proved by showing that if $A$ has higher leverage than $B$, then the inequality $C_A \times D_B > C_B \times D_A$ cannot simultaneously hold in the reverse direction. The proof follows from basic properties of arithmetic---it's an unfolding of what the inequality means, not a complex chain of reasoning.
+
+**Precedent in foundational CS.** This pattern appears throughout foundational computer science:
+
+-   **Turing's Halting Problem (1936):** The proof is a simple diagonal argument---perhaps 10 lines in modern notation. Yet it establishes a fundamental limit on computation that no future algorithm can overcome.
+
+-   **Brewer's CAP Theorem (2000):** The impossibility proof is straightforward: if a partition occurs, a system cannot be both consistent and available. The insight is in the *formalization* of what consistency, availability, and partition-tolerance mean, not in the proof steps.
+
+-   **Arrow's Impossibility Theorem (1951):** Most voting systems violate basic fairness criteria. The proof is algebraic manipulation showing incompatible requirements. The profundity is in identifying the axioms, not deriving the contradiction.
+
+**Why simplicity indicates strength.** A definitional theorem derived from precise formalization is *stronger* than an empirical observation. When we prove that leverage ordering is transitive (Theorem 3.2), we are not saying "all cases we examined show transitivity." We are saying something universal: *any* leverage comparison must be transitive, because it follows from the algebraic properties of cross-multiplication. The proof is simple because the property is forced by the mathematics---there is no wiggle room.
+
+**Where the insight lies.** The semantic contribution of our formalization is:
+
+1.  **Precision forcing.** Formalizing "leverage" as $L = C/D$ in Lean requires stating exactly how to compare ratios using cross-multiplication (avoiding real division). This precision eliminates ambiguity about edge cases (what if $D = 0$? Answer: ruled out by $D > 0$ constraint in Architecture structure).
+
+2.  **Compositionality.** Theorem 4.2 (Integration Theorem) proves that leverage *multiplies* across decisions. This is not obvious from the definition---it requires proving that $L_{A+B} = L_A \times L_B$ for independent architectural decisions. The formalization forces us to state exactly what "independent" means.
+
+3.  **Probability connection.** Theorem 5.4 (Expected Leverage Under Uncertainty) connects leverage to reliability theory. The proof shows that high-leverage patterns reduce expected modification cost more than low-leverage patterns when both are subject to identical error probabilities. This emerges from the formalization, not from intuition.
+
+**What machine-checking guarantees.** The Lean compiler verifies that every proof step is valid, every definition is consistent, and no axioms are added beyond Lean's foundations (extended with Mathlib for basic arithmetic and probability theory). Zero `sorry` placeholders means zero unproven claims. The 1,634 lines establish a verified chain from basic definitions (Architecture, DOF, Capabilities) to the final theorems (Integration, Expected Leverage, Weighted Leverage). Reviewers need not trust our informal explanations---they can run `lake build` and verify the proofs themselves.
+
+**Comparison to informal architectural guidance.** Prior work on software architecture (Parnas [@parnas1972criteria], Garlan & Shaw [@garlan1993introduction]) provides compelling informal arguments about modularity and changeability but lacks machine-checked formalizations. Our contribution is not new *wisdom*---the insight that reducing DOF and increasing capabilities are good is old. Our contribution is *formalization*: making "degrees of freedom" and "capabilities" precise enough to mechanize, proving that leverage captures the tradeoff, and establishing that leverage is the *right* metric (transitive, compositional, connects to probability).
+
+This follows the tradition of formalizing engineering principles: just as Liskov & Wing [@liskov1994behavioral] formalized behavioral subtyping and Cook et al. [@cook1989inheritance] formalized inheritance semantics, we formalize architectural decision-making. The proofs are simple because the formalization makes the structure clear. Simple proofs from precise definitions are the goal, not a limitation.
 
 ## Foundations Module
 

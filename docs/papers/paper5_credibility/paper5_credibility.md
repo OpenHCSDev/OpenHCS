@@ -369,8 +369,7 @@ Credibility/
 ├── CheapTalk.lean     -- Theorems 3.1-3.4
 ├── CostlySignals.lean -- Theorems 4.1-4.2
 ├── Impossibility.lean -- Theorems 5.1-5.3
-├── Leverage.lean      -- Theorem 6.1
-└── Integration.lean   -- Cross-paper connections
+└── Leverage.lean      -- Theorem 6.1
 ```
 
 ## Core Definitions (Lean 4)

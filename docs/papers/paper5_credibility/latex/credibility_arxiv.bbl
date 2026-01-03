@@ -1,0 +1,39 @@
+\begin{thebibliography}{1}
+
+\bibitem{paper1_typing}
+Anonymous.
+\newblock Paper 1: Nominal typing dominates structural typing.
+\newblock Technical report, 2025.
+
+\bibitem{paper2_ssot}
+Anonymous.
+\newblock Paper 2: Single source of truth minimizes modification complexity.
+\newblock Technical report, 2025.
+
+\bibitem{paper3_leverage}
+Anonymous.
+\newblock Paper 3: Leverage maximization in software systems.
+\newblock Technical report, 2025.
+
+\bibitem{paper4_decisionquotient}
+Anonymous.
+\newblock Paper 4: The complexity of decision-relevant uncertainty.
+\newblock Technical report, 2025.
+
+\bibitem{crawford1982strategic}
+Vincent~P. Crawford and Joel Sobel.
+\newblock Strategic information transmission.
+\newblock {\em Econometrica}, 50(6):1431--1451, 1982.
+
+\bibitem{demoura2021lean4}
+Leonardo de~Moura and Sebastian Ullrich.
+\newblock The lean 4 theorem prover and programming language.
+\newblock In {\em International Conference on Automated Deduction}, pages
+  625--635. Springer, 2021.
+
+\bibitem{spence1973job}
+Michael Spence.
+\newblock Job market signaling.
+\newblock {\em Quarterly Journal of Economics}, 87(3):355--374, 1973.
+
+\end{thebibliography}

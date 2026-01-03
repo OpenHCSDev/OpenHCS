@@ -1,70 +1,176 @@
-\begin{thebibliography}{10}
+\begin{thebibliography}{27}
+\providecommand{\natexlab}[1]{#1}
+\providecommand{\url}[1]{\texttt{#1}}
+\expandafter\ifx\csname urlstyle\endcsname\relax
+  \providecommand{\doi}[1]{doi: #1}\else
+  \providecommand{\doi}{doi: \begingroup \urlstyle{rm}\Url}\fi
 
-\bibitem{fowler1999refactoring}
+\bibitem[Beck(1999)]{beck1999xp}
+Kent Beck.
+\newblock \emph{Extreme Programming Explained: Embrace Change}.
+\newblock Addison-Wesley Professional, 1999.
+
+\bibitem[Czarnecki and Eisenecker(2000)]{czarnecki2000generative}
+Krzysztof Czarnecki and Ulrich~W Eisenecker.
+\newblock \emph{Generative Programming: Methods, Tools, and Applications}.
+\newblock Addison-Wesley Professional, 2000.
+
+\bibitem[de~Moura and Ullrich(2021)]{demoura2021lean4}
+Leonardo de~Moura and Sebastian Ullrich.
+\newblock The {Lean} 4 theorem prover and programming language.
+\newblock In \emph{Automated Deduction -- CADE 28}, pages 625--635. Springer,
+  2021.
+\newblock \doi{10.1007/978-3-030-79876-5_37}.
+
+\bibitem[Flanagan and Matsumoto(2008)]{flanagan2020ruby}
+David Flanagan and Yukihiro Matsumoto.
+\newblock \emph{The {Ruby} Programming Language}.
+\newblock O'Reilly Media, 2008.
+
+\bibitem[Fowler(1999)]{fowler1999refactoring}
 Martin Fowler.
-\newblock {\em Refactoring: improving the design of existing code}.
+\newblock \emph{Refactoring: improving the design of existing code}.
 \newblock Addison-Wesley Professional, 1999.
+\newblock \doi{10.1007/3-540-45672-4_31}.
 
-\bibitem{hunt1999pragmatic}
+\bibitem[Gosling et~al.(2021)Gosling, Joy, Steele, Bracha, Buckley, Smith, and
+  Bierman]{gosling2021java}
+James Gosling, Bill Joy, Guy Steele, Gilad Bracha, Alex Buckley, Daniel Smith,
+  and Gavin Bierman.
+\newblock \emph{The {Java} Language Specification, {Java SE} 17 Edition}.
+\newblock Oracle America, Inc., 2021.
+\newblock Online: docs.oracle.com/javase/specs/.
+
+\bibitem[Hunt and Thomas(1999)]{hunt1999pragmatic}
 Andrew Hunt and David Thomas.
-\newblock {\em The Pragmatic Programmer: From Journeyman to Master}.
+\newblock \emph{The Pragmatic Programmer: From Journeyman to Master}.
 \newblock Addison-Wesley Professional, 1999.
+\newblock \doi{10.1109/ms.2000.895178}.
 
-\bibitem{kiczales1991art}
+\bibitem[Juergens et~al.(2009)Juergens, Deissenboeck, Hummel, and
+  Wagner]{juergens2009clones}
+Elmar Juergens, Florian Deissenboeck, Benjamin Hummel, and Stefan Wagner.
+\newblock Do code clones matter?
+\newblock In \emph{Proceedings of the 31st International Conference on Software
+  Engineering}, pages 485--495. IEEE, 2009.
+\newblock \doi{10.1109/ICSE.2009.5070547}.
+
+\bibitem[Kiczales et~al.(1991)Kiczales, des Rivi{\`e}res, and
+  Bobrow]{kiczales1991art}
 Gregor Kiczales, Jim des Rivi{\`e}res, and Daniel~G Bobrow.
-\newblock {\em The Art of the Metaobject Protocol}.
+\newblock \emph{The Art of the Metaobject Protocol}.
 \newblock MIT press, 1991.
 
-\bibitem{leroy2009compcert}
+\bibitem[Leroy(2009)]{leroy2009compcert}
 Xavier Leroy.
 \newblock Formal verification of a realistic compiler.
-\newblock {\em Communications of the ACM}, 52(7):107--115, 2009.
+\newblock \emph{Communications of the ACM}, 52\penalty0 (7):\penalty0 107--115,
+  2009.
+\newblock \doi{10.1145/1538788.1538814}.
 
-\bibitem{mccabe1976complexity}
+\bibitem[McCabe(1976)]{mccabe1976complexity}
 Thomas~J McCabe.
 \newblock A complexity measure.
-\newblock {\em IEEE Transactions on software Engineering}, SE-2(4):308--320,
-  1976.
+\newblock \emph{IEEE Transactions on software Engineering}, SE-2\penalty0
+  (4):\penalty0 308--320, 1976.
 
-\bibitem{parnas1972criteria}
+\bibitem[{OpenHCS Contributors}(2024)]{openhcs2024}
+{OpenHCS Contributors}.
+\newblock {OpenHCS}: Open-source high-content screening platform.
+\newblock GitHub repository, 2024.
+\newblock Online: github.com/trissim/openhcs.
+
+\bibitem[Parnas(1972)]{parnas1972criteria}
 David~L Parnas.
 \newblock On the criteria to be used in decomposing systems into modules.
-\newblock {\em Communications of the ACM}, 15(12):1053--1058, 1972.
+\newblock \emph{Communications of the ACM}, 15\penalty0 (12):\penalty0
+  1053--1058, 1972.
+\newblock \doi{10.21236/ad0773837}.
 
-\bibitem{pierce2002types}
+\bibitem[Pierce(2002)]{pierce2002types}
 Benjamin~C Pierce.
-\newblock {\em Types and programming languages}.
+\newblock \emph{Types and programming languages}.
 \newblock MIT press, 2002.
 
-\bibitem{prechelt2000empirical}
+\bibitem[Prechelt(2000)]{prechelt2000empirical}
 Lutz Prechelt.
 \newblock An empirical comparison of seven programming languages.
-\newblock {\em Computer}, 33(10):23--29, 2000.
+\newblock \emph{Computer}, 33\penalty0 (10):\penalty0 23--29, 2000.
+\newblock \doi{10.1109/2.876288}.
 
-\bibitem{scott2015programming}
+\bibitem[Roy and Cordy(2007)]{roy2007survey}
+Chanchal~K Roy and James~R Cordy.
+\newblock A survey on software clone detection research.
+\newblock \emph{School of Computing TR 2007-541, Queen's University},
+  115:\penalty0 64--68, 2007.
+
+\bibitem[Runeson and H{\"o}st(2009)]{runeson2009guidelines}
+Per Runeson and Martin H{\"o}st.
+\newblock Guidelines for conducting and reporting case study research in
+  software engineering.
+\newblock \emph{Empirical Software Engineering}, 14\penalty0 (2):\penalty0
+  131--164, 2009.
+\newblock \doi{10.1007/s10664-008-9102-8}.
+
+\bibitem[Scott(2015)]{scott2015programming}
 Michael~L Scott.
-\newblock {\em Programming language pragmatics}.
+\newblock \emph{Programming language pragmatics}.
 \newblock Morgan Kaufmann, 2015.
+\newblock \doi{10.1016/b978-0-12-374514-9.00040-9}.
 
-\bibitem{smith1984reflection}
+\bibitem[Smith(1984)]{smith1984reflection}
 Brian~Cantwell Smith.
 \newblock Reflection and semantics in lisp.
-\newblock In {\em Proceedings of the 11th ACM SIGACT-SIGPLAN symposium on
+\newblock In \emph{Proceedings of the 11th ACM SIGACT-SIGPLAN symposium on
   Principles of programming languages}, pages 23--35, 1984.
+\newblock \doi{10.1145/800017.800513}.
 
-\bibitem{stevens1974structured}
+\bibitem[Stevens et~al.(1974)Stevens, Myers, and
+  Constantine]{stevens1974structured}
 Wayne~P Stevens, Glenford~J Myers, and Larry~L Constantine.
 \newblock Structured design.
-\newblock {\em IBM systems journal}, 13(2):115--139, 1974.
+\newblock \emph{IBM systems journal}, 13\penalty0 (2):\penalty0 115--139, 1974.
+\newblock \doi{10.1007/springerreference_25824}.
 
-\bibitem{vanrossum2003unifying}
+\bibitem[Stroustrup(2013)]{stroustrup2013cpp}
+Bjarne Stroustrup.
+\newblock \emph{The {C++} Programming Language}.
+\newblock Addison-Wesley Professional, 4th edition, 2013.
+
+\bibitem[Teich et~al.(2016)Teich, Hettinger, and Selivanov]{pep487}
+Martin Teich, Raymond Hettinger, and Yury Selivanov.
+\newblock {PEP 487} -- simpler customisation of class creation.
+\newblock Python Enhancement Proposals, 2016.
+\newblock Online: peps.python.org/pep-0487/.
+
+\bibitem[{The Go Authors}(2024)]{gospec2024}
+{The Go Authors}.
+\newblock The {Go} programming language specification.
+\newblock Language specification, 2024.
+\newblock Online: go.dev/ref/spec.
+
+\bibitem[{The Rust Team}(2024)]{rustref2024}
+{The Rust Team}.
+\newblock The {Rust} reference.
+\newblock Language reference, 2024.
+\newblock Online: doc.rust-lang.org/reference/.
+
+\bibitem[{TIOBE Software BV}(2024)]{tiobe2024}
+{TIOBE Software BV}.
+\newblock {TIOBE} index for programming languages.
+\newblock TIOBE Programming Community Index, 2024.
+\newblock Online: tiobe.com/tiobe-index/.
+
+\bibitem[van Rossum(2003)]{vanrossum2003unifying}
 Guido van Rossum.
 \newblock Unifying types and classes in python 2.2.
 \newblock \url{https://www.python.org/doc/newstyle/}, 2003.
 
-\bibitem{winskel1993semantics}
+\bibitem[Winskel(1993)]{winskel1993semantics}
 Glynn Winskel.
-\newblock {\em The Formal Semantics of Programming Languages: An Introduction}.
+\newblock \emph{The Formal Semantics of Programming Languages: An
+  Introduction}.
 \newblock MIT press, 1993.
+\newblock \doi{10.7551/mitpress/3054.001.0001}.
 
 \end{thebibliography}
