@@ -1,0 +1,174 @@
+\section{Main Theorems}\label{main-theorems}
+
+We prove the core results connecting leverage to error probability and architectural optimality. The theoretical structure is:
+
+\begin{enumerate}
+\item \textbf{DOF-Reliability Isomorphism} (Theorem \ref{thm:dof-reliability}): Maps architecture to reliability theory
+\item \textbf{Leverage Gap Theorem} (Theorem \ref{thm:leverage-gap}): Provides testable predictions
+\item \textbf{Leverage-Error Tradeoff} (Theorem \ref{thm:leverage-error}): Connects leverage to error probability
+\item \textbf{Optimality Criterion} (Theorem \ref{thm:optimal}): Correctness of decision procedure
+\end{enumerate}
+
+\subsection{Recap: DOF-Reliability Isomorphism}
+
+The core theoretical contribution (stated in Section 1.3) is that DOF maps formally to series system components. This enables all subsequent results by connecting software architecture to the mature mathematical framework of reliability theory.
+
+\textbf{Key properties of the isomorphism:}
+\begin{itemize}
+\item \textbf{Preserves ordering:} If $\text{DOF}(A_1) < \text{DOF}(A_2)$, then $P_{\text{error}}(A_1) < P_{\text{error}}(A_2)$
+\item \textbf{Invertible:} An architecture can be reconstructed from its series system representation
+\item \textbf{Compositional:} $\text{DOF}(A_1 \oplus A_2) = \text{DOF}(A_1) + \text{DOF}(A_2)$ (series systems combine)
+\end{itemize}
+
+\subsection{The Leverage Maximization Principle}
+
+Given the DOF-Reliability Isomorphism, the following is a \emph{corollary}:
+
+\begin{theorem}[Leverage Maximization Principle]\label{thm:leverage-max}
+For any architectural decision with alternatives $A_1, \ldots, A_n$ meeting capability requirements, the optimal choice maximizes leverage:
+\[
+A^* = \arg\max_{A_i} L(A_i) = \arg\max_{A_i} \frac{|\text{Capabilities}(A_i)|}{\text{DOF}(A_i)}
+\]
+\end{theorem}
+
+\textbf{Note:} This is \emph{not} the central theorem---it is a consequence of the DOF-Reliability Isomorphism. The isomorphism is the deep result; ``maximize leverage'' is the actionable heuristic derived from it.
+
+\subsection{Leverage-Error Tradeoff}
+
+\begin{theorem}[Leverage-Error Tradeoff]\label{thm:leverage-error}
+For architectures $A_1, A_2$ with equal capabilities:
+\[
+\text{Cap}(A_1) = \text{Cap}(A_2) \wedge L(A_1) > L(A_2) \implies P_{\text{error}}(A_1) < P_{\text{error}}(A_2)
+\]
+\end{theorem}
+
+\begin{proof}
+Given: $\text{Cap}(A_1) = \text{Cap}(A_2)$ and $L(A_1) > L(A_2)$.
+
+Since $L(A) = |\text{Cap}(A)|/\text{DOF}(A)$ and capabilities are equal:
+\[
+\frac{|\text{Cap}(A_1)|}{\text{DOF}(A_1)} > \frac{|\text{Cap}(A_2)|}{\text{DOF}(A_2)}
+\]
+
+With $|\text{Cap}(A_1)| = |\text{Cap}(A_2)|$:
+\[
+\frac{1}{\text{DOF}(A_1)} > \frac{1}{\text{DOF}(A_2)} \implies \text{DOF}(A_1) < \text{DOF}(A_2)
+\]
+
+By Corollary \ref{cor:dof-monotone}:
+\[
+\text{DOF}(A_1) < \text{DOF}(A_2) \implies P_{\text{error}}(A_1) < P_{\text{error}}(A_2) \qed
+\]
+\end{proof}
+
+\textbf{Corollary:} Maximizing leverage minimizes error probability (for fixed capabilities).
+
+\subsection{Metaprogramming Dominance}
+
+\begin{theorem}[Metaprogramming Dominance]\label{thm:metaprog}
+Metaprogramming (single source with unbounded derivations) achieves unbounded leverage.
+\end{theorem}
+
+\begin{proof}
+Let $M$ be metaprogramming architecture with:
+\begin{itemize}
+\item Source $S$: single definition (DOF $= 1$)
+\item Derivations: unlimited capabilities can be derived from $S$
+\end{itemize}
+
+As capabilities grow: $|\text{Cap}(M)| \to \infty$
+
+Therefore:
+\[
+L(M) = \frac{|\text{Cap}(M)|}{\text{DOF}(M)} = \frac{|\text{Cap}(M)|}{1} \to \infty \qed
+\]
+\end{proof}
+
+\subsection{Architectural Decision Criterion}
+
+\begin{theorem}[Optimal Architecture]\label{thm:optimal}
+Given requirements $R$, architecture $A^*$ is optimal if and only if:
+\begin{enumerate}
+\item $\text{Cap}(A^*) \supseteq R$ (feasibility)
+\item $\forall A'$ with $\text{Cap}(A') \supseteq R$: $L(A^*) \geq L(A')$ (maximality)
+\end{enumerate}
+\end{theorem}
+
+\begin{proof}
+($\Leftarrow$) Suppose $A^*$ satisfies (1) and (2). Then $A^*$ is feasible and has maximum leverage among feasible architectures. By Theorem \ref{thm:leverage-error}, this minimizes error probability, so $A^*$ is optimal.
+
+($\Rightarrow$) Suppose $A^*$ is optimal but violates (1) or (2). If (1) fails, $A^*$ doesn't meet requirements (contradiction). If (2) fails, there exists $A'$ with $L(A') > L(A^*)$, so $P_{\text{error}}(A') < P_{\text{error}}(A^*)$ by Theorem \ref{thm:leverage-error} (contradiction). \qed
+\end{proof}
+
+\textbf{Decision Procedure:}
+\begin{enumerate}
+\item Enumerate candidate architectures $\{A_1, \ldots, A_n\}$
+\item Filter: Keep only $A_i$ with $\text{Cap}(A_i) \supseteq R$
+\item Optimize: Choose $A^* = \arg\max_i L(A_i)$
+\end{enumerate}
+
+\subsection{Leverage Composition}
+
+\begin{theorem}[Leverage Composition]\label{thm:composition}
+For modular architecture $A = A_1 \oplus A_2$ with disjoint components:
+\begin{enumerate}
+\item $\text{DOF}(A) = \text{DOF}(A_1) + \text{DOF}(A_2)$
+\item $L(A) \geq \min\{L(A_1), L(A_2)\}$
+\end{enumerate}
+\end{theorem}
+
+\begin{proof}
+(1) By Proposition \ref{prop:dof-additive}.
+
+(2) Let $n_1 = \text{DOF}(A_1)$, $n_2 = \text{DOF}(A_2)$, $c_1 = |\text{Cap}(A_1)|$, $c_2 = |\text{Cap}(A_2)|$.
+
+Then:
+\[
+L(A) = \frac{c_1 + c_2}{n_1 + n_2}
+\]
+
+Assume WLOG $L(A_1) \leq L(A_2)$, i.e., $c_1/n_1 \leq c_2/n_2$.
+
+Then:
+\[
+\frac{c_1 + c_2}{n_1 + n_2} \geq \frac{c_1 + c_1 \cdot (n_2/n_1)}{n_1 + n_2} = \frac{c_1(n_1 + n_2)}{n_1(n_1 + n_2)} = \frac{c_1}{n_1} = L(A_1) \qed
+\]
+\end{proof}
+
+\textbf{Interpretation:} Combining architectures yields leverage at least as good as the worst submodule.
+
+\subsection{Formalization}
+
+All theorems formalized in \texttt{Leverage/Theorems.lean}:
+\begin{itemize}
+\item \texttt{leverage\_error\_tradeoff}: Theorem \ref{thm:leverage-error}
+\item \texttt{metaprogramming\_unbounded\_leverage}: Theorem \ref{thm:metaprog}
+\item \texttt{architectural\_decision\_criterion}: Theorem \ref{thm:optimal}
+\item \texttt{leverage\_composition}: Theorem \ref{thm:composition}
+\end{itemize}
+
+\subsection{Cross-Paper Integration}
+
+The leverage framework provides the unifying theory for results proven in Papers 1 and 2:
+
+\begin{theorem}[Paper 1 as Leverage Instance]\label{thm:paper1-integration}
+The SSOT theorem from Paper 1 is an instance of leverage maximization:
+\begin{itemize}
+\item SSOT achieves $L = \infty$ (finite capabilities, zero DOF for derived facts)
+\item Non-SSOT has $L = 1$ (each capability requires one DOF)
+\item Therefore SSOT is optimal by Theorem \ref{thm:leverage-max}
+\end{itemize}
+\end{theorem}
+
+\begin{theorem}[Paper 2 as Leverage Instance]\label{thm:paper2-integration}
+The typing theorem from Paper 2 is an instance of leverage maximization:
+\begin{itemize}
+\item Nominal typing: $L = c/n$ where $n$ = explicit type annotations
+\item Duck typing: $L = c/m$ where $m$ = implicit structural constraints
+\item Since $n < m$ for equivalent capabilities, nominal typing has higher leverage
+\end{itemize}
+\end{theorem}
+
+These theorems are formalized in \texttt{Leverage/Integration.lean}.
+
+

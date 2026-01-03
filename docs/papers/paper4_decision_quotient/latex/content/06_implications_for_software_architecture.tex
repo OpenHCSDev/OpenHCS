@@ -1,0 +1,46 @@
+\section{Implications for Software Architecture}\label{sec:implications}
+
+The complexity results have direct implications for software engineering practice.
+
+\subsection{Why Over-Specification Is Rational}
+
+Software architects routinely specify more configuration parameters than strictly necessary. Our results show this is computationally rational:
+
+\begin{corollary}[Rational Over-Specification]
+Given a software system with $n$ configuration parameters, checking whether a proposed subset suffices is \coNP-complete. Finding the minimum such set is also \coNP-complete.
+\end{corollary}
+
+This explains why configuration files grow over time: removing ``unnecessary'' parameters requires solving a hard problem.
+
+\subsection{Connection to Leverage Theory}
+
+Paper 3 introduced leverage as the ratio of impact to effort. The decision quotient provides a complementary measure:
+
+\begin{definition}[Architectural Decision Quotient]
+For a software system with configuration space $S$ and behavior space $B$:
+\[
+\text{ADQ}(I) = \frac{|\{b \in B : b \text{ achievable with some } s \text{ where } s_I \text{ fixed}\}|}{|B|}
+\]
+\end{definition}
+
+High ADQ means the configuration subset $I$ leaves many behaviors achievable---it doesn't constrain the system much. Low ADQ means $I$ strongly constrains behavior.
+
+\begin{proposition}[Leverage-ADQ Duality]
+High-leverage architectural decisions correspond to low-ADQ configuration subsets: they strongly constrain system behavior with minimal specification.
+\end{proposition}
+
+\subsection{Practical Recommendations}
+
+Based on our theoretical results:
+
+\begin{enumerate}
+\item \textbf{Accept over-modeling:} Don't penalize engineers for including ``extra'' parameters. The alternative (minimal modeling) is computationally hard.
+
+\item \textbf{Use bounded scenarios:} When the scenario space is small (Proposition~\ref{prop:sufficiency-char}), minimal modeling becomes tractable.
+
+\item \textbf{Exploit structure:} Tree-structured dependencies, bounded alternatives, and separable utilities admit efficient algorithms.
+
+\item \textbf{Invest in heuristics:} For general problems, develop domain-specific heuristics rather than seeking optimal solutions.
+\end{enumerate}
+
+

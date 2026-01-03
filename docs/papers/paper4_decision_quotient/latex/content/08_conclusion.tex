@@ -1,0 +1,79 @@
+\section{Conclusion}
+
+\subsection*{Methodology and Disclosure}
+
+\textbf{Role of LLMs in this work.} This paper was developed through
+human-AI collaboration. The author provided the core intuitions---the
+connection between decision-relevance and computational complexity, the
+conjecture that SUFFICIENCY-CHECK is coNP-complete, and the insight that
+the $\Sigma_2^P$ structure collapses for MINIMUM-SUFFICIENT-SET. Large
+language models (Claude, GPT-4) served as implementation partners for
+proof drafting, Lean formalization, and LaTeX generation.
+
+The Lean 4 proofs were iteratively refined: the author specified what
+should be proved, the LLM proposed proof strategies, and the Lean
+compiler served as the arbiter of correctness. The complexity-theoretic
+reductions required careful human oversight to ensure the polynomial
+bounds were correctly established.
+
+\textbf{What the author contributed:} The problem formulations
+(SUFFICIENCY-CHECK, MINIMUM-SUFFICIENT-SET, ANCHOR-SUFFICIENCY), the
+hardness conjectures, the tractability conditions, and the connection
+to over-modeling in engineering practice.
+
+\textbf{What LLMs contributed:} LaTeX drafting, Lean tactic exploration,
+reduction construction assistance, and prose refinement.
+
+The proofs are machine-checked; their validity is independent of
+generation method. We disclose this methodology in the interest of
+academic transparency.
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+We have established that identifying decision-relevant information is computationally hard:
+
+\begin{itemize}
+\item Checking whether a coordinate set is sufficient is \coNP-complete
+\item Finding the minimum sufficient set is \coNP-complete (the $\SigmaP{2}$ structure collapses)
+\item Anchor sufficiency (fixed-coordinate subcube) is $\SigmaP{2}$-complete
+\item A complexity dichotomy separates easy (logarithmic) from hard (linear) cases
+\item Tractable subcases exist for bounded actions, separable utilities, and tree structures
+\end{itemize}
+
+These results formalize a fundamental insight: \textbf{determining what you need to know is harder than knowing everything}. This explains the ubiquity of over-modeling in engineering practice and provides theoretical grounding for heuristic approaches to model selection.
+
+All proofs are machine-checked in Lean 4, ensuring correctness of the core mathematical claims including the reduction mappings and equivalence theorems. Complexity classifications follow from standard complexity-theoretic results (TAUTOLOGY is coNP-complete, $\exists\forall$-SAT is $\Sigma_2^\text{P}$-complete) under the encoding model described in Section~\ref{sec:reduction}.
+
+\subsection*{Why These Results Are Final}
+
+The theorems proven here are \emph{ceiling results}---no stronger claims are possible within their respective frameworks:
+
+\begin{enumerate}
+\item \textbf{Exact complexity characterization (not just lower bounds).} We prove SUFFICIENCY-CHECK is \coNP-complete (Theorem~\ref{thm:sufficiency-conp}). This is \emph{both} a lower bound (\coNP-hard) and an upper bound (in \coNP). The complexity class is exact. Additional lower or upper bounds would be redundant.
+
+\item \textbf{Universal impossibility ($\forall$), not probabilistic prevalence ($\mu = 1$).} Theorems quantify over \emph{all} decision problems satisfying the structural constraints, not measure-1 subsets. Measure-theoretic claims like ``hard instances are prevalent'' would \emph{weaken} the results from ``always hard (unless P = coNP)'' to ``almost always hard.''
+
+\item \textbf{Constructive reductions, not existence proofs.} Theorem~\ref{thm:sufficiency-conp} provides an explicit polynomial-time reduction from TAUTOLOGY to SUFFICIENCY-CHECK. This is stronger than proving hardness via non-constructive arguments (e.g., diagonalization). The reduction is machine-checked and executable.
+
+\item \textbf{Dichotomy is complete (Theorem~\ref{thm:dichotomy}).} The complexity separates into exactly two cases: polynomial (when minimal sufficient set has size $O(\log |S|)$) or exponential (when size is $\Omega(n)$). Under standard assumptions (\Pclass{} $\neq$ \coNP), there are no intermediate cases. The dichotomy is exhaustive.
+
+\item \textbf{Tractable cases are maximal (Section~\ref{sec:tractable}).} The tractability conditions (bounded actions, separable utilities, tree structure) are shown to be \emph{tight}---relaxing any condition yields \coNP-hardness. These are the boundary cases, not a subset of tractable instances.
+\end{enumerate}
+
+\textbf{What would NOT strengthen the results:}
+
+\begin{itemize}
+\item \textbf{Additional complexity classes:} SUFFICIENCY-CHECK is \coNP-complete. Proving it is also NP-hard, PSPACE-hard, or \#P-hard would add no information (these follow from \coNP-completeness under standard reductions).
+
+\item \textbf{Average-case hardness:} We prove worst-case hardness. Average-case results would be \emph{weaker} (average $\leq$ worst) and would require distributional assumptions not present in the problem definition.
+
+\item \textbf{\#P-hardness of counting:} When the decision problem is asking ``does there exist?'' (existential) or ``are all?'' (universal), the corresponding counting problem is trivially at least as hard. Proving \#P-hardness separately would be redundant unless we change the problem to count something else.
+
+\item \textbf{Approximation hardness beyond inapproximability:} Theorem~\ref{thm:inapprox} proves no polynomial-time algorithm can approximate the minimal sufficient set size within any constant factor (unless P = coNP). This is maximal inapproximability---the problem admits no non-trivial approximation.
+\end{itemize}
+
+These results close the complexity landscape for coordinate sufficiency. Open questions remain (e.g., fixed-parameter tractability with parameters beyond those in Section~\ref{sec:tractable}, quantum complexity), but within classical complexity theory, the characterization is complete.
+
+
+\appendix
+

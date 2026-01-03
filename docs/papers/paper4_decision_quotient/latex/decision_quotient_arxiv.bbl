@@ -1,0 +1,82 @@
+\begin{thebibliography}{10}
+
+\bibitem{akaike1974new}
+Hirotugu Akaike.
+\newblock A new look at the statistical model identification.
+\newblock {\em IEEE Transactions on Automatic Control}, 19(6):716--723, 1974.
+
+\bibitem{arora2009computational}
+Sanjeev Arora and Boaz Barak.
+\newblock {\em Computational Complexity: A Modern Approach}.
+\newblock Cambridge University Press, 2009.
+
+\bibitem{blum1997selection}
+Avrim~L. Blum and Pat Langley.
+\newblock Selection of relevant features and examples in machine learning.
+\newblock {\em Artificial Intelligence}, 97(1-2):245--271, 1997.
+
+\bibitem{cook1971complexity}
+Stephen~A. Cook.
+\newblock The complexity of theorem-proving procedures.
+\newblock In {\em Proceedings of the Third Annual ACM Symposium on Theory of
+  Computing}, pages 151--158. ACM, 1971.
+
+\bibitem{howard1966information}
+Ronald~A. Howard.
+\newblock Information value theory.
+\newblock {\em IEEE Transactions on Systems Science and Cybernetics},
+  2(1):22--26, 1966.
+
+\bibitem{impagliazzo2001complexity}
+Russell Impagliazzo and Ramamohan Paturi.
+\newblock On the complexity of $k$-sat.
+\newblock {\em Journal of Computer and System Sciences}, 62(2):367--375, 2001.
+
+\bibitem{karp1972reducibility}
+Richard~M. Karp.
+\newblock Reducibility among combinatorial problems.
+\newblock In {\em Complexity of Computer Computations}, pages 85--103.
+  Springer, 1972.
+
+\bibitem{koller2009probabilistic}
+Daphne Koller and Nir Friedman.
+\newblock {\em Probabilistic Graphical Models: Principles and Techniques}.
+\newblock MIT Press, 2009.
+
+\bibitem{papadimitriou1994complexity}
+Christos~H. Papadimitriou.
+\newblock {\em Computational Complexity}.
+\newblock Addison-Wesley, 1994.
+
+\bibitem{pearl1988probabilistic}
+Judea Pearl.
+\newblock {\em Probabilistic Reasoning in Intelligent Systems}.
+\newblock Morgan Kaufmann, 1988.
+
+\bibitem{raiffa1961applied}
+Howard Raiffa and Robert Schlaifer.
+\newblock {\em Applied Statistical Decision Theory}.
+\newblock Harvard University Press, 1961.
+
+\bibitem{savage1954foundations}
+Leonard~J. Savage.
+\newblock {\em The Foundations of Statistics}.
+\newblock John Wiley \& Sons, 1954.
+
+\bibitem{schwarz1978estimating}
+Gideon Schwarz.
+\newblock Estimating the dimension of a model.
+\newblock {\em The Annals of Statistics}, 6(2):461--464, 1978.
+
+\bibitem{stockmeyer1976polynomial}
+Larry~J. Stockmeyer.
+\newblock The polynomial-time hierarchy.
+\newblock {\em Theoretical Computer Science}, 3(1):1--22, 1976.
+
+\bibitem{stone1974cross}
+Mervyn Stone.
+\newblock Cross-validatory choice and assessment of statistical predictions.
+\newblock {\em Journal of the Royal Statistical Society: Series B
+  (Methodological)}, 36(2):111--133, 1974.
+
+\end{thebibliography}

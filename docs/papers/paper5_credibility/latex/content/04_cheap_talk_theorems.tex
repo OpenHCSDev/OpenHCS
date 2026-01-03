@@ -1,0 +1,134 @@
+\section{Cheap Talk Theorems}\label{cheap-talk-theorems}
+
+\subsection{The Cheap Talk Bound}\label{the-cheap-talk-bound}
+
+\begin{theorem}[Cheap-talk credibility is a likelihood-ratio bound]\label{thm:cheap-talk-bound}
+Let $C\in\{0,1\}$ denote the truth of a claim ($C=1$ true), with prior
+$p := \Pr[C=1]\in(0,1)$. Let $S$ be the event that the receiver observes a
+particular message-pattern (signal) $s$.
+
+Define the emission rates
+\[
+\alpha := \Pr[S \mid C=1],\qquad \beta := \Pr[S \mid C=0].
+\]
+Then the posterior credibility of the claim given observation of $s$ is
+\[
+\Pr[C=1 \mid S] \;=\; \frac{p\,\alpha}{p\,\alpha + (1-p)\,\beta}.
+\]
+Equivalently, in odds form,
+\[
+\frac{\Pr[C=1 \mid S]}{\Pr[C=0 \mid S]}
+\;=\;
+\frac{p}{1-p}\cdot \frac{\alpha}{\beta}.
+\]
+
+In particular, if $s$ is a \emph{cheap-talk} pattern in the sense that:
+\begin{enumerate}
+\item[(i)] truthful senders emit $s$ with certainty ($\alpha=1$), and
+\item[(ii)] deceptive senders can mimic $s$ with probability at least $q$
+(i.e.\ $\beta \ge q$),
+\end{enumerate}
+then credibility obeys the tight upper bound
+\[
+\Pr[C=1 \mid S] \;\le\; \frac{p}{p+(1-p)q}.
+\]
+Moreover this bound is \emph{tight}: equality holds whenever $\alpha=1$ and $\beta=q$.
+\end{theorem}
+
+\begin{proof}
+By Bayes' rule,
+\[
+\Pr[C=1 \mid S]
+= \frac{\Pr[S\mid C=1]\Pr[C=1]}{\Pr[S\mid C=1]\Pr[C=1] + \Pr[S\mid C=0]\Pr[C=0]}
+= \frac{p\alpha}{p\alpha+(1-p)\beta}.
+\]
+If $\alpha=1$ and $\beta \ge q$, the denominator is minimized by setting $\beta=q$,
+yielding
+\[
+\Pr[C=1 \mid S]\le \frac{p}{p+(1-p)q}.
+\]
+Tightness is immediate when $\beta=q$.
+\end{proof}
+
+\textbf{Remark (Notation reconciliation).} In this paper we use $q$ to denote the
+\emph{mimicability} of a cheap-talk signal: the probability that a deceptive sender
+successfully produces the same message pattern as a truthful sender. If one prefers
+to work with detection probability $\pi_d$ (the probability deception is detected),
+then $q = 1 - \pi_d$ and the bound becomes
+$\Pr[C=1 \mid S] \le p / (p + (1-p)(1-\pi_d))$.
+
+\textbf{Interpretation:} No matter how emphatically you assert
+something, cheap talk credibility is capped. The cap depends on how
+likely deception is in the population.
+
+\subsection{The Magnitude Penalty}\label{the-magnitude-penalty}
+
+\begin{theorem}[Magnitude Penalty]\label{thm:magnitude-penalty}
+For claims $c_1, c_2$ with $M(c_1) < M(c_2)$ (i.e., $p_1 := P(c_1) > p_2 := P(c_2)$)
+and identical cheap talk signals $s$ with mimicability $q$:
+\[\Pr[c_1 \mid S] > \Pr[c_2 \mid S]\]
+Higher-magnitude claims receive less credibility from identical signals.
+\end{theorem}
+
+\begin{proof}
+From Theorem~\ref{thm:cheap-talk-bound}, the bound $p/(p+(1-p)q)$ is strictly
+increasing in $p$ for fixed $q \in (0,1)$. Since $p_1 > p_2$, we have
+$\Pr[c_1 \mid S] > \Pr[c_2 \mid S]$.
+\end{proof}
+
+\textbf{Interpretation:} Claiming you wrote one good paper gets more
+credibility than claiming you wrote four. The signal (your assertion) is
+identical; the prior probability differs.
+
+\subsection{The Emphasis Penalty}\label{the-emphasis-penalty}
+
+\textbf{Theorem 3.3 (Emphasis Penalty).} Let \(s_1, s_2, ..., s_n\) be
+cheap talk signals all asserting claim \(c\). There exists \(k^*\) such
+that for \(n > k^*\): \[\frac{\partial C(c, s_{1..n})}{\partial n} < 0\]
+
+Additional emphasis \emph{decreases} credibility past a threshold.
+
+The key insight: excessive signaling is itself informative. Define the
+\emph{suspicion function}:
+\[\sigma(n) = P(\text{deceptive} | n \text{ assertions})\]
+
+Honest agents have less need to over-assert. Therefore:
+\[P(n \text{ assertions} | \text{deceptive}) > P(n \text{ assertions} | \text{honest}) \text{ for large } n\]
+
+By Bayes' rule, \(\sigma(n)\) is increasing in \(n\) past some
+threshold.
+
+Substituting into the credibility update:
+\[C(c, s_{1..n}) = \frac{P(c) \cdot (1 - \sigma(n))}{P(c) \cdot (1 - \sigma(n)) + (1 - P(c)) \cdot \sigma(n)}\]
+
+This is decreasing in \(\sigma(n)\), hence decreasing in \(n\) for
+\(n > k^*\). \qed{}
+
+\textbf{Interpretation:} ``Trust me, I'm serious, this is absolutely
+true, I swear'' is \emph{less} credible than just stating the claim. The
+emphasis signals desperation.
+
+\subsection{The Meta-Assertion Trap}\label{the-meta-assertion-trap}
+
+\textbf{Theorem 3.4 (Meta-Assertion Trap).} Let \(a\) be a cheap talk
+assertion and \(m\) be a meta-assertion ``assertion \(a\) is credible.''
+Then: \[C(c, a \cup m) \leq C(c, a) + \epsilon\]
+
+where \(\epsilon \to 0\) as common knowledge of rationality increases.
+
+Meta-assertion \(m\) is itself cheap talk (costs nothing to produce
+regardless of truth). Therefore \(m\) is subject to the Cheap Talk Bound
+(Theorem 3.1).
+
+Under common knowledge of rationality, agents anticipate that deceptive
+agents will produce meta-assertions. Therefore:
+\[P(m | \text{deceptive}) \approx P(m | \text{honest})\]
+
+The signal provides negligible information; \(\epsilon \to 0\). \qed{}
+
+\textbf{Interpretation:} ``My claims are verified'' is cheap talk about
+cheap talk. It doesn't escape the bound---it's \emph{subject to} the
+bound recursively. Adding ``really verified, I promise'' makes it worse.
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+

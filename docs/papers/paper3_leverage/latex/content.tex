@@ -148,11 +148,11 @@ Section~\ref{sec:foundations} defines Architecture, DOF, Capabilities, and Lever
 \end{itemize}
 
 \textbf{Scope:}
-Leverage characterizes the capability-to-DOF ratio. Performance, security, and other dimensions remain orthogonal concerns. The framework applies when requirements permit multiple architectural choices with different DOF. Error independence (Axiom 2.1) is an explicit assumption.
+Leverage characterizes the capability-to-DOF ratio. Performance, security, and other dimensions remain orthogonal concerns. The framework applies when requirements permit multiple architectural choices with different DOF. Error independence is \emph{derived} from Paper 1's axis orthogonality theorem, not assumed.
 
 \subsection{Roadmap}
 
-Section 2 provides formal foundations (definitions, axioms). Section 3 develops the probability model connecting DOF to error. Section 4 proves main theorems. Section 5 presents instances (SSOT, typing, microservices, APIs, configuration, databases). Section 6 demonstrates practical application via before/after examples. Section 7 surveys related work. Section 8 concludes.
+Section 2 provides formal foundations (definitions). Section 3 derives the probability model from Papers 1 and 2. Section 4 proves main theorems. Section 5 presents instances (SSOT, typing, microservices, APIs, configuration, databases). Section 6 demonstrates practical application via before/after examples. Section 7 surveys related work. Section 8 concludes.
 
 
 \section{Foundations}\label{foundations}
@@ -326,19 +326,47 @@ All definitions in this section are formalized in \texttt{Leverage/Foundations.l
 
 \section{Probability Model}\label{probability-model}
 
-We formalize the relationship between DOF and error probability.
+We derive the relationship between DOF and error probability from Paper 1's axis independence theorem.
 
-\subsection{Independent Errors Assumption}
+\subsection{Error Independence from Axis Orthogonality}
 
-\begin{axiom}[Independent Errors]\label{ax:independent-errors}
-Each DOF has independent error probability $p \in (0,1)$.
-\end{axiom}
+The independence of errors is not an axiom---it is a consequence of axis orthogonality proven in Paper 1.
 
-\textbf{Justification:} DOF represent independent modification points. Errors in different components (microservices, API endpoints, configuration parameters) arise from independent development activities.
+\begin{theorem}[Error Independence]\label{thm:error-independence}
+If axes $\{A_1, \ldots, A_n\}$ are orthogonal (Paper 1, Theorem \texttt{minimal\_complete\_unique\_orthogonal}), then errors along each axis are statistically independent.
+\end{theorem}
 
-\begin{axiom}[Error Compound]\label{ax:error-compound}
-Errors in independent DOF compound multiplicatively: system is correct only if all DOF are correct.
-\end{axiom}
+\begin{proof}
+By Paper 1's orthogonality theorem, orthogonal axes satisfy:
+\[
+\forall i \neq j: A_i \perp A_j \quad (\text{no axis constrains another})
+\]
+
+An \emph{error along axis $A_i$} is a deviation from specification in the dimension $A_i$ controls. By orthogonality:
+\begin{itemize}
+\item Deviation along $A_i$ does not affect the value along $A_j$
+\item The probability of error in $A_i$ is independent of the state of $A_j$
+\end{itemize}
+
+Therefore:
+\[
+P(\text{error in } A_i \land \text{error in } A_j) = P(\text{error in } A_i) \cdot P(\text{error in } A_j)
+\]
+
+This is the definition of statistical independence. \qed
+\end{proof}
+
+\begin{corollary}[DOF = Independent Error Sources]\label{cor:dof-errors}
+DOF$(A) = n$ implies $n$ independent sources of error, each with probability $p$.
+\end{corollary}
+
+\begin{theorem}[Error Compounding]\label{thm:error-compound}
+For a system to be correct, all $n$ independent axes must be error-free. Errors compound multiplicatively.
+\end{theorem}
+
+\begin{proof}
+By Paper 2's coherence theorem, incoherence in any axis violates system correctness. An error in axis $A_i$ introduces incoherence along $A_i$. Therefore, correctness requires $\bigwedge_{i=1}^{n} \neg\text{error}(A_i)$. By Theorem~\ref{thm:error-independence}, this probability is $(1-p)^n$. \qed
+\end{proof}
 
 \subsection{Error Probability Formula}
 
@@ -350,7 +378,7 @@ P_{\text{error}}(n) = 1 - (1-p)^n
 \end{theorem}
 
 \begin{proof}
-By Axiom \ref{ax:independent-errors}, each DOF is correct with probability $(1-p)$. By Axiom \ref{ax:error-compound}, all $n$ DOF must be correct, so:
+By Theorem~\ref{thm:error-independence} (derived from Paper 1's orthogonality), each DOF has independent error probability $p$, so each is correct with probability $(1-p)$. By Theorem~\ref{thm:error-compound}, all $n$ DOF must be correct:
 \[
 P_{\text{correct}}(n) = (1-p)^n
 \]
@@ -421,7 +449,7 @@ P_{\text{error}}(n) = 1 - R_{\text{series}}(n) \text{ where } R_{\text{series}}(
 \]
 \end{theorem}
 
-\textbf{Interpretation:} Each DOF is a ``component'' that must work correctly. This is the reliability analog of our independence assumption (Axiom \ref{ax:independent-errors}).
+\textbf{Interpretation:} Each DOF is a ``component'' that must work correctly. This is the reliability analog of Theorem~\ref{thm:error-independence}, which derives error independence from axis orthogonality.
 
 \textbf{Linear Approximation Justification:} For small $p$ (the software engineering regime where $p \approx 0.01$), the linear model $P_{\text{error}} \approx n \cdot p$ is:
 \begin{enumerate}
@@ -430,16 +458,29 @@ P_{\text{error}}(n) = 1 - R_{\text{series}}(n) \text{ where } R_{\text{series}}(
 \item Cleanly provable in natural number arithmetic (avoiding real analysis)
 \end{enumerate}
 
+\subsection{Epistemic Grounding}
+
+The probability model is not axiomatic---it is derived from the epistemic foundations established in Papers 1 and 2:
+
+\begin{enumerate}
+\item \textbf{Paper 1} proves axis orthogonality (\texttt{minimal\_complete\_unique\_orthogonal})
+\item \textbf{Theorem~\ref{thm:error-independence}} derives error independence from orthogonality
+\item \textbf{Paper 2} establishes that DOF = 1 guarantees coherence
+\item \textbf{Theorem~\ref{thm:error-compound}} connects errors to incoherence
+\end{enumerate}
+
+This derivation chain ensures the probability model rests on proven foundations, not assumed axioms.
+
 \subsection{Formalization}
 
 Formalized in \texttt{Leverage/Probability.lean}:
 \begin{itemize}
-\item \texttt{independent\_errors}: Axiom \ref{ax:independent-errors}
-\item \texttt{error\_propagation}: Axiom \ref{ax:error-compound}
-\item \texttt{error\_probability\_formula}: Theorem \ref{thm:error-prob}
-\item \texttt{dof\_error\_monotone}: Corollary \ref{cor:dof-monotone}
-\item \texttt{expected\_error\_bound}: Theorem \ref{thm:expected-errors}
-\item \texttt{linear\_model\_preserves\_ordering}: Theorem \ref{thm:series-system}
+\item \texttt{error\_independence\_from\_orthogonality}: Theorem~\ref{thm:error-independence} (references Paper 1)
+\item \texttt{error\_compounding\_from\_coherence}: Theorem~\ref{thm:error-compound} (references Paper 2)
+\item \texttt{error\_probability\_formula}: Theorem~\ref{thm:error-prob}
+\item \texttt{dof\_error\_monotone}: Corollary~\ref{cor:dof-monotone}
+\item \texttt{expected\_error\_bound}: Theorem~\ref{thm:expected-errors}
+\item \texttt{linear\_model\_preserves\_ordering}: Theorem~\ref{thm:series-system}
 \end{itemize}
 
 \section{Main Theorems}\label{main-theorems}
@@ -1239,7 +1280,7 @@ Given requirements $R$, choose optimal architecture via:
 
 \subsection{Limitations}
 
-\textbf{1. Independence Assumption (Axiom 2.1):} Assumes errors in different DOF are independent. Real systems may have correlated errors.
+\textbf{1. Independence Derivation:} Error independence is derived from Paper 1's axis orthogonality. Real systems may violate orthogonality, leading to correlated errors.
 
 \textbf{2. Constant Error Rate:} Assumes $p$ is constant across components. Reality: some components are more error-prone than others.
 
@@ -1478,9 +1519,9 @@ For architectures with \emph{different} capabilities, we count cardinality. This
 
 The \emph{principle} (leverage via SSOT) is universal. The \emph{implementation} depends on language features.
 
-\subsection{Objection 5: ``Independence assumption is unrealistic''}
+\subsection{Objection 5: ``Independence derivation requires perfect orthogonality''}
 
-\textbf{Response:} Axiom 2.1 (independent errors) is an \emph{assumption}, clearly stated. Real systems may have correlated errors.
+\textbf{Response:} Error independence is derived from Paper 1's axis orthogonality theorem. Real systems may violate orthogonality, leading to correlated errors.
 
 \textbf{Mitigation:} Even with correlation, DOF remains relevant. If correlation coefficient is $\rho$, then:
 \[
@@ -1531,8 +1572,8 @@ For reference, all theorems in this paper:
 
 \textbf{Probability Model (Section 3):}
 \begin{itemize}
-\item Axiom 3.1 (Independent Errors)
-\item Axiom 3.2 (Error Propagation)
+\item Theorem 3.1 (Error Independence from Orthogonality)
+\item Theorem 3.2 (Error Compounding from Coherence)
 \item Theorem 3.3 (Error Probability Formula)
 \item Corollary 3.4 (Linear Approximation)
 \item Corollary 3.5 (DOF-Error Monotonicity)

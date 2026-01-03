@@ -1,27 +1,44 @@
 #!/bin/bash
-# Unified build script for all three TOPLAS papers
-# Usage: ./scripts/build_papers.sh [latex|markdown|lean|all] [paper1|paper2|paper3|all]
+# Unified build + release script for all five papers
+# Builds LaTeX, Lean proofs, and packages for arXiv/Zenodo
+#
+# Usage: ./scripts/build_papers.sh [command] [paper]
+#
+# Commands:
+#   release  - Full build: Lean + LaTeX + package into releases/ (default)
+#   latex    - Build LaTeX PDFs only
+#   lean     - Build Lean proofs only
+#   package  - Package for arXiv (flatten, tarball)
+#
+# Paper:
+#   paper1|paper2|paper3|paper4|paper5|all (default: all)
 #
 # Examples:
-#   ./scripts/build_papers.sh all          # Build everything
-#   ./scripts/build_papers.sh latex        # Build all LaTeX PDFs
-#   ./scripts/build_papers.sh markdown     # Build all Markdown
-#   ./scripts/build_papers.sh lean paper1  # Build Paper 1 Lean only
+#   ./scripts/build_papers.sh                    # Full release build for all
+#   ./scripts/build_papers.sh release paper3    # Full release for paper3
+#   ./scripts/build_papers.sh latex             # LaTeX only, all papers
+#   ./scripts/build_papers.sh lean paper1       # Lean only for paper1
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 PAPERS_DIR="$REPO_ROOT/docs/papers"
+BUILD_DIR="$REPO_ROOT/build/arxiv"
+
+# Use global Lake cache to avoid re-downloading Mathlib per paper
+export LAKE_HOME="${LAKE_HOME:-$HOME/.elan/.lake}"
 
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 RED='\033[0;31m'
+YELLOW='\033[0;33m'
 NC='\033[0m'
 
 log() { echo -e "${BLUE}[build]${NC} $1"; }
-success() { echo -e "${GREEN}[build]${NC} $1"; }
-error() { echo -e "${RED}[build]${NC} $1"; }
+success() { echo -e "${GREEN}✓${NC} $1"; }
+error() { echo -e "${RED}✗${NC} $1"; exit 1; }
+warn() { echo -e "${YELLOW}!${NC} $1"; }
 
 # Auto-update publication and copyright dates.
 # Defaults to today's date/year but can be overridden with:
@@ -43,122 +60,167 @@ update_paper_date() {
     log "Updated publication date ($publication_date) and copyright year ($copyright_year) in $paper_dir"
 }
 
-build_latex_paper1() {
-    log "Building Paper 1 LaTeX..."
-    update_paper_date "$PAPERS_DIR/paper1_typing_discipline"
-    cd "$PAPERS_DIR/paper1_typing_discipline/toplas"
-    pdflatex -interaction=nonstopmode main.tex > /dev/null 2>&1 || true
-    success "Paper 1 PDF → toplas/main.pdf"
+
+
+# Paper configurations: name|main_tex|output_pdf
+declare -A PAPER_CONFIG=(
+    [paper1]="paper1_typing_discipline|latex/main.tex|main.pdf"
+    [paper2]="paper2_ssot|latex/main.tex|main.pdf"
+    [paper3]="paper3_leverage|latex/leverage_arxiv.tex|leverage_arxiv.pdf"
+    [paper4]="paper4_decision_quotient|latex/decision_quotient_arxiv.tex|decision_quotient_arxiv.pdf"
+    [paper5]="paper5_credibility|latex/credibility_arxiv.tex|credibility_arxiv.pdf"
+)
+
+build_latex() {
+    local paper="$1"
+    local config="${PAPER_CONFIG[$paper]}"
+    IFS='|' read -r dir tex_path pdf_name <<< "$config"
+
+    local paper_dir="$PAPERS_DIR/$dir"
+    local tex_dir="$(dirname "$paper_dir/$tex_path")"
+    local tex_file="$(basename "$tex_path")"
+
+    log "Building $paper LaTeX..."
+    update_paper_date "$paper_dir"
+    cd "$tex_dir"
+    if pdflatex -interaction=batchmode "$tex_file" > /tmp/latex_$$.log 2>&1; then
+        success "$paper PDF built"
+    else
+        warn "$paper PDF built (with warnings - check /tmp/latex_$$.log)"
+    fi
 }
 
-build_latex_paper2() {
-    log "Building Paper 2 LaTeX..."
-    update_paper_date "$PAPERS_DIR/paper2_ssot"
-    cd "$PAPERS_DIR/paper2_ssot/toplas"
-    pdflatex -interaction=nonstopmode main.tex > /dev/null 2>&1 || true
-    success "Paper 2 PDF → toplas/main.pdf"
+build_lean() {
+    local paper="$1"
+    local config="${PAPER_CONFIG[$paper]}"
+    IFS='|' read -r dir _ _ <<< "$config"
+
+    local proofs_dir="$PAPERS_DIR/$dir/proofs"
+    if [[ ! -d "$proofs_dir" ]]; then
+        warn "$paper has no proofs directory, skipping"
+        return
+    fi
+
+    log "Building $paper Lean proofs..."
+    cd "$proofs_dir"
+    lake build
+    success "$paper Lean complete"
 }
 
-build_latex_paper3() {
-    log "Building Paper 3 LaTeX..."
-    update_paper_date "$PAPERS_DIR/paper3_leverage"
-    cd "$PAPERS_DIR/paper3_leverage/latex"
-    pdflatex -interaction=nonstopmode leverage_arxiv.tex > /dev/null 2>&1 || true
-    success "Paper 3 PDF → latex/leverage_arxiv.pdf"
+package_paper() {
+    local paper="$1"
+    local config="${PAPER_CONFIG[$paper]}"
+    IFS='|' read -r dir tex_path pdf_name <<< "$config"
+
+    local paper_dir="$PAPERS_DIR/$dir"
+    local tex_dir="$(dirname "$paper_dir/$tex_path")"
+    local tex_file="$(basename "$tex_path")"
+    local releases_dir="$paper_dir/releases"
+    local out_dir="$BUILD_DIR/$dir"
+
+    log "Packaging $paper..."
+
+    mkdir -p "$releases_dir" "$out_dir"
+
+    # Build PDF with proper bibliography passes
+    cd "$tex_dir"
+    pdflatex -interaction=batchmode "$tex_file" > /tmp/latex_$$.log 2>&1 || true
+    if [[ -f "${tex_file%.tex}.aux" ]] && grep -q "\\\\citation" "${tex_file%.tex}.aux" 2>/dev/null; then
+        bibtex "${tex_file%.tex}" >> /tmp/latex_$$.log 2>&1 || true
+        pdflatex -interaction=batchmode "$tex_file" >> /tmp/latex_$$.log 2>&1 || true
+    fi
+    pdflatex -interaction=batchmode "$tex_file" >> /tmp/latex_$$.log 2>&1 || true
+
+    # Copy PDF to releases
+    if [[ -f "$pdf_name" ]]; then
+        cp "$pdf_name" "$releases_dir/$paper.pdf"
+        success "$paper.pdf → releases/"
+    fi
+
+    # Copy sources for arXiv package
+    cp "$tex_dir"/*.tex "$out_dir/" 2>/dev/null || true
+    cp "$tex_dir"/*.bib "$out_dir/" 2>/dev/null || true
+    cp "$tex_dir"/*.bbl "$out_dir/" 2>/dev/null || true
+    cp "$tex_dir"/*.cls "$out_dir/" 2>/dev/null || true
+    cp "$tex_dir"/*.sty "$out_dir/" 2>/dev/null || true
+
+    # Copy Lean proofs if present
+    local proofs_dir="$paper_dir/proofs"
+    if [[ -d "$proofs_dir" ]]; then
+        rsync -a \
+            --exclude '.lake' \
+            --exclude 'build' \
+            --exclude 'lake-packages' \
+            --exclude '*.olean' \
+            "$proofs_dir"/ "$out_dir/proofs/"
+    fi
+
+    # Create arXiv tarball
+    local tarball="$releases_dir/${paper}_arxiv.tar.gz"
+    (cd "$out_dir" && tar -czf "$tarball" \
+        --exclude='*.pdf' \
+        --exclude='*.aux' \
+        --exclude='*.log' \
+        --exclude='*.out' \
+        --exclude='*.toc' \
+        --exclude='*.fls' \
+        --exclude='*.fdb_latexmk' \
+        .)
+    success "${paper}_arxiv.tar.gz → releases/"
 }
 
-build_latex_paper4() {
-    log "Building Paper 4 LaTeX..."
-    update_paper_date "$PAPERS_DIR/paper4_decision_quotient"
-    cd "$PAPERS_DIR/paper4_decision_quotient/latex"
-    pdflatex -interaction=nonstopmode decision_quotient_arxiv.tex > /dev/null 2>&1 || true
-    success "Paper 4 PDF → latex/decision_quotient_arxiv.pdf"
+release_paper() {
+    local paper="$1"
+    build_lean "$paper"
+    build_latex "$paper"
+    package_paper "$paper"
 }
 
-build_latex_paper5() {
-    log "Building Paper 5 LaTeX..."
-    update_paper_date "$PAPERS_DIR/paper5_credibility"
-    cd "$PAPERS_DIR/paper5_credibility/latex"
-    pdflatex -interaction=nonstopmode credibility_arxiv.tex > /dev/null 2>&1 || true
-    success "Paper 5 PDF → latex/credibility_arxiv.pdf"
+run_for_papers() {
+    local cmd="$1"
+    local paper="$2"
+
+    if [[ "$paper" == "all" ]]; then
+        for p in paper1 paper2 paper3 paper4 paper5; do
+            $cmd "$p"
+        done
+    else
+        $cmd "$paper"
+    fi
 }
 
-build_lean_paper1() {
-    log "Building Paper 1 Lean..."
-    cd "$PAPERS_DIR/paper1_typing_discipline/proofs"
-    lake build 2>&1 | tail -1
-    success "Paper 1 Lean complete"
-}
-
-build_lean_paper2() {
-    log "Building Paper 2 Lean..."
-    cd "$PAPERS_DIR/paper2_ssot/proofs"
-    lake build 2>&1 | tail -1
-    success "Paper 2 Lean complete"
-}
-
-build_lean_paper3() {
-    log "Building Paper 3 Lean..."
-    cd "$PAPERS_DIR/paper3_leverage/proofs"
-    lake build 2>&1 | tail -1
-    success "Paper 3 Lean complete"
-}
-
-build_lean_paper4() {
-    log "Building Paper 4 Lean..."
-    cd "$PAPERS_DIR/paper4_decision_quotient/proofs"
-    lake build 2>&1 | tail -1
-    success "Paper 4 Lean complete"
-}
-
-build_lean_paper5() {
-    log "Building Paper 5 Lean..."
-    cd "$PAPERS_DIR/paper5_credibility/proofs"
-    lake build 2>&1 | tail -1
-    success "Paper 5 Lean complete"
-}
-
-build_markdown() {
-    "$SCRIPT_DIR/build_paper_markdown.sh" "${1:-all}"
-}
-
-# Dispatch based on arguments
-BUILD_TYPE="${1:-all}"
+# Dispatch
+COMMAND="${1:-release}"
 PAPER="${2:-all}"
 
-case "$BUILD_TYPE" in
-    latex)
-        case "$PAPER" in
-            paper1) build_latex_paper1 ;;
-            paper2) build_latex_paper2 ;;
-            paper3) build_latex_paper3 ;;
-            all) build_latex_paper1; build_latex_paper2; build_latex_paper3 ;;
-        esac
+case "$COMMAND" in
+    release)
+        log "=== Full Release Build ==="
+        rm -rf "$BUILD_DIR"
+        mkdir -p "$BUILD_DIR"
+        run_for_papers release_paper "$PAPER"
+        echo ""
+        success "Release complete! Check docs/papers/*/releases/"
         ;;
-    markdown|md)
-        build_markdown "$PAPER"
+    latex)
+        run_for_papers build_latex "$PAPER"
         ;;
     lean)
-        case "$PAPER" in
-            paper1) build_lean_paper1 ;;
-            paper2) build_lean_paper2 ;;
-            paper3) build_lean_paper3 ;;
-            all) build_lean_paper1; build_lean_paper2; build_lean_paper3 ;;
-        esac
+        run_for_papers build_lean "$PAPER"
         ;;
-    all)
-        log "Building all papers (Lean + LaTeX + Markdown)..."
-        echo ""
-        build_lean_paper1; build_lean_paper2; build_lean_paper3
-        echo ""
-        build_latex_paper1; build_latex_paper2; build_latex_paper3
-        echo ""
-        build_markdown all
-        echo ""
-        success "All builds complete!"
+    package)
+        rm -rf "$BUILD_DIR"
+        mkdir -p "$BUILD_DIR"
+        run_for_papers package_paper "$PAPER"
         ;;
     *)
-        echo "Usage: $0 [latex|markdown|lean|all] [paper1|paper2|paper3|all]"
+        echo "Usage: $0 [release|latex|lean|package] [paper1|paper2|paper3|paper4|paper5|all]"
+        echo ""
+        echo "Commands:"
+        echo "  release  - Full build: Lean + LaTeX + package (default)"
+        echo "  latex    - Build LaTeX PDFs only"
+        echo "  lean     - Build Lean proofs only"
+        echo "  package  - Package for arXiv submission"
         exit 1
         ;;
 esac

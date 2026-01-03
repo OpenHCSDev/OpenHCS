@@ -1,0 +1,49 @@
+OpenHCS Paper Build Log
+========================
+
+Paper: paper1 - A Universal Typing Discipline for Polymorphic Abstraction
+Package Date: 2026-01-03T09:35:20.099967
+Lean Toolchain: leanprover/lean4:v4.27.0-rc1
+
+Proof Statistics:
+-----------------
+Lean Files: 11
+Lines of Code: 6086
+Theorems: 265
+Sorry Placeholders: 1
+
+Proof Files:
+------------
+  - paper1_Paper1.lean
+  - paper1_PrintAxioms.lean
+  - paper1_abstract_class_system.lean
+  - paper1_axis_framework.lean
+  - paper1_context_formalization.lean
+  - paper1_discipline_migration.lean
+  - paper1_java_instantiation.lean
+  - paper1_nominal_resolution.lean
+  - paper1_python_instantiation.lean
+  - paper1_rust_instantiation.lean
+  - paper1_typescript_instantiation.lean
+
+================================================================================
+COMPILATION OUTPUT (lake build)
+================================================================================
+
+Build completed successfully (3066 jobs).
+
+
+================================================================================
+END COMPILATION OUTPUT
+================================================================================
+
+Build Instructions:
+-------------------
+To verify the proofs compile:
+
+  cd proofs/
+  lake build
+
+All theorems will be machine-verified if compilation succeeds.
+
+Repository: https://github.com/trissim/openhcs

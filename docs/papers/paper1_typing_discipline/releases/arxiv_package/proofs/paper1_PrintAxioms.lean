@@ -1,0 +1,25 @@
+import abstract_class_system
+import python_instantiation
+import typescript_instantiation
+import java_instantiation
+import rust_instantiation
+
+open AbstractClassSystem
+open PythonInstantiation
+open TypeScriptInstantiation
+open JavaInstantiation
+open RustInstantiation
+
+#print axioms AbstractClassSystem.ProvenanceWitness.prov_query_not_shape_respecting
+#print axioms AbstractClassSystem.ProtocolAlias.protocol_alias
+#print axioms AbstractClassSystem.ProtocolAlias.distinguishable_implies_namespace_diff
+#print axioms AbstractClassSystem.ShapeFactorization.shapeRespecting_iff_factors
+#print axioms AbstractClassSystem.Scope.observer_factors
+#print axioms AbstractClassSystem.semantic_non_embeddability
+#print axioms AbstractClassSystem.exact_implies_nominal
+#print axioms AbstractClassSystem.nominal_not_implies_exact
+#print axioms PythonInstantiation.pyHasattr_shape_respecting
+#print axioms PythonInstantiation.pyIsinstance_bases_sensitive
+#print axioms TypeScriptInstantiation.observables_factor_through_axes
+#print axioms JavaInstantiation.observables_factor_through_axes
+#print axioms RustInstantiation.observables_factor_through_axes

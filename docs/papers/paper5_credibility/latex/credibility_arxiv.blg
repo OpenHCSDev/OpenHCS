@@ -3,44 +3,49 @@ Capacity: max_strings=200000, hash_size=200000, hash_prime=170003
 The top-level auxiliary file: credibility_arxiv.aux
 The style file: plain.bst
 Database file #1: references.bib
-You've used 7 entries,
+Warning--I didn't find a database entry for "bommasani2021opportunities"
+Warning--I didn't find a database entry for "bender2021dangers"
+Warning--I didn't find a database entry for "myerson1979incentive"
+Warning--I didn't find a database entry for "mascolell1995microeconomic"
+You've used 23 entries,
             2118 wiz_defined-function locations,
-            531 strings with 4732 characters,
-and the built_in function-call counts, 1943 in all, are:
-= -- 193
-> -- 61
-< -- 1
-+ -- 26
-- -- 18
-* -- 97
-:= -- 311
-add.period$ -- 22
-call.type$ -- 7
-change.case$ -- 30
+            637 strings with 6823 characters,
+and the built_in function-call counts, 6981 in all, are:
+= -- 715
+> -- 221
+< -- 4
++ -- 95
+- -- 66
+* -- 446
+:= -- 1135
+add.period$ -- 72
+call.type$ -- 23
+change.case$ -- 99
 chr.to.int$ -- 0
-cite$ -- 7
-duplicate$ -- 73
-empty$ -- 186
-format.name$ -- 18
-if$ -- 421
+cite$ -- 23
+duplicate$ -- 277
+empty$ -- 632
+format.name$ -- 66
+if$ -- 1481
 int.to.chr$ -- 0
-int.to.str$ -- 7
-missing$ -- 3
-newline$ -- 38
-num.names$ -- 14
-pop$ -- 57
+int.to.str$ -- 23
+missing$ -- 21
+newline$ -- 118
+num.names$ -- 48
+pop$ -- 114
 preamble$ -- 1
-purify$ -- 23
+purify$ -- 78
 quote$ -- 0
-skip$ -- 58
+skip$ -- 193
 stack$ -- 0
-substring$ -- 124
-swap$ -- 17
-text.length$ -- 1
+substring$ -- 529
+swap$ -- 50
+text.length$ -- 4
 text.prefix$ -- 0
 top$ -- 0
-type$ -- 28
+type$ -- 88
 warning$ -- 0
-while$ -- 21
-width$ -- 8
-write$ -- 72
+while$ -- 82
+width$ -- 25
+write$ -- 252
+(There were 4 warnings)

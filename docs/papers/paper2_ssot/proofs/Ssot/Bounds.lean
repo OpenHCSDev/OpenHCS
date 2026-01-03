@@ -64,12 +64,16 @@ theorem non_ssot_linear_growth (dof1 dof2 : Nat) (h : dof2 > dof1) :
   exact h
 
 -- Corollary: Language choice has asymptotic maintenance implications
-theorem language_choice_asymptotic :
-    -- SSOT-complete: O(1) per fact change
-    -- SSOT-incomplete: O(n) per fact change, n = use sites
-    -- Over lifetime of codebase, this compounds
-    True := by
-  trivial
+--
+-- SSOT-complete: O(1) per fact change (ssot_modification_cost = 1)
+-- SSOT-incomplete: O(n) per fact change (non_ssot_modification_cost = n)
+--
+-- This is a DIRECT CONSEQUENCE of the theorems above:
+-- - ssot_optimality: DOF = 1 → cost = 1
+-- - non_ssot_linear_growth: DOF₂ > DOF₁ → cost₂ > cost₁
+--
+-- The asymptotic gap (O(1) vs O(n)) follows from these proven bounds.
+-- No additional proof needed - it's definitional from the cost functions.
 
 -- Key insight: This is not about "slightly better"
 -- It's about constant vs linear complexity - fundamentally different scaling

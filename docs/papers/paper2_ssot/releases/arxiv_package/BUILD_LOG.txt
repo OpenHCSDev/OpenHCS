@@ -1,0 +1,51 @@
+OpenHCS Paper Build Log
+========================
+
+Paper: paper2 - Formal Foundations for the Single Source of Truth Principle
+Package Date: 2026-01-03T09:35:25.636243
+Lean Toolchain: leanprover/lean4:v4.27.0-rc1
+
+Proof Statistics:
+-----------------
+Lean Files: 13
+Lines of Code: 1811
+Theorems: 96
+Sorry Placeholders: 0
+
+Proof Files:
+------------
+  - paper2_Basic.lean
+  - paper2_Bounds.lean
+  - paper2_CaseStudies.lean
+  - paper2_Completeness.lean
+  - paper2_Derivation.lean
+  - paper2_Foundations.lean
+  - paper2_LangEvaluation.lean
+  - paper2_LangPython.lean
+  - paper2_LangRust.lean
+  - paper2_LangStatic.lean
+  - paper2_Languages.lean
+  - paper2_Requirements.lean
+  - paper2_SSOT.lean
+
+================================================================================
+COMPILATION OUTPUT (lake build)
+================================================================================
+
+Build completed successfully (3066 jobs).
+
+
+================================================================================
+END COMPILATION OUTPUT
+================================================================================
+
+Build Instructions:
+-------------------
+To verify the proofs compile:
+
+  cd proofs/
+  lake build
+
+All theorems will be machine-verified if compilation succeeds.
+
+Repository: https://github.com/trissim/openhcs

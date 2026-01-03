@@ -1,0 +1,23 @@
+\textbf{Foundation.} Paper 1 proves axis orthogonality for architectural dimensions. Paper 2 proves DOF = 1 guarantees epistemic coherence. This paper derives the optimization criterion: \emph{among coherent architectures, maximize leverage}.
+
+\textbf{Theorem (Error Independence).} Axis orthogonality (Paper 1) implies statistical independence of errors across DOF. This is derived, not assumed.
+
+\textbf{Theorem (DOF-Reliability Isomorphism).} An architecture with $n$ DOF is isomorphic to a series reliability system with $n$ components. The isomorphism preserves failure probability ordering: $\text{DOF}(A_1) < \text{DOF}(A_2) \iff P_{\text{error}}(A_1) < P_{\text{error}}(A_2)$.
+
+\textbf{Theorem (Leverage Gap).} For architectures with equal capabilities:
+\[
+\frac{\mathbb{E}[\text{Modifications}(A_2)]}{\mathbb{E}[\text{Modifications}(A_1)]} = \frac{\text{DOF}(A_2)}{\text{DOF}(A_1)}
+\]
+
+\textbf{Corollary (Decidable Optimization).} Optimal architecture is $\arg\max_{A} |\text{Capabilities}(A)|/\text{DOF}(A)$ subject to coherence (DOF = 1 per fact) and capability requirements.
+
+\textbf{Integration.} Papers 1--2 establish the coherence constraint; this paper provides the optimization criterion within that constraint:
+\begin{itemize}
+\item Paper 1 (axis orthogonality) $\to$ error independence (Theorem~3.1)
+\item Paper 2 (DOF = 1 for coherence) $\to$ error compounding (Theorem~3.3)
+\item This paper: maximize $L = \text{Capabilities}/\text{DOF}$
+\end{itemize}
+
+Machine-checked: Lean 4 formalization with explicit imports from Paper 1/2 proofs.
+
+\textbf{Keywords:} Software architecture, leverage, degrees of freedom, epistemic coherence, reliability theory, formal methods

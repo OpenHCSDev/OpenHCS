@@ -1,0 +1,15 @@
+Engineers routinely include irrelevant information in their models. Climate scientists model atmospheric chemistry when predicting regional temperatures. Financial analysts track hundreds of indicators when making portfolio decisions. Software architects specify dozens of configuration parameters when only a handful affect outcomes.
+
+This paper proves that such \emph{over-modeling} is not laziness---it is computationally rational. Identifying precisely which variables are ``decision-relevant'' is \coNP-complete \cite{cook1971complexity, karp1972reducibility}, finding the \emph{minimum} set of relevant variables is \coNP-complete, and a fixed-coordinate ``anchor'' version is $\SigmaP{2}$-complete \cite{stockmeyer1976polynomial}. These results formalize a fundamental insight:
+
+\begin{quote}
+\textbf{Determining what you need to know is harder than knowing everything.}
+\end{quote}
+
+We introduce the \emph{decision quotient}---a measure of decision-relevant complexity---and prove a complexity dichotomy: checking sufficiency is polynomial when the minimal sufficient set has logarithmic size, but exponential when it has linear size. We identify tractable subcases (bounded actions, separable utilities, tree-structured dependencies) that admit polynomial algorithms.
+
+\textbf{These are ceiling results:} The complexity characterizations are exact (both upper and lower bounds). The theorems quantify universally over all problem instances ($\forall$), not probabilistically ($\mu = 1$). The dichotomy is complete---no intermediate cases exist under standard assumptions. The tractability conditions are maximal---relaxing any yields hardness. No stronger complexity claims are possible within classical complexity theory.
+
+All results are machine-checked in Lean 4 \cite{moura2021lean4} (3,400+ lines across 25 files, $\sim$60 theorems). The Lean formalization proves: (1) polynomial-time reduction composition; (2) correctness of the TAUTOLOGY and $\exists\forall$-SAT reduction mappings; (3) equivalence of sufficiency checking with coNP/$\Sigma_2^\text{P}$-complete problems under standard encodings. Complexity classifications (coNP-complete, $\SigmaP{2}$-complete) are derived by combining these machine-checked results with the well-known complexity of TAUTOLOGY and $\exists\forall$-SAT.
+
+\textbf{Keywords:} computational complexity, decision theory, model selection, coNP-completeness, polynomial hierarchy, Lean 4

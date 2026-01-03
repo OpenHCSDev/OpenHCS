@@ -1,0 +1,53 @@
+\section{Foundations}\label{foundations}
+
+\subsection{Signals and Costs}\label{signals-and-costs}
+
+\textbf{Definition 2.1 (Signal).} A \emph{signal} is a tuple
+\(s = (c, v, p)\) where: - \(c\) is the \emph{content} (what is
+communicated) - \(v \in \{\top, \bot\}\) is the \emph{truth value}
+(whether content is true) - \(p : \mathbb{R}_{\geq 0}\) is the
+\emph{production cost}
+
+\textbf{Definition 2.2 (Cheap Talk).} A signal \(s\) is \emph{cheap
+talk} if production cost is truth-independent:
+\[\text{Cost}(s | v = \top) = \text{Cost}(s | v = \bot)\]
+
+\textbf{Definition 2.3 (Costly Signal).} A signal \(s\) is \emph{costly}
+if: \[\text{Cost}(s | v = \bot) > \text{Cost}(s | v = \top)\] Producing
+the signal when false costs more than when true.
+
+\textbf{Intuition:} Verbal assertions are cheap talk---saying ``I'm
+honest'' costs the same whether you're honest or not. A PhD from MIT is
+a costly signal \cite{spence1973job}---obtaining it while incompetent is much harder than
+while competent. Similarly, price and advertising can serve as signals of quality \cite{milgrom1986price}.
+
+\subsection{Credibility Functions}\label{credibility-functions}
+
+\textbf{Definition 2.4 (Prior).} A \emph{prior} is a probability
+distribution \(P : \mathcal{C} \to [0,1]\) over claims, representing
+beliefs before observing signals.
+
+\textbf{Definition 2.5 (Credibility Function).} A \emph{credibility
+function} is a mapping:
+\[C : \mathcal{C} \times \mathcal{S}^* \to [0,1]\] from (claim,
+signal-sequence) pairs to credibility scores, satisfying: 1.
+\(C(c, \emptyset) = P(c)\) (base case: prior) 2. Bayesian update:
+\(C(c, s_{1..n}) = P(c | s_{1..n})\)
+
+\textbf{Definition 2.6 (Rational Agent).} An agent is \emph{rational}
+if: 1. Updates beliefs via Bayes' rule 2. Has common knowledge of
+rationality \cite{aumann1995backward} (knows others are rational, knows others know, etc.) 3.
+Accounts for strategic signal production \cite{cho1987signaling}.
+
+\subsection{Deception Model}\label{deception-model}
+
+\textbf{Definition 2.7 (Deception Prior).} Let \(\pi_d \in [0,1]\) be
+the prior probability that a random agent will produce deceptive
+signals. This is common knowledge.
+
+\textbf{Definition 2.8 (Magnitude).} The \emph{magnitude} of a claim
+\(c\) is: \[M(c) = -\log P(c)\] High-magnitude claims have low prior
+probability. This is the standard self-information measure \cite{shannon1948}.
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+

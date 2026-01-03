@@ -1,0 +1,107 @@
+\section{Conclusion}\label{conclusion}
+
+\subsection{Methodology and Disclosure}
+
+\textbf{Role of LLMs in this work.} This paper was developed through
+human-AI collaboration. The author provided the core insight---that
+leverage ($L = \text{Capabilities}/\text{DOF}$) unifies architectural
+decision-making---while large language models (Claude, GPT-4) served as
+implementation partners for formalization, proof drafting, and LaTeX
+generation.
+
+The Lean 4 proofs (858 lines, 0 sorry placeholders) were iteratively
+developed: the author specified theorems, the LLM proposed proof
+strategies, and the Lean compiler verified correctness. This
+methodology is epistemically sound: machine-checked proofs are correct
+regardless of generation method.
+
+\textbf{What the author contributed:} The leverage framework itself,
+the metatheorem that SSOT and nominal typing are instances of leverage
+maximization, the connection to error probability, the case study
+selection from OpenHCS, and the weighted leverage extension.
+
+\textbf{What LLMs contributed:} LaTeX drafting, Lean tactic suggestions,
+prose refinement, and exploration of proof strategies.
+
+This disclosure reflects our commitment to transparency. The contribution
+is the unifying insight; the proofs stand on their machine-checked
+validity.
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsection{Summary}
+
+We provided the first formal connection between software architecture and reliability theory. Key results:
+
+\textbf{1. DOF-Reliability Isomorphism (Theorem \ref{thm:dof-reliability}):} An architecture with $n$ DOF is isomorphic to a series system with $n$ components. Each DOF is a failure point. This is the core theoretical contribution---it grounds architectural decisions in reliability-theoretic foundations.
+
+\textbf{2. Leverage Gap Theorem (Theorem \ref{thm:leverage-gap}):} For equal-capability architectures, modification cost ratio equals DOF ratio. This is a \emph{testable prediction}: $k\times$ leverage yields $k\times$ fewer modifications.
+
+\textbf{3. Approximation Bounds (Theorem \ref{thm:approx-bound}):} The linear approximation $P_{error} \approx n \cdot p$ has bounded error $O(n^2 p^2)$, justifying its use for architectural decisions.
+
+\textbf{4. Leverage-Error Tradeoff (Theorem \ref{thm:leverage-error}):} Maximizing leverage minimizes error probability.
+
+\textbf{5. Unifying Framework:} SSOT and nominal typing are instances of leverage maximization.
+
+\textbf{6. Practical Demonstration:} Before/after examples from OpenHCS demonstrating DOF collapse. PR \#44 provides a publicly verifiable instance.
+
+\subsection{Decision Procedure}
+
+Given requirements $R$, choose optimal architecture via:
+
+\begin{enumerate}
+\item \textbf{Enumerate:} List candidate architectures $\{A_1, \ldots, A_n\}$
+\item \textbf{Filter:} Keep only $A_i$ with $\text{Cap}(A_i) \supseteq R$ (feasible architectures)
+\item \textbf{Compute:} Calculate $L(A_i) = |\text{Cap}(A_i)|/\text{DOF}(A_i)$ for each
+\item \textbf{Optimize:} Choose $A^* = \arg\max_i L(A_i)$
+\end{enumerate}
+
+\textbf{Justification:} By Theorem 3.4, this minimizes error probability among feasible architectures.
+
+\subsection{Limitations}
+
+\textbf{1. Independence Assumption (Axiom 2.1):} Assumes errors in different DOF are independent. Real systems may have correlated errors.
+
+\textbf{2. Constant Error Rate:} Assumes $p$ is constant across components. Reality: some components are more error-prone than others.
+
+\textbf{3. Single Codebase Examples:} Demonstrations drawn from OpenHCS. The mechanism is general; specific patterns may vary across domains.
+
+\textbf{4. Capability Quantification:} We count capabilities qualitatively (unweighted). Some capabilities may be more valuable than others.
+
+\textbf{5. Static Analysis:} Framework evaluates architecture statically. Dynamic factors (runtime performance, scalability) require separate analysis.
+
+\subsection{Future Work}
+
+\textbf{1. Weighted Capabilities:} Extend framework to assign weights to capabilities based on business value: $L = \sum w_i c_i / \text{DOF}$.
+
+\textbf{2. Correlated Errors:} Relax independence assumption. Model error correlation via covariance matrix.
+
+\textbf{3. Multi-Objective Optimization:} Combine leverage with performance, security, and other quality attributes. Pareto frontier analysis.
+
+\textbf{4. Tool Support:} Develop automated leverage calculator. Static analysis to compute DOF, capability inference from specifications.
+
+\textbf{5. Language Extensions:} Design languages that make high-leverage patterns easier (e.g., first-class support for SSOT).
+
+\textbf{6. Broader Validation:} Replicate case studies across diverse domains (web services, embedded systems, data pipelines).
+
+\subsection{Impact}
+
+This work provides:
+
+\textbf{For Practitioners:} Principled method for architectural decisions. When choosing between alternatives, compute leverage and select maximum (subject to requirements).
+
+\textbf{For Researchers:} Unifying framework connecting SSOT, nominal typing, microservices, API design, configuration, and database normalization. Opens new research directions (weighted capabilities, correlated errors, tool support).
+
+\textbf{For Educators:} Formal foundation for teaching software architecture. Explains \emph{why} design patterns work (leverage maximization).
+
+\subsection{Final Remarks}
+
+Software architecture has long relied on heuristics and experience. This paper provides formal foundations: \emph{architectural quality is fundamentally about leverage}. By maximizing capabilities per degree of freedom, we minimize error probability and modification cost.
+
+The framework unifies diverse prior results (SSOT, nominal typing) and applies to new domains (microservices, APIs, configuration, databases).
+
+We invite the community to apply the leverage framework to additional domains, develop tool support, and extend the theory to weighted capabilities and correlated errors.
+
+
+\appendix
+

@@ -2,45 +2,127 @@
 """
 Unified paper build system for all TOPLAS papers.
 
-Replaces fragmented shell scripts with single orthogonal abstraction.
-Principles:
-  - Single source of truth (papers.yaml)
-  - Fail loudly (validate all prerequisites)
-  - Generic execution (one function per build type)
-  - No special cases (all papers treated identically)
+OpenHCS Architecture:
+  - Declarative: Configuration in YAML, not code
+  - Fail-Loud: Explicit validation, no silent failures
+  - Orthogonal: One responsibility per function
+  - Explicit Dependency Injection: No hidden state
+  - Compile-Time Validation: Check everything upfront
+
+STRUCTURAL INVARIANTS (mathematical constraints):
+  1. Content: ∀p ∈ Papers: content(p) ⊂ paper_dir(p)/latex/content/*.tex
+  2. Proofs:  ∀p ∈ Papers: proofs(p) ⊂ proofs_dir/paper{id}_*.lean
+  3. Output:  ∀p ∈ Papers: releases(p) = {pdf, md, BUILD_LOG.txt, tar.gz}
+
+All papers follow identical structure. No special cases.
 """
 
 import sys
 import subprocess
 import shutil
 from pathlib import Path
-from typing import Optional
+from typing import List, Dict, Tuple
+from dataclasses import dataclass
 import yaml
 import argparse
 from datetime import datetime
 
 
+@dataclass(frozen=True)
+class ArxivConfig:
+    """Immutable arXiv packaging configuration."""
+    include_build_log: bool = True
+    include_lean_source: bool = True
+    include_build_config: bool = True
+    exclude_patterns: Tuple[str, ...] = (".lake", "build", "*.olean", "*.ilean")
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "ArxivConfig":
+        return cls(
+            include_build_log=d.get("include_build_log", True),
+            include_lean_source=d.get("include_lean_source", True),
+            include_build_config=d.get("include_build_config", True),
+            exclude_patterns=tuple(d.get("exclude_patterns", [])),
+        )
+
+
+@dataclass(frozen=True)
+class PaperMeta:
+    """Immutable paper metadata. Represents a single paper's configuration."""
+    paper_id: str           # e.g., "paper1"
+    name: str               # e.g., "Typing Discipline"
+    full_name: str          # Full paper title
+    dir_name: str           # e.g., "paper1_typing_discipline"
+    latex_dir: str          # Relative to paper dir, typically "latex"
+    latex_file: str         # Main .tex file name
+    lean_lines: int
+    lean_theorems: int
+    lean_sorry: int
+
+    @classmethod
+    def from_dict(cls, paper_id: str, d: dict) -> "PaperMeta":
+        return cls(
+            paper_id=paper_id,
+            name=d["name"],
+            full_name=d["full_name"],
+            dir_name=d["dir"],
+            latex_dir=d.get("latex_dir", "latex"),
+            latex_file=d["latex_file"],
+            lean_lines=d.get("lean_lines", 0),
+            lean_theorems=d.get("lean_theorems", 0),
+            lean_sorry=d.get("lean_sorry", 0),
+        )
+
+
 class PaperBuilder:
-    """Unified builder for all paper formats."""
+    """
+    Unified builder for all paper formats.
+
+    STRUCTURAL INVARIANTS:
+    1. ∀p: paper_dir(p) = papers_dir / meta(p).dir_name
+    2. ∀p: content_dir(p) = paper_dir(p) / meta(p).latex_dir / "content"
+    3. ∀p: releases_dir(p) = paper_dir(p) / "releases"
+    4. Shared proofs: proofs_dir = papers_dir / "proofs"
+
+    All papers follow these invariants. No exceptions.
+    """
 
     def __init__(self, repo_root: Path):
         self.repo_root = repo_root
         self.scripts_dir = repo_root / "scripts"
         self.papers_dir = repo_root / "docs" / "papers"
-        self.metadata = self._load_metadata()
-        self._validate_prerequisites()
+        self.proofs_dir = self.papers_dir / "proofs"  # Shared across all papers
 
-    def _load_metadata(self) -> dict:
-        """Load papers.yaml metadata."""
+        # Load configuration
+        self._raw_metadata = self._load_raw_metadata()
+        self.arxiv_config = ArxivConfig.from_dict(self._raw_metadata.get("arxiv", {}))
+        self.papers: Dict[str, PaperMeta] = self._load_papers()
+
+        # Captured build output for BUILD_LOG.txt
+        self._lean_build_output: str = ""
+
+        # Validate upfront (fail-loud)
+        self._validate_prerequisites()
+        self._validate_paper_structure()
+
+    def _load_raw_metadata(self) -> dict:
+        """Load raw YAML metadata."""
         metadata_file = self.scripts_dir / "papers.yaml"
         if not metadata_file.exists():
             raise FileNotFoundError(f"papers.yaml not found at {metadata_file}")
         with open(metadata_file) as f:
             return yaml.safe_load(f)
 
+    def _load_papers(self) -> Dict[str, PaperMeta]:
+        """Convert raw YAML to immutable PaperMeta objects."""
+        papers = {}
+        for paper_id, paper_dict in self._raw_metadata.get("papers", {}).items():
+            papers[paper_id] = PaperMeta.from_dict(paper_id, paper_dict)
+        return papers
+
     def _validate_prerequisites(self):
         """Fail loudly if required tools are missing."""
-        required = ["pdflatex", "pandoc", "lake"]
+        required = ["pdflatex", "bibtex", "pandoc", "lake"]
         missing = [cmd for cmd in required if not shutil.which(cmd)]
         if missing:
             raise RuntimeError(
@@ -48,51 +130,139 @@ class PaperBuilder:
                 f"Install with: sudo apt install {' '.join(missing)}"
             )
 
-    def _get_paper_dir(self, paper_id: str) -> Path:
-        """Get paper directory, fail if not found."""
-        if paper_id not in self.metadata["papers"]:
-            raise ValueError(f"Unknown paper: {paper_id}")
-        paper_name = self.metadata["papers"][paper_id]["dir"]
-        paper_dir = self.papers_dir / paper_name
-        if not paper_dir.exists():
-            raise FileNotFoundError(f"Paper directory not found: {paper_dir}")
-        return paper_dir
+    def _validate_paper_structure(self):
+        """Validate structural invariants for all papers."""
+        errors = []
+        for paper_id, meta in self.papers.items():
+            paper_dir = self.papers_dir / meta.dir_name
+            if not paper_dir.exists():
+                errors.append(f"{paper_id}: paper_dir not found: {paper_dir}")
+                continue
 
-    def build_lean(self, paper_id: str):
-        """Build Lean proofs for a paper."""
-        paper_dir = self._get_paper_dir(paper_id)
-        proofs_dir = paper_dir / "proofs"
-        if not proofs_dir.exists():
-            raise FileNotFoundError(f"Proofs directory not found: {proofs_dir}")
+            latex_dir = paper_dir / meta.latex_dir
+            if not latex_dir.exists():
+                errors.append(f"{paper_id}: latex_dir not found: {latex_dir}")
+
+            latex_file = latex_dir / meta.latex_file
+            if not latex_file.exists():
+                errors.append(f"{paper_id}: latex_file not found: {latex_file}")
+
+            content_dir = latex_dir / "content"
+            if not content_dir.exists():
+                errors.append(f"{paper_id}: content_dir not found: {content_dir}")
+
+        if errors:
+            raise ValueError(
+                f"Paper structure validation failed:\n" +
+                "\n".join(f"  - {e}" for e in errors)
+            )
+
+    def _get_paper_meta(self, paper_id: str) -> PaperMeta:
+        """Get paper metadata, fail if not found."""
+        if paper_id not in self.papers:
+            valid = ", ".join(self.papers.keys())
+            raise ValueError(f"Unknown paper: {paper_id}. Valid papers: {valid}")
+        return self.papers[paper_id]
+
+    def _get_paper_dir(self, paper_id: str) -> Path:
+        """Get paper directory path."""
+        meta = self._get_paper_meta(paper_id)
+        return self.papers_dir / meta.dir_name
+
+    def _get_content_dir(self, paper_id: str) -> Path:
+        """Get content directory: paper_dir/latex/content (INVARIANT 2)."""
+        meta = self._get_paper_meta(paper_id)
+        return self.papers_dir / meta.dir_name / meta.latex_dir / "content"
+
+    def _get_releases_dir(self, paper_id: str) -> Path:
+        """Get releases directory, creating if needed (INVARIANT 3)."""
+        releases_dir = self._get_paper_dir(paper_id) / "releases"
+        releases_dir.mkdir(parents=True, exist_ok=True)
+        return releases_dir
+
+    def _discover_content_files(self, paper_id: str) -> List[Path]:
+        """Auto-discover content files from latex/content/ directory."""
+        content_dir = self._get_content_dir(paper_id)
+        # Find all .tex files, sorted by name (ensures consistent order)
+        files = sorted(content_dir.glob("*.tex"))
+        # Filter: skip abstract.tex (handled separately), include numbered files
+        return [f for f in files if f.name != "abstract.tex"]
+
+    def build_lean(self, paper_id: str, verbose: bool = True) -> str:
+        """Build Lean proofs with streaming output. Returns captured output.
+
+        Uses shared proofs directory (docs/papers/proofs/) - INVARIANT 4.
+        Captures output for inclusion in BUILD_LOG.txt.
+        """
+        if not self.proofs_dir.exists():
+            raise FileNotFoundError(
+                f"Shared proofs directory not found: {self.proofs_dir}\n"
+                f"Expected: docs/papers/proofs/ with all paper proof files"
+            )
 
         print(f"[build] Building {paper_id} Lean...")
-        # Try with -R flag if configuration is invalid
-        result = subprocess.run(
-            ["lake", "build"],
-            cwd=proofs_dir,
-            capture_output=True,
-            text=True,
-        )
-        if "compiled configuration is invalid" in result.stderr:
-            print(f"[build] Reconfiguring {paper_id} Lean...")
-            result = subprocess.run(
-                ["lake", "build", "-R"],
-                cwd=proofs_dir,
-                capture_output=True,
-                text=True,
-            )
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"Lean build failed for {paper_id}:\n{result.stderr}"
-            )
-        print(f"[build] {paper_id} Lean complete")
+        print(f"[build]   Directory: {self.proofs_dir.relative_to(self.repo_root)} (shared)")
 
-    def build_latex(self, paper_id: str):
-        """Build LaTeX PDF for a paper."""
+        def run_lake(args: List[str]) -> Tuple[int, List[str]]:
+            """Run lake command with streaming output."""
+            print(f"[build]   Running: lake {' '.join(args)}")
+            process = subprocess.Popen(
+                ["lake"] + args,
+                cwd=self.proofs_dir,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+
+            output_lines: List[str] = []
+            if process.stdout is not None:
+                for line in process.stdout:
+                    output_lines.append(line)
+                    if verbose:
+                        print(f"         {line}", end="", flush=True)
+                    elif "Building" in line or "Compiling" in line:
+                        print(".", end="", flush=True)
+
+            process.wait()
+            if not verbose:
+                print()
+            return (process.returncode, output_lines)
+
+        # Build proofs
+        returncode, output = run_lake(["build"])
+        output_text = "".join(output)
+
+        # Handle stale cache
+        if "compiled configuration is invalid" in output_text:
+            print(f"[build]   Reconfiguring (stale cache detected)...")
+            returncode, output = run_lake(["build", "-R"])
+            output_text = "".join(output)
+
+        if returncode != 0:
+            if not verbose:
+                print("[build]   lake output (last 200 lines):")
+                for line in output_text.splitlines()[-200:]:
+                    print(f"         {line}")
+            raise RuntimeError(
+                f"Lean build failed for {paper_id} (exit code {returncode})"
+            )
+
+        # Store for BUILD_LOG.txt
+        self._lean_build_output = output_text
+        print(f"[build] ✓ {paper_id} Lean complete")
+        return output_text
+
+    def build_latex(self, paper_id: str, verbose: bool = False):
+        """Build LaTeX PDF for a paper and copy to releases/.
+
+        Runs full build cycle: pdflatex → bibtex → pdflatex → pdflatex
+        to resolve citations and cross-references.
+        """
+        meta = self._get_paper_meta(paper_id)
         paper_dir = self._get_paper_dir(paper_id)
-        paper_meta = self.metadata["papers"][paper_id]
-        latex_dir = paper_dir / paper_meta["latex_dir"]
-        latex_file = latex_dir / paper_meta["latex_file"]
+        latex_dir = paper_dir / meta.latex_dir
+        latex_file = latex_dir / meta.latex_file
 
         if not latex_file.exists():
             raise FileNotFoundError(f"LaTeX file not found: {latex_file}")
@@ -100,90 +270,136 @@ class PaperBuilder:
         self._update_paper_date(latex_file)
 
         print(f"[build] Building {paper_id} LaTeX...")
-        result = subprocess.run(
-            ["pdflatex", "-interaction=nonstopmode", latex_file.name],
-            cwd=latex_dir,
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            print(f"[build] LaTeX build had warnings/errors (continuing)")
-        print(f"[build] {paper_id} PDF → {latex_dir.relative_to(self.repo_root)}")
+
+        # Full build cycle for proper citation/reference resolution
+        aux_name = latex_file.stem
+        build_steps = [
+            (["pdflatex", "-interaction=nonstopmode", latex_file.name], "pdflatex (1/3)"),
+            (["bibtex", aux_name], "bibtex"),
+            (["pdflatex", "-interaction=nonstopmode", latex_file.name], "pdflatex (2/3)"),
+            (["pdflatex", "-interaction=nonstopmode", latex_file.name], "pdflatex (3/3)"),
+        ]
+
+        for cmd, step_name in build_steps:
+            if verbose:
+                print(f"[build]   Running: {step_name}")
+            result = subprocess.run(
+                cmd,
+                cwd=latex_dir,
+                capture_output=True,
+                text=True,
+                encoding="latin-1",
+                errors="replace",
+            )
+            # bibtex returns non-zero if no citations, which is fine
+            if result.returncode != 0 and "bibtex" not in cmd[0]:
+                if verbose:
+                    if result.stdout:
+                        print(result.stdout)
+                print(f"[build] {step_name} had warnings/errors (exit {result.returncode})")
+
+        # Copy PDF to releases/ (INVARIANT 3)
+        pdf_name = latex_file.stem + ".pdf"
+        pdf_src = latex_dir / pdf_name
+        if pdf_src.exists():
+            releases_dir = self._get_releases_dir(paper_id)
+            pdf_dest = releases_dir / f"{paper_id}.pdf"
+            shutil.copy2(pdf_src, pdf_dest)
+            print(f"[build] ✓ {paper_id}.pdf → releases/")
 
     def build_markdown(self, paper_id: str):
-        """Build Markdown version of a paper."""
-        paper_dir = self._get_paper_dir(paper_id)
-        paper_meta = self.metadata["papers"][paper_id]
-        content_dir = paper_dir / "shared" / "content"
-        out_dir = paper_dir / "markdown"
-        out_file = out_dir / f"{paper_meta['dir']}.md"
+        """Build Markdown version of a paper.
+
+        Uses INVARIANT 2: content is at paper_dir/latex/content/
+        Content files are auto-discovered, not hardcoded.
+        """
+        meta = self._get_paper_meta(paper_id)
+        content_dir = self._get_content_dir(paper_id)
+        out_dir = self._get_paper_dir(paper_id) / "markdown"
+        out_file = out_dir / f"{meta.dir_name}.md"
 
         if not content_dir.exists():
-            print(f"[build-md] Skipping {paper_id}: no shared/content directory")
+            print(f"[build-md] Skipping {paper_id}: content_dir not found: {content_dir}")
             return
 
         out_dir.mkdir(parents=True, exist_ok=True)
+        print(f"[build-md] Building {paper_id}: {meta.name}...")
 
-        print(f"[build-md] Building {paper_id}: {paper_meta['name']}...")
+        # Auto-discover content files
+        content_files = self._discover_content_files(paper_id)
+        self._build_markdown_file(meta, content_dir, content_files, out_file)
 
-        # Build markdown from content files
-        self._build_markdown_file(
-            paper_meta, content_dir, out_file
-        )
+        # Also copy to releases/ for arxiv package
+        releases_dir = self._get_releases_dir(paper_id)
+        shutil.copy2(out_file, releases_dir / out_file.name)
         print(f"[build-md] {paper_id} → {out_file.relative_to(self.repo_root)}")
 
     def _build_markdown_file(
-        self, meta: dict, content_dir: Path, out_file: Path
+        self, meta: PaperMeta, content_dir: Path, content_files: List[Path], out_file: Path
     ):
         """Generate markdown file from LaTeX content."""
         with open(out_file, "w") as f:
             # Header
-            f.write(f"# Paper: {meta['full_name']}\n\n")
+            f.write(f"# Paper: {meta.full_name}\n\n")
             f.write(
                 f"**Status**: TOPLAS-ready | "
-                f"**Lean**: {meta['lean_lines']} lines, "
-                f"{meta['lean_theorems']} theorems, "
-                f"{meta['lean_sorry']} sorry\n\n---\n\n"
+                f"**Lean**: {meta.lean_lines} lines, "
+                f"{meta.lean_theorems} theorems, "
+                f"{meta.lean_sorry} sorry\n\n---\n\n"
             )
 
             # Abstract
             f.write("## Abstract\n\n")
             abstract_file = content_dir / "abstract.tex"
             if abstract_file.exists():
-                self._convert_latex_to_markdown(abstract_file, f)
+                self._convert_latex_to_markdown(abstract_file, f, extract_env="abstract")
             else:
                 f.write("_Abstract not available._\n\n")
 
-            # Content sections
-            for content_file in meta["content_files"]:
-                content_path = content_dir / content_file
-                if content_path.exists():
-                    self._convert_latex_to_markdown(content_path, f)
-                else:
-                    print(f"[build-md] Warning: missing {content_file}")
+            # Content sections (auto-discovered)
+            for content_path in content_files:
+                self._convert_latex_to_markdown(content_path, f)
 
             # Footer
             f.write("\n\n---\n\n## Machine-Checked Proofs\n\n")
             f.write(f"All theorems are formalized in Lean 4:\n")
-            f.write(f"- Location: `docs/papers/{meta['dir']}/proofs/`\n")
-            f.write(f"- Lines: {meta['lean_lines']}\n")
-            f.write(f"- Theorems: {meta['lean_theorems']}\n")
-            f.write(f"- Sorry placeholders: {meta['lean_sorry']}\n")
+            f.write(f"- Location: `docs/papers/proofs/{meta.paper_id}_*.lean`\n")
+            f.write(f"- Lines: {meta.lean_lines}\n")
+            f.write(f"- Theorems: {meta.lean_theorems}\n")
+            f.write(f"- Sorry placeholders: {meta.lean_sorry}\n")
 
-    def _convert_latex_to_markdown(self, tex_file: Path, out_file):
-        """Convert LaTeX file to Markdown using pandoc."""
-        result = subprocess.run(
-            [
-                "pandoc",
-                str(tex_file),
-                "-f", "latex",
-                "-t", "markdown",
-                "--wrap=none",
-                "--columns=100",
-            ],
-            capture_output=True,
-            text=True,
-        )
+    def _convert_latex_to_markdown(self, tex_file: Path, out_file, extract_env: str | None = None):
+        """Convert LaTeX file to Markdown using pandoc.
+
+        Args:
+            tex_file: Path to .tex file
+            out_file: Output file handle
+            extract_env: If set, extract content from \\begin{env}...\\end{env} first
+        """
+        import re
+
+        if extract_env:
+            # Extract content from environment before converting
+            content = tex_file.read_text(encoding='utf-8')
+            pattern = rf'\\begin\{{{extract_env}\}}(.*?)\\end\{{{extract_env}\}}'
+            match = re.search(pattern, content, re.DOTALL)
+            if not match:
+                out_file.write(f"_Content not found in {tex_file.name}_\n\n")
+                return
+            latex_input = match.group(1).strip()
+            result = subprocess.run(
+                ["pandoc", "-f", "latex", "-t", "markdown", "--wrap=none", "--columns=100"],
+                input=latex_input,
+                capture_output=True,
+                text=True,
+            )
+        else:
+            result = subprocess.run(
+                ["pandoc", str(tex_file), "-f", "latex", "-t", "markdown", "--wrap=none", "--columns=100"],
+                capture_output=True,
+                text=True,
+            )
+
         if result.returncode == 0 and result.stdout:
             out_file.write(result.stdout)
             out_file.write("\n\n")
@@ -191,30 +407,250 @@ class PaperBuilder:
             out_file.write(f"_Failed to convert {tex_file.name}_\n\n")
 
     def _update_paper_date(self, tex_file: Path):
-        """Update publication date in LaTeX file."""
+        """Update publication date in LaTeX file using regex for correct replacement."""
+        import re
         today = datetime.now().strftime("%B %-d, %Y")
         year = datetime.now().strftime("%Y")
-        content = tex_file.read_text()
-        content = content.replace(r"\date{", f"\\date{{{today}}}")
-        content = content.replace(r"\copyrightyear{", f"\\copyrightyear{{{year}}}")
-        content = content.replace(r"\acmYear{", f"\\acmYear{{{year}}}")
-        tex_file.write_text(content)
+        try:
+            content = tex_file.read_text(encoding='utf-8')
+        except UnicodeDecodeError:
+            content = tex_file.read_text(encoding='latin-1')
 
-    def build_all(self, build_type: str = "all"):
+        # Use regex to replace entire \date{...} command, not just the prefix
+        content = re.sub(r'\\date\{[^}]*\}', f'\\\\date{{{today}}}', content)
+        content = re.sub(r'\\copyrightyear\{[^}]*\}', f'\\\\copyrightyear{{{year}}}', content)
+        content = re.sub(r'\\acmYear\{[^}]*\}', f'\\\\acmYear{{{year}}}', content)
+        tex_file.write_text(content, encoding='utf-8')
+
+    def package_arxiv(self, paper_id: str):
+        """
+        Package paper for arXiv submission.
+
+        Includes:
+        - PDF (compiled paper)
+        - Markdown (full text for LLM consumption)
+        - Lean proofs (source code)
+        - BUILD_LOG.txt (actual lake build output as compilation proof)
+        """
+        # Phase 1: Validate all required files exist (fail-loud)
+        pdf_file = self._validate_and_get_pdf(paper_id)
+        md_file = self._validate_and_get_markdown(paper_id)
+        self._validate_proofs_exist()
+
+        # Phase 2: Create staging directory in releases/
+        releases_dir = self._get_releases_dir(paper_id)
+        package_dir = releases_dir / "arxiv_package"
+        if package_dir.exists():
+            shutil.rmtree(package_dir)
+        package_dir.mkdir(parents=True)
+
+        print(f"[arxiv] Packaging {paper_id}...")
+
+        # Phase 3: Copy artifacts
+        self._copy_pdf(pdf_file, package_dir)
+        self._copy_markdown(md_file, package_dir)
+        self._copy_lean_proofs(paper_id, package_dir)
+
+        if self.arxiv_config.include_build_log:
+            self._create_build_log(paper_id, package_dir)
+
+        # Phase 4: Create compressed archive
+        tar_path = self._create_archive(paper_id, package_dir)
+
+        print(f"[arxiv] {paper_id} → {tar_path.relative_to(self.repo_root)}")
+        return tar_path
+
+    def _validate_and_get_pdf(self, paper_id: str) -> Path:
+        """Validate PDF exists and return path. Fail-loud if missing."""
+        meta = self._get_paper_meta(paper_id)
+        paper_dir = self._get_paper_dir(paper_id)
+        latex_dir = paper_dir / meta.latex_dir
+        pdfs = list(latex_dir.glob("*.pdf"))
+
+        if not pdfs:
+            raise FileNotFoundError(
+                f"[arxiv] FATAL: No PDF found in {latex_dir}\n"
+                f"  Paper: {meta.name}\n"
+                f"  Run: python3 scripts/build_papers.py latex {paper_id}"
+            )
+        return pdfs[0]
+
+    def _validate_and_get_markdown(self, paper_id: str) -> Path:
+        """Validate Markdown exists and return path. Fail-loud if missing."""
+        meta = self._get_paper_meta(paper_id)
+        paper_dir = self._get_paper_dir(paper_id)
+        md_file = paper_dir / "markdown" / f"{meta.dir_name}.md"
+
+        if not md_file.exists():
+            raise FileNotFoundError(
+                f"[arxiv] FATAL: Markdown not found: {md_file}\n"
+                f"  Paper: {meta.name}\n"
+                f"  Run: python3 scripts/build_papers.py markdown {paper_id}"
+            )
+        return md_file
+
+    def _validate_proofs_exist(self) -> None:
+        """Validate shared proofs directory exists. Fail-loud if missing."""
+        if not self.proofs_dir.exists():
+            raise FileNotFoundError(
+                f"[arxiv] FATAL: Shared proofs directory not found: {self.proofs_dir}\n"
+                f"  Expected: docs/papers/proofs/"
+            )
+
+    def _copy_pdf(self, pdf_file: Path, package_dir: Path) -> None:
+        """Copy PDF to package directory."""
+        pdf_dest = package_dir / pdf_file.name
+        shutil.copy2(pdf_file, pdf_dest)
+        print(f"[arxiv]   PDF: {pdf_file.name}")
+
+    def _copy_markdown(self, md_file: Path, package_dir: Path) -> None:
+        """Copy Markdown to package directory."""
+        md_dest = package_dir / md_file.name
+        shutil.copy2(md_file, md_dest)
+        print(f"[arxiv]   Markdown: {md_file.name}")
+
+    def _copy_lean_proofs(self, paper_id: str, package_dir: Path) -> None:
+        """Copy Lean proofs for specific paper to package directory."""
+        lean_dest = package_dir / "proofs"
+        lean_dest.mkdir(parents=True, exist_ok=True)
+
+        # Copy only files for this paper (paper{N}_*.lean) + config files
+        paper_files = list(self.proofs_dir.glob(f"{paper_id}_*.lean"))
+        config_files = [
+            self.proofs_dir / "lakefile.lean",
+            self.proofs_dir / "lean-toolchain",
+            self.proofs_dir / "lake-manifest.json",
+        ]
+
+        for f in paper_files:
+            shutil.copy2(f, lean_dest / f.name)
+        for f in config_files:
+            if f.exists():
+                shutil.copy2(f, lean_dest / f.name)
+
+        print(f"[arxiv]   Lean proofs: {len(paper_files)} files")
+
+    def _create_build_log(self, paper_id: str, package_dir: Path) -> None:
+        """
+        Create BUILD_LOG.txt with ACTUAL lake build output as compilation proof.
+        This is the mathematical evidence that proofs compile.
+        """
+        meta = self._get_paper_meta(paper_id)
+        log_file = package_dir / "BUILD_LOG.txt"
+
+        # Paper-specific proof files
+        paper_lean_files = list(self.proofs_dir.glob(f"{paper_id}_*.lean"))
+        lean_toolchain = self.proofs_dir / "lean-toolchain"
+        toolchain_version = lean_toolchain.read_text().strip() if lean_toolchain.exists() else "unknown"
+
+        log_content = f"""OpenHCS Paper Build Log
+========================
+
+Paper: {paper_id} - {meta.full_name}
+Package Date: {datetime.now().isoformat()}
+Lean Toolchain: {toolchain_version}
+
+Proof Statistics:
+-----------------
+Lean Files: {len(paper_lean_files)}
+Lines of Code: {meta.lean_lines}
+Theorems: {meta.lean_theorems}
+Sorry Placeholders: {meta.lean_sorry}
+
+Proof Files:
+------------
+"""
+        for f in sorted(paper_lean_files):
+            log_content += f"  - {f.name}\n"
+
+        # Include actual lake build output if available
+        if self._lean_build_output:
+            log_content += f"""
+================================================================================
+COMPILATION OUTPUT (lake build)
+================================================================================
+
+{self._lean_build_output}
+
+================================================================================
+END COMPILATION OUTPUT
+================================================================================
+"""
+        else:
+            log_content += """
+Note: Run 'python3 scripts/build_papers.py release' to include compilation output.
+"""
+
+        log_content += f"""
+Build Instructions:
+-------------------
+To verify the proofs compile:
+
+  cd proofs/
+  lake build
+
+All theorems will be machine-verified if compilation succeeds.
+
+Repository: https://github.com/trissim/openhcs
+"""
+
+        log_file.write_text(log_content)
+        print(f"[arxiv]   Build log: BUILD_LOG.txt (with compilation output)")
+
+    def _create_archive(self, paper_id: str, package_dir: Path) -> Path:
+        """Create compressed tar.gz archive of package in releases/."""
+        import tarfile
+
+        meta = self._get_paper_meta(paper_id)
+        releases_dir = self._get_releases_dir(paper_id)
+
+        tar_name = f"{meta.dir_name}_arxiv.tar.gz"
+        tar_path = releases_dir / tar_name
+
+        with tarfile.open(tar_path, "w:gz") as tar:
+            tar.add(package_dir, arcname=meta.dir_name)
+
+        return tar_path
+
+    def release(self, paper_id: str, verbose: bool = True):
+        """Full release build: Lean + LaTeX + Markdown + arXiv package."""
+        meta = self._get_paper_meta(paper_id)
+        print(f"\n{'='*60}")
+        print(f"[release] Building {paper_id}: {meta.name}")
+        print(f"{'='*60}\n")
+
+        # Build in order: Lean → LaTeX → Markdown → Package
+        self.build_lean(paper_id, verbose=verbose)
+        self.build_latex(paper_id, verbose=verbose)
+        self.build_markdown(paper_id)
+        self.package_arxiv(paper_id)
+
+        releases_dir = self._get_releases_dir(paper_id)
+        print(f"\n[release] ✓ {paper_id} complete → {releases_dir.relative_to(self.repo_root)}/")
+
+    def build_all(self, build_type: str = "all", verbose: bool = True):
         """Build all papers of specified type."""
-        paper_ids = list(self.metadata["papers"].keys())
+        paper_ids = list(self.papers.keys())
+
+        if build_type == "release":
+            for paper_id in paper_ids:
+                try:
+                    self.release(paper_id, verbose=verbose)
+                except Exception as e:
+                    print(f"[release] ERROR {paper_id}: {e}")
+            return
 
         if build_type in ("all", "lean"):
             for paper_id in paper_ids:
                 try:
-                    self.build_lean(paper_id)
+                    self.build_lean(paper_id, verbose=verbose)
                 except Exception as e:
                     print(f"[build] ERROR: {e}")
 
         if build_type in ("all", "latex"):
             for paper_id in paper_ids:
                 try:
-                    self.build_latex(paper_id)
+                    self.build_latex(paper_id, verbose=verbose)
                 except Exception as e:
                     print(f"[build] ERROR: {e}")
 
@@ -225,39 +661,77 @@ class PaperBuilder:
                 except Exception as e:
                     print(f"[build-md] ERROR: {e}")
 
+        if build_type in ("all", "arxiv"):
+            for paper_id in paper_ids:
+                try:
+                    self.package_arxiv(paper_id)
+                except Exception as e:
+                    print(f"[arxiv] ERROR: {e}")
+
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Unified TOPLAS paper builder"
+        description="Unified paper builder",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python scripts/build_papers.py release           # Full release build for all papers
+  python scripts/build_papers.py release paper1    # Full release for paper1 only
+  python scripts/build_papers.py lean paper1 -v    # Build Paper 1 Lean proofs (verbose)
+  python scripts/build_papers.py latex paper2      # Build Paper 2 LaTeX
+"""
     )
     parser.add_argument(
         "build_type",
         nargs="?",
-        default="all",
-        choices=["all", "lean", "latex", "markdown"],
-        help="What to build",
+        default="release",
+        choices=["release", "all", "lean", "latex", "markdown", "arxiv"],
+        help="What to build (default: release)",
     )
     parser.add_argument(
         "paper",
         nargs="?",
         default="all",
-        help="Which paper (paper1-5 or all)",
+        help="Which paper: paper1, paper2, paper3, paper4, paper5, or all (default: all)",
+    )
+    parser.add_argument(
+        "-v", "--verbose",
+        action="store_true",
+        help="Show detailed output from build commands",
+    )
+    parser.add_argument(
+        "-q", "--quiet",
+        action="store_true",
+        help="Minimal output (errors only)",
     )
 
     args = parser.parse_args()
     repo_root = Path(__file__).parent.parent
 
+    # Determine verbosity:
+    # - Explicit -q wins (quiet)
+    # - Otherwise default to verbose for release/lean so build output is streamed
+    # - -v always forces verbose
+    if args.quiet:
+        verbose = False
+    else:
+        verbose = args.verbose or args.build_type in ("release", "lean")
+
     try:
         builder = PaperBuilder(repo_root)
         if args.paper == "all":
-            builder.build_all(args.build_type)
+            builder.build_all(args.build_type, verbose=verbose)
         else:
-            if args.build_type in ("all", "lean"):
-                builder.build_lean(args.paper)
+            if args.build_type == "release":
+                builder.release(args.paper, verbose=verbose)
+            elif args.build_type in ("all", "lean"):
+                builder.build_lean(args.paper, verbose=verbose)
             if args.build_type in ("all", "latex"):
-                builder.build_latex(args.paper)
+                builder.build_latex(args.paper, verbose=verbose)
             if args.build_type in ("all", "markdown"):
                 builder.build_markdown(args.paper)
+            if args.build_type in ("all", "arxiv"):
+                builder.package_arxiv(args.paper)
     except Exception as e:
         print(f"[build] FATAL: {e}", file=sys.stderr)
         sys.exit(1)
@@ -265,4 +739,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

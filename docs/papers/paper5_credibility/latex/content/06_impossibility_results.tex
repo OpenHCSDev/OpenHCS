@@ -1,0 +1,41 @@
+\section{Impossibility Results}\label{impossibility-results}
+
+\subsection{The Text Credibility
+Bound}\label{the-text-credibility-bound}
+
+\begin{theorem}[Text Credibility Bound]\label{thm:text-bound}
+For any text string $T$ (memory content, assertion, etc.) and high-magnitude
+claim $c$ with $M(c) > M^*$ (i.e., prior $p < e^{-M^*}$):
+\[\Pr[c \mid T] < \tau\]
+where $\tau < 1$ is determined by the mimicability $q$ and $M^*$.
+No text achieves full credibility for exceptional claims.
+\end{theorem}
+
+\begin{proof}
+Text is cheap talk (production cost independent of truth). Apply
+Theorem~\ref{thm:cheap-talk-bound} with prior $p = e^{-M^*}$ and mimicability $q$:
+\[
+\tau = \frac{p}{p + (1-p)q} = \frac{e^{-M^*}}{e^{-M^*} + (1 - e^{-M^*})q}
+\]
+For $M^*$ large (low prior probability), $\tau \to 0$ regardless of $q > 0$.
+\end{proof}
+
+\textbf{Corollary 5.2 (Memory Iteration Futility).} No rephrasing of
+memory content can achieve credibility above \(\tau\) for high-magnitude
+claims. Iteration on text is bounded in effectiveness.
+
+\textbf{Interpretation:} This is why we couldn't solve the credibility
+problem by editing memory text. The \emph{structure} of the problem
+(text is cheap talk, claims are high-magnitude) guarantees bounded
+credibility regardless of phrasing.
+
+\subsection{Optimal Strategies}\label{optimal-strategies}
+
+\textbf{Theorem 5.3 (Optimal Credibility Strategy).} For high-magnitude
+claims, the credibility-maximizing strategy is: 1. Minimize cheap talk
+(reduce emphasis, meta-assertions) 2. Maximize costly signal exposure
+(show the work, provide proofs) 3. Enable real-time demonstration
+(costly to fake)
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+

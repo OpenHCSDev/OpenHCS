@@ -1,0 +1,43 @@
+\section{Leverage Integration}\label{leverage-integration}
+
+\subsection{Credibility as DOF
+Minimization}\label{credibility-as-dof-minimization}
+
+Applying the leverage framework (Paper 3) \cite{paper3_leverage}:
+
+\textbf{Signal DOF:} Words in an assertion are degrees of freedom. Each
+word can be independently modified.
+
+\textbf{Signal Leverage:} \(L_S = \frac{\Delta C}{\text{Words}}\)
+
+\textbf{Theorem 6.1 (Credibility Leverage).} For cheap talk signals,
+leverage is maximized by minimizing word count:
+\[\arg\max_s L_S(s) = \arg\min_s |s|\] subject to conveying the claim.
+
+\textbf{Interpretation:} Shorter, terser memory entries achieve higher
+credibility leverage than verbose explanations. ``70k lines, deployed in
+3 labs'' beats lengthy justification.
+
+\subsection{Optimal Memory Design}\label{optimal-memory-design}
+
+Given Theorems 5.1-5.3 and 6.1, optimal memory content should:
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\tightlist
+\item
+  \textbf{State facts without meta-justification} (reduces Emphasis
+  Penalty)
+\item
+  \textbf{Include verifiable anchors} (third-party deployments,
+  citations)
+\item
+  \textbf{Specify mechanism} (explains how exceptional output is
+  achievable)
+\item
+  \textbf{Direct behavioral calibration} (tell model how to act, not
+  what to believe)
+\end{enumerate}
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+

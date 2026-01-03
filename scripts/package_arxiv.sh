@@ -103,8 +103,8 @@ package_paper() {
         --exclude='*.toc' \
         .)
 
-    # Also drop a copy into each paper's release folder for convenience
-    local release_dir="$paper_dir/release"
+    # Also drop a copy into each paper's releases folder for convenience
+    local release_dir="$paper_dir/releases"
     mkdir -p "$release_dir"
     local release_name
     case "$name" in

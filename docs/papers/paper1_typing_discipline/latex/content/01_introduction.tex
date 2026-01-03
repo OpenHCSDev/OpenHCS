@@ -1,0 +1,281 @@
+\section{Introduction}\label{introduction}
+
+\subsection{The Classification Problem}\label{the-classification-problem}
+
+Every formal system that classifies entities faces a fundamental architectural decision: which dimensions (axes) of classification to employ. Type systems choose between nominal and structural axes. Ontologies choose between taxonomic and mereological axes. Database schemas choose between relational and hierarchical axes.
+
+This paper proves that this choice has unavoidable mathematical consequences. Specifically:
+
+\begin{enumerate}
+\item \textbf{Fixed axis sets guarantee incompleteness.} For any axis set $A$, there exist domains requiring axes outside $A$. No implementation within $A$ can answer these domains' queries---the information does not exist.
+\item \textbf{Parameterized axis sets achieve universality.} A classification system that parameterizes over axes can serve any domain by instantiating the required axes.
+\item \textbf{The asymmetry is absolute.} Fixed systems fail for some domain (guaranteed). Parameterized systems succeed for all domains (guaranteed). This is not a tradeoff; it is strict dominance.
+\end{enumerate}
+
+\subsection{Scope: From Type Theory to Classification Theory}\label{scope-from-type-theory}
+
+This paper began as a type theory contribution, proving that nominal typing strictly dominates structural typing when inheritance exists. But the proof techniques are not type-specific. The impossibility theorems rest on:
+\begin{itemize}
+\item Domains as sets of queries requiring specific information
+\item Axes as orthogonal dimensions of classification
+\item Completeness as the ability to answer all queries in a domain
+\end{itemize}
+
+These concepts instantiate to type systems, but equally to any classification scheme. We therefore present the results at two levels:
+\begin{enumerate}
+\item \textbf{The universal claim} (Section 3): Classification systems with fixed axes are incomplete for some domain.
+\item \textbf{The type system instantiation} (Sections 4--5): For programming languages with inheritance, $(B, S)$ is the unique minimal complete axis set.
+\end{enumerate}
+
+The type system results are one case study. The impossibility theorems are universal.
+
+\subsection{Metatheoretic Foundations}\label{metatheoretic-foundations}
+
+This work follows the tradition of Liskov \& Wing~\cite{liskov1994behavioral}, who formalized correctness criteria for subtyping. Where Liskov \& Wing asked ``what makes subtyping \emph{correct}?'', we ask a more fundamental question: ``what makes \emph{any classification scheme} complete for its domain?''
+
+Our contribution is not recommending specific classification axes, but proving that the choice is \emph{determined} by domain requirements. We develop a framework where:
+\begin{itemize}
+\item The required axes are \emph{computable} from domain queries
+\item Missing axes cause \emph{impossibility}, not difficulty
+\item All minimal complete axis sets have \emph{equal cardinality} (dimension is well-defined)
+\end{itemize}
+
+\subsection{Overview}\label{overview}
+
+All results are machine-checked in Lean 4 (2700+ lines, 142+ theorems, 0 \texttt{sorry} placeholders).
+
+We develop a metatheory applicable to any classification system. The core insight: every such system is characterized by which axes it employs. For type systems, these are $(B, S)$ (Bases and Namespace); for hierarchical configuration, $(B, S, H)$ adds a Scope axis. These axes form a lattice: $\emptyset < S < (B,S) < (B,S,H)$, where each increment strictly dominates the previous.
+
+\textbf{The pay-as-you-go principle:} Each axis increment adds capabilities without cognitive load increase until those capabilities are invoked. Duck typing uses $\emptyset$; structural uses $S$; nominal uses $(B,S)$ with the same API; scoped resolution uses $(B,S,H)$ with one optional parameter.
+
+The model formalizes what programmers intuitively understand but rarely make explicit:
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\tightlist
+\item
+  \textbf{Universal dominance} (Theorem 3.4): For languages with explicit
+  inheritance (\texttt{bases} axis), nominal typing Pareto-dominates
+  structural typing in greenfield development (provides strictly more
+  capabilities with zero tradeoffs). Structural typing loses nothing only
+  when \texttt{bases\ =\ {[}{]}} universally (e.g., Go); in retrofit scenarios
+  it remains a sacrifice, not an alternative. The decision is \textbf{derived} from
+  capability analysis, not preference.
+\item
+  \textbf{Complexity separation} (Theorem 4.3): Nominal typing achieves
+  O(1) error localization; duck typing requires $\Omega(n)$ call-site
+  inspection.
+\item
+  \textbf{Provenance impossibility} (Corollary 6.3): Duck typing cannot
+  answer ``which type provided this value?'' because structurally
+  equivalent objects are indistinguishable by definition.
+  Machine-checked in Lean 4.
+\end{enumerate}
+
+These theorems yield four measurable code quality metrics:
+
+\small
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep) * \real{0.2162}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep) * \real{0.4865}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep) * \real{0.2973}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Metric
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+What it measures
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Indicates
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+Duck typing density & \texttt{hasattr()} per KLOC & Discipline
+violations (duck typing is incoherent per Theorem 2.10d; other
+\texttt{getattr()} / \texttt{AttributeError} patterns may be valid
+metaprogramming) \\
+Nominal typing ratio & \texttt{isinstance()} + ABC registrations per
+KLOC & Explicit type contracts \\
+Provenance capability & Presence of ``which type provided this'' queries
+& System requires nominal typing \\
+Resolution determinism & MRO-based dispatch vs runtime probing & O(1) vs
+$\Omega(n)$ error localization \\
+\end{longtable}
+
+The methodology is validated through case studies from OpenHCS~\cite{openhcs2025}, a
+production bioimage analysis platform. The system's architecture exposed
+the formal necessity of nominal typing through patterns ranging from
+metaclass auto-registration to bidirectional type registries. A
+migration from duck typing to nominal contracts (PR \#44~\cite{openhcsPR44}) eliminated 47
+scattered \texttt{hasattr()} checks and consolidated dispatch logic into
+explicit ABC contracts.
+
+\subsection{Contributions}\label{contributions}
+
+This paper makes five contributions, ordered from most general to most specific:
+
+\textbf{1. Impossibility Theorems for Fixed Classification (Section 3):}
+\begin{itemize}
+\item \textbf{Fixed Axis Incompleteness:} Any classification system with fixed axes is incomplete for some domain. This is information-theoretic: the data required to answer the domain's queries does not exist in the fixed axis set.
+\item \textbf{Uniqueness of Minimal Complete Sets:} All minimal complete axis sets for a domain have equal cardinality. Dimension is well-defined for classification problems.
+\item \textbf{Minimality $\Rightarrow$ Orthogonality:} Every minimal complete axis set is orthogonal. Redundant (non-orthogonal) systems are never minimal.
+\item \textbf{Parameterized Dominance:} Axis-parameterized classification systems strictly dominate fixed systems. The gap is not a tradeoff; it is absolute.
+\end{itemize}
+These theorems apply to \emph{any} classification system: type systems, ontologies, taxonomies, schemas.
+
+\textbf{2. Type System Instantiation (Sections 4--5):}
+\begin{itemize}
+\item \textbf{Theorem 3.32 (Model Completeness):} $(B, S)$ captures all runtime-available type information for class-based systems.
+\item \textbf{Theorem 3.13 (Provenance Impossibility):} No system without $B$ can compute provenance. This is not a limitation of specific implementations; it is information-theoretic impossibility.
+\item \textbf{Theorem 3.24 (Complexity Lower Bound):} Duck typing requires $\Omega(n)$ error localization. Nominal typing achieves $O(1)$. The gap is unbounded.
+\item \textbf{Theorem 3.5:} Nominal typing strictly dominates structural typing when $B \neq \emptyset$.
+\end{itemize}
+
+\textbf{3. Axis-Parametric Extension:}
+\begin{itemize}
+\item \textbf{Theorem 3.82 (Axis Capability Monotonicity):} Adding an independent axis strictly increases capabilities.
+\item \textbf{Theorem 3.85 (Completeness Uniqueness):} For any domain, the minimal complete axis set is unique.
+\item \textbf{Theorem 3.86 (Axis Derivation Algorithm):} The minimal axis set is computable from domain requirements.
+\item \textbf{OpenHCS instantiation:} For hierarchical configuration (scope chains), a third axis $H$ is derived. The result $(B, S, H)$ enables click-to-provenance across windows.
+\end{itemize}
+
+\textbf{4. Metatheoretic Foundations (Section 2):}
+\begin{itemize}
+\item The axis lattice framework for capability analysis
+\item Theorem 2.15 (Axis Lattice Dominance): capability monotonicity under axis subset ordering
+\item The pay-as-you-go principle: axes add capability without cost until invoked
+\end{itemize}
+
+\textbf{5. Machine-checked Verification (Section 6):}
+\begin{itemize}
+\item 2700+ lines of Lean 4 proofs across five modules
+\item 142+ theorems/lemmas with \textbf{zero \texttt{sorry} placeholders}
+\item Formalized $O(1)$ vs $\Omega(n)$ complexity separation with adversary-based lower bound
+\item Universal extension to 8 languages (Java, C\#, Rust, TypeScript, Kotlin, Swift, Scala, C++)
+\end{itemize}
+
+\textbf{6. Empirical Validation (Section 5):}
+\begin{itemize}
+\item 13 case studies from OpenHCS (45K LoC production Python codebase)
+\item Demonstrates theoretical predictions align with real-world architectural decisions
+\item Four derivable code quality metrics (DTD, NTR, PC, RD)
+\end{itemize}
+
+\subsubsection{Empirical Context:
+OpenHCS}\label{empirical-context-openhcs}
+
+\textbf{What it does:} OpenHCS is a bioimage analysis platform.
+Pipelines are compiled before execution. Errors surface at definition
+time, not after processing starts. The GUI and Python code are
+interconvertible: design in GUI, export to code, edit, re-import.
+Changes to parent config propagate automatically to all child windows.
+
+\textbf{Why it matters for this paper:} The system requires knowing
+\emph{which type} provided a value, not just \emph{what} the value is.
+Dual-axis resolution walks both the context hierarchy (global
+\(\rightarrow\) plate \(\rightarrow\) step) and the class hierarchy
+(MRO) simultaneously. Every resolved value carries provenance: (value,
+source\_scope, source\_type). This is only possible with nominal
+typing. Duck typing cannot answer ``which type provided this?''
+
+\textbf{Key architectural patterns (detailed in Section 5):}
+\begin{itemize}
+\item \texttt{@auto\_create\_decorator} $\rightarrow$ \texttt{@global\_pipeline\_config} cascade: one decorator spawns a 5-stage type transformation (Case Study 7)
+\item Dual-axis resolver: MRO \emph{is} the priority system. No custom priority function exists (Case Study 8)
+\item Bidirectional type registries: single source of truth with \texttt{type()} identity as key (Case Study 13)
+\end{itemize}
+
+\subsubsection{Decision Procedure, Not
+Preference}\label{decision-procedure-not-preference}
+
+The contribution of this paper is not the theorems alone, but their
+consequence: typing discipline selection becomes a decision procedure.
+Given requirements, the discipline is derived.
+
+\textbf{Implications:}
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\item
+  \textbf{Pedagogy.} Architecture courses should not teach ``pick the
+  style that feels Pythonic.'' They should teach how to derive the
+  correct discipline from requirements. This is engineering, not taste.
+\item
+  \textbf{AI code generation.} LLMs can apply the decision procedure.
+  ``Given requirements R, apply Algorithm 1, emit code with the derived
+  discipline'' is an objective correctness criterion. The model either
+  applies the procedure correctly or it does not.
+\item
+  \textbf{Language design.} Future languages could enforce discipline
+  based on declared requirements. A \texttt{@requires\_provenance}
+  annotation could mandate nominal patterns at compile time.
+\item
+  \textbf{Formal constraints.} When requirements include provenance,
+  the mathematics constrains the choice: shape-based typing cannot
+  provide this capability (Theorem 3.13, information-theoretic
+  impossibility). The procedure derives the discipline from requirements.
+\end{enumerate}
+
+\subsubsection{Scope and Limitations}\label{scope-limitations}
+
+This paper makes absolute claims. We do not argue nominal typing is
+``preferred'' or ``more elegant.'' We prove:
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\item
+  \textbf{Shape-based typing cannot provide provenance.} Duck typing and
+  structural typing check type \emph{shape}: attributes, method
+  signatures. Provenance requires type \emph{identity}. Shape-based
+  disciplines cannot provide what they do not track.
+\item
+  \textbf{When B $\neq$ $\emptyset$, nominal typing dominates among fixed-axis systems.} Nominal typing
+  provides strictly more capabilities. Adapters eliminate the retrofit exception (Theorem
+  2.10j). When inheritance exists, nominal typing is the capability-maximizing choice \emph{within the fixed $(B,S)$ model}.
+\item
+  \textbf{Shape-based typing is a capability sacrifice.} Protocol and
+  duck typing discard the Bases axis. This eliminates four capabilities
+  (provenance, identity, enumeration, conflict resolution) without
+  providing any compensating capability (a dominated choice when \(B \neq \emptyset\)).
+\end{enumerate}
+
+\textbf{Fixed-axis vs.\ axis-parametric correctness.} The above results establish dominance \emph{within} fixed-axis type systems. However, any fixed-axis system is fundamentally incomplete (Theorem 3.77, Fixed Axis Incompleteness): there exist domains requiring axes outside the fixed set. The truly \emph{correct} approach is axis-parametric---deriving the minimal axis set from domain requirements (Section~\ref{axis-parametric-theory}). Fixed-axis maximization (choosing nominal over structural when $B \neq \emptyset$) is coherent only when the axis-parametric option is unavailable. Put simply: axis-parametric is correct; fixed-axis nominal is less wrong than fixed-axis structural; but both fixed options remain incomplete.
+
+\textbf{Boundary scope} (pulled forward for clarity): when \(B = \emptyset\)
+(no user-declared inheritance), e.g., pure JSON/FFI payloads or
+languages intentionally designed without inheritance, structural typing
+is the coherent choice. Whenever \(B \neq \emptyset\) and inheritance metadata is accessible, nominal typing strictly dominates. Systems where \(B = \emptyset\) are not exceptions---they simply do not require the B axis, and thus shape-based typing loses nothing (but gains nothing either).
+
+The requirements determine the axes; the axes determine the discipline. Systems requiring provenance cannot use shape-based typing---this is not a design recommendation but a mathematical constraint.
+
+\subsection{Roadmap}\label{roadmap}
+
+\textbf{Section 2: Metatheoretic foundations} --- The two-axis model
+(B, S) with names as sugar, abstract class system formalization, and the
+Axis Lattice Metatheorem (Theorem 2.15)
+
+\textbf{Section 3: Universal dominance} --- Strict dominance (Theorem
+3.5), information-theoretic completeness (Theorem 3.19), retrofit
+exception eliminated (Theorem 2.10j)
+
+\textbf{Section 4: Decision procedure} --- Deriving typing discipline
+from system properties
+
+\textbf{Section 5: Empirical validation} --- 13 OpenHCS case studies
+validating theoretical predictions
+
+\textbf{Section 6: Machine-checked proofs} --- Lean 4 formalization
+(2600+ lines)
+
+\textbf{Section 7: Related work} --- Positioning within PL theory
+literature
+
+\textbf{Section 8: Extensions} --- Mixins vs composition (Theorem 8.1),
+TypeScript coherence analysis (Theorem 8.7), gradual typing connection,
+Zen alignment
+
+\textbf{Section 9: Conclusion} --- Implications for PL theory and
+practice
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
