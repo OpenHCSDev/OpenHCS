@@ -1,0 +1,1 @@
+ts       3618379  0.0  0.0   6960  4136 pts/25   S+   22:50   0:00 grep --color=auto lake

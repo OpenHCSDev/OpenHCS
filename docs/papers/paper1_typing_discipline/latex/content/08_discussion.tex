@@ -55,10 +55,12 @@ may need to consider this cost.
 \textbf{Scope: systems where \(B \neq \emptyset\).} Simple scripts where
 the entire program fits in working memory may not require provenance
 tracking. But provenance is just one of four capabilities (Theorem
-2.17). Even without provenance requirements, nominal typing dominates
+2.17). Even without provenance requirements, $\{B,S\}$ typing dominates
 because it provides identity, enumeration, and conflict resolution at no
 additional cost. Our theorems apply universally when
 \(B \neq \emptyset\).
+
+\textbf{Remark:} Traditional term: nominal typing.
 
 \textbf{Python as canonical model.} The formalization uses Python's
 \texttt{type(name,\ bases,\ namespace)} because it is the clearest
@@ -90,22 +92,26 @@ machine-checked guarantees.
 provenance cannot be computed without the bases axis
 (information-theoretically impossible, not merely difficult). The
 case studies (Section 5) demonstrate these theorems in a production
-codebase. The \emph{direction} of the claims---that capability gaps
-translate to error reduction---follows from the formalism: if provenance is
-impossible without nominal typing (Corollary 6.3), and provenance is
-required (PC = 1), then errors \emph{must} occur under duck typing. The
+codebase. The \emph{direction} of the claims (that capability gaps
+translate to error reduction) follows from the formalism: if provenance is
+impossible without $\{B,S\}$ typing (Corollary 6.3), and provenance is
+required (PC = 1), then errors \emph{must} occur under $\{S\}$-only incoherent typing. The
 \emph{magnitude} of the effect is codebase-specific; the
 \emph{existence} of the effect is not. We distinguish:
+
+\textbf{Remark:} Traditional terms: nominal typing vs duck typing.
 
 \begin{itemize}
 \tightlist
 \item
   \textbf{Universal (proven):} Capability gap exists, provenance is
-  impossible under duck typing, nominal typing strictly dominates.
+  impossible under $\{S\}$-only typing, $\{B,S\}$ typing strictly dominates.
 \item
   \textbf{Singular (observed):} 47 \texttt{hasattr()} calls eliminated,
   centralized error detection via ABC contracts.
 \end{itemize}
+
+\textbf{Remark:} In type system terminology, "$\{S\}$-only typing" and "$\{B,S\}$ typing" correspond to duck/structural typing and nominal typing respectively.
 
 We call for replication studies on other codebases to measure the
 magnitude of the effect across different architectural patterns. The
@@ -113,20 +119,132 @@ formal results predict that \emph{some} positive effect will be
 observed in any \(B \neq \emptyset\) system requiring provenance; the
 specific multipliers are empirical questions.
 
-\textbf{OpenHCS is also wrong.} The universal principle (Section~\ref{the-classification-problem}) applies to OpenHCS itself. OpenHCS currently fixes the axis set \(A = \{B, S, H\}\) (Bases, Shape, Hierarchy). By the Fixed Axis Incompleteness theorem, domains requiring axes outside this set---temporal versioning, provenance chains, security contexts, resource affinity---cannot be served.
+\textbf{OpenHCS is also wrong.} The universal principle (Section~\ref{the-classification-problem}) applies to OpenHCS itself. OpenHCS currently fixes the axis set \(A = \{B, S, H\}\) (Bases, Shape, Hierarchy). By the Fixed Axis Incompleteness theorem, domains requiring axes outside this set (temporal versioning, provenance chains, security contexts, resource affinity) cannot be served.
 
-OpenHCS is \emph{less wrong} than structural typing (\(A = \{S\}\)) or nominal typing (\(A = \{B, S\}\)) because it includes more axes. But ``less wrong'' is not ``correct.'' The theorems predict that as the space of domains grows, OpenHCS will encounter impossibility walls:
+OpenHCS is \emph{less wrong} than $\{S\}$-only typing or $\{B,S\}$-only typing because it includes more axes (\(A = \{B, S, H\}\)). But ``less wrong'' is not ``correct.'' The theorems predict that as the space of domains grows, OpenHCS will encounter impossibility walls:
 \[
 \lim_{|\text{Domains}| \to \infty} |\{D : \neg\text{complete}(\{B, S, H\}, D)\}| = \infty
 \]
 
 This is not speculation. It follows from \texttt{fixed\_axis\_incompleteness}: for each axis outside \(\{B, S, H\}\), there exists a domain OpenHCS cannot serve. Since the space of possible axes is unbounded, so is the failure count.
 
+\textbf{Remark (Epistemic Strengthening).} The incompleteness result does not depend on the axis space being \emph{ontologically} infinite. Even if the space of possible axes were finite, no designer \emph{knows} the complete set. The relevant constraint is epistemic: you cannot guarantee your fixed axis set is sufficient without proving completeness over all possible domains. Since no such proof exists for any fixed set, the designer's epistemic position is identical whether the axis space is infinite or merely unknown. This parallels G\"{o}del's incompleteness (you cannot prove consistency from within) and Turing's halting problem (you cannot decide in advance which programs halt). The limitation is on what you can \emph{know}, not merely on what \emph{is}.
+
 \textbf{The path forward.} Future versions of OpenHCS should parameterize over axis sets rather than hardcoding \(\{B, S, H\}\). The architecture should be:
 \begin{verbatim}
 OpenHCS : AxisSet -> ConfigurationSystem
 \end{verbatim}
 instantiated with \(\{B, S, H\}\) for current use cases, but extensible to new axes without modification. This is the subject of ongoing work (see Section~\ref{future-work}).
+
+\paragraph{8.1 Axes as Query Dimensions}\label{axes-as-query-dimensions}
+
+The paper's central claim---that axes are mandatory for specific capabilities---follows from a more primitive observation: \emph{axes are query dimensions}. Every capability is operationally defined as answering a specific query, and each query requires traversal along specific axes.
+
+\textbf{Definition 8.1 (Query Parameterization).} Let \(T\) denote type-level access to an object. Query complexity is parameterized by the axis set \(A\) required for resolution:
+\begin{itemize}
+\item \(T\): Base object access (no axes required)
+\item \(T(S)\): Attribute lookup---requires shape axis \(S\)
+\item \(T(S,B)\): Attribute at inheritance level---requires shape \(S\) and bases \(B\)
+\item \(T(S,B,H)\): Attribute at inheritance level within containment tree---requires \(S\), \(B\), and hierarchy \(H\)
+\item \(T(S,B,H,\tau)\): Temporally-versioned attribute at inheritance level in containment tree---adds temporal axis \(\tau\)
+\end{itemize}
+
+\textbf{Theorem 8.1a (Query-Axis Necessity).} A query of form \(T(A)\) cannot be computed in a type system with axis set \(A' \subsetneq A\). The query is information-theoretically impossible, not merely inefficient.
+
+\emph{Proof.} By construction, \(T(A)\) requires traversal along dimension \(a \in A \setminus A'\). Since \(a\) is absent from the type system, no structural path exists to resolve the query. Manual value-level encoding (e.g., \texttt{\_\_source\_\_} attributes) degrades the query to runtime inspection (\(\Omega(n)\) error localization) but does not eliminate the axis---it encodes it in imperative state. \qed
+
+\textbf{Corollary 8.1b (Provenance as \(T(S,B)\) Query).} ``Which type provided this value?'' is a \(T(S,B)\) query: given field \(f \in S\) (shape), determine \(C \in \text{MRO}\) (bases) where \(f\) was defined. Duck typing (\(\{S\}\)-only) cannot answer this query (Corollary 6.3); nominal typing (\(\{B,S\}\)) can.
+
+\textbf{Example 8.1 (Hierarchy Query).} OpenHCS's dual-axis resolver answers: ``Given pipeline node \(n\) and field \(f\), what is \(f\)'s value in \(n\)'s scope?'' This is a \(T(S,H)\) query (shape + hierarchy). Python provides \(\{B,S\}\) natively; OpenHCS implements \(H\) manually via \texttt{ContextNode} graph traversal.
+
+\textbf{Theorem 8.1c (Manual Axis Complexity Superlinearity).} Let \(A_{\text{native}}\) be a language's native axes and \(A_{\text{req}}\) be domain-required axes. For \(k = |A_{\text{req}} \setminus A_{\text{native}}|\) manually-implemented axes, implementation complexity grows as \(\Omega(k^2)\) due to synergistic interaction, not \(O(k)\).
+
+\emph{Proof sketch.} Each manually-encoded axis \(a_i\) requires: (1) storage semantics (where axis data lives), (2) query interface (how to traverse the dimension), (3) consistency invariants (what axis combinations are valid). For \(k\) axes, pairwise interactions number \(\binom{k}{2} = O(k^2)\). Examples of interactions:
+\begin{itemize}
+\item \emph{Hierarchy \(\times\) Bases:} When node \(n\) inherits configuration \(C\), must hierarchy position propagate through MRO, or does MRO reset at each tree level?
+\item \emph{Temporal \(\times\) Hierarchy:} When pipeline structure changes over time, do version timestamps apply per-node or per-tree?
+\item \emph{Security \(\times\) Bases:} Do permission scopes inherit via MRO, or are they hierarchy-local?
+\end{itemize}
+
+Each interaction creates \(O(1)\) design decisions, but incorrect choices lead to \emph{irrecoverable architectural states}: local minima where refactoring requires rewriting all \(k\) axes simultaneously. This is the synergistic complexity penalty.
+
+Native axes avoid this: the language runtime enforces interaction semantics (e.g., Python's MRO + descriptor protocol defines how \(B \times S\) interact). Manual implementations must specify \emph{all} interactions explicitly, and inconsistency across axes compounds error rates super-linearly. \qed
+
+\textbf{Corollary 8.1d (Fixed-Axis Penalty Function).} For a type system with native axes \(A_n\) and domain requiring \(A_d\), the penalty for \(|A_d \setminus A_n| = k\) missing axes is:
+\[
+\text{Penalty}(k) = O(k) \text{ (storage)} + \Omega(k^2) \text{ (interactions)} + \text{LocalMinima}(k)
+\]
+where \(\text{LocalMinima}(k)\) represents irrecoverable architectural debt from inconsistent interaction choices.
+
+\textbf{Remark.} This formalizes why ``just implement it manually'' fails at scale. One missing axis (\(k=1\)) is manageable. Two axes (\(k=2\)) create \(\binom{2}{2}=1\) interaction. Three axes (\(k=3\)) create \(\binom{3}{2}=3\) interactions. At \(k=5\) (e.g., temporal, security, provenance, resource affinity, versioning), \(\binom{5}{2}=10\) interactions must be specified manually, and the probability of reaching a local minimum approaches 1.
+
+\subsubsection{Connection to Degrees of Freedom}\label{sec:dof-connection}
+
+The super-linear complexity \(\Omega(k^2)\) is not merely implementation cost---it directly corresponds to \emph{degrees of freedom} (DOF) in the system architecture, as formalized in the companion paper on Single Source of Truth~\cite{paper2_ssot}.
+
+\textbf{Coherence and Structural Facts.} Paper 2 defines \emph{coherence} as: all encoding locations agree on the same value for a fact. A \emph{structural fact} is a fact about program structure (e.g., ``Type \(T\) has method \(m\)'' or ``These are all types implementing interface \(I\)''). When DOF \(> 1\), multiple independent locations can hold different values for the same structural fact, creating \emph{incoherence}: the system cannot determine which value is ``true.'' For manual axis implementation, each axis and each axis interaction is an independent encoding location, yielding DOF \(= \Omega(k^2)\). This characterizes a \emph{specific property}---coherence for structural facts---not general language quality. Languages make different trade-offs: static languages (Rust, Java, Go) choose compile-time safety over runtime introspection, accepting DOF \(> 1\) as a consequence; dynamic languages (Python, CLOS, Smalltalk) enable DOF \(= 1\) at the cost of performance and static guarantees.
+
+\textbf{Theorem 8.2 (DOF-Complexity Correspondence).} For \(k\) manually-implemented axes, the architectural degrees of freedom satisfy:
+\[
+\text{DOF}_{\text{total}} = k + \Omega(k^2)
+\]
+where \(k\) represents storage DOF (one independent location per axis) and \(\Omega(k^2)\) represents interaction DOF (independent decisions for each axis pair).
+
+\begin{proof}
+By Definition 2.6 of~\cite{paper2_ssot}, DOF counts \emph{independent encoding locations} for architectural facts. For \(k\) manually-implemented axes:
+
+\textbf{Storage DOF = \(k\):} Each axis \(a_i\) requires independent choice of:
+\begin{itemize}
+\item Where axis data is stored (object attribute, separate mapping, context variable)
+\item Data structure representation (dict, tree, graph)
+\item Mutability semantics (immutable, copy-on-write, in-place)
+\end{itemize}
+
+These \(k\) choices are \emph{independent} in the sense that no language constraint forces agreement. Different axes can use different storage strategies, and the system remains type-correct (though architecturally inconsistent).
+
+\textbf{Interaction DOF = \(\Omega(k^2)\):} For each axis pair \((a_i, a_j)\), independent choices include:
+\begin{itemize}
+\item \emph{Traversal order:} Does query \(T(a_i, a_j)\) traverse \(a_i\) first or \(a_j\) first?
+\item \emph{Composition semantics:} Are values at \((a_i, a_j)\) derived by combining separate \(T(a_i)\) and \(T(a_j)\) queries, or is the combination primitive?
+\item \emph{Invalidation propagation:} When \(a_i\) changes, must \(a_j\)-indexed caches be invalidated?
+\item \emph{Consistency invariants:} Can \(a_i\) and \(a_j\) hold contradictory information, or are they constrained to agree?
+\end{itemize}
+
+The number of axis pairs is \(\binom{k}{2} = \frac{k(k-1)}{2} = \Omega(k^2)\). Each pair introduces \(O(1)\) independent decisions. Therefore, interaction DOF \(= O(k^2)\).
+
+Total: \(\text{DOF}_{\text{total}} = k + O(k^2) = \Omega(k^2)\). \qed
+\end{proof}
+
+\textbf{Corollary 8.2a (Modification Complexity Bound).} By Theorem 6.2 of~\cite{paper2_ssot} (Non-SSOT Lower Bound), modification complexity for architectural changes satisfies:
+\[
+M_{\text{effective}} = \Omega(\text{DOF}) = \Omega(k^2)
+\]
+
+\begin{proof}
+Theorem 6.2 of~\cite{paper2_ssot} establishes that for DOF \(= n\) independent encoding locations, effective modification complexity \(M_{\text{effective}} = \Omega(n)\). By Theorem 8.2, \(\text{DOF} = \Omega(k^2)\) for \(k\) manually-implemented axes. Substituting: \(M_{\text{effective}} = \Omega(k^2)\). \qed
+\end{proof}
+
+\textbf{Example 8.2 (OpenHCS Hierarchy Axis).} OpenHCS's dual-axis configuration framework implements hierarchy \(H\) manually (Python provides \(B, S\) natively). With \(k=1\) manual axis:
+\begin{itemize}
+\item \textbf{Storage DOF = 1:} Hierarchy stored in \texttt{ContextNode} graph (\textasciitilde 500 LOC)
+\item \textbf{Interaction DOF:} 
+  \begin{itemize}
+  \item \(H \times B\): Does MRO traversal reset at each hierarchy level, or propagate through tree? (Decision: propagate)
+  \item \(H \times S\): Are field accesses scoped per-node or per-subtree? (Decision: per-node with fallback)
+  \end{itemize}
+\item \textbf{Total:} \(\text{DOF} = 1 + 2 = 3\) independent architectural decisions
+\end{itemize}
+
+For \(k=2\) axes (e.g., adding temporal versioning \(\tau\)):
+\begin{itemize}
+\item \textbf{Storage DOF = 2:} Hierarchy + temporal storage
+\item \textbf{Interaction DOF:} \(\binom{2}{2} + \binom{3}{2} = 1 + 3 = 4\) interactions (\(H \times \tau\), plus 3 existing)
+\item \textbf{Total:} \(\text{DOF} = 2 + 4 = 6\) (doubled from \(k=1\))
+\end{itemize}
+
+This quadratic growth explains why OpenHCS stopped at \(H\)---adding \(\tau\) would require \(\Omega(k^2)\) additional design decisions, each a potential inconsistency.
+
+\textbf{Remark.} The DOF framework explains the ``local minima'' phenomenon: when \(k\) axes make inconsistent interaction choices, refactoring requires changing \(\Omega(k^2)\) independent locations simultaneously. By Theorem 6.3 of~\cite{paper2_ssot} (Unbounded Gap), this creates modification complexity that grows without bound as the codebase scales. Native axes avoid this: the language enforces interaction semantics (e.g., Python's descriptor protocol defines \(B \times S\) interaction), keeping DOF = 1 per axis.
 
 \paragraph{8.1.1 Axiom Methodology}\label{axiom-methodology}
 
@@ -170,15 +288,15 @@ model \\
 
 A program violating any of these axioms fails at class definition time
 with \texttt{TypeError}. Such a program is not a valid Python
-program---it cannot be executed. Therefore, our theorems apply to
-\emph{all valid programs}. \(\blacksquare\)
+program; it cannot be executed. Therefore, our theorems apply to
+\emph{all valid programs}. \qed
 
 \textbf{Corollary 8.1b (Axiom Scope).} A claim that the axioms are too
 strong would require exhibiting: 1. A valid, executable Python program
 where the axioms fail, AND 2. A scenario where this program requires
 typing discipline analysis.
 
-Programs where axioms fail are not valid programs---they crash at
+Programs where axioms fail are not valid programs; they crash at
 definition time. The axioms characterize well-formed programs, which is
 the standard scope for type system analysis.
 
@@ -191,14 +309,14 @@ ML compiler): Assumes input parses successfully
 We follow the same pattern: assume the input is a valid program
 (accepted by Python's runtime), prove properties of that program.
 Proving that Python's parser and class system are correct is out of
-scope---and unnecessary, as Python's semantics are the \emph{definition}
+scope, and unnecessary, as Python's semantics are the \emph{definition}
 of what we're modeling.
 
 \subsection{The Typing Discipline
 Hierarchy}\label{the-typing-discipline-hierarchy}
 
-Theorem 2.10d establishes that duck typing is incoherent. Theorem 2.10g
-establishes that structural typing is eliminable when
+Theorem 2.10d establishes that $\{S\}$-only incoherent typing (duck typing) is incoherent. Theorem 2.10g
+establishes that $\{S\}$-only typing with declared interfaces (structural typing) is eliminable when
 \(B \neq \emptyset\). Together, these results collapse the space of
 valid typing disciplines.
 
@@ -224,25 +342,33 @@ When Valid
 \endhead
 \bottomrule\noalign{}
 \endlastfoot
-Duck typing (\(\{S\}\), incoherent) & No (Thm 2.10d) & N/A & Never \\
-Structural (\(\{S\}\), coherent) & Yes & Yes, when \(B \neq \emptyset\) (Thm
+$\{S\}$-incoherent (\(\{S\}\), incoherent) & No (Thm 2.10d) & N/A & Never \\
+$\{S\}$-declared (\(\{S\}\), coherent) & Yes & Yes, when \(B \neq \emptyset\) (Thm
 2.10g) & Only when \(B = \emptyset\) \\
-Nominal (\(\{B, S\}\), coherent) & Yes & No & Always (when
+$\{B,S\}$ (\(\{B, S\}\), coherent) & Yes & No & Always (when
 \(B \neq \emptyset\)) \\
 \end{longtable}
 
-\textbf{Duck typing} is incoherent: no declared interface, no complete
+\textbf{Remark:} Traditional terms: Duck typing, Structural typing, Nominal typing.
+
+\textbf{$\{S\}$-only incoherent typing} is incoherent: no declared interface, no complete
 compatibility predicate, no position on structure-semantics
 relationship. This is never valid.
 
-\textbf{Structural typing (Protocol)} is coherent but eliminable: for
+\textbf{Remark:} Traditional term: duck typing.
+
+\textbf{$\{S\}$-only declared typing (Protocol)} is coherent but eliminable: for
 any system using Protocol at boundaries, there exists an equivalent
-system using nominal typing with explicit adapters (Theorem 2.10g). The
+system using $\{B,S\}$ typing with explicit adapters (Theorem 2.10g). The
 only ``value'' of Protocol is avoiding the 2-line adapter class.
 Convenience is not a capability.
 
-\textbf{Nominal typing (ABC)} is coherent and non-eliminable: it is the
+\textbf{Remark:} Traditional terms: structural typing vs nominal typing.
+
+\textbf{$\{B,S\}$ typing (ABC)} is coherent and non-eliminable: it is the
 only necessary discipline for systems with inheritance.
+
+\textbf{Remark:} Traditional term: nominal typing.
 
 \textbf{The eliminability argument.} When integrating third-party type
 \(T\) that cannot inherit from your ABC:
@@ -266,31 +392,39 @@ isinstance(adapted, ConfigurableABC)   # Nominal check
 \end{verbatim}
 
 The adapter approach is strictly more explicit. ``Explicit is better
-than implicit'' (Zen of Python). Protocol's only advantage---avoiding
-the adapter---is a convenience, not a typing capability.
+than implicit'' (Zen of Python). Protocol's only advantage (avoiding
+the adapter) is a convenience, not a typing capability.
 
 \textbf{Languages without inheritance.} Go's struct types have
-\(B = \emptyset\) by design. Structural typing with declared interfaces
-is the only coherent option. Go does not use duck typing; Go interfaces
+\(B = \emptyset\) by design. $\{S\}$-only declared typing with declared interfaces
+is the only coherent option. Go does not use $\{S\}$-only incoherent typing; Go interfaces
 are declared \cite{goSpec}. This is why Go's type system is sound
 despite lacking inheritance.
 
-\textbf{The final collapse.} For languages with inheritance
-(\(B \neq \emptyset\)): - Duck typing: incoherent, never valid -
-Structural typing: coherent but eliminable, valid only as convenience -
-Nominal typing: coherent and necessary
+\textbf{Remark:} Traditional terms: structural typing, duck typing.
 
-The only \emph{necessary} typing discipline is nominal. Everything else
-is either incoherent (duck typing) or reducible to nominal with trivial
-adapters (structural typing).
+\textbf{The final collapse.} For languages with inheritance
+(\(B \neq \emptyset\)): - $\{S\}$-only incoherent typing: incoherent, never valid -
+$\{S\}$-only declared typing: coherent but eliminable, valid only as convenience -
+$\{B,S\}$ typing: coherent and necessary
+
+\textbf{Remark:} Traditional terms: duck typing, structural typing, nominal typing.
+
+The only \emph{necessary} typing discipline is $\{B,S\}$. Everything else
+is either incoherent ($\{S\}$-only incoherent typing) or reducible to $\{B,S\}$ with trivial
+adapters ($\{S\}$-only declared typing).
+
+\textbf{Remark:} Traditional terms: nominal, duck typing, structural typing.
 
 \subsection{Future Work}\label{future-work}
 
-\textbf{Gradual nominal/structural typing.} TypeScript supports both
-nominal (via branding) and structural typing in the same program.
+\textbf{Gradual $\{B,S\}$/$\{S\}$-declared typing.} TypeScript supports both
+$\{B,S\}$ (via branding) and $\{S\}$-only declared typing in the same program.
 Formalizing the interaction between these disciplines, and proving
 soundness of gradual migration, would enable principled adoption
 strategies.
+
+\textbf{Remark:} Traditional terms: nominal, structural typing.
 
 \textbf{Trait systems.} Rust traits and Scala traits provide multiple
 inheritance of behavior without nominal base classes. Our theorems apply
@@ -328,7 +462,7 @@ Foo = type("Foo", (Bar,), {"x": 1},
            provenance=chain)     # Provenance axis
 \end{verbatim}
 
-The \texttt{**axes} parameter would be accessible via \texttt{cls.\_\_axes\_\_} and introspectable at runtime. This enables: (a) domain-specific axis requirements declared at the type level, (b) framework code parameterized over arbitrary axes, and (c) gradual adoption---existing code uses the 3-argument form unchanged.
+The \texttt{**axes} parameter would be accessible via \texttt{cls.\_\_axes\_\_} and introspectable at runtime. This enables: (a) domain-specific axis requirements declared at the type level, (b) framework code parameterized over arbitrary axes, and (c) gradual adoption; existing code uses the 3-argument form unchanged.
 
 A formal PEP would specify: (i) storage semantics (\texttt{\_\_axes\_\_} dict), (ii) inheritance behavior (axis merging vs. override), (iii) metaclass interaction, and (iv) static type checker support (\texttt{typing.Axes}). The mathematical foundation is provided by the Fixed Axis Incompleteness theorem: Python's current \texttt{type()} will fail for domains requiring axes outside \(\{B, S\}\). Parameterization eliminates this impossibility wall.
 \end{enumerate}
@@ -346,22 +480,26 @@ that nominal and structural typing can coexist. TypeScript's
 validates our thesis: programmers need nominal identity even in
 structurally-typed languages. Python provides both ABCs (nominal) and
 \texttt{Protocol} (structural). Our theorems clarify the relationship:
-when \(B \neq \emptyset\), nominal typing (ABCs) strictly dominates
+when \(B \neq \emptyset\), $\{B,S\}$ typing (ABCs) strictly dominates
 Protocol (Theorem 2.10j). Protocol provides convenience (avoiding adapters)
-but this is not a capability---ABCs can also integrate external types via
+but this is not a capability; ABCs can also integrate external types via
 adapters. Protocol is dominated: it provides a strict subset of capabilities.
+
+\textbf{Remark:} In Python, ABCs implement $\{B,S\}$ typing (nominal), while Protocols implement $\{S\}$-only typing (structural).
 
 \textbf{MRO-based resolution is near-optimal.} Python's descriptor
 protocol combined with C3 linearization achieves O(1) field resolution
 while preserving provenance. Languages designing new metaobject
 protocols should consider whether they can match this complexity bound.
 
-\textbf{Explicit \texttt{bases} makes nominal typing strictly optimal.} If a language
+\textbf{Explicit \texttt{bases} makes $\{B,S\}$ typing strictly optimal.} If a language
 exposes explicit inheritance declarations (\texttt{class\ C(Base)}),
-Theorem 3.4 (Nominal Pareto-Dominance) applies: nominal typing strictly
-dominates structural typing. Language designers cannot add inheritance
+Theorem 3.4 (Axis Inclusion Dominance) applies: $\{B,S\}$ typing strictly
+dominates $\{S\}$-only typing. Language designers cannot add inheritance
 to a structurally-typed language without creating capability gaps that
-nominal typing would eliminate.
+$\{B,S\}$ typing would eliminate.
+
+\textbf{Remark:} In type system terminology, $\{B,S\}$ and $\{S\}$ correspond to nominal and structural typing respectively.
 
 \subsection{Derivable Code Quality
 Metrics}\label{derivable-code-quality-metrics}
@@ -379,23 +517,27 @@ Measures ad-hoc capability probing. High DTD where \(B \neq \emptyset\)
 indicates discipline violation. We count only \texttt{hasattr()}, not
 \texttt{getattr()} or \texttt{try/except AttributeError}, because
 \texttt{hasattr()} is specifically capability detection (``does this
-object have this attribute?'')---the operational signature of duck
+object have this attribute?''), the operational signature of $\{S\}$-only
 typing (Definition 2.10c). \texttt{getattr()} without a fallback is
 explicit attribute access; \texttt{getattr()} with a fallback or
-\texttt{try/except AttributeError} may indicate duck typing but also
+\texttt{try/except AttributeError} may indicate $\{S\}$-only typing but also
 appear in legitimate metaprogramming (descriptors, \texttt{\_\_getattr\_\_}
 hooks, optional feature detection at system boundaries). The theorem
 backing (Theorem 2.10d) establishes \texttt{hasattr()} as the incoherent
 probe; other patterns require case-by-case analysis.
 
-\textbf{Metric 2: Nominal Typing Ratio (NTR)}
+\textbf{Remark:} "Duck typing" is traditional terminology for $\{S\}$-only typing.
+
+\textbf{Metric 2: $\{B,S\}$ Typing Ratio (BTR)}
 
 \begin{verbatim}
-NTR = (isinstance_calls + type_as_dict_key + abc_registrations) / KLOC
+BTR = (isinstance_calls + type_as_dict_key + abc_registrations) / KLOC
 \end{verbatim}
 
-Measures explicit type contracts. High NTR indicates intentional use of
+Measures explicit type contracts. High BTR indicates intentional use of
 inheritance hierarchy.
+
+\textbf{Remark:} Previously called "Nominal Typing Ratio (NTR)". In type system terminology, $\{B,S\}$ typing corresponds to nominal typing.
 
 \textbf{Metric 3: Provenance Capability (PC)} Binary metric: does the
 codebase contain queries of the form ``which type provided this value''?
@@ -430,7 +572,7 @@ Scope}\label{hybrid-systems-and-methodology-scope}
 
 Our theorems establish necessary conditions for provenance-tracking
 systems. This section clarifies the relationship between dominance and
-practical constraints---shape-based typing is never an alternative, only
+practical constraints; shape-based typing is never an alternative, only
 a sacrifice forced by external constraints.
 
 \paragraph{8.6.1 Structural Typing Is Eliminable (Theorem
@@ -468,7 +610,7 @@ cost. For TypeScript code that never uses \texttt{instanceof} or class
 identity (effectively \(B = \emptyset\) at runtime), structural typing
 has no capability gap because there's no \(B\) to lose. However, see
 Section 8.7 for why TypeScript's \emph{class-based} structural typing
-creates tension---once you have \texttt{class\ extends}, you have
+creates tension; once you have \texttt{class\ extends}, you have
 \(B \neq \emptyset\).
 
 \textbf{Summary.} In all scenarios with \(B \neq \emptyset\), the
@@ -512,7 +654,7 @@ class PathPlanningConfig(ConfigBase):
 
 # B = {}: parse external JSON (structural is only option)
 def load_config_from_json(json_dict: Dict[str, Any]) -> ConfigBase:
-    # JSON has no inheritance---structural validation at boundary
+    # JSON has no inheritance; structural validation at boundary
     if "well_filter" in json_dict:
         return PathPlanningConfig(**json_dict)  # Returns nominal type
     raise ValueError("Invalid config")
@@ -552,8 +694,8 @@ available (\(B = \emptyset\) at boundary) \\
 \end{longtable}
 
 \textbf{Removed rows:} - ``Retrofit / external types $\rightarrow$ Structural
-(acceptable)'' --- Adapters exist (Theorem 2.10j); structural is dominated. -
-``Small scripts / prototypes $\rightarrow$ Duck (acceptable)'' ---
+(acceptable)''. Adapters exist (Theorem 2.10j); structural is dominated.
+``Small scripts / prototypes $\rightarrow$ Duck (acceptable)''.
 Duck typing is incoherent for B-dependent queries (Theorem 2.10d).
 
 The methodology states: \textbf{if \(B \neq \emptyset\), nominal typing
@@ -649,7 +791,7 @@ checks this nominal identity at runtime 3. TypeScript's type system uses
 structural compatibility for class types 4. Therefore: runtime
 distinguishes \texttt{A} from structurally-identical \texttt{B}; type
 system does not 5. Per Definition 8.3, this is incoherence.
-\(\blacksquare\)
+\qed
 
 \textbf{Corollary 8.7.1 (Branding Validates Tension).} The prevalence of
 branding patterns in TypeScript codebases empirically validates the
@@ -667,22 +809,24 @@ Design}\label{implications-for-language-design-1}
 TypeScript's tension is an intentional design decision for JavaScript
 interoperability. The structural type system allows gradual adoption in
 untyped JavaScript codebases. However, TypeScript has \texttt{class}
-with \texttt{extends}---meaning \(B \neq \emptyset\). Our theorems
-apply: nominal typing strictly dominates (Theorem 3.5).
+with \texttt{extends}, meaning \(B \neq \emptyset\). Our theorems
+apply: $\{B,S\}$ typing strictly dominates (Theorem 3.5).
 
 The tension manifests in practice: programmers use \texttt{class}
-expecting nominal semantics, receive structural semantics, then add
-branding to restore nominal behavior. Our theorems predict this: Theorem
-3.4 shows that when \texttt{bases} exist, nominal typing strictly
-dominates structural typing; TypeScript violates this optimality,
+expecting $\{B,S\}$ semantics, receive $\{S\}$-only semantics, then add
+branding to restore $\{B,S\}$ behavior. Our theorems predict this: Theorem
+3.4 shows that when \texttt{bases} exist, $\{B,S\}$ typing strictly
+dominates $\{S\}$-only typing; TypeScript violates this optimality,
 causing measurable friction. The branding idiom is programmers manually
 recovering capabilities the language architecture foreclosed.
 
+\textbf{Remark:} In type system terminology, $\{B,S\}$ and $\{S\}$ correspond to nominal and structural typing.
+
 \textbf{The lesson:} Languages adding \texttt{class} syntax should
 consider whether their type system will be coherent (per Definition 8.3)
-with the runtime semantics of class identity. Structural typing is
+with the runtime semantics of class identity. $\{S\}$-only typing is
 correct for languages without inheritance (Go). For languages with
-inheritance, coherence requires nominal typing or explicit documentation
+inheritance, coherence requires $\{B,S\}$ typing or explicit documentation
 of the intentional tension.
 
 \subsection{Mixins with MRO Strictly Dominate Object
@@ -746,13 +890,13 @@ class Handler:
 
 \textbf{What mixins provide:} 1. {[}PASS{]} Behavior extension (via
 super() linearization) 2. {[}PASS{]} Multiple behaviors combined 3.
-{[}PASS{]} \textbf{Deterministic conflict resolution} (C3 MRO) ---
-\textbf{composition cannot provide} 4. {[}PASS{]} \textbf{Single
-decision point} (class definition) --- \textbf{composition has n call
+{[}PASS{]} \textbf{Deterministic conflict resolution} (C3 MRO).
+\textbf{Composition cannot provide} 4. {[}PASS{]} \textbf{Single
+decision point} (class definition). \textbf{Composition has n call
 sites} 5. {[}PASS{]} \textbf{Provenance via MRO} (which mixin provided
-this behavior?) --- \textbf{composition cannot provide} 6. {[}PASS{]}
+this behavior?). \textbf{Composition cannot provide} 6. {[}PASS{]}
 \textbf{Exhaustive enumeration} (list all mixed-in behaviors via
-\texttt{\_\_mro\_\_}) --- \textbf{composition cannot provide}
+\texttt{\_\_mro\_\_}). \textbf{Composition cannot provide}
 
 \textbf{Addressing runtime swapping:} A common objection is that
 composition allows ``swapping implementations at runtime''
@@ -768,7 +912,7 @@ dominance claim for two reasons:
   class system is mutable.
 \item
   \textbf{Runtime swapping is a separate axis.} The dominance claim
-  concerns \emph{static behavior extension}---adding logging, caching,
+  concerns \emph{static behavior extension}: adding logging, caching,
   validation to a class. Whether to also support runtime reconfiguration
   is an orthogonal requirement. Systems requiring runtime swapping can
   use mixins for static extension AND composition for swappable
@@ -795,7 +939,7 @@ provide)
 
 Therefore \(\mathcal{C} \subset \mathcal{M}\) (strict subset). By the
 same argument as Theorem 3.5 (Strict Dominance), choosing composition
-forecloses capabilities for zero benefit. \(\blacksquare\)
+forecloses capabilities for zero benefit. \qed
 
 \textbf{Corollary 8.1.1 (Runtime Swapping Is Orthogonal).} Runtime
 implementation swapping is achievable under both patterns: via object
@@ -844,7 +988,7 @@ or mixins).
 hierarchy.
 
 Therefore \(\text{capabilities}(D_S) \subset \text{capabilities}(D_B)\)
-(strict subset). \(\blacksquare\)
+(strict subset). \qed
 
 \subsection{Validation: Alignment with Python's Design
 Philosophy}\label{validation-alignment-with-pythons-design-philosophy}
@@ -882,10 +1026,10 @@ do it''} (Zen line 13). Our decision procedure (Section 2.5.1) provides
 exactly one obvious way: when \(B \neq \emptyset\), use nominal typing.
 
 \textbf{Historical validation:} Python's evolution confirms our
-theorems. Python 1.0 (1991) had only duck typing---an incoherent
+theorems. Python 1.0 (1991) had only duck typing, an incoherent
 non-discipline (Theorem 2.10d). Python 2.6 (2007) added ABCs because
 duck typing was insufficient for large codebases. Python 3.8 (2019)
-added Protocols for retrofit scenarios---coherent structural typing to
+added Protocols for retrofit scenarios; coherent structural typing to
 replace incoherent duck typing. This evolution from incoherent
 \(\rightarrow\) nominal \(\rightarrow\) nominal+structural exactly
 matches our formal predictions.
@@ -929,7 +1073,7 @@ the dynamic type \texttt{?} allows gradual migration. This applies when
 
 \textbf{Our insight:} When \(B \neq \emptyset\), nominal typing strictly
 dominates. This includes ``retrofit'' scenarios with external
-types---adapters make nominal typing available (Theorem 2.10j).
+types; adapters make nominal typing available (Theorem 2.10j).
 
 \textbf{The unified view:} Gradual typing and nominal typing address
 orthogonal concerns: - Gradual typing: Typed vs untyped
@@ -946,7 +1090,7 @@ compatibility with untyped code where \(B = \emptyset\). Once
 \(B \neq \emptyset\) (inheritance exists), our theorems apply: nominal
 typing strictly dominates (Theorem 3.5), and adapters eliminate the
 retrofit exception (Theorem 2.10j). The two address different questions.
-\(\blacksquare\)
+\qed
 
 \begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
 
@@ -976,4 +1120,4 @@ Principle.
 \emph{Proof.} By Theorem 2.10j, nominal typing provides a strict superset of
 capabilities at equivalent cost. This is exactly the condition for higher
 leverage: $L(\text{nominal}) > L(\text{duck})$. By the Leverage Maximization
-Principle, nominal typing is therefore optimal. $\blacksquare$
+Principle, nominal typing is therefore optimal. \qed

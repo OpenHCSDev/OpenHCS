@@ -32,4 +32,6 @@
 
 % Common commands
 \providecommand{\real}[1]{#1}
-\providecommand{\blacksquare}{\ensuremath{\square}}
+% Use filled black square for QED symbol, inline (left-aligned) instead of right-aligned
+\renewcommand{\qedsymbol}{$\blacksquare$}
+\renewcommand{\qed}{\hspace{0.5em}\qedsymbol}

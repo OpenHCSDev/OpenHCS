@@ -27,7 +27,7 @@ Therefore:
 P(\text{error in } A_i \land \text{error in } A_j) = P(\text{error in } A_i) \cdot P(\text{error in } A_j)
 \]
 
-This is the definition of statistical independence. \(\blacksquare\)
+This is the definition of statistical independence.
 \end{proof}
 
 \begin{corollary}[DOF = Independent Error Sources]\label{cor:dof-errors}
@@ -35,7 +35,7 @@ DOF$(A) = n$ implies $n$ independent sources of error, each with probability $p$
 \end{corollary}
 
 \begin{proof}
-DOF counts independent axes (Paper 2, Definition~\ref{def:dof}). By Theorem~\ref{thm:error-independence}, independent axes have independent errors. \(\blacksquare\)
+DOF counts independent axes (Paper 2, Definition~\ref{def:dof}). By Theorem~\ref{thm:error-independence}, independent axes have independent errors.
 \end{proof}
 
 \begin{theorem}[Error Compounding]\label{thm:error-compound}
@@ -43,7 +43,7 @@ For a system to be correct, all $n$ independent axes must be error-free. Errors 
 \end{theorem}
 
 \begin{proof}
-By Paper 2's coherence theorem (\texttt{oracle\_arbitrary}), incoherence in any axis violates system correctness. An error in axis $A_i$ introduces incoherence along $A_i$. Therefore, correctness requires $\bigwedge_{i=1}^{n} \neg\text{error}(A_i)$. By Theorem~\ref{thm:error-independence}, this probability is $(1-p)^n$. \(\blacksquare\)
+By Paper 2's coherence theorem (\texttt{oracle\_arbitrary}), incoherence in any axis violates system correctness. An error in axis $A_i$ introduces incoherence along $A_i$. Therefore, correctness requires $\bigwedge_{i=1}^{n} \neg\text{error}(A_i)$. By Theorem~\ref{thm:error-independence}, this probability is $(1-p)^n$.
 \end{proof}
 
 \subsection{Error Probability Formula}
@@ -63,7 +63,7 @@ P_{\text{correct}}(n) = (1-p)^n
 Therefore:
 \[
 P_{\text{error}}(n) = 1 - P_{\text{correct}}(n) = 1 - (1-p)^n
-\] \(\blacksquare\)
+\]
 \end{proof}
 
 \begin{corollary}[Linear Approximation]\label{cor:linear-approx}
@@ -77,7 +77,7 @@ with relative error less than $10\%$.
 \begin{proof}
 Using Taylor expansion: $(1-p)^n = e^{n \ln(1-p)} \approx e^{-np}$ for small $p$.
 Further: $e^{-np} \approx 1 - np$ for $np < 1$.
-Therefore: $P_{\text{error}}(n) = 1 - (1-p)^n \approx 1 - (1 - np) = np$. \(\blacksquare\)
+Therefore: $P_{\text{error}}(n) = 1 - (1-p)^n \approx 1 - (1 - np) = np$.
 \end{proof}
 
 \begin{corollary}[DOF-Error Monotonicity]\label{cor:dof-monotone}
@@ -88,7 +88,7 @@ For architectures $A_1, A_2$:
 \end{corollary}
 
 \begin{proof}
-$P_{\text{error}}(n) = 1 - (1-p)^n$ is strictly increasing in $n$ for $p \in (0,1)$. \(\blacksquare\)
+$P_{\text{error}}(n) = 1 - (1-p)^n$ is strictly increasing in $n$ for $p \in (0,1)$.
 \end{proof}
 
 \subsection{Expected Errors}
@@ -104,7 +104,7 @@ Expected number of errors in architecture $A$:
 By linearity of expectation:
 \[
 \mathbb{E}[\text{\# errors}] = \sum_{i=1}^{\text{DOF}(A)} P(\text{error in DOF}_i) = \sum_{i=1}^{\text{DOF}(A)} p = p \cdot \text{DOF}(A)
-\] \(\blacksquare\)
+\]
 \end{proof}
 
 \begin{example}[Concrete Calculations]

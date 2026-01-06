@@ -1,0 +1,43 @@
+⚠ [606/641] Replayed TheoreticalMinimality.Domain
+warning: TheoreticalMinimality/Domain.lean:136:41: unused variable `p`
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+⚠ [633/641] Replayed TheoreticalMinimality.Theory
+warning: TheoreticalMinimality/Theory.lean:52:5: unused variable `h_same_count`
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+warning: TheoreticalMinimality/Theory.lean:75:5: unused variable `i`
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+⚠ [634/641] Replayed TheoreticalMinimality.Minimality
+warning: TheoreticalMinimality/Minimality.lean:134:2: Try this: intro h_min ⟨T', h_smaller, h_covers⟩
+✖ [640/641] Building TheoreticalMinimality.Framework (1.3s)
+trace: .> LEAN_PATH=/home/ts/code/projects/openhcs-sequential/docs/papers/paper5_credibility/proofs/.lake/packages/Cli/.lake/build/lib/lean:/home/ts/code/projects/openhcs-sequential/docs/papers/paper5_credibility/proofs/.lake/packages/batteries/.lake/build/lib/lean:/home/ts/code/projects/openhcs-sequential/docs/papers/paper5_credibility/proofs/.lake/packages/Qq/.lake/build/lib/lean:/home/ts/code/projects/openhcs-sequential/docs/papers/paper5_credibility/proofs/.lake/packages/aesop/.lake/build/lib/lean:/home/ts/code/projects/openhcs-sequential/docs/papers/paper5_credibility/proofs/.lake/packages/proofwidgets/.lake/build/lib/lean:/home/ts/code/projects/openhcs-sequential/docs/papers/paper5_credibility/proofs/.lake/packages/importGraph/.lake/build/lib/lean:/home/ts/code/projects/openhcs-sequential/docs/papers/paper5_credibility/proofs/.lake/packages/LeanSearchClient/.lake/build/lib/lean:/home/ts/code/projects/openhcs-sequential/docs/papers/paper5_credibility/proofs/.lake/packages/plausible/.lake/build/lib/lean:/home/ts/code/projects/openhcs-sequential/docs/papers/paper5_credibility/proofs/.lake/packages/mathlib/.lake/build/lib/lean:/home/ts/code/projects/openhcs-sequential/docs/papers/paper7_theoretical_minimality/proofs/.lake/build/lib/lean /home/ts/.elan/toolchains/leanprover--lean4---v4.27.0-rc1/bin/lean /home/ts/code/projects/openhcs-sequential/docs/papers/paper7_theoretical_minimality/proofs/TheoreticalMinimality/Framework.lean -o /home/ts/code/projects/openhcs-sequential/docs/papers/paper7_theoretical_minimality/proofs/.lake/build/lib/lean/TheoreticalMinimality/Framework.olean -i /home/ts/code/projects/openhcs-sequential/docs/papers/paper7_theoretical_minimality/proofs/.lake/build/lib/lean/TheoreticalMinimality/Framework.ilean -c /home/ts/code/projects/openhcs-sequential/docs/papers/paper7_theoretical_minimality/proofs/.lake/build/ir/TheoreticalMinimality/Framework.c --setup /home/ts/code/projects/openhcs-sequential/docs/papers/paper7_theoretical_minimality/proofs/.lake/build/ir/TheoreticalMinimality/Framework.setup.json --json
+error: TheoreticalMinimality/Framework.lean:39:8: Type mismatch
+  h_covers
+has type
+  ∃ a, a = T'.mapping q
+but is expected to have type
+  ∃ a, T'.mapping q = a
+error: TheoreticalMinimality/Framework.lean:55:10: Invalid rewrite argument: Expected an equality or iff proof or definition name, but `h_T_min_size` is a proof of
+  T_min.coversSet D.queries ∧ T_min.size = D.intrinsicDimension
+error: TheoreticalMinimality/Framework.lean:85:2: Type mismatch
+  Nat.le_refl ?m.8
+has type
+  ?m.8 ≤ ?m.8
+but is expected to have type
+  T.size ≥ kolmogorov_complexity D T
+error: TheoreticalMinimality/Framework.lean:117:4: failed to synthesize
+  Subsingleton (Theory D)
+
+Hint: Additional diagnostic information may be available using the `set_option diagnostics true` command.
+error: TheoreticalMinimality/Framework.lean:159:4: Type mismatch
+  Nat.le_refl ?m.14
+has type
+  ?m.14 ≤ ?m.14
+but is expected to have type
+  T.size ≤ kolmogorov_complexity D T
+error: Lean exited with code 1
+Some required targets logged failures:
+- TheoreticalMinimality.Framework
+error: build failed

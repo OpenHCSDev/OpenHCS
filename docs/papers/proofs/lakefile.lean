@@ -98,7 +98,9 @@ lean_lib «paper4_DecisionQuotient» where
   weakLeanArgs := weakLeanArgs
 
 -- Paper 5: Credibility
-lean_lib «paper5_Basic» where
+-- Main target imports Credibility.* submodules (synced from paper5_credibility/proofs/)
+lean_lib «Credibility» where
+  globs := #[.submodules `Credibility]
   moreLeanArgs := moreLeanArgs
   weakLeanArgs := weakLeanArgs
 

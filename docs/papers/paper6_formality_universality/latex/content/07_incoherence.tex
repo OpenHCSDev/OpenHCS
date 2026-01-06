@@ -15,13 +15,13 @@ Most people never get the type error. They live in a world of vague assertions t
 \begin{theorem}[Parse Failure]
 \begin{verbatim}
 theorem in_your_model_parse_failure :
-  ∀ obj : InYourModelObjection,
-  obj.witness = none →
+  forall obj : InYourModelObjection,
+  obj.witness = none ->
   parse obj.uttered = none := by
   intro obj h_none
-  -- An argument requires: Γ, φ, witness
+  -- An argument requires: Gamma, phi, witness
   -- obj has witness = none
-  -- No witness → no argument
+  -- No witness -> no argument
   exact no_witness_no_argument obj
 \end{verbatim}
 \end{theorem}

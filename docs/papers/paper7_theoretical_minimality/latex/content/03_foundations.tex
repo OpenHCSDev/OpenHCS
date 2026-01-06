@@ -1,0 +1,202 @@
+\section{Foundations}\label{foundations}
+
+\subsection{One-Universe Framework}\label{one-universe-framework}
+
+We adopt the \emph{One-Universe Framework (OUF)} as our foundational ontology. This framework establishes a single source of truth and proves the interchangeability of truth and semantic information.
+
+\subsubsection{Formalization in Lean 4}
+
+The OUF is implemented as a foundational axiom and definitions in our Lean formalization:
+
+\begin{lstlisting}[language=lean]
+axiom Universe : Type
+
+def Truth (φ : Prop) : Prop := φ
+
+def SemanticInfo (φ : Prop) : Prop := φ
+
+theorem info_iff_truth (φ : Prop) : 
+  SemanticInfo φ ↔ Truth φ := by rfl
+\end{lstlisting}
+
+\subsubsection{Ontology}
+
+\textbf{Axiom 1.1 (Universe).} There exists a unique mathematical Universe $\mathcal{U}$ serving as the single source of truth (SSOT). Formalized as:
+$$\texttt{axiom Universe : Type}$$
+
+\textbf{Definition 1.2 (Truth).} Truth is what holds in Universe. For any proposition $\varphi$:
+$$\text{Truth}(\varphi) := \varphi$$
+Truth is \emph{defined} as ontological entailment by Universe, not relativized to models.
+
+\textbf{Definition 1.3 (Semantic Information).} Semantic information is reliable facts about Universe:
+$$\text{SemanticInfo}(\varphi) := \varphi$$
+This is \emph{semantic} information (correspondence with reality), not Shannon information (entropy).
+
+\textbf{Theorem 1.1 (Interchangeability).} Information and truth are interchangeable:
+$$\text{SemanticInfo}(\varphi) \;\iff\; \text{Truth}(\varphi)$$
+
+\begin{proof}
+By reflexivity. Since both are defined identically as $\varphi$, the biconditional holds by definitional equality. Formalized as \texttt{theorem info\_iff\_truth (φ : Prop) : SemanticInfo φ ↔ Truth φ := by rfl}.
+\end{proof}
+
+\textbf{Consequence.} In OUF, reliable information about Universe is exactly the set of truths. There is no gap between what is true and what constitutes information.
+
+\subsubsection{Gödel's Incompleteness and the Truth Hierarchy}
+
+OUF explicitly acknowledges three levels of truth, compatible with Gödel's incompleteness theorems:
+
+\textbf{Level 1: Stipulated Truth} (Axioms and Definitions)
+\begin{itemize}
+\item Axioms are true by declaration (e.g., \texttt{axiom Universe : Type})
+\item Definitions are true by convention (e.g., \texttt{def Truth (φ) := φ})
+\item These require no proof---they \emph{are} the foundation
+\end{itemize}
+
+\textbf{Level 2: Semantic Truth} (Universe-Grounded)
+\begin{itemize}
+\item $\text{Truth}(\varphi) \iff \mathcal{U} \models \varphi$
+\item True in Universe, whether syntactically provable or not
+\item Gödel: $\exists \varphi$ where $\mathcal{U} \models \varphi$ but $\text{System} \not\vdash \varphi$
+\end{itemize}
+
+\textbf{Level 3: Syntactic Provability} (Derivable Truth)
+\begin{itemize}
+\item $\text{System} \vdash \varphi$ means $\varphi$ derivable from axioms
+\item Soundness: $\text{System} \vdash \varphi \Rightarrow \mathcal{U} \models \varphi$
+\item Incompleteness: $\mathcal{U} \models \varphi \not\Rightarrow \text{System} \vdash \varphi$
+\end{itemize}
+
+\textbf{OUF Position.} Truth is grounded at Level 2 (semantic), not Level 3 (syntactic). We care what holds in Universe, not what is formally derivable. This is compatible with Gödel: unprovable $\neq$ untrue.
+
+\textbf{Formalization.} The framework formalizes:
+\begin{lstlisting}[language=lean]
+axiom axioms_true_without_proof : ∀ (_ax : Prop), True
+
+theorem definitions_true_by_stipulation : 
+  ∀ (definiendum definiens : Prop), 
+  (definiendum ↔ definiens) → (definiendum ↔ definiens)
+\end{lstlisting}
+
+\subsubsection{Theories, Axioms, Definitions}
+
+\textbf{Definition 1.4 (Theory).} A theory $T$ is a finite or recursively enumerable set of sentences.
+
+\textbf{Definition 1.5 (Definition).} A sentence $D$ is a \emph{definition} if it introduces symbols or constraints without being proven from prior sentences.
+
+\textbf{Observation (Axiom-Definition Equivalence).} Axioms are definitional statements about what terms mean in $\mathcal{U}$, not assumptions about multiple models.
+
+\subsubsection{Summary: OUF vs. Standard Model Framework}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{|l|l|l|}
+\hline
+\textbf{Concept} & \textbf{SMF} & \textbf{OUF} \\ \hline
+Truth & Model-relative & Absolute in $\mathcal{U}$ \\ \hline
+Models & Many & One (Universe) \\ \hline
+Axioms & Assumptions & Definitions \\ \hline
+Info = Truth & No & Yes (proven) \\ \hline
+Gödel & Problematic & Compatible \\ \hline
+Provability & Central & Epistemic \\ \hline
+\end{tabular}
+\caption{Comparison of Standard Model Framework (SMF) and One-Universe Framework (OUF)}
+\label{tab:ouf-comparison}
+\end{table}
+
+\subsection{Domains and Query Spaces}\label{domains-and-implementations}
+
+\textbf{Definition 2.1 (Domain).} A \emph{domain} $D$ consists of:
+\begin{itemize}
+\item Observable phenomena $\Phi$
+\item Query type $Q$ (well-formed questions about $D$)
+\item Answer type $A$ (responses to queries)
+\item Query set $\mathcal{Q} \subseteq Q$ (all valid queries)
+\end{itemize}
+
+Formalized in Lean as:
+\begin{lstlisting}[language=lean]
+structure Domain where
+  Phenomenon : Type
+  Query : Type
+  Answer : Type
+  [answerInhabited : Inhabited Answer]
+  queries : Set Query
+  queries_nonempty : queries.Nonempty
+\end{lstlisting}
+
+\textbf{Transcendental Condition (queries\_nonempty).} Domains must have at least one query. This is not arbitrary---it's the \emph{transcendental condition} for the possibility of theory:
+\begin{itemize}
+\item For any output (Answer), there must be input (Query)
+\item Queries encode information/truth about what we seek
+\item By OUF: Information = Truth
+\item Therefore: Domain existence $\Rightarrow$ queries exist
+\end{itemize}
+
+Denying this denies the possibility of theorizing about the domain.
+
+\textbf{Definition 2.2 (Information).} For domain $D$ with query $q \in \mathcal{Q}$:
+$$\text{Info}_D(q) := \text{ the truth-grounded answer to } q$$
+By OUF interchangeability: Information = Truth.
+
+\textbf{Example:} For a dataset with $n$ points in $\mathbb{R}^d$:
+\begin{itemize}
+\item Phenomena: The dataset points
+\item Queries: ``What is the covariance matrix?'', ``Which point has maximum leverage?''
+\item Answers: Specific matrices, point indices
+\item queries\_nonempty: At least one valid statistical question exists
+\end{itemize}
+
+\subsection{Theories as Query-Answer Mappings}\label{theories-as-query-answer-mappings}
+
+\textbf{Definition 2.3 (Theory).} A \emph{theory} $T$ for domain $D$ is a structure with:
+\begin{itemize}
+\item Parameters $\theta \in \Theta$ (the theory's state space)
+\item Answer function $f : Q \times \Theta \to A$ mapping queries and parameters to answers
+\end{itemize}
+
+Formalized as:
+\begin{lstlisting}[language=lean]
+structure Theory (D : Domain) where
+  Parameter : Type
+  answer : D.Query → Parameter → D.Answer
+  hasOrthogonalParams : Prop
+\end{lstlisting}
+
+\textbf{Definition 2.4 (Theory Size).} The \emph{size} of theory $T$ is:
+$$|T| = |\Theta| \text{ (number of parameters)}$$
+
+\textbf{Theorem 2.1 (Orthogonal Parameters).} Every theory has orthogonal parameters (no redundancy):
+$$T.\text{hasOrthogonalParams}$$
+
+\begin{proof}
+By transcendental argument. Since queries exist (\texttt{queries\_nonempty}), and theories must answer queries, each parameter must contribute to some answer. Otherwise it would be eliminable, contradicting minimality. Formalized as proven theorem \texttt{Theory.orthogonal\_by\_definition} (not an axiom).
+\end{proof}
+
+\subsection{Minimality and Redundancy}\label{minimality-and-redundancy}
+
+\textbf{Definition 2.7 (Minimal Theory).} A theory $T$ is \emph{minimal} if no 
+proper subset $T' \subsetneq T$ answers all queries in $\text{Queries}(D)$.
+
+\textbf{Definition 2.8 (Redundant Structure).} A component $c \in T$ is 
+\emph{redundant} if $T \setminus \{c\}$ still answers all queries.
+
+\textbf{Definition 2.9 (Query Coverage).} A theory $T$ \emph{covers} query space 
+$Q$ if:
+$$\forall q \in Q, \exists f_q : T \to A_q \text{ computable}$$
+
+\textbf{Lemma 2.1 (Minimality Characterization).} $T$ is minimal iff:
+\begin{enumerate}
+\item $T$ covers $\text{Queries}(D)$, and
+\item Every component of $T$ is required by some query
+\end{enumerate}
+
+\begin{proof}
+Forward direction: If $T$ minimal but some component $c$ not required, then 
+$T \setminus \{c\}$ covers all queries, contradicting minimality.
+
+Reverse direction: If every component required and $T$ covers all queries, then 
+any proper subset fails to cover some query, so $T$ minimal.
+\end{proof}
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+

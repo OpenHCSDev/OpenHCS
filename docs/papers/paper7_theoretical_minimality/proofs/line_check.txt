@@ -1,0 +1,3 @@
+axiom iso_preserves_minimal {D : Domain} [Finite D.Query] {T T' : Theory D} :
+    T' ≅ T → T.isMinimal → T'.isMinimal
+

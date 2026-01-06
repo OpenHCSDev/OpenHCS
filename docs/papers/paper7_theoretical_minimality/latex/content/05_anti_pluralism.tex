@@ -1,0 +1,72 @@
+\section{Anti-Pluralism Results}\label{anti-pluralism}
+
+\subsection{Incoherence of Pluralism}\label{incoherence-of-pluralism}
+
+\begin{theorem}[Incoherence of Pluralism]\label{thm:anti-pluralism}
+For any domain $D$ with query space $\text{Queries}(D)$, there cannot exist 
+multiple distinct minimal theories $T_1, T_2$ that are not isomorphic.
+\end{theorem}
+
+\begin{proof}
+Suppose $T_1$ and $T_2$ are both minimal and complete, but not isomorphic.
+
+Since both are complete, they answer all queries identically. 
+
+Since they are not isomorphic, there exists structure in $T_1$ with no 
+corresponding structure in $T_2$, or vice versa.
+
+Without loss of generality, suppose $T_1$ contains component $c$ with no 
+correspondent in $T_2$. 
+
+Since $T_2$ answers all queries without $c$, component $c$ is not required by 
+any query.
+
+But then $T_1$ is not minimal, contradicting our assumption.
+\end{proof}
+
+\textbf{Corollary 4.1 (Convention vs Discovery).} Isomorphic theories are mere 
+relabelings. If $T_1 \cong T_2$, they differ only in notation, not content.
+
+\begin{proof}
+Isomorphism $\phi: T_1 \to T_2$ preserves all structural relationships. Every 
+query answered by $T_1$ is answered identically (up to relabeling) by $T_2$.
+
+The theories contain the same information in different notation.
+\end{proof}
+
+\textbf{Interpretation:} When physicists debate equivalent formulations of quantum 
+mechanics (Heisenberg vs Schrödinger pictures), they are arguing about notation, 
+not discovering different theories. The minimal theory answering quantum mechanical 
+queries is unique; the formulations are isomorphic.
+
+\subsection{Philosophical Implications}\label{philosophical-implications-pluralism}
+
+\textbf{Rejection of Epistemic Pluralism:} Pluralism claims multiple equally valid 
+theories can explain the same phenomena. Our result shows this is impossible for 
+minimal theories.
+
+\textbf{Underdetermination of Theory by Data:} Quine argued observations 
+underdetermine theory choice. Our result resolves this: observations determine 
+queries, queries determine minimal theory uniquely.
+
+\textbf{Scientific Realism:} Theories converge not by social consensus but by 
+computational necessity. The minimal theory is real structure, not convention.
+
+\textbf{Theory Choice:} Occam's razor is not aesthetic preference---it is algorithmic 
+requirement. Simpler theories are not "more beautiful," they are the unique minimal 
+compression.
+
+\textbf{Theorem 4.2 (Learnability).} The minimal theory $T^*$ is learnable from 
+finite query samples.
+
+\begin{proof}
+By Theorem~\ref{thm:computability-from-queries}, $T^* = f(\text{Queries}(D))$.
+
+For finite $D$, a finite sample of queries suffices to determine all structure 
+required by those queries.
+
+Additional queries either confirm existing structure or add new required components.
+\end{proof}
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+

@@ -1,6 +1,6 @@
 # Paper: Formality and Universality in Software Engineering
 
-**Status**: TOPLAS-ready | **Lean**: 0 lines, 0 theorems, 0 sorry
+**Status**: TOPLAS-ready | **Lean**: 0 lines, 0 theorems
 
 ---
 
@@ -21,20 +21,20 @@ The paper concludes with implications for discourse: incoherent positions reflec
 A proposition $P$ is *formal* if there exists a verifier $V$ such that any agent can run $V$ and $V$ decides $P$:
 
     def formal (P : Prop) : Prop :=
-      ∃ V : Verifier, ∀ agent, agent.can_run V ∧ V.decides P
+      exists V : Verifier, forall agent, agent.can_run V /\\ V.decides P
 :::
 
 ::: definition
 A proposition $P$ is *universal* if it is useful to all agents:
 
     def universal (P : Prop) : Prop :=
-      ∀ agent, useful P agent
+      forall agent, useful P agent
 :::
 
 ::: theorem
 []{#thm:formal-universal label="thm:formal-universal"}
 
-    theorem formal_iff_universal : formal P ↔ universal P
+    theorem formal_iff_universal : formal P <-> universal P
 :::
 
 **Proof sketch.**
@@ -70,8 +70,8 @@ This paper synthesizes: formal proofs are costly signals (Paper 5) because compi
 
 ::: definition
     def opinion (p : Prop) : Prop :=
-      ∃ model : Model, decidable_in model p ∧
-      ¬computable_in_poly_time (find model)
+      exists model : Model, decidable_in model p /\\
+      notcomputable_in_poly_time (find model)
 :::
 
 "Opinions" are propositions where:
@@ -88,8 +88,8 @@ Sometimes the model is small. Sometimes the sufficient coordinates are few. Some
 
 ::: theorem
     theorem opinion_is_complexity_class :
-      is_opinion p ↔
-      (∃ truth_value p) ∧
+      is_opinion p <->
+      (exists truth_value p) /\\
       (complexity (determine p) > available_resources)
 :::
 
@@ -107,11 +107,11 @@ Someone holding an "opinion" is not irrational. They're running a heuristic on i
 From the axis framework, the theorems are:
 
     theorem fixed_axis_incompleteness :
-      ∀ A : AxisSet, ∀ a : Axis, a ∉ A →
-      ∃ D : Domain, ¬complete A D
+      forall A : AxisSet, forall a : Axis, a notin A ->
+      exists D : Domain, notcomplete A D
 
     theorem parameterized_axis_immunity :
-      ∀ D : Domain, complete (requiredAxesOf D) D
+      forall D : Domain, complete (requiredAxesOf D) D
 
 The quantifiers are $\forall A : \texttt{AxisSet}$ and $\forall D : \texttt{Domain}$. Not "for all $A$ in model $M$." For all $A$. Period.
 
@@ -123,15 +123,15 @@ The quantifiers are $\forall A : \texttt{AxisSet}$ and $\forall D : \texttt{Doma
       | DenyAxisType   : UniverseDenialForm  -- "Axis doesn't capture real axes"
       | DenyDomainType : UniverseDenialForm  -- "Domain doesn't capture real domains"
       | DenyProof      : UniverseDenialForm  -- "The proof has a gap"
-      | DenyLogic      : UniverseDenialForm  -- "∀ doesn't mean what you think"
+      | DenyLogic      : UniverseDenialForm  -- "forall doesn't mean what you think"
 
 Each requires a witness:
 
-    def required_witness : UniverseDenialForm → Type
-      | .DenyAxisType   => Σ A : Type, IsAxis A × ¬EmbeddableIn A Axis
-      | .DenyDomainType => Σ D : Type, IsDomain D × ¬EmbeddableIn D Domain
-      | .DenyProof      => Σ line : Nat, IsGap line
-      | .DenyLogic      => Σ L : Logic, Valid L × (¬UniversalElim L)
+    def required_witness : UniverseDenialForm -> Type
+      | .DenyAxisType   => Sigma A : Type, IsAxis A * notEmbeddableIn A Axis
+      | .DenyDomainType => Sigma D : Type, IsDomain D * notEmbeddableIn D Domain
+      | .DenyProof      => Sigma line : Nat, IsGap line
+      | .DenyLogic      => Sigma L : Logic, Valid L * (notUniversalElim L)
 
 
 # No Witness Theorems {#sec:no-witness}
@@ -139,8 +139,8 @@ Each requires a witness:
 ## Why No Witnesses Exist
 
 ::: theorem
-    theorem no_axis_witness : ¬∃ w : required_witness .DenyAxisType := by
-      intro ⟨A, hAxis, hNotEmbed⟩
+    theorem no_axis_witness : notexists w : required_witness .DenyAxisType := by
+      intro <A, hAxis, hNotEmbed>
       -- Axis is: structure with Carrier : Type, ord, lattice
       -- If A has these, it IS an Axis. If not, it's not an axis.
       -- "Real axis not captured" is category error
@@ -148,21 +148,21 @@ Each requires a witness:
 :::
 
 ::: theorem
-    theorem no_domain_witness : ¬∃ w : required_witness .DenyDomainType := by
-      intro ⟨D, hDomain, hNotEmbed⟩
-      -- Domain α = List (Query α). A domain IS a list of queries.
+    theorem no_domain_witness : notexists w : required_witness .DenyDomainType := by
+      intro <D, hDomain, hNotEmbed>
+      -- Domain alpha = List (Query alpha). A domain IS a list of queries.
       exact domain_characterization_complete D hDomain hNotEmbed
 :::
 
 ::: theorem
-    theorem no_proof_witness : ¬∃ w : required_witness .DenyProof := by
+    theorem no_proof_witness : notexists w : required_witness .DenyProof := by
       -- 0 sorry. Compiles. QED.
       exact zero_sorry_no_gaps
 :::
 
 ::: theorem
-    theorem no_logic_witness : ¬∃ w : required_witness .DenyLogic := by
-      -- Denying ∀-elim exits the game
+    theorem no_logic_witness : notexists w : required_witness .DenyLogic := by
+      -- Denying forall-elim exits the game
       exact universal_elim_is_foundational
 :::
 
@@ -172,7 +172,7 @@ Each requires a witness:
 []{#thm:denial-incoherent label="thm:denial-incoherent"}
 
     theorem universe_denial_incoherent :
-      ∀ form : UniverseDenialForm, ¬∃ w : required_witness form := by
+      forall form : UniverseDenialForm, notexists w : required_witness form := by
       intro form
       cases form with
       | DenyAxisType => exact no_axis_witness
@@ -193,8 +193,8 @@ Each requires a witness:
 
 ::: theorem
     theorem in_your_model_without_witness_is_cheap_talk :
-      ∀ obj : InYourModelObjection,
-      obj.witness = none →
+      forall obj : InYourModelObjection,
+      obj.witness = none ->
       is_cheap_talk obj.uttered := by
       intro obj h_none
       -- Asserting limitation without witness costs nothing
@@ -208,15 +208,15 @@ Each requires a witness:
 []{#thm:asymmetry label="thm:asymmetry"}
 
     theorem proof_vs_objection_asymmetry :
-      ∀ thm : CompiledTheorem,
-      ∀ obj : InYourModelObjection,
-      obj.witness = none →
-      credibility thm.proof = 1 ∧
-      credibility obj.uttered ≤ cheap_talk_bound := by
+      forall thm : CompiledTheorem,
+      forall obj : InYourModelObjection,
+      obj.witness = none ->
+      credibility thm.proof = 1 /\\
+      credibility obj.uttered <= cheap_talk_bound := by
       intro thm obj h_none
       constructor
-      · exact Paper5.verified_proof_credibility_one thm
-      · exact in_your_model_credibility_bounded obj h_none
+      . exact Paper5.verified_proof_credibility_one thm
+      . exact in_your_model_credibility_bounded obj h_none
 :::
 
 The objection isn't wrong. It's *nothing*. The type is empty. The utterance fails to parse as an argument.
@@ -228,32 +228,32 @@ The objection isn't wrong. It's *nothing*. The type is empty. The utterance fail
 
 ::: definition
     def coherent_agent (a : Agent) : Prop :=
-      ∀ claim : Claim,
-        a.asserts claim →
-        (verified claim → a.maintains claim) ∧
-        (refuted claim → a.concedes claim)
+      forall claim : Claim,
+        a.asserts claim ->
+        (verified claim -> a.maintains claim) /\\
+        (refuted claim -> a.concedes claim)
 :::
 
 ## The Two Failure Modes
 
 ::: definition
     def incoherent_stubborn (a : Agent) : Prop :=
-      ∃ claim, refuted claim ∧ ¬a.concedes claim
+      exists claim, refuted claim /\\ nota.concedes claim
 :::
 
 ::: definition
     def incoherent_coward (a : Agent) : Prop :=
-      ∃ claim, verified claim ∧ ¬a.maintains claim
+      exists claim, verified claim /\\ nota.maintains claim
 :::
 
 ## The Coherence Commitment
 
 ::: theorem
     theorem coherence_commitment :
-      ∀ claim,
-        (submit claim verifier) ∧
-        (pass verifier → maintain claim) ∧
-        (fail verifier → concede claim)
+      forall claim,
+        (submit claim verifier) /\\
+        (pass verifier -> maintain claim) /\\
+        (fail verifier -> concede claim)
 :::
 
 Not infallibility. Accountability to the checker.
@@ -273,13 +273,13 @@ Most people never get the type error. They live in a world of vague assertions t
 
 ::: theorem
     theorem in_your_model_parse_failure :
-      ∀ obj : InYourModelObjection,
-      obj.witness = none →
+      forall obj : InYourModelObjection,
+      obj.witness = none ->
       parse obj.uttered = none := by
       intro obj h_none
-      -- An argument requires: Γ, φ, witness
+      -- An argument requires: Gamma, phi, witness
       -- obj has witness = none
-      -- No witness → no argument
+      -- No witness -> no argument
       exact no_witness_no_argument obj
 :::
 
@@ -349,4 +349,3 @@ All theorems are formalized in Lean 4:
 - Location: `docs/papers/proofs/paper6_*.lean`
 - Lines: 0
 - Theorems: 0
-- Sorry placeholders: 0

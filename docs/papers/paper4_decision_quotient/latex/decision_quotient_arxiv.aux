@@ -5,27 +5,21 @@
 \citation{cook1971complexity}
 \citation{karp1972reducibility}
 \citation{stockmeyer1976polynomial}
+\citation{moura2021lean4}
 \@writefile{toc}{\contentsline {section}{\numberline {1}Introduction}{1}{section.1}\protected@file@percent }
 \newlabel{sec:introduction}{{1}{1}{Introduction}{section.1}{}}
 \citation{cook1971complexity}
 \citation{karp1972reducibility}
-\citation{stockmeyer1976polynomial}
-\@writefile{toc}{\contentsline {subsection}{\numberline {1.1}The Decision Quotient}{2}{subsection.1.1}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {1.2}The Sufficiency-Checking Problem}{2}{subsection.1.2}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {1.3}Main Results}{2}{subsection.1.3}\protected@file@percent }
-\newlabel{thm:sufficiency-conp-intro}{{1.3}{2}{SUFFICIENCY-CHECK is \coNP -complete}{theorem.1.3}{}}
-\newlabel{thm:minsuff-conp-intro}{{1.4}{2}{MINIMUM-SUFFICIENT-SET is \coNP -complete}{theorem.1.4}{}}
-\newlabel{thm:anchor-sigma2p-intro}{{1.5}{2}{ANCHOR-SUFFICIENCY is $\SigmaP {2}$-complete}{theorem.1.5}{}}
-\newlabel{thm:dichotomy-intro}{{1.6}{2}{Complexity Dichotomy}{theorem.1.6}{}}
-\newlabel{thm:tractable-intro}{{1.7}{2}{Tractable Subcases}{theorem.1.7}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {1.4}The $\Sigma _{2}^{\textsf  {P}}$ to \textsf  {coNP}{} Collapse}{3}{subsection.1.4}\protected@file@percent }
-\newlabel{thm:sufficient-iff-relevant}{{1.8}{3}{Sufficient iff Superset of Relevant}{theorem.1.8}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {1.5}Connection to Prior Papers}{3}{subsection.1.5}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {1.6}Machine-Checked Proofs}{3}{subsection.1.6}\protected@file@percent }
+\citation{impagliazzo2001complexity}
+\@writefile{toc}{\contentsline {subsection}{\numberline {1.1}The Core Problem}{2}{subsection.1.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {1.2}Main Results}{2}{subsection.1.2}\protected@file@percent }
 \citation{savage1954foundations}
 \citation{raiffa1961applied}
-\@writefile{toc}{\contentsline {section}{\numberline {2}Formal Foundations}{4}{section.2}\protected@file@percent }
-\newlabel{sec:foundations}{{2}{4}{Formal Foundations}{section.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {1.3}The Foundational Principle}{3}{subsection.1.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {1.4}Connection to Prior Papers}{3}{subsection.1.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {1.5}Paper Structure}{3}{subsection.1.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {2}Formal Foundations}{3}{section.2}\protected@file@percent }
+\newlabel{sec:foundations}{{2}{3}{Formal Foundations}{section.2}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {2.1}Decision Problems with Coordinate Structure}{4}{subsection.2.1}\protected@file@percent }
 \newlabel{def:decision-problem}{{2.1}{4}{Decision Problem}{theorem.2.1}{}}
 \newlabel{def:projection}{{2.2}{4}{Projection}{theorem.2.2}{}}
@@ -66,8 +60,8 @@
 \@writefile{toc}{\contentsline {subsection}{\numberline {5.2}Separable Utility}{10}{subsection.5.2}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {5.3}Tree-Structured Dependencies}{10}{subsection.5.3}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {5.4}Practical Implications}{10}{subsection.5.4}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {6}Mathematical Justification of Engineering Practice}{10}{section.6}\protected@file@percent }
-\newlabel{sec:engineering-justification}{{6}{10}{Mathematical Justification of Engineering Practice}{section.6}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {6}Why Over-Modeling Is Optimal}{10}{section.6}\protected@file@percent }
+\newlabel{sec:engineering-justification}{{6}{10}{Why Over-Modeling Is Optimal}{section.6}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {6.1}Configuration Simplification is SUFFICIENCY-CHECK}{11}{subsection.6.1}\protected@file@percent }
 \newlabel{thm:config-reduction}{{6.1}{11}{Configuration Simplification Reduces to SUFFICIENCY-CHECK}{theorem.6.1}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {6.2}Computational Rationality of Over-Modeling}{11}{subsection.6.2}\protected@file@percent }
@@ -93,27 +87,38 @@
 \@writefile{toc}{\contentsline {subsection}{\numberline {8.3}Value of Information}{14}{subsection.8.3}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {8.4}Model Selection}{14}{subsection.8.4}\protected@file@percent }
 \@writefile{toc}{\contentsline {section}{\numberline {9}Conclusion}{14}{section.9}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {A}Lean 4 Proof Listings}{15}{appendix.A}\protected@file@percent }
-\newlabel{app:lean}{{A}{15}{Lean 4 Proof Listings}{appendix.A}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {A.1}Module Structure}{15}{subsection.A.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {A}Lean 4 Proof Listings}{17}{appendix.A}\protected@file@percent }
+\newlabel{app:lean}{{A}{17}{Lean 4 Proof Listings}{appendix.A}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {A.1}On the Nature of Foundational Proofs}{17}{subsection.A.1}\protected@file@percent }
+\newlabel{foundational-proofs-nature}{{A.1}{17}{On the Nature of Foundational Proofs}{subsection.A.1}{}}
+\citation{chickering2004large}
+\citation{teyssier2012ordering}
+\citation{nipkow2014concrete}
+\citation{cook2018complexity}
+\@writefile{toc}{\contentsline {subsection}{\numberline {A.2}Module Structure}{18}{subsection.A.2}\protected@file@percent }
 \bibstyle{plain}
 \bibdata{references}
 \bibcite{akaike1974new}{1}
 \bibcite{arora2009computational}{2}
 \bibcite{blum1997selection}{3}
-\bibcite{cook1971complexity}{4}
-\bibcite{howard1966information}{5}
-\bibcite{impagliazzo2001complexity}{6}
-\bibcite{karp1972reducibility}{7}
-\bibcite{koller2009probabilistic}{8}
-\bibcite{papadimitriou1994complexity}{9}
-\bibcite{pearl1988probabilistic}{10}
-\@writefile{toc}{\contentsline {subsection}{\numberline {A.2}Key Theorems}{16}{subsection.A.2}\protected@file@percent }
-\newlabel{thm:poly-compose}{{A.1}{16}{Polynomial Composition, Lean}{theorem.A.1}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {A.3}Verification Status}{16}{subsection.A.3}\protected@file@percent }
-\bibcite{raiffa1961applied}{11}
-\bibcite{savage1954foundations}{12}
-\bibcite{schwarz1978estimating}{13}
-\bibcite{stockmeyer1976polynomial}{14}
-\bibcite{stone1974cross}{15}
-\gdef \@abspage@last{17}
+\bibcite{chickering2004large}{4}
+\bibcite{cook1971complexity}{5}
+\bibcite{cook2018complexity}{6}
+\bibcite{moura2021lean4}{7}
+\bibcite{howard1966information}{8}
+\bibcite{impagliazzo2001complexity}{9}
+\bibcite{karp1972reducibility}{10}
+\@writefile{toc}{\contentsline {subsection}{\numberline {A.3}Key Theorems}{19}{subsection.A.3}\protected@file@percent }
+\newlabel{thm:poly-compose}{{A.1}{19}{Polynomial Composition, Lean}{theorem.A.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {A.4}Verification Status}{19}{subsection.A.4}\protected@file@percent }
+\bibcite{koller2009probabilistic}{11}
+\bibcite{nipkow2014concrete}{12}
+\bibcite{papadimitriou1994complexity}{13}
+\bibcite{pearl1988probabilistic}{14}
+\bibcite{raiffa1961applied}{15}
+\bibcite{savage1954foundations}{16}
+\bibcite{schwarz1978estimating}{17}
+\bibcite{stockmeyer1976polynomial}{18}
+\bibcite{stone1974cross}{19}
+\bibcite{teyssier2012ordering}{20}
+\gdef \@abspage@last{20}

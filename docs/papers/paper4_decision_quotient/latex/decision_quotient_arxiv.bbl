@@ -15,11 +15,28 @@ Avrim~L. Blum and Pat Langley.
 \newblock Selection of relevant features and examples in machine learning.
 \newblock {\em Artificial Intelligence}, 97(1-2):245--271, 1997.
 
+\bibitem{chickering2004large}
+David~Maxwell Chickering, David Heckerman, and Christopher Meek.
+\newblock Large-sample learning of {Bayesian} networks is {NP}-hard.
+\newblock In {\em Journal of Machine Learning Research}, volume~5, pages
+  1287--1330, 2004.
+
 \bibitem{cook1971complexity}
 Stephen~A. Cook.
 \newblock The complexity of theorem-proving procedures.
 \newblock In {\em Proceedings of the Third Annual ACM Symposium on Theory of
   Computing}, pages 151--158. ACM, 1971.
+
+\bibitem{cook2018complexity}
+Stephen~A. Cook.
+\newblock The {P} versus {NP} problem, 2018.
+\newblock Millennium Prize Problems, Clay Mathematics Institute.
+
+\bibitem{moura2021lean4}
+Leonardo de~Moura and Sebastian Ullrich.
+\newblock The lean 4 theorem prover and programming language.
+\newblock In {\em International Conference on Automated Deduction}, pages
+  625--635. Springer, 2021.
 
 \bibitem{howard1966information}
 Ronald~A. Howard.
@@ -42,6 +59,11 @@ Richard~M. Karp.
 Daphne Koller and Nir Friedman.
 \newblock {\em Probabilistic Graphical Models: Principles and Techniques}.
 \newblock MIT Press, 2009.
+
+\bibitem{nipkow2014concrete}
+Tobias Nipkow and Gerwin Klein.
+\newblock {\em Concrete Semantics with {Isabelle/HOL}}.
+\newblock Springer, 2014.
 
 \bibitem{papadimitriou1994complexity}
 Christos~H. Papadimitriou.
@@ -78,5 +100,11 @@ Mervyn Stone.
 \newblock Cross-validatory choice and assessment of statistical predictions.
 \newblock {\em Journal of the Royal Statistical Society: Series B
   (Methodological)}, 36(2):111--133, 1974.
+
+\bibitem{teyssier2012ordering}
+Marc Teyssier and Daphne Koller.
+\newblock Ordering-based search: A simple and effective algorithm for learning
+  {Bayesian} networks.
+\newblock {\em arXiv preprint arXiv:1207.1429}, 2012.
 
 \end{thebibliography}

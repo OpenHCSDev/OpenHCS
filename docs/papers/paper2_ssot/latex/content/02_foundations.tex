@@ -106,10 +106,16 @@ $F_5$: ``\texttt{Config} has field \texttt{name: str}'' & A dataclass field \\
 \end{center}
 
 \begin{definition}[Structural Fact]\label{def:structural-fact}
-A fact $F$ is \emph{structural} iff it concerns the structure of the type system: class existence, inheritance relationships, method signatures, or attribute definitions. Structural facts are fixed at \emph{definition time}, not runtime.
+A fact $F$ is \emph{structural} with respect to codebase $C$ iff the locations encoding $F$ are syntactic constituents of type definitions:
+\[
+\text{structural}(F, C) \Longleftrightarrow \forall L: \text{encodes}(L, F) \rightarrow L \in \text{TypeSyntax}(C)
+\]
+where $\text{TypeSyntax}(C)$ comprises class declarations, method signatures, inheritance clauses, and attribute definitions.
 \end{definition}
 
-The distinction between structural and non-structural facts is crucial. A configuration value (``threshold = 0.5'') can be changed at runtime. A method signature (``\texttt{validate()} returns \texttt{bool}'') is fixed when the class is defined. SSOT for structural facts requires different mechanisms than SSOT for configuration values.
+\textbf{Key property:} Structural facts are fixed at \emph{definition time}. Once a class is defined, its structure (methods, bases, attributes) cannot change without redefining the class. This is why structural SSOT requires definition-time hooks: the encoding locations are only mutable during class creation.
+
+\textbf{Non-structural facts} (configuration values, runtime state) have encoding locations outside type syntax. They can be modified at runtime without redefining types. SSOT for non-structural facts requires different mechanisms (e.g., reactive bindings, event systems) and is outside the scope of this paper.
 
 \subsection{Encoding: The Correctness Relationship}\label{sec:encoding}
 

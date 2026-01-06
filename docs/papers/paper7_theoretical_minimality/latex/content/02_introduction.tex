@@ -1,0 +1,134 @@
+\section{Introduction}\label{introduction}
+
+Scientific theories compress observations into minimal explanatory structures. 
+The Standard Model reduces particle physics to 19 parameters. General relativity 
+compresses gravitational phenomena into a single field equation. This compression 
+is not merely aesthetic---it is computational necessity.
+
+This paper proves a fundamental result in formal epistemology, grounded in the 
+\emph{One-Universe Framework (OUF)} where axioms are definitions and truth is 
+absolute:
+
+\begin{quote}
+\textbf{For any finite domain, the minimal theory that answers all possible queries 
+is unique up to isomorphism and computable from the query space.}
+\end{quote}
+
+\subsection{The Uniqueness Question}\label{the-uniqueness-question}
+
+Can multiple distinct theories equally explain the same phenomena? Philosophical 
+pluralists argue yes---equivalent formulations reflect convention rather than 
+discovery. We prove the opposite.
+
+Within the One-Universe Framework (formalized in Section~\ref{one-universe-framework}), 
+truth is absolute, not model-relative. Axioms are definitional statements about what 
+terms mean in the mathematical universe $\mathcal{U}$, not assumptions about multiple 
+possible models. This foundational commitment has a profound consequence: minimal 
+theories are unique.
+
+\textbf{Definition:} A \emph{theory} is a function $T: Q \to A$ mapping queries 
+to answers for a domain $D$. A theory is \emph{minimal} if no proper subset of 
+$T$ answers all queries in $\text{Queries}(D)$.
+
+\textbf{Theorem 1.1 (Unique Minimal Theory):} For any finite domain $D$, there 
+exists exactly one minimal theory $T^*$ up to isomorphism. All other theories 
+either:
+\begin{enumerate}
+\item Fail to answer some query in $\text{Queries}(D)$, or
+\item Contain redundant structure not required by any query
+\end{enumerate}
+
+\textbf{Foundational Grounding:} This uniqueness follows from the One-Universe 
+Framework's collapse of model-theoretic independence. Since truth is absolute 
+and axioms are definitions, the minimal set of parameters required to answer 
+all queries is uniquely determined by the intrinsic dimension of the domain. 
+There is no room for ``equivalent but distinct'' theories---minimality and 
+orthogonality collapse into a single constraint (Collapse Result 1, Section~\ref{one-universe-framework}).
+
+This is not mere mathematical pedantry. Papers 1--3 already demonstrate this 
+pattern in concrete domains:
+
+\subsection{Instances in Prior Work}\label{instances-in-prior-work}
+
+\textbf{Paper 1 (Axis Orthogonality):} Proves that for any finite dataset with 
+$n$ distinct values per attribute, the unique minimal theory is orthogonal 
+coordinate axes. All queries about attribute independence are answered by checking 
+axis alignment. Any non-orthogonal system introduces redundant parameters.
+
+\textbf{Paper 2 (SSOT):} Proves that coherent multi-scale representations have 
+exactly one degree of freedom. The minimal theory is the single source of truth. 
+All scale-specific views are computable projections. Any additional structure 
+violates coherence or introduces redundancy.
+
+\textbf{Paper 3 (Leverage):} Proves that weighted leverage is the unique 
+optimization criterion for finite datasets under statistical invariance. All 
+queries about optimal point selection are answered by leverage scores. Any 
+alternative criterion either fails some query or contains unnecessary parameters.
+
+These are not accidents. They instantiate a general pattern.
+
+\subsection{From Compression to Computation}\label{from-compression-to-computation}
+
+Why does minimality entail uniqueness? The key insight connects compression to 
+computation.
+
+\textbf{Theorem 1.2 (Compression Necessity):} For any domain $D$ with infinite 
+query space $|\text{Queries}(D)| = \infty$, any theory $T$ that answers all 
+queries must satisfy $|T| < |\text{Implementation}|$. Direct lookup tables are 
+uncomputable.
+
+Compression forces structure. Structure determines the theory. Once we know which 
+queries must be answered, the minimal structure is fixed.
+
+\textbf{Theorem 1.3 (Computability from Queries):} The minimal theory $T^*$ is a 
+computable function of the query space: $T^* = f(\text{Queries}(D))$ where $f$ 
+is algorithmic.
+
+This has profound implications: discovering a theory is not creative interpretation 
+but mechanical extraction. Given a domain and its query space, the minimal theory 
+is determined.
+
+\subsection{Contributions}\label{contributions}
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\item \textbf{Formal Framework (Section~\ref{foundations}):} Rigorous definitions of 
+theories, implementations, query spaces, domains, and minimality.
+
+\item \textbf{Uniqueness Theorems (Section~\ref{uniqueness-theorems}):}
+\begin{itemize}
+\item Theorem 3.1: Unique Minimal Theory (minimal $T^*$ unique up to isomorphism)
+\item Theorem 3.2: Compression Necessity (infinite queries require $|T| < |I|$)
+\item Theorem 3.3: Computability from Queries ($T^* = f(\text{Queries}(D))$)
+\end{itemize}
+
+\item \textbf{Anti-Pluralism Results (Section~\ref{anti-pluralism}):}
+\begin{itemize}
+\item Theorem 4.1: Incoherence of Pluralism (multiple minimal theories impossible)
+\item Corollary 4.2: Convention vs Discovery (isomorphisms are relabelings)
+\end{itemize}
+
+\item \textbf{Instances (Section~\ref{instances}):} Demonstrate that Papers 1--3 
+are concrete realizations of the general uniqueness pattern.
+
+\item \textbf{Lean Formalization (Appendix~\ref{lean-formalization}):} Complete 
+machine-verified proofs in Lean 4 of all theorems.
+\end{enumerate}
+
+\subsection{Philosophical Implications}\label{philosophical-implications}
+
+This result challenges epistemic pluralism. If minimal theories are unique, then:
+
+\begin{itemize}
+\item \textbf{Scientific realism:} Theories converge because reality has unique 
+minimal structure, not because scientists impose arbitrary conventions.
+\item \textbf{Theory choice:} Selecting simpler theories is not aesthetic 
+preference but computational necessity.
+\item \textbf{Underdetermination:} Apparent theoretical alternatives either answer 
+different queries or contain redundant structure.
+\end{itemize}
+
+The proof is constructive. We show how to compute $T^*$ from $\text{Queries}(D)$.
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+

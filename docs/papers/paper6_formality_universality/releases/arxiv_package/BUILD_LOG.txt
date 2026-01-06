@@ -2,7 +2,7 @@ OpenHCS Paper Build Log
 ========================
 
 Paper: paper6 - Formality and Universality in Software Engineering
-Package Date: 2026-01-03T10:43:56.012882
+Package Date: 2026-01-06T06:57:45.909692
 Lean Toolchain: leanprover/lean4:v4.27.0-rc1
 
 Proof Statistics:
@@ -10,21 +10,12 @@ Proof Statistics:
 Lean Files: 0
 Lines of Code: 0
 Theorems: 0
-Sorry Placeholders: 0
+
 
 Proof Files:
 ------------
 
-================================================================================
-COMPILATION OUTPUT (lake build)
-================================================================================
-
-Build completed successfully (3066 jobs).
-
-
-================================================================================
-END COMPILATION OUTPUT
-================================================================================
+Note: Run 'python3 scripts/build_papers.py release' to include compilation output.
 
 Build Instructions:
 -------------------

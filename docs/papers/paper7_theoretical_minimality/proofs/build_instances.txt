@@ -1,0 +1,40 @@
+⚠ [606/641] Replayed TheoreticalMinimality.Domain
+warning: TheoreticalMinimality/Domain.lean:136:41: unused variable `p`
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+⚠ [633/641] Replayed TheoreticalMinimality.Theory
+warning: TheoreticalMinimality/Theory.lean:52:5: unused variable `h_same_count`
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+warning: TheoreticalMinimality/Theory.lean:75:5: unused variable `i`
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+⚠ [634/641] Replayed TheoreticalMinimality.Minimality
+warning: TheoreticalMinimality/Minimality.lean:134:2: Try this: intro h_min ⟨T', h_smaller, h_covers⟩
+✖ [639/641] Building TheoreticalMinimality.Instances (1.2s)
+trace: .> LEAN_PATH=/home/ts/code/projects/openhcs-sequential/docs/papers/paper5_credibility/proofs/.lake/packages/Cli/.lake/build/lib/lean:/home/ts/code/projects/openhcs-sequential/docs/papers/paper5_credibility/proofs/.lake/packages/batteries/.lake/build/lib/lean:/home/ts/code/projects/openhcs-sequential/docs/papers/paper5_credibility/proofs/.lake/packages/Qq/.lake/build/lib/lean:/home/ts/code/projects/openhcs-sequential/docs/papers/paper5_credibility/proofs/.lake/packages/aesop/.lake/build/lib/lean:/home/ts/code/projects/openhcs-sequential/docs/papers/paper5_credibility/proofs/.lake/packages/proofwidgets/.lake/build/lib/lean:/home/ts/code/projects/openhcs-sequential/docs/papers/paper5_credibility/proofs/.lake/packages/importGraph/.lake/build/lib/lean:/home/ts/code/projects/openhcs-sequential/docs/papers/paper5_credibility/proofs/.lake/packages/LeanSearchClient/.lake/build/lib/lean:/home/ts/code/projects/openhcs-sequential/docs/papers/paper5_credibility/proofs/.lake/packages/plausible/.lake/build/lib/lean:/home/ts/code/projects/openhcs-sequential/docs/papers/paper5_credibility/proofs/.lake/packages/mathlib/.lake/build/lib/lean:/home/ts/code/projects/openhcs-sequential/docs/papers/paper7_theoretical_minimality/proofs/.lake/build/lib/lean /home/ts/.elan/toolchains/leanprover--lean4---v4.27.0-rc1/bin/lean /home/ts/code/projects/openhcs-sequential/docs/papers/paper7_theoretical_minimality/proofs/TheoreticalMinimality/Instances.lean -o /home/ts/code/projects/openhcs-sequential/docs/papers/paper7_theoretical_minimality/proofs/.lake/build/lib/lean/TheoreticalMinimality/Instances.olean -i /home/ts/code/projects/openhcs-sequential/docs/papers/paper7_theoretical_minimality/proofs/.lake/build/lib/lean/TheoreticalMinimality/Instances.ilean -c /home/ts/code/projects/openhcs-sequential/docs/papers/paper7_theoretical_minimality/proofs/.lake/build/ir/TheoreticalMinimality/Instances.c --setup /home/ts/code/projects/openhcs-sequential/docs/papers/paper7_theoretical_minimality/proofs/.lake/build/ir/TheoreticalMinimality/Instances.setup.json --json
+error: TheoreticalMinimality/Instances.lean:65:4: Tactic `rfl` failed: The left-hand side
+  d
+is not definitionally equal to the right-hand side
+  (Paper1Domain n d).intrinsicDimension
+
+n d : ℕ
+⊢ d = (Paper1Domain n d).intrinsicDimension
+error: TheoreticalMinimality/Instances.lean:121:4: Tactic `rfl` failed: The left-hand side
+  1
+is not definitionally equal to the right-hand side
+  (Paper2Domain scales).intrinsicDimension
+
+scales : ℕ
+⊢ 1 = (Paper2Domain scales).intrinsicDimension
+error: TheoreticalMinimality/Instances.lean:177:4: Tactic `rfl` failed: The left-hand side
+  n
+is not definitionally equal to the right-hand side
+  (Paper3Domain n d).intrinsicDimension
+
+n d : ℕ
+⊢ n = (Paper3Domain n d).intrinsicDimension
+error: Lean exited with code 1
+Some required targets logged failures:
+- TheoreticalMinimality.Instances
+error: build failed

@@ -1,67 +1,13 @@
 \documentclass[11pt]{article}
-\usepackage[utf8]{inputenc}
-\usepackage[T1]{fontenc}
-\usepackage{amsmath,amssymb,amsthm}
-\usepackage{graphicx}
-\usepackage{xcolor}
-\usepackage{booktabs}
-\usepackage{longtable}
-\usepackage{array}
-\usepackage{calc}
-\usepackage{fancyvrb}
-\usepackage{geometry}
-\usepackage{hyperref}
-\usepackage{url}
-
-\geometry{margin=1in}
-
-% Allow URLs to break at any character
-\makeatletter
-\g@addto@macro{\UrlBreaks}{\UrlOrds}
-\makeatother
-
-% Prevent overfull hboxes in references
-\sloppy
-
-% Fix for pandoc's \tightlist
-\providecommand{\tightlist}{%
-  \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
-
-% Disable proof environment's automatic QED (we use inline blacksquare)
-\renewcommand{\qedsymbol}{}
-
-% Theorem environments
-\newtheorem{theorem}{Theorem}[section]
-\newtheorem{lemma}[theorem]{Lemma}
-\newtheorem{corollary}[theorem]{Corollary}
-\newtheorem{proposition}[theorem]{Proposition}
-\newtheorem{axiom}[theorem]{Axiom}
-\theoremstyle{definition}
-\newtheorem{definition}[theorem]{Definition}
-\newtheorem{example}[theorem]{Example}
-\theoremstyle{remark}
-\newtheorem{remark}[theorem]{Remark}
-\newtheorem{observation}[theorem]{Observation}
-
-% Hyperref setup
-\hypersetup{
-  colorlinks=true,
-  linkcolor=blue,
-  citecolor=blue,
-  urlcolor=blue
-}
+\usepackage{pentalogy-preamble}
 
 \title{Leverage-Driven Software Architecture:\\A Probabilistic Framework for Architectural Decision-Making}
-
-\author{Anonymous Author \\
-Anonymous Institution \\
-\texttt{anonymous@example.com}}
-
-\date{January 3, 2026}
+\pentalogyauthor
+\pentalogydateJan
 
 \begin{document}
-
 \maketitle
+\pentalogyfooter
 
 \begin{abstract}
 \input{content/abstract.tex}

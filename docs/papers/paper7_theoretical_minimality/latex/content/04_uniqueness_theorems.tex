@@ -1,0 +1,129 @@
+\section{Uniqueness Theorems}\label{uniqueness-theorems}
+
+\subsection{The Unique Minimal Theory}\label{the-unique-minimal-theory}
+
+\begin{theorem}[Unique Minimal Theory]\label{thm:unique-minimal-theory}
+Let $D$ be a finite domain with query space $\text{Queries}(D)$. There exists
+exactly one minimal theory $T^* : \text{Queries}(D) \to \text{Answers}$ up to
+isomorphism.
+
+Any other theory $T'$ satisfies exactly one of:
+\begin{enumerate}
+\item $T'$ fails to answer some query in $\text{Queries}(D)$ (incomplete), or
+\item $T'$ contains redundant structure not required by any query (non-minimal)
+\end{enumerate}
+\end{theorem}
+
+\textbf{Definition (Theory Isomorphism).} Two theories $T_1, T_2$ are \emph{isomorphic}
+($T_1 \cong T_2$) if there exists a bijection $\phi: T_1 \to T_2$ such that for all
+$q \in \text{Queries}(D)$: $T_1(q) = T_2(q)$. Isomorphism is query-answer equivalence.
+
+\textbf{Lemma (Equivalence Implies Structural Isomorphism).} For minimal theories,
+query-answer equivalence implies structural isomorphism.
+
+\begin{proof}
+Let $T_1, T_2$ be minimal with identical query-answer behavior. Suppose $T_1$ contains
+structure $c$ with no correspondent in $T_2$. Since $T_2$ answers all queries without $c$,
+component $c$ is not required by any query. But then $T_1$ is not minimal---contradiction.
+Therefore every component in $T_1$ has a correspondent in $T_2$ and vice versa.
+\end{proof}
+
+\begin{proof}[Proof of Theorem~\ref{thm:unique-minimal-theory}]
+We prove this by constructing $T^*$ and showing any other minimal theory is isomorphic.
+
+\textbf{Construction:} Define $T^*$ as follows. For each query $q \in \text{Queries}(D)$:
+\begin{enumerate}
+\item Determine the minimal information $I_q$ from the implementation required to answer $q$
+\item Add $I_q$ to $T^*$ if not derivable from existing structure
+\item Derive answer to $q$ from $T^*$
+\end{enumerate}
+
+This produces a theory where every component is required by some query.
+
+\textbf{Uniqueness:} Suppose $T_1$ and $T_2$ are both minimal and complete.
+By the lemma, query-answer equivalence implies structural isomorphism. Both answer
+all queries identically (completeness). By minimality, neither contains structure
+beyond what queries require. Therefore $T_1 \cong T_2$.
+\end{proof}
+
+\textbf{Interpretation:} The minimal theory is not a choice or convention. It is 
+determined by the query space. Scientists who ask the same questions will converge to 
+isomorphic theories.
+
+\subsection{Compression Necessity}\label{compression-necessity}
+
+\begin{theorem}[Compression Necessity]\label{thm:compression-necessity}
+For any domain $D$ with infinite query space $|\text{Queries}(D)| = \infty$, any 
+complete theory $T$ satisfies:
+$$|T| < |\text{Implementation}|$$
+Direct lookup tables are uncomputable.
+\end{theorem}
+
+\begin{proof}
+Let $I$ be the complete implementation with state space $\Sigma$. If $|\text{Queries}(D)| = \infty$, 
+a lookup table storing all query-answer pairs requires infinite storage.
+
+Any computable theory must compress this infinite space into finite structure. 
+Therefore $|T| < |I|$ is necessary for computability.
+
+\textbf{Example:} For a dataset in $\mathbb{R}^d$, queries include:
+\begin{itemize}
+\item "What is the covariance between attributes $i$ and $j$?" (${d \choose 2}$ queries)
+\item "What is the correlation?" (another ${d \choose 2}$ queries)
+\item "What is the leverage of point $k$?" ($n$ queries)
+\item Infinitely many queries about linear combinations, projections, etc.
+\end{itemize}
+
+Storing all answers is impossible. The theory compresses via the covariance matrix 
+($d^2$ parameters), from which all queries are computable.
+\end{proof}
+
+\textbf{Interpretation:} Compression is not optional. Theories must compress to be 
+computable.
+
+\subsection{Computability from Queries}\label{computability-from-queries}
+
+\begin{theorem}[Computability from Queries]\label{thm:computability-from-queries}
+The minimal theory $T^*$ is a computable function of the query space:
+$$T^* = f(\text{Queries}(D))$$
+where $f$ is algorithmic.
+\end{theorem}
+
+\begin{proof}
+We construct $f$ explicitly:
+
+\textbf{Algorithm $f$:}
+\begin{enumerate}
+\item Input: $Q = \text{Queries}(D)$
+\item Initialize $T = \emptyset$
+\item For each query $q \in Q$:
+   \begin{enumerate}
+   \item Determine minimal information $I_q$ required to answer $q$
+   \item If $I_q$ not derivable from $T$, add $I_q$ to $T$
+   \end{enumerate}
+\item Output: $T$
+\end{enumerate}
+
+This algorithm terminates because:
+\begin{itemize}
+\item Each query requires finite information
+\item Adding information is monotone (never remove)
+\item Finite domain implies finite minimal theory
+\end{itemize}
+
+The output is minimal by construction: every component added is required by some query.
+\end{proof}
+
+\textbf{Corollary 3.1.} Theory discovery is mechanical extraction, not creative interpretation.
+
+\begin{proof}
+Given domain $D$ and query space $\text{Queries}(D)$, the minimal theory is determined 
+by algorithm $f$. No ambiguity exists.
+\end{proof}
+
+\textbf{Interpretation:} Discovering the Standard Model is not insight---it is 
+running algorithm $f$ on particle physics queries. Newton did not invent gravity; he 
+extracted the minimal theory answering mechanical queries.
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+

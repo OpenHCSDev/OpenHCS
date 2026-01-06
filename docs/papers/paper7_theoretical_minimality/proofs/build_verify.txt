@@ -1,0 +1,27 @@
+⚠ [606/641] Replayed TheoreticalMinimality.Domain
+warning: TheoreticalMinimality/Domain.lean:122:41: unused variable `p`
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+✖ [635/641] Building TheoreticalMinimality.Theory (1.4s)
+trace: .> LEAN_PATH=/home/ts/code/projects/openhcs-sequential/docs/papers/paper5_credibility/proofs/.lake/packages/Cli/.lake/build/lib/lean:/home/ts/code/projects/openhcs-sequential/docs/papers/paper5_credibility/proofs/.lake/packages/batteries/.lake/build/lib/lean:/home/ts/code/projects/openhcs-sequential/docs/papers/paper5_credibility/proofs/.lake/packages/Qq/.lake/build/lib/lean:/home/ts/code/projects/openhcs-sequential/docs/papers/paper5_credibility/proofs/.lake/packages/aesop/.lake/build/lib/lean:/home/ts/code/projects/openhcs-sequential/docs/papers/paper5_credibility/proofs/.lake/packages/proofwidgets/.lake/build/lib/lean:/home/ts/code/projects/openhcs-sequential/docs/papers/paper5_credibility/proofs/.lake/packages/importGraph/.lake/build/lib/lean:/home/ts/code/projects/openhcs-sequential/docs/papers/paper5_credibility/proofs/.lake/packages/LeanSearchClient/.lake/build/lib/lean:/home/ts/code/projects/openhcs-sequential/docs/papers/paper5_credibility/proofs/.lake/packages/plausible/.lake/build/lib/lean:/home/ts/code/projects/openhcs-sequential/docs/papers/paper5_credibility/proofs/.lake/packages/mathlib/.lake/build/lib/lean:/home/ts/code/projects/openhcs-sequential/docs/papers/paper7_theoretical_minimality/proofs/.lake/build/lib/lean /home/ts/.elan/toolchains/leanprover--lean4---v4.27.0-rc1/bin/lean /home/ts/code/projects/openhcs-sequential/docs/papers/paper7_theoretical_minimality/proofs/TheoreticalMinimality/Theory.lean -o /home/ts/code/projects/openhcs-sequential/docs/papers/paper7_theoretical_minimality/proofs/.lake/build/lib/lean/TheoreticalMinimality/Theory.olean -i /home/ts/code/projects/openhcs-sequential/docs/papers/paper7_theoretical_minimality/proofs/.lake/build/lib/lean/TheoreticalMinimality/Theory.ilean -c /home/ts/code/projects/openhcs-sequential/docs/papers/paper7_theoretical_minimality/proofs/.lake/build/ir/TheoreticalMinimality/Theory.c --setup /home/ts/code/projects/openhcs-sequential/docs/papers/paper7_theoretical_minimality/proofs/.lake/build/ir/TheoreticalMinimality/Theory.setup.json --json
+warning: TheoreticalMinimality/Theory.lean:52:5: unused variable `h_same_count`
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+warning: TheoreticalMinimality/Theory.lean:75:5: unused variable `i`
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+error: TheoreticalMinimality/Theory.lean:105:7: failed to synthesize instance of type class
+  Inhabited D.Query
+
+Hint: Type class instance resolution failures can be inspected with the `set_option trace.Meta.synthInstance true` command.
+error: TheoreticalMinimality/Theory.lean:106:2: Tactic `constructor` failed: target is not an inductive datatype
+
+case h
+D : Domain
+T : Theory D
+i : Fin T.numParams
+⊢ sorry ∈ D.queries
+error: Lean exited with code 1
+Some required targets logged failures:
+- TheoreticalMinimality.Theory
+error: build failed

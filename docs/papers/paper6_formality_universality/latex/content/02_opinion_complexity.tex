@@ -9,8 +9,8 @@
 \begin{definition}[Opinion]
 \begin{verbatim}
 def opinion (p : Prop) : Prop :=
-  ∃ model : Model, decidable_in model p ∧
-  ¬computable_in_poly_time (find model)
+  exists model : Model, decidable_in model p /\\
+  notcomputable_in_poly_time (find model)
 \end{verbatim}
 \end{definition}
 
@@ -29,8 +29,8 @@ Sometimes the model is small. Sometimes the sufficient coordinates are few. Some
 \begin{theorem}[Opinion is Complexity Class]
 \begin{verbatim}
 theorem opinion_is_complexity_class :
-  is_opinion p ↔
-  (∃ truth_value p) ∧
+  is_opinion p <->
+  (exists truth_value p) /\\
   (complexity (determine p) > available_resources)
 \end{verbatim}
 \end{theorem}

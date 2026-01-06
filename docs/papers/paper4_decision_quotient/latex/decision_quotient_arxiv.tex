@@ -1,93 +1,28 @@
 \documentclass[11pt]{article}
-\usepackage[utf8]{inputenc}
-\usepackage[T1]{fontenc}
-\usepackage{amsmath,amssymb,amsthm}
-\usepackage{graphicx}
-\usepackage{xcolor}
-\usepackage{booktabs}
-\usepackage{longtable}
-\usepackage{array}
-\usepackage{calc}
-\usepackage{fancyvrb}
-\usepackage{geometry}
-\usepackage{hyperref}
-\usepackage{url}
-\usepackage{algorithm}
-\usepackage{algpseudocode}
-
-\geometry{margin=1in}
-
-% Allow URLs to break at any character
-\makeatletter
-\g@addto@macro{\UrlBreaks}{\UrlOrds}
-\makeatother
-
-% Prevent overfull hboxes in references
-\sloppy
-
-% Fix for pandoc's \tightlist
-\providecommand{\tightlist}{%
-  \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
-
-% Disable proof environment's automatic QED (we use inline blacksquare)
-\renewcommand{\qedsymbol}{}
-
-% Theorem environments
-\newtheorem{theorem}{Theorem}[section]
-\newtheorem{lemma}[theorem]{Lemma}
-\newtheorem{corollary}[theorem]{Corollary}
-\newtheorem{proposition}[theorem]{Proposition}
-\newtheorem{axiom}[theorem]{Axiom}
-\theoremstyle{definition}
-\newtheorem{definition}[theorem]{Definition}
-\newtheorem{example}[theorem]{Example}
-\newtheorem{problem}[theorem]{Problem}
-\theoremstyle{remark}
-\newtheorem{remark}[theorem]{Remark}
-\newtheorem{observation}[theorem]{Observation}
-
-% Hyperref setup
-\hypersetup{
-  colorlinks=true,
-  linkcolor=blue,
-  citecolor=blue,
-  urlcolor=blue
-}
-
-% Complexity class macros
-\newcommand{\coNP}{\textsf{coNP}}
-\newcommand{\NP}{\textsf{NP}}
-\newcommand{\SigmaP}[1]{\Sigma_{#1}^{\textsf{P}}}
-\newcommand{\PiP}[1]{\Pi_{#1}^{\textsf{P}}}
-\newcommand{\Pclass}{\textsf{P}}
-\newcommand{\Opt}{\text{Opt}}
+\usepackage{pentalogy-preamble}
 
 \title{The Complexity of Decision-Relevant Uncertainty:\\
 Why Identifying What Matters Is Harder Than Knowing Everything}
-
-\author{
-  Tristan Simas\\
-  McGill University\\
-  \texttt{tristan.simas@mail.mcgill.ca}
-}
-
-\date{January 3, 2026}
+\pentalogyauthor
+\pentalogydateJan
 
 \begin{document}
-
 \maketitle
+\pentalogyfooter
 
-% arXiv license footnote
-\renewcommand{\thefootnote}{}
-\footnotetext{
-  \textcopyright\ 2026 Tristan Simas.
-  This work is licensed under CC BY 4.0.
-  License: \url{https://creativecommons.org/licenses/by/4.0/}
-}
-\renewcommand{\thefootnote}{\arabic{footnote}}
+\begin{abstract}
+\input{content/abstract.tex}
+\end{abstract}
 
-% SINGLE SOURCE OF TRUTH: All content in content.tex
-\input{content.tex}
+\input{content/01_introduction.tex}
+\input{content/02_formal_foundations.tex}
+\input{content/03_complexity_dichotomy.tex}
+\input{content/04_tractable_special_cases.tex}
+\input{content/05_mathematical_justification_of_engineering_practice.tex}
+\input{content/06_implications_for_software_architecture.tex}
+\input{content/07_related_work.tex}
+\input{content/08_conclusion.tex}
+\input{content/09_lean_4_proof_listings.tex}
 
 \bibliographystyle{plain}
 \bibliography{references}

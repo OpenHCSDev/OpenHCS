@@ -1,0 +1,2 @@
+error: TheoreticalMinimality/Framework.lean:118:4: Type mismatch
+error: Lean exited with code 1

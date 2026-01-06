@@ -1,12 +1,12 @@
 # Paper: A Universal Typing Discipline for Polymorphic Abstraction
 
-**Status**: TOPLAS-ready | **Lean**: 6086 lines, 265 theorems, 1 sorry
+**Status**: TOPLAS-ready | **Lean**: 6086 lines, 265 theorems
 
 ---
 
 ## Abstract
 
-**The Problem.** Classification systems---type systems, ontologies, taxonomies, schemas---operate over fixed sets of classification axes. We prove this architectural choice has unavoidable consequences: *any fixed-axis system is incomplete for some domain*. This is not a limitation of specific implementations; it is an information-theoretic impossibility.
+**The Problem.** Classification systems (type systems, ontologies, taxonomies, schemas) operate over fixed sets of classification axes. We prove this architectural choice has unavoidable consequences: *any fixed-axis system is incomplete for some domain*. This is not a limitation of specific implementations; it is an information-theoretic impossibility.
 
 **The Core Theorems (machine-checked, 0 sorries):**
 
@@ -34,11 +34,11 @@
 
 -   $(B, S, H)$ extends this for hierarchical configuration systems (adding a Scope axis)
 
--   Nominal typing strictly dominates structural typing when inheritance exists ($B \neq \emptyset$)
+-   B-inclusive systems strictly dominate B-exclusive systems when $B \neq \emptyset$ (in type system terminology: nominal typing dominates structural typing)
 
--   Duck typing requires $\Omega(n)$ error localization; nominal achieves $O(1)$
+-   Systems using only $\{S\}$ require $\Omega(n)$ error localization; systems using $\{B, S\}$ achieve $O(1)$
 
-**The Broader Claim.** The impossibility theorems apply to *any* classification system with fixed dimensions---not only type systems. Biological taxonomies, library classification schemes, database schemas, knowledge graphs: all are subject to the same constraints. A fixed set of axes guarantees domains that cannot be served.
+**The Broader Claim.** The impossibility theorems apply to *any* classification system with fixed dimensions, not only type systems. Biological taxonomies, library classification schemes, database schemas, knowledge graphs: all are subject to the same constraints. A fixed set of axes guarantees domains that cannot be served.
 
 **Corollary (Incoherence of Preference).** Claiming "classification system design is a matter of preference" while accepting the uniqueness theorem instantiates $P \land \neg P$. Uniqueness entails $\neg\exists$ alternatives; preference presupposes $\exists$ alternatives. The mathematics admits no choice.
 
@@ -55,7 +55,7 @@ Every formal system that classifies entities faces a fundamental architectural d
 
 This paper proves that this choice has unavoidable mathematical consequences. Specifically:
 
-1.  **Fixed axis sets guarantee incompleteness.** For any axis set $A$, there exist domains requiring axes outside $A$. No implementation within $A$ can answer these domains' queries---the information does not exist.
+1.  **Fixed axis sets guarantee incompleteness.** For any axis set $A$, there exist domains requiring axes outside $A$. No implementation within $A$ can answer these domains' queries; the information does not exist.
 
 2.  **Parameterized axis sets achieve universality.** A classification system that parameterizes over axes can serve any domain by instantiating the required axes.
 
@@ -63,7 +63,9 @@ This paper proves that this choice has unavoidable mathematical consequences. Sp
 
 ## Scope: From Type Theory to Classification Theory {#scope-from-type-theory}
 
-This paper began as a type theory contribution, proving that nominal typing strictly dominates structural typing when inheritance exists. But the proof techniques are not type-specific. The impossibility theorems rest on:
+This work establishes a general framework for classification systems, proving that axis sets are derivable from domain requirements. The type system application (\"nominal vs structural typing\") is one instantiation among many.
+
+The framework rests on three core concepts:
 
 -   Domains as sets of queries requiring specific information
 
@@ -71,13 +73,13 @@ This paper began as a type theory contribution, proving that nominal typing stri
 
 -   Completeness as the ability to answer all queries in a domain
 
-These concepts instantiate to type systems, but equally to any classification scheme. We therefore present the results at two levels:
+These concepts apply to any classification scheme (type systems, ontologies, taxonomies, schemas). We present results at two levels:
 
-1.  **The universal claim** (Section 3): Classification systems with fixed axes are incomplete for some domain.
+1.  **The universal claim** (Section 3): Classification systems with fixed axes are incomplete for some domain. Axis sets are computable from domain requirements.
 
-2.  **The type system instantiation** (Sections 4--5): For programming languages with inheritance, $(B, S)$ is the unique minimal complete axis set.
+2.  **The type system instantiation** (Sections 4--5): For programming languages with inheritance, $(B, S)$ is the unique minimal complete axis set. Traditional typing discipline names (\"nominal,\" \"structural\") denote specific axis configurations.
 
-The type system results are one case study. The impossibility theorems are universal.
+The impossibility theorems are universal; the type system debates are a consequence of wrongly framing axis derivation as preference.
 
 ## Metatheoretic Foundations
 
@@ -101,11 +103,11 @@ We develop a metatheory applicable to any classification system. The core insigh
 
 The model formalizes what programmers intuitively understand but rarely make explicit:
 
-1.  **Universal dominance** (Theorem 3.4): For languages with explicit inheritance (`bases` axis), nominal typing Pareto-dominates structural typing in greenfield development (provides strictly more capabilities with zero tradeoffs). Structural typing loses nothing only when `bases = ``[``]` universally (e.g., Go); in retrofit scenarios it remains a sacrifice, not an alternative. The decision is **derived** from capability analysis, not preference.
+1.  **Axis inclusion requirements** (Theorem 3.4): For languages with explicit inheritance (bases axis $B \neq \emptyset$), systems including $\{B, S\}$ Pareto-dominate systems using only $\{S\}$ (provides strictly more capabilities with zero tradeoffs). Systems excluding $B$ lose nothing only when $B = \emptyset$ by design (e.g., Go); otherwise it is a capability sacrifice, not an alternative. The axis set is **derived** from domain requirements, not preference. In type system terminology: \"nominal typing\" = $\{B,S\}$; \"structural typing\" = $\{S\}$.
 
-2.  **Complexity separation** (Theorem 4.3): Nominal typing achieves O(1) error localization; duck typing requires $\Omega(n)$ call-site inspection.
+2.  **Complexity separation** (Theorem 4.3): Systems using $\{B, S\}$ achieve O(1) error localization; systems using only $\{S\}$ incoherently (duck typing) require $\Omega(n)$ call-site inspection.
 
-3.  **Provenance impossibility** (Corollary 6.3): Duck typing cannot answer "which type provided this value?" because structurally equivalent objects are indistinguishable by definition. Machine-checked in Lean 4.
+3.  **Provenance impossibility** (Corollary 6.3): Systems using only the $\{S\}$ axis cannot answer "which type provided this value?" because structurally equivalent objects are indistinguishable by definition. The $B$ axis is required. Machine-checked in Lean 4.
 
 These theorems yield four measurable code quality metrics:
 
@@ -130,7 +132,7 @@ This paper makes five contributions, ordered from most general to most specific:
 
 -   **Minimality $\Rightarrow$ Orthogonality:** Every minimal complete axis set is orthogonal. Redundant (non-orthogonal) systems are never minimal.
 
--   **Parameterized Dominance:** Axis-parameterized classification systems strictly dominate fixed systems. The gap is not a tradeoff; it is absolute.
+-   **Axis-Parametric Dominance:** Systems that derive axes from requirements strictly dominate fixed-axis systems. The gap is not a tradeoff; it is absolute.
 
 These theorems apply to *any* classification system: type systems, ontologies, taxonomies, schemas.
 
@@ -138,11 +140,11 @@ These theorems apply to *any* classification system: type systems, ontologies, t
 
 -   **Theorem 3.32 (Model Completeness):** $(B, S)$ captures all runtime-available type information for class-based systems.
 
--   **Theorem 3.13 (Provenance Impossibility):** No system without $B$ can compute provenance. This is not a limitation of specific implementations; it is information-theoretic impossibility.
+-   **Theorem 3.13 (Provenance Impossibility):** No system excluding $B$ can compute provenance. This is information-theoretic impossibility.
 
--   **Theorem 3.24 (Complexity Lower Bound):** Duck typing requires $\Omega(n)$ error localization. Nominal typing achieves $O(1)$. The gap is unbounded.
+-   **Theorem 3.24 (Complexity Lower Bound):** Systems using only $\{S\}$ incoherently require $\Omega(n)$ error localization. Systems using $\{B, S\}$ achieve $O(1)$. The gap is unbounded.
 
--   **Theorem 3.5:** Nominal typing strictly dominates structural typing when $B \neq \emptyset$.
+-   **Theorem 3.5:** Systems including $\{B, S\}$ strictly dominate systems using only $\{S\}$ when $B \neq \emptyset$. (In type system terminology: nominal typing dominates structural typing.)
 
 **3. Axis-Parametric Extension:**
 
@@ -196,33 +198,33 @@ These theorems apply to *any* classification system: type systems, ontologies, t
 
 ### Decision Procedure, Not Preference
 
-The contribution of this paper is not the theorems alone, but their consequence: typing discipline selection becomes a decision procedure. Given requirements, the discipline is derived.
+The contribution of this paper is not the theorems alone, but their consequence: axis set determination becomes a decision procedure (Theorem 2.26). Given requirements, the axes are derived.
 
 **Implications:**
 
-1.  **Pedagogy.** Architecture courses should not teach "pick the style that feels Pythonic." They should teach how to derive the correct discipline from requirements. This is engineering, not taste.
+1.  **Pedagogy.** Architecture courses should not teach "pick the style that feels Pythonic." They should teach how to derive the required axes from domain queries. This is engineering, not taste.
 
-2.  **AI code generation.** LLMs can apply the decision procedure. "Given requirements R, apply Algorithm 1, emit code with the derived discipline" is an objective correctness criterion. The model either applies the procedure correctly or it does not.
+2.  **AI code generation.** LLMs can apply the decision procedure. "Given requirements R, apply Algorithm 2.26, emit code with the derived axis set" is an objective correctness criterion. The model either applies the procedure correctly or it does not.
 
-3.  **Language design.** Future languages could enforce discipline based on declared requirements. A `@requires_provenance` annotation could mandate nominal patterns at compile time.
+3.  **Language design.** Future languages could enforce axis inclusion based on declared requirements. A `@requires_provenance` annotation could mandate $B$ inclusion at compile time.
 
-4.  **Formal constraints.** When requirements include provenance, the mathematics constrains the choice: shape-based typing cannot provide this capability (Theorem 3.13, information-theoretic impossibility). The procedure derives the discipline from requirements.
+4.  **Formal constraints.** When requirements include provenance, the mathematics constrains the choice: systems excluding $B$ cannot provide this capability (Theorem 3.13, information-theoretic impossibility). The procedure derives the axis set from requirements.
 
 ### Scope and Limitations {#scope-limitations}
 
-This paper makes absolute claims. We do not argue nominal typing is "preferred" or "more elegant." We prove:
+This paper makes absolute claims. We do not argue that including all axes is "preferred" or "more elegant." We prove:
 
-1.  **Shape-based typing cannot provide provenance.** Duck typing and structural typing check type *shape*: attributes, method signatures. Provenance requires type *identity*. Shape-based disciplines cannot provide what they do not track.
+1.  **Systems excluding $B$ cannot provide provenance.** Disciplines using only $\{S\}$ check type *shape*: attributes, method signatures. Provenance requires type *identity* from the inheritance graph. Systems excluding $B$ cannot provide what they do not track.
 
-2.  **When B $\neq$ $\emptyset$, nominal typing dominates among fixed-axis systems.** Nominal typing provides strictly more capabilities. Adapters eliminate the retrofit exception (Theorem 2.10j). When inheritance exists, nominal typing is the capability-maximizing choice *within the fixed $(B,S)$ model*.
+2.  **When B $\neq$ $\emptyset$, $\{B, S\}$ systems dominate among fixed-axis systems.** Including both axes provides strictly more capabilities. Adapters eliminate the retrofit exception (Theorem 2.10j). When inheritance exists, $\{B, S\}$ inclusion is the capability-maximizing choice *within the fixed-axis model*.
 
-3.  **Shape-based typing is a capability sacrifice.** Protocol and duck typing discard the Bases axis. This eliminates four capabilities (provenance, identity, enumeration, conflict resolution) without providing any compensating capability (a dominated choice when $B \neq \emptyset$).
+3.  **Excluding required axes is a capability sacrifice.** Systems using only $\{S\}$ (Protocol, structural typing) discard the Bases axis. This eliminates four capabilities (provenance, identity, enumeration, conflict resolution) without providing any compensating capability (a dominated choice when $B \neq \emptyset$).
 
-**Fixed-axis vs. axis-parametric correctness.** The above results establish dominance *within* fixed-axis type systems. However, any fixed-axis system is fundamentally incomplete (Theorem 3.77, Fixed Axis Incompleteness): there exist domains requiring axes outside the fixed set. The truly *correct* approach is axis-parametric---deriving the minimal axis set from domain requirements (Section [\[axis-parametric-theory\]](#axis-parametric-theory){reference-type="ref" reference="axis-parametric-theory"}). Fixed-axis maximization (choosing nominal over structural when $B \neq \emptyset$) is coherent only when the axis-parametric option is unavailable. Put simply: axis-parametric is correct; fixed-axis nominal is less wrong than fixed-axis structural; but both fixed options remain incomplete.
+**Fixed-axis vs. axis-parametric correctness.** The above results establish dominance *within* fixed-axis type systems. However, any fixed-axis system is fundamentally incomplete (Theorem 3.77, Fixed Axis Incompleteness): there exist domains requiring axes outside the fixed set. The truly *correct* approach is axis-parametric, deriving the minimal axis set from domain requirements (Section [\[axis-parametric-theory\]](#axis-parametric-theory){reference-type="ref" reference="axis-parametric-theory"}). Fixed-axis maximization (choosing $\{B,S\}$ over $\{S\}$ when $B \neq \emptyset$) is coherent only when the axis-parametric option is unavailable. Put simply: axis-parametric is correct; fixed-axis $\{B,S\}$ is less wrong than fixed-axis $\{S\}$; but both fixed options remain incomplete.
 
-**Boundary scope** (pulled forward for clarity): when $B = \emptyset$ (no user-declared inheritance), e.g., pure JSON/FFI payloads or languages intentionally designed without inheritance, structural typing is the coherent choice. Whenever $B \neq \emptyset$ and inheritance metadata is accessible, nominal typing strictly dominates. Systems where $B = \emptyset$ are not exceptions---they simply do not require the B axis, and thus shape-based typing loses nothing (but gains nothing either).
+**Boundary scope** (pulled forward for clarity): when $B = \emptyset$ (no user-declared inheritance), e.g., pure JSON/FFI payloads or languages intentionally designed without inheritance, $\{S\}$-only systems (structural typing) are the coherent choice. Whenever $B \neq \emptyset$ and inheritance metadata is accessible, including $B$ in the axis set strictly dominates excluding it. Systems where $B = \emptyset$ are not exceptions---they simply do not require the B axis, and thus $\{S\}$-only systems lose nothing (but gain nothing either).
 
-The requirements determine the axes; the axes determine the discipline. Systems requiring provenance cannot use shape-based typing---this is not a design recommendation but a mathematical constraint.
+The requirements determine the axes; the axes determine the capabilities. Systems requiring provenance cannot exclude $B$. This is not a design recommendation but a mathematical constraint.
 
 ## Roadmap
 
@@ -256,23 +258,33 @@ The requirements determine the axes; the axes determine the discipline. Systems 
 
 **Definition 2.2 (Typing Discipline).** A typing discipline T is a method for determining whether an object x satisfies a type constraint A.
 
-**Definition 2.3 (Nominal Typing).** x satisfies A iff A $\in$ MRO(type(x)). The constraint is checked via explicit inheritance.
+**Definition 2.3 ($\{B,S\}$ Typing).** x satisfies A iff A $\in$ MRO(type(x)). The constraint is checked via explicit inheritance.
 
-**Definition 2.4 (Structural Typing).** x satisfies A iff namespace(x) $\supseteq$ signature(A). The constraint is checked via method/attribute matching. In Python, `typing.Protocol` implements structural typing: a class satisfies a Protocol if it has matching method signatures, regardless of inheritance.
+**Remark:** In type system terminology, this is called \"nominal typing.\"
 
-**Definition 2.5 (Duck Typing).** x satisfies A iff hasattr(x, m) returns True for each m in some implicit set M. The constraint is checked via runtime string-based probing.
+**Definition 2.4 ($\{S\}$-Only Typing with Declared Interfaces).** x satisfies A iff namespace(x) $\supseteq$ signature(A). The constraint is checked via method/attribute matching. In Python, `typing.Protocol` implements this: a class satisfies a Protocol if it has matching method signatures, regardless of inheritance.
 
-**Observation 2.1 (Shape-Based Typing).** Structural typing and duck typing are both *shape-based*: they check what methods or attributes an object has, not what type it is. Nominal typing is *identity-based*: it checks the inheritance chain. This distinction is fundamental. Python's `Protocol`, TypeScript's interfaces, and Go's implicit interface satisfaction are all shape-based. ABCs with explicit inheritance are identity-based. The theorems in this paper prove shape-based typing cannot provide provenance---regardless of whether the shape-checking happens at compile time (structural) or runtime (duck).
+**Remark:** In type system terminology, this is called \"structural typing.\"
 
-**Complexity distinction:** While structural typing and duck typing are both shape-based, they differ critically in *when* the shape-checking occurs:
+**Definition 2.5 ($\{S\}$-Only Incoherent Typing).** x satisfies A iff hasattr(x, m) returns True for each m in some implicit set M. The constraint is checked via runtime string-based probing.
 
--   **Structural typing** (Protocol): Shape-checking at *static analysis time* or *type definition time*. Complexity: O(k) where k = number of classes implementing the protocol.
+**Remark:** In type system terminology, this incoherent pattern is called \"duck typing.\"
 
--   **Duck typing** (hasattr/getattr): Shape-checking at *runtime, per call site*. Complexity: $\Omega$(n) where n = number of call sites.
+**Observation 2.1 ($\{S\}$-Only Systems Are Shape-Based).** $\{S\}$-only systems (with or without declared interfaces) are both *shape-based*: they check what methods or attributes an object has, not what type it is. $\{B,S\}$ typing is *identity-based*: it checks the inheritance chain. This distinction is fundamental. Python's `Protocol`, TypeScript's interfaces, and Go's implicit interface satisfaction are all shape-based. ABCs with explicit inheritance are identity-based. The theorems in this paper prove $\{S\}$-only typing cannot provide provenance---regardless of whether the shape-checking happens at compile time (with declared interfaces) or runtime (incoherent).
 
-This explains why structural typing (TypeScript interfaces, Go interfaces, Python Protocols) is considered superior to duck typing in practice: both are shape-based, but structural typing performs the checking once at compile/definition time, while duck typing repeats the checking at every usage site.
+**Remark:** In type system terminology, $\{S\}$-only with declared interfaces is \"structural typing\"; $\{S\}$-only incoherent is \"duck typing\"; $\{B,S\}$ is \"nominal typing.\"
 
-**Critical insight:** Even though structural typing has better complexity than duck typing (O(k) vs $\Omega$(n)), *both* are strictly dominated by nominal typing's O(1) error localization (Theorem 4.1). Nominal typing checks inheritance at the single class definition point---not once per implementing class (structural) or once per call site (duck).
+**Complexity distinction:** While $\{S\}$-only systems with and without declared interfaces are both shape-based, they differ critically in *when* the shape-checking occurs:
+
+-   **$\{S\}$-only with declared interfaces** (Protocol, structural typing): Shape-checking at *static analysis time* or *type definition time*. Complexity: O(k) where k = number of classes implementing the protocol.
+
+-   **$\{S\}$-only incoherent** (hasattr/getattr, duck typing): Shape-checking at *runtime, per call site*. Complexity: $\Omega$(n) where n = number of call sites.
+
+This explains why $\{S\}$-only with declared interfaces (TypeScript interfaces, Go interfaces, Python Protocols) is considered superior to incoherent use in practice: both are shape-based, but declared interfaces perform the checking once at compile/definition time, while incoherent use repeats the checking at every usage site.
+
+**Critical insight:** Even though $\{S\}$-only with declared interfaces has better complexity than incoherent use (O(k) vs $\Omega$(n)), *both* are strictly dominated by $\{B,S\}$ typing's O(1) error localization (Theorem 4.1). $\{B,S\}$ typing checks inheritance at the single class definition point---not once per implementing class ($\{S\}$-only declared) or once per call site ($\{S\}$-only incoherent).
+
+**Remark:** In type system terminology, $\{B,S\}$ is nominal typing; $\{S\}$-only with declared interfaces is structural typing; incoherent is duck typing.
 
 ## The type() Theorem
 
@@ -285,17 +297,17 @@ This explains why structural typing (TypeScript interfaces, Go interfaces, Pytho
     assert C.__bases__ == bases
     assert all(namespace[k] == getattr(C, k) for k in namespace)
 
-The `class` statement is syntactic sugar for `type()`. Any class expressible via syntax is expressible via `type()`. $\blacksquare$
+The `class` statement is syntactic sugar for `type()`. Any class expressible via syntax is expressible via `type()`. 0◻
 
 **Theorem 2.2 (Semantic Minimality).** The semantically minimal class constructor has arity 2: `type(bases, namespace)`.
 
-*Proof.* - `bases` determines inheritance hierarchy and MRO - `namespace` determines attributes and methods - `name` is metadata; object identity distinguishes types at runtime - Each call to `type(bases, namespace)` produces a distinct object - Therefore name is not necessary for type semantics. $\blacksquare$
+*Proof.* - `bases` determines inheritance hierarchy and MRO - `namespace` determines attributes and methods - `name` is metadata; object identity distinguishes types at runtime - Each call to `type(bases, namespace)` produces a distinct object - Therefore name is not necessary for type semantics. 0◻
 
 **Theorem 2.3 (Practical Minimality).** The practically minimal class constructor has arity 3: `type(name, bases, namespace)`.
 
 *Proof.* The name string is required for: 1. **Debugging**: `repr(C)` $\rightarrow$ `<class __main__.Foo>` vs `<class __main__.???>` 2. **Serialization**: Pickling uses `__name__` to reconstruct classes 3. **Error messages**: "Expected Foo, got Bar" requires names 4. **Metaclass protocols**: `__init_subclass__`, registries key on `__name__`
 
-Without name, the system is semantically complete but practically unusable. $\blacksquare$
+Without name, the system is semantically complete but practically unusable. 0◻
 
 **Definition 2.6 (The Two-Axis Semantic Core).** The semantic core of Python's class system is: - **bases**: inheritance relationships ($\rightarrow$ MRO, nominal typing) - **namespace**: attributes and methods ($\rightarrow$ behavior, structural typing)
 
@@ -305,7 +317,7 @@ The `name` axis is orthogonal to both and carries no semantic weight.
 
 *Proof.* Independence: - Changing bases does not change namespace content (only resolution order for inherited methods) - Changing namespace does not change bases or MRO
 
-The factorization (bases, namespace) is unique. $\blacksquare$
+The factorization (bases, namespace) is unique. 0◻
 
 **Corollary 2.5.** The semantic content of a class is fully determined by (bases, namespace). Two classes with identical bases and namespace are semantically equivalent, differing only in object identity.
 
@@ -313,7 +325,7 @@ The factorization (bases, namespace) is unique. $\blacksquare$
 
 **Theorem 2.6 (C3 Optimality).** C3 linearization is the unique algorithm satisfying: 1. **Monotonicity:** If A precedes B in linearization of C, and C' extends C, then A precedes B in linearization of C' 2. **Local precedence:** A class precedes its parents in its own linearization 3. **Consistency:** Linearization respects all local precedence orderings
 
-*Proof.* See Barrett et al. (1996), "A Monotonic Superclass Linearization for Dylan." $\blacksquare$
+*Proof.* See Barrett et al. (1996), "A Monotonic Superclass Linearization for Dylan." 0◻
 
 **Corollary 2.7.** Given bases, MRO is deterministically derived. There is no configuration; there is only computation.
 
@@ -323,7 +335,7 @@ We formalize class systems independently of any specific language. This establis
 
 #### 2.4.1 Axes {#the-two-axis-model}
 
-**Definition 2.7 (Abstract Class System).** A class system is a tuple $(B, S)$ where: - $B$: Bases --- the set of explicitly declared parent types (inheritance) - $S$: Namespace --- the set of (attribute, value) pairs defining the type's interface.
+**Definition 2.7 (Abstract Class System).** A class system is a tuple $(B, S)$ where: - $B$: Bases --- the set of explicitly declared parent types (inheritance). The B axis provides access to the full inheritance chain, including the type itself and all ancestors via transitive closure. - $S$: Namespace --- the set of (attribute, value) pairs defining the type's interface.
 
 **Remark (Syntactic Names Are Not an Axis).** Language-level type names (`__name__` in Python, `getName()` in Java) are *not* part of the semantic model. They are metadata assigned at definition time for debugging, serialization, and error messages. The semantic identity of a type---what determines its capabilities and compatibility---is fully captured by $(B, S)$. Two types with identical $(B, S)$ but different syntactic names are semantically equivalent: they support the same operations, have the same inheritance relationships, and are indistinguishable to any typing discipline. We do not include N as an axis because it adds no typing capability.
 
@@ -379,7 +391,7 @@ Shape-based typing projects out the $B$ axis entirely. It cannot distinguish typ
 
     -   Duck typing checks *partial* structure *ad-hoc* without declaration---neither position
 
-A discipline that gives different compatibility answers depending on which code path executes, with no declared $T$ to verify against, is not a discipline. It is the absence of one. $\blacksquare$
+A discipline that gives different compatibility answers depending on which code path executes, with no declared $T$ to verify against, is not a discipline. It is the absence of one. 0◻
 
 **Related work (duck typing formalization).** Refinement-based analyses and logics for dynamic languages approximate duck-typed behaviour statically (e.g., [@chugh2012nested; @systemDArxiv]) and empirical interface extraction for dynamic checks has been explored [@lamaison2012duck]. These systems aim to prove safety for specific programs, not to define a globally coherent predicate $\text{compatible}(x,T)$ for undeclared $T$ that is stable across code paths. Our incoherence result concerns that global typing-discipline property (Definition 8.3); it does not deny the usefulness of such analyses for individual programs.
 
@@ -387,13 +399,13 @@ A discipline that gives different compatibility answers depending on which code 
 
 **Corollary 2.10e (Duck Typing vs Structural Typing).** Duck typing ($\{S\}$, incoherent) is strictly weaker than structural typing with Protocols ($\{S\}$, coherent). Both use the same axis; the distinction is coherence.
 
-*Proof.* Protocols declare $T$, enabling static verification, documentation, and composition guarantees. Duck typing declares nothing. A Protocol-based discipline is coherent (Definition 2.10b); duck typing is not (Theorem 2.10d). $\blacksquare$
+*Proof.* Protocols declare $T$, enabling static verification, documentation, and composition guarantees. Duck typing declares nothing. A Protocol-based discipline is coherent (Definition 2.10b); duck typing is not (Theorem 2.10d). 0◻
 
 **Corollary 2.10f (No Valid Context for Duck Typing).** There exists no production context where duck typing is the correct choice.
 
 *Proof.* In systems with inheritance ($B \neq \emptyset$): nominal typing ($\{B, S\}$, coherent) strictly dominates any system with fewer axes (Remark 3.82a). In systems without inheritance ($B = \emptyset$): structural typing with Protocols ($\{S\}$, coherent) strictly dominates incoherent duck typing ($\{S\}$, incoherent). The only "advantage" of duck typing---avoiding interface declaration---is not a capability but deferred work with negative value (lost verification, documentation, composition guarantees).
 
-**Note:** This establishes dominance *within fixed-axis systems*. The ultimately correct choice is axis-parametric (Remark 3.82b): supporting $N$ axes costs nothing when only $k < N$ are used, but enables extension when requirements grow. $\blacksquare$
+**Note:** This establishes dominance *within fixed-axis systems*. The ultimately correct choice is axis-parametric (Remark 3.82b): supporting $N$ axes costs nothing when only $k < N$ are used, but enables extension when requirements grow. 0◻
 
 **Theorem 2.10g (Structural Typing Eliminability).** In systems with inheritance ($B \neq \emptyset$), structural typing is eliminable via boundary adaptation.
 
@@ -407,7 +419,7 @@ A discipline that gives different compatibility answers depending on which code 
 
 4.  **Equivalence.** The adapted system $S'$ accepts exactly the same inputs as $S$ but uses nominal typing internally
 
-The systems are equivalent in capability. Structural typing provides no capability that nominal typing with adapters lacks. $\blacksquare$
+The systems are equivalent in capability. Structural typing provides no capability that nominal typing with adapters lacks. 0◻
 
 **Corollary 2.10h (Structural Typing as Convenience).** When $B \neq \emptyset$, structural typing (Protocol) is not a typing necessity but a convenience---it avoids writing the 2-line adapter class. Convenience is not a typing capability.
 
@@ -433,7 +445,7 @@ The systems are equivalent in capability. Structural typing provides no capabili
 
 The adapter provides strictly more: same inputs, plus explicit documentation, plus fail-loud at definition time, plus provenance. Protocol provides strictly less.
 
-Protocol's only "advantage" is avoiding the 2-line adapter class. But avoiding explicitness is not an advantage---it is negative value. "Explicit is better than implicit" (Zen of Python, line 2). $\blacksquare$
+Protocol's only "advantage" is avoiding the 2-line adapter class. But avoiding explicitness is not an advantage---it is negative value. "Explicit is better than implicit" (Zen of Python, line 2). 0◻
 
 **Corollary 2.10k (Protocol's Value Proposition Is Negative).** When $B \neq \emptyset$, Protocol trades explicitness, fail-loud behavior, and provenance for 2 fewer lines of code. Protocol's value proposition is negative.
 
@@ -469,11 +481,11 @@ Beyond typing discipline, nominal and structural typing differ in a second, inde
 
 **Theorem 2.10p (Hooks Require Declarations).** Metaprogramming hooks require declaration-time events. Structural typing provides no declaration-time events for conformance. Therefore, structural typing cannot provide conformance-based metaprogramming hooks.
 
-*Proof.* 1. A hook is a function that fires when an event occurs. 2. In nominal typing, `class C(Base)` is a declaration-time event. The act of writing the inheritance declaration fires hooks: Python's `__init_subclass__()`, metaclass `__new__()`, Java's annotation processors, Rust's derive macros. 3. In structural typing, "Does $X$ conform to interface $I$?" is evaluated at query time. There is no syntax declaring "$X$ implements $I$"---conformance is inferred from structure. 4. No declaration $\rightarrow$ no event. No event $\rightarrow$ no hook point. 5. Therefore, structural typing cannot provide hooks that fire when a type "becomes" conformant to an interface. $\blacksquare$
+*Proof.* 1. A hook is a function that fires when an event occurs. 2. In nominal typing, `class C(Base)` is a declaration-time event. The act of writing the inheritance declaration fires hooks: Python's `__init_subclass__()`, metaclass `__new__()`, Java's annotation processors, Rust's derive macros. 3. In structural typing, "Does $X$ conform to interface $I$?" is evaluated at query time. There is no syntax declaring "$X$ implements $I$"---conformance is inferred from structure. 4. No declaration $\rightarrow$ no event. No event $\rightarrow$ no hook point. 5. Therefore, structural typing cannot provide hooks that fire when a type "becomes" conformant to an interface. 0◻
 
 **Theorem 2.10q (Enumeration Requires Registration).** To enumerate all types conforming to interface $I$, a registry mapping types to interfaces is required. Nominal typing provides this registry implicitly via inheritance declarations. Structural typing does not.
 
-*Proof.* 1. Enumeration requires a finite data structure containing conforming types. 2. In nominal typing, each declaration `class C(Base)` registers $C$ as a subtype of $\text{Base}$. The transitive closure of declarations forms the registry. `__subclasses__()` queries this registry in $O(k)$ where $k = |\text{subtypes}(T)|$. 3. In structural typing, no registration occurs. Conformance is computed at query time by checking structural compatibility. 4. To enumerate conforming types under structural typing, one must iterate over all types in the universe and check conformance for each. In an open system (where new types can be added at any time), $|\text{universe}|$ is unbounded. 5. Therefore, enumeration under structural typing is $O(|\text{universe}|)$, which is infeasible for open systems. $\blacksquare$
+*Proof.* 1. Enumeration requires a finite data structure containing conforming types. 2. In nominal typing, each declaration `class C(Base)` registers $C$ as a subtype of $\text{Base}$. The transitive closure of declarations forms the registry. `__subclasses__()` queries this registry in $O(k)$ where $k = |\text{subtypes}(T)|$. 3. In structural typing, no registration occurs. Conformance is computed at query time by checking structural compatibility. 4. To enumerate conforming types under structural typing, one must iterate over all types in the universe and check conformance for each. In an open system (where new types can be added at any time), $|\text{universe}|$ is unbounded. 5. Therefore, enumeration under structural typing is $O(|\text{universe}|)$, which is infeasible for open systems. 0◻
 
 **Corollary 2.10r (Metaprogramming Capability Gap Is Necessary).** The gap between nominal and structural typing in metaprogramming capability is not an implementation choice---it is a logical consequence of declaration vs. query.
 
@@ -517,11 +529,11 @@ where $\text{ancestors}(C) = \{C\} \cup \bigcup_{P \in B(C)} \text{ancestors}(P)
 
 **Theorem 2.13 (Provenance Requires MRO).** Provenance queries require access to MRO, which requires access to $B$.
 
-*Proof.* MRO is defined as a linearization over ancestors, which is the transitive closure over $B$. Without $B$, MRO is undefined. Without MRO, provenance queries cannot be answered. $\blacksquare$
+*Proof.* MRO is defined as a linearization over ancestors, which is the transitive closure over $B$. Without $B$, MRO is undefined. Without MRO, provenance queries cannot be answered. 0◻
 
 **Corollary 2.14 (Shape-Based Typing Cannot Provide Provenance).** Shape-based typing cannot answer provenance queries.
 
-*Proof.* By Definition 2.10, shape-based typing uses only $S$. By Theorem 2.13, provenance requires $B$. Shape-based typing has no access to $B$. Therefore shape-based typing cannot provide provenance. $\blacksquare$
+*Proof.* By Definition 2.10, shape-based typing uses only $S$. By Theorem 2.13, provenance requires $B$. Shape-based typing has no access to $B$. Therefore shape-based typing cannot provide provenance. 0◻
 
 #### 2.4.3a Representational Cost {#representational-cost}
 
@@ -535,7 +547,7 @@ This is an information-theoretic measure: the minimal state/bits needed to answe
 
 **Theorem 2.14d (No Unnecessary Cost).** If an axis $X$ is never used by any query in $Q_D$, then adding $X$ as a constant field adds zero semantic cost.
 
-*Proof.* A constant carries zero bits of information. If no query in $Q_D$ inspects $X$, then the representation with $X := \star$ (constant) answers exactly the same queries as the representation without $X$. The minimal adequate information is unchanged. $\blacksquare$
+*Proof.* A constant carries zero bits of information. If no query in $Q_D$ inspects $X$, then the representation with $X := \star$ (constant) answers exactly the same queries as the representation without $X$. The minimal adequate information is unchanged. 0◻
 
 **Theorem 2.14e (Necessity of Axes).** If there exist types $t_1, t_2$ such that:
 
@@ -545,11 +557,11 @@ This is an information-theoretic measure: the minimal state/bits needed to answe
 
 then any adequate representation for $Q_D$ must carry at least one bit distinguishing $t_1$ from $t_2$---i.e., the cost is forced by the query set.
 
-*Proof.* Suppose $R$ is adequate for $Q_D$ and drops $X$. Then $R(t_1) = R(t_2)$ by hypothesis (1). But adequacy requires $q = f \circ R$, so $q(t_1) = f(R(t_1)) = f(R(t_2)) = q(t_2)$. This contradicts hypothesis (2). Therefore no representation dropping $X$ is adequate. $\blacksquare$
+*Proof.* Suppose $R$ is adequate for $Q_D$ and drops $X$. Then $R(t_1) = R(t_2)$ by hypothesis (1). But adequacy requires $q = f \circ R$, so $q(t_1) = f(R(t_1)) = f(R(t_2)) = q(t_2)$. This contradicts hypothesis (2). Therefore no representation dropping $X$ is adequate. 0◻
 
 **Corollary 2.14f (Necessity of B).** For any domain $D$ that asks provenance queries, the Bases axis $B$ is necessary. The cost of including $B$ is forced by the query set, not a design choice.
 
-*Proof.* Immediate from Theorem 2.14e with $X = B$: Theorem 2.13 shows provenance requires MRO, which requires $B$. Types with identical $S$ but different $B$ can have different provenance. $\blacksquare$
+*Proof.* Immediate from Theorem 2.14e with $X = B$: Theorem 2.13 shows provenance requires MRO, which requires $B$. Types with identical $S$ but different $B$ can have different provenance. 0◻
 
 #### 2.4.4 Cross-Language Instantiation
 
@@ -625,7 +637,7 @@ Note: `hasattr(obj, foo)` checks namespace membership via the S axis. Our prove
 
 -   $S$: Interface checking
 
-Names are labels, not axes (Theorem 2.2). A discipline using subset $A$ can only employ capabilities enabled by axes in $A$. Adding an axis to $A$ adds capabilities but removes none. Therefore the capability sets form a monotonic lattice under subset inclusion. $\blacksquare$
+Names are labels, not axes (Theorem 2.2). A discipline using subset $A$ can only employ capabilities enabled by axes in $A$. Adding an axis to $A$ adds capabilities but removes none. Therefore the capability sets form a monotonic lattice under subset inclusion. 0◻
 
 **Corollary 2.16 (Bases Axis Primacy).** The Bases axis $B$ is the source of all strict dominance. Specifically: provenance, type identity, subtype enumeration, and conflict resolution all require $B$. Any discipline that discards $B$ forecloses these capabilities.
 
@@ -659,7 +671,7 @@ We exhaustively enumerate capabilities NOT in $\mathcal{C}_B$ and show none requ
 
 4.  **Method invocation** ("call $x.m()$"): Answered by retrieving $m$ from $S$ and invoking. Requires only $S$. Does not require $B$. $\checkmark$
 
-No capability outside $\mathcal{C}_B$ requires $B$. Therefore $\mathcal{C}_B$ is exactly the $B$-dependent capabilities. $\blacksquare$
+No capability outside $\mathcal{C}_B$ requires $B$. Therefore $\mathcal{C}_B$ is exactly the $B$-dependent capabilities. 0◻
 
 **Significance:** This is a **tight characterization**, not an observation. The capability gap is not "here are some things you lose"---it is "here is **exactly** what you lose, nothing more, nothing less." This completeness result is what distinguishes a formal theory from an enumerated list.
 
@@ -671,7 +683,7 @@ Shape-based typing can check interface satisfaction: $S(\text{type}(x)) \supsete
 
 Nominal typing can: 1. Check interface satisfaction (equivalent to shape-based) 2. Check type identity: $T \in \text{ancestors}(\text{type}(x))$ --- **impossible for shape-based** 3. Answer provenance queries --- **impossible for shape-based** (Corollary 2.14) 4. Enumerate subtypes --- **impossible for shape-based** 5. Use type as dictionary key --- **impossible for shape-based**
 
-Therefore $\mathcal{C}_{\text{shape}} \subset \mathcal{C}_{\text{nominal}}$ (strict subset). In a class system with $B \neq \emptyset$, both disciplines are available. Choosing shape-based typing forecloses capabilities for zero benefit. $\blacksquare$
+Therefore $\mathcal{C}_{\text{shape}} \subset \mathcal{C}_{\text{nominal}}$ (strict subset). In a class system with $B \neq \emptyset$, both disciplines are available. Choosing shape-based typing forecloses capabilities for zero benefit. 0◻
 
 #### 2.5.1 The Decision Procedure
 
@@ -690,13 +702,92 @@ Given a language $L$ and development context $C$:
 
 This is a **decision procedure**, not a preference. The output is determined by whether $B = \emptyset$.
 
+## Axis-Parametric Classification Theory {#axis-parametric-classification}
+
+The preceding sections establish typing disciplines as axis projections: nominal typing uses $\{B, S\}$, structural typing uses $\{S\}$. This raises a more fundamental question: **how do we determine which axes a domain requires?**
+
+We now develop a general framework where axis sets are *derived* from domain requirements, not chosen from a menu. This transforms typing discipline selection from preference to computation.
+
+#### 2.6.1 Core Definitions {#axis-parametric-definitions}
+
+**Definition 2.19 (Domain).** A *domain* $D$ is a set of queries that a classification system must answer. Each query is a computable function from types to answers.
+
+**Definition 2.20 (Axis).** An *axis* $A$ is a recursive lattice structure that:
+
+-   Has a carrier type with partial order
+
+-   Supports recursive self-reference: $A \to \text{List } A$ (e.g., bases have bases)
+
+-   Provides capabilities not derivable from other axes
+
+**Definition 2.21 (Axis Independence).** Axis $A$ is *independent* of axis set $\mathcal{A}$ iff $\exists$ query $q$ such that $A$ can answer $q$ but no projection from $\mathcal{A}$ can answer $q$.
+
+**Definition 2.22 (Completeness).** An axis set $\mathcal{A}$ is *complete* for domain $D$ iff every query $q \in D$ is answerable using only axes in $\mathcal{A}$.
+
+**Definition 2.23 (Minimality).** An axis set $\mathcal{A}$ is *minimal* for domain $D$ iff:
+
+1.  $\mathcal{A}$ is complete for $D$, and
+
+2.  No proper subset of $\mathcal{A}$ is complete for $D$
+
+#### 2.6.2 Fundamental Theorems {#axis-parametric-theorems}
+
+**Theorem 2.24 (Axis Capability Monotonicity).** For any axis set $\mathcal{A}$ and independent axis $X$: $$\text{capabilities}(\mathcal{A} \cup \{X\}) \supsetneq \text{capabilities}(\mathcal{A})$$
+
+*Proof.* By independence, $\exists q$ that $\mathcal{A}$ cannot answer but $X$ can. Adding $X$ enables $q$ while preserving all existing capabilities. 0◻
+
+**Theorem 2.25 (Completeness Uniqueness).** For any domain $D$ with requirements $Q$, if $\mathcal{A}_1$ and $\mathcal{A}_2$ are both minimal complete for $D$, then $\mathcal{A}_1 \cong \mathcal{A}_2$ (isomorphic as axis sets).
+
+*Proof.* Suppose $\mathcal{A}_1 \neq \mathcal{A}_2$. WLOG $\exists A \in \mathcal{A}_1, A \notin \mathcal{A}_2$. By minimality of $\mathcal{A}_1$, $\exists q$ requiring $A$. By completeness of $\mathcal{A}_2$, some axis in $\mathcal{A}_2$ answers $q$. That axis must be isomorphic to $A$ (answers same queries). Contradiction. 0◻
+
+**Theorem 2.26 (Axis Derivation Algorithm).** The minimal complete axis set for domain $D$ is computable:
+
+    derive_axes(D):
+      A := {}
+      for q in queries(D):
+        if not answerable(A, q):
+          A := A union {minimal_axis_for(q)}
+      return collapse(A)  -- remove derivable axes
+
+The result is unique (by Theorem 2.25), minimal, and complete.
+
+*Proof.* The algorithm constructs an axis set that is complete (every query is answerable) and minimal (each axis is required by at least one query). By Theorem 2.25, this is the unique minimal complete set. 0◻
+
+#### 2.6.3 Implications for Typing Disciplines {#axis-implications}
+
+**Corollary 2.27 (Typing Disciplines as Axis Configurations).** Traditional typing discipline names are shorthand for axis configurations:
+
+-   **Structural typing** = $\{S\}$-only systems (namespace axis only)
+
+-   **Nominal typing** = $\{B, S\}$ systems (bases and namespace)
+
+-   **Duck typing** = incoherent use of $\{S\}$ (Theorem 2.10d)
+
+The question "nominal or structural?" presupposes a choice exists. Theorem 2.26 shows the axis set is *computable* from domain requirements.
+
+**Theorem 2.28 (Fixed-Axis Incompleteness --- Preview).** For any fixed axis set $A$ and any axis $a \notin A$, there exists a domain $D$ requiring $a$. Therefore $A$ is incomplete for $D$.
+
+*Proof sketch.* Construct domain $D$ with a query $q$ that requires axis $a$. Since $a \notin A$, the query is unanswerable by $A$. Full proof in Section 3.11. 0◻
+
+**Remark 2.29 (Reframing the Contribution).** This paper's contribution is not "nominal typing is better than structural typing." It is:
+
+1.  Proving axes are *derived* from domain requirements (Theorem 2.26)
+
+2.  Showing fixed-axis systems are fundamentally incomplete (Theorem 2.28)
+
+3.  Demonstrating that type system debates arise from wrongly framing axis derivation as preference
+
+Section 3 establishes these results formally. The type system instantiation ("nominal vs structural") is one application among many.
+
 ::: center
 
 ----------------------------------------------------------------------------------------------------
 :::
 
 
-# Universal Dominance
+# Axis Inclusion Requirements and Fixed-Axis Incompleteness {#universal-dominance}
+
+**Framing note:** This section establishes dominance relations *within* fixed-axis systems. Section [1.6](#axis-parametric-theory){reference-type="ref" reference="axis-parametric-theory"} proves the stronger result: any fixed-axis system is incomplete for some domain. The correct approach is axis-parametric (deriving the minimal axis set from requirements).
 
 **Thought experiment:** What if `type()` only took namespace?
 
@@ -713,7 +804,7 @@ Given that the semantic core is (bases, namespace), what if we further reduce to
 
 In a namespace-only system, structural typing is the unique correct typing discipline.
 
-*Proof.* 1. Let A and B be classes in a namespace-only system 2. A $\equiv$ B iff namespace(A) = namespace(B) (by definition of namespace-only) 3. Structural typing checks: namespace(x) $\supseteq$ signature(T) 4. This is the only information available for type checking 5. Therefore structural typing is correct and complete. $\blacksquare$
+*Proof.* 1. Let A and B be classes in a namespace-only system 2. A $\equiv$ B iff namespace(A) = namespace(B) (by definition of namespace-only) 3. Structural typing checks: namespace(x) $\supseteq$ signature(T) 4. This is the only information available for type checking 5. Therefore structural typing is correct and complete. 0◻
 
 **Corollary 3.2 (Go's Design Is Consistent).** Go has no inheritance. Interfaces are method sets. Structural typing is correct for Go.
 
@@ -730,21 +821,23 @@ The syntactic name (`__name__`) is metadata in both cases---it doesn't affect wh
 
 **Binder vs. Observable Identity.** In *pure* structural typing, "name" is only a binder/alias for a shape; it is not an observable discriminator. Conformance depends solely on namespace (structure). Any observable discriminator (brand/tag/nominal identity) is an added axis: once it is observable to the conformance relation, the discipline is no longer purely structural.
 
-**Lineage axis = ordered identities.** The Bases axis $B$ can be viewed as the ordered lineage $\text{MRO}(T)$ (C3 linearization). The "identity" capability is a projection of this lineage: $\text{head}(\text{MRO}(T)) = T$ (exact type), and instance-of is membership $U \in \text{MRO}(T)$. Provenance and conflict resolution are the other projections. There is no separate "I axis"; identity is one of the queries made available by $B$. A discipline that can only test $\text{head}(\text{MRO}(T))$ has tag identity but not inheritance capabilities---it is a strict subset of full $B$.
+**Lineage axis = ordered identities.** The Bases axis $B$ can be viewed as the ordered lineage $\text{MRO}(T)$ (C3 linearization). The "identity" capability is a projection of this lineage: $\text{head}(\text{MRO}(T)) = T$ (exact type), and instance-of is membership $U \in \text{MRO}(T)$. Provenance and conflict resolution are the other projections. There is no separate "I axis"; identity is one of the queries made available by $B$. A discipline that can only test $\text{head}(\text{MRO}(T))$ has tag identity but not inheritance capabilities; it is a strict subset of full $B$.
 
-**Theorem 3.4 (Nominal Typing Pareto-Dominance).** When a `bases` axis exists in the class system, nominal typing Pareto-dominates all shape-based alternatives (provides strictly more capabilities with zero additional cost). This dominance is universal, not limited to greenfield development.
+**Theorem 3.4 (Axis Inclusion Dominance).** When a `bases` axis exists in the class system ($B \neq \emptyset$), systems including $\{B, S\}$ Pareto-dominate all systems using only $\{S\}$ (provides strictly more capabilities with zero additional cost). This dominance is universal, not limited to greenfield development.
+
+**Remark:** In type system terminology, $\{B, S\}$-inclusive systems are called "nominal typing"; $\{S\}$-only systems are called "structural typing." The theorem establishes that axis inclusion is determined by domain requirements, not preference.
 
 *Proof.* We prove this in two steps: (1) strict dominance holds unconditionally, (2) retrofit constraints do not constitute an exception.
 
 **Step 1: Strict Dominance is Unconditional.**
 
-Let $D_{\text{shape}}$ be any shape-based discipline (uses only $\{S\}$). Let $D_{\text{nominal}}$ be nominal typing (uses $\{B, S\}$; names are aliases).
+Let $D_{\{S\}}$ be any system using only the $\{S\}$ axis (shape-based). Let $D_{\{B,S\}}$ be a system using both axes.
 
-By Theorem 2.15 (Axis Lattice Dominance): $$\text{capabilities}(D_{\text{shape}}) \subseteq \text{capabilities}(D_{\text{nominal}})$$
+By Theorem 2.15 (Axis Lattice Dominance): $$\text{capabilities}(D_{\{S\}}) \subseteq \text{capabilities}(D_{\{B,S\}})$$
 
-By Theorem 2.17 (Capability Completeness), $D_{\text{nominal}}$ provides four capabilities that $D_{\text{shape}}$ cannot: provenance, identity, enumeration, conflict resolution.
+By Theorem 2.17 (Capability Completeness), $D_{\{B,S\}}$ provides four capabilities that $D_{\{S\}}$ cannot: provenance, identity, enumeration, conflict resolution.
 
-Therefore: $\text{capabilities}(D_{\text{shape}}) \subset \text{capabilities}(D_{\text{nominal}})$ (strict subset).
+Therefore: $\text{capabilities}(D_{\{S\}}) \subset \text{capabilities}(D_{\{B,S\}})$ (strict subset).
 
 This dominance holds **regardless of whether the system currently uses these capabilities**. The capability gap exists by the structure of axis subsets, not by application requirements.
 
@@ -758,13 +851,13 @@ This objection was addressed in Theorem 2.10j (Protocol Dominated by Adapters): 
 
 -   Protocol avoids the adapter? Yes, but avoiding adapters is a convenience, not a capability (Corollary 2.10k).
 
-**Conclusion: Shape-Based Typing Has Negative Expected Value.**
+**Conclusion: Systems Excluding Required Axes Have Negative Expected Value.**
 
 Given two available options $A$ and $B$ where $\text{capabilities}(A) \subset \text{capabilities}(B)$ and $\text{cost}(A) = \text{cost}(B)$, choosing $A$ is **Pareto-dominated**: there exists no rational justification for $A$ over $B$ under expected utility maximization.
 
 When $B \neq \emptyset$:
 
--   $D_{\text{shape}}$ is Pareto-dominated by $D_{\text{nominal}}$
+-   Systems using only $\{S\}$ are Pareto-dominated by systems using $\{B, S\}$
 
 -   Same declaration cost: one class definition per interface for both (Definition 2.14c)
 
@@ -776,7 +869,9 @@ When $B \neq \emptyset$:
 
 -   Analysis has positive expected value: $E[V_{\text{analysis}}] > 0$ (Theorem 3.70)
 
-Therefore: **Choosing shape-based typing when inheritance exists has negative expected value under capability-based utility.**
+Therefore: **Excluding the $B$ axis when inheritance exists ($B \neq \emptyset$) has negative expected value under capability-based utility.**
+
+**Note:** In type system terminology, "nominal typing" denotes $\{B, S\}$-inclusive systems; "structural typing" denotes $\{S\}$-only systems.
 
 **Note on "what if I don't need the extra capabilities?"**
 
@@ -793,31 +888,35 @@ This objection misunderstands option value. A Pareto-dominated choice has negati
 The `bases` axis creates an information asymmetry: nominal typing can access inheritance structure; shape-based typing cannot. Adapters ensure nominal typing is universally available.
 
 **Theorem 3.71 (Unique Optimum):** Under capability-based utility maximization, nominal typing is the unique optimal choice when $B \neq
-\emptyset$. Choosing shape-based typing while maximizing capabilities contradicts the stated objective (Theorem 3.72: proven incoherence). $\blacksquare$
+\emptyset$. Choosing shape-based typing while maximizing capabilities contradicts the stated objective (Theorem 3.72: proven incoherence). 0◻
 
-**Theorem 3.5 (Strict Dominance, Universal).** Nominal typing strictly dominates shape-based typing whenever $B \neq \emptyset$: nominal provides all capabilities of shape-based typing plus additional capabilities, at equal or lower cost.
+**Theorem 3.5 (Axis Inclusion Dominance, Concrete).** Systems including $\{B, S\}$ strictly dominate systems using only $\{S\}$ whenever $B \neq \emptyset$: $\{B, S\}$ systems provide all capabilities of $\{S\}$-only systems plus additional capabilities, at equal or lower cost.
 
-*Proof.* Consider Python's concrete implementations: - Shape-based: `typing.Protocol` (structural typing) - Nominal: Abstract Base Classes (ABCs)
+**Remark:** This theorem is traditionally stated as "nominal typing strictly dominates structural typing." We state it in axis terms to emphasize that the result follows from axis inclusion, not from advocacy for a particular discipline name.
+
+*Proof.* Consider Python's concrete implementations: - $\{S\}$-only (coherent): `typing.Protocol` (structural typing) - $\{B, S\}$:Abstract Base Classes (ABCs, nominal typing)
 
 Let S = capabilities provided by Protocol, N = capabilities provided by ABCs.
 
-**What Protocols provide:** 1. Interface enforcement via method signature matching 2. Type checking at static analysis time (mypy, pyright) 3. No runtime isinstance() check (by default)
+**What Protocols ($\{S\}$-only) provide:** 1. Interface enforcement via method signature matching 2. Type checking at static analysis time (mypy, pyright) 3. No runtime isinstance() check (by default)
 
-**What ABCs provide:** 1. Interface enforcement via `@abstractmethod` (equivalent to Protocol) 2. Type checking at static analysis time (equivalent to Protocol) 3. **Type identity via isinstance()** (Protocol cannot provide this) 4. **Provenance tracking via MRO position** (Protocol cannot provide this) 5. **Exhaustive enumeration via `__subclasses__()`** (Protocol cannot provide this) 6. **Type-as-dictionary-key via type() identity** (Protocol cannot provide this) 7. **Runtime enforcement at instantiation** (Protocol only checks statically)
+**What ABCs ($\{B, S\}$) provide:** 1. Interface enforcement via `@abstractmethod` (equivalent to Protocol) 2. Type checking at static analysis time (equivalent to Protocol) 3. **Type identity via isinstance()** (Protocol cannot provide this) 4. **Provenance tracking via MRO position** (Protocol cannot provide this) 5. **Exhaustive enumeration via `__subclasses__()`** (Protocol cannot provide this) 6. **Type-as-dictionary-key via type() identity** (Protocol cannot provide this) 7. **Runtime enforcement at instantiation** (Protocol only checks statically)
 
-Therefore S $\subset$ N (strict subset). Both require explicit type declarations. The declaration cost is equivalent: one class definition per interface. Therefore, nominal typing provides strictly more capabilities at equal or lower cost (earlier failure). $\blacksquare$
+Therefore S $\subset$ N (strict subset). Both require explicit type declarations. The declaration cost is equivalent: one class definition per interface. Therefore, $\{B, S\}$ systems provide strictly more capabilities at equal or lower cost (earlier failure). 0◻
 
-**Corollary 3.6 (Shape Typing Incorrectness).** When $B \neq \emptyset$, using shape-based typing instead of nominal typing is not suboptimal: it is incorrect.
+**Corollary 3.6 (Axis Exclusion Incorrectness).** When $B \neq \emptyset$, excluding $B$ from the axis set is not suboptimal: it is incorrect.
 
-*Proof.* By Theorem 3.5, nominal typing strictly dominates shape-based typing. By Theorem 2.10j, adapters make nominal typing universally available. Choosing a strictly dominated option when the superior option is available is definitionally incorrect. $\blacksquare$
+*Proof.* By Theorem 3.5, systems including $\{B, S\}$ strictly dominate systems using only $\{S\}$. By Theorem 2.10j, adapters make $\{B, S\}$ systems universally available. Choosing a strictly dominated option when the superior option is available is definitionally incorrect. 0◻
+
+**Remark:** In type system terminology, this means structural typing is incorrect when inheritance exists; nominal typing is correct.
 
 ## The Absolute Claim
 
-**Claim (Typing Discipline Correctness).** In any programming language with explicit inheritance syntax ($B \neq \emptyset$), shape-based typing (structural typing, Protocol-based typing) is **incorrect**. Duck typing is **incoherent** (Theorem 2.10d). It is not even a valid typing discipline. Nominal typing is **correct**. This is not a preference, recommendation, or tradeoff. It is a mathematical fact derivable from the structure of class systems.
+**Claim (Axis Inclusion Correctness).** In any programming language with explicit inheritance syntax ($B \neq \emptyset$), systems excluding the $B$ axis (structural typing, Protocol-based typing) are **incorrect**. Duck typing is **incoherent** (Theorem 2.10d). It is not even a valid typing discipline. Systems including $\{B, S\}$ (nominal typing) are **correct**. This is not a preference, recommendation, or tradeoff. It is a mathematical fact derivable from the structure of class systems.
 
-*Proof.* By Theorem 2.18 (Strict Dominance), nominal typing provides all capabilities of shape-based typing plus additional capabilities (provenance, type identity, subtype enumeration, type-as-key). By Theorem 2.10j, adapters eliminate the retrofit exception. Therefore, choosing shape-based typing when $B \neq \emptyset$ is choosing the strictly dominated option. $\blacksquare$
+*Proof.* By Theorem 2.18 (Strict Dominance), systems using $\{B, S\}$ provide all capabilities of $\{S\}$-only systems plus additional capabilities (provenance, type identity, subtype enumeration, type-as-key). By Theorem 2.10j, adapters eliminate the retrofit exception. Therefore, choosing $\{S\}$-only when $B \neq \emptyset$ is choosing the strictly dominated option. 0◻
 
-**What "incorrect" means:** 1. **Information-theoretic**: Shape-based typing discards the $B$ axis. Discarding available information without compensating benefit is suboptimal by definition. 2. **Capability-theoretic**: Shape-based typing forecloses capabilities that nominal typing provides. Foreclosing capabilities for zero benefit is incorrect. 3. **Decision-theoretic**: Given the choice between two options where one strictly dominates, choosing the dominated option is irrational.
+**What "incorrect" means:** 1. **Information-theoretic**: Excluding the $B$ axis discards available information. Discarding available information without compensating benefit is suboptimal by definition. 2. **Capability-theoretic**: Excluding $B$ forecloses capabilities that including it provides. Foreclosing capabilities for zero benefit is incorrect. 3. **Decision-theoretic**: Given the choice between two options where one strictly dominates, choosing the dominated option is irrational.
 
 ## Information-Theoretic Foundations
 
@@ -827,17 +926,21 @@ This section establishes the formal foundation of our results. We prove three th
 
 **Definition 3.10 (Typing Discipline).** A *typing discipline* $\mathcal{D}$ over axis set $A \subseteq \{B, S\}$ is a collection of computable functions that take as input only the projections of types onto axes in $A$.
 
-**Definition 3.11 (Shape Discipline).** A *shape discipline* is a typing discipline over $\{S\}$. It has access to namespaces (shape), but not to the Bases axis.
+**Definition 3.11 (Axis-Exclusive Discipline).** A *$\{S\}$-only discipline* is a typing discipline over $\{S\}$. It has access to namespaces (shape), but not to the Bases axis.
 
-**Remark (Syntactic Names and Type Identity).** A shape discipline that also inspects type identity (e.g., `type(x) is T`) is using information from $B$, not a third axis. The type identity is $\text{head}(\text{MRO}(T)) = T$---a projection of $B$ that discards all ancestors. Such a discipline has access to $\{S\}$ plus the *leaf* of $B$, but not the lineage. Since provenance requires ancestor information (which ancestor provides attribute $a$?), projecting $B$ to its leaf loses exactly the information needed. This is why the impossibility results hold even for disciplines that inspect type identity. Note: the syntactic name (`__name__`) is distinct from type identity---see Definition 2.7.
+**Remark:** In type system terminology, $\{S\}$-only disciplines include structural typing (with declared interfaces) and duck typing (without declared interfaces). Both exclude the $B$ axis.
+
+**Remark (Syntactic Names and Type Identity).** A discipline that also inspects type identity (e.g., `type(x) is T`) is using information from $B$, not a third axis. The type identity is $\text{head}(\text{MRO}(T)) = T$, a projection of $B$ that discards all ancestors. Such a discipline has access to $\{S\}$ plus the *leaf* of $B$, but not the lineage. Since provenance requires ancestor information (which ancestor provides attribute $a$?), projecting $B$ to its leaf loses exactly the information needed. This is why the impossibility results hold even for disciplines that inspect type identity. Note: the syntactic name (`__name__`) is distinct from type identity (see Definition 2.7).
 
 **Definition 3.12 (Provenance Function).** The *provenance function* is: $$\text{prov} : \text{Type} \times \text{Attr} \to \text{Type}$$ where $\text{prov}(T, a)$ returns the type in $T$'s MRO that provides attribute $a$.
 
-**Theorem 3.13 (Provenance Impossibility --- Universal).**[]{#thm:provenance-impossibility label="thm:provenance-impossibility"} Let $\mathcal{D}$ be ANY shape discipline (typing discipline over $\{S\}$, even with the leaf of $B$). Then $\mathcal{D}$ cannot compute $\text{prov}$.
+**Theorem 3.13 (Provenance Impossibility, Universal).**[]{#thm:provenance-impossibility label="thm:provenance-impossibility"} Let $\mathcal{D}$ be ANY $\{S\}$-only discipline (typing discipline over $\{S\}$, even with the leaf of $B$). Then $\mathcal{D}$ cannot compute $\text{prov}$.
+
+**Remark:** In type system terminology, this means neither structural typing nor duck typing can provide provenance. Only systems including $B$ (nominal typing) can answer provenance queries.
 
 *Proof.* We prove this by showing that $\text{prov}$ requires information that is information-theoretically absent from $(S)$.
 
-1.  **Information content of $(S)$.** A shape discipline receives: the type name $N(T)$ and the namespace $S(T) = \{a_1, a_2, \ldots, a_k\}$ (the set of attributes $T$ declares or inherits).
+1.  **Information content of $(S)$.** A $\{S\}$-only discipline receives: the type name $N(T)$ and the namespace $S(T) = \{a_1, a_2, \ldots, a_k\}$ (the set of attributes $T$ declares or inherits).
 
 2.  **Information content required by $\text{prov}$.** The function $\text{prov}(T, a)$ must return *which ancestor type* originally declared $a$. This requires knowing the MRO of $T$ and which position in the MRO declares $a$.
 
@@ -859,11 +962,11 @@ This section establishes the formal foundation of our results. We prove three th
 
     -   $\text{prov}(B_2, \text{"x"}) = B_2$ (declared locally)
 
-    A shape discipline cannot distinguish $B_1$ from $B_2$, therefore cannot compute $\text{prov}$. $\blacksquare$
+    A $\{S\}$-only discipline cannot distinguish $B_1$ from $B_2$, therefore cannot compute $\text{prov}$. 0◻
 
-**Corollary 3.14 (No Algorithm Exists).** There exists no algorithm, heuristic, or approximation that allows a shape discipline to compute provenance. This is not a limitation of current implementations: it is information-theoretically impossible.
+**Corollary 3.14 (No Algorithm Exists).** There exists no algorithm, heuristic, or approximation that allows a $\{S\}$-only discipline to compute provenance. This is not a limitation of current implementations: it is information-theoretically impossible.
 
-*Proof.* The proof of Theorem 3.13 shows that the input $(S)$ contains strictly less information than required to determine $\text{prov}$. No computation can extract information that is not present in its input. $\blacksquare$
+*Proof.* The proof of Theorem 3.13 shows that the input $(S)$ contains strictly less information than required to determine $\text{prov}$. No computation can extract information that is not present in its input. 0◻
 
 **Significance:** This is not "our model doesn't have provenance." It is "NO model over $(S)$ can have provenance." The impossibility is mathematical, not implementational.
 
@@ -881,11 +984,13 @@ That is, shape-equivalent types produce identical query results.
 
 **Theorem 3.18 (Query Space Partition).** Every query is either shape-respecting or B-dependent. These categories are mutually exclusive and exhaustive.
 
-*Proof.* - *Mutual exclusion:* If $q$ is shape-respecting, then $S(A) = S(B) \Rightarrow q(A) = q(B)$. If $q$ is B-dependent, then $\exists A, B: S(A) = S(B) \land q(A) \neq q(B)$. These are logical negations. - *Exhaustiveness:* For any query $q$, either $\forall A, B: S(A) = S(B) \Rightarrow q(A) = q(B)$ (shape-respecting) or $\exists A, B: S(A) = S(B) \land q(A) \neq q(B)$ (B-dependent). Tertium non datur. $\blacksquare$
+*Proof.* - *Mutual exclusion:* If $q$ is shape-respecting, then $S(A) = S(B) \Rightarrow q(A) = q(B)$. If $q$ is B-dependent, then $\exists A, B: S(A) = S(B) \land q(A) \neq q(B)$. These are logical negations. - *Exhaustiveness:* For any query $q$, either $\forall A, B: S(A) = S(B) \Rightarrow q(A) = q(B)$ (shape-respecting) or $\exists A, B: S(A) = S(B) \land q(A) \neq q(B)$ (B-dependent). Tertium non datur. 0◻
 
-**Theorem 3.19 (Capability Gap = B-Dependent Queries).** The capability gap between shape and nominal typing is EXACTLY the set of B-dependent queries: $$\text{NominalCapabilities} \setminus \text{ShapeCapabilities} = \{q : q \text{ is B-dependent}\}$$
+**Theorem 3.19 (Capability Gap = B-Dependent Queries).** The capability gap between systems using only $\{S\}$ and systems using $\{B, S\}$ is EXACTLY the set of B-dependent queries: $$\text{Capabilities}_{\{B,S\}} \setminus \text{Capabilities}_{\{S\}} = \{q : q \text{ is B-dependent}\}$$
 
-*Proof.* - ($\supseteq$) If $q$ is B-dependent, then $\exists A, B$ with $S(A) = S(B)$ but $q(A) \neq q(B)$. Shape disciplines cannot distinguish $A$ from $B$, so cannot compute $q$. Nominal disciplines have access to $B$, so can distinguish $A$ from $B$ via MRO. Therefore $q$ is in the gap. - ($\subseteq$) If $q$ is in the gap, then nominal can compute it but shape cannot. If $q$ were shape-respecting, shape could compute it (contradiction). Therefore $q$ is B-dependent. $\blacksquare$
+**Remark:** In type system terminology, this characterizes the gap between structural/duck typing ($\{S\}$-only) and nominal typing ($\{B, S\}$).
+
+*Proof.* - ($\supseteq$) If $q$ is B-dependent, then $\exists A, B$ with $S(A) = S(B)$ but $q(A) \neq q(B)$. Shape disciplines cannot distinguish $A$ from $B$, so cannot compute $q$. Nominal disciplines have access to $B$, so can distinguish $A$ from $B$ via MRO. Therefore $q$ is in the gap. - ($\subseteq$) If $q$ is in the gap, then nominal can compute it but shape cannot. If $q$ were shape-respecting, shape could compute it (contradiction). Therefore $q$ is B-dependent. 0◻
 
 **Theorem 3.20 (Four Capabilities Are Complete).** The set $\mathcal{C}_B = \{\text{provenance, identity, enumeration, conflict resolution}\}$ is the complete set of B-dependent query classes.
 
@@ -901,13 +1006,13 @@ That is, shape-equivalent types produce identical query results.
 
 **Completeness argument:** A B-dependent query must use information from $B$. The only information in $B$ is: - Which types are ancestors (enables identity, provenance) - The order of ancestors (enables conflict resolution) - The inverse relation (enables enumeration)
 
-These three pieces of information (ancestor set, ancestor order, inverse relation) generate exactly four query classes. No other information exists in $B$. $\blacksquare$
+These three pieces of information (ancestor set, ancestor order, inverse relation) generate exactly four query classes. No other information exists in $B$. 0◻
 
 **Corollary 3.21 (Capability Set Is Minimal).** $|\mathcal{C}_B| = 4$ and no element is redundant.
 
 *Proof.* Each capability addresses a distinct aspect of $B$: - Provenance: forward lookup by attribute - Identity: forward lookup by type - Enumeration: inverse lookup - Conflict resolution: ordering
 
-Removing any one leaves queries that the remaining three cannot answer. $\blacksquare$
+Removing any one leaves queries that the remaining three cannot answer. 0◻
 
 #### 3.8.3 The Axis Packing Dichotomy
 
@@ -929,7 +1034,7 @@ That is, $q$ distinguishes types with identical shape but different bases.
 
 **Theorem 3.22e (No Free Lunch for Axis Packing).** If $q$ depends on $B$, then $q$ is not shape-only.
 
-*Proof.* Suppose $q = f \circ \text{obs}_S$ for some $f$. Let $s, b_1, b_2$ witness $B$-dependence. Then: $$q(s, b_1) = f(\text{obs}_S(s, b_1)) = f(s) = f(\text{obs}_S(s, b_2)) = q(s, b_2)$$ But $q(s, b_1) \neq q(s, b_2)$ by $B$-dependence. Contradiction. $\blacksquare$
+*Proof.* Suppose $q = f \circ \text{obs}_S$ for some $f$. Let $s, b_1, b_2$ witness $B$-dependence. Then: $$q(s, b_1) = f(\text{obs}_S(s, b_1)) = f(s) = f(\text{obs}_S(s, b_2)) = q(s, b_2)$$ But $q(s, b_1) \neq q(s, b_2)$ by $B$-dependence. Contradiction. 0◻
 
 This is the core impossibility: if the observation interface is only $S$, then no query that distinguishes on $B$ can be defined.
 
@@ -942,15 +1047,15 @@ This formalizes "packing $B$ into $S$ without changing what structural typing ob
 *Proof.* Suppose $q' = f \circ \text{obs}_{S'}$ for some $f : S \to Y$. Let $s, b_1, b_2$ witness $B$-dependence of $q_B$. Then: $$\begin{aligned}
 q_B(s, b_1) &= q'(\text{enc}(s, b_1)) = f(\text{obs}_{S'}(\text{enc}(s, b_1))) = f(s) \\
 q_B(s, b_2) &= q'(\text{enc}(s, b_2)) = f(\text{obs}_{S'}(\text{enc}(s, b_2))) = f(s)
-\end{aligned}$$ Therefore $q_B(s, b_1) = q_B(s, b_2)$, contradicting $B$-dependence. $\blacksquare$
+\end{aligned}$$ Therefore $q_B(s, b_1) = q_B(s, b_2)$, contradicting $B$-dependence. 0◻
 
 **Theorem 3.22h (The Axis Packing Dichotomy).** To make $B$-dependent queries answerable after packing, **exactly one** of the following must happen:
 
-1.  **Extend the observable interface.** Introduce an operation $\pi_B : S' \to B$ (or equivalent) that exposes $B$ information. This is *adding an axis*---$B$ becomes observable.
+1.  **Extend the observable interface.** Introduce an operation $\pi_B : S' \to B$ (or equivalent) that exposes $B$ information. This is *adding an axis*, so $B$ becomes observable.
 
 2.  **Fail to answer required queries.** Remain shape-only w.r.t. $\text{obs}_{S'}$ and lose provenance, identity, enumeration, and conflict resolution.
 
-*Proof.* By Theorem 3.22g, if the $S$-interface is preserved, $B$-dependent queries are unanswerable. To answer them, the interface must be extended. Adding $\pi_B$ makes $B$ observable---this is precisely what "adding an axis" means: making new information available to queries. $\blacksquare$
+*Proof.* By Theorem 3.22g, if the $S$-interface is preserved, $B$-dependent queries are unanswerable. To answer them, the interface must be extended. Adding $\pi_B$ makes $B$ observable. This is precisely what "adding an axis" means: making new information available to queries. 0◻
 
 **Corollary 3.22i (Packing Maneuver Is Futile).** The "packing" objection to the capability gap fails in all cases:
 
@@ -991,7 +1096,7 @@ This model captures duck typing's fundamental constraint: type compatibility is 
 
 1.  **Adversary construction.** Fix any deterministic algorithm $\mathcal{A}$. We construct an adversary that forces $\mathcal{A}$ to query at least $n-1$ call sites.
 
-2.  **Adversary strategy.** The adversary maintains a set $S$ of "candidate violators"---call sites that could be the unique violating site. Initially $S = \{c_1, \ldots, c_n\}$. When $\mathcal{A}$ queries $\mathcal{O}(c_i)$:
+2.  **Adversary strategy.** The adversary maintains a set $S$ of "candidate violators", call sites that could be the unique violating site. Initially $S = \{c_1, \ldots, c_n\}$. When $\mathcal{A}$ queries $\mathcal{O}(c_i)$:
 
     -   If $|S| > 1$: Answer "does not use $a$" and set $S \leftarrow S \setminus \{c_i\}$
 
@@ -999,21 +1104,21 @@ This model captures duck typing's fundamental constraint: type compatibility is 
 
 3.  **Lower bound derivation.** The algorithm must distinguish between $n$ possible inputs (exactly one of $c_1, \ldots, c_n$ violates). Each query eliminates at most one candidate. After $k < n-1$ queries, $|S| \geq 2$, so the algorithm cannot determine the unique violator. Therefore $\mathcal{A}$ requires at least $n-1 \in \Omega(n)$ queries.
 
-4.  **Generalization.** For the case where multiple call sites may violate: there are $2^n$ possible subsets. Each binary query provides at most 1 bit. Therefore $\log_2(2^n) = n$ queries are necessary to identify the exact subset. $\blacksquare$
+4.  **Generalization.** For the case where multiple call sites may violate: there are $2^n$ possible subsets. Each binary query provides at most 1 bit. Therefore $\log_2(2^n) = n$ queries are necessary to identify the exact subset. 0◻
 
-**Remark (Static Analysis).** Static analyzers precompute call site information via control-flow analysis over the program text. This shifts the $\Omega(n)$ cost to analysis time rather than eliminating it. The bound characterizes the inherent information content required---$n$ bits to identify $n$ potential violation sites---regardless of when that information is gathered.
+**Remark (Static Analysis).** Static analyzers precompute call site information via control-flow analysis over the program text. This shifts the $\Omega(n)$ cost to analysis time rather than eliminating it. The bound characterizes the inherent information content required, $n$ bits to identify $n$ potential violation sites, regardless of when that information is gathered.
 
 **Theorem 3.25 (Nominal Typing Upper Bound).** Nominal error localization requires exactly 1 inspection.
 
-*Proof.* In nominal typing, constraints are declared at the class definition. The constraint "type $T$ must have attribute $a$" is checked at the single location where $T$ is defined. If the constraint is violated, the error is at that location. No call site inspection is required. $\blacksquare$
+*Proof.* In nominal typing, constraints are declared at the class definition. The constraint "type $T$ must have attribute $a$" is checked at the single location where $T$ is defined. If the constraint is violated, the error is at that location. No call site inspection is required. 0◻
 
 **Corollary 3.26 (Complexity Gap Is Unbounded).** The ratio $\frac{\text{DuckCost}(n)}{\text{NominalCost}}$ grows without bound: $$\lim_{n \to \infty} \frac{\Omega(n)}{O(1)} = \infty$$
 
-*Proof.* Immediate from Theorems 3.24 and 3.25. $\blacksquare$
+*Proof.* Immediate from Theorems 3.24 and 3.25. 0◻
 
-**Corollary 3.27 (Lower Bound Is Tight).** The $\Omega(n)$ lower bound for duck typing is achieved by naive inspection---no algorithm can do better, and simple algorithms achieve this bound.
+**Corollary 3.27 (Lower Bound Is Tight).** The $\Omega(n)$ lower bound for duck typing is achieved by naive inspection; no algorithm can do better, and simple algorithms achieve this bound.
 
-*Proof.* Theorem 3.24 proves $\Omega(n)$ is necessary. Linear scan of call sites achieves $O(n)$. Therefore the bound is tight. $\blacksquare$
+*Proof.* Theorem 3.24 proves $\Omega(n)$ is necessary. Linear scan of call sites achieves $O(n)$. Therefore the bound is tight. 0◻
 
 ::: center
 
@@ -1031,13 +1136,13 @@ We have established four theorems with universal scope:
   **3.22h (Packing Dichotomy)**         Packing $B$ into $S$ either fails or adds an axis   Categorical: observation preservation blocks recovery
   **3.24 (Lower Bound)**                Duck typing requires $\Omega$(n) inspections        Adversary argument: any algorithm can be forced
 
-These are not claims about our model---they are claims about **the universe of possible typing systems**. The theorems establish:
+These are not claims about our model; they are claims about **the universe of possible typing systems**. The theorems establish:
 
 -   Theorem 3.13 proves no model over $(S)$ can provide provenance.
 
 -   Theorem 3.19 proves the capability enumeration is derived from information structure.
 
--   Theorem 3.22h proves "packing" cannot circumvent the capability gap---it either fails or is equivalent to adding an axis.
+-   Theorem 3.22h proves "packing" cannot circumvent the capability gap; it either fails or is equivalent to adding an axis.
 
 -   Theorem 3.24 proves no algorithm can overcome the information-theoretic limitation.
 
@@ -1054,19 +1159,23 @@ For completeness, we restate the original characterization in the context of the
 
 **Definition 3.28 (Query).** A *query* is a predicate $q : \text{Type} \to \text{Bool}$ that a typing discipline can evaluate.
 
-**Definition 3.29 (Shape-Respecting Query).** A query $q$ is *shape-respecting* if for all types $A, B$ with $S(A) = S(B)$: $$q(A) = q(B)$$
+**Definition 3.29 (Axis-Respecting Query).** A query $q$ is *$\{S\}$-respecting* if for all types $A, B$ with $S(A) = S(B)$: $$q(A) = q(B)$$
 
 That is, shape-equivalent types cannot be distinguished by $q$.
 
-**Theorem 3.30 (Capability Gap Characterization).** Let ShapeQueries be the set of all shape-respecting queries, and let AllQueries be the set of all queries. If there exist types $A \neq B$ with $S(A) = S(B)$, then: $$\text{ShapeQueries} \subsetneq \text{AllQueries}$$
+**Theorem 3.30 (Capability Gap Characterization).** Let $\{S\}$-Queries be the set of all $\{S\}$-respecting queries, and let AllQueries be the set of all queries. If there exist types $A \neq B$ with $S(A) = S(B)$, then: $$\text{$\{S\}$-Queries} \subsetneq \text{AllQueries}$$
 
-*Proof.* The identity query $\text{isA}(T) := (T = A)$ is in AllQueries but not ShapeQueries, because isA(A) = true but isA(B) = false despite $S(A) = S(B)$. $\blacksquare$
+**Remark:** In type system terminology, \"$\{S\}$-Queries\" corresponds to structural/shape/duck typing capabilities.
 
-**Corollary 3.31 (Derived Capability Set).** The capability gap between shape-based and nominal typing is **exactly** the set of queries that depend on the Bases axis: $$\text{Capability Gap} = \{ q \mid \exists A, B.\ S(A) = S(B) \land q(A) \neq q(B) \}$$
+*Proof.* The identity query $\text{isA}(T) := (T = A)$ is in AllQueries but not $\{S\}$-Queries, because isA(A) = true but isA(B) = false despite $S(A) = S(B)$. 0◻
 
-This is not an enumeration---it's a **characterization**. Our listed capabilities (provenance, identity, enumeration, conflict resolution) are instances of this set, not arbitrary choices.
+**Corollary 3.31 (Derived Capability Set).** The capability gap between $\{S\}$-only and $\{B,S\}$ systems is **exactly** the set of queries that depend on the Bases axis: $$\text{Capability Gap} = \{ q \mid \exists A, B.\ S(A) = S(B) \land q(A) \neq q(B) \}$$
 
-**Information-Theoretic Interpretation:** Information theory tells us that discarding information removes the ability to answer queries that depend on that information. The Bases axis contains information about inheritance relationships. Shape-based typing discards this axis. Therefore, any query that depends on inheritance---provenance, identity, enumeration, conflict resolution---cannot be answered. This follows from the structure of the information available.
+**Remark:** This characterizes the gap between structural/duck typing ($\{S\}$) and nominal typing ($\{B,S\}$).
+
+This is not an enumeration; it's a **characterization**. Our listed capabilities (provenance, identity, enumeration, conflict resolution) are instances of this set, not arbitrary choices.
+
+**Information-Theoretic Interpretation:** Information theory tells us that discarding information removes the ability to answer queries that depend on that information. The Bases axis contains information about inheritance relationships. Shape-based typing discards this axis. Therefore, any query that depends on inheritance (provenance, identity, enumeration, conflict resolution) cannot be answered. This follows from the structure of the information available.
 
 ::: center
 
@@ -1083,15 +1192,15 @@ This section presents additional theorems that establish the completeness and ro
 
 *Proof.* The proof proceeds by constitutive definition, not empirical enumeration.
 
-In Python, `type(name, bases, namespace)` is the universal type constructor. Every type $T$ is created by some invocation `type(n, b, s)`---either explicitly or via the `class` statement (which is syntactic sugar for `type()`). A type does not merely *have* $(B, S)$; a type *is* $(B, S)$. There is no other information constitutive of a type object.
+In Python, `type(name, bases, namespace)` is the universal type constructor. Every type $T$ is created by some invocation `type(n, b, s)`, either explicitly or via the `class` statement (which is syntactic sugar for `type()`). A type does not merely *have* $(B, S)$; a type *is* $(B, S)$. There is no other information constitutive of a type object.
 
 Therefore, for any computable function $g : \text{Type} \to \alpha$: $$g(T) = g(\texttt{type}(n, b, s)) = h(n, b, s)$$ for some computable $h$. Any function of a type is definitionally a function of the triple that constitutes it.
 
 **Remark (Derived vs. Constitutive).** Properties like `__mro__` (method resolution order) or `__module__` are not counterexamples: MRO is computed from $B$ by C3 linearization; `__module__` is stored in the namespace $S$. These are *derived from* or *contained in* $(B, S)$, not independent of it.
 
-This is a definitional closure: a critic cannot exhibit a "fourth axis" because any proposed axis is either (a) stored in $S$, (b) computable from $(B, S)$, or (c) not part of the type's semantic identity (e.g., memory address). $\blacksquare$
+This is a definitional closure: a critic cannot exhibit a "fourth axis" because any proposed axis is either (a) stored in $S$, (b) computable from $(B, S)$, or (c) not part of the type's semantic identity (e.g., memory address). 0◻
 
-**Corollary 3.33 (No Hidden Information).** There exists no "fourth axis" that shape-based typing could use to recover provenance. The information is structurally absent---not because we failed to model it, but because types *are* $(B, S)$ by construction.
+**Corollary 3.33 (No Hidden Information).** There exists no "fourth axis" that shape-based typing could use to recover provenance. The information is structurally absent, not because we failed to model it, but because types *are* $(B, S)$ by construction.
 
 #### 3.11.2 Capability Comparison
 
@@ -1099,11 +1208,11 @@ This is a definitional closure: a critic cannot exhibit a "fourth axis" because 
 
 *Proof.* Duck typing operations are: 1. Attribute access: `getattr(obj, "name")` 2. Attribute existence: `hasattr(obj, "name")` 3. Method invocation: `obj.method()`
 
-All three operations are available in nominal systems. Nominal typing adds type identity operations; it does not remove duck typing operations. $\blacksquare$
+All three operations are available in nominal systems. Nominal typing adds type identity operations; it does not remove duck typing operations. 0◻
 
 **Theorem 3.35 (Strict Superset).** The inclusion is strict: $$\mathcal{C}_{\text{duck}} \subsetneq \mathcal{C}_{\text{nom}}$$
 
-*Proof.* Nominal typing provides provenance, identity, enumeration, and conflict resolution (Theorem 2.17). Duck typing cannot provide these (Theorem 3.13). Therefore: $$\mathcal{C}_{\text{nom}} = \mathcal{C}_{\text{duck}} \cup \mathcal{C}_B$$ where $\mathcal{C}_B \neq \emptyset$. $\blacksquare$
+*Proof.* Nominal typing provides provenance, identity, enumeration, and conflict resolution (Theorem 2.17). Duck typing cannot provide these (Theorem 3.13). Therefore: $$\mathcal{C}_{\text{nom}} = \mathcal{C}_{\text{duck}} \cup \mathcal{C}_B$$ where $\mathcal{C}_B \neq \emptyset$. 0◻
 
 **Corollary 3.36 (No Capability Tradeoff).** Choosing nominal typing over duck typing: - Forecloses **zero** capabilities - Gains **four** capabilities
 
@@ -1111,51 +1220,55 @@ There is no capability tradeoff. Nominal typing strictly dominates.
 
 **Remark (Capability vs. Code Compatibility).** The capability superset does not mean "all duck-typed code runs unchanged under nominal typing." It means "every operation expressible in duck typing is expressible in nominal typing." The critical distinction:
 
--   **False equivalence** (duck typing): `WellFilterConfig` and `StepWellFilterConfig` are structurally identical but semantically distinct (different MRO positions, different scopes). Duck typing conflates them---it literally cannot answer "which type is this?" This is not flexibility; it is **information destruction**.
+-   **False equivalence** (duck typing): `WellFilterConfig` and `StepWellFilterConfig` are structurally identical but semantically distinct (different MRO positions, different scopes). Duck typing conflates them; it literally cannot answer "which type is this?" This is not flexibility; it is **information destruction**.
 
--   **Type distinction** (nominal typing): `isinstance(config, StepWellFilterConfig)` distinguishes them in O(1). The distinction is expressible because nominal typing preserves type identity.
+-   **Type distinction** ($\{B,S\}$ systems): `isinstance(config, StepWellFilterConfig)` distinguishes them in O(1). The distinction is expressible because $\{B,S\}$ systems preserve type identity.
 
-Duck typing's "acceptance" of structurally-equivalent types is not a capability---it is the *absence* of the capability to distinguish them. Nominal typing adds this capability without removing any duck typing operation. See Case Study 1 (§5.2, Theorem 5.1) for the complete production example demonstrating that structural identity $\neq$ semantic identity.
+The "acceptance" of structurally-equivalent types in $\{S\}$-only systems is not a capability; it is the *absence* of the capability to distinguish them. $\{B,S\}$ systems add this capability without removing any structural typing operation. See Case Study 1 (§5.2, Theorem 5.1) for the complete production example demonstrating that structural identity $\neq$ semantic identity.
+
+**Remark:** The traditional terms \"duck typing\" and \"nominal typing\" correspond to $\{S\}$-only and $\{B,S\}$ systems respectively.
 
 #### 3.11.3 Axiom Justification
 
-**Lemma 3.37 (Shape Axiom is Definitional).**[]{#lem:shape-axiom-definitional label="lem:shape-axiom-definitional"} The axiom "shape-based typing treats same-namespace types identically" is not an assumption---it is the **definition** of shape-based typing.
+**Lemma 3.37 (Axis-Exclusion is Definitional).**[]{#lem:shape-axiom-definitional label="lem:shape-axiom-definitional"} The axiom "$\{S\}$-only typing treats same-namespace types identically" is not an assumption; it is the **definition** of $\{S\}$-only typing.
 
-*Proof.* Shape-based typing is defined as a typing discipline over $\{S\}$ only (Definition 2.10). If a discipline uses information from $B$ (the Bases axis) to distinguish types, it is, by definition, not shape-based.
+*Proof.* $\{S\}$-only typing is defined as a typing discipline over $\{S\}$ only (Definition 2.10). If a discipline uses information from $B$ (the Bases axis) to distinguish types, it is, by definition, not $\{S\}$-only.
 
-The axiom is not: "We assume shape typing can't distinguish same-shape types." The axiom is: "Shape typing means treating same-shape types identically."
+The axiom is not: "We assume $\{S\}$-only typing can't distinguish same-shape types." The axiom is: "$\{S\}$-only typing means treating same-shape types identically."
 
-Any system that distinguishes same-shape types is using $B$ (explicitly or implicitly). $\blacksquare$
+Any system that distinguishes same-shape types is using $B$ (explicitly or implicitly). 0◻
 
-**Corollary 3.38 (No Clever Shape System).** There exists no "clever" shape-based system that can distinguish types $A$ and $B$ with $S(A) = S(B)$. Such a system would, by definition, not be shape-based.
+**Remark:** In type system terminology, \"$\{S\}$-only typing\" corresponds to shape-based/duck/structural typing.
+
+**Corollary 3.38 (No Axis-Extension Without Including Axis).** There exists no "clever" $\{S\}$-only system that can distinguish types $A$ and $B$ with $S(A) = S(B)$. Such a system would, by definition, not be $\{S\}$-only.
 
 #### 3.11.4 Extension Impossibility
 
-**Theorem 3.39 (Extension Impossibility).**[]{#thm:extension-impossibility label="thm:extension-impossibility"} Let $\mathcal{D}$ be any duck typing system. Let $\mathcal{D}'$ be $\mathcal{D}$ extended with any computable function $f : \text{Namespace} \to \alpha$. Then $\mathcal{D}'$ still cannot compute provenance.
+**Theorem 3.39 (Extension Impossibility).**[]{#thm:extension-impossibility label="thm:extension-impossibility"} Let $\mathcal{D}$ be any $\{S\}$-only typing system. Let $\mathcal{D}'$ be $\mathcal{D}$ extended with any computable function $f : \text{Namespace} \to \alpha$. Then $\mathcal{D}'$ still cannot compute provenance.
 
 *Proof.* Provenance requires distinguishing types $A$ and $B$ where $S(A) = S(B)$ but $\text{prov}(A, a) \neq \text{prov}(B, a)$ for some attribute $a$.
 
 Any function $f : \text{Namespace} \to \alpha$ maps $A$ and $B$ to the same value, since $S(A) = S(B)$ implies $f$ receives identical input for both.
 
-Therefore, $f$ provides no distinguishing information. The only way to distinguish $A$ from $B$ is to use information not in $\text{Namespace}$---i.e., the Bases axis $B$.
+Therefore, $f$ provides no distinguishing information. The only way to distinguish $A$ from $B$ is to use information not in $\text{Namespace}$, i.e., the Bases axis $B$.
 
-No computable extension over $\{S\}$ (even with the leaf of $B$) can recover provenance. $\blacksquare$
+No computable extension over $\{S\}$ (even with the leaf of $B$) can recover provenance. 0◻
 
 **Corollary 3.40 (No Future Fix).** No future language feature, library, or tool operating within the duck typing paradigm can provide provenance. The limitation is structural, not technical.
 
 #### 3.11.5 Capability Exhaustiveness
 
-**Theorem 3.43a (Capability Exhaustiveness).** The four capabilities (provenance, identity, enumeration, conflict resolution) are **exhaustive**---they are the only capabilities derivable from the Bases axis.
+**Theorem 3.43a (Capability Exhaustiveness).** The four capabilities (provenance, identity, enumeration, conflict resolution) are **exhaustive**; they are the only capabilities derivable from the Bases axis.
 
 *Proof.* (Machine-checked in `nominal_resolution.lean`, Section 6: CapabilityExhaustiveness)
 
 The Bases axis provides MRO, a **list of types**. A list has exactly three queryable properties: 1. **Ordering**: Which element precedes which? $\rightarrow$ *Conflict resolution* (C3 linearization selects based on MRO order) 2. **Membership**: Is element X in the list? $\rightarrow$ *Enumeration* (subtype iff in some type's MRO) 3. **Element identity**: Which specific element? $\rightarrow$ *Provenance* and *type identity* (distinguish structurally-equivalent types by MRO position)
 
-These are exhaustive by the structure of lists---there are no other operations on a list that do not reduce to ordering, membership, or element identity. Therefore, the four capabilities are derived from MRO structure, not enumerated by inspection. $\blacksquare$
+These are exhaustive by the structure of lists; there are no other operations on a list that do not reduce to ordering, membership, or element identity. Therefore, the four capabilities are derived from MRO structure, not enumerated by inspection. 0◻
 
 **Corollary 3.43b (No Missing Capability).** Any capability claimed to require $B$ reduces to one of the four. There is no "fifth capability" that $B$ provides.
 
-*Proof.* Any operation on $B$ is an operation on MRO. Any operation on MRO is an operation on a list. List operations are exhaustively {ordering, membership, identity}. $\blacksquare$
+*Proof.* Any operation on $B$ is an operation on MRO. Any operation on MRO is an operation on a list. List operations are exhaustively {ordering, membership, identity}. 0◻
 
 **Theorem 3.43b-bis (Capability Reducibility).** Every B-dependent query reduces to a composition of the four primitive capabilities.
 
@@ -1175,13 +1288,13 @@ Note: Syntactic names (`__name__`) are metadata external to this model (see Defi
 
 No other distinguishing information exists (Theorem 3.32: $(B, S)$ is complete).
 
-Therefore any B-dependent query $q$ can be computed by composing: $$q(T) = f(\text{provenance}(T), \text{identity}(T), \text{enumeration}(T), \text{conflict\_resolution}(T))$$ for some computable $f$. $\blacksquare$
+Therefore any B-dependent query $q$ can be computed by composing: $$q(T) = f(\text{provenance}(T), \text{identity}(T), \text{enumeration}(T), \text{conflict\_resolution}(T))$$ for some computable $f$. 0◻
 
 #### 3.11.6a Adapter Cost Analysis
 
-**Theorem 3.43c (Adapter Declaration is Information-Preserving).** An adapter declares information that is **already true**---that a type conforms to an interface. Declaration does not create the conformance; it makes it explicit.
+**Theorem 3.43c (Adapter Declaration is Information-Preserving).** An adapter declares information that is **already true**, that a type conforms to an interface. Declaration does not create the conformance; it makes it explicit.
 
-*Proof.* If `TheirType` does not satisfy `YourABC`'s interface, the adapter fails at definition time (missing method error). If `TheirType` does satisfy the interface, the conformance existed before the adapter. The adapter is not implementation---it is documentation of pre-existing fact. $\blacksquare$
+*Proof.* If `TheirType` does not satisfy `YourABC`'s interface, the adapter fails at definition time (missing method error). If `TheirType` does satisfy the interface, the conformance existed before the adapter. The adapter is not implementation; it is documentation of pre-existing fact. 0◻
 
 **Theorem 3.43d (Adapter Amortization).** Adapter cost is O(1). Manual capability implementation is O(N) where N is the number of use sites.
 
@@ -1191,11 +1304,11 @@ Under nominal typing (with adapter): - Provenance: Automatic via `type(obj).__mr
 
 Under structural typing (without adapter), to recover any capability manually: - Provenance: Must thread source information through call sites (1 additional parameter $\times$ N calls) - Identity: Must maintain external type registry (1 registry + N registration calls) - Enumeration: Must maintain external subtype set (1 set + N insertions) - Conflict resolution: Must implement manual dispatch (1 dispatcher + N cases)
 
-The adapter is 2 lines. Manual implementation is $\Omega(N)$. For $N \geq 1$, adapter dominates. $\blacksquare$
+The adapter is 2 lines. Manual implementation is $\Omega(N)$. For $N \geq 1$, adapter dominates. 0◻
 
-**Corollary 3.43e (Negative Adapter Cost).** Adapter "cost" is negative---a net benefit.
+**Corollary 3.43e (Negative Adapter Cost).** Adapter "cost" is negative, a net benefit.
 
-*Proof.* The adapter enables automatic capabilities that would otherwise require O(N) manual implementation. The adapter costs O(1). For any system requiring the capabilities, adapter provides net savings of $\Omega(N) - O(1) = \Omega(N)$. The "cost" is negative. $\blacksquare$
+*Proof.* The adapter enables automatic capabilities that would otherwise require O(N) manual implementation. The adapter costs O(1). For any system requiring the capabilities, adapter provides net savings of $\Omega(N) - O(1) = \Omega(N)$. The "cost" is negative. 0◻
 
 **Corollary 3.43f (Adapter Cost Objection is Invalid).** Objecting to adapter cost is objecting to O(1) overhead while accepting O(N) overhead. This is mathematically incoherent.
 
@@ -1213,15 +1326,15 @@ Examine the proof of Theorem 3.13 (Provenance Impossibility): it shows that $(S)
 
 **Proof chain (no OpenHCS references):**
 
-1.  Theorem 2.17 (Capability Gap): Proved from the definition of shape-based typing
+1.  Theorem 2.17 (Capability Gap): Proved from the definition of $\{S\}$-only typing
 
 2.  Theorem 3.5 (Strict Dominance): Proved from Theorem 2.17 + Theorem 2.18
 
 3.  Theorem 2.10j (Adapters): Proved from capability comparison
 
-OpenHCS appears only to demonstrate that the four capabilities are *achievable*---that real systems use provenance, identity, enumeration, and conflict resolution. This is an existence proof ("such systems exist"), not a premise ("if OpenHCS works, then the theorems hold").
+OpenHCS appears only to demonstrate that the four capabilities are *achievable*, that real systems use provenance, identity, enumeration, and conflict resolution. This is an existence proof ("such systems exist"), not a premise ("if OpenHCS works, then the theorems hold").
 
-**Analogy:** Proving "comparison-based sorting requires $\Omega(n \log n)$" does not require testing on multiple arrays. Exhibiting quicksort demonstrates achievability, not theorem validity. $\blacksquare$
+**Analogy:** Proving "comparison-based sorting requires $\Omega(n \log n)$" does not require testing on multiple arrays. Exhibiting quicksort demonstrates achievability, not theorem validity. 0◻
 
 **Corollary 3.43h (Cross-Codebase Validity).** The theorems apply to any codebase in any language where $B \neq \emptyset$. OpenHCS is a sufficient example, not a necessary one.
 
@@ -1262,7 +1375,7 @@ OpenHCS appears only to demonstrate that the four capabilities are *achievable*-
 
 -   Pure functional style with only module-level functions and built-in types
 
-This describes a pathologically constrained subset of Python---not "most code" but "no OOP at all." $\blacksquare$
+This describes a pathologically constrained subset of Python, not "most code" but "no OOP at all." 0◻
 
 **Corollary 3.43j (B=$\emptyset$ Is Exceptional).** The $B = \emptyset$ case applies only to: 1. Languages without inheritance by design (Go) 2. Pure data serialization boundaries (JSON parsing before domain modeling) 3. FFI boundaries (ctypes, CFFI) before wrapping in domain types 4. Purely functional codebases with no class definitions
 
@@ -1276,23 +1389,23 @@ In all other cases---which constitute the overwhelming majority of production Py
 
 *Proof.* A parameterized type $G\langle T \rangle$ (e.g., `List<Dog>`) has:
 
--   $B(G\langle T \rangle) = B(G)[T/\tau]$ --- bases with parameter substituted
+-   $B(G\langle T \rangle) = B(G)[T/\tau]$. Bases with parameter substituted
 
--   $S(G\langle T \rangle) = S(G)[T/\tau]$ --- namespace with parameter in signatures
+-   $S(G\langle T \rangle) = S(G)[T/\tau]$. Namespace with parameter in signatures
 
-The type parameter affects both $B$ and $S$ after substitution. No additional axis is required; generics are fully captured by $(B, S)$. $\blacksquare$
+The type parameter affects both $B$ and $S$ after substitution. No additional axis is required; generics are fully captured by $(B, S)$. 0◻
 
 **Theorem 3.44 (Generic Shape Indistinguishability).** Under shape-based typing, `List<Dog>` and `Set<Cat>` are indistinguishable if $S(\text{List}\langle\text{Dog}\rangle) = S(\text{Set}\langle\text{Cat}\rangle)$.
 
 *Proof.* Shape typing uses only $S$. If two parameterized types have the same method signatures (after parameter substitution), shape typing treats them identically. It cannot distinguish: - The base generic type (`List` vs `Set`) - The type parameter (`Dog` vs `Cat`) - The generic inheritance hierarchy
 
-These require $N$ (for parameter identity) and $B$ (for hierarchy). $\blacksquare$
+These require $N$ (for parameter identity) and $B$ (for hierarchy). 0◻
 
-**Theorem 3.45 (Generic Capability Gap Extends).** The four capabilities from $\mathcal{C}_B$ (provenance, identity, enumeration, conflict resolution) apply to generic types. Generics do not reduce the capability gap---they **increase the type space** where it applies.
+**Theorem 3.45 (Generic Capability Gap Extends).** The four capabilities from $\mathcal{C}_B$ (provenance, identity, enumeration, conflict resolution) apply to generic types. Generics do not reduce the capability gap; they **increase the type space** where it applies.
 
 *Proof.* For generic types, the four capabilities manifest as: 1. **Provenance:** "Which generic type provided this method?" --- requires $B$ 2. **Identity:** "Is this `List<Dog>` or `Set<Cat>`?" --- requires parameterized $N$ 3. **Enumeration:** "What are the subtypes of `Collection<T>`?" --- requires $B$ 4. **Conflict resolution:** "Which `Comparable<T>` implementation wins?" --- requires $B$
 
-Additionally, generics introduce **variance** (covariant, contravariant, invariant), which requires $B$ to track inheritance direction. Shape typing discards $B$ and the parameter component of $N$, losing all four capabilities plus variance. $\blacksquare$
+Additionally, generics introduce **variance** (covariant, contravariant, invariant), which requires $B$ to track inheritance direction. Shape typing discards $B$ and the parameter component of $N$, losing all four capabilities plus variance. 0◻
 
 **Corollary 3.45.1 (Same Four, Larger Space).** Generics do not create new capabilities---they apply the same four capabilities to a larger type space. The capability gap is preserved, not reduced.
 
@@ -1304,7 +1417,7 @@ At compile time: - The type checker has access to `List<Dog>` vs `List<Cat>` - S
 
 At runtime (erased): - Both become `List` (erased) - Shape typing cannot distinguish `ArrayList` from `LinkedList` - Nominal typing can (via `instanceof`)
 
-The capability gap exists at both levels. $\blacksquare$
+The capability gap exists at both levels. 0◻
 
 **Theorem 3.47 (Universal Extension).** All capability gap theorems (3.13, 3.19, 3.24) extend to generic type systems. The formal results apply to:
 
@@ -1316,7 +1429,7 @@ The capability gap exists at both levels. $\blacksquare$
 
 -   **Compile-time only:** TypeScript, Swift
 
-*Proof.* Each language encodes generics as parameterized $N$ (see Table 2.2). The $(B, S)$ model applies uniformly. Type checking occurs at compile time where full parameterized types are available. Runtime representation (erased, reified, or monomorphized) is irrelevant to typing discipline. $\blacksquare$
+*Proof.* Each language encodes generics as parameterized $N$ (see Table 2.2). The $(B, S)$ model applies uniformly. Type checking occurs at compile time where full parameterized types are available. Runtime representation (erased, reified, or monomorphized) is irrelevant to typing discipline. 0◻
 
 **Corollary 3.48 (No Generic Escape).** Generics do not provide an escape from the capability gap. No major language invented a fourth axis.
 
@@ -1340,7 +1453,7 @@ No mainstream type system feature introduces a fourth axis orthogonal to $(B, S)
 
 *Proof.* The capability gap (Theorem 3.19) is information-theoretic: shape typing discards $B$, losing four capabilities. This holds regardless of: - Whether code is new or legacy - Whether the language is compiled or interpreted - Whether types are manifest or inferred - Whether the system uses classes, traits, protocols, or typeclasses
 
-The gap exists wherever $B$ exists. $\blacksquare$
+The gap exists wherever $B$ exists. 0◻
 
 **Corollary 3.51 (Scope of Shape Typing).** Shape-based typing is capability-equivalent to nominal typing only when:
 
@@ -1360,7 +1473,7 @@ A critical distinction: **discipline optimality** (which typing paradigm has mor
 
 **Theorem 3.54 (Nominal Pareto Dominates Shape).** Nominal typing Pareto dominates shape-based typing.
 
-*Proof.* (Machine-checked in `discipline_migration.lean`) 1. Shape capabilities = {attributeCheck} 2. Nominal capabilities = {provenance, identity, enumeration, conflictResolution, attributeCheck} 3. Shape $\subset$ Nominal (strict subset) 4. Declaration cost: both require one class definition per interface 5. Therefore nominal Pareto dominates shape. $\blacksquare$
+*Proof.* (Machine-checked in `discipline_migration.lean`) 1. Shape capabilities = {attributeCheck} 2. Nominal capabilities = {provenance, identity, enumeration, conflictResolution, attributeCheck} 3. Shape $\subset$ Nominal (strict subset) 4. Declaration cost: both require one class definition per interface 5. Therefore nominal Pareto dominates shape. 0◻
 
 **Theorem 3.55 (Dominance Does Not Imply Migration).**[]{#thm:dominance-not-migration label="thm:dominance-not-migration"} Pareto dominance of discipline $A$ over $B$ does NOT imply that migrating from $B$ to $A$ is beneficial for all codebases.
 
@@ -1376,7 +1489,7 @@ A critical distinction: **discipline optimality** (which typing paradigm has mor
 
 5.  **Existence of both cases.** For small $ctx$: $C(ctx) < B$ (migration beneficial). For large $ctx$: $C(ctx) > B$ (migration not beneficial).
 
-Therefore dominance does not determine migration benefit. $\blacksquare$
+Therefore dominance does not determine migration benefit. 0◻
 
 **Corollary 3.55a (Category Error).** Conflating "discipline $A$ is better" with "migrate to $A$" is a category error: the former is a property of disciplines (universal), the latter is a property of (discipline, codebase) pairs (context-dependent).
 
@@ -1398,21 +1511,23 @@ This distinguishes "nominal provides more capabilities" from "rewrite everything
 
 **Theorem 3.59 (Context Classification Exclusivity).** Greenfield and retrofit contexts are mutually exclusive.
 
-*Proof.* (Machine-checked in `context_formalization.lean`) If a context is greenfield, all modules are internal and no constraints require structural typing. If any module is external or any constraint requires structural typing, the context is retrofit. These conditions are mutually exclusive by construction. $\blacksquare$
+*Proof.* (Machine-checked in `context_formalization.lean`) If a context is greenfield, all modules are internal and no constraints require structural typing. If any module is external or any constraint requires structural typing, the context is retrofit. These conditions are mutually exclusive by construction. 0◻
 
-**Corollary 3.59a (Retrofit Does Not Imply Structural).** A retrofit context does not require structural typing. Adapters (Theorem 2.10j) make nominal typing available in all retrofit contexts where $B \neq \emptyset$.
+**Corollary 3.59a (Retrofit Does Not Imply $\{S\}$-Only).** A retrofit context does not require $\{S\}$-only typing. Adapters (Theorem 2.10j) make $\{B,S\}$ typing available in all retrofit contexts where $B \neq \emptyset$.
 
 **Definition 3.60 (Provenance-Requiring Query).** A system query *requires provenance* if it needs to distinguish between structurally equivalent types. Examples: - "Which type provided this value?" (provenance) - "Is this the same type?" (identity) - "What are all subtypes?" (enumeration) - "Which type wins in MRO?" (conflict resolution)
 
 **Theorem 3.61 (Provenance Detection).** Whether a system requires provenance is decidable from its query set.
 
-*Proof.* (Machine-checked in `context_formalization.lean`) Each query type is classified as requiring provenance or not. A system requires provenance iff any of its queries requires provenance. This is a finite check over a finite query set. $\blacksquare$
+*Proof.* (Machine-checked in `context_formalization.lean`) Each query type is classified as requiring provenance or not. A system requires provenance iff any of its queries requires provenance. This is a finite check over a finite query set. 0◻
 
-**Theorem 3.62 (Decision Procedure Soundness).** The discipline selection procedure is sound: 1. If $B \neq \emptyset$ $\rightarrow$ select Nominal (dominance, universal) 2. If $B = \emptyset$ $\rightarrow$ select Shape (no alternative exists)
+**Theorem 3.62 (Decision Procedure Soundness).** The discipline selection procedure is sound: 1. If $B \neq \emptyset$ $\rightarrow$ select $\{B,S\}$ (dominance, universal) 2. If $B = \emptyset$ $\rightarrow$ select $\{S\}$ (no alternative exists)
 
-*Proof.* (Machine-checked in `context_formalization.lean`) Case 1: When $B \neq \emptyset$, nominal typing strictly dominates shape-based typing (Theorem 3.5). Adapters eliminate the retrofit exception (Theorem 2.10j). Therefore nominal is always correct. Case 2: When $B = \emptyset$ (e.g., Go interfaces, JSON objects), nominal typing is undefined---there is no inheritance to track. Shape is the only coherent discipline. $\blacksquare$
+*Proof.* (Machine-checked in `context_formalization.lean`) Case 1: When $B \neq \emptyset$, $\{B,S\}$ typing strictly dominates $\{S\}$-only typing (Theorem 3.5). Adapters eliminate the retrofit exception (Theorem 2.10j). Therefore $\{B,S\}$ is always correct. Case 2: When $B = \emptyset$ (e.g., Go interfaces, JSON objects), $\{B,S\}$ typing is undefined---there is no inheritance to track. $\{S\}$ is the only coherent discipline. 0◻
 
-**Remark (Obsolescence of Greenfield/Retrofit Distinction).** Earlier versions of this paper distinguished "greenfield" (use nominal) from "retrofit" (use shape). Theorem 2.10j eliminates this distinction: adapters make nominal typing available in all retrofit contexts. The only remaining distinction is whether $B$ exists at all.
+**Remark:** In type system terminology, $\{B,S\}$ corresponds to nominal typing and $\{S\}$ to structural/duck typing.
+
+**Remark (Obsolescence of Greenfield/Retrofit Distinction).** Earlier versions of this paper distinguished "greenfield" (use nominal) from "retrofit" (use shape). Theorem 2.10j eliminates this distinction: adapters make $\{B,S\}$ typing available in all retrofit contexts. The only remaining distinction is whether $B$ exists at all.
 
 ::: center
 
@@ -1435,7 +1550,7 @@ The (B, S) model generalizes to a parametric framework where axis sets are *deri
 
 **Theorem 3.82 (Axis Capability Monotonicity).** For any axis set $\mathcal{A}$ and independent axis $X$: $$\text{capabilities}(\mathcal{A} \cup \{X\}) \supsetneq \text{capabilities}(\mathcal{A})$$
 
-*Proof.* By independence, $\exists q$ that $\mathcal{A}$ cannot answer but $X$ can. Adding $X$ enables $q$ while preserving all existing capabilities. $\blacksquare$
+*Proof.* By independence, $\exists q$ that $\mathcal{A}$ cannot answer but $X$ can. Adding $X$ enables $q$ while preserving all existing capabilities. 0◻
 
 **Remark 3.82a (Relative vs. Ultimate Dominance).** Nominal typing strictly dominates any system with *fewer* axes---but not those with more. $(B,S,H)$ dominates $(B,S)$ which dominates $(S)$. Dominance is relative to axis count. The ultimately correct choice is axis-parametric: supporting $N$ axes, where the minimal $N$ is derived from domain requirements.
 
@@ -1447,13 +1562,13 @@ Formally: Let $\text{work}(A, k)$ denote the work performed when using $k$ axes 
 
 **Theorem 3.83 (Derivability Collapse).** If axis $N$ is derivable from axis $B$ (i.e., $\exists f: B \to N$ preserving structure), then $N$ is not independent and any minimal axis set excludes $N$.
 
-*Proof.* Any query answerable by $N$ is answerable by $f(B)$. Therefore $N$ provides no capability beyond $B$. $\blacksquare$
+*Proof.* Any query answerable by $N$ is answerable by $f(B)$. Therefore $N$ provides no capability beyond $B$. 0◻
 
 **Corollary 3.84 (Type Identity Collapse).** Type identity is derivable from Bases $B$: the identity of type $T$ is $\text{head}(\text{MRO}(T))$, which is $T$ itself---the leaf of the bases graph. Therefore type identity is not an independent axis. Note: the syntactic name (`__name__`) is metadata external to the semantic model; it is not derivable from $(B, S)$ and is not part of the minimal typing model. See Definition 2.7.
 
 **Theorem 3.85 (Completeness Uniqueness).** For any domain $D$ with requirements $Q$, if $\mathcal{A}_1$ and $\mathcal{A}_2$ are both minimal complete for $D$, then $\mathcal{A}_1 \cong \mathcal{A}_2$ (isomorphic as axis sets).
 
-*Proof.* Suppose $\mathcal{A}_1 \neq \mathcal{A}_2$. WLOG $\exists A \in \mathcal{A}_1, A \notin \mathcal{A}_2$. By minimality of $\mathcal{A}_1$, $\exists q$ requiring $A$. By completeness of $\mathcal{A}_2$, some axis in $\mathcal{A}_2$ answers $q$. That axis must be isomorphic to $A$ (answers same queries). Contradiction. $\blacksquare$
+*Proof.* Suppose $\mathcal{A}_1 \neq \mathcal{A}_2$. WLOG $\exists A \in \mathcal{A}_1, A \notin \mathcal{A}_2$. By minimality of $\mathcal{A}_1$, $\exists q$ requiring $A$. By completeness of $\mathcal{A}_2$, some axis in $\mathcal{A}_2$ answers $q$. That axis must be isomorphic to $A$ (answers same queries). Contradiction. 0◻
 
 **Theorem 3.86 (Axis Derivation Algorithm).** The minimal complete axis set for domain $D$ is computable:
 
@@ -1482,17 +1597,17 @@ Each transition adds exactly the capabilities predicted by Theorem 3.82.
 
 **Theorem 3.88 (Non-Recursive Collapse).** Any non-recursive structure (e.g., flat enums, constants) is derivable from $S$ as an attribute value. Only recursive structures can be independent axes.
 
-*Proof.* Non-recursive values are atomic and can be stored as attribute values in the namespace. Therefore they are captured by $S$ and provide no independent capability. $\blacksquare$
+*Proof.* Non-recursive values are atomic and can be stored as attribute values in the namespace. Therefore they are captured by $S$ and provide no independent capability. 0◻
 
 **Definition 3.89 (Preference Position).** A *preference position* for domain $D$ is the claim that multiple distinct typing disciplines are valid choices: $$\text{Preference}(D) \triangleq \exists A_1, A_2 : \text{AxisSet}.\; \text{minimal}(A_1, D) \land \text{minimal}(A_2, D) \land A_1 \not\cong A_2$$
 
 **Theorem 3.90 (Preference Incoherence).** For any domain $D$ with specified requirements, the preference position is false: $$\forall D.\; \neg\text{Preference}(D)$$
 
-*Proof.* By Theorem 3.85 (Completeness Uniqueness), if $A_1$ and $A_2$ are both minimal complete for $D$, then $A_1 \cong A_2$. Therefore the conjunction $\text{minimal}(A_1, D) \land \text{minimal}(A_2, D) \land A_1 \not\cong A_2$ is unsatisfiable. $\blacksquare$
+*Proof.* By Theorem 3.85 (Completeness Uniqueness), if $A_1$ and $A_2$ are both minimal complete for $D$, then $A_1 \cong A_2$. Therefore the conjunction $\text{minimal}(A_1, D) \land \text{minimal}(A_2, D) \land A_1 \not\cong A_2$ is unsatisfiable. 0◻
 
 **Corollary 3.91 (Hedging Incoherence).** Let $R$ be a reader who accepts Theorems 3.80-3.88. The position "these theorems are correct but typing discipline selection remains a matter of preference or tradeoffs" is logically inconsistent.
 
-*Proof.* "Preference" presupposes $\text{Preference}(D)$ for some domain $D$. By Theorem 3.90, $\neg\text{Preference}(D)$ for all $D$. Accepting the theorems while asserting preference instantiates $P \land \neg P$. $\blacksquare$
+*Proof.* "Preference" presupposes $\text{Preference}(D)$ for some domain $D$. By Theorem 3.90, $\neg\text{Preference}(D)$ for all $D$. Accepting the theorems while asserting preference instantiates $P \land \neg P$. 0◻
 
 **Remark 3.92 (Why This Theorem Exists).** Empirically, readers who accept formal results often hedge on their implications ("interesting contribution, but\..."). This hedging is not mere caution---it is a logical error. Corollary 3.91 makes this error explicit: one cannot coherently accept uniqueness while maintaining that alternatives exist. The debate over typing disciplines is not "contributed to" by this work; it is *resolved*.
 
@@ -1544,37 +1659,53 @@ Each transition adds exactly the capabilities predicted by Theorem 3.82.
 
 **Definition 4.1 (Error Location).** Let E(T) be the number of source locations that must be inspected to find all potential violations of a type constraint under discipline T.
 
-**Theorem 4.1 (Nominal Complexity).** E(nominal) = O(1).
+**Theorem 4.1 ($\{B,S\}$ Typing Complexity).** E($\{B,S\}$) = O(1).
 
-*Proof.* Under nominal typing, constraint "x must be an A" is satisfied iff type(x) inherits from A. This property is determined at class definition time, at exactly one location: the class definition of type(x). If the class does not list A in its bases (transitively), the constraint fails. One location. $\blacksquare$
+*Proof.* Under $\{B,S\}$ typing, constraint "x must be an A" is satisfied iff type(x) inherits from A. This property is determined at class definition time, at exactly one location: the class definition of type(x). If the class does not list A in its bases (transitively), the constraint fails. One location. 0◻
 
-**Theorem 4.2 (Structural Complexity).** E(structural) = O(k) where k = number of classes.
+**Remark:** In type system terminology, $\{B,S\}$ typing is called nominal typing.
 
-*Proof.* Under structural typing, constraint "x must satisfy interface A" requires checking that type(x) implements all methods in signature(A). This check occurs at each class definition. For k classes, O(k) locations. $\blacksquare$
+**Theorem 4.2 ($\{S\}$-Only Declared Complexity).** E($\{S\}$-declared) = O(k) where k = number of classes.
 
-**Theorem 4.3 (Duck Typing Complexity).** E(duck) = $\Omega(n)$ where n = number of call sites.
+*Proof.* Under $\{S\}$-only typing with declared interfaces, constraint "x must satisfy interface A" requires checking that type(x) implements all methods in signature(A). This check occurs at each class definition. For k classes, O(k) locations. 0◻
 
-*Proof.* Under duck typing, constraint "x must have method m" is encoded as `hasattr(x, "m")` at each call site. There is no central declaration. For n call sites, each must be inspected. Lower bound is $\Omega(n)$. $\blacksquare$
+**Remark:** In type system terminology, this is called structural typing.
 
-**Corollary 4.4 (Strict Dominance).** Nominal typing strictly dominates duck typing: E(nominal) = O(1) \< $\Omega(n)$ = E(duck) for all n \> 1.
+**Theorem 4.3 ($\{S\}$-Only Incoherent Complexity).** E($\{S\}$-incoherent) = $\Omega(n)$ where n = number of call sites.
+
+*Proof.* Under $\{S\}$-only incoherent typing, constraint "x must have method m" is encoded as `hasattr(x, "m")` at each call site. There is no central declaration. For n call sites, each must be inspected. Lower bound is $\Omega(n)$. 0◻
+
+**Remark:** This incoherent pattern is traditionally called \"duck typing.\"
+
+**Corollary 4.4 (Strict Dominance).** $\{B,S\}$ typing strictly dominates $\{S\}$-only incoherent: E($\{B,S\}$) = O(1) \< $\Omega(n)$ = E($\{S\}$-incoherent) for all n \> 1.
+
+**Remark:** In type system terminology, this shows nominal typing dominates duck typing.
 
 ## The Information Scattering Theorem
 
 **Definition 4.2 (Constraint Encoding Locations).** Let I(T, c) be the set of source locations where constraint c is encoded under discipline T.
 
-**Theorem 4.5 (Duck Typing Scatters).** For duck typing, I(duck, c) = O(n) where n = call sites using constraint c.
+**Theorem 4.5 ($\{S\}$-Only Incoherent Scattering).** For $\{S\}$-only incoherent typing, I($\{S\}$-incoherent, c) = O(n) where n = call sites using constraint c.
 
-*Proof.* Each `hasattr(x, "method")` call independently encodes the constraint. No shared reference. Constraints scale with call sites. $\blacksquare$
+**Remark:** This describes the scattering problem in \"duck typing.\"
 
-**Theorem 4.6 (Nominal Typing Centralizes).** For nominal typing, I(nominal, c) = O(1).
+*Proof.* Each `hasattr(x, "method")` call independently encodes the constraint. No shared reference. Constraints scale with call sites. 0◻
 
-*Proof.* Constraint c = "must inherit from A" is encoded once: in the ABC/Protocol definition of A. All `isinstance(x, A)` checks reference this single definition. $\blacksquare$
+**Theorem 4.6 ($\{B,S\}$ Typing Centralizes).** For $\{B,S\}$ typing, I($\{B,S\}$, c) = O(1).
 
-**Corollary 4.7 (Maintenance Entropy).** Duck typing maximizes maintenance entropy; nominal typing minimizes it.
+*Proof.* Constraint c = "must inherit from A" is encoded once: in the ABC/Protocol definition of A. All `isinstance(x, A)` checks reference this single definition. 0◻
+
+**Remark:** In type system terminology, $\{B,S\}$ typing is called nominal typing.
+
+**Corollary 4.7 (Maintenance Entropy).** $\{S\}$-only incoherent typing maximizes maintenance entropy; $\{B,S\}$ typing minimizes it.
+
+**Remark:** Traditional terms: duck typing vs nominal typing.
 
 ## Empirical Demonstration
 
-The theoretical complexity bounds in Theorems 4.1-4.3 are demonstrated empirically in Section 5, Case Study 1 (WellFilterConfig hierarchy). Two classes with identical structure but different nominal identities require O(1) disambiguation under nominal typing but $\Omega$(n) call-site inspection under duck typing. Case Study 5 illustrates this: migrating from duck to nominal typing replaced scattered `hasattr()` checks across 47 call sites with centralized ABC contract validation at a single definition point.
+The theoretical complexity bounds in Theorems 4.1-4.3 are demonstrated empirically in Section 5, Case Study 1 (WellFilterConfig hierarchy). Two classes with identical structure but different nominal identities require O(1) disambiguation under $\{B,S\}$ typing but $\Omega$(n) call-site inspection under $\{S\}$-only incoherent typing. Case Study 5 illustrates this: migrating from incoherent to $\{B,S\}$ typing replaced scattered `hasattr()` checks across 47 call sites with centralized ABC contract validation at a single definition point.
+
+**Remark:** In type system terminology, $\{B,S\}$ is nominal typing; $\{S\}$-only incoherent is duck typing.
 
 ::: center
 
@@ -1588,11 +1719,17 @@ The theoretical complexity bounds in Theorems 4.1-4.3 are demonstrated empirical
 
 **Addressing the "n=1" objection:** A potential criticism is that our case studies come from a single codebase (OpenHCS [@openhcs2025]). We address this in three ways:
 
-**First: Claim structure.** This paper makes two distinct types of claims with different validation requirements. *Mathematical claims* (Theorems 3.1--3.62): "Discarding B necessarily loses these capabilities." These are proven by formal derivation in Lean (2600+ lines, 0 `sorry`). Mathematical proofs have no sample size: they are universal by construction. *Existence claims*: "Production systems requiring these capabilities exist." One example suffices for an existential claim. OpenHCS demonstrates that real systems require provenance tracking, MRO-based resolution, and type-identity dispatch, exactly the capabilities Theorem 3.19 proves impossible under structural typing.
+**First: Claim structure.** This paper makes two distinct types of claims with different validation requirements. *Mathematical claims* (Theorems 3.1--3.62): "Discarding B necessarily loses these capabilities." These are proven by formal derivation in Lean (2600+ lines, 0 `sorry`). Mathematical proofs have no sample size: they are universal by construction. *Existence claims*: "Production systems requiring these capabilities exist." One example suffices for an existential claim. OpenHCS demonstrates that real systems require provenance tracking, MRO-based resolution, and type-identity dispatch, exactly the capabilities Theorem 3.19 proves impossible under $\{S\}$-only typing.
 
-**Second: Case studies are theorem instantiations.** Table 5.1 links each case study to the theorem it validates. These are not arbitrary examples: they are empirical instantiations of theoretical predictions. The theory predicts that systems requiring provenance will use nominal typing; the case studies confirm this prediction. The 13 patterns are 13 independent architectural decisions, each of which could have used structural typing but provably could not. Packaging these patterns into separate repositories would not add information: it would be technicality theater. The mathematical impossibility results are the contribution; OpenHCS is the existence proof that the impossibility matters.
+**Remark:** In type system terminology, $\{S\}$-only typing is called structural typing.
 
-**Third: Falsifiable predictions.** The decision procedure (Theorem 3.62) makes falsifiable predictions: systems where $B \neq \emptyset$ should exhibit nominal patterns; systems where $B = \emptyset$ should exhibit structural patterns. Any codebase where this prediction fails would falsify our theory.
+**Second: Case studies are theorem instantiations.** Table 5.1 links each case study to the theorem it validates. These are not arbitrary examples: they are empirical instantiations of theoretical predictions. The theory predicts that systems requiring provenance will use $\{B,S\}$ typing; the case studies confirm this prediction. The 13 patterns are 13 independent architectural decisions, each of which could have used $\{S\}$-only typing but provably could not. Packaging these patterns into separate repositories would not add information: it would be technicality theater. The mathematical impossibility results are the contribution; OpenHCS is the existence proof that the impossibility matters.
+
+**Remark:** In type system terminology, $\{B,S\}$ is nominal typing; $\{S\}$-only is structural typing.
+
+**Third: Falsifiable predictions.** The decision procedure (Theorem 3.62) makes falsifiable predictions: systems where $B \neq \emptyset$ should exhibit $\{B,S\}$ patterns; systems where $B = \emptyset$ should exhibit $\{S\}$-only patterns. Any codebase where this prediction fails would falsify our theory.
+
+**Remark:** In type system terminology, $\{B,S\}$ patterns are nominal; $\{S\}$-only are structural.
 
 **The validation structure:**
 
@@ -1602,11 +1739,17 @@ The theoretical complexity bounds in Theorems 4.1-4.3 are demonstrated empirical
   OpenHCS case studies   Existence proof          patterns documented
   Decision procedure     Falsifiability           Theorem 3.62 (machine-checked)
 
-OpenHCS is a bioimage analysis platform for high-content screening microscopy. The system was designed from the start with explicit commitment to nominal typing, exposing the consequences of this architectural decision through 13 distinct patterns. These case studies demonstrate the methodology in action: for each pattern, we identify whether it requires provenance tracking, MRO-based resolution, or type identity as dictionary keys: all indicators that nominal typing is mandatory per the formal model.
+OpenHCS is a bioimage analysis platform for high-content screening microscopy. The system was designed from the start with explicit commitment to $\{B,S\}$ typing, exposing the consequences of this architectural decision through 13 distinct patterns. These case studies demonstrate the methodology in action: for each pattern, we identify whether it requires provenance tracking, MRO-based resolution, or type identity as dictionary keys: all indicators that $\{B,S\}$ typing is mandatory per the formal model.
 
-Duck typing fails for all 13 patterns because they fundamentally require **type identity** rather than structural compatibility. Configuration resolution needs to know *which type* provided a value (provenance tracking, Corollary 6.3). MRO-based priority needs inheritance relationships preserved (Theorem 3.4). Metaclass registration needs types as dictionary keys (type identity as hash). These requirements are not implementation details. They are architectural necessities proven impossible under duck typing's structural equivalence axiom.
+**Remark:** In type system terminology, $\{B,S\}$ typing is called nominal typing.
 
-The 13 studies demonstrate four pattern taxonomies: (1) **type discrimination** (WellFilterConfig hierarchy), (2) **metaclass registration** (AutoRegisterMeta, GlobalConfigMeta, DynamicInterfaceMeta), (3) **MRO-based resolution** (dual-axis resolver, \@global_pipeline_config chain), and (4) **bidirectional lookup** (lazy $\leftrightarrow$ base type registries). Table 5.2 summarizes how each pattern fails under duck typing and what nominal mechanism enables it.
+$\{S\}$-only incoherent typing fails for all 13 patterns because they fundamentally require **type identity** rather than structural compatibility. Configuration resolution needs to know *which type* provided a value (provenance tracking, Corollary 6.3). MRO-based priority needs inheritance relationships preserved (Theorem 3.4). Metaclass registration needs types as dictionary keys (type identity as hash). These requirements are not implementation details. They are architectural necessities proven impossible under $\{S\}$-only typing's structural equivalence axiom.
+
+**Remark:** \"$\{S\}$-only incoherent typing\" is traditionally called \"duck typing.\"
+
+The 13 studies demonstrate four pattern taxonomies: (1) **type discrimination** (WellFilterConfig hierarchy), (2) **metaclass registration** (AutoRegisterMeta, GlobalConfigMeta, DynamicInterfaceMeta), (3) **MRO-based resolution** (dual-axis resolver, \@global_pipeline_config chain), and (4) **bidirectional lookup** (lazy $\leftrightarrow$ base type registries). Table 5.2 summarizes how each pattern fails under $\{S\}$-only incoherent typing and what $\{B,S\}$ mechanism enables it.
+
+**Remark:** Traditional terms: duck typing (incoherent) and nominal typing.
 
 ### Table 5.1: Case Studies as Theorem Validation
 
@@ -1721,19 +1864,25 @@ Duck typing's verdict: **identical**. Same attributes, same values.
 
 3.  "Can I use `isinstance(config, StepWellFilterConfig)`?" $\rightarrow$ Scope discrimination
 
-Duck typing cannot answer ANY of these questions. The information is **not in the structure**: it is in the **type identity** and **MRO position**.
+$\{S\}$-only typing cannot answer ANY of these questions. The information is **not in the structure**: it is in the **type identity** and **MRO position**.
 
-**Nominal typing answers all three in O(1):**
+**$\{B,S\}$ typing answers all three in O(1):**
+
+**Remark:** In type system terminology, $\{B,S\}$ is nominal typing; $\{S\}$-only is duck/structural typing.
 
     isinstance(config, StepWellFilterConfig)  # Scope check: O(1)
     type(config).__mro__                       # Full provenance chain: O(1)
     type(config).__mro__.index(StepWellFilterConfig)  # MRO position: O(k)
 
-**Corollary 5.2 (Scope Encoding Requires Nominal Typing).** Any system that encodes scope semantics in inheritance hierarchies (where structurally-identical types at different MRO positions have different meanings) **requires** nominal typing. Duck typing makes such architectures impossible (not difficult, **impossible**).
+**Corollary 5.2 (Scope Encoding Requires $\{B,S\}$ Typing).** Any system that encodes scope semantics in inheritance hierarchies (where structurally-identical types at different MRO positions have different meanings) **requires** $\{B,S\}$ typing. $\{S\}$-only typing makes such architectures impossible (not difficult, **impossible**).
 
-*Proof.* Duck typing defines equivalence as $S(A) = S(B) \Rightarrow A \equiv B$. If $A$ and $B$ are structurally identical but semantically distinct (different scopes), duck typing **by definition** cannot distinguish them. This is not a limitation of duck typing implementations; it is the **definition** of duck typing. $\blacksquare$
+**Remark:** In type system terminology, $\{B,S\}$ typing is called nominal typing; $\{S\}$-only is duck/structural typing.
 
-**This is not an edge case.** The OpenHCS configuration system has 15 `@global_pipeline_config` decorated dataclasses forming multiple diamond inheritance patterns. The entire architecture depends on MRO position distinguishing types with identical structure. Under duck typing, this system **cannot exist**.
+*Proof.* $\{S\}$-only typing defines equivalence as $S(A) = S(B) \Rightarrow A \equiv B$. If $A$ and $B$ are structurally identical but semantically distinct (different scopes), $\{S\}$-only typing **by definition** cannot distinguish them. This is not a limitation of $\{S\}$-only implementations; it is the **definition** of $\{S\}$-only typing. 0◻
+
+**This is not an edge case.** The OpenHCS configuration system has 15 `@global_pipeline_config` decorated dataclasses forming multiple diamond inheritance patterns. The entire architecture depends on MRO position distinguishing types with identical structure. Under $\{S\}$-only typing, this system **cannot exist**.
+
+**Remark:** \"Duck typing\" is the traditional term for $\{S\}$-only incoherent typing.
 
 **Pattern (Table 5.1, Row 1):** Type discrimination via MRO position. This case study demonstrates: - Theorem 4.1: O(1) type identity via `isinstance()` - Theorem 4.3: O(1) vs $\Omega(n)$ complexity gap - The fundamental failure of structural equivalence to capture semantic distinctions
 
@@ -1743,7 +1892,7 @@ Duck typing cannot answer ANY of these questions. The information is **not in th
 
 **Theorem 5.2a (Sentinel Attribute Insufficiency).** Let $\sigma : T \to V$ be a sentinel attribute (a structural field intended to distinguish types). Then $\sigma$ cannot recover any B-dependent capability.
 
-*Proof.* 1. **Sentinel is structural.** By definition, $\sigma$ is an attribute with a value. Therefore $\sigma \in S(T)$ (the structure axis). 2. **B-dependent capabilities require B.** By Theorem 3.19, provenance, identity, enumeration, and conflict resolution all require the Bases axis $B$. 3. **S does not contain B.** By the axis independence property (Definition 2.5), the axes $(B, S)$ are independent: $S$ carries no information about $B$. 4. **Therefore $\sigma$ cannot provide B-dependent capabilities.** Since $\sigma \in S$ and B-dependent capabilities require information not in $S$, no sentinel attribute can recover them. $\blacksquare$
+*Proof.* 1. **Sentinel is structural.** By definition, $\sigma$ is an attribute with a value. Therefore $\sigma \in S(T)$ (the structure axis). 2. **B-dependent capabilities require B.** By Theorem 3.19, provenance, identity, enumeration, and conflict resolution all require the Bases axis $B$. 3. **S does not contain B.** By the axis independence property (Definition 2.5), the axes $(B, S)$ are independent: $S$ carries no information about $B$. 4. **Therefore $\sigma$ cannot provide B-dependent capabilities.** Since $\sigma \in S$ and B-dependent capabilities require information not in $S$, no sentinel attribute can recover them. 0◻
 
 **Corollary 5.2b (Specific Sentinel Failures).**
 
@@ -1754,7 +1903,7 @@ Duck typing cannot answer ANY of these questions. The information is **not in th
   Conflict resolution   When multiple mixins define $\sigma$, which wins? This requires MRO, which requires $B$. Sentinel $\sigma \in S$ has no MRO.
   Provenance            "Which type provided $\sigma$?" requires MRO traversal. $\sigma$ cannot answer queries about its own origin.
 
-**Corollary 5.2c (Sentinel Simulates, Cannot Recover).** Sentinel attributes can *simulate* type identity (by convention) but cannot *recover* the capabilities that identity provides. The simulation is unenforced (violable without type error), unenumerable (no registry), and unordered (no MRO for conflicts). This is precisely the capability gap of Theorem 3.19, repackaged. $\blacksquare$
+**Corollary 5.2c (Sentinel Simulates, Cannot Recover).** Sentinel attributes can *simulate* type identity (by convention) but cannot *recover* the capabilities that identity provides. The simulation is unenforced (violable without type error), unenumerable (no registry), and unordered (no MRO for conflicts). This is precisely the capability gap of Theorem 3.19, repackaged. 0◻
 
 ### 5.3 Case Study 2: Discriminated Unions via **subclasses**()
 
@@ -1835,28 +1984,34 @@ The codebase documentation explicitly contrasts approaches:
 
 > **Old:** `hasattr(config, napari_port)` --- fragile (breaks if renamed), no type checking **New:** `isinstance(config, NapariStreamingConfig)` --- type-safe, explicit
 
-Duck typing couples the check to attribute names (strings), creating maintenance fragility. Renaming a field breaks all `hasattr()` call sites. Nominal typing couples the check to type identity, which is refactoring-safe.
+Duck typing couples the check to attribute names (strings), creating maintenance fragility. Renaming a field breaks all `hasattr()` call sites. $\{B,S\}$ typing couples the check to type identity, which is refactoring-safe.
 
-**Pattern (Table 5.1, Row 4):** Polymorphic dispatch with interface guarantees. Demonstrates how nominal ABC contracts provide fail-loud validation that duck typing's fail-silent probing cannot match.
+**Remark:** In type system terminology, $\{B,S\}$ is nominal typing.
 
-## Case Study 5: Migration from Duck to Nominal Typing (PR #44)
+**Pattern (Table 5.1, Row 4):** Polymorphic dispatch with interface guarantees. Demonstrates how $\{B,S\}$ ABC contracts provide fail-loud validation that $\{S\}$-only incoherent typing's fail-silent probing cannot match.
 
-PR #44 [@openhcsPR44] ("UI Anti-Duck-Typing Refactor") migrated OpenHCS's UI layer from duck typing to nominal ABC contracts. The architectural changes:
+**Remark:** Traditional terms: nominal typing vs duck typing.
 
-**Before (duck typing):** - ParameterFormManager: 47 `hasattr()` dispatch points scattered across methods - CrossWindowPreviewMixin: attribute-based widget probing throughout - Dispatch tables: string attribute names mapped to handlers
+## Case Study 5: Migration from $\{S\}$-Only Incoherent to $\{B,S\}$ Typing (PR #44) {#case-study-5-migration-from-duck-to-nominal-typing-pr-44}
 
-**After (nominal typing):** - ParameterFormManager: single `AbstractFormWidget` ABC with explicit contracts - CrossWindowPreviewMixin: explicit widget protocols - Dispatch tables: eliminated --- replaced by `isinstance()` + method calls
+**Remark:** Traditional terms: duck typing to nominal typing.
+
+PR #44 [@openhcsPR44] ("UI Anti-Duck-Typing Refactor") migrated OpenHCS's UI layer from $\{S\}$-only incoherent typing to $\{B,S\}$ ABC contracts. The architectural changes:
+
+**Before ($\{S\}$-only incoherent):** - ParameterFormManager: 47 `hasattr()` dispatch points scattered across methods - CrossWindowPreviewMixin: attribute-based widget probing throughout - Dispatch tables: string attribute names mapped to handlers
+
+**After ($\{B,S\}$ typing):** - ParameterFormManager: single `AbstractFormWidget` ABC with explicit contracts - CrossWindowPreviewMixin: explicit widget protocols - Dispatch tables: eliminated, replaced by `isinstance()` + method calls
 
 **Architectural transformation:**
 
-    # BEFORE: Duck typing dispatch (scattered across 47 call sites)
+    # BEFORE: {S}-only incoherent dispatch (scattered across 47 call sites)
     if hasattr(widget, 'isChecked'):
         return widget.isChecked()
     elif hasattr(widget, 'currentText'):
         return widget.currentText()
     # ... 45 more cases
 
-    # AFTER: Nominal ABC (single definition point)
+    # AFTER: {B,S} ABC (single definition point)
     class AbstractFormWidget(ABC):
         @abstractmethod
         def get_value(self) -> Any: pass
@@ -1865,7 +2020,9 @@ PR #44 [@openhcsPR44] ("UI Anti-Duck-Typing Refactor") migrated OpenHCS's UI la
 
 The migration eliminated fail-silent bugs where missing attributes returned `None` instead of raising exceptions. Type errors now surface at class definition time (when ABC contract is violated) rather than at user interaction time (when attribute access fails silently).
 
-**Pattern (Table 5.1, Row 5):** Architecture migration from fail-silent duck typing to fail-loud nominal contracts. Demonstrates the complexity reduction predicted by Theorem 4.3: scattered `hasattr()` checks (n=47) were replaced with O(1) centralized ABC validation.
+**Pattern (Table 5.1, Row 5):** Architecture migration from fail-silent $\{S\}$-only incoherent typing to fail-loud $\{B,S\}$ contracts. Demonstrates the complexity reduction predicted by Theorem 4.3: scattered `hasattr()` checks (n=47) were replaced with O(1) centralized ABC
+
+**Remark:** Traditional terms: duck typing to nominal typing. validation.
 
 ## Case Study 6: AutoRegisterMeta
 
@@ -1888,15 +2045,23 @@ The migration eliminated fail-silent bugs where missing attributes returned `Non
     class ImageXpressHandler(MicroscopeHandler, metaclass=MicroscopeHandlerMeta):
         _microscope_type = 'imagexpress'
 
-This pattern is impossible with duck typing because: (1) type identity is required as dict values. Duck typing has no way to reference "the type itself" distinct from instances, (2) skipping abstract classes requires checking `__abstractmethods__`, a class-level attribute inaccessible to duck typing's instance-level probing, and (3) inheritance-based key derivation (extracting "imagexpress" from "ImageXpressHandler") requires class name access.
+This pattern is impossible with $\{S\}$-only incoherent typing because: (1) type identity is required as dict values. $\{S\}$-only incoherent typing has no way to reference "the type itself" distinct from instances, (2) skipping abstract classes requires checking `__abstractmethods__`, a class-level attribute inaccessible to $\{S\}$-only incoherent typing's instance-level probing, and (3) inheritance-based key derivation (extracting "imagexpress" from "ImageXpressHandler") requires class name access.
 
-The metaclass ensures exactly one handler per microscope type. Attempting to define a second `ImageXpressHandler` raises an exception at import time. Duck typing's runtime checks cannot provide this guarantee. Duplicates would silently overwrite.
+**Remark:** Traditional term: duck typing.
 
-**Pattern (Table 5.1, Row 6):** Auto-registration with type identity. Demonstrates that metaclasses fundamentally depend on nominal typing to distinguish classes from instances.
+The metaclass ensures exactly one handler per microscope type. Attempting to define a second `ImageXpressHandler` raises an exception at import time. $\{S\}$-only incoherent typing's runtime checks cannot provide this guarantee. Duplicates would silently overwrite.
+
+**Remark:** Traditional term: duck typing.
+
+**Pattern (Table 5.1, Row 6):** Auto-registration with type identity. Demonstrates that metaclasses fundamentally depend on $\{B,S\}$ typing to distinguish classes from instances.
+
+**Remark:** Traditional term: nominal typing.
 
 ## Case Study 7: Five-Stage Type Transformation
 
-The decorator chain demonstrates nominal typing's power for systematic type manipulation. Starting from `@auto_create_decorator`, one decorator invocation spawns a cascade that generates lazy companion types, injects fields into parent configs, and maintains bidirectional registries.
+The decorator chain demonstrates $\{B,S\}$ typing's power for systematic type manipulation. Starting from `@auto_create_decorator`, one decorator invocation spawns a cascade that generates lazy companion types, injects fields into parent configs, and maintains bidirectional registries.
+
+**Remark:** Traditional term: nominal typing.
 
 **Stage 1: `@auto_create_decorator` on `GlobalPipelineConfig`**
 
@@ -1932,7 +2097,9 @@ At runtime, dual-axis resolution walks `type(config).__mro__`, normalizing each 
 
 This 5-stage chain is single-stage generation (not nested metaprogramming). It respects Veldhuizen's (2006) bounds: full power without complexity explosion. The lineage tracking (which lazy type came from which base) is only possible with nominal identity. Structurally equivalent types would be indistinguishable.
 
-**Pattern (Table 5.1, Row 7):** Type transformation with lineage tracking. Demonstrates the limits of what duck typing can express: runtime type generation requires `type()`, which returns nominal identities.
+**Pattern (Table 5.1, Row 7):** Type transformation with lineage tracking. Demonstrates the limits of what duck typing can express: runtime type generation requires `type()`, which returns $\{B,S\}$ identities.
+
+**Remark:** Traditional term: nominal identities.
 
 ## Case Study 8: Dual-Axis Resolution Algorithm
 
@@ -1950,11 +2117,17 @@ This 5-stage chain is single-stage generation (not nested metaprogramming). It r
 
 The algorithm walks two hierarchies simultaneously: scope_stack (global $\rightarrow$ plate $\rightarrow$ step) and MRO (child class $\rightarrow$ parent class). For each (scope, type) pair, it checks if a config of that type exists at that scope with a non-None value for the requested field.
 
-The `mro_type` in the return tuple is the provenance: it records *which type* provided the value. This is only meaningful under nominal typing where `PathPlanningConfig` and `LazyPathPlanningConfig` are distinct despite identical structure. Duck typing sees both as having the same attributes, making `mro_type` meaningless.
+The `mro_type` in the return tuple is the provenance: it records *which type* provided the value. This is only meaningful under $\{B,S\}$ typing where `PathPlanningConfig` and `LazyPathPlanningConfig` are distinct despite identical structure. $\{S\}$-only incoherent typing sees both as having the same attributes, making `mro_type` meaningless.
 
-MRO position encodes priority: types earlier in the MRO override later types. The dual-axis product (scope $\times$ MRO) creates O(scopes $\times$ MRO) checks in worst case, but terminates early on first match. Duck typing would require O(n) sequential attribute probing with no principled ordering.
+**Remark:** Traditional terms: nominal typing vs duck typing.
 
-**Pattern (Table 5.1, Row 8):** Dual-axis resolution with scope $\times$ MRO product. Demonstrates that provenance tracking fundamentally requires nominal identity (Corollary 6.3).
+MRO position encodes priority: types earlier in the MRO override later types. The dual-axis product (scope $\times$ MRO) creates O(scopes $\times$ MRO) checks in worst case, but terminates early on first match. $\{S\}$-only incoherent typing would require O(n) sequential attribute probing with no principled ordering.
+
+**Remark:** Traditional term: duck typing.
+
+**Pattern (Table 5.1, Row 8):** Dual-axis resolution with scope $\times$ MRO product. Demonstrates that provenance tracking fundamentally requires $\{B,S\}$ identity (Corollary 6.3).
+
+**Remark:** Traditional term: nominal identity.
 
 ## Case Study 9: Custom isinstance() Implementation
 
@@ -1968,13 +2141,21 @@ MRO position encodes priority: types earlier in the MRO override later types. Th
     # Usage: isinstance(config, GlobalConfigBase) returns True
     # even if config doesn't inherit from GlobalConfigBase
 
-This metaclass enables "virtual inheritance". Classes can satisfy `isinstance(obj, Base)` without explicitly inheriting from `Base`. The check relies on the `_is_global_config` class attribute (set by `@auto_create_decorator`), creating a nominal marker that duck typing cannot replicate.
+This metaclass enables "virtual inheritance". Classes can satisfy `isinstance(obj, Base)` without explicitly inheriting from `Base`. The check relies on the `_is_global_config` class attribute (set by `@auto_create_decorator`), creating a $\{B,S\}$ marker that $\{S\}$-only incoherent typing cannot replicate.
 
-Duck typing could check `hasattr(instance, _is_global_config)`, but this is instance-level. The metaclass pattern requires class-level checks (`instance.__class__._is_global_config`), distinguishing the class from its instances. This is fundamentally nominal: the check is "does this type have this marker?" not "does this instance have this attribute?"
+**Remark:** Traditional terms: nominal marker vs duck typing.
 
-The virtual inheritance enables interface segregation: `GlobalPipelineConfig` advertises conformance to `GlobalConfigBase` without inheriting implementation. This is impossible with duck typing's attribute probing. There's no way to express "this class satisfies this interface" as a runtime-checkable property.
+$\{S\}$-only incoherent typing could check `hasattr(instance, _is_global_config)`, but this is instance-level. The metaclass pattern requires class-level checks (`instance.__class__._is_global_config`), distinguishing the class from its instances. This is fundamentally $\{B,S\}$: the check is "does this type have this marker?" not "does this instance have this attribute?"
 
-**Pattern (Table 5.1, Row 9):** Custom isinstance via class-level markers. Demonstrates that Python's metaobject protocol is fundamentally nominal.
+**Remark:** Traditional terms: duck typing vs nominal.
+
+The virtual inheritance enables interface segregation: `GlobalPipelineConfig` advertises conformance to `GlobalConfigBase` without inheriting implementation. This is impossible with $\{S\}$-only incoherent typing's attribute probing. There's no way to express "this class satisfies this interface" as a runtime-checkable property.
+
+**Remark:** Traditional term: duck typing.
+
+**Pattern (Table 5.1, Row 9):** Custom isinstance via class-level markers. Demonstrates that Python's metaobject protocol is fundamentally $\{B,S\}$.
+
+**Remark:** Traditional term: nominal.
 
 ## Case Study 10: Dynamic Interface Generation
 
@@ -1986,7 +2167,7 @@ The virtual inheritance enables interface segregation: `GlobalPipelineConfig` ad
         @classmethod
         def get_or_create_interface(mcs, interface_name: str) -> Type:
             if interface_name not in mcs._generated_interfaces:
-                # Generate pure nominal type
+                # Generate pure {B,S} type
                 interface = type(interface_name, (ABC,), {})
                 mcs._generated_interfaces[interface_name] = interface
             return mcs._generated_interfaces[interface_name]
@@ -1997,11 +2178,17 @@ The virtual inheritance enables interface segregation: `GlobalPipelineConfig` ad
 
     # Later: isinstance(config, IStreamingConfig) -> True
 
-The generated interfaces have empty namespaces: no methods, no attributes. Their sole purpose is nominal identity: marking that a class explicitly claims to implement an interface. This is pure nominal typing: structural typing would see these interfaces as equivalent to `object` (since they have no distinguishing structure), but nominal typing distinguishes `IStreamingConfig` from `IVideoConfig` even though both are structurally empty.
+The generated interfaces have empty namespaces: no methods, no attributes. Their sole purpose is $\{B,S\}$ identity: marking that a class explicitly claims to implement an interface. This is pure $\{B,S\}$ typing: $\{S\}$-only declared typing would see these interfaces as equivalent to `object` (since they have no distinguishing structure), but $\{B,S\}$ typing distinguishes `IStreamingConfig` from `IVideoConfig` even though both are structurally empty.
 
-Duck typing has no equivalent concept. There's no way to express "this class explicitly implements this contract" without actual attributes to probe. The nominal marker enables explicit interface declarations in a dynamically-typed language.
+**Remark:** Traditional terms: nominal identity, pure nominal typing, structural typing vs nominal typing.
 
-**Pattern (Table 5.1, Row 10):** Runtime-generated interfaces with empty structure. Demonstrates that nominal identity can exist independent of structural content.
+$\{S\}$-only incoherent typing has no equivalent concept. There's no way to express "this class explicitly implements this contract" without actual attributes to probe. The $\{B,S\}$ marker enables explicit interface declarations in a dynamically-typed language.
+
+**Remark:** Traditional terms: duck typing vs nominal marker.
+
+**Pattern (Table 5.1, Row 10):** Runtime-generated interfaces with empty structure. Demonstrates that $\{B,S\}$ identity can exist independent of structural content.
+
+**Remark:** Traditional term: nominal identity.
 
 ## Case Study 11: Framework Detection via Sentinel Type
 
@@ -2016,13 +2203,19 @@ Duck typing has no equivalent concept. There's no way to express "this class exp
     # hasattr(module, '_FRAMEWORK_CONFIG') -> fragile, module probing
     # 'framework' in config_names -> string-based, no type safety
 
-The sentinel is a runtime-generated type with empty namespace, instantiated once, and used as a dictionary key. Its nominal identity (memory address) guarantees uniqueness. Even if another module creates `type("_FrameworkConfigSentinel", (), {})()`, the two sentinels are distinct objects with distinct identities.
+The sentinel is a runtime-generated type with empty namespace, instantiated once, and used as a dictionary key. Its $\{B,S\}$ identity (memory address) guarantees uniqueness. Even if another module creates `type("_FrameworkConfigSentinel", (), {})()`, the two sentinels are distinct objects with distinct identities.
 
-Duck typing cannot replicate this pattern. Attribute-based detection (`hasattr(module, attr_name)`) couples the check to module structure. String-based keys ('framework') lack type safety. The nominal sentinel provides a refactoring-safe, type-safe marker that exists independent of names or attributes.
+**Remark:** Traditional term: nominal identity.
+
+$\{S\}$-only incoherent typing cannot replicate this pattern. Attribute-based detection (`hasattr(module, attr_name)`) couples the check to module structure. String-based keys ('framework') lack type safety. The $\{B,S\}$ sentinel provides a refactoring-safe, type-safe marker that exists independent of names or attributes.
+
+**Remark:** Traditional terms: duck typing vs nominal.
 
 This pattern appears in framework detection, feature flags, and capability markers. Contexts where the existence of a capability needs to be checked without coupling to implementation details.
 
-**Pattern (Table 5.1, Row 11):** Sentinel types for framework detection. Demonstrates nominal identity as a capability marker independent of structure.
+**Pattern (Table 5.1, Row 11):** Sentinel types for framework detection. Demonstrates $\{B,S\}$ identity as a capability marker independent of structure.
+
+**Remark:** Traditional term: nominal identity.
 
 ## Case Study 12: Dynamic Method Injection
 
@@ -2037,13 +2230,21 @@ This pattern appears in framework detection, feature flags, and capability marke
         'to_torch': lambda self, data, gpu: torch.tensor(data, device=gpu),
     })
 
-Method injection requires a target type: the type whose namespace will be modified. Duck typing has no concept of "the type itself" as a mutable namespace. It can only access instances. To inject methods duck-style would require modifying every instance's `__dict__`, which doesn't affect future instances.
+Method injection requires a target type: the type whose namespace will be modified. $\{S\}$-only incoherent typing has no concept of "the type itself" as a mutable namespace. It can only access instances. To inject methods $\{S\}$-incoherent-style would require modifying every instance's `__dict__`, which doesn't affect future instances.
 
-The nominal type serves as a shared namespace. Injecting `to_cupy` into `NumpyConverter` affects all instances (current and future) because method lookup walks `type(obj).__dict__` before `obj.__dict__`. This is fundamentally nominal: the type is a first-class object with its own namespace, distinct from instance namespaces.
+**Remark:** Traditional term: duck typing.
 
-This pattern enables plugins, mixins, and monkey-patching. All requiring types as mutable namespaces. Duck typing's instance-level view cannot express "modify the behavior of all objects of this kind."
+The $\{B,S\}$ type serves as a shared namespace. Injecting `to_cupy` into `NumpyConverter` affects all instances (current and future) because method lookup walks `type(obj).__dict__` before `obj.__dict__`. This is fundamentally $\{B,S\}$: the type is a first-class object with its own namespace, distinct from instance namespaces.
 
-**Pattern (Table 5.1, Row 12):** Dynamic method injection into type namespaces. Demonstrates that Python's type system treats types as first-class objects with nominal identity.
+**Remark:** Traditional term: nominal.
+
+This pattern enables plugins, mixins, and monkey-patching. All requiring types as mutable namespaces. $\{S\}$-only incoherent typing's instance-level view cannot express "modify the behavior of all objects of this kind."
+
+**Remark:** Traditional term: duck typing.
+
+**Pattern (Table 5.1, Row 12):** Dynamic method injection into type namespaces. Demonstrates that Python's type system treats types as first-class objects with $\{B,S\}$ identity.
+
+**Remark:** Traditional term: nominal identity.
 
 ## Case Study 13: Bidirectional Type Lookup
 
@@ -2069,7 +2270,9 @@ OpenHCS maintains bidirectional registries linking lazy types to base types: `_l
     # Later: registry.normalize(LazyPathPlanningConfig) -> PathPlanningConfig
     #        registry.get_lazy(PathPlanningConfig) -> LazyPathPlanningConfig
 
-Duck typing would require maintaining two separate dicts with string keys (class names), introducing synchronization bugs. Renaming `PathPlanningConfig` would break the string-based lookup. The nominal type identity serves as a refactoring-safe key that guarantees both dicts stay synchronized (a type can only be registered once, enforcing bijection.
+$\{S\}$-only incoherent typing would require maintaining two separate dicts with string keys (class names), introducing synchronization bugs. Renaming `PathPlanningConfig` would break the string-based lookup. The
+
+**Remark:** Traditional term: duck typing. nominal type identity serves as a refactoring-safe key that guarantees both dicts stay synchronized (a type can only be registered once, enforcing bijection.
 
 The registry operations are O(1) lookups by type identity. Duck typing's string-based approach would require O(n) string matching or maintaining parallel indices, both error-prone and slower.
 
@@ -2468,7 +2671,7 @@ An external provenance map could record `provenance_map``[``id(b)``]`` = B`. B
 
 $$\text{ExternalMap cannot answer: "Which type in MRO(type(obj)) provided attribute } a \text{?"}$$
 
-*Proof.* The question asks about MRO position. MRO is derived from Bases. ExternalMap has no access to Bases (it maps object IDs to types, not types to MRO positions). Therefore ExternalMap cannot answer MRO-position queries. $\blacksquare$
+*Proof.* The question asks about MRO position. MRO is derived from Bases. ExternalMap has no access to Bases (it maps object IDs to types, not types to MRO positions). Therefore ExternalMap cannot answer MRO-position queries. 0◻
 
 **The deeper point:** Provenance is not about "where did this object come from?" It's about "where did this *value* come from in the inheritance hierarchy?" The latter requires MRO, which requires Bases, which duck typing discards.
 
@@ -2626,19 +2829,25 @@ This formalizes Theorem 2.17 (Capability Completeness): the capability set $\mat
 
 **Abdelgawad [@abdelgawad2016nominal].** The essay "Why Nominal-Typing Matters in OOP" argues that nominal typing provides **information centralization**: *"objects and their types carry class names information as part of their meaning"* and those names correspond to behavioral contracts. Type names aren't just shapes. They imply specific intended semantics. Structural typing, treating objects as mere records, *"cannot naturally convey such semantic intent."*
 
-**Our contribution:** Theorem 6.2 (Provenance Preservation) formalizes this intuition. The tuple `(value, scope_id, source_type)` returned by `resolve` captures exactly the "class name information" that Abdelgawad argues is essential. Duck typing loses this information after attribute access.
+**Our contribution:** Theorem 6.2 (Provenance Preservation) formalizes this intuition. The tuple `(value, scope_id, source_type)` returned by `resolve` captures exactly the "class name information" that Abdelgawad argues is essential. $\{S\}$-only typing loses this information after attribute access.
+
+**Remark:** \"Duck typing\" in this context refers to $\{S\}$-only typing.
 
 ## Practical Hybrid Systems
 
 **Gil & Maman [@gil2008whiteoak].** Whiteoak adds structural typing to Java for **retrofitting**: treating classes as subtypes of structural interfaces without modifying source. Their motivation: *"many times multiple classes have no common supertype even though they could share an interface."* This supports the Malayeri-Aldrich observation that structural typing's benefits are context-dependent.
 
-**Our contribution:** OpenHCS demonstrates the capabilities that nominal typing enables: MRO-based resolution, bidirectional type registries, provenance tracking. These are impossible under structural typing regardless of whether the system is new or legacy. The capability gap is information-theoretic (Theorem 3.19).
+**Our contribution:** OpenHCS demonstrates the capabilities that $\{B,S\}$ typing enables: MRO-based resolution, bidirectional type registries, provenance tracking. These are impossible under $\{S\}$-only typing regardless of whether the system is new or legacy. The capability gap is information-theoretic (Theorem 3.19).
+
+**Remark:** In type system terminology, $\{B,S\}$ and $\{S\}$ correspond to nominal and structural typing.
 
 **Go (2012) and TypeScript (2012+).** Both adopt structural typing for pragmatic reasons: - Go uses structural interface satisfaction to reduce boilerplate. - TypeScript uses structural compatibility to integrate with JavaScript's untyped ecosystem.
 
-However, both face the **accidental compatibility problem**. TypeScript developers use "branding" (adding nominal tag properties) to differentiate structurally identical types: a workaround that **reintroduces nominal typing**. The TypeScript issue tracker has open requests for native nominal types.
+However, both face the **accidental compatibility problem**. TypeScript developers use "branding" (adding nominal tag properties) to differentiate structurally identical types: a workaround that **reintroduces $\{B,S\}$ typing**. The TypeScript issue tracker has open requests for native $\{B,S\}$-style types.
 
-**Our contribution:** OpenHCS avoids this problem by using nominal typing from the start. The `@global_pipeline_config` chain generates `LazyPathPlanningConfig` as a distinct type from `PathPlanningConfig` precisely to enable different behavior (resolution on access) while sharing the same structure.
+**Our contribution:** OpenHCS avoids this problem by using $\{B,S\}$ typing from the start. The `@global_pipeline_config` chain generates `LazyPathPlanningConfig` as a distinct type from `PathPlanningConfig` precisely to enable different behavior (resolution on access) while sharing the same structure.
+
+**Remark:** In type system terminology, $\{B,S\}$ typing corresponds to nominal typing.
 
 ## Metaprogramming Complexity
 
@@ -2768,7 +2977,9 @@ Our theorems establish necessary conditions for provenance-tracking systems, but
 
 **Runtime overhead.** Provenance tracking stores `(value, scope_id, source_type)` tuples for each resolved field. This introduces memory overhead proportional to the number of lazy fields. In OpenHCS, this overhead is negligible (\< 1% of total memory usage), but systems with millions of configuration objects may need to consider this cost.
 
-**Scope: systems where $B \neq \emptyset$.** Simple scripts where the entire program fits in working memory may not require provenance tracking. But provenance is just one of four capabilities (Theorem 2.17). Even without provenance requirements, nominal typing dominates because it provides identity, enumeration, and conflict resolution at no additional cost. Our theorems apply universally when $B \neq \emptyset$.
+**Scope: systems where $B \neq \emptyset$.** Simple scripts where the entire program fits in working memory may not require provenance tracking. But provenance is just one of four capabilities (Theorem 2.17). Even without provenance requirements, $\{B,S\}$ typing dominates because it provides identity, enumeration, and conflict resolution at no additional cost. Our theorems apply universally when $B \neq \emptyset$.
+
+**Remark:** Traditional term: nominal typing.
 
 **Python as canonical model.** The formalization uses Python's `type(name, bases, namespace)` because it is the clearest expression of the two-axis model. This is a strength, not a limitation: Python's explicit constructor exposes what other languages obscure with syntax. Table 2.2 demonstrates that 8 major languages (Java, C#, Rust, TypeScript, Kotlin, Swift, Scala, C++) are isomorphic to this model. Theorem 3.50 proves universality.
 
@@ -2776,25 +2987,139 @@ Our theorems establish necessary conditions for provenance-tracking systems, but
 
 **Lean proofs assume well-formedness.** Our Lean 4 verification includes `Registry.wellFormed` and MRO monotonicity as axioms rather than derived properties. We prove theorems *given* these axioms, but do not prove the axioms themselves from more primitive foundations. This is standard practice in mechanized verification (e.g., CompCert assumes well-typed input), but limits the scope of our machine-checked guarantees.
 
-**Validation scope.** The formal results (Theorems 3.5, 3.13, Corollary 6.3) are proven universally for any system where $B \neq \emptyset$. These proofs establish *what is impossible*: provenance cannot be computed without the bases axis (information-theoretically impossible, not merely difficult). The case studies (Section 5) demonstrate these theorems in a production codebase. The *direction* of the claims---that capability gaps translate to error reduction---follows from the formalism: if provenance is impossible without nominal typing (Corollary 6.3), and provenance is required (PC = 1), then errors *must* occur under duck typing. The *magnitude* of the effect is codebase-specific; the *existence* of the effect is not. We distinguish:
+**Validation scope.** The formal results (Theorems 3.5, 3.13, Corollary 6.3) are proven universally for any system where $B \neq \emptyset$. These proofs establish *what is impossible*: provenance cannot be computed without the bases axis (information-theoretically impossible, not merely difficult). The case studies (Section 5) demonstrate these theorems in a production codebase. The *direction* of the claims (that capability gaps translate to error reduction) follows from the formalism: if provenance is impossible without $\{B,S\}$ typing (Corollary 6.3), and provenance is required (PC = 1), then errors *must* occur under $\{S\}$-only incoherent typing. The *magnitude* of the effect is codebase-specific; the *existence* of the effect is not. We distinguish:
 
--   **Universal (proven):** Capability gap exists, provenance is impossible under duck typing, nominal typing strictly dominates.
+**Remark:** Traditional terms: nominal typing vs duck typing.
+
+-   **Universal (proven):** Capability gap exists, provenance is impossible under $\{S\}$-only typing, $\{B,S\}$ typing strictly dominates.
 
 -   **Singular (observed):** 47 `hasattr()` calls eliminated, centralized error detection via ABC contracts.
 
+**Remark:** In type system terminology, \"$\{S\}$-only typing\" and \"$\{B,S\}$ typing\" correspond to duck/structural typing and nominal typing respectively.
+
 We call for replication studies on other codebases to measure the magnitude of the effect across different architectural patterns. The formal results predict that *some* positive effect will be observed in any $B \neq \emptyset$ system requiring provenance; the specific multipliers are empirical questions.
 
-**OpenHCS is also wrong.** The universal principle (Section [\[the-classification-problem\]](#the-classification-problem){reference-type="ref" reference="the-classification-problem"}) applies to OpenHCS itself. OpenHCS currently fixes the axis set $A = \{B, S, H\}$ (Bases, Shape, Hierarchy). By the Fixed Axis Incompleteness theorem, domains requiring axes outside this set---temporal versioning, provenance chains, security contexts, resource affinity---cannot be served.
+**OpenHCS is also wrong.** The universal principle (Section [\[the-classification-problem\]](#the-classification-problem){reference-type="ref" reference="the-classification-problem"}) applies to OpenHCS itself. OpenHCS currently fixes the axis set $A = \{B, S, H\}$ (Bases, Shape, Hierarchy). By the Fixed Axis Incompleteness theorem, domains requiring axes outside this set (temporal versioning, provenance chains, security contexts, resource affinity) cannot be served.
 
-OpenHCS is *less wrong* than structural typing ($A = \{S\}$) or nominal typing ($A = \{B, S\}$) because it includes more axes. But "less wrong" is not "correct." The theorems predict that as the space of domains grows, OpenHCS will encounter impossibility walls: $$\lim_{|\text{Domains}| \to \infty} |\{D : \neg\text{complete}(\{B, S, H\}, D)\}| = \infty$$
+OpenHCS is *less wrong* than $\{S\}$-only typing or $\{B,S\}$-only typing because it includes more axes ($A = \{B, S, H\}$). But "less wrong" is not "correct." The theorems predict that as the space of domains grows, OpenHCS will encounter impossibility walls: $$\lim_{|\text{Domains}| \to \infty} |\{D : \neg\text{complete}(\{B, S, H\}, D)\}| = \infty$$
 
 This is not speculation. It follows from `fixed_axis_incompleteness`: for each axis outside $\{B, S, H\}$, there exists a domain OpenHCS cannot serve. Since the space of possible axes is unbounded, so is the failure count.
+
+**Remark (Epistemic Strengthening).** The incompleteness result does not depend on the axis space being *ontologically* infinite. Even if the space of possible axes were finite, no designer *knows* the complete set. The relevant constraint is epistemic: you cannot guarantee your fixed axis set is sufficient without proving completeness over all possible domains. Since no such proof exists for any fixed set, the designer's epistemic position is identical whether the axis space is infinite or merely unknown. This parallels Gödel's incompleteness (you cannot prove consistency from within) and Turing's halting problem (you cannot decide in advance which programs halt). The limitation is on what you can *know*, not merely on what *is*.
 
 **The path forward.** Future versions of OpenHCS should parameterize over axis sets rather than hardcoding $\{B, S, H\}$. The architecture should be:
 
     OpenHCS : AxisSet -> ConfigurationSystem
 
 instantiated with $\{B, S, H\}$ for current use cases, but extensible to new axes without modification. This is the subject of ongoing work (see Section [1.4](#future-work){reference-type="ref" reference="future-work"}).
+
+#### 8.1 Axes as Query Dimensions
+
+The paper's central claim---that axes are mandatory for specific capabilities---follows from a more primitive observation: *axes are query dimensions*. Every capability is operationally defined as answering a specific query, and each query requires traversal along specific axes.
+
+**Definition 8.1 (Query Parameterization).** Let $T$ denote type-level access to an object. Query complexity is parameterized by the axis set $A$ required for resolution:
+
+-   $T$: Base object access (no axes required)
+
+-   $T(S)$: Attribute lookup---requires shape axis $S$
+
+-   $T(S,B)$: Attribute at inheritance level---requires shape $S$ and bases $B$
+
+-   $T(S,B,H)$: Attribute at inheritance level within containment tree---requires $S$, $B$, and hierarchy $H$
+
+-   $T(S,B,H,\tau)$: Temporally-versioned attribute at inheritance level in containment tree---adds temporal axis $\tau$
+
+**Theorem 8.1a (Query-Axis Necessity).** A query of form $T(A)$ cannot be computed in a type system with axis set $A' \subsetneq A$. The query is information-theoretically impossible, not merely inefficient.
+
+*Proof.* By construction, $T(A)$ requires traversal along dimension $a \in A \setminus A'$. Since $a$ is absent from the type system, no structural path exists to resolve the query. Manual value-level encoding (e.g., `__source__` attributes) degrades the query to runtime inspection ($\Omega(n)$ error localization) but does not eliminate the axis---it encodes it in imperative state. 0◻
+
+**Corollary 8.1b (Provenance as $T(S,B)$ Query).** "Which type provided this value?" is a $T(S,B)$ query: given field $f \in S$ (shape), determine $C \in \text{MRO}$ (bases) where $f$ was defined. Duck typing ($\{S\}$-only) cannot answer this query (Corollary 6.3); nominal typing ($\{B,S\}$) can.
+
+**Example 8.1 (Hierarchy Query).** OpenHCS's dual-axis resolver answers: "Given pipeline node $n$ and field $f$, what is $f$'s value in $n$'s scope?" This is a $T(S,H)$ query (shape + hierarchy). Python provides $\{B,S\}$ natively; OpenHCS implements $H$ manually via `ContextNode` graph traversal.
+
+**Theorem 8.1c (Manual Axis Complexity Superlinearity).** Let $A_{\text{native}}$ be a language's native axes and $A_{\text{req}}$ be domain-required axes. For $k = |A_{\text{req}} \setminus A_{\text{native}}|$ manually-implemented axes, implementation complexity grows as $\Omega(k^2)$ due to synergistic interaction, not $O(k)$.
+
+*Proof sketch.* Each manually-encoded axis $a_i$ requires: (1) storage semantics (where axis data lives), (2) query interface (how to traverse the dimension), (3) consistency invariants (what axis combinations are valid). For $k$ axes, pairwise interactions number $\binom{k}{2} = O(k^2)$. Examples of interactions:
+
+-   *Hierarchy $\times$ Bases:* When node $n$ inherits configuration $C$, must hierarchy position propagate through MRO, or does MRO reset at each tree level?
+
+-   *Temporal $\times$ Hierarchy:* When pipeline structure changes over time, do version timestamps apply per-node or per-tree?
+
+-   *Security $\times$ Bases:* Do permission scopes inherit via MRO, or are they hierarchy-local?
+
+Each interaction creates $O(1)$ design decisions, but incorrect choices lead to *irrecoverable architectural states*: local minima where refactoring requires rewriting all $k$ axes simultaneously. This is the synergistic complexity penalty.
+
+Native axes avoid this: the language runtime enforces interaction semantics (e.g., Python's MRO + descriptor protocol defines how $B \times S$ interact). Manual implementations must specify *all* interactions explicitly, and inconsistency across axes compounds error rates super-linearly. 0◻
+
+**Corollary 8.1d (Fixed-Axis Penalty Function).** For a type system with native axes $A_n$ and domain requiring $A_d$, the penalty for $|A_d \setminus A_n| = k$ missing axes is: $$\text{Penalty}(k) = O(k) \text{ (storage)} + \Omega(k^2) \text{ (interactions)} + \text{LocalMinima}(k)$$ where $\text{LocalMinima}(k)$ represents irrecoverable architectural debt from inconsistent interaction choices.
+
+**Remark.** This formalizes why "just implement it manually" fails at scale. One missing axis ($k=1$) is manageable. Two axes ($k=2$) create $\binom{2}{2}=1$ interaction. Three axes ($k=3$) create $\binom{3}{2}=3$ interactions. At $k=5$ (e.g., temporal, security, provenance, resource affinity, versioning), $\binom{5}{2}=10$ interactions must be specified manually, and the probability of reaching a local minimum approaches 1.
+
+### Connection to Degrees of Freedom {#sec:dof-connection}
+
+The super-linear complexity $\Omega(k^2)$ is not merely implementation cost---it directly corresponds to *degrees of freedom* (DOF) in the system architecture, as formalized in the companion paper on Single Source of Truth [@paper2_ssot].
+
+**Coherence and Structural Facts.** Paper 2 defines *coherence* as: all encoding locations agree on the same value for a fact. A *structural fact* is a fact about program structure (e.g., "Type $T$ has method $m$" or "These are all types implementing interface $I$"). When DOF $> 1$, multiple independent locations can hold different values for the same structural fact, creating *incoherence*: the system cannot determine which value is "true." For manual axis implementation, each axis and each axis interaction is an independent encoding location, yielding DOF $= \Omega(k^2)$. This characterizes a *specific property*---coherence for structural facts---not general language quality. Languages make different trade-offs: static languages (Rust, Java, Go) choose compile-time safety over runtime introspection, accepting DOF $> 1$ as a consequence; dynamic languages (Python, CLOS, Smalltalk) enable DOF $= 1$ at the cost of performance and static guarantees.
+
+**Theorem 8.2 (DOF-Complexity Correspondence).** For $k$ manually-implemented axes, the architectural degrees of freedom satisfy: $$\text{DOF}_{\text{total}} = k + \Omega(k^2)$$ where $k$ represents storage DOF (one independent location per axis) and $\Omega(k^2)$ represents interaction DOF (independent decisions for each axis pair).
+
+::: proof
+*Proof.* By Definition 2.6 of [@paper2_ssot], DOF counts *independent encoding locations* for architectural facts. For $k$ manually-implemented axes:
+
+**Storage DOF = $k$:** Each axis $a_i$ requires independent choice of:
+
+-   Where axis data is stored (object attribute, separate mapping, context variable)
+
+-   Data structure representation (dict, tree, graph)
+
+-   Mutability semantics (immutable, copy-on-write, in-place)
+
+These $k$ choices are *independent* in the sense that no language constraint forces agreement. Different axes can use different storage strategies, and the system remains type-correct (though architecturally inconsistent).
+
+**Interaction DOF = $\Omega(k^2)$:** For each axis pair $(a_i, a_j)$, independent choices include:
+
+-   *Traversal order:* Does query $T(a_i, a_j)$ traverse $a_i$ first or $a_j$ first?
+
+-   *Composition semantics:* Are values at $(a_i, a_j)$ derived by combining separate $T(a_i)$ and $T(a_j)$ queries, or is the combination primitive?
+
+-   *Invalidation propagation:* When $a_i$ changes, must $a_j$-indexed caches be invalidated?
+
+-   *Consistency invariants:* Can $a_i$ and $a_j$ hold contradictory information, or are they constrained to agree?
+
+The number of axis pairs is $\binom{k}{2} = \frac{k(k-1)}{2} = \Omega(k^2)$. Each pair introduces $O(1)$ independent decisions. Therefore, interaction DOF $= O(k^2)$.
+
+Total: $\text{DOF}_{\text{total}} = k + O(k^2) = \Omega(k^2)$. 0◻ ◻
+:::
+
+**Corollary 8.2a (Modification Complexity Bound).** By Theorem 6.2 of [@paper2_ssot] (Non-SSOT Lower Bound), modification complexity for architectural changes satisfies: $$M_{\text{effective}} = \Omega(\text{DOF}) = \Omega(k^2)$$
+
+::: proof
+*Proof.* Theorem 6.2 of [@paper2_ssot] establishes that for DOF $= n$ independent encoding locations, effective modification complexity $M_{\text{effective}} = \Omega(n)$. By Theorem 8.2, $\text{DOF} = \Omega(k^2)$ for $k$ manually-implemented axes. Substituting: $M_{\text{effective}} = \Omega(k^2)$. 0◻ ◻
+:::
+
+**Example 8.2 (OpenHCS Hierarchy Axis).** OpenHCS's dual-axis configuration framework implements hierarchy $H$ manually (Python provides $B, S$ natively). With $k=1$ manual axis:
+
+-   **Storage DOF = 1:** Hierarchy stored in `ContextNode` graph (\~500 LOC)
+
+-   **Interaction DOF:**
+
+    -   $H \times B$: Does MRO traversal reset at each hierarchy level, or propagate through tree? (Decision: propagate)
+
+    -   $H \times S$: Are field accesses scoped per-node or per-subtree? (Decision: per-node with fallback)
+
+-   **Total:** $\text{DOF} = 1 + 2 = 3$ independent architectural decisions
+
+For $k=2$ axes (e.g., adding temporal versioning $\tau$):
+
+-   **Storage DOF = 2:** Hierarchy + temporal storage
+
+-   **Interaction DOF:** $\binom{2}{2} + \binom{3}{2} = 1 + 3 = 4$ interactions ($H \times \tau$, plus 3 existing)
+
+-   **Total:** $\text{DOF} = 2 + 4 = 6$ (doubled from $k=1$)
+
+This quadratic growth explains why OpenHCS stopped at $H$---adding $\tau$ would require $\Omega(k^2)$ additional design decisions, each a potential inconsistency.
+
+**Remark.** The DOF framework explains the "local minima" phenomenon: when $k$ axes make inconsistent interaction choices, refactoring requires changing $\Omega(k^2)$ independent locations simultaneously. By Theorem 6.3 of [@paper2_ssot] (Unbounded Gap), this creates modification complexity that grows without bound as the codebase scales. Native axes avoid this: the language enforces interaction semantics (e.g., Python's descriptor protocol defines $B \times S$ interaction), keeping DOF = 1 per axis.
 
 #### 8.1.1 Axiom Methodology
 
@@ -2809,33 +3134,41 @@ instantiated with $\{B, S, H\}$ for current use cases, but extensible to new axe
   MRO totality               Every class has a linearizable MRO                     C3 fails for unlinearizable diamonds; `TypeError` at class definition
   `isinstance` correctness   `isinstance(x, T)` iff `type(x)` in T's subclass set   Definitional in Python's data model
 
-A program violating any of these axioms fails at class definition time with `TypeError`. Such a program is not a valid Python program---it cannot be executed. Therefore, our theorems apply to *all valid programs*. $\blacksquare$
+A program violating any of these axioms fails at class definition time with `TypeError`. Such a program is not a valid Python program; it cannot be executed. Therefore, our theorems apply to *all valid programs*. 0◻
 
 **Corollary 8.1b (Axiom Scope).** A claim that the axioms are too strong would require exhibiting: 1. A valid, executable Python program where the axioms fail, AND 2. A scenario where this program requires typing discipline analysis.
 
-Programs where axioms fail are not valid programs---they crash at definition time. The axioms characterize well-formed programs, which is the standard scope for type system analysis.
+Programs where axioms fail are not valid programs; they crash at definition time. The axioms characterize well-formed programs, which is the standard scope for type system analysis.
 
 **Comparison to prior art.** This methodology is standard in mechanized verification: - **CompCert** (verified C compiler): Assumes input is well-typed C - **seL4** (verified microkernel): Assumes hardware behaves according to spec - **CakeML** (verified ML compiler): Assumes input parses successfully
 
-We follow the same pattern: assume the input is a valid program (accepted by Python's runtime), prove properties of that program. Proving that Python's parser and class system are correct is out of scope---and unnecessary, as Python's semantics are the *definition* of what we're modeling.
+We follow the same pattern: assume the input is a valid program (accepted by Python's runtime), prove properties of that program. Proving that Python's parser and class system are correct is out of scope, and unnecessary, as Python's semantics are the *definition* of what we're modeling.
 
 ## The Typing Discipline Hierarchy
 
-Theorem 2.10d establishes that duck typing is incoherent. Theorem 2.10g establishes that structural typing is eliminable when $B \neq \emptyset$. Together, these results collapse the space of valid typing disciplines.
+Theorem 2.10d establishes that $\{S\}$-only incoherent typing (duck typing) is incoherent. Theorem 2.10g establishes that $\{S\}$-only typing with declared interfaces (structural typing) is eliminable when $B \neq \emptyset$. Together, these results collapse the space of valid typing disciplines.
 
 **The complete hierarchy:**
 
-  Discipline                          Coherent?        Eliminable?                                When Valid
-  ----------------------------------- ---------------- ------------------------------------------ ----------------------------------
-  Duck typing ($\{S\}$, incoherent)   No (Thm 2.10d)   N/A                                        Never
-  Structural ($\{S\}$, coherent)      Yes              Yes, when $B \neq \emptyset$ (Thm 2.10g)   Only when $B = \emptyset$
-  Nominal ($\{B, S\}$, coherent)      Yes              No                                         Always (when $B \neq \emptyset$)
+  Discipline                                 Coherent?        Eliminable?                                When Valid
+  ------------------------------------------ ---------------- ------------------------------------------ ----------------------------------
+  $\{S\}$-incoherent ($\{S\}$, incoherent)   No (Thm 2.10d)   N/A                                        Never
+  $\{S\}$-declared ($\{S\}$, coherent)       Yes              Yes, when $B \neq \emptyset$ (Thm 2.10g)   Only when $B = \emptyset$
+  $\{B,S\}$ ($\{B, S\}$, coherent)           Yes              No                                         Always (when $B \neq \emptyset$)
 
-**Duck typing** is incoherent: no declared interface, no complete compatibility predicate, no position on structure-semantics relationship. This is never valid.
+**Remark:** Traditional terms: Duck typing, Structural typing, Nominal typing.
 
-**Structural typing (Protocol)** is coherent but eliminable: for any system using Protocol at boundaries, there exists an equivalent system using nominal typing with explicit adapters (Theorem 2.10g). The only "value" of Protocol is avoiding the 2-line adapter class. Convenience is not a capability.
+**$\{S\}$-only incoherent typing** is incoherent: no declared interface, no complete compatibility predicate, no position on structure-semantics relationship. This is never valid.
 
-**Nominal typing (ABC)** is coherent and non-eliminable: it is the only necessary discipline for systems with inheritance.
+**Remark:** Traditional term: duck typing.
+
+**$\{S\}$-only declared typing (Protocol)** is coherent but eliminable: for any system using Protocol at boundaries, there exists an equivalent system using $\{B,S\}$ typing with explicit adapters (Theorem 2.10g). The only "value" of Protocol is avoiding the 2-line adapter class. Convenience is not a capability.
+
+**Remark:** Traditional terms: structural typing vs nominal typing.
+
+**$\{B,S\}$ typing (ABC)** is coherent and non-eliminable: it is the only necessary discipline for systems with inheritance.
+
+**Remark:** Traditional term: nominal typing.
 
 **The eliminability argument.** When integrating third-party type $T$ that cannot inherit from your ABC:
 
@@ -2853,17 +3186,25 @@ Theorem 2.10d establishes that duck typing is incoherent. Theorem 2.10g establis
     adapted = TheirTypeAdapter(their_obj)  # Explicit boundary
     isinstance(adapted, ConfigurableABC)   # Nominal check
 
-The adapter approach is strictly more explicit. "Explicit is better than implicit" (Zen of Python). Protocol's only advantage---avoiding the adapter---is a convenience, not a typing capability.
+The adapter approach is strictly more explicit. "Explicit is better than implicit" (Zen of Python). Protocol's only advantage (avoiding the adapter) is a convenience, not a typing capability.
 
-**Languages without inheritance.** Go's struct types have $B = \emptyset$ by design. Structural typing with declared interfaces is the only coherent option. Go does not use duck typing; Go interfaces are declared [@goSpec]. This is why Go's type system is sound despite lacking inheritance.
+**Languages without inheritance.** Go's struct types have $B = \emptyset$ by design. $\{S\}$-only declared typing with declared interfaces is the only coherent option. Go does not use $\{S\}$-only incoherent typing; Go interfaces are declared [@goSpec]. This is why Go's type system is sound despite lacking inheritance.
 
-**The final collapse.** For languages with inheritance ($B \neq \emptyset$): - Duck typing: incoherent, never valid - Structural typing: coherent but eliminable, valid only as convenience - Nominal typing: coherent and necessary
+**Remark:** Traditional terms: structural typing, duck typing.
 
-The only *necessary* typing discipline is nominal. Everything else is either incoherent (duck typing) or reducible to nominal with trivial adapters (structural typing).
+**The final collapse.** For languages with inheritance ($B \neq \emptyset$): - $\{S\}$-only incoherent typing: incoherent, never valid - $\{S\}$-only declared typing: coherent but eliminable, valid only as convenience - $\{B,S\}$ typing: coherent and necessary
+
+**Remark:** Traditional terms: duck typing, structural typing, nominal typing.
+
+The only *necessary* typing discipline is $\{B,S\}$. Everything else is either incoherent ($\{S\}$-only incoherent typing) or reducible to $\{B,S\}$ with trivial adapters ($\{S\}$-only declared typing).
+
+**Remark:** Traditional terms: nominal, duck typing, structural typing.
 
 ## Future Work
 
-**Gradual nominal/structural typing.** TypeScript supports both nominal (via branding) and structural typing in the same program. Formalizing the interaction between these disciplines, and proving soundness of gradual migration, would enable principled adoption strategies.
+**Gradual $\{B,S\}$/$\{S\}$-declared typing.** TypeScript supports both $\{B,S\}$ (via branding) and $\{S\}$-only declared typing in the same program. Formalizing the interaction between these disciplines, and proving soundness of gradual migration, would enable principled adoption strategies.
+
+**Remark:** Traditional terms: nominal, structural typing.
 
 **Trait systems.** Rust traits and Scala traits provide multiple inheritance of behavior without nominal base classes. Our theorems apply to Python's MRO, but trait resolution uses different algorithms. Extending our complexity bounds to trait systems would broaden applicability.
 
@@ -2890,7 +3231,7 @@ The only *necessary* typing discipline is nominal. Everything else is either inc
                    version=v,            # Temporal axis
                    provenance=chain)     # Provenance axis
 
-    The `**axes` parameter would be accessible via `cls.__axes__` and introspectable at runtime. This enables: (a) domain-specific axis requirements declared at the type level, (b) framework code parameterized over arbitrary axes, and (c) gradual adoption---existing code uses the 3-argument form unchanged.
+    The `**axes` parameter would be accessible via `cls.__axes__` and introspectable at runtime. This enables: (a) domain-specific axis requirements declared at the type level, (b) framework code parameterized over arbitrary axes, and (c) gradual adoption; existing code uses the 3-argument form unchanged.
 
     A formal PEP would specify: (i) storage semantics (`__axes__` dict), (ii) inheritance behavior (axis merging vs. override), (iii) metaclass interaction, and (iv) static type checker support (`typing.Axes`). The mathematical foundation is provided by the Fixed Axis Incompleteness theorem: Python's current `type()` will fail for domains requiring axes outside $\{B, S\}$. Parameterization eliminates this impossibility wall.
 
@@ -2898,11 +3239,15 @@ The only *necessary* typing discipline is nominal. Everything else is either inc
 
 Language designers face a fundamental choice: provide nominal typing (enabling provenance), structural typing (for $B = \emptyset$ boundaries), or both. Our theorems inform this decision:
 
-**Provide both mechanisms.** Languages like TypeScript demonstrate that nominal and structural typing can coexist. TypeScript's "branding" idiom (using private fields to create nominal distinctions) validates our thesis: programmers need nominal identity even in structurally-typed languages. Python provides both ABCs (nominal) and `Protocol` (structural). Our theorems clarify the relationship: when $B \neq \emptyset$, nominal typing (ABCs) strictly dominates Protocol (Theorem 2.10j). Protocol provides convenience (avoiding adapters) but this is not a capability---ABCs can also integrate external types via adapters. Protocol is dominated: it provides a strict subset of capabilities.
+**Provide both mechanisms.** Languages like TypeScript demonstrate that nominal and structural typing can coexist. TypeScript's "branding" idiom (using private fields to create nominal distinctions) validates our thesis: programmers need nominal identity even in structurally-typed languages. Python provides both ABCs (nominal) and `Protocol` (structural). Our theorems clarify the relationship: when $B \neq \emptyset$, $\{B,S\}$ typing (ABCs) strictly dominates Protocol (Theorem 2.10j). Protocol provides convenience (avoiding adapters) but this is not a capability; ABCs can also integrate external types via adapters. Protocol is dominated: it provides a strict subset of capabilities.
+
+**Remark:** In Python, ABCs implement $\{B,S\}$ typing (nominal), while Protocols implement $\{S\}$-only typing (structural).
 
 **MRO-based resolution is near-optimal.** Python's descriptor protocol combined with C3 linearization achieves O(1) field resolution while preserving provenance. Languages designing new metaobject protocols should consider whether they can match this complexity bound.
 
-**Explicit `bases` makes nominal typing strictly optimal.** If a language exposes explicit inheritance declarations (`class C(Base)`), Theorem 3.4 (Nominal Pareto-Dominance) applies: nominal typing strictly dominates structural typing. Language designers cannot add inheritance to a structurally-typed language without creating capability gaps that nominal typing would eliminate.
+**Explicit `bases` makes $\{B,S\}$ typing strictly optimal.** If a language exposes explicit inheritance declarations (`class C(Base)`), Theorem 3.4 (Axis Inclusion Dominance) applies: $\{B,S\}$ typing strictly dominates $\{S\}$-only typing. Language designers cannot add inheritance to a structurally-typed language without creating capability gaps that $\{B,S\}$ typing would eliminate.
+
+**Remark:** In type system terminology, $\{B,S\}$ and $\{S\}$ correspond to nominal and structural typing respectively.
 
 ## Derivable Code Quality Metrics
 
@@ -2912,13 +3257,17 @@ The formal model yields four measurable metrics that can be computed statically 
 
     DTD = hasattr_calls / KLOC
 
-Measures ad-hoc capability probing. High DTD where $B \neq \emptyset$ indicates discipline violation. We count only `hasattr()`, not `getattr()` or `try/except AttributeError`, because `hasattr()` is specifically capability detection ("does this object have this attribute?")---the operational signature of duck typing (Definition 2.10c). `getattr()` without a fallback is explicit attribute access; `getattr()` with a fallback or `try/except AttributeError` may indicate duck typing but also appear in legitimate metaprogramming (descriptors, `__getattr__` hooks, optional feature detection at system boundaries). The theorem backing (Theorem 2.10d) establishes `hasattr()` as the incoherent probe; other patterns require case-by-case analysis.
+Measures ad-hoc capability probing. High DTD where $B \neq \emptyset$ indicates discipline violation. We count only `hasattr()`, not `getattr()` or `try/except AttributeError`, because `hasattr()` is specifically capability detection ("does this object have this attribute?"), the operational signature of $\{S\}$-only typing (Definition 2.10c). `getattr()` without a fallback is explicit attribute access; `getattr()` with a fallback or `try/except AttributeError` may indicate $\{S\}$-only typing but also appear in legitimate metaprogramming (descriptors, `__getattr__` hooks, optional feature detection at system boundaries). The theorem backing (Theorem 2.10d) establishes `hasattr()` as the incoherent probe; other patterns require case-by-case analysis.
 
-**Metric 2: Nominal Typing Ratio (NTR)**
+**Remark:** \"Duck typing\" is traditional terminology for $\{S\}$-only typing.
 
-    NTR = (isinstance_calls + type_as_dict_key + abc_registrations) / KLOC
+**Metric 2: $\{B,S\}$ Typing Ratio (BTR)**
 
-Measures explicit type contracts. High NTR indicates intentional use of inheritance hierarchy.
+    BTR = (isinstance_calls + type_as_dict_key + abc_registrations) / KLOC
+
+Measures explicit type contracts. High BTR indicates intentional use of inheritance hierarchy.
+
+**Remark:** Previously called \"Nominal Typing Ratio (NTR)\". In type system terminology, $\{B,S\}$ typing corresponds to nominal typing.
 
 **Metric 3: Provenance Capability (PC)** Binary metric: does the codebase contain queries of the form "which type provided this value"? Presence of `(value, scope, source_type)` tuples, MRO traversal for resolution, or `type(obj).__mro__` inspection indicates PC = 1. If PC = 1, nominal typing is mandatory (Corollary 6.3).
 
@@ -2934,7 +3283,7 @@ Measures O(1) vs $\Omega$(n) error localization. RD = 1 indicates all dispatch i
 
 ## Hybrid Systems and Methodology Scope
 
-Our theorems establish necessary conditions for provenance-tracking systems. This section clarifies the relationship between dominance and practical constraints---shape-based typing is never an alternative, only a sacrifice forced by external constraints.
+Our theorems establish necessary conditions for provenance-tracking systems. This section clarifies the relationship between dominance and practical constraints; shape-based typing is never an alternative, only a sacrifice forced by external constraints.
 
 #### 8.6.1 Structural Typing Is Eliminable (Theorem 2.10g)
 
@@ -2946,7 +3295,7 @@ Our theorems establish necessary conditions for provenance-tracking systems. Thi
 
 **Versioning and compatibility.** When newer code must accept older types that predate a base class introduction, you can create versioned adapters: `class V1ConfigAdapter(V1Config, ConfigBaseV2): pass`. Protocol avoids this but does not provide additional capabilities.
 
-**Type-level programming without runtime overhead.** TypeScript's structural typing enables type checking at compile time without runtime cost. For TypeScript code that never uses `instanceof` or class identity (effectively $B = \emptyset$ at runtime), structural typing has no capability gap because there's no $B$ to lose. However, see Section 8.7 for why TypeScript's *class-based* structural typing creates tension---once you have `class extends`, you have $B \neq \emptyset$.
+**Type-level programming without runtime overhead.** TypeScript's structural typing enables type checking at compile time without runtime cost. For TypeScript code that never uses `instanceof` or class identity (effectively $B = \emptyset$ at runtime), structural typing has no capability gap because there's no $B$ to lose. However, see Section 8.7 for why TypeScript's *class-based* structural typing creates tension; once you have `class extends`, you have $B \neq \emptyset$.
 
 **Summary.** In all scenarios with $B \neq \emptyset$, the adapter approach is available. Protocol's only advantage is avoiding the adapter. Avoiding the adapter is a convenience, not a typing capability (Corollary 2.10h).
 
@@ -2974,7 +3323,7 @@ Systems have $B \neq \emptyset$ components (internal hierarchies) and $B = \empt
 
     # B = {}: parse external JSON (structural is only option)
     def load_config_from_json(json_dict: Dict[str, Any]) -> ConfigBase:
-        # JSON has no inheritance---structural validation at boundary
+        # JSON has no inheritance; structural validation at boundary
         if "well_filter" in json_dict:
             return PathPlanningConfig(**json_dict)  # Returns nominal type
         raise ValueError("Invalid config")
@@ -2989,7 +3338,7 @@ The JSON parsing layer is $B = \emptyset$ (JSON has no inheritance). The return 
   $B = \emptyset$ (Go, JSON, pure structs)             Structural (correct)     Theorem 3.1 (namespace-only)
   Language boundaries (C/FFI)                          Structural (mandatory)   No inheritance available ($B = \emptyset$ at boundary)
 
-**Removed rows:** - "Retrofit / external types $\rightarrow$ Structural (acceptable)" --- Adapters exist (Theorem 2.10j); structural is dominated. - "Small scripts / prototypes $\rightarrow$ Duck (acceptable)" --- Duck typing is incoherent for B-dependent queries (Theorem 2.10d).
+**Removed rows:** - "Retrofit / external types $\rightarrow$ Structural (acceptable)". Adapters exist (Theorem 2.10j); structural is dominated. "Small scripts / prototypes $\rightarrow$ Duck (acceptable)". Duck typing is incoherent for B-dependent queries (Theorem 2.10d).
 
 The methodology states: **if $B \neq \emptyset$, nominal typing is the capability-maximizing choice.** Protocol is dominated. Duck typing is incoherent. The decision follows from the capability analysis, not from project size or aesthetic preference.
 
@@ -3041,7 +3390,7 @@ The `extends` keyword is provided but ignored by the type checker. This is infor
 
 **Theorem 8.7 (TypeScript Incoherence).** TypeScript's class-based type system is incoherent per Definition 8.3.
 
-*Proof.* 1. TypeScript's `class A` creates a runtime entity with nominal identity (JavaScript prototype) 2. `instanceof A` checks this nominal identity at runtime 3. TypeScript's type system uses structural compatibility for class types 4. Therefore: runtime distinguishes `A` from structurally-identical `B`; type system does not 5. Per Definition 8.3, this is incoherence. $\blacksquare$
+*Proof.* 1. TypeScript's `class A` creates a runtime entity with nominal identity (JavaScript prototype) 2. `instanceof A` checks this nominal identity at runtime 3. TypeScript's type system uses structural compatibility for class types 4. Therefore: runtime distinguishes `A` from structurally-identical `B`; type system does not 5. Per Definition 8.3, this is incoherence. 0◻
 
 **Corollary 8.7.1 (Branding Validates Tension).** The prevalence of branding patterns in TypeScript codebases empirically validates the tension per Definition 8.4.
 
@@ -3049,11 +3398,13 @@ The `extends` keyword is provided but ignored by the type checker. This is infor
 
 #### 8.7.3 Implications for Language Design
 
-TypeScript's tension is an intentional design decision for JavaScript interoperability. The structural type system allows gradual adoption in untyped JavaScript codebases. However, TypeScript has `class` with `extends`---meaning $B \neq \emptyset$. Our theorems apply: nominal typing strictly dominates (Theorem 3.5).
+TypeScript's tension is an intentional design decision for JavaScript interoperability. The structural type system allows gradual adoption in untyped JavaScript codebases. However, TypeScript has `class` with `extends`, meaning $B \neq \emptyset$. Our theorems apply: $\{B,S\}$ typing strictly dominates (Theorem 3.5).
 
-The tension manifests in practice: programmers use `class` expecting nominal semantics, receive structural semantics, then add branding to restore nominal behavior. Our theorems predict this: Theorem 3.4 shows that when `bases` exist, nominal typing strictly dominates structural typing; TypeScript violates this optimality, causing measurable friction. The branding idiom is programmers manually recovering capabilities the language architecture foreclosed.
+The tension manifests in practice: programmers use `class` expecting $\{B,S\}$ semantics, receive $\{S\}$-only semantics, then add branding to restore $\{B,S\}$ behavior. Our theorems predict this: Theorem 3.4 shows that when `bases` exist, $\{B,S\}$ typing strictly dominates $\{S\}$-only typing; TypeScript violates this optimality, causing measurable friction. The branding idiom is programmers manually recovering capabilities the language architecture foreclosed.
 
-**The lesson:** Languages adding `class` syntax should consider whether their type system will be coherent (per Definition 8.3) with the runtime semantics of class identity. Structural typing is correct for languages without inheritance (Go). For languages with inheritance, coherence requires nominal typing or explicit documentation of the intentional tension.
+**Remark:** In type system terminology, $\{B,S\}$ and $\{S\}$ correspond to nominal and structural typing.
+
+**The lesson:** Languages adding `class` syntax should consider whether their type system will be coherent (per Definition 8.3) with the runtime semantics of class identity. $\{S\}$-only typing is correct for languages without inheritance (Go). For languages with inheritance, coherence requires $\{B,S\}$ typing or explicit documentation of the intentional tension.
 
 ## Mixins with MRO Strictly Dominate Object Composition
 
@@ -3101,13 +3452,13 @@ The "composition over inheritance" principle from the Gang of Four [@gamma1994d
 
 **What composition provides:** 1. \[PASS\] Behavior extension (via delegation) 2. \[PASS\] Multiple behaviors combined
 
-**What mixins provide:** 1. \[PASS\] Behavior extension (via super() linearization) 2. \[PASS\] Multiple behaviors combined 3. \[PASS\] **Deterministic conflict resolution** (C3 MRO) --- **composition cannot provide** 4. \[PASS\] **Single decision point** (class definition) --- **composition has n call sites** 5. \[PASS\] **Provenance via MRO** (which mixin provided this behavior?) --- **composition cannot provide** 6. \[PASS\] **Exhaustive enumeration** (list all mixed-in behaviors via `__mro__`) --- **composition cannot provide**
+**What mixins provide:** 1. \[PASS\] Behavior extension (via super() linearization) 2. \[PASS\] Multiple behaviors combined 3. \[PASS\] **Deterministic conflict resolution** (C3 MRO). **Composition cannot provide** 4. \[PASS\] **Single decision point** (class definition). **Composition has n call sites** 5. \[PASS\] **Provenance via MRO** (which mixin provided this behavior?). **Composition cannot provide** 6. \[PASS\] **Exhaustive enumeration** (list all mixed-in behaviors via `__mro__`). **Composition cannot provide**
 
 **Addressing runtime swapping:** A common objection is that composition allows "swapping implementations at runtime" (`handler.cache = NewCache()`). This is orthogonal to the dominance claim for two reasons:
 
 1.  **Mixins can also swap at runtime** via class mutation: `Handler.__bases__ = (NewLoggingMixin, CachingMixin, BaseHandler)` or via `type()` to create a new class dynamically. Python's class system is mutable.
 
-2.  **Runtime swapping is a separate axis.** The dominance claim concerns *static behavior extension*---adding logging, caching, validation to a class. Whether to also support runtime reconfiguration is an orthogonal requirement. Systems requiring runtime swapping can use mixins for static extension AND composition for swappable components. The two patterns are not mutually exclusive.
+2.  **Runtime swapping is a separate axis.** The dominance claim concerns *static behavior extension*: adding logging, caching, validation to a class. Whether to also support runtime reconfiguration is an orthogonal requirement. Systems requiring runtime swapping can use mixins for static extension AND composition for swappable components. The two patterns are not mutually exclusive.
 
 Therefore: **Mixin capabilities $\supset$ Composition capabilities** (strict superset) for static behavior extension.
 
@@ -3117,7 +3468,7 @@ Therefore: **Mixin capabilities $\supset$ Composition capabilities** (strict sup
 
 Mixins provide: 1. Behavior extension (same as composition) 2. Deterministic conflict resolution via MRO (composition cannot provide) 3. Provenance via MRO position (composition cannot provide) 4. Single decision point for ordering (composition has $n$ decision points) 5. Exhaustive enumeration via `__mro__` (composition cannot provide)
 
-Therefore $\mathcal{C} \subset \mathcal{M}$ (strict subset). By the same argument as Theorem 3.5 (Strict Dominance), choosing composition forecloses capabilities for zero benefit. $\blacksquare$
+Therefore $\mathcal{C} \subset \mathcal{M}$ (strict subset). By the same argument as Theorem 3.5 (Strict Dominance), choosing composition forecloses capabilities for zero benefit. 0◻
 
 **Corollary 8.1.1 (Runtime Swapping Is Orthogonal).** Runtime implementation swapping is achievable under both patterns: via object attribute assignment (composition) or via class mutation/dynamic type creation (mixins). Neither pattern forecloses this capability.
 
@@ -3138,7 +3489,7 @@ Therefore $\mathcal{C} \subset \mathcal{M}$ (strict subset). By the same argumen
 
 $D_S$ can only distinguish types/behaviors by namespace content. $D_B$ can distinguish by namespace content AND position in inheritance hierarchy.
 
-Therefore $\text{capabilities}(D_S) \subset \text{capabilities}(D_B)$ (strict subset). $\blacksquare$
+Therefore $\text{capabilities}(D_S) \subset \text{capabilities}(D_B)$ (strict subset). 0◻
 
 ## Validation: Alignment with Python's Design Philosophy
 
@@ -3152,7 +3503,7 @@ Our formal results align with Python's informal design philosophy, codified in P
 
 **"There should be one-- and preferably only one --obvious way to do it"** (Zen line 13). Our decision procedure (Section 2.5.1) provides exactly one obvious way: when $B \neq \emptyset$, use nominal typing.
 
-**Historical validation:** Python's evolution confirms our theorems. Python 1.0 (1991) had only duck typing---an incoherent non-discipline (Theorem 2.10d). Python 2.6 (2007) added ABCs because duck typing was insufficient for large codebases. Python 3.8 (2019) added Protocols for retrofit scenarios---coherent structural typing to replace incoherent duck typing. This evolution from incoherent $\rightarrow$ nominal $\rightarrow$ nominal+structural exactly matches our formal predictions.
+**Historical validation:** Python's evolution confirms our theorems. Python 1.0 (1991) had only duck typing, an incoherent non-discipline (Theorem 2.10d). Python 2.6 (2007) added ABCs because duck typing was insufficient for large codebases. Python 3.8 (2019) added Protocols for retrofit scenarios; coherent structural typing to replace incoherent duck typing. This evolution from incoherent $\rightarrow$ nominal $\rightarrow$ nominal+structural exactly matches our formal predictions.
 
 ## Connection to Gradual Typing
 
@@ -3167,13 +3518,13 @@ Our results connect to the gradual typing literature (Siek & Taha 2006, Wadler &
 
 **Gradual typing's insight:** When adding types to untyped code, the dynamic type `?` allows gradual migration. This applies when $B = \emptyset$ (no inheritance structure exists yet).
 
-**Our insight:** When $B \neq \emptyset$, nominal typing strictly dominates. This includes "retrofit" scenarios with external types---adapters make nominal typing available (Theorem 2.10j).
+**Our insight:** When $B \neq \emptyset$, nominal typing strictly dominates. This includes "retrofit" scenarios with external types; adapters make nominal typing available (Theorem 2.10j).
 
 **The unified view:** Gradual typing and nominal typing address orthogonal concerns: - Gradual typing: Typed vs untyped ($B = \emptyset$ $\rightarrow$ $B \neq \emptyset$ migration) - Our theorems: Which discipline when $B \neq \emptyset$ (answer: nominal)
 
 **Theorem 8.3 (Gradual-Nominal Complementarity).** Gradual typing and nominal typing are complementary, not competing. Gradual typing addresses the presence of types; our theorems address which types to use.
 
-*Proof.* Gradual typing's dynamic type `?` allows structural compatibility with untyped code where $B = \emptyset$. Once $B \neq \emptyset$ (inheritance exists), our theorems apply: nominal typing strictly dominates (Theorem 3.5), and adapters eliminate the retrofit exception (Theorem 2.10j). The two address different questions. $\blacksquare$
+*Proof.* Gradual typing's dynamic type `?` allows structural compatibility with untyped code where $B = \emptyset$. Once $B \neq \emptyset$ (inheritance exists), our theorems apply: nominal typing strictly dominates (Theorem 3.5), and adapters eliminate the retrofit exception (Theorem 2.10j). The two address different questions. 0◻
 
 ::: center
 
@@ -3190,7 +3541,7 @@ The leverage framework (see companion paper) proves that for any architectural d
 
 **Theorem 8.4 (Typing as Leverage Instance).** The strict dominance of nominal typing (Theorem 2.10j) is an instance of the Leverage Maximization Principle.
 
-*Proof.* By Theorem 2.10j, nominal typing provides a strict superset of capabilities at equivalent cost. This is exactly the condition for higher leverage: $L(\text{nominal}) > L(\text{duck})$. By the Leverage Maximization Principle, nominal typing is therefore optimal. $\blacksquare$
+*Proof.* By Theorem 2.10j, nominal typing provides a strict superset of capabilities at equivalent cost. This is exactly the condition for higher leverage: $L(\text{nominal}) > L(\text{duck})$. By the Leverage Maximization Principle, nominal typing is therefore optimal. 0◻
 
 
 # Conclusion
@@ -3201,9 +3552,9 @@ This paper proves an impossibility theorem: **any classification system with fix
 
 The corollary is equally strong: **axis-parameterized systems dominate fixed systems absolutely.** A parameterized system can instantiate any axis set, achieving completeness for any domain. The asymmetry is:
 
--   Fixed: $\forall A.\, \exists D.\, \neg\text{complete}(A, D)$ --- every fixed system fails somewhere
+-   Fixed: $\forall A.\, \exists D.\, \neg\text{complete}(A, D)$. Every fixed system fails somewhere
 
--   Parameterized: $\forall D.\, \exists A.\, \text{complete}(A, D)$ --- every domain is reachable
+-   Parameterized: $\forall D.\, \exists A.\, \text{complete}(A, D)$. Every domain is reachable
 
 This result applies to any classification scheme: type systems, ontologies, taxonomies, database schemas, knowledge graphs. The type system instantiation is one case study.
 
@@ -3211,29 +3562,35 @@ This result applies to any classification scheme: type systems, ontologies, taxo
 
 For programming languages with class-based inheritance:
 
-1.  **The $B = \emptyset$ criterion**: If a language has inheritance ($B \neq \emptyset$), nominal typing is the capability-maximizing choice (Theorem 2.18). If a language lacks inheritance ($B = \emptyset$), structural typing is correct. Duck typing is incoherent in both cases (Theorem 2.10d).
+1.  **The $B = \emptyset$ criterion**: If a language has inheritance ($B \neq \emptyset$), including $B$ in the axis set is required for capability-maximization (Theorem 2.18). If a language lacks inheritance ($B = \emptyset$), $\{S\}$-only systems (structural typing) are correct. Duck typing is incoherent in both cases (Theorem 2.10d). **Terminology note:** In type system terminology, $\{B, S\}$-inclusive systems are called "nominal typing"; $\{S\}$-only systems are called "structural typing."
 
-2.  **Complexity separation**: Nominal typing achieves O(1) error localization versus duck typing's $\Omega$(n) (Theorem 4.3). The gap is unbounded.
+2.  **Complexity separation**: Systems using $\{B, S\}$ achieve O(1) error localization versus $\{S\}$-only incoherent use (duck typing) requiring $\Omega(n)$ (Theorem 4.3). The gap is unbounded.
 
-3.  **Provenance impossibility**: Duck typing cannot provide provenance (Corollary 6.3, machine-checked). This is information-theoretic, not implementational.
+3.  **Provenance impossibility**: Systems using only $\{S\}$ cannot provide provenance (Corollary 6.3, machine-checked). This is information-theoretic, not implementational.
 
 4.  **Hierarchical extension**: For systems with scope hierarchies, $(B, S, H)$ is the unique minimal complete axis set (Theorem 3.63).
 
-**The decision procedure:** Given domain requirements, the required axes are *computable*. The typing discipline follows deterministically.
+**The decision procedure:** Given domain requirements, the required axes are *computable* (Theorem 2.26). The typing discipline follows deterministically.
 
 ### Summary of Results
 
-The decision procedure (Theorem 3.62) outputs "nominal typing" when $B \neq \emptyset$ and "structural typing" when $B = \emptyset$. All proofs are machine-checked (Lean 4, 0 `sorry`).
+The decision procedure (Theorem 3.62) outputs "$\{B,S\}$ typing" when $B \neq \emptyset$ and "$\{S\}$-only typing" when $B = \emptyset$. All proofs are machine-checked (Lean 4, 0 `sorry`).
+
+**Remark:** Traditional terms: nominal typing, structural typing.
 
 Two architects examining identical requirements will derive identical discipline choices. Disagreement indicates incomplete requirements or different analysis; the formal framework provides a basis for resolution.
 
 **Incoherence of denial.** The uniqueness theorems establish $\neg\exists$ alternatives to the minimal complete axis set. The position "these results are interesting but classification scheme design remains a preference" presupposes $\exists$ alternatives. Accepting the theorems while maintaining preference instantiates $P \land \neg P$ (logical incoherence, not mere disagreement).
 
-For type systems specifically: this work does not contribute to the debate over typing disciplines. It resolves it. For classification systems generally: the "which taxonomy should we use" question has a mathematical answer given the domain.
+For type systems specifically: this work does not contribute to the debate over typing disciplines. It **dissolves** it by showing the debate presupposes a choice that doesn't exist. Axes are derived from domain requirements (Theorem 2.26); typing discipline names (\"nominal,\" \"structural\") are labels for specific axis configurations. For classification systems generally: the "which taxonomy should we use" question has a mathematical answer given the domain.
 
-**On capability vs. aesthetics.** Aesthetics, elegance, and readability are orthogonal to capability. The theorems establish that nominal typing provides strictly more capabilities---this is a mathematical fact, not a stylistic preference. Choosing fewer capabilities is a sacrifice, not an alternative. If constraints force that sacrifice (e.g., interoperability with systems lacking type metadata), the sacrifice is justified---but it remains a sacrifice.
+**On capability vs. aesthetics.** Aesthetics, elegance, and readability are orthogonal to capability. The theorems establish that $\{B,S\}$ typing provides strictly more capabilities. This is a mathematical fact, not a stylistic preference. Choosing fewer capabilities is a sacrifice, not an alternative. If constraints force that sacrifice (e.g., interoperability with systems lacking type metadata), the sacrifice is justified, but it remains a sacrifice.
 
-**On PEP 20 (The Zen of Python).** PEP 20 is sometimes cited to justify duck typing. However, several Zen principles align with nominal typing: "Explicit is better than implicit" (ABCs are explicit; hasattr is implicit), and "In the face of ambiguity, refuse the temptation to guess" (duck typing infers interface conformance; nominal typing verifies it). We discuss this alignment in Section 8.9.
+**Remark:** Traditional term: nominal typing.
+
+**On PEP 20 (The Zen of Python).** PEP 20 is sometimes cited to justify $\{S\}$-only incoherent typing. However, several Zen principles align with $\{B,S\}$ typing: "Explicit is better than implicit" (ABCs are explicit; hasattr is implicit), and "In the face of ambiguity, refuse the temptation to guess" ($\{S\}$-only incoherent typing infers interface conformance; $\{B,S\}$ typing verifies it). We discuss this alignment in Section 8.9.
+
+**Remark:** Traditional terms: duck typing, nominal typing.
 
 ## Application: LLM Code Generation
 
@@ -3243,19 +3600,23 @@ The decision procedure (Theorem 3.62) has a clean application domain: evaluating
 
 **Corollary 9.1 (LLM Discipline Evaluation).** Given an LLM prompt with explicit context: 1. If the prompt involves inheritance ($B \neq \emptyset$) $\rightarrow$ isinstance/ABC patterns are correct; hasattr patterns are violations (by Theorem 3.5) 2. If the prompt involves pure data without inheritance ($B = \emptyset$, e.g., JSON) $\rightarrow$ structural patterns are the only option 3. External types requiring integration $\rightarrow$ use adapters to achieve nominal (Theorem 2.10j) 4. Deviation from these patterns is a typing discipline error detectable by the decision procedure
 
-*Proof.* Direct application of Theorem 3.62. The generated code's patterns map to discipline choice. The decision procedure evaluates correctness based on whether $B \neq \emptyset$. $\blacksquare$
+*Proof.* Direct application of Theorem 3.62. The generated code's patterns map to discipline choice. The decision procedure evaluates correctness based on whether $B \neq \emptyset$. 0◻
 
 **Implications.** An automated linter applying our decision procedure could: - Flag `hasattr()` in code with inheritance as a discipline violation - Suggest `isinstance()`/ABC replacements - Validate that provenance-requiring prompts produce nominal patterns - Flag Protocol usage as dominated (Theorem 2.10j)
 
 This application is clean because the context is unambiguous: the prompt explicitly states whether the developer controls the type hierarchy. The metrics defined in Section 8.5 (DTD, NTR) can be computed on generated code to evaluate discipline adherence.
 
-**Falsifiability.** If code with $B \neq \emptyset$ consistently performs better with structural patterns than nominal patterns, our Theorem 3.5 is falsified. We predict it will not.
+**Falsifiability.** If code with $B \neq \emptyset$ consistently performs better with $\{S\}$-only patterns than $\{B,S\}$ patterns, our Theorem 3.5 is falsified. We predict it will not.
+
+**Remark:** Traditional terms: structural patterns vs nominal patterns.
 
 ## Data Availability {#sec:data-availability}
 
 **OpenHCS Codebase:** The OpenHCS platform (45K LoC Python) is available at <https://github.com/trissim/openhcs> [@openhcs2025]. The codebase demonstrates the practical application of the theoretical framework, including the hierarchical scoping system (H axis) and ABC-based contracts.
 
-**PR #44:** The migration from duck typing to nominal contracts is documented in a publicly verifiable pull request [@openhcsPR44]: <https://github.com/trissim/openhcs/pull/44>. This PR eliminated 47 scattered `hasattr()` checks by introducing ABC contracts.
+**PR #44:** The migration from $\{S\}$-only incoherent typing to $\{B,S\}$ contracts is documented in a publicly verifiable pull request [@openhcsPR44]: <https://github.com/trissim/openhcs/pull/44>. This PR eliminated 47 scattered `hasattr()` checks by introducing ABC contracts.
+
+**Remark:** Traditional terms: duck typing to nominal contracts.
 
 **Lean 4 Proofs:** The complete Lean 4 formalization (2613 lines, 127 theorems, 0 `sorry` placeholders) [@openhcsLeanProofs] is included as supplementary material. Reviewers can verify the proofs by running `lake build` in the proof directory.
 
@@ -3381,4 +3742,3 @@ All theorems are formalized in Lean 4:
 - Location: `docs/papers/proofs/paper1_*.lean`
 - Lines: 6086
 - Theorems: 265
-- Sorry placeholders: 1

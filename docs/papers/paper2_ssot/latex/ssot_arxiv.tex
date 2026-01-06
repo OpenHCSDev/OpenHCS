@@ -1,78 +1,14 @@
 \documentclass[11pt]{article}
-\usepackage[utf8]{inputenc}
-\usepackage[T1]{fontenc}
-\usepackage{amsmath,amssymb,amsthm}
-\usepackage{graphicx}
-\usepackage{xcolor}
-\usepackage{booktabs}
-\usepackage{longtable}
-\usepackage{array}
-\usepackage{calc}
-\usepackage{fancyvrb}
-\usepackage{geometry}
-\usepackage{hyperref}
-\usepackage{url}
-
-\geometry{margin=1in}
-
-% Allow URLs to break at any character
-\makeatletter
-\g@addto@macro{\UrlBreaks}{\UrlOrds}
-\makeatother
-
-% Prevent overfull hboxes
-\sloppy
-
-% Fix for pandoc's \tightlist
-\providecommand{\tightlist}{%
-  \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
-
-% Disable proof environment's automatic QED (we use inline blacksquare)
-\renewcommand{\qedsymbol}{}
-
-% Theorem environments
-\newtheorem{theorem}{Theorem}[section]
-\newtheorem{lemma}[theorem]{Lemma}
-\newtheorem{corollary}[theorem]{Corollary}
-\newtheorem{proposition}[theorem]{Proposition}
-\newtheorem{axiom}[theorem]{Axiom}
-\theoremstyle{definition}
-\newtheorem{definition}[theorem]{Definition}
-\newtheorem{example}[theorem]{Example}
-\theoremstyle{remark}
-\newtheorem{remark}[theorem]{Remark}
-\newtheorem{observation}[theorem]{Observation}
-
-% Hyperref setup
-\hypersetup{
-  colorlinks=true,
-  linkcolor=blue,
-  citecolor=blue,
-  urlcolor=blue
-}
+\usepackage{pentalogy-preamble}
 
 \title{Formal Foundations for the Single Source of Truth Principle:\\
 A Language Design Specification Derived from Modification Complexity Bounds}
-
-\author{
-  Tristan Simas\\
-  McGill University\\
-  \texttt{tristan.simas@mail.mcgill.ca}
-}
-
-\date{January 3, 2026}
+\pentalogyauthor
+\pentalogydateJan
 
 \begin{document}
 \maketitle
-
-% arXiv license footnote
-\renewcommand{\thefootnote}{}
-\footnotetext{
-  \textcopyright\ 2024 Tristan Simas. 
-  This work is licensed under CC BY 4.0. 
-  License: \url{https://creativecommons.org/licenses/by/4.0/}
-}
-\renewcommand{\thefootnote}{\arabic{footnote}}
+\pentalogyfooter
 
 \begin{abstract}
 We provide the first formal foundations for the ``Don't Repeat Yourself'' (DRY) principle, articulated by Hunt \& Thomas (1999) but never formalized. Our contributions:

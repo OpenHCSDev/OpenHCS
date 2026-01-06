@@ -2,7 +2,7 @@
 
 The complete Lean 4 formalization is available at:
 \begin{center}
-\url{https://github.com/[repository]/openhcs/docs/papers/paper4_decision_quotient/proofs}
+\url{https://doi.org/10.5281/zenodo.18140966}
 \end{center}
 
 \subsection{On the Nature of Foundational Proofs}\label{foundational-proofs-nature}
@@ -26,7 +26,7 @@ The Lean proofs are straightforward applications of definitions and standard com
 \begin{enumerate}
 \item \textbf{Precision forcing.} Formalizing ``coordinate sufficiency'' in Lean requires stating exactly what it means for a coordinate subset to contain all decision-relevant information. This precision eliminates ambiguity about edge cases (what if projections differ only on irrelevant coordinates?).
 
-\item \textbf{Reduction correctness.} The TAUTOLOGY reduction (Section~\ref{sec:reduction}) is machine-checked to preserve the decision structure. Informal reductions can have subtle bugs; Lean verification guarantees the mapping is correct.
+\item \textbf{Reduction correctness.} The TAUTOLOGY reduction (Section~\ref{sec:hardness}) is machine-checked to preserve the decision structure. Informal reductions can have subtle bugs; Lean verification guarantees the mapping is correct.
 
 \item \textbf{Complexity dichotomy.} Theorem~\ref{thm:dichotomy} proves that problem instances are either tractable (P) or intractable (coNP-complete), with no intermediate cases under standard assumptions. This emerges from the formalization of constraint structure, not from case enumeration.
 \end{enumerate}

@@ -14,8 +14,8 @@ structure InYourModelObjection where
 \begin{theorem}[Witnessless Objection is Cheap Talk]
 \begin{verbatim}
 theorem in_your_model_without_witness_is_cheap_talk :
-  ∀ obj : InYourModelObjection,
-  obj.witness = none →
+  forall obj : InYourModelObjection,
+  obj.witness = none ->
   is_cheap_talk obj.uttered := by
   intro obj h_none
   -- Asserting limitation without witness costs nothing
@@ -29,15 +29,15 @@ theorem in_your_model_without_witness_is_cheap_talk :
 \begin{theorem}[Proof vs Objection Asymmetry]\label{thm:asymmetry}
 \begin{verbatim}
 theorem proof_vs_objection_asymmetry :
-  ∀ thm : CompiledTheorem,
-  ∀ obj : InYourModelObjection,
-  obj.witness = none →
-  credibility thm.proof = 1 ∧
-  credibility obj.uttered ≤ cheap_talk_bound := by
+  forall thm : CompiledTheorem,
+  forall obj : InYourModelObjection,
+  obj.witness = none ->
+  credibility thm.proof = 1 /\\
+  credibility obj.uttered <= cheap_talk_bound := by
   intro thm obj h_none
   constructor
-  · exact Paper5.verified_proof_credibility_one thm
-  · exact in_your_model_credibility_bounded obj h_none
+  . exact Paper5.verified_proof_credibility_one thm
+  . exact in_your_model_credibility_bounded obj h_none
 \end{verbatim}
 \end{theorem}
 

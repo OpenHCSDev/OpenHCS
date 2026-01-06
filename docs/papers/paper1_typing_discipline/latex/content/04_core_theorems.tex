@@ -7,33 +7,41 @@ Theorem}\label{the-error-localization-theorem}
 source locations that must be inspected to find all potential violations
 of a type constraint under discipline T.
 
-\textbf{Theorem 4.1 (Nominal Complexity).} E(nominal) = O(1).
+\textbf{Theorem 4.1 ($\{B,S\}$ Typing Complexity).} E($\{B,S\}$) = O(1).
 
-\emph{Proof.} Under nominal typing, constraint ``x must be an A'' is
+\emph{Proof.} Under $\{B,S\}$ typing, constraint ``x must be an A'' is
 satisfied iff type(x) inherits from A. This property is determined at
 class definition time, at exactly one location: the class definition of
 type(x). If the class does not list A in its bases (transitively), the
-constraint fails. One location. \(\blacksquare\)
+constraint fails. One location. \qed
 
-\textbf{Theorem 4.2 (Structural Complexity).} E(structural) = O(k) where
+\textbf{Remark:} In type system terminology, $\{B,S\}$ typing is called nominal typing.
+
+\textbf{Theorem 4.2 ($\{S\}$-Only Declared Complexity).} E($\{S\}$-declared) = O(k) where
 k = number of classes.
 
-\emph{Proof.} Under structural typing, constraint ``x must satisfy
+\emph{Proof.} Under $\{S\}$-only typing with declared interfaces, constraint ``x must satisfy
 interface A'' requires checking that type(x) implements all methods in
 signature(A). This check occurs at each class definition. For k classes,
-O(k) locations. \(\blacksquare\)
+O(k) locations. \qed
 
-\textbf{Theorem 4.3 (Duck Typing Complexity).} E(duck) = $\Omega(n)$
+\textbf{Remark:} In type system terminology, this is called structural typing.
+
+\textbf{Theorem 4.3 ($\{S\}$-Only Incoherent Complexity).} E($\{S\}$-incoherent) = $\Omega(n)$
 where n = number of call sites.
 
-\emph{Proof.} Under duck typing, constraint ``x must have method m'' is
+\emph{Proof.} Under $\{S\}$-only incoherent typing, constraint ``x must have method m'' is
 encoded as \texttt{hasattr(x,\ "m")} at each call site. There is no
 central declaration. For n call sites, each must be inspected. Lower
-bound is $\Omega(n)$. \(\blacksquare\)
+bound is $\Omega(n)$. \qed
 
-\textbf{Corollary 4.4 (Strict Dominance).} Nominal typing strictly
-dominates duck typing: E(nominal) = O(1) \textless{} $\Omega(n)$ =
-E(duck) for all n \textgreater{} 1.
+\textbf{Remark:} This incoherent pattern is traditionally called "duck typing."
+
+\textbf{Corollary 4.4 (Strict Dominance).} $\{B,S\}$ typing strictly
+dominates $\{S\}$-only incoherent: E($\{B,S\}$) = O(1) \textless{} $\Omega(n)$ =
+E($\{S\}$-incoherent) for all n \textgreater{} 1.
+
+\textbf{Remark:} In type system terminology, this shows nominal typing dominates duck typing.
 
 \subsection{The Information Scattering
 Theorem}\label{the-information-scattering-theorem}
@@ -42,23 +50,29 @@ Theorem}\label{the-information-scattering-theorem}
 the set of source locations where constraint c is encoded under
 discipline T.
 
-\textbf{Theorem 4.5 (Duck Typing Scatters).} For duck typing,
-\textbar I(duck, c)\textbar{} = O(n) where n = call sites using
+\textbf{Theorem 4.5 ($\{S\}$-Only Incoherent Scattering).} For $\{S\}$-only incoherent typing,
+\textbar I($\{S\}$-incoherent, c)\textbar{} = O(n) where n = call sites using
 constraint c.
+
+\textbf{Remark:} This describes the scattering problem in "duck typing."
 
 \emph{Proof.} Each \texttt{hasattr(x,\ "method")} call independently
 encodes the constraint. No shared reference. Constraints scale with call
-sites. \(\blacksquare\)
+sites. \qed
 
-\textbf{Theorem 4.6 (Nominal Typing Centralizes).} For nominal typing,
-\textbar I(nominal, c)\textbar{} = O(1).
+\textbf{Theorem 4.6 ($\{B,S\}$ Typing Centralizes).} For $\{B,S\}$ typing,
+\textbar I($\{B,S\}$, c)\textbar{} = O(1).
 
 \emph{Proof.} Constraint c = ``must inherit from A'' is encoded once: in
 the ABC/Protocol definition of A. All \texttt{isinstance(x,\ A)} checks
-reference this single definition. \(\blacksquare\)
+reference this single definition. \qed
 
-\textbf{Corollary 4.7 (Maintenance Entropy).} Duck typing maximizes
-maintenance entropy; nominal typing minimizes it.
+\textbf{Remark:} In type system terminology, $\{B,S\}$ typing is called nominal typing.
+
+\textbf{Corollary 4.7 (Maintenance Entropy).} $\{S\}$-only incoherent typing maximizes
+maintenance entropy; $\{B,S\}$ typing minimizes it.
+
+\textbf{Remark:} Traditional terms: duck typing vs nominal typing.
 
 \subsection{Empirical
 Demonstration}\label{empirical-demonstration}
@@ -66,10 +80,12 @@ Demonstration}\label{empirical-demonstration}
 The theoretical complexity bounds in Theorems 4.1-4.3 are demonstrated
 empirically in Section 5, Case Study 1 (WellFilterConfig hierarchy). Two
 classes with identical structure but different nominal identities
-require O(1) disambiguation under nominal typing but \(\Omega\)(n)
-call-site inspection under duck typing. Case Study 5 illustrates this:
-migrating from duck to nominal typing replaced scattered
+require O(1) disambiguation under $\{B,S\}$ typing but \(\Omega\)(n)
+call-site inspection under $\{S\}$-only incoherent typing. Case Study 5 illustrates this:
+migrating from incoherent to $\{B,S\}$ typing replaced scattered
 \texttt{hasattr()} checks across 47 call sites with centralized ABC
 contract validation at a single definition point.
+
+\textbf{Remark:} In type system terminology, $\{B,S\}$ is nominal typing; $\{S\}$-only incoherent is duck typing.
 
 \begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}

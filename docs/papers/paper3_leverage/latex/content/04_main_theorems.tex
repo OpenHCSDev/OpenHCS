@@ -58,7 +58,7 @@ With $|\text{Cap}(A_1)| = |\text{Cap}(A_2)|$:
 By Corollary \ref{cor:dof-monotone}:
 \[
 \text{DOF}(A_1) < \text{DOF}(A_2) \implies P_{\text{error}}(A_1) < P_{\text{error}}(A_2)
-\] \(\blacksquare\)
+\]
 \end{proof}
 
 \textbf{Corollary:} Maximizing leverage minimizes error probability (for fixed capabilities).
@@ -81,7 +81,7 @@ As capabilities grow: $|\text{Cap}(M)| \to \infty$
 Therefore:
 \[
 L(M) = \frac{|\text{Cap}(M)|}{\text{DOF}(M)} = \frac{|\text{Cap}(M)|}{1} \to \infty
-\] \(\blacksquare\)
+\]
 \end{proof}
 
 \subsection{Architectural Decision Criterion}
@@ -97,7 +97,7 @@ Given requirements $R$, architecture $A^*$ is optimal if and only if:
 \begin{proof}
 ($\Leftarrow$) Suppose $A^*$ satisfies (1) and (2). Then $A^*$ is feasible and has maximum leverage among feasible architectures. By Theorem \ref{thm:leverage-error}, this minimizes error probability, so $A^*$ is optimal.
 
-($\Rightarrow$) Suppose $A^*$ is optimal but violates (1) or (2). If (1) fails, $A^*$ doesn't meet requirements (contradiction). If (2) fails, there exists $A'$ with $L(A') > L(A^*)$, so $P_{\text{error}}(A') < P_{\text{error}}(A^*)$ by Theorem \ref{thm:leverage-error} (contradiction). \(\blacksquare\)
+($\Rightarrow$) Suppose $A^*$ is optimal but violates (1) or (2). If (1) fails, $A^*$ doesn't meet requirements (contradiction). If (2) fails, there exists $A'$ with $L(A') > L(A^*)$, so $P_{\text{error}}(A') < P_{\text{error}}(A^*)$ by Theorem \ref{thm:leverage-error} (contradiction).
 \end{proof}
 
 \textbf{Decision Procedure:}
@@ -132,7 +132,7 @@ Assume WLOG $L(A_1) \leq L(A_2)$, i.e., $c_1/n_1 \leq c_2/n_2$.
 Then:
 \[
 \frac{c_1 + c_2}{n_1 + n_2} \geq \frac{c_1 + c_1 \cdot (n_2/n_1)}{n_1 + n_2} = \frac{c_1(n_1 + n_2)}{n_1(n_1 + n_2)} = \frac{c_1}{n_1} = L(A_1)
-\] \(\blacksquare\)
+\]
 \end{proof}
 
 \textbf{Interpretation:} Combining architectures yields leverage at least as good as the worst submodule.

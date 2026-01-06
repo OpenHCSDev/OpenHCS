@@ -6,8 +6,8 @@
 
 \begin{theorem}[No Axis Witness]
 \begin{verbatim}
-theorem no_axis_witness : ¬∃ w : required_witness .DenyAxisType := by
-  intro ⟨A, hAxis, hNotEmbed⟩
+theorem no_axis_witness : notexists w : required_witness .DenyAxisType := by
+  intro <A, hAxis, hNotEmbed>
   -- Axis is: structure with Carrier : Type, ord, lattice
   -- If A has these, it IS an Axis. If not, it's not an axis.
   -- "Real axis not captured" is category error
@@ -17,16 +17,16 @@ theorem no_axis_witness : ¬∃ w : required_witness .DenyAxisType := by
 
 \begin{theorem}[No Domain Witness]
 \begin{verbatim}
-theorem no_domain_witness : ¬∃ w : required_witness .DenyDomainType := by
-  intro ⟨D, hDomain, hNotEmbed⟩
-  -- Domain α = List (Query α). A domain IS a list of queries.
+theorem no_domain_witness : notexists w : required_witness .DenyDomainType := by
+  intro <D, hDomain, hNotEmbed>
+  -- Domain alpha = List (Query alpha). A domain IS a list of queries.
   exact domain_characterization_complete D hDomain hNotEmbed
 \end{verbatim}
 \end{theorem}
 
 \begin{theorem}[No Proof Witness]
 \begin{verbatim}
-theorem no_proof_witness : ¬∃ w : required_witness .DenyProof := by
+theorem no_proof_witness : notexists w : required_witness .DenyProof := by
   -- 0 sorry. Compiles. QED.
   exact zero_sorry_no_gaps
 \end{verbatim}
@@ -34,8 +34,8 @@ theorem no_proof_witness : ¬∃ w : required_witness .DenyProof := by
 
 \begin{theorem}[No Logic Witness]
 \begin{verbatim}
-theorem no_logic_witness : ¬∃ w : required_witness .DenyLogic := by
-  -- Denying ∀-elim exits the game
+theorem no_logic_witness : notexists w : required_witness .DenyLogic := by
+  -- Denying forall-elim exits the game
   exact universal_elim_is_foundational
 \end{verbatim}
 \end{theorem}
@@ -45,7 +45,7 @@ theorem no_logic_witness : ¬∃ w : required_witness .DenyLogic := by
 \begin{theorem}[Universe Denial Incoherent]\label{thm:denial-incoherent}
 \begin{verbatim}
 theorem universe_denial_incoherent :
-  ∀ form : UniverseDenialForm, ¬∃ w : required_witness form := by
+  forall form : UniverseDenialForm, notexists w : required_witness form := by
   intro form
   cases form with
   | DenyAxisType => exact no_axis_witness

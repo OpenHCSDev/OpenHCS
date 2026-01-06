@@ -7,10 +7,10 @@
 \begin{definition}[Coherent Agent]
 \begin{verbatim}
 def coherent_agent (a : Agent) : Prop :=
-  ∀ claim : Claim,
-    a.asserts claim →
-    (verified claim → a.maintains claim) ∧
-    (refuted claim → a.concedes claim)
+  forall claim : Claim,
+    a.asserts claim ->
+    (verified claim -> a.maintains claim) /\\
+    (refuted claim -> a.concedes claim)
 \end{verbatim}
 \end{definition}
 
@@ -19,14 +19,14 @@ def coherent_agent (a : Agent) : Prop :=
 \begin{definition}[Incoherent Stubborn]
 \begin{verbatim}
 def incoherent_stubborn (a : Agent) : Prop :=
-  ∃ claim, refuted claim ∧ ¬a.concedes claim
+  exists claim, refuted claim /\\ nota.concedes claim
 \end{verbatim}
 \end{definition}
 
 \begin{definition}[Incoherent Coward]
 \begin{verbatim}
 def incoherent_coward (a : Agent) : Prop :=
-  ∃ claim, verified claim ∧ ¬a.maintains claim
+  exists claim, verified claim /\\ nota.maintains claim
 \end{verbatim}
 \end{definition}
 
@@ -35,10 +35,10 @@ def incoherent_coward (a : Agent) : Prop :=
 \begin{theorem}[Coherence Commitment]
 \begin{verbatim}
 theorem coherence_commitment :
-  ∀ claim,
-    (submit claim verifier) ∧
-    (pass verifier → maintain claim) ∧
-    (fail verifier → concede claim)
+  forall claim,
+    (submit claim verifier) /\\
+    (pass verifier -> maintain claim) /\\
+    (fail verifier -> concede claim)
 \end{verbatim}
 \end{theorem}
 

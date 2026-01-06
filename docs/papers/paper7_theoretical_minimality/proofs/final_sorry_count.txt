@@ -1,0 +1,7 @@
+TheoreticalMinimality/AntiPluralism.lean:0
+TheoreticalMinimality/Domain.lean:0
+TheoreticalMinimality/Framework.lean:0
+TheoreticalMinimality/Instances.lean:0
+TheoreticalMinimality/Minimality.lean:0
+TheoreticalMinimality/Theory.lean:0
+TheoreticalMinimality/Uniqueness.lean:0

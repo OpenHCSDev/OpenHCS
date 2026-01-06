@@ -54,7 +54,9 @@ records, \emph{``cannot naturally convey such semantic intent.''}
 formalizes this intuition. The tuple
 \texttt{(value,\ scope\_id,\ source\_type)} returned by \texttt{resolve}
 captures exactly the ``class name information'' that Abdelgawad argues
-is essential. Duck typing loses this information after attribute access.
+is essential. $\{S\}$-only typing loses this information after attribute access.
+
+\textbf{Remark:} "Duck typing" in this context refers to $\{S\}$-only typing.
 
 \subsection{Practical Hybrid
 Systems}\label{practical-hybrid-systems}
@@ -67,10 +69,12 @@ they could share an interface.''} This supports the Malayeri-Aldrich
 observation that structural typing's benefits are context-dependent.
 
 \textbf{Our contribution:} OpenHCS demonstrates the capabilities that
-nominal typing enables: MRO-based resolution, bidirectional type
-registries, provenance tracking. These are impossible under structural
+$\{B,S\}$ typing enables: MRO-based resolution, bidirectional type
+registries, provenance tracking. These are impossible under $\{S\}$-only
 typing regardless of whether the system is new or legacy. The
 capability gap is information-theoretic (Theorem 3.19).
+
+\textbf{Remark:} In type system terminology, $\{B,S\}$ and $\{S\}$ correspond to nominal and structural typing.
 
 \textbf{Go (2012) and TypeScript (2012+).} Both adopt structural typing
 for pragmatic reasons: - Go uses structural interface satisfaction to
@@ -80,14 +84,16 @@ integrate with JavaScript's untyped ecosystem.
 However, both face the \textbf{accidental compatibility problem}.
 TypeScript developers use ``branding'' (adding nominal tag properties)
 to differentiate structurally identical types: a workaround that
-\textbf{reintroduces nominal typing}. The TypeScript issue tracker has
-open requests for native nominal types.
+\textbf{reintroduces $\{B,S\}$ typing}. The TypeScript issue tracker has
+open requests for native $\{B,S\}$-style types.
 
-\textbf{Our contribution:} OpenHCS avoids this problem by using nominal
+\textbf{Our contribution:} OpenHCS avoids this problem by using $\{B,S\}$
 typing from the start. The \texttt{@global\_pipeline\_config} chain
 generates \texttt{LazyPathPlanningConfig} as a distinct type from
 \texttt{PathPlanningConfig} precisely to enable different behavior
 (resolution on access) while sharing the same structure.
+
+\textbf{Remark:} In type system terminology, $\{B,S\}$ typing corresponds to nominal typing.
 
 \subsection{Metaprogramming
 Complexity}\label{metaprogramming-complexity}

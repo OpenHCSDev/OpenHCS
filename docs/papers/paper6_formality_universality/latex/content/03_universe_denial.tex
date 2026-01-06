@@ -8,11 +8,11 @@ From the axis framework, the theorems are:
 
 \begin{verbatim}
 theorem fixed_axis_incompleteness :
-  ∀ A : AxisSet, ∀ a : Axis, a ∉ A →
-  ∃ D : Domain, ¬complete A D
+  forall A : AxisSet, forall a : Axis, a notin A ->
+  exists D : Domain, notcomplete A D
 
 theorem parameterized_axis_immunity :
-  ∀ D : Domain, complete (requiredAxesOf D) D
+  forall D : Domain, complete (requiredAxesOf D) D
 \end{verbatim}
 
 The quantifiers are $\forall A : \texttt{AxisSet}$ and $\forall D : \texttt{Domain}$. Not ``for all $A$ in model $M$.'' For all $A$. Period.
@@ -26,16 +26,16 @@ inductive UniverseDenialForm where
   | DenyAxisType   : UniverseDenialForm  -- "Axis doesn't capture real axes"
   | DenyDomainType : UniverseDenialForm  -- "Domain doesn't capture real domains"
   | DenyProof      : UniverseDenialForm  -- "The proof has a gap"
-  | DenyLogic      : UniverseDenialForm  -- "∀ doesn't mean what you think"
+  | DenyLogic      : UniverseDenialForm  -- "forall doesn't mean what you think"
 \end{verbatim}
 
 Each requires a witness:
 
 \begin{verbatim}
-def required_witness : UniverseDenialForm → Type
-  | .DenyAxisType   => Σ A : Type, IsAxis A × ¬EmbeddableIn A Axis
-  | .DenyDomainType => Σ D : Type, IsDomain D × ¬EmbeddableIn D Domain
-  | .DenyProof      => Σ line : Nat, IsGap line
-  | .DenyLogic      => Σ L : Logic, Valid L × (¬UniversalElim L)
+def required_witness : UniverseDenialForm -> Type
+  | .DenyAxisType   => Sigma A : Type, IsAxis A * notEmbeddableIn A Axis
+  | .DenyDomainType => Sigma D : Type, IsDomain D * notEmbeddableIn D Domain
+  | .DenyProof      => Sigma line : Nat, IsGap line
+  | .DenyLogic      => Sigma L : Logic, Valid L * (notUniversalElim L)
 \end{verbatim}
 

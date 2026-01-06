@@ -107,7 +107,9 @@ We establish four theorems characterizing coherence achievability:
 
 \subsection{Scope}\label{sec:scope}
 
-This work characterizes SSOT for \emph{structural facts} (class existence, method signatures, type relationships) within language semantics. The complexity analysis is asymptotic, applying to systems where $n$ grows. External tooling can approximate SSOT behavior but operates outside language semantics.
+This work characterizes SSOT for \emph{structural facts} (class existence, method signatures, type relationships) within \emph{single-language} systems. The complexity analysis is asymptotic, applying to systems where $n$ grows. External tooling can approximate SSOT behavior but operates outside language semantics.
+
+\textbf{Multi-language systems.} When a system spans multiple languages (e.g., Python backend + TypeScript frontend + protobuf schemas), cross-language SSOT requires external code generation tools. The analysis in this paper characterizes single-language SSOT; multi-language SSOT is noted as future work (Section~\ref{sec:conclusion}).
 
 \subsection{Contributions}\label{sec:contributions}
 

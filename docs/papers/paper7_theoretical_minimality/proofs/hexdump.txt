@@ -1,0 +1,9 @@
+0000000   a   x   i   o   m       i   s   o   _   p   r   e   s   e   r
+0000020   v   e   s   _   m   i   n   i   m   a   l       {   D       :
+0000040       D   o   m   a   i   n   }       [   F   i   n   i   t   e
+0000060       D   .   Q   u   e   r   y   ]       {   T       T   '    
+0000100   :       T   h   e   o   r   y       D   }       :  \n        
+0000120           T   '     342 211 205       T     342 206 222       T
+0000140   .   i   s   M   i   n   i   m   a   l     342 206 222       T
+0000160   '   .   i   s   M   i   n   i   m   a   l  \n
+0000174

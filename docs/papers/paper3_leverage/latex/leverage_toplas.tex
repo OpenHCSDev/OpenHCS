@@ -19,6 +19,10 @@
 \newtheorem{remark}[theorem]{Remark}
 \newtheorem{observation}[theorem]{Observation}
 
+% QED symbol customization (amssymb provides \blacksquare)
+\renewcommand{\qedsymbol}{$\blacksquare$}
+\renewcommand{\qed}{\hspace{0.5em}\qedsymbol} % inline (left-aligned) instead of right-aligned
+
 % Fix for pandoc's \tightlist
 \providecommand{\tightlist}{%
   \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}

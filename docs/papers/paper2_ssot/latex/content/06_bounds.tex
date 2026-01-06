@@ -3,6 +3,20 @@
 
 We now prove the complexity bounds that make SSOT valuable. The key result: the gap between SSOT-complete and SSOT-incomplete architectures is \emph{unbounded}---it grows without limit as codebases scale.
 
+\subsection{Cost Model}\label{sec:cost-model}
+
+\begin{definition}[Modification Cost Model]\label{def:cost-model}
+Let $\delta_F$ be a modification to fact $F$ in codebase $C$. The \emph{effective modification complexity} $M_{\text{effective}}(C, \delta_F)$ is the number of syntactically distinct edit operations a developer must perform manually. Formally:
+\[
+M_{\text{effective}}(C, \delta_F) = |\{L \in \text{Locations}(C) : \text{requires\_manual\_edit}(L, \delta_F)\}|
+\]
+where $\text{requires\_manual\_edit}(L, \delta_F)$ holds iff location $L$ must be updated by the developer (not by automatic derivation) to maintain coherence after $\delta_F$.
+\end{definition}
+
+\textbf{Unit of cost:} One edit = one syntactic modification to one location. We count locations, not keystrokes or characters. This abstracts over edit complexity to focus on the scaling behavior.
+
+\textbf{What we measure:} Manual edits only. Derived locations that update automatically have zero cost. This distinguishes SSOT (where derivation handles propagation) from non-SSOT (where all updates are manual).
+
 \subsection{Upper Bound: SSOT Achieves O(1)}\label{sec:upper-bound}
 
 \begin{theorem}[SSOT Upper Bound]\label{thm:upper-bound}

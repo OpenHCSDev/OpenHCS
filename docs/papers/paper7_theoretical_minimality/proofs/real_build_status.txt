@@ -1,0 +1,28 @@
+⚠ [606/641] Replayed TheoreticalMinimality.Domain
+warning: TheoreticalMinimality/Domain.lean:136:41: unused variable `p`
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+⚠ [633/641] Replayed TheoreticalMinimality.Theory
+warning: TheoreticalMinimality/Theory.lean:52:5: unused variable `h_same_count`
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+warning: TheoreticalMinimality/Theory.lean:75:5: unused variable `i`
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+⚠ [634/641] Replayed TheoreticalMinimality.Minimality
+warning: TheoreticalMinimality/Minimality.lean:134:2: Try this: intro h_min ⟨T', h_smaller, h_covers⟩
+✖ [640/641] Building TheoreticalMinimality.Framework (1.5s)
+trace: .> LEAN_PATH=/home/ts/code/projects/openhcs-sequential/docs/papers/paper5_credibility/proofs/.lake/packages/Cli/.lake/build/lib/lean:/home/ts/code/projects/openhcs-sequential/docs/papers/paper5_credibility/proofs/.lake/packages/batteries/.lake/build/lib/lean:/home/ts/code/projects/openhcs-sequential/docs/papers/paper5_credibility/proofs/.lake/packages/Qq/.lake/build/lib/lean:/home/ts/code/projects/openhcs-sequential/docs/papers/paper5_credibility/proofs/.lake/packages/aesop/.lake/build/lib/lean:/home/ts/code/projects/openhcs-sequential/docs/papers/paper5_credibility/proofs/.lake/packages/proofwidgets/.lake/build/lib/lean:/home/ts/code/projects/openhcs-sequential/docs/papers/paper5_credibility/proofs/.lake/packages/importGraph/.lake/build/lib/lean:/home/ts/code/projects/openhcs-sequential/docs/papers/paper5_credibility/proofs/.lake/packages/LeanSearchClient/.lake/build/lib/lean:/home/ts/code/projects/openhcs-sequential/docs/papers/paper5_credibility/proofs/.lake/packages/plausible/.lake/build/lib/lean:/home/ts/code/projects/openhcs-sequential/docs/papers/paper5_credibility/proofs/.lake/packages/mathlib/.lake/build/lib/lean:/home/ts/code/projects/openhcs-sequential/docs/papers/paper7_theoretical_minimality/proofs/.lake/build/lib/lean /home/ts/.elan/toolchains/leanprover--lean4---v4.27.0-rc1/bin/lean /home/ts/code/projects/openhcs-sequential/docs/papers/paper7_theoretical_minimality/proofs/TheoreticalMinimality/Framework.lean -o /home/ts/code/projects/openhcs-sequential/docs/papers/paper7_theoretical_minimality/proofs/.lake/build/lib/lean/TheoreticalMinimality/Framework.olean -i /home/ts/code/projects/openhcs-sequential/docs/papers/paper7_theoretical_minimality/proofs/.lake/build/lib/lean/TheoreticalMinimality/Framework.ilean -c /home/ts/code/projects/openhcs-sequential/docs/papers/paper7_theoretical_minimality/proofs/.lake/build/ir/TheoreticalMinimality/Framework.c --setup /home/ts/code/projects/openhcs-sequential/docs/papers/paper7_theoretical_minimality/proofs/.lake/build/ir/TheoreticalMinimality/Framework.setup.json --json
+error: TheoreticalMinimality/Framework.lean:84:9: type expected, got
+  (T : Theory D)
+error: TheoreticalMinimality/Framework.lean:118:11: failed to synthesize instance of type class
+  Finite D.Query
+
+Hint: Type class instance resolution failures can be inspected with the `set_option trace.Meta.synthInstance true` command.
+warning: TheoreticalMinimality/Framework.lean:157:20: unused variable `I`
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+error: Lean exited with code 1
+Some required targets logged failures:
+- TheoreticalMinimality.Framework
+error: build failed

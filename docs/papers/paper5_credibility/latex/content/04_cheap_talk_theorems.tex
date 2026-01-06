@@ -82,12 +82,12 @@ identical; the prior probability differs.
 
 \subsection{The Emphasis Penalty}\label{the-emphasis-penalty}
 
-\textbf{Theorem 3.3 (Emphasis Penalty).} Let \(s_1, s_2, ..., s_n\) be
-cheap talk signals all asserting claim \(c\). There exists \(k^*\) such
-that for \(n > k^*\): \[\frac{\partial C(c, s_{1..n})}{\partial n} < 0\]
-
+\begin{theorem}[Emphasis Penalty]\label{thm:emphasis-penalty}
+Let \(s_1, s_2, ..., s_n\) be cheap talk signals all asserting claim \(c\). There exists \(k^*\) such that for \(n > k^*\): \[\frac{\partial C(c, s_{1..n})}{\partial n} < 0\]
 Additional emphasis \emph{decreases} credibility past a threshold.
+\end{theorem}
 
+\begin{proof}
 The key insight: excessive signaling is itself informative. Define the
 \emph{suspicion function}:
 \[\sigma(n) = P(\text{deceptive} | n \text{ assertions})\]
@@ -102,7 +102,8 @@ Substituting into the credibility update:
 \[C(c, s_{1..n}) = \frac{P(c) \cdot (1 - \sigma(n))}{P(c) \cdot (1 - \sigma(n)) + (1 - P(c)) \cdot \sigma(n)}\]
 
 This is decreasing in \(\sigma(n)\), hence decreasing in \(n\) for
-\(n > k^*\). \qed{}
+\(n > k^*\).
+\end{proof}
 
 \textbf{Interpretation:} ``Trust me, I'm serious, this is absolutely
 true, I swear'' is \emph{less} credible than just stating the claim. The
@@ -110,21 +111,23 @@ emphasis signals desperation.
 
 \subsection{The Meta-Assertion Trap}\label{the-meta-assertion-trap}
 
-\textbf{Theorem 3.4 (Meta-Assertion Trap).} Let \(a\) be a cheap talk
-assertion and \(m\) be a meta-assertion ``assertion \(a\) is credible.''
+\begin{theorem}[Meta-Assertion Trap]\label{thm:meta-assertion-trap}
+Let \(a\) be a cheap talk assertion and \(m\) be a meta-assertion ``assertion \(a\) is credible.''
 Then: \[C(c, a \cup m) \leq C(c, a) + \epsilon\]
-
 where \(\epsilon \to 0\) as common knowledge of rationality increases.
+\end{theorem}
 
+\begin{proof}
 Meta-assertion \(m\) is itself cheap talk (costs nothing to produce
 regardless of truth). Therefore \(m\) is subject to the Cheap Talk Bound
-(Theorem 3.1).
+(Theorem~\ref{thm:cheap-talk-bound}).
 
 Under common knowledge of rationality, agents anticipate that deceptive
 agents will produce meta-assertions. Therefore:
 \[P(m | \text{deceptive}) \approx P(m | \text{honest})\]
 
-The signal provides negligible information; \(\epsilon \to 0\). \qed{}
+The signal provides negligible information; \(\epsilon \to 0\).
+\end{proof}
 
 \textbf{Interpretation:} ``My claims are verified'' is cheap talk about
 cheap talk. It doesn't escape the bound---it's \emph{subject to} the

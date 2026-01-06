@@ -82,13 +82,13 @@ Swift & $\times$ & $\times$ & $\times$ & $\times$ & NO \\
 \end{tabular}
 \end{center}
 
-TypeScript earns $\triangle$ for DEF/INTRO because decorators plus
+TypeScript earns $\triangle$ for DEF/INTRO because decorators (aligned with ES decorators since TypeScript 5.0, 2023) plus
 \texttt{reflect-metadata} can run at class decoration time and expose
-limited metadata, but (a) they require compiler flags/transformers
+limited metadata, but (a) they require \texttt{experimentalDecorators} or specific tsconfig flags
 instead of being always-on language features, (b) they cannot enumerate
-implementers at runtime, and (c) they are erased for plain JavaScript
-consumers. Consequently SSOT remains impossible without external
-tooling, so the overall verdict stays NO.
+implementers at runtime (no \texttt{\_\_subclasses\_\_()} equivalent), and (c) type information is erased at compile time.
+Consequently SSOT remains impossible without external
+tooling, so the overall verdict stays NO. \textbf{Note (as of 2026):} While ES decorators are now standard in JavaScript, they still lack subclass enumeration---the fundamental barrier to SSOT remains.
 
 \subsubsection{Python: Full SSOT Support}
 
@@ -131,7 +131,7 @@ Python provides all four capabilities:
 
 JavaScript lacks definition-time hooks:
 
-\textbf{DEF:} $\times$. No code executes when a class is defined. The \texttt{class} syntax is declarative. Decorators (Stage 3 proposal) are not yet standard and have limited capabilities.
+\textbf{DEF:} $\times$. No code executes when a class is defined. The \texttt{class} syntax is declarative. Decorators (TC39 Stage 3, finalized 2024) exist but cannot access or enumerate subclasses at runtime.
 
 \textbf{INTRO:} $\times$. \texttt{Object.getPrototypeOf()}, \texttt{instanceof} exist but \emph{cannot enumerate subclasses}. No equivalent to \texttt{\_\_subclasses\_\_()}.
 
@@ -267,11 +267,11 @@ Ruby provides hooks but with limitations~\cite{flanagan2020ruby}:
 
 \textbf{INTRO:} \checkmark. \texttt{subclasses}, \texttt{ancestors}, \texttt{instance\_methods} provide introspection.
 
-\textbf{STRUCT:} Partial. Can add methods but cannot easily modify class structure during definition.
+\textbf{STRUCT:} Partial. Ruby's \texttt{inherited} hook receives the subclass \emph{after} its body has been parsed, meaning the hook cannot intercept or transform the class definition as it is being constructed. Contrast with Python's \texttt{\_\_init\_subclass\_\_}, which executes \emph{during} class creation with access to keyword arguments passed in the class definition (e.g., \texttt{class Foo(Base, key=val)}). Ruby can add methods post-hoc via \texttt{define\_method}, but cannot parameterize class creation or inject attributes before the class body executes.
 
-\textbf{HIER:} \checkmark. \texttt{subclasses} enumerates subclasses.
+\textbf{HIER:} \checkmark. \texttt{subclasses} enumerates subclasses (added in Ruby 3.1).
 
-Ruby is close to full SSOT support but the structural modification limitations prevent complete SSOT for some use cases.
+Ruby is close to full SSOT support but the structural modification limitations (no parameterized class creation, no pre-body hook) prevent complete SSOT for use cases requiring definition-time configuration.
 
 \begin{theorem}[Three-Language Theorem]\label{thm:three-lang}
 Exactly three languages in common use satisfy complete SSOT requirements: Python, Common Lisp (CLOS), and Smalltalk.

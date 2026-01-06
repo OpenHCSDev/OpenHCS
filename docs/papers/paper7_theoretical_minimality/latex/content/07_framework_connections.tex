@@ -1,0 +1,68 @@
+\section{Framework Connections}\label{framework-connections}
+
+\subsection{Degrees of Freedom and Minimality}\label{dof-and-minimality}
+
+The DOF framework from Paper 2 provides a measure of theory size.
+
+\textbf{Definition 7.1 (Theory DOF).} A theory's degrees of freedom is the number 
+of independent parameters required to answer all queries:
+$$\text{DOF}(T) = |\{p \in T : p \text{ not derivable from others}\}|$$
+
+\textbf{Theorem 7.1 (Minimality is DOF Minimization).} $T$ is minimal iff it has 
+minimum DOF among all complete theories.
+
+\begin{proof}
+If $T$ minimal, every parameter is required by some query. Removing any parameter 
+makes the theory incomplete. Therefore DOF cannot be reduced.
+
+If $T$ has minimum DOF, any proper subset has fewer parameters and thus cannot 
+answer all queries. Therefore $T$ is minimal.
+\end{proof}
+
+\textbf{Connection to Paper 2:} SSOT minimizes DOF to exactly 1. This is the minimal 
+theory for multi-scale coherence.
+
+\subsection{Compression and Information Theory}\label{compression-information}
+
+\textbf{Kolmogorov Complexity:} The minimal theory is closely related to Kolmogorov 
+complexity $K(x)$ = length of shortest program computing $x$.
+
+\textbf{Theorem 7.2 (Theory Complexity Bound).} For domain $D$ with implementation $I$:
+$$|T^*| \geq K(\text{query-answer function})$$
+The minimal theory cannot be shorter than the Kolmogorov complexity of the query-answer mapping.
+
+\begin{proof}
+The theory must compute all query answers. Any program computing these answers 
+defines a theory. The shortest such program is the Kolmogorov complexity.
+\end{proof}
+
+\textbf{Remark:} This connects our result to algorithmic information theory. The 
+minimal theory is the shortest program that answers all queries.
+
+\subsection{Learnability and Sample Complexity}\label{learnability}
+
+\textbf{Theorem 7.3 (Exact Identification).} For finite domain $D$, the minimal
+theory $T^*$ is \emph{exactly identifiable} from $O(|T^*|)$ query-answer pairs.
+
+\textbf{Definition (Exact Identification).} A theory $T$ is exactly identifiable
+from sample $S \subseteq \text{Queries}(D) \times \text{Answers}$ if $S$ uniquely
+determines $T$ with no ambiguity. This is stronger than PAC-learning (which allows
+approximation) or Bayesian inference (which requires priors).
+
+\begin{proof}
+Each component of $T^*$ is required by some query (minimality). A query-answer
+pair $(q, a)$ constrains the theory: any valid $T$ must satisfy $T(q) = a$.
+
+For minimal theories, each component corresponds to at least one query. Therefore
+$O(|T^*|)$ query-answer pairs suffice to constrain all components.
+
+Since $T^*$ is unique (Theorem~\ref{thm:unique-minimal-theory}), these constraints
+determine $T^*$ exactly---no probability, no approximation.
+\end{proof}
+
+\textbf{Implication:} Theory discovery is mechanical extraction. Given sufficient
+query-answer pairs, the minimal theory is uniquely determined---not inferred, not
+approximated, but \emph{identified}.
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+

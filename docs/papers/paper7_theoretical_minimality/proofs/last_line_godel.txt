@@ -1,0 +1,1 @@
+✔ [639/641] Built TheoreticalMinimality.Instances (1.4s)

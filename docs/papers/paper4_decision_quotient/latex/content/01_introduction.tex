@@ -1,8 +1,14 @@
 \section{Introduction}\label{sec:introduction}
 
-Engineers routinely include irrelevant information in their models. Climate scientists model atmospheric chemistry when predicting regional temperatures. Financial analysts track hundreds of indicators when making portfolio decisions. Software architects specify dozens of configuration parameters when only a handful affect outcomes.
+This paper establishes a fundamental limit on rational decision-making under uncertainty:
 
-The conventional view holds that this \emph{over-modeling} reflects poor discipline---that skilled practitioners should identify the \emph{essential} variables and model only those. This paper proves the opposite: over-modeling is computationally rational because identifying the minimal set of decision-relevant variables is intractable.
+\begin{quote}
+\textbf{Determining what you need to know is harder than knowing everything.}
+\end{quote}
+
+This is not metaphor. It is a theorem. Specifically: given a decision problem with $n$ dimensions of uncertainty, \emph{checking} whether a subset of dimensions suffices for optimal action is \coNP-complete. \emph{Finding} the minimal sufficient subset is \coNP-complete. These results hold universally---for any decision problem with coordinate structure.
+
+The implications are immediate and far-reaching. Engineers who include ``irrelevant'' information in their models are not exhibiting poor discipline. They are responding optimally to a computational constraint that admits no workaround. Climate scientists modeling atmospheric chemistry, financial analysts tracking hundreds of indicators, software architects specifying dozens of parameters---all are exhibiting computationally rational behavior. The alternative (identifying precisely which variables matter) requires solving \coNP-complete problems.
 
 \subsection{The Core Problem}
 
@@ -41,19 +47,23 @@ This paper proves four main theorems:
 \end{itemize}
 \end{enumerate}
 
-\subsection{What This Paper Does NOT Claim}
+\subsection{The Foundational Principle}
 
-To prevent misreading, we state explicit non-claims:
+The core result transcends the specific application domain:
 
-\begin{enumerate}
-\item \textbf{NOT ``always model everything.''} Over-modeling has costs (computation, data collection). We claim the \emph{alternative} (minimal modeling) is computationally hard to identify.
+\begin{quote}
+\textbf{For any agent facing structured uncertainty, identifying the relevant dimensions of uncertainty is computationally harder than simply observing all dimensions.}
+\end{quote}
 
-\item \textbf{NOT ``complexity results apply to all domains.''} Structured problems admit tractable algorithms (Section~\ref{sec:tractable}). The hardness applies to general unstructured problems.
+This applies to:
+\begin{itemize}
+\item \textbf{Machine learning:} Feature selection is intractable in general
+\item \textbf{Economics:} Identifying relevant market factors is intractable
+\item \textbf{Scientific modeling:} Determining which variables matter is intractable
+\item \textbf{Software engineering:} Configuration minimization is intractable
+\end{itemize}
 
-\item \textbf{NOT ``information theory is wrong.''} Value of information remains well-defined. We show \emph{computing} which information matters is hard.
-
-\item \textbf{NOT ``this obsoletes existing approaches.''} Domain-specific heuristics remain valuable. We provide formal justification for their necessity.
-\end{enumerate}
+The ubiquity of over-modeling, over-parameterization, and ``include everything'' strategies across domains is not coincidence. It is the universal rational response to a universal computational constraint.
 
 \subsection{Connection to Prior Papers}
 
@@ -65,7 +75,7 @@ This paper completes the theoretical foundation established in Papers 1--3:
 \item \textbf{Paper 3 (Leverage):} Unified both as leverage maximization
 \end{itemize}
 
-\textbf{Paper 4's contribution:} Proves that \emph{identifying} which architectural decisions matter is itself computationally hard. This explains why leverage maximization (Paper 3) uses heuristics rather than optimal algorithms.
+\textbf{Paper 4's contribution:} Proves that \emph{identifying} which architectural decisions matter is itself computationally hard. This explains why leverage maximization (Paper 3) uses heuristics rather than optimal algorithms---and why this is not a deficiency but a mathematical necessity.
 
 \subsection{Paper Structure}
 

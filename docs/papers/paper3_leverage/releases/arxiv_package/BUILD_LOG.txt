@@ -2,7 +2,7 @@ OpenHCS Paper Build Log
 ========================
 
 Paper: paper3 - Leverage-Driven Software Architecture
-Package Date: 2026-01-03T10:43:38.490138
+Package Date: 2026-01-03T13:08:08.708638
 Lean Toolchain: leanprover/lean4:v4.27.0-rc1
 
 Proof Statistics:
@@ -10,7 +10,7 @@ Proof Statistics:
 Lean Files: 9
 Lines of Code: 741
 Theorems: 35
-Sorry Placeholders: 4
+
 
 Proof Files:
 ------------

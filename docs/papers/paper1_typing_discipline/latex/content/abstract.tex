@@ -1,5 +1,5 @@
 \begin{abstract}
-\textbf{The Problem.} Classification systems---type systems, ontologies, taxonomies, schemas---operate over fixed sets of classification axes. We prove this architectural choice has unavoidable consequences: \emph{any fixed-axis system is incomplete for some domain}. This is not a limitation of specific implementations; it is an information-theoretic impossibility.
+\textbf{The Problem.} Classification systems (type systems, ontologies, taxonomies, schemas) operate over fixed sets of classification axes. We prove this architectural choice has unavoidable consequences: \emph{any fixed-axis system is incomplete for some domain}. This is not a limitation of specific implementations; it is an information-theoretic impossibility.
 
 \textbf{The Core Theorems (machine-checked, 0 sorries):}
 \begin{itemize}
@@ -21,11 +21,11 @@
 \begin{itemize}
 \item $(B, S)$ (Bases and Namespace) is the unique minimal complete representation of class semantics
 \item $(B, S, H)$ extends this for hierarchical configuration systems (adding a Scope axis)
-\item Nominal typing strictly dominates structural typing when inheritance exists ($B \neq \emptyset$)
-\item Duck typing requires $\Omega(n)$ error localization; nominal achieves $O(1)$
+\item B-inclusive systems strictly dominate B-exclusive systems when $B \neq \emptyset$ (in type system terminology: nominal typing dominates structural typing)
+\item Systems using only \(\{S\}\) require $\Omega(n)$ error localization; systems using \(\{B, S\}\) achieve $O(1)$
 \end{itemize}
 
-\textbf{The Broader Claim.} The impossibility theorems apply to \emph{any} classification system with fixed dimensions---not only type systems. Biological taxonomies, library classification schemes, database schemas, knowledge graphs: all are subject to the same constraints. A fixed set of axes guarantees domains that cannot be served.
+\textbf{The Broader Claim.} The impossibility theorems apply to \emph{any} classification system with fixed dimensions, not only type systems. Biological taxonomies, library classification schemes, database schemas, knowledge graphs: all are subject to the same constraints. A fixed set of axes guarantees domains that cannot be served.
 
 \textbf{Corollary (Incoherence of Preference).} Claiming ``classification system design is a matter of preference'' while accepting the uniqueness theorem instantiates $P \land \neg P$. Uniqueness entails $\neg\exists$ alternatives; preference presupposes $\exists$ alternatives. The mathematics admits no choice.
 

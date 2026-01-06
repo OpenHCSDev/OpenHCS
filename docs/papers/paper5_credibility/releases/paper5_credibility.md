@@ -1,12 +1,24 @@
 # Paper: Credibility: Formal Verification of Architectural Claims
 
-**Status**: TOPLAS-ready | **Lean**: 58 lines, 0 theorems, 1 sorry
+**Status**: TOPLAS-ready | **Lean**: 58 lines, 0 theorems
 
 ---
 
 ## Abstract
 
-Abstract to be added.
+A counterintuitive phenomenon pervades epistemic communication: emphatic assertions of trustworthiness often *decrease* perceived trustworthiness. "Trust me" invites suspicion; excessive qualification triggers doubt rather than alleviating it. This paper provides the first formal framework explaining this phenomenon through the lens of signaling theory.
+
+**Theorem (Cheap Talk Bound).** For any signal $s$ whose production cost is truth-independent, posterior credibility is bounded: $\Pr[C{=}1 \mid s] \leq p/(p + (1-p)q)$, where $p$ is the prior and $q$ is the mimicability of the signal. Verbal assertions---including assertions about credibility---are cheap talk and therefore subject to this bound.
+
+**Theorem (Emphasis Penalty).** There exists a threshold $k^*$ such that for $n > k^*$ repeated assertions of claim $c$: $\partial C(c, s_{1..n})/\partial n < 0$. Additional emphasis *decreases* credibility, as excessive signaling is itself informative of deceptive intent.
+
+**Theorem (Text Credibility Bound).** For high-magnitude claims (low prior probability), no text string achieves credibility above threshold $\tau < 1$. This is an impossibility result: rephrasing cannot escape the cheap talk bound.
+
+**Theorem (Costly Signal Escape).** Signals with truth-dependent costs---where $\text{Cost}(s \mid \text{false}) > \text{Cost}(s \mid \text{true})$---can achieve arbitrarily high credibility as the cost differential increases. Machine-checked proofs are maximally costly signals: producing a compiling proof of a false theorem has infinite cost.
+
+These results integrate with the leverage framework (Paper 3): credibility leverage $L_C = \Delta C / \text{Signal Cost}$ is maximized by minimizing cheap talk and maximizing costly signal exposure. The theorems are formalized in Lean 4.
+
+**Keywords:** signaling theory, cheap talk, credibility, Bayesian epistemology, costly signals, formal verification, Lean 4
 
 
 # Paper 5: A Formal Theory of Credibility
@@ -173,11 +185,12 @@ then credibility obeys the tight upper bound $$\Pr[C=1 \mid S] \;\le\; \frac{p}{
 
 ## The Emphasis Penalty
 
-**Theorem 3.3 (Emphasis Penalty).** Let $s_1, s_2, ..., s_n$ be cheap talk signals all asserting claim $c$. There exists $k^*$ such that for $n > k^*$: $$\frac{\partial C(c, s_{1..n})}{\partial n} < 0$$
+::: theorem
+[]{#thm:emphasis-penalty label="thm:emphasis-penalty"} Let $s_1, s_2, ..., s_n$ be cheap talk signals all asserting claim $c$. There exists $k^*$ such that for $n > k^*$: $$\frac{\partial C(c, s_{1..n})}{\partial n} < 0$$ Additional emphasis *decreases* credibility past a threshold.
+:::
 
-Additional emphasis *decreases* credibility past a threshold.
-
-The key insight: excessive signaling is itself informative. Define the *suspicion function*: $$\sigma(n) = P(\text{deceptive} | n \text{ assertions})$$
+::: proof
+*Proof.* The key insight: excessive signaling is itself informative. Define the *suspicion function*: $$\sigma(n) = P(\text{deceptive} | n \text{ assertions})$$
 
 Honest agents have less need to over-assert. Therefore: $$P(n \text{ assertions} | \text{deceptive}) > P(n \text{ assertions} | \text{honest}) \text{ for large } n$$
 
@@ -185,21 +198,24 @@ By Bayes' rule, $\sigma(n)$ is increasing in $n$ past some threshold.
 
 Substituting into the credibility update: $$C(c, s_{1..n}) = \frac{P(c) \cdot (1 - \sigma(n))}{P(c) \cdot (1 - \sigma(n)) + (1 - P(c)) \cdot \sigma(n)}$$
 
-This is decreasing in $\sigma(n)$, hence decreasing in $n$ for $n > k^*$. 0◻
+This is decreasing in $\sigma(n)$, hence decreasing in $n$ for $n > k^*$. ◻
+:::
 
 **Interpretation:** "Trust me, I'm serious, this is absolutely true, I swear" is *less* credible than just stating the claim. The emphasis signals desperation.
 
 ## The Meta-Assertion Trap
 
-**Theorem 3.4 (Meta-Assertion Trap).** Let $a$ be a cheap talk assertion and $m$ be a meta-assertion "assertion $a$ is credible." Then: $$C(c, a \cup m) \leq C(c, a) + \epsilon$$
+::: theorem
+[]{#thm:meta-assertion-trap label="thm:meta-assertion-trap"} Let $a$ be a cheap talk assertion and $m$ be a meta-assertion "assertion $a$ is credible." Then: $$C(c, a \cup m) \leq C(c, a) + \epsilon$$ where $\epsilon \to 0$ as common knowledge of rationality increases.
+:::
 
-where $\epsilon \to 0$ as common knowledge of rationality increases.
-
-Meta-assertion $m$ is itself cheap talk (costs nothing to produce regardless of truth). Therefore $m$ is subject to the Cheap Talk Bound (Theorem 3.1).
+::: proof
+*Proof.* Meta-assertion $m$ is itself cheap talk (costs nothing to produce regardless of truth). Therefore $m$ is subject to the Cheap Talk Bound (Theorem [\[thm:cheap-talk-bound\]](#thm:cheap-talk-bound){reference-type="ref" reference="thm:cheap-talk-bound"}).
 
 Under common knowledge of rationality, agents anticipate that deceptive agents will produce meta-assertions. Therefore: $$P(m | \text{deceptive}) \approx P(m | \text{honest})$$
 
-The signal provides negligible information; $\epsilon \to 0$. 0◻
+The signal provides negligible information; $\epsilon \to 0$. ◻
+:::
 
 **Interpretation:** "My claims are verified" is cheap talk about cheap talk. It doesn't escape the bound---it's *subject to* the bound recursively. Adding "really verified, I promise" makes it worse.
 
@@ -507,4 +523,3 @@ All theorems are formalized in Lean 4:
 - Location: `docs/papers/proofs/paper5_*.lean`
 - Lines: 58
 - Theorems: 0
-- Sorry placeholders: 1

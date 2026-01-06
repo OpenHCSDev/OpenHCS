@@ -1,0 +1,12 @@
+error: TheoreticalMinimality/Framework.lean:118:4: Type mismatch
+  Eq.symm (theory_eq_of_minimal h h_T'_min)
+has type
+  T = T'
+but is expected to have type
+  T' = T
+warning: TheoreticalMinimality/Framework.lean:157:20: unused variable `I`
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+error: Lean exited with code 1
+Some required targets logged failures:
+- TheoreticalMinimality.Framework

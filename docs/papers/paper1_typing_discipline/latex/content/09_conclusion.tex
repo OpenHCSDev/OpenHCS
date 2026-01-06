@@ -6,8 +6,8 @@ This paper proves an impossibility theorem: \textbf{any classification system wi
 
 The corollary is equally strong: \textbf{axis-parameterized systems dominate fixed systems absolutely.} A parameterized system can instantiate any axis set, achieving completeness for any domain. The asymmetry is:
 \begin{itemize}
-\item Fixed: $\forall A.\, \exists D.\, \neg\text{complete}(A, D)$ --- every fixed system fails somewhere
-\item Parameterized: $\forall D.\, \exists A.\, \text{complete}(A, D)$ --- every domain is reachable
+\item Fixed: $\forall A.\, \exists D.\, \neg\text{complete}(A, D)$. Every fixed system fails somewhere
+\item Parameterized: $\forall D.\, \exists A.\, \text{complete}(A, D)$. Every domain is reachable
 \end{itemize}
 
 This result applies to any classification scheme: type systems, ontologies, taxonomies, database schemas, knowledge graphs. The type system instantiation is one case study.
@@ -20,28 +20,30 @@ For programming languages with class-based inheritance:
 \def\labelenumi{\arabic{enumi}.}
 \item
   \textbf{The \(B = \emptyset\) criterion}: If a language has
-  inheritance (\(B \neq \emptyset\)), nominal typing is the capability-maximizing
-  choice (Theorem 2.18). If a language lacks inheritance (\(B = \emptyset\)),
-  structural typing is correct. Duck typing is incoherent in both cases
-  (Theorem 2.10d).
+  inheritance (\(B \neq \emptyset\)), including $B$ in the axis set is required for
+  capability-maximization (Theorem 2.18). If a language lacks inheritance (\(B = \emptyset\)),
+  $\{S\}$-only systems (structural typing) are correct. Duck typing is incoherent in both cases
+  (Theorem 2.10d). \textbf{Terminology note:} In type system terminology, $\{B, S\}$-inclusive systems are called ``nominal typing''; $\{S\}$-only systems are called ``structural typing.''
 \item
-  \textbf{Complexity separation}: Nominal typing achieves O(1) error
-  localization versus duck typing's \(\Omega\)(n) (Theorem 4.3). The gap is unbounded.
+  \textbf{Complexity separation}: Systems using $\{B, S\}$ achieve O(1) error
+  localization versus $\{S\}$-only incoherent use (duck typing) requiring $\Omega(n)$ (Theorem 4.3). The gap is unbounded.
 \item
-  \textbf{Provenance impossibility}: Duck typing cannot provide provenance
+  \textbf{Provenance impossibility}: Systems using only $\{S\}$ cannot provide provenance
   (Corollary 6.3, machine-checked). This is information-theoretic, not implementational.
 \item
   \textbf{Hierarchical extension}: For systems with scope hierarchies,
   $(B, S, H)$ is the unique minimal complete axis set (Theorem 3.63).
 \end{enumerate}
 
-\textbf{The decision procedure:} Given domain requirements, the required axes are \emph{computable}. The typing discipline follows deterministically.
+\textbf{The decision procedure:} Given domain requirements, the required axes are \emph{computable} (Theorem 2.26). The typing discipline follows deterministically.
 
 \subsubsection{Summary of Results}\label{summary-of-results}
 
-The decision procedure (Theorem 3.62) outputs ``nominal typing'' when
-\(B \neq \emptyset\) and ``structural typing'' when \(B = \emptyset\).
+The decision procedure (Theorem 3.62) outputs ``$\{B,S\}$ typing'' when
+\(B \neq \emptyset\) and ``$\{S\}$-only typing'' when \(B = \emptyset\).
 All proofs are machine-checked (Lean 4, 0 \texttt{sorry}).
+
+\textbf{Remark:} Traditional terms: nominal typing, structural typing.
 
 Two architects examining identical requirements will derive identical
 discipline choices. Disagreement indicates incomplete requirements or
@@ -49,16 +51,20 @@ different analysis; the formal framework provides a basis for resolution.
 
 \textbf{Incoherence of denial.} The uniqueness theorems establish $\neg\exists$ alternatives to the minimal complete axis set. The position ``these results are interesting but classification scheme design remains a preference'' presupposes $\exists$ alternatives. Accepting the theorems while maintaining preference instantiates $P \land \neg P$ (logical incoherence, not mere disagreement).
 
-For type systems specifically: this work does not contribute to the debate over typing disciplines. It resolves it. For classification systems generally: the ``which taxonomy should we use'' question has a mathematical answer given the domain.
+For type systems specifically: this work does not contribute to the debate over typing disciplines. It \textbf{dissolves} it by showing the debate presupposes a choice that doesn't exist. Axes are derived from domain requirements (Theorem 2.26); typing discipline names ("nominal," "structural") are labels for specific axis configurations. For classification systems generally: the ``which taxonomy should we use'' question has a mathematical answer given the domain.
 
-\textbf{On capability vs. aesthetics.} Aesthetics, elegance, and readability are orthogonal to capability. The theorems establish that nominal typing provides strictly more capabilities---this is a mathematical fact, not a stylistic preference. Choosing fewer capabilities is a sacrifice, not an alternative. If constraints force that sacrifice (e.g., interoperability with systems lacking type metadata), the sacrifice is justified---but it remains a sacrifice.
+\textbf{On capability vs. aesthetics.} Aesthetics, elegance, and readability are orthogonal to capability. The theorems establish that $\{B,S\}$ typing provides strictly more capabilities. This is a mathematical fact, not a stylistic preference. Choosing fewer capabilities is a sacrifice, not an alternative. If constraints force that sacrifice (e.g., interoperability with systems lacking type metadata), the sacrifice is justified, but it remains a sacrifice.
+
+\textbf{Remark:} Traditional term: nominal typing.
 
 \textbf{On PEP 20 (The Zen of Python).} PEP 20 is sometimes cited to
-justify duck typing. However, several Zen principles align with nominal
+justify $\{S\}$-only incoherent typing. However, several Zen principles align with $\{B,S\}$
 typing: ``Explicit is better than implicit'' (ABCs are explicit; hasattr
 is implicit), and ``In the face of ambiguity, refuse the temptation to
-guess'' (duck typing infers interface conformance; nominal typing verifies
+guess'' ($\{S\}$-only incoherent typing infers interface conformance; $\{B,S\}$ typing verifies
 it). We discuss this alignment in Section 8.9.
+
+\textbf{Remark:} Traditional terms: duck typing, nominal typing.
 
 \subsection{Application: LLM Code
 Generation}\label{application-llm-code-generation}
@@ -87,7 +93,7 @@ procedure
 
 \emph{Proof.} Direct application of Theorem 3.62. The generated code's
 patterns map to discipline choice. The decision procedure evaluates
-correctness based on whether \(B \neq \emptyset\). \(\blacksquare\)
+correctness based on whether \(B \neq \emptyset\). \qed
 
 \textbf{Implications.} An automated linter applying our decision
 procedure could: - Flag \texttt{hasattr()} in code with inheritance
@@ -101,14 +107,18 @@ metrics defined in Section 8.5 (DTD, NTR) can be computed on generated
 code to evaluate discipline adherence.
 
 \textbf{Falsifiability.} If code with \(B \neq \emptyset\) consistently
-performs better with structural patterns than nominal patterns, our
+performs better with $\{S\}$-only patterns than $\{B,S\}$ patterns, our
 Theorem 3.5 is falsified. We predict it will not.
+
+\textbf{Remark:} Traditional terms: structural patterns vs nominal patterns.
 
 \subsection{Data Availability}\label{sec:data-availability}
 
 \textbf{OpenHCS Codebase:} The OpenHCS platform (45K LoC Python) is available at \url{https://github.com/trissim/openhcs}~\cite{openhcs2025}. The codebase demonstrates the practical application of the theoretical framework, including the hierarchical scoping system (H axis) and ABC-based contracts.
 
-\textbf{PR \#44:} The migration from duck typing to nominal contracts is documented in a publicly verifiable pull request~\cite{openhcsPR44}: \url{https://github.com/trissim/openhcs/pull/44}. This PR eliminated 47 scattered \texttt{hasattr()} checks by introducing ABC contracts.
+\textbf{PR \#44:} The migration from $\{S\}$-only incoherent typing to $\{B,S\}$ contracts is documented in a publicly verifiable pull request~\cite{openhcsPR44}: \url{https://github.com/trissim/openhcs/pull/44}. This PR eliminated 47 scattered \texttt{hasattr()} checks by introducing ABC contracts.
+
+\textbf{Remark:} Traditional terms: duck typing to nominal contracts.
 
 \textbf{Lean 4 Proofs:} The complete Lean 4 formalization (2613 lines, 127 theorems, 0 \texttt{sorry} placeholders)~\cite{openhcsLeanProofs} is included as supplementary material. Reviewers can verify the proofs by running \texttt{lake build} in the proof directory.
 

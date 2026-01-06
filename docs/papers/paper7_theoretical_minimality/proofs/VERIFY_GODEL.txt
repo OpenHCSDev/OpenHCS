@@ -1,0 +1,16 @@
+⚠ [606/641] Replayed TheoreticalMinimality.Domain
+warning: TheoreticalMinimality/Domain.lean:218:41: unused variable `p`
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+⚠ [633/641] Replayed TheoreticalMinimality.Theory
+warning: TheoreticalMinimality/Theory.lean:52:5: unused variable `h_same_count`
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+warning: TheoreticalMinimality/Theory.lean:75:5: unused variable `i`
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+⚠ [634/641] Replayed TheoreticalMinimality.Minimality
+warning: TheoreticalMinimality/Minimality.lean:134:2: Try this: intro h_min ⟨T', h_smaller, h_covers⟩
+✔ [637/641] Built TheoreticalMinimality.Uniqueness (1.5s)
+✔ [638/641] Built TheoreticalMinimality.AntiPluralism (1.3s)
+✔ [639/641] Built TheoreticalMinimality.Instances (1.4s)

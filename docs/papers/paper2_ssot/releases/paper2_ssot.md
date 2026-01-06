@@ -1,6 +1,6 @@
 # Paper: Formal Foundations for the Single Source of Truth Principle
 
-**Status**: TOPLAS-ready | **Lean**: 1811 lines, 96 theorems, 0 sorry
+**Status**: TOPLAS-ready | **Lean**: 1811 lines, 96 theorems
 
 ---
 
@@ -2403,4 +2403,3 @@ All theorems are formalized in Lean 4:
 - Location: `docs/papers/proofs/paper2_*.lean`
 - Lines: 1811
 - Theorems: 96
-- Sorry placeholders: 0

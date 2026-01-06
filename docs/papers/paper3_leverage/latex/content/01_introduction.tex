@@ -52,7 +52,7 @@ The linear model $P_{\text{error}}(n, p) \approx np$ preserves all pairwise orde
 \end{theorem}
 
 \begin{proof}
-Taylor expansion: $(1-p)^n = 1 - np + \binom{n}{2}p^2 - \cdots$. For $p < 0.05$, higher-order terms $< 0.025n^2p^2$. Ordering preservation: if $n_1 < n_2$, then $n_1p < n_2p$ (strict monotonicity). \(\blacksquare\)
+Taylor expansion: $(1-p)^n = 1 - np + \binom{n}{2}p^2 - \cdots$. For $p < 0.05$, higher-order terms $< 0.025n^2p^2$. Ordering preservation: if $n_1 < n_2$, then $n_1p < n_2p$ (strict monotonicity).
 \end{proof}
 
 \subsection{Leverage Gap}
@@ -69,7 +69,7 @@ Therefore:
 \end{theorem}
 
 \begin{proof}
-Each DOF is an independent modification point. When fact $F$ changes, each location encoding $F$ requires update. Expected modifications = (number of locations) $\times$ (probability of change). \(\blacksquare\)
+Each DOF is an independent modification point. When fact $F$ changes, each location encoding $F$ requires update. Expected modifications = (number of locations) $\times$ (probability of change).
 \end{proof}
 
 \subsection{Building on Prior Results}
@@ -88,7 +88,7 @@ Paper 2's SSOT theorem is the coherence foundation. This paper adds: given DOF =
 \end{theorem}
 
 \begin{proof}
-Paper 2 proves: $\text{DOF} > 1$ for a fact $F$ implies oracles can diverge (incoherence). Therefore coherent architecture requires $\text{DOF}(F) = 1$ for each fact $F$. Given this constraint, architectures differ in how many capabilities they derive from coherent representation. This ratio is leverage. \(\blacksquare\)
+Paper 2 proves: $\text{DOF} > 1$ for a fact $F$ implies oracles can diverge (incoherence). Therefore coherent architecture requires $\text{DOF}(F) = 1$ for each fact $F$. Given this constraint, architectures differ in how many capabilities they derive from coherent representation. This ratio is leverage.
 \end{proof}
 
 \begin{theorem}[Paper 1 Integration]\label{thm:paper1-instance}
@@ -96,7 +96,7 @@ Paper 1's axis orthogonality theorem enables error independence. Nominal typing 
 \end{theorem}
 
 \begin{proof}
-By Paper 1, axes are orthogonal, so errors are independent (Theorem~\ref{thm:error-independence}). Nominal typing adds 4 B-dependent capabilities impossible with duck typing. DOF is comparable (both are type systems with similar annotation burden). Therefore $L_{\text{nominal}} = (c+4)/d > c/d = L_{\text{duck}}$. \(\blacksquare\)
+By Paper 1, axes are orthogonal, so errors are independent (Theorem~\ref{thm:error-independence}). Nominal typing adds 4 B-dependent capabilities impossible with duck typing. DOF is comparable (both are type systems with similar annotation burden). Therefore $L_{\text{nominal}} = (c+4)/d > c/d = L_{\text{duck}}$.
 \end{proof}
 
 \subsection{Organization}

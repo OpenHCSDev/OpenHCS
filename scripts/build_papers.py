@@ -12,7 +12,7 @@ OpenHCS Architecture:
 STRUCTURAL INVARIANTS (mathematical constraints):
   1. Content: ∀p ∈ Papers: content(p) ⊂ paper_dir(p)/latex/content/*.tex
   2. Proofs:  ∀p ∈ Papers: proofs(p) ⊂ proofs_dir/paper{id}_*.lean
-  3. Output:  ∀p ∈ Papers: releases(p) = {pdf, md, BUILD_LOG.txt, tar.gz}
+  3. Output:  ∀p ∈ Papers: releases(p) = {pdf, md, BUILD_LOG.txt, tar.gz, zip}
 
 All papers follow identical structure. No special cases.
 """
@@ -352,7 +352,13 @@ class PaperBuilder:
             f.write("## Abstract\n\n")
             abstract_file = content_dir / "abstract.tex"
             if abstract_file.exists():
-                self._convert_latex_to_markdown(abstract_file, f, extract_env="abstract")
+                # Try extracting from \begin{abstract}...\end{abstract} first,
+                # fall back to raw file content if no environment found
+                content = abstract_file.read_text(encoding='utf-8')
+                if r'\begin{abstract}' in content:
+                    self._convert_latex_to_markdown(abstract_file, f, extract_env="abstract")
+                else:
+                    self._convert_latex_to_markdown(abstract_file, f)
             else:
                 f.write("_Abstract not available._\n\n")
 
@@ -454,10 +460,10 @@ class PaperBuilder:
         if self.arxiv_config.include_build_log:
             self._create_build_log(paper_id, package_dir)
 
-        # Phase 4: Create compressed archive
-        tar_path = self._create_archive(paper_id, package_dir)
+        # Phase 4: Create compressed archives
+        tar_path, zip_path = self._create_archive(paper_id, package_dir)
 
-        print(f"[arxiv] {paper_id} → {tar_path.relative_to(self.repo_root)}")
+        print(f"[arxiv] {paper_id} → {tar_path.relative_to(self.repo_root)}, {zip_path.name}")
         return tar_path
 
     def _validate_and_get_pdf(self, paper_id: str) -> Path:
@@ -597,20 +603,30 @@ Repository: https://github.com/trissim/openhcs
         log_file.write_text(log_content)
         print(f"[arxiv]   Build log: BUILD_LOG.txt (with compilation output)")
 
-    def _create_archive(self, paper_id: str, package_dir: Path) -> Path:
-        """Create compressed tar.gz archive of package in releases/."""
+    def _create_archive(self, paper_id: str, package_dir: Path) -> tuple[Path, Path]:
+        """Create compressed tar.gz and zip archives of package in releases/."""
         import tarfile
+        import zipfile
 
         meta = self._get_paper_meta(paper_id)
         releases_dir = self._get_releases_dir(paper_id)
 
+        # Create tar.gz
         tar_name = f"{meta.dir_name}_arxiv.tar.gz"
         tar_path = releases_dir / tar_name
-
         with tarfile.open(tar_path, "w:gz") as tar:
             tar.add(package_dir, arcname=meta.dir_name)
 
-        return tar_path
+        # Create zip
+        zip_name = f"{meta.dir_name}_arxiv.zip"
+        zip_path = releases_dir / zip_name
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for file_path in package_dir.rglob("*"):
+                if file_path.is_file():
+                    arcname = meta.dir_name / file_path.relative_to(package_dir)
+                    zf.write(file_path, arcname)
+
+        return tar_path, zip_path
 
     def release(self, paper_id: str, verbose: bool = True):
         """Full release build: Lean + LaTeX + Markdown + arXiv package."""

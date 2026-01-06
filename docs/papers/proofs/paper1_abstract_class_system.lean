@@ -47,7 +47,6 @@ abbrev AttrName := String
 structure Typ where
   ns : Finset AttrName
   bs : List Typ
-deriving Repr
 
 noncomputable instance : DecidableEq Typ := Classical.decEq _
 
@@ -165,7 +164,8 @@ theorem shape_cannot_distinguish {α : Type _} (A B : Typ)
 -- Provenance result: which type provided the value
 structure Provenance where
   sourceType : Typ
-deriving DecidableEq
+
+noncomputable instance : DecidableEq Provenance := Classical.decEq _
 
 -- If a provenance function is shape-respecting, it cannot distinguish
 -- types with same namespace but different inheritance
@@ -340,11 +340,14 @@ theorem no_inheritance_implies_structural' :
 -/
 
 -- Two types with same "shape" but different identity
-def ConfigType : Typ := { ns := Finset.singleton "cfg", bs := [] }
-def StepConfigType : Typ := { ns := Finset.singleton "cfg", bs := [ConfigType] }
+def ConfigType : Typ := { ns := {"cfg"}, bs := [] }
+def StepConfigType : Typ := { ns := {"cfg"}, bs := [ConfigType] }
 
 -- They're nominally distinct
-theorem types_nominally_distinct : ConfigType ≠ StepConfigType := by decide
+theorem types_nominally_distinct : ConfigType ≠ StepConfigType := by
+  intro h
+  have : ConfigType.bs = StepConfigType.bs := by rw [h]
+  simp [ConfigType, StepConfigType] at this
 
 -- But if they have same namespace, they're shape-equivalent
 example : shapeEquivalent ConfigType StepConfigType := rfl
@@ -1006,18 +1009,18 @@ def prov (decl : Declared) (fuel : Nat) (T : Typ) (a : AttrName) :
   (ancestors fuel T).find? (fun u => a ∈ decl u)
 
 -- A Bool-valued query: “is provenance of (T, a) equal to provider P?”
-def provIs (decl : Declared) (fuel : Nat) (a : AttrName) (P : Typ) :
+noncomputable def provIs (decl : Declared) (fuel : Nat) (a : AttrName) (P : Typ) :
     SingleQuery :=
   fun T => decide (prov decl fuel T a = some P)
 
-private def attrX : Finset AttrName := Finset.singleton "x"
+private def attrX : Finset AttrName := {"x"}
 
 -- Concrete counterexample types
-def A : Typ := { ns := attrX, bs := [] }
-def B1 : Typ := { ns := attrX, bs := [A] }  -- inherits x from A
-def B2 : Typ := { ns := attrX, bs := [] }   -- declares x itself
+noncomputable def A : Typ := { ns := attrX, bs := [] }
+noncomputable def B1 : Typ := { ns := attrX, bs := [A] }  -- inherits x from A
+noncomputable def B2 : Typ := { ns := attrX, bs := [] }   -- declares x itself
 
-def declEx : Declared :=
+noncomputable def declEx : Declared :=
   fun t =>
     if t = A then attrX
     else if t = B2 then attrX
@@ -1319,7 +1322,8 @@ structure Runtime where
   N : String
   B : List Typ
   S : List AttrName
-  deriving DecidableEq, Repr
+
+noncomputable instance : DecidableEq Runtime := Classical.decEq _
 
 -- Abstraction: project to the axes triple
 def axesProj (r : Runtime) : String × List Typ × List AttrName := (r.N, r.B, r.S)
@@ -1612,7 +1616,8 @@ inductive ObservableInfo where
   | typeName : Typ → ObservableInfo           -- Label only (not independent; see Part 1)
   | typeParents : Typ → List Typ → ObservableInfo  -- B: declared parent types
   | typeAttrs : Typ → List AttrName → ObservableInfo  -- S: declared attributes
-deriving DecidableEq, Repr
+
+noncomputable instance : DecidableEq ObservableInfo := Classical.decEq _
 
 -- The (B, S) model captures all observables (typeName is just a label)
 def modelCaptures (obs : ObservableInfo) : Prop :=
@@ -1821,7 +1826,8 @@ theorem greenfield_is_claimed :
 structure GenericType where
   baseName : Typ           -- The generic name (e.g., "List")
   parameters : List Typ    -- Type parameters (e.g., [Dog])
-deriving DecidableEq, Repr
+
+noncomputable instance : DecidableEq GenericType := Classical.decEq _
 
 -- Parameterized name: encodes both base and parameters (for labeling only)
 def parameterizedName (g : GenericType) : Typ × List Typ :=
@@ -2010,15 +2016,19 @@ abbrev HierarchyId := String
 structure HierarchicalType where
   baseType : Typ           -- The type (carries B, S implicitly)
   hierarchy : HierarchyId  -- Where in the runtime hierarchy
-deriving DecidableEq, Repr
+
+noncomputable instance : DecidableEq HierarchicalType := Classical.decEq _
 
 -- THEOREM 3.57: H is orthogonal to (B, S)
 -- Two types with same (B, S) can have different hierarchy levels
+-- Note: We use a simple witness type with empty namespace and bases
+private def witnessTyp : Typ := { ns := ∅, bs := [] }
+
 theorem hierarchy_is_orthogonal (ns : Namespace) (B : Bases) :
     ∃ (T1 T2 : HierarchicalType),
       T1.baseType = T2.baseType ∧    -- Same (B, S) via same type
       T1.hierarchy ≠ T2.hierarchy :=  -- Different hierarchy levels
-  ⟨⟨0, "global"⟩, ⟨0, "plate::step_0"⟩, rfl, by decide⟩
+  ⟨⟨witnessTyp, "global"⟩, ⟨witnessTyp, "plate::step_0"⟩, rfl, by decide⟩
 
 -- The extended axis set including Hierarchy
 inductive ExtendedAxis where
@@ -2065,7 +2075,8 @@ theorem all_hierarchy_capabilities_require_H :
 structure RuntimeContext where
   typeInfo : Typ                  -- The type (carries B, S)
   hierarchyId : Option HierarchyId -- None = use (B, S) only; Some = use (B, S, H)
-deriving DecidableEq, Repr
+
+noncomputable instance : DecidableEq RuntimeContext := Classical.decEq _
 
 def usesOnlyBS (ctx : RuntimeContext) : Prop := ctx.hierarchyId.isNone
 def usesFullModel (ctx : RuntimeContext) : Prop := ctx.hierarchyId.isSome
@@ -2892,7 +2903,7 @@ theorem bases_underdetermines_namespace :
       T₁.bs = bs ∧ T₂.bs = bs ∧ T₁.ns ≠ T₂.ns := by
   intro bs
   let T₁ : Typ := { ns := ∅, bs := bs }
-  let T₂ : Typ := { ns := Finset.singleton "x", bs := bs }
+  let T₂ : Typ := { ns := {"x"}, bs := bs }
   refine ⟨T₁, T₂, rfl, rfl, ?_⟩
   simp [T₁, T₂]
 

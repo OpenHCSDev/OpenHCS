@@ -17,25 +17,31 @@ systems requiring these capabilities exist.'' One example suffices for
 an existential claim. OpenHCS demonstrates that real systems require
 provenance tracking, MRO-based resolution, and type-identity
 dispatch, exactly the capabilities Theorem 3.19 proves impossible under
-structural typing.
+$\{S\}$-only typing.
+
+\textbf{Remark:} In type system terminology, $\{S\}$-only typing is called structural typing.
 
 \textbf{Second: Case studies are theorem instantiations.} Table 5.1
 links each case study to the theorem it validates. These are not
 arbitrary examples: they are empirical instantiations of theoretical
 predictions. The theory predicts that systems requiring provenance will
-use nominal typing; the case studies confirm this prediction. The 13
+use $\{B,S\}$ typing; the case studies confirm this prediction. The 13
 patterns are 13 independent architectural decisions, each of which could
-have used structural typing but provably could not. Packaging these
+have used $\{S\}$-only typing but provably could not. Packaging these
 patterns into separate repositories would not add information: it would
 be technicality theater. The mathematical impossibility results are the
 contribution; OpenHCS is the existence proof that the impossibility
 matters.
 
+\textbf{Remark:} In type system terminology, $\{B,S\}$ is nominal typing; $\{S\}$-only is structural typing.
+
 \textbf{Third: Falsifiable predictions.} The decision procedure (Theorem
 3.62) makes falsifiable predictions: systems where \(B \neq \emptyset\)
-should exhibit nominal patterns; systems where \(B = \emptyset\) should
-exhibit structural patterns. Any codebase where this prediction fails
+should exhibit $\{B,S\}$ patterns; systems where \(B = \emptyset\) should
+exhibit $\{S\}$-only patterns. Any codebase where this prediction fails
 would falsify our theory.
+
+\textbf{Remark:} In type system terminology, $\{B,S\}$ patterns are nominal; $\{S\}$-only are structural.
 
 \textbf{The validation structure:}
 
@@ -64,22 +70,26 @@ Decision procedure & Falsifiability & Theorem 3.62 (machine-checked) \\
 
 OpenHCS is a bioimage analysis platform for high-content screening
 microscopy. The system was designed from the start with explicit
-commitment to nominal typing, exposing the consequences of this
+commitment to $\{B,S\}$ typing, exposing the consequences of this
 architectural decision through 13 distinct patterns. These case studies
 demonstrate the methodology in action: for each pattern, we identify
 whether it requires provenance tracking, MRO-based resolution, or type
-identity as dictionary keys: all indicators that nominal typing is
+identity as dictionary keys: all indicators that $\{B,S\}$ typing is
 mandatory per the formal model.
 
-Duck typing fails for all 13 patterns because they fundamentally require
+\textbf{Remark:} In type system terminology, $\{B,S\}$ typing is called nominal typing.
+
+$\{S\}$-only incoherent typing fails for all 13 patterns because they fundamentally require
 \textbf{type identity} rather than structural compatibility.
 Configuration resolution needs to know \emph{which type} provided a
 value (provenance tracking, Corollary 6.3). MRO-based priority needs
 inheritance relationships preserved (Theorem 3.4). Metaclass
 registration needs types as dictionary keys (type identity as hash).
 These requirements are not implementation details. They are
-architectural necessities proven impossible under duck typing's
+architectural necessities proven impossible under $\{S\}$-only typing's
 structural equivalence axiom.
+
+\textbf{Remark:} "$\{S\}$-only incoherent typing" is traditionally called "duck typing."
 
 The 13 studies demonstrate four pattern taxonomies: (1) \textbf{type
 discrimination} (WellFilterConfig hierarchy), (2) \textbf{metaclass
@@ -87,8 +97,10 @@ registration} (AutoRegisterMeta, GlobalConfigMeta,
 DynamicInterfaceMeta), (3) \textbf{MRO-based resolution} (dual-axis
 resolver, @global\_pipeline\_config chain), and (4)
 \textbf{bidirectional lookup} (lazy \(\leftrightarrow\) base type
-registries). Table 5.2 summarizes how each pattern fails under duck
-typing and what nominal mechanism enables it.
+registries). Table 5.2 summarizes how each pattern fails under $\{S\}$-only
+incoherent typing and what $\{B,S\}$ mechanism enables it.
+
+\textbf{Remark:} Traditional terms: duck typing (incoherent) and nominal typing.
 
 \subsubsection{Table 5.1: Case Studies as Theorem
 Validation}\label{table-5.1-case-studies-as-theorem-validation}
@@ -307,11 +319,13 @@ Duck typing's verdict: \textbf{identical}. Same attributes, same values.
   Scope discrimination
 \end{enumerate}
 
-Duck typing cannot answer ANY of these questions. The information is
+$\{S\}$-only typing cannot answer ANY of these questions. The information is
 \textbf{not in the structure}: it is in the \textbf{type identity} and
 \textbf{MRO position}.
 
-\textbf{Nominal typing answers all three in O(1):}
+\textbf{$\{B,S\}$ typing answers all three in O(1):}
+
+\textbf{Remark:} In type system terminology, $\{B,S\}$ is nominal typing; $\{S\}$-only is duck/structural typing.
 
 \begin{verbatim}
 isinstance(config, StepWellFilterConfig)  # Scope check: O(1)
@@ -319,24 +333,28 @@ type(config).__mro__                       # Full provenance chain: O(1)
 type(config).__mro__.index(StepWellFilterConfig)  # MRO position: O(k)
 \end{verbatim}
 
-\textbf{Corollary 5.2 (Scope Encoding Requires Nominal Typing).} Any
+\textbf{Corollary 5.2 (Scope Encoding Requires $\{B,S\}$ Typing).} Any
 system that encodes scope semantics in inheritance hierarchies (where
 structurally-identical types at different MRO positions have different
-meanings) \textbf{requires} nominal typing. Duck typing makes such
+meanings) \textbf{requires} $\{B,S\}$ typing. $\{S\}$-only typing makes such
 architectures impossible (not difficult, \textbf{impossible}).
 
-\emph{Proof.} Duck typing defines equivalence as
+\textbf{Remark:} In type system terminology, $\{B,S\}$ typing is called nominal typing; $\{S\}$-only is duck/structural typing.
+
+\emph{Proof.} $\{S\}$-only typing defines equivalence as
 \(S(A) = S(B) \Rightarrow A \equiv B\). If \(A\) and \(B\) are
 structurally identical but semantically distinct (different scopes),
-duck typing \textbf{by definition} cannot distinguish them. This is not
-a limitation of duck typing implementations; it is the
-\textbf{definition} of duck typing. \(\blacksquare\)
+$\{S\}$-only typing \textbf{by definition} cannot distinguish them. This is not
+a limitation of $\{S\}$-only implementations; it is the
+\textbf{definition} of $\{S\}$-only typing. \qed
 
 \textbf{This is not an edge case.} The OpenHCS configuration system has
 15 \texttt{@global\_pipeline\_config} decorated dataclasses forming
 multiple diamond inheritance patterns. The entire architecture depends
 on MRO position distinguishing types with identical structure. Under
-duck typing, this system \textbf{cannot exist}.
+$\{S\}$-only typing, this system \textbf{cannot exist}.
+
+\textbf{Remark:} "Duck typing" is the traditional term for $\{S\}$-only incoherent typing.
 
 \textbf{Pattern (Table 5.1, Row 1):} Type discrimination via MRO
 position. This case study demonstrates: - Theorem 4.1: O(1) type
@@ -365,7 +383,7 @@ the axis independence property (Definition 2.5), the axes \((B, S)\)
 are independent: \(S\) carries no information about \(B\). 4.
 \textbf{Therefore \(\sigma\) cannot provide B-dependent capabilities.}
 Since \(\sigma \in S\) and B-dependent capabilities require information
-not in \(S\), no sentinel attribute can recover them. \(\blacksquare\)
+not in \(S\), no sentinel attribute can recover them. \qed
 
 \textbf{Corollary 5.2b (Specific Sentinel Failures).}
 
@@ -402,7 +420,7 @@ attributes can \emph{simulate} type identity (by convention) but cannot
 \emph{recover} the capabilities that identity provides. The simulation
 is unenforced (violable without type error), unenumerable (no registry),
 and unordered (no MRO for conflicts). This is precisely the capability
-gap of Theorem 3.19, repackaged. \(\blacksquare\)
+gap of Theorem 3.19, repackaged. \qed
 
 \subsubsection{\texorpdfstring{5.3 Case Study 2: Discriminated Unions
 via
@@ -529,41 +547,47 @@ explicit
 
 Duck typing couples the check to attribute names (strings), creating
 maintenance fragility. Renaming a field breaks all \texttt{hasattr()}
-call sites. Nominal typing couples the check to type identity, which is
+call sites. $\{B,S\}$ typing couples the check to type identity, which is
 refactoring-safe.
 
-\textbf{Pattern (Table 5.1, Row 4):} Polymorphic dispatch with interface
-guarantees. Demonstrates how nominal ABC contracts provide fail-loud
-validation that duck typing's fail-silent probing cannot match.
+\textbf{Remark:} In type system terminology, $\{B,S\}$ is nominal typing.
 
-\subsection{Case Study 5: Migration from Duck to Nominal Typing
+\textbf{Pattern (Table 5.1, Row 4):} Polymorphic dispatch with interface
+guarantees. Demonstrates how $\{B,S\}$ ABC contracts provide fail-loud
+validation that $\{S\}$-only incoherent typing's fail-silent probing cannot match.
+
+\textbf{Remark:} Traditional terms: nominal typing vs duck typing.
+
+\subsection{Case Study 5: Migration from $\{S\}$-Only Incoherent to $\{B,S\}$ Typing
 (PR
 \#44)}\label{case-study-5-migration-from-duck-to-nominal-typing-pr-44}
 
-PR \#44~\cite{openhcsPR44} (``UI Anti-Duck-Typing Refactor'') migrated OpenHCS's UI layer from duck typing to
-nominal ABC contracts. The architectural changes:
+\textbf{Remark:} Traditional terms: duck typing to nominal typing.
 
-\textbf{Before (duck typing):} - ParameterFormManager: 47
+PR \#44~\cite{openhcsPR44} (``UI Anti-Duck-Typing Refactor'') migrated OpenHCS's UI layer from $\{S\}$-only incoherent typing to
+$\{B,S\}$ ABC contracts. The architectural changes:
+
+\textbf{Before ($\{S\}$-only incoherent):} - ParameterFormManager: 47
 \texttt{hasattr()} dispatch points scattered across methods -
 CrossWindowPreviewMixin: attribute-based widget probing throughout -
 Dispatch tables: string attribute names mapped to handlers
 
-\textbf{After (nominal typing):} - ParameterFormManager: single
+\textbf{After ($\{B,S\}$ typing):} - ParameterFormManager: single
 \texttt{AbstractFormWidget} ABC with explicit contracts -
 CrossWindowPreviewMixin: explicit widget protocols - Dispatch tables:
-eliminated --- replaced by \texttt{isinstance()} + method calls
+eliminated, replaced by \texttt{isinstance()} + method calls
 
 \textbf{Architectural transformation:}
 
 \begin{verbatim}
-# BEFORE: Duck typing dispatch (scattered across 47 call sites)
+# BEFORE: {S}-only incoherent dispatch (scattered across 47 call sites)
 if hasattr(widget, 'isChecked'):
     return widget.isChecked()
 elif hasattr(widget, 'currentText'):
     return widget.currentText()
 # ... 45 more cases
 
-# AFTER: Nominal ABC (single definition point)
+# AFTER: {B,S} ABC (single definition point)
 class AbstractFormWidget(ABC):
     @abstractmethod
     def get_value(self) -> Any: pass
@@ -577,9 +601,11 @@ surface at class definition time (when ABC contract is violated) rather
 than at user interaction time (when attribute access fails silently).
 
 \textbf{Pattern (Table 5.1, Row 5):} Architecture migration from
-fail-silent duck typing to fail-loud nominal contracts. Demonstrates
+fail-silent $\{S\}$-only incoherent typing to fail-loud $\{B,S\}$ contracts. Demonstrates
 the complexity reduction predicted by Theorem 4.3: scattered
 \texttt{hasattr()} checks (n=47) were replaced with O(1) centralized ABC
+
+\textbf{Remark:} Traditional terms: duck typing to nominal typing.
 validation.
 
 \subsection{Case Study 6:
@@ -608,31 +634,39 @@ class ImageXpressHandler(MicroscopeHandler, metaclass=MicroscopeHandlerMeta):
     _microscope_type = 'imagexpress'
 \end{verbatim}
 
-This pattern is impossible with duck typing because: (1) type identity
-is required as dict values. Duck typing has no way to reference ``the
+This pattern is impossible with $\{S\}$-only incoherent typing because: (1) type identity
+is required as dict values. $\{S\}$-only incoherent typing has no way to reference ``the
 type itself'' distinct from instances, (2) skipping abstract classes
 requires checking \texttt{\_\_abstractmethods\_\_}, a class-level
-attribute inaccessible to duck typing's instance-level probing, and (3)
+attribute inaccessible to $\{S\}$-only incoherent typing's instance-level probing, and (3)
 inheritance-based key derivation (extracting ``imagexpress'' from
 ``ImageXpressHandler'') requires class name access.
 
+\textbf{Remark:} Traditional term: duck typing.
+
 The metaclass ensures exactly one handler per microscope type.
 Attempting to define a second \texttt{ImageXpressHandler} raises an
-exception at import time. Duck typing's runtime checks cannot provide
+exception at import time. $\{S\}$-only incoherent typing's runtime checks cannot provide
 this guarantee. Duplicates would silently overwrite.
 
+\textbf{Remark:} Traditional term: duck typing.
+
 \textbf{Pattern (Table 5.1, Row 6):} Auto-registration with type
-identity. Demonstrates that metaclasses fundamentally depend on nominal
+identity. Demonstrates that metaclasses fundamentally depend on $\{B,S\}$
 typing to distinguish classes from instances.
+
+\textbf{Remark:} Traditional term: nominal typing.
 
 \subsection{Case Study 7: Five-Stage Type
 Transformation}\label{case-study-7-five-stage-type-transformation}
 
-The decorator chain demonstrates nominal typing's power for systematic
+The decorator chain demonstrates $\{B,S\}$ typing's power for systematic
 type manipulation. Starting from \texttt{@auto\_create\_decorator}, one
 decorator invocation spawns a cascade that generates lazy companion
 types, injects fields into parent configs, and maintains bidirectional
 registries.
+
+\textbf{Remark:} Traditional term: nominal typing.
 
 \textbf{Stage 1: \texttt{@auto\_create\_decorator} on
 \texttt{GlobalPipelineConfig}}
@@ -713,8 +747,10 @@ equivalent types would be indistinguishable.
 
 \textbf{Pattern (Table 5.1, Row 7):} Type transformation with lineage
 tracking. Demonstrates the limits of what duck typing can express:
-runtime type generation requires \texttt{type()}, which returns nominal
+runtime type generation requires \texttt{type()}, which returns $\{B,S\}$
 identities.
+
+\textbf{Remark:} Traditional term: nominal identities.
 
 \subsection{Case Study 8: Dual-Axis Resolution
 Algorithm}\label{case-study-8-dual-axis-resolution-algorithm}
@@ -741,20 +777,26 @@ requested field.
 
 The \texttt{mro\_type} in the return tuple is the provenance: it records
 \emph{which type} provided the value. This is only meaningful under
-nominal typing where \texttt{PathPlanningConfig} and
+$\{B,S\}$ typing where \texttt{PathPlanningConfig} and
 \texttt{LazyPathPlanningConfig} are distinct despite identical
-structure. Duck typing sees both as having the same attributes, making
+structure. $\{S\}$-only incoherent typing sees both as having the same attributes, making
 \texttt{mro\_type} meaningless.
+
+\textbf{Remark:} Traditional terms: nominal typing vs duck typing.
 
 MRO position encodes priority: types earlier in the MRO override later
 types. The dual-axis product (scope \(\times\) MRO) creates
 O(\textbar scopes\textbar{} \(\times\) \textbar MRO\textbar) checks in
-worst case, but terminates early on first match. Duck typing would
+worst case, but terminates early on first match. $\{S\}$-only incoherent typing would
 require O(n) sequential attribute probing with no principled ordering.
+
+\textbf{Remark:} Traditional term: duck typing.
 
 \textbf{Pattern (Table 5.1, Row 8):} Dual-axis resolution with scope
 \(\times\) MRO product. Demonstrates that provenance tracking
-fundamentally requires nominal identity (Corollary 6.3).
+fundamentally requires $\{B,S\}$ identity (Corollary 6.3).
+
+\textbf{Remark:} Traditional term: nominal identity.
 
 \subsection{Case Study 9: Custom isinstance()
 Implementation}\label{case-study-9-custom-isinstance-implementation}
@@ -775,26 +817,34 @@ This metaclass enables ``virtual inheritance''. Classes can satisfy
 \texttt{isinstance(obj,\ Base)} without explicitly inheriting from
 \texttt{Base}. The check relies on the \texttt{\_is\_global\_config}
 class attribute (set by \texttt{@auto\_create\_decorator}), creating a
-nominal marker that duck typing cannot replicate.
+$\{B,S\}$ marker that $\{S\}$-only incoherent typing cannot replicate.
 
-Duck typing could check
+\textbf{Remark:} Traditional terms: nominal marker vs duck typing.
+
+$\{S\}$-only incoherent typing could check
 \texttt{hasattr(instance,\ \textquotesingle{}\_is\_global\_config\textquotesingle{})},
 but this is instance-level. The metaclass pattern requires class-level
 checks (\texttt{instance.\_\_class\_\_.\_is\_global\_config}),
 distinguishing the class from its instances. This is fundamentally
-nominal: the check is ``does this type have this marker?'' not ``does
+$\{B,S\}$: the check is ``does this type have this marker?'' not ``does
 this instance have this attribute?''
+
+\textbf{Remark:} Traditional terms: duck typing vs nominal.
 
 The virtual inheritance enables interface segregation:
 \texttt{GlobalPipelineConfig} advertises conformance to
 \texttt{GlobalConfigBase} without inheriting implementation. This is
-impossible with duck typing's attribute probing. There's no way to
+impossible with $\{S\}$-only incoherent typing's attribute probing. There's no way to
 express ``this class satisfies this interface'' as a runtime-checkable
 property.
 
+\textbf{Remark:} Traditional term: duck typing.
+
 \textbf{Pattern (Table 5.1, Row 9):} Custom isinstance via class-level
 markers. Demonstrates that Python's metaobject protocol is fundamentally
-nominal.
+$\{B,S\}$.
+
+\textbf{Remark:} Traditional term: nominal.
 
 \subsection{Case Study 10: Dynamic Interface
 Generation}\label{case-study-10-dynamic-interface-generation}
@@ -810,7 +860,7 @@ class DynamicInterfaceMeta(ABCMeta):
     @classmethod
     def get_or_create_interface(mcs, interface_name: str) -> Type:
         if interface_name not in mcs._generated_interfaces:
-            # Generate pure nominal type
+            # Generate pure {B,S} type
             interface = type(interface_name, (ABC,), {})
             mcs._generated_interfaces[interface_name] = interface
         return mcs._generated_interfaces[interface_name]
@@ -823,21 +873,27 @@ class NapariConfig(StreamingConfig, IStreamingConfig): pass
 \end{verbatim}
 
 The generated interfaces have empty namespaces: no methods, no
-attributes. Their sole purpose is nominal identity: marking that a class
-explicitly claims to implement an interface. This is pure nominal
-typing: structural typing would see these interfaces as equivalent to
+attributes. Their sole purpose is $\{B,S\}$ identity: marking that a class
+explicitly claims to implement an interface. This is pure $\{B,S\}$
+typing: $\{S\}$-only declared typing would see these interfaces as equivalent to
 \texttt{object} (since they have no distinguishing structure), but
-nominal typing distinguishes \texttt{IStreamingConfig} from
+$\{B,S\}$ typing distinguishes \texttt{IStreamingConfig} from
 \texttt{IVideoConfig} even though both are structurally empty.
 
-Duck typing has no equivalent concept. There's no way to express ``this
+\textbf{Remark:} Traditional terms: nominal identity, pure nominal typing, structural typing vs nominal typing.
+
+$\{S\}$-only incoherent typing has no equivalent concept. There's no way to express ``this
 class explicitly implements this contract'' without actual attributes to
-probe. The nominal marker enables explicit interface declarations in a
+probe. The $\{B,S\}$ marker enables explicit interface declarations in a
 dynamically-typed language.
 
+\textbf{Remark:} Traditional terms: duck typing vs nominal marker.
+
 \textbf{Pattern (Table 5.1, Row 10):} Runtime-generated interfaces with
-empty structure. Demonstrates that nominal identity can exist
+empty structure. Demonstrates that $\{B,S\}$ identity can exist
 independent of structural content.
+
+\textbf{Remark:} Traditional term: nominal identity.
 
 \subsection{Case Study 11: Framework Detection via Sentinel
 Type}\label{case-study-11-framework-detection-via-sentinel-type}
@@ -856,24 +912,30 @@ def has_framework_config():
 \end{verbatim}
 
 The sentinel is a runtime-generated type with empty namespace,
-instantiated once, and used as a dictionary key. Its nominal identity
+instantiated once, and used as a dictionary key. Its $\{B,S\}$ identity
 (memory address) guarantees uniqueness. Even if another module creates
 \texttt{type("\_FrameworkConfigSentinel",\ (),\ \{\})()}, the two
 sentinels are distinct objects with distinct identities.
 
-Duck typing cannot replicate this pattern. Attribute-based detection
+\textbf{Remark:} Traditional term: nominal identity.
+
+$\{S\}$-only incoherent typing cannot replicate this pattern. Attribute-based detection
 (\texttt{hasattr(module,\ attr\_name)}) couples the check to module
-structure. String-based keys (`framework') lack type safety. The nominal
+structure. String-based keys (`framework') lack type safety. The $\{B,S\}$
 sentinel provides a refactoring-safe, type-safe marker that exists
 independent of names or attributes.
+
+\textbf{Remark:} Traditional terms: duck typing vs nominal.
 
 This pattern appears in framework detection, feature flags, and
 capability markers. Contexts where the existence of a capability needs
 to be checked without coupling to implementation details.
 
 \textbf{Pattern (Table 5.1, Row 11):} Sentinel types for framework
-detection. Demonstrates nominal identity as a capability marker
+detection. Demonstrates $\{B,S\}$ identity as a capability marker
 independent of structure.
+
+\textbf{Remark:} Traditional term: nominal identity.
 
 \subsection{Case Study 12: Dynamic Method
 Injection}\label{case-study-12-dynamic-method-injection}
@@ -892,25 +954,33 @@ inject_conversion_methods(NumpyConverter, {
 \end{verbatim}
 
 Method injection requires a target type: the type whose namespace will
-be modified. Duck typing has no concept of ``the type itself'' as a
+be modified. $\{S\}$-only incoherent typing has no concept of ``the type itself'' as a
 mutable namespace. It can only access instances. To inject methods
-duck-style would require modifying every instance's
+$\{S\}$-incoherent-style would require modifying every instance's
 \texttt{\_\_dict\_\_}, which doesn't affect future instances.
 
-The nominal type serves as a shared namespace. Injecting
+\textbf{Remark:} Traditional term: duck typing.
+
+The $\{B,S\}$ type serves as a shared namespace. Injecting
 \texttt{to\_cupy} into \texttt{NumpyConverter} affects all instances
 (current and future) because method lookup walks
 \texttt{type(obj).\_\_dict\_\_} before \texttt{obj.\_\_dict\_\_}. This
-is fundamentally nominal: the type is a first-class object with its own
+is fundamentally $\{B,S\}$: the type is a first-class object with its own
 namespace, distinct from instance namespaces.
 
+\textbf{Remark:} Traditional term: nominal.
+
 This pattern enables plugins, mixins, and monkey-patching. All
-requiring types as mutable namespaces. Duck typing's instance-level view
+requiring types as mutable namespaces. $\{S\}$-only incoherent typing's instance-level view
 cannot express ``modify the behavior of all objects of this kind.''
+
+\textbf{Remark:} Traditional term: duck typing.
 
 \textbf{Pattern (Table 5.1, Row 12):} Dynamic method injection into type
 namespaces. Demonstrates that Python's type system treats types as
-first-class objects with nominal identity.
+first-class objects with $\{B,S\}$ identity.
+
+\textbf{Remark:} Traditional term: nominal identity.
 
 \subsection{Case Study 13: Bidirectional Type
 Lookup}\label{case-study-13-bidirectional-type-lookup}
@@ -942,9 +1012,11 @@ registry.register(LazyPathPlanningConfig, PathPlanningConfig)
 #        registry.get_lazy(PathPlanningConfig) -> LazyPathPlanningConfig
 \end{verbatim}
 
-Duck typing would require maintaining two separate dicts with string
+$\{S\}$-only incoherent typing would require maintaining two separate dicts with string
 keys (class names), introducing synchronization bugs. Renaming
 \texttt{PathPlanningConfig} would break the string-based lookup. The
+
+\textbf{Remark:} Traditional term: duck typing.
 nominal type identity serves as a refactoring-safe key that guarantees
 both dicts stay synchronized (a type can only be registered once,
 enforcing bijection.

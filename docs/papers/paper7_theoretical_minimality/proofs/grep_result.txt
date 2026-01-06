@@ -1,0 +1,2 @@
+83:axiom iso_preserves_minimal {D : Domain} [Finite D.Query] {T T' : Theory D} :
+116:    have h_T'_min : T'.isMinimal := iso_preserves_minimal h_iso h

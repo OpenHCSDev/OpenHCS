@@ -1,0 +1,6 @@
+✔ [305/641] Built Mathlib.Init (809ms)
+✔ [306/641] Built Mathlib.Tactic.Monotonicity.Attr (1.0s)
+✔ [307/641] Built Mathlib.Util.PPOptions (1.0s)
+✔ [308/641] Built Mathlib.Tactic.Trace (1.2s)
+✔ [309/641] Built Mathlib.Tactic.TypeCheck (1.3s)
+✔ [310/641] Built Mathlib.Data.Int.DivMod (1.2s)

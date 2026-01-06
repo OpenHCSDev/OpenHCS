@@ -1,0 +1,91 @@
+\section{Instances}\label{instances}
+
+Papers 1--3 already prove theoretical uniqueness for specific domains. We show how 
+they instantiate the general pattern.
+
+\subsection{Paper 1: Axis Orthogonality}\label{paper1-instance}
+
+\textbf{Domain:} Dataset with $n$ points in $\mathbb{R}^d$, finite attribute values.
+
+\textbf{Queries:} 
+\begin{itemize}
+\item "Are attributes $i$ and $j$ independent?"
+\item "What is the covariance between attributes?"
+\item "Which coordinate system minimizes redundancy?"
+\end{itemize}
+
+\textbf{Implementation:} All $n \times d$ coordinate values.
+
+\textbf{Minimal Theory:} Orthogonal coordinate axes.
+
+\textbf{Uniqueness:} Paper 1 proves that for finite discrete attributes, orthogonal 
+axes are the unique minimal coordinate system. Any non-orthogonal system introduces 
+redundant parameters (correlations between axes).
+
+\textbf{Instance of Theorem~\ref{thm:unique-minimal-theory}:} Orthogonal axes are 
+unique minimal theory for attribute independence queries.
+
+\textbf{Instance of Theorem~\ref{thm:computability-from-queries}:} Given queries about 
+independence, the algorithm extracts the unique orthogonal basis.
+
+\subsection{Paper 2: Single Source of Truth}\label{paper2-instance}
+
+\textbf{Domain:} Multi-scale representation system with coherence requirements.
+
+\textbf{Queries:}
+\begin{itemize}
+\item "What is the value at scale $s$ and position $p$?"
+\item "Are scales $s_1$ and $s_2$ coherent?"
+\item "How many degrees of freedom does the system have?"
+\end{itemize}
+
+\textbf{Implementation:} Complete specification of all scale-specific values.
+
+\textbf{Minimal Theory:} Single source of truth with projection operators.
+
+\textbf{Uniqueness:} Paper 2 proves DOF = 1 for coherent systems. The minimal theory 
+has one authoritative representation; all others are projections. Any multi-source 
+system either violates coherence or contains redundancy.
+
+\textbf{Instance of Theorem~\ref{thm:unique-minimal-theory}:} SSOT is unique minimal 
+theory for coherent multi-scale queries.
+
+\textbf{Instance of Theorem~\ref{thm:compression-necessity}:} Infinite scale queries 
+require compression into single source.
+
+\subsection{Paper 3: Leverage Uniqueness}\label{paper3-instance}
+
+\textbf{Domain:} Statistical dataset with $n$ points, selection criteria needed.
+
+\textbf{Queries:}
+\begin{itemize}
+\item "Which point has maximum influence on model fit?"
+\item "What is the optimal removal criterion?"
+\item "How does removing point $i$ affect uncertainty?"
+\end{itemize}
+
+\textbf{Implementation:} All point coordinates and statistical relationships.
+
+\textbf{Minimal Theory:} Weighted leverage scores.
+
+\textbf{Uniqueness:} Paper 3 proves weighted leverage is the unique optimization 
+criterion under statistical invariance. Any alternative criterion either fails some 
+optimality query or adds unnecessary parameters.
+
+\textbf{Instance of Theorem~\ref{thm:unique-minimal-theory}:} Leverage is unique 
+minimal theory for influence queries.
+
+\subsection{The General Pattern}\label{general-pattern}
+
+All three papers follow identical structure:
+\begin{enumerate}
+\item Define domain $D$ and query space $\text{Queries}(D)$
+\item Show minimal theory $T^*$ answers all queries
+\item Prove any alternative theory either incomplete or redundant
+\item Conclude $T^*$ is unique
+\end{enumerate}
+
+This is not coincidence---it is Theorem~\ref{thm:unique-minimal-theory} applied.
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
