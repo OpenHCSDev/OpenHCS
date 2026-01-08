@@ -252,10 +252,8 @@ class PipelineEditorWidget(AbstractManagerWidget):
         state = ObjectStateRegistry.get_by_scope(pipeline_scope)
 
         if not state:
-            # Create new Pipeline instance
-            pipeline = Pipeline(name=Path(plate_path).name)
-            # Add step_scope_ids attribute for tracking steps
-            pipeline.step_scope_ids = []
+            # Create new Pipeline instance with step_scope_ids as proper parameter
+            pipeline = Pipeline(name=Path(plate_path).name, step_scope_ids=[])
 
             # Create ObjectState
             state = ObjectState(
@@ -280,7 +278,7 @@ class PipelineEditorWidget(AbstractManagerWidget):
         if not pipeline_state:
             return []
 
-        step_scope_ids = pipeline_state.get_parameter("step_scope_ids") or []
+        step_scope_ids = pipeline_state.parameters.get("step_scope_ids") or []
 
         steps = []
         for scope_id in step_scope_ids:
@@ -326,7 +324,7 @@ class PipelineEditorWidget(AbstractManagerWidget):
         if not root_state:
             return {}
 
-        plate_paths = root_state.get_parameter("orchestrator_scope_ids") or []
+        plate_paths = root_state.parameters.get("orchestrator_scope_ids") or []
 
         # Build dict of plate_path -> steps
         result = {}
@@ -480,18 +478,23 @@ class PipelineEditorWidget(AbstractManagerWidget):
 
         def handle_save(edited_step):
             """Handle step save from editor."""
-            # Check if step already exists in pipeline (for Shift+Click saves)
-            if edited_step not in self.pipeline_steps:
-                self.pipeline_steps.append(edited_step)
-                ScopeTokenService.ensure_token(plate_scope, edited_step)
-                self.status_message.emit(f"Added new step: {edited_step.name}")
-            else:
-                # Step already exists, just update the display
-                self.status_message.emit(f"Updated step: {edited_step.name}")
+            # Use atomic operation to coalesce all ObjectState changes into one undo step
+            is_new = edited_step not in self.pipeline_steps
+            label = f"add step {edited_step.name}" if is_new else f"edit step {edited_step.name}"
 
-            # Update Pipeline ObjectState with new step list
-            if self.current_plate:
-                self._update_pipeline_steps(self.current_plate, self.pipeline_steps)
+            with ObjectStateRegistry.atomic(label):
+                # Check if step already exists in pipeline (for Shift+Click saves)
+                if is_new:
+                    self.pipeline_steps.append(edited_step)
+                    ScopeTokenService.ensure_token(plate_scope, edited_step)
+                    self.status_message.emit(f"Added new step: {edited_step.name}")
+                else:
+                    # Step already exists, just update the display
+                    self.status_message.emit(f"Updated step: {edited_step.name}")
+
+                # Update Pipeline ObjectState with new step list
+                if self.current_plate:
+                    self._update_pipeline_steps(self.current_plate, self.pipeline_steps)
 
             self.update_item_list()
             self.pipeline_changed.emit(self.pipeline_steps)
@@ -961,18 +964,23 @@ class PipelineEditorWidget(AbstractManagerWidget):
 
     def _perform_delete(self, items: List[Any]) -> None:
         """Remove steps from backing list (required abstract method)."""
-        # Unregister ObjectStates for deleted steps
-        for step in items:
-            self._unregister_step_state(step)
+        # Build descriptive label for undo
+        step_names = [getattr(step, 'name', '?') for step in items]
+        label = f"delete step{'s' if len(items) > 1 else ''} {', '.join(step_names)}"
 
-        # Build set of steps to delete (by identity, not equality)
-        steps_to_delete = set(id(step) for step in items)
-        self.pipeline_steps = [s for s in self.pipeline_steps if id(s) not in steps_to_delete]
-        self._normalize_step_scope_tokens()
+        with ObjectStateRegistry.atomic(label):
+            # Unregister ObjectStates for deleted steps
+            for step in items:
+                self._unregister_step_state(step)
 
-        # Sync to Pipeline ObjectState
-        if self.current_plate:
-            self._update_pipeline_steps(self.current_plate, self.pipeline_steps)
+            # Build set of steps to delete (by identity, not equality)
+            steps_to_delete = set(id(step) for step in items)
+            self.pipeline_steps = [s for s in self.pipeline_steps if id(s) not in steps_to_delete]
+            self._normalize_step_scope_tokens()
+
+            # Sync to Pipeline ObjectState
+            if self.current_plate:
+                self._update_pipeline_steps(self.current_plate, self.pipeline_steps)
 
         if self.selected_step in [getattr(step, 'name', '') for step in items]:
             self.selected_step = ""

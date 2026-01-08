@@ -120,17 +120,17 @@ from openhcs.config_framework.config import (
     get_base_config_type,
 )
 
-# Cache warming
-from openhcs.config_framework.cache_warming import (
-    prewarm_config_analysis_cache,
-    prewarm_callable_analysis_cache,
-)
-
 # Live context resolver
 from openhcs.config_framework.live_context_resolver import LiveContextResolver
 
 # Token cache
 from openhcs.config_framework.token_cache import TokenCache, SingleValueTokenCache, CacheKey
+
+# Object state
+from openhcs.config_framework.object_state import ObjectState, ObjectStateRegistry
+
+# Snapshot model
+from openhcs.config_framework.snapshot_model import Snapshot, StateSnapshot, Timeline
 
 __all__ = [
     # Factory
@@ -169,15 +169,19 @@ __all__ = [
     # Configuration
     'set_base_config_type',
     'get_base_config_type',
-    # Cache warming
-    'prewarm_config_analysis_cache',
-    'prewarm_callable_analysis_cache',
     # Live context resolver
     'LiveContextResolver',
     # Token cache
     'TokenCache',
     'SingleValueTokenCache',
     'CacheKey',
+    # Object state
+    'ObjectState',
+    'ObjectStateRegistry',
+    # Snapshot model
+    'Snapshot',
+    'StateSnapshot',
+    'Timeline',
 ]
 
 __version__ = '1.0.0'

@@ -8,9 +8,10 @@ PFM attaches to ObjectState when editor opens, detaches when closed.
 ObjectStateRegistry: Singleton registry of all ObjectState instances.
 Replaces LiveContextService._active_form_managers as the single source of truth.
 """
+from contextlib import contextmanager
 from dataclasses import is_dataclass, fields as dataclass_fields
 import logging
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Generator
 import copy
 
 from openhcs.config_framework.snapshot_model import Snapshot, StateSnapshot, Timeline
@@ -560,6 +561,10 @@ class ObjectStateRegistry:
     _max_history_size: int = 1000  # Max snapshots in DAG (increased since we don't truncate branches)
     _in_time_travel: bool = False  # Flag for PFM to know to refresh widget values
 
+    # Atomic operation state - when >0, snapshots are deferred until operation completes
+    _atomic_depth: int = 0
+    _atomic_label: Optional[str] = None  # Label for the coalesced snapshot
+
     # Limbo: ObjectStates temporarily removed during time-travel
     # When traveling to a snapshot, ObjectStates not in that snapshot are moved here.
     # When traveling forward or to head, they're restored from here.
@@ -575,6 +580,42 @@ class ObjectStateRegistry:
     # head_id always points to a valid key in _snapshots (guaranteed by construction)
     _timelines: Dict[str, Timeline] = {}
     _current_timeline: str = "main"
+
+    @classmethod
+    @contextmanager
+    def atomic(cls, label: str) -> Generator[None, None, None]:
+        """Context manager for atomic operations that should be a single undo step.
+
+        All ObjectState changes within this context are coalesced into a single
+        snapshot when the context exits. Nested atomic blocks are supported -
+        only the outermost block records the snapshot.
+
+        Example:
+            with ObjectStateRegistry.atomic("add step"):
+                # Register step ObjectState
+                ObjectStateRegistry.register(step_state)
+                # Update pipeline's step_scope_ids
+                pipeline_state.update_parameter("step_scope_ids", new_ids)
+                # Register function ObjectState
+                ObjectStateRegistry.register(func_state)
+            # Single snapshot recorded here with label "add step"
+
+        Args:
+            label: Human-readable label for the coalesced snapshot
+        """
+        cls._atomic_depth += 1
+        if cls._atomic_depth == 1:
+            cls._atomic_label = label
+
+        try:
+            yield
+        finally:
+            cls._atomic_depth -= 1
+            if cls._atomic_depth == 0:
+                # Outermost atomic block - record the coalesced snapshot
+                final_label = cls._atomic_label or label
+                cls._atomic_label = None
+                cls.record_snapshot(final_label)
 
     @classmethod
     def get_branch_history(cls, branch_name: Optional[str] = None) -> List[Snapshot]:
@@ -644,6 +685,12 @@ class ObjectStateRegistry:
 
         # CRITICAL: Don't record snapshots during time-travel
         if cls._in_time_travel:
+            return
+
+        # ATOMIC OPERATIONS: Defer snapshot until atomic block exits
+        # The atomic() context manager will call record_snapshot() when it completes
+        if cls._atomic_depth > 0:
+            logger.debug(f"⏱️ ATOMIC: Deferring snapshot '{label}' (depth={cls._atomic_depth})")
             return
 
         import time
@@ -864,12 +911,11 @@ class ObjectStateRegistry:
                         changed_param_keys.append((param_key, before, after))
                         has_param_change = True
 
-                # For CONTINUOUSLY EXISTING scopes: track param changes (user edits being undone/redone)
-                # For LIMBO-RESTORED scopes: don't use param changes (just initialization)
+                # Log param changes for debugging (but don't use to decide window opening)
+                # Only scopes with CONCRETE unsaved work should open windows (see below)
                 if has_param_change and not was_restored_from_limbo:
                     for pk, pv_before, pv_after in changed_param_keys:
                         logger.debug(f"⏱️ PARAM_CHANGE: {scope_key} param={pk} before={pv_before!r} after={pv_after!r}")
-                    scopes_needing_window.add(scope_key)
 
                 # RESTORE state (including saved_parameters for concrete dirty detection)
                 state._saved_resolved = copy.deepcopy(state_snap.saved_resolved)
@@ -1087,6 +1133,23 @@ class ObjectStateRegistry:
         """
         timeline = cls._timelines[name]  # KeyError if branch doesn't exist
 
+        # If we're back in time on current branch, preserve the old future as auto-branch
+        # before switching (same logic as diverge in record_snapshot)
+        if cls._current_head is not None and cls._current_timeline in cls._timelines:
+            old_head_id = cls._timelines[cls._current_timeline].head_id
+            if old_head_id != cls._current_head:
+                # There IS an old future to preserve
+                branch_name = f"auto-{old_head_id[:8]}"
+                if branch_name not in cls._timelines:
+                    cls._timelines[branch_name] = Timeline(
+                        name=branch_name,
+                        head_id=old_head_id,
+                        base_id=cls._current_head,
+                        description=f"Auto-saved before switch from {cls._current_timeline} at {cls._current_head[:8]}",
+                    )
+                    old_snapshot = cls._snapshots[old_head_id]
+                    logger.info(f"⏱️ AUTO-BRANCH: Created '{branch_name}' before branch switch (was {old_snapshot.label})")
+
         # Switch to branch and travel to its head
         cls._current_timeline = name
         result = cls.time_travel_to_snapshot(timeline.head_id)
@@ -1290,11 +1353,14 @@ class FieldProxy:
         field_type = field_info.type
 
         # Handle Optional[DataclassType]
-        from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
-        if isinstance(field_type, type) and ParameterTypeUtils.is_optional_dataclass(field_type):
-            nested_type = ParameterTypeUtils.get_optional_inner_type(field_type)
-            if isinstance(nested_type, type):
-                return FieldProxy(self._state, new_path, nested_type)
+        from typing import get_origin, get_args, Union
+        origin = get_origin(field_type)
+        if origin is Union:
+            args = get_args(field_type)
+            if len(args) == 2 and type(None) in args:
+                inner_type = next(arg for arg in args if arg is not type(None))
+                if is_dataclass(inner_type) and isinstance(inner_type, type):
+                    return FieldProxy(self._state, new_path, inner_type)
 
         # Handle direct dataclass type
         if isinstance(field_type, type) and is_dataclass(field_type):
@@ -1562,6 +1628,67 @@ class ObjectState:
     # DELETED: _create_nested_states() - No longer needed with flat storage
     # Nested ObjectStates are no longer created - flat storage handles all parameters
 
+    def _analyze_parameters(self, obj: Any, exclude_params: Optional[List[str]] = None) -> Dict[str, Any]:
+        """Analyze object parameters using pure stdlib introspection.
+
+        Returns dict mapping param_name -> info object with .param_type and .default_value attributes.
+
+        Handles:
+        - Dataclasses: uses dataclasses.fields()
+        - Regular classes: walks MRO and analyzes __init__ signatures
+        """
+        import inspect
+        from dataclasses import fields, MISSING
+        from types import SimpleNamespace
+
+        exclude_params = exclude_params or []
+        result = {}
+
+        obj_type = obj if isinstance(obj, type) else type(obj)
+
+        if is_dataclass(obj_type):
+            # Dataclass: use fields()
+            for field in fields(obj_type):
+                if field.name in exclude_params:
+                    continue
+                default = field.default if field.default is not MISSING else (
+                    field.default_factory() if field.default_factory is not MISSING else None
+                )
+                result[field.name] = SimpleNamespace(
+                    param_type=field.type,
+                    default_value=default
+                )
+        else:
+            # Non-dataclass: walk MRO and analyze __init__ signatures
+            for cls in obj_type.__mro__:
+                if cls is object:
+                    continue
+                if not hasattr(cls, '__init__') or cls.__init__ is object.__init__:
+                    continue
+
+                try:
+                    sig = inspect.signature(cls.__init__)
+                except (ValueError, TypeError):
+                    continue
+
+                for name, param in sig.parameters.items():
+                    if name in ('self', 'cls', 'args', 'kwargs'):
+                        continue
+                    if name in exclude_params:
+                        continue
+                    if name in result:  # Already found in more specific class
+                        continue
+
+                    param_type = param.annotation if param.annotation is not inspect.Parameter.empty else Any
+                    default = param.default if param.default is not inspect.Parameter.empty else None
+
+                    result[name] = SimpleNamespace(
+                        param_type=param_type,
+                        default_value=default
+                    )
+
+        return result
+
     def _get_nested_dataclass_type(self, param_type: Any) -> Optional[type]:
         """Get the nested dataclass type if param_type is a nested dataclass.
 
@@ -1571,11 +1698,16 @@ class ObjectState:
         Returns:
             The dataclass type if nested, None otherwise
         """
-        from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
+        from typing import get_origin, get_args, Union
 
         # Check Optional[dataclass]
-        if ParameterTypeUtils.is_optional_dataclass(param_type):
-            return ParameterTypeUtils.get_optional_inner_type(param_type)
+        origin = get_origin(param_type)
+        if origin is Union:
+            args = get_args(param_type)
+            if len(args) == 2 and type(None) in args:
+                inner_type = next(arg for arg in args if arg is not type(None))
+                if is_dataclass(inner_type):
+                    return inner_type
 
         # Check direct dataclass (but not the type itself)
         if is_dataclass(param_type) and not isinstance(param_type, type):
@@ -1613,6 +1745,10 @@ class ObjectState:
             value: New value
         """
         if param_name not in self.parameters:
+            logger.warning(
+                f"⚠️ update_parameter({param_name!r}) called on ObjectState(scope={self.scope_id!r}) "
+                f"but parameter does not exist. Available: {list(self.parameters.keys())[:5]}..."
+            )
             return
 
         # EARLY EXIT: No change, no invalidation, no flash
@@ -2003,18 +2139,18 @@ class ObjectState:
         Nested dataclass container fields are excluded since they're not
         directly editable values.
 
-        For steps: only includes fields INSIDE nested dataclass configs (has '.' in path),
-        not top-level step fields like name/func/enabled which are always set explicitly.
+        For non-dataclass roots (e.g. AbstractStep): only includes fields INSIDE nested
+        dataclass configs (has '.' in path), not top-level attrs which are set explicitly.
+        For dataclass roots: all fields are trackable.
         """
-        # Check if this is a step (has AbstractStep in MRO)
-        from openhcs.core.steps.abstract import AbstractStep
-        is_step = isinstance(self.object_instance, type) and issubclass(self.object_instance, AbstractStep) \
-                  or isinstance(self.object_instance, AbstractStep)
+        obj = self.object_instance
+        obj_type = obj if isinstance(obj, type) else type(obj)
+        is_dataclass_root = is_dataclass(obj_type)
 
         return {
             k for k, v in self.parameters.items()
             if k in self._signature_defaults
-            and (not is_step or '.' in k)  # For steps: only nested config fields
+            and (is_dataclass_root or '.' in k)  # dataclass: all fields; non-dataclass: only nested
             and v != self._signature_defaults[k]
         }
 
@@ -2349,37 +2485,6 @@ class ObjectState:
         """Check if updates should be skipped due to batch operations."""
         return self._in_reset or self._block_cross_window_updates
 
-    def update_thread_local_global_config(self):
-        """Update thread-local GlobalPipelineConfig with current form values.
-
-        LIVE UPDATES ARCHITECTURE:
-        Called on every parameter change when editing GlobalPipelineConfig.
-        Updates thread-local storage so other windows see changes immediately.
-        Original config is stored by ConfigWindow and restored on Cancel.
-        """
-        from openhcs.core.config import GlobalPipelineConfig
-        from openhcs.config_framework.global_config import set_global_config_for_editing
-
-        try:
-            # CRITICAL: Use to_object() to properly reconstruct nested structure from flat storage
-            # This ensures None values in nested configs (like well_filter_config.well_filter)
-            # are properly preserved and propagated to descendants.
-            # The old approach using get_current_values() + replace_raw() failed because:
-            # 1. get_current_values() returns flat dict with dotted paths ('well_filter_config.well_filter': None)
-            # 2. replace_raw() expects top-level field names, not dotted paths
-            # 3. This caused None values in nested configs to not be properly set in thread-local storage
-            updated_config = self.to_object()
-
-            # DEBUG: Log what we're about to set
-            raw_well_filter = object.__getattribute__(updated_config.well_filter_config, 'well_filter')
-            logger.debug(f"🔍 LIVE_UPDATES: to_object() returned well_filter={raw_well_filter}")
-            logger.debug(f"🔍 LIVE_UPDATES: Flat storage has well_filter_config.well_filter={self.parameters.get('well_filter_config.well_filter')}")
-
-            set_global_config_for_editing(GlobalPipelineConfig, updated_config)
-            logger.debug(f"🔍 LIVE_UPDATES: Updated thread-local GlobalPipelineConfig")
-        except Exception as e:
-            logger.warning(f"🔍 LIVE_UPDATES: Failed to update thread-local GlobalPipelineConfig: {e}")
-
     # ==================== FLAT STORAGE METHODS (NEW) ====================
 
     def _extract_all_parameters_flat(self, obj: Any, prefix: str = '', exclude_params: Optional[List[str]] = None) -> None:
@@ -2387,24 +2492,19 @@ class ObjectState:
 
         Populates self.parameters and self._path_to_type with dotted path keys.
 
-        UNIFIED PATH: Uses UnifiedParameterAnalyzer for ALL object types.
-        UnifiedParameterAnalyzer already handles both dataclasses and non-dataclasses
-        via its internal routing (MRO traversal for regular classes, dataclass_fields for dataclasses).
+        Uses pluggable parameter analyzer if available, falls back to stdlib dataclass introspection.
 
         Args:
             obj: Object to extract from (dataclass instance OR regular object like FunctionStep)
             prefix: Current path prefix (e.g., 'well_filter_config')
             exclude_params: List of top-level parameter names to exclude
         """
-        from openhcs.introspection.unified_parameter_analyzer import UnifiedParameterAnalyzer
-
         exclude_params = exclude_params or []
         obj_type = type(obj)
         is_function = obj_type.__name__ == 'function'
 
-        # UNIFIED: Use UnifiedParameterAnalyzer for ALL object types
-        # It already handles dataclasses vs non-dataclasses internally
-        param_info = UnifiedParameterAnalyzer.analyze(obj, exclude_params=exclude_params if not prefix else [])
+        # Try to use UnifiedParameterAnalyzer if available (OpenHCS), else fall back to stdlib
+        param_info = self._analyze_parameters(obj, exclude_params if not prefix else [])
 
         for param_name, info in param_info.items():
             # Skip excluded parameters (only at top level)
@@ -2518,7 +2618,12 @@ class ObjectState:
         else:
             # Non-dataclass class instance - shallow copy + setattr
             obj_copy = copy.copy(self.object_instance)
+            obj_type = type(self.object_instance)
             for field_name, field_value in field_updates.items():
+                # Skip read-only properties (those without setters)
+                prop = getattr(obj_type, field_name, None)
+                if isinstance(prop, property) and prop.fset is None:
+                    continue
                 setattr(obj_copy, field_name, field_value)
             self._cached_object = obj_copy
 

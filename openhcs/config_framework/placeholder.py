@@ -114,11 +114,8 @@ class LazyDefaultPlaceholderService:
         else:
             # Apply proper formatting for different value types
             if hasattr(resolved_value, 'value') and hasattr(resolved_value, 'name'):  # Enum
-                try:
-                    from openhcs.ui.shared.ui_utils import format_enum_display
-                    value_text = format_enum_display(resolved_value)
-                except ImportError:
-                    value_text = str(resolved_value)
+                # Format as "EnumName.VALUE" for display
+                value_text = f"{type(resolved_value).__name__}.{resolved_value.name}"
             else:
                 value_text = str(resolved_value)
         
@@ -152,11 +149,8 @@ class LazyDefaultPlaceholderService:
                 
                 # Format different value types appropriately
                 if hasattr(value, 'value') and hasattr(value, 'name'):  # Enum
-                    try:
-                        from openhcs.ui.shared.ui_utils import format_enum_display
-                        formatted_value = format_enum_display(value)
-                    except ImportError:
-                        formatted_value = str(value)
+                    # Format as "EnumName.VALUE" for display
+                    formatted_value = f"{type(value).__name__}.{value.name}"
                 elif isinstance(value, str) and len(value) > 20:  # Long strings
                     formatted_value = f"{value[:17]}..."
                 elif dataclasses.is_dataclass(value):  # Nested dataclass
