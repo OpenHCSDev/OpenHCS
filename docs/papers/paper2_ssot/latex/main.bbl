@@ -1,5 +1,11 @@
 \begin{thebibliography}{10}
 
+\bibitem{cook1989inheritance}
+William~R Cook, Walter Hill, and Peter~S Canning.
+\newblock Inheritance is not subtyping.
+\newblock In {\em Proceedings of the 17th ACM SIGPLAN-SIGACT Symposium on
+  Principles of Programming Languages}, pages 125--135. ACM, 1989.
+
 \bibitem{czarnecki2000generative}
 Krzysztof Czarnecki and Ulrich~W Eisenecker.
 \newblock {\em Generative Programming: Methods, Tools, and Applications}.
@@ -75,6 +81,11 @@ Benjamin~C Pierce.
 Lutz Prechelt.
 \newblock An empirical comparison of seven programming languages.
 \newblock {\em Computer}, 33(10):23--29, 2000.
+
+\bibitem{reynolds1983types}
+John~C Reynolds.
+\newblock Types, abstraction and parametric polymorphism.
+\newblock {\em Information Processing}, 83:513--523, 1983.
 
 \bibitem{roy2007survey}
 Chanchal~K Roy and James~R Cordy.

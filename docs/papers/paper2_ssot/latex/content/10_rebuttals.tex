@@ -148,4 +148,114 @@ The file proves:
 
 This addresses the critique directly: inconsistency is now a formal property that Lean knows about, not a comment. The interpretation ``this models real configuration systems'' still requires mapping to reality, but every formalization eventually bottoms out in interpretation. The contribution is making assumptions \emph{explicit and attackable}, not eliminating interpretation entirely.
 
+\subsection{Objection: What About the Type's Name?}
+
+\textbf{Objection:} ``Your two-axis model (B, S) ignores the type's name. Isn't N (the name) a third independent axis?''
+
+\textbf{Response:} No. N is not an independent axis---it is stored \emph{within} B. In Python, a class's name is simply \texttt{\_\_name\_\_ $\in$ \_\_dict\_\_}. More precisely:
+
+\begin{enumerate}
+\item \texttt{type(MyClass).\_\_name\_\_} returns \texttt{'MyClass'}
+\item This is an attribute lookup, meaning \texttt{\_\_name\_\_} is a key in the class's namespace
+\item The namespace \emph{is} the S axis (or accessible via B through the MRO)
+\end{enumerate}
+
+The Lean formalization (AbstractClassSystem.lean, lines 26--34) proves this formally:
+
+\begin{verbatim}
+CLARIFICATION ON "N" (Name):
+- N is just a label for a (B, S) pair
+- N contributes no observables beyond B
+- Two types with identical (B, S) are indistinguishable regardless of N
+- Theorem obs_eq_bs proves: (B, S) equality suffices; N adds nothing
+\end{verbatim}
+
+The operational test: given two classes with identical \texttt{\_\_bases\_\_} (B) and identical \texttt{\_\_dict\_\_} (S), can any Python code distinguish them by name alone? No---because the name \emph{is} an entry in \texttt{\_\_dict\_\_}. If two classes have the same dict, they have the same name.
+
+This is why the model is (B, S) and not (B, S, N). N adds no independent information. The full derivation appears in Paper 1~\cite{paper1_typing_discipline}, but the key insight is: in any language with explicit inheritance, the ``name'' is either:
+\begin{itemize}
+\tightlist
+\item An attribute (part of S), or
+\item Derivable from the MRO (part of B)
+\end{itemize}
+
+In both cases, N collapses into the existing axes.
+
+\subsection{Objection: Model Doesn't Mirror Compiler Internals}
+
+\textbf{Objection:} ``Your Rust model (RuntimeItem, erasure) doesn't mirror rustc's actual HIR→MIR phases. You haven't modeled proc-macro hygiene, \texttt{\#[link\_section]} retention, or the actual expander traces.''
+
+\textbf{Response:} We model \emph{observable behavior}, not compiler implementation. The claim is:
+
+\begin{quote}
+At runtime, you cannot distinguish hand-written code from macro-generated code.
+\end{quote}
+
+This is empirically testable. Challenge: produce Rust code that, at runtime, recovers whether a given struct was written by a human or expanded by a macro---without external metadata files, build logs, or source access.
+
+The model's \texttt{RuntimeItem} having no source field is \emph{observationally accurate}: real Rust binaries contain no such field. Whether rustc internally tracks provenance during compilation is irrelevant; what matters is that this information is not preserved in the final artifact.
+
+If the model is wrong, show the Rust code that falsifies it. The burden is on the critic to produce the counterexample.
+
+\subsection{Objection: You Just Need Discipline}
+
+\textbf{Objection:} ``Real teams maintain consistency through code review, documentation, and discipline. You don't need language features.''
+
+\textbf{Response:} Discipline \emph{is} the human oracle. The theorem states:
+
+\begin{quote}
+With DOF $> 1$, consistency requires an external oracle to resolve disagreements.
+\end{quote}
+
+``Discipline'' is exactly that oracle---human memory, review processes, documentation conventions. This is not a counterargument; it is the theorem restated in different words.
+
+The question is whether the oracle is:
+\begin{itemize}
+\tightlist
+\item \textbf{Internal} (language-enforced, automatic, unforgeable), or
+\item \textbf{External} (human-maintained, fallible, bypassable)
+\end{itemize}
+
+Language-level SSOT provides an internal oracle. Discipline provides an external one. Both satisfy consistency when they work. The difference is failure mode: language enforcement cannot be forgotten; human discipline can.
+
+\subsection{Objection: The Proofs Are Trivial}
+
+\textbf{Objection:} ``Most of your proofs are just \texttt{rfl} (reflexivity). That means they're trivial tautologies, not real theorems.''
+
+\textbf{Response:} When you model correctly, theorems become definitional. This is a feature, not a bug.
+
+Consider: ``The sum of two even numbers is even.'' In a well-designed formalization, this might be \texttt{rfl}---not because it's trivial, but because the definition of ``even'' was chosen to make the property structural.
+
+That said, not all proofs are \texttt{rfl}. The \texttt{rust\_lacks\_introspection} theorem is 40 lines of actual reasoning:
+
+\begin{enumerate}
+\item Assume a hypothetical introspection function exists
+\item Use \texttt{erasure\_destroys\_source} to show user-written and macro-expanded code produce identical \texttt{RuntimeItem}s
+\item Derive that the function would need to return two different sources for the same item
+\item Contradiction
+\end{enumerate}
+
+The proof structure (assumption → lemma application → contradiction) is genuine mathematical reasoning, not tautology. The \texttt{rfl} proofs establish the scaffolding; the substantive proofs build on that scaffolding.
+
+\subsection{Objection: Real Codebases Don't Need Formal DOF}
+
+\textbf{Objection:} ``Nobody actually needs Lean-enforced DOF guarantees. Conventions work fine in practice.''
+
+\textbf{Response:} This is an interpretation gap, not a flaw in the proof. We prove:
+
+\begin{quote}
+IF you encode a fact in multiple locations AND require guaranteed consistency, THEN you need either DOF = 1 or an external oracle.
+\end{quote}
+
+Whether real codebases ``need'' guaranteed consistency is an engineering judgment outside the scope of formal verification. The same gap exists for:
+
+\begin{itemize}
+\tightlist
+\item \textbf{CAP theorem:} Proves partition tolerance forces trade-off. Whether your system needs strong consistency is judgment.
+\item \textbf{Rice's theorem:} Proves semantic properties are undecidable. Whether you need decidable analysis is judgment.
+\item \textbf{Halting problem:} Proves general termination is undecidable. Whether your programs need termination guarantees is judgment.
+\end{itemize}
+
+The theorem characterizes what is \emph{logically required}. Application to specific codebases requires human interpretation. This is philosophy, not mathematics, and lies outside the proof's scope.
+
 %==============================================================================

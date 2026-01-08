@@ -5,47 +5,45 @@ The style file: plain.bst
 Database file #1: references.bib
 Warning--entry type for "openhcs2025" isn't style-file defined
 --line 351 of file references.bib
-Warning--I didn't find a database entry for "cook1989inheritance"
-Warning--I didn't find a database entry for "reynolds1983types"
-You've used 30 entries,
+You've used 32 entries,
             2118 wiz_defined-function locations,
-            669 strings with 8210 characters,
-and the built_in function-call counts, 8487 in all, are:
-= -- 833
-> -- 332
-< -- 3
-+ -- 148
-- -- 104
-* -- 464
-:= -- 1411
-add.period$ -- 99
-call.type$ -- 30
-change.case$ -- 133
+            681 strings with 8500 characters,
+and the built_in function-call counts, 9275 in all, are:
+= -- 919
+> -- 357
+< -- 4
++ -- 158
+- -- 112
+* -- 513
+:= -- 1530
+add.period$ -- 106
+call.type$ -- 32
+change.case$ -- 143
 chr.to.int$ -- 0
-cite$ -- 30
-duplicate$ -- 338
-empty$ -- 754
-format.name$ -- 104
-if$ -- 1807
+cite$ -- 32
+duplicate$ -- 372
+empty$ -- 821
+format.name$ -- 112
+if$ -- 1983
 int.to.chr$ -- 0
-int.to.str$ -- 30
-missing$ -- 31
-newline$ -- 160
-num.names$ -- 60
-pop$ -- 211
+int.to.str$ -- 32
+missing$ -- 33
+newline$ -- 170
+num.names$ -- 64
+pop$ -- 222
 preamble$ -- 1
-purify$ -- 112
+purify$ -- 120
 quote$ -- 0
-skip$ -- 232
+skip$ -- 257
 stack$ -- 0
-substring$ -- 452
-swap$ -- 58
-text.length$ -- 3
+substring$ -- 519
+swap$ -- 70
+text.length$ -- 4
 text.prefix$ -- 0
 top$ -- 0
-type$ -- 100
+type$ -- 108
 warning$ -- 0
-while$ -- 85
-width$ -- 32
-write$ -- 330
-(There were 3 warnings)
+while$ -- 94
+width$ -- 34
+write$ -- 353
+(There was 1 warning)
