@@ -2,12 +2,12 @@ OpenHCS Paper Build Log
 ========================
 
 Paper: paper1 - A Universal Typing Discipline for Polymorphic Abstraction
-Package Date: 2026-01-06T14:01:37.179064
+Package Date: 2026-01-07T20:50:03.362492
 Lean Toolchain: leanprover/lean4:v4.27.0-rc1
 
 Proof Statistics:
 -----------------
-Lean Files: 12
+Lean Files: 13
 Lines of Code: 6086
 Theorems: 265
 
@@ -18,6 +18,7 @@ Proof Files:
   - PrintAxioms.lean
   - abstract_class_system.lean
   - axis_framework.lean
+  - check_axioms.lean
   - context_formalization.lean
   - discipline_migration.lean
   - java_instantiation.lean
@@ -31,7 +32,38 @@ Proof Files:
 COMPILATION OUTPUT (lake build)
 ================================================================================
 
-Build completed successfully (3066 jobs).
+ℹ [7818/7831] Replayed abstract_class_system
+info: abstract_class_system.lean:693:0: []
+info: abstract_class_system.lean:694:0: [AbstractClassSystem.UnifiedCapability.interfaceCheck]
+info: abstract_class_system.lean:695:0: [AbstractClassSystem.UnifiedCapability.identity,
+ AbstractClassSystem.UnifiedCapability.provenance,
+ AbstractClassSystem.UnifiedCapability.enumeration,
+ AbstractClassSystem.UnifiedCapability.conflictResolution,
+ AbstractClassSystem.UnifiedCapability.interfaceCheck]
+ℹ [7830/7831] Replayed PrintAxioms
+info: PrintAxioms.lean:15:0: 'fixed_axis_incompleteness' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: PrintAxioms.lean:16:0: 'parameterized_axis_immunity' depends on axioms: [propext, Quot.sound]
+info: PrintAxioms.lean:17:0: 'fixed_vs_parameterized_asymmetry' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: PrintAxioms.lean:18:0: 'domain_agnostic' depends on axioms: [propext, Quot.sound]
+info: PrintAxioms.lean:19:0: 'semantically_minimal_implies_orthogonal' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: PrintAxioms.lean:20:0: 'minimal_complete_unique_orthogonal' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: PrintAxioms.lean:21:0: 'axisB_ne_axisS' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: PrintAxioms.lean:22:0: 'axisB_ne_axisH' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: PrintAxioms.lean:23:0: 'axisS_ne_axisH' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: PrintAxioms.lean:26:0: 'AbstractClassSystem.ProvenanceWitness.prov_query_not_shape_respecting' depends on axioms: [propext, Quot.sound]
+info: PrintAxioms.lean:27:0: 'AbstractClassSystem.ProtocolAlias.protocol_alias' depends on axioms: [propext, Quot.sound]
+info: PrintAxioms.lean:28:0: 'AbstractClassSystem.ProtocolAlias.distinguishable_implies_namespace_diff' depends on axioms: [propext, Quot.sound]
+info: PrintAxioms.lean:29:0: 'AbstractClassSystem.ShapeFactorization.shapeRespecting_iff_factors' depends on axioms: [propext, Quot.sound]
+info: PrintAxioms.lean:30:0: 'AbstractClassSystem.Scope.observer_factors' does not depend on any axioms
+info: PrintAxioms.lean:31:0: 'AbstractClassSystem.semantic_non_embeddability' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: PrintAxioms.lean:32:0: 'AbstractClassSystem.exact_implies_nominal' depends on axioms: [propext, Quot.sound]
+info: PrintAxioms.lean:33:0: 'AbstractClassSystem.nominal_not_implies_exact' depends on axioms: [propext, Quot.sound]
+info: PrintAxioms.lean:34:0: 'PythonInstantiation.pyHasattr_shape_respecting' depends on axioms: [propext, Quot.sound]
+info: PrintAxioms.lean:35:0: 'PythonInstantiation.pyIsinstance_bases_sensitive' depends on axioms: [propext, Quot.sound]
+info: PrintAxioms.lean:36:0: 'TypeScriptInstantiation.observables_factor_through_axes' depends on axioms: [propext, Quot.sound]
+info: PrintAxioms.lean:37:0: 'JavaInstantiation.observables_factor_through_axes' depends on axioms: [propext, Quot.sound]
+info: PrintAxioms.lean:38:0: 'RustInstantiation.observables_factor_through_axes' depends on axioms: [propext, Quot.sound]
+Build completed successfully (7831 jobs).
 
 
 ================================================================================

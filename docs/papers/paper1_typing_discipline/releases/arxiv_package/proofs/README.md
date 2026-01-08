@@ -28,6 +28,7 @@ lake build
 | `PrintAxioms.lean` | PrintAxioms |
 | `abstract_class_system.lean` | abstract_class_system |
 | `axis_framework.lean` | axis_framework |
+| `check_axioms.lean` | check_axioms |
 | `context_formalization.lean` | context_formalization |
 | `discipline_migration.lean` | discipline_migration |
 | `java_instantiation.lean` | java_instantiation |

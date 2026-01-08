@@ -24,15 +24,16 @@ lake build
 
 | File | Module |
 |------|--------|
-| `paper3_Examples.lean` | Examples |
-| `paper3_Foundations.lean` | Foundations |
-| `paper3_LambdaDR.lean` | LambdaDR |
-| `paper3_Leverage.lean` | Leverage |
-| `paper3_Probability.lean` | Probability |
-| `paper3_SSOT.lean` | SSOT |
-| `paper3_Theorems.lean` | Theorems |
-| `paper3_Typing.lean` | Typing |
-| `paper3_WeightedLeverage.lean` | WeightedLeverage |
+| `LambdaDR.lean` | LambdaDR |
+| `Examples.lean` | Examples |
+| `Foundations.lean` | Foundations |
+| `Probability.lean` | Probability |
+| `SSOT.lean` | SSOT |
+| `Theorems.lean` | Theorems |
+| `Typing.lean` | Typing |
+| `WeightedLeverage.lean` | WeightedLeverage |
+| `Leverage.lean` | Leverage |
+| `lakefile.lean` | lakefile |
 
 ## Verification
 

@@ -32,7 +32,7 @@ For any incoherent encoding system $S$ and any oracle $O$ that resolves $S$ to a
 \end{theorem}
 
 \begin{proof}
-By incoherence, $\exists v_1, v_2 \in S: v_1 \neq v_2$. Either $O$ picks $v_1$ (then $v_2$ disagrees) or $O$ doesn't pick $v_1$ (then $v_1$ disagrees). \qed
+By incoherence, $\exists v_1, v_2 \in S: v_1 \neq v_2$. Either $O$ picks $v_1$ (then $v_2$ disagrees) or $O$ doesn't pick $v_1$ (then $v_1$ disagrees).
 \end{proof}
 
 \textbf{Interpretation.} This theorem is not about difficulty---it is about \emph{indeterminacy}. Under incoherence, the encoding system does not determine which value is true. Any resolution requires information external to the encodings.
@@ -46,7 +46,7 @@ If DOF = 1, then the encoding system is coherent in all reachable states.
 \end{theorem}
 
 \begin{proof}
-With DOF = 1, exactly one location is independent. All other locations are derived (automatically updated when the source changes). Derived locations cannot diverge from their source. Therefore, all locations hold the value determined by the single independent source. Disagreement is impossible. \qed
+With DOF = 1, exactly one location is independent. All other locations are derived (automatically updated when the source changes). Derived locations cannot diverge from their source. Therefore, all locations hold the value determined by the single independent source. Disagreement is impossible.
 \end{proof}
 
 \begin{theorem}[DOF $>$ 1 Permits Incoherence]\label{thm:dof-gt-one-incoherence}
@@ -54,7 +54,7 @@ If DOF $> 1$, then incoherent states are reachable.
 \end{theorem}
 
 \begin{proof}
-With DOF $> 1$, at least two locations are independent. Independent locations can be modified separately. A sequence of edits can set $L_1 = v_1$ and $L_2 = v_2$ where $v_1 \neq v_2$. This is an incoherent state. \qed
+With DOF $> 1$, at least two locations are independent. Independent locations can be modified separately. A sequence of edits can set $L_1 = v_1$ and $L_2 = v_2$ where $v_1 \neq v_2$. This is an incoherent state.
 \end{proof}
 
 \begin{corollary}[Coherence Forces DOF = 1]\label{cor:coherence-forces-ssot}
@@ -183,7 +183,7 @@ Suppose $M(C, \delta_F) = k$, meaning $k$ locations encode $F$. By Definition~\r
 \item Locations $L_{j+1}, \ldots, L_k$ reflect $v$ (old)
 \end{enumerate}
 
-By Definition~\ref{def:encodes}, the program is incorrect. Therefore, all $k$ locations must be updated, and $k$ is the minimum. \qed
+By Definition~\ref{def:encodes}, the program is incorrect. Therefore, all $k$ locations must be updated, and $k$ is the minimum.
 \end{proof}
 
 \subsection{Independence and Degrees of Freedom}\label{sec:dof}
@@ -241,7 +241,7 @@ $\text{DOF}(C, F) = k$ implies $k$ different values for $F$ can coexist in $C$ s
 \end{theorem}
 
 \begin{proof}
-Each independent location can hold a different value. By Definition~\ref{def:independent}, no constraint forces agreement between independent locations. Therefore, $k$ independent locations can hold $k$ distinct values. This is an instance of Theorem~\ref{thm:dof-gt-one-incoherence} applied to software. \qed
+Each independent location can hold a different value. By Definition~\ref{def:independent}, no constraint forces agreement between independent locations. Therefore, $k$ independent locations can hold $k$ distinct values. This is an instance of Theorem~\ref{thm:dof-gt-one-incoherence} applied to software.
 \end{proof}
 
 \begin{corollary}[DOF $>$ 1 Implies Incoherence Risk]\label{cor:dof-risk}
@@ -282,7 +282,7 @@ This is a direct instantiation of Corollary~\ref{cor:coherence-forces-ssot} to s
 \item DOF $>$ 1 means multiple independent locations. By Corollary~\ref{cor:dof-risk}, they can diverge. Incoherence is reachable.
 \end{enumerate}
 
-Only DOF = 1 achieves coherent representation. This is epistemic necessity, not design preference. \qed
+Only DOF = 1 achieves coherent representation. This is epistemic necessity, not design preference.
 \end{proof}
 
 %==============================================================================

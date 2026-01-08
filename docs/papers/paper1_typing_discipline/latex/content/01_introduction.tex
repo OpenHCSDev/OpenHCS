@@ -44,7 +44,7 @@ Our contribution is not recommending specific classification axes, but proving t
 
 \subsection{Overview}\label{overview}
 
-All results are machine-checked in Lean 4 (2700+ lines, 142+ theorems, 0 \texttt{sorry} placeholders).
+All results are machine-checked in Lean 4 (6300+ lines, 190+ theorems, 0 \texttt{sorry} placeholders).
 
 We develop a metatheory applicable to any classification system. The core insight: every such system is characterized by which axes it employs. For type systems, these are $(B, S)$ (Bases and Namespace); for hierarchical configuration, $(B, S, H)$ adds a Scope axis. These axes form a lattice: $\emptyset < S < (B,S) < (B,S,H)$, where each increment strictly dominates the previous.
 
@@ -151,8 +151,8 @@ These theorems apply to \emph{any} classification system: type systems, ontologi
 
 \textbf{5. Machine-checked Verification (Section 6):}
 \begin{itemize}
-\item 2700+ lines of Lean 4 proofs across five modules
-\item 142+ theorems/lemmas with \textbf{zero \texttt{sorry} placeholders}
+\item 6300+ lines of Lean 4 proofs across eleven modules
+\item 190+ theorems/lemmas with \textbf{zero \texttt{sorry} placeholders}
 \item Formalized $O(1)$ vs $\Omega(n)$ complexity separation with adversary-based lower bound
 \item Universal extension to 8 languages (Java, C\#, Rust, TypeScript, Kotlin, Swift, Scala, C++)
 \end{itemize}
@@ -268,7 +268,7 @@ from system properties
 validating theoretical predictions
 
 \textbf{Section 6: Machine-checked proofs} --- Lean 4 formalization
-(2600+ lines)
+(6300+ lines)
 
 \textbf{Section 7: Related work} --- Positioning within PL theory
 literature

@@ -38,7 +38,7 @@ papers:
     full_name: "Formal Foundations for the Single Source of Truth Principle"
     dir: "paper2_ssot"
     latex_dir: "latex"
-    latex_file: "ssot_arxiv.tex"
+    latex_file: "main.tex"
     lean_lines: 1811
     lean_theorems: 96
     lean_sorry: 0

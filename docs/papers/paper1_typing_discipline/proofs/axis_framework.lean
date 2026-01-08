@@ -699,7 +699,7 @@ This is a key structural result: minimality preserves orthogonality when working
 within an orthogonal ambient space. -/
 lemma minimal_subset_orthogonal_is_orthogonal {A₁ A A₂ : AxisSet} {D : Domain α}
     (horth : OrthogonalAxes A) (h₁sub : A₁ ⊆ A) (h₂sub : A₂ ⊆ A)
-    (hmin₁ : minimal A₁ D) (hmin₂ : minimal A₂ D) :
+    (_hmin₁ : minimal A₁ D) (_hmin₂ : minimal A₂ D) :
     OrthogonalAxes A₁ ∧ OrthogonalAxes A₂ := by
   constructor
   · intro a haA₁ b hbA₁ hab hderiv
@@ -727,6 +727,51 @@ theorem semantically_minimal_implies_independent {D : Domain α} {A : AxisSet}
 
 /-- Nodup property for axis sets (no duplicate axes). -/
 def NodupAxisSet (A : AxisSet) : Prop := A.Nodup
+
+/-- Semantically minimal sets have no duplicates.
+
+    Proof: Suppose A has a duplicate axis a. Then A.erase a still contains a
+    (erasing removes only the first occurrence). Since A.erase a still contains
+    every axis needed to answer queries (the second copy of a remains),
+    A.erase a is semantically complete. This contradicts minimality of A.
+
+    Note: This relies on the fact that semantic satisfaction depends only on
+    which axes are *present* (membership), not their multiplicity. -/
+theorem semantically_minimal_implies_nodup {D : Domain α} {A : AxisSet}
+    (hmin : semanticallyMinimal A D) : A.Nodup := by
+  by_contra hdup
+  -- A has a duplicate: ∃ a, a appears more than once
+  rw [List.nodup_iff_count_le_one] at hdup
+  push_neg at hdup
+  obtain ⟨a, hcount⟩ := hdup
+  -- a appears at least twice
+  have hcount_ge_2 : A.count a ≥ 2 := hcount
+  have hi_mem : a ∈ A := List.count_pos_iff.mp (Nat.lt_of_lt_of_le (by omega) hcount_ge_2)
+  -- After erase, a still appears (count decreases by 1, but was ≥ 2)
+  have herase_count : (A.erase a).count a = A.count a - 1 := List.count_erase_self
+  have herase_still_has_a : a ∈ A.erase a := by
+    rw [← List.count_pos_iff]
+    omega
+  -- A.erase a is still complete (semanticallySatisfies means: in set OR derivable from set)
+  have hcomplete : semanticallyComplete (A.erase a) D := by
+    intro q hqD
+    have hqA := hmin.1 q hqD
+    intro r hrReq
+    have hrA := hqA r hrReq
+    -- hrA : r ∈ A ∨ ∃ b ∈ A, derivable r b
+    rcases hrA with hr_in_A | ⟨b, hbA, hderiv⟩
+    · -- r was directly in A
+      by_cases hr_eq : r = a
+      · left; rw [hr_eq]; exact herase_still_has_a
+      · left; rw [List.mem_erase_of_ne hr_eq]; exact hr_in_A
+    · -- r was derivable from some b ∈ A
+      by_cases hb_eq : b = a
+      · -- b was a, but a is still in A.erase a
+        right; exact ⟨a, herase_still_has_a, by rw [← hb_eq]; exact hderiv⟩
+      · -- b ≠ a, so b is still in A.erase a
+        right; exact ⟨b, List.mem_erase_of_ne hb_eq |>.mpr hbA, hderiv⟩
+  -- Contradiction with minimality
+  exact hmin.2 a hi_mem hcomplete
 
 /-- For Nodup lists, if J ⊆ I then |J| ≤ |I|.
     Uses Finset.card_le_card via List.toFinset. -/
@@ -778,15 +823,6 @@ theorem orthogonal_implies_exchange {A : AxisSet} (horth : OrthogonalAxes A) :
     exchangeProperty A :=
   orthogonal_exchange horth
 
-/-- Tree derivability implies exchange.
-
-The key insight: in a tree, each element of J \ I that "blocks" must map to
-a distinct element of I (its unique parent). Since |J \ I| elements each need
-a distinct blocker in I, and the tree structure ensures this mapping is injective,
-we get |J \ I| ≤ |I|, which contradicts |J| > |I| when J is independent. -/
-axiom tree_implies_exchange {A : AxisSet} (htree : TreeDerivability A) :
-    exchangeProperty A
-
 /-- Matroid structure on axis sets (with Nodup requirement). -/
 structure AxisMatroid where
   ground : AxisSet
@@ -814,33 +850,6 @@ theorem matroid_basis_equicardinality (M : AxisMatroid)
     exact this B₂ B₁ hmax₂ hmax₁ (Ne.symm hne) hlt'
   rcases M.indep_exchange B₁ B₂ hmax₁.1 hmax₂.1 hlt with ⟨x, _, hxnB₁, hxB₁ind⟩
   exact hmax₁.2 x hxnB₁ hxB₁ind
-
-/-!
-### Equicardinality for Orthogonal Systems
-
-For orthogonal axis systems (the common case), we get full equicardinality.
-This is stated as a conditional theorem requiring Nodup axis sets.
--/
-
-/-- For orthogonal axes with Nodup, minimal complete sets have equal cardinality.
-
-This requires connecting minimality (w.r.t. completeness) to matroid maximality
-(w.r.t. independence). The key insight is that for orthogonal axes:
-- Independence = being a subset (trivially satisfied)
-- Minimality w.r.t. completeness = maximality w.r.t. some constraint
-
-The full proof requires showing that removing any element from a minimal complete
-set breaks completeness, while adding any element is redundant. Combined with
-exchange, this forces equal cardinality.
-
-We state this as an axiom, instantiable when the domain structure is specified. -/
-axiom minimal_equicardinal_orthogonal {A : AxisSet} {D : Domain α}
-    (horth : OrthogonalAxes A)
-    (A₁ A₂ : AxisSet) (hmin₁ : minimal A₁ D) (hmin₂ : minimal A₂ D)
-    (hnodup₁ : A₁.Nodup) (hnodup₂ : A₂.Nodup)
-    (h₁sub : A₁ ⊆ A) (h₂sub : A₂ ⊆ A)
-    (h₁ind : axisIndependent A₁) (h₂ind : axisIndependent A₂) :
-    A₁.length = A₂.length
 
 /-!
 ## Fixed Axis Incompleteness and Parameterized Immunity
@@ -1291,42 +1300,51 @@ and prove the H-axis necessity theorems as corollaries of the general results.
 -/
 
 /-- The Behavior axis: inheritance chains and trait composition.
-    Carrier is a lattice of behavior descriptors (abstract for generality). -/
-axiom BehaviorCarrier : Type
-axiom BehaviorCarrier.lattice : Lattice BehaviorCarrier
-axiom BehaviorCarrier.ord : PartialOrder BehaviorCarrier
-
-noncomputable def axisB : Axis where
-  Carrier := BehaviorCarrier
-  lattice := BehaviorCarrier.lattice
-  ord := BehaviorCarrier.ord
+    We use Fin 3 with index 0 as a concrete carrier with decidable equality.
+    The specific carrier type doesn't matter for the theorems - only distinctness. -/
+def axisB : Axis where
+  Carrier := Fin 1  -- Singleton type, distinct from others
+  lattice := Fin.instLattice
+  ord := Fin.instPartialOrder
 
 /-- The Structure axis: record shapes and field presence.
-    Carrier is a lattice of structural descriptors. -/
-axiom StructureCarrier : Type
-axiom StructureCarrier.lattice : Lattice StructureCarrier
-axiom StructureCarrier.ord : PartialOrder StructureCarrier
-
-noncomputable def axisS : Axis where
-  Carrier := StructureCarrier
-  lattice := StructureCarrier.lattice
-  ord := StructureCarrier.ord
+    We use Fin 2 as a concrete carrier distinct from axisB. -/
+def axisS : Axis where
+  Carrier := Fin 2  -- Two-element type, distinct from Fin 1
+  lattice := Fin.instLattice
+  ord := Fin.instPartialOrder
 
 /-- The Hierarchy axis: containment tree position.
-    Carrier is a lattice of hierarchy positions. -/
-axiom HierarchyCarrier : Type
-axiom HierarchyCarrier.lattice : Lattice HierarchyCarrier
-axiom HierarchyCarrier.ord : PartialOrder HierarchyCarrier
+    We use Fin 3 as a concrete carrier distinct from both axisB and axisS. -/
+def axisH : Axis where
+  Carrier := Fin 3  -- Three-element type, distinct from Fin 1 and Fin 2
+  lattice := Fin.instLattice
+  ord := Fin.instPartialOrder
 
-noncomputable def axisH : Axis where
-  Carrier := HierarchyCarrier
-  lattice := HierarchyCarrier.lattice
-  ord := HierarchyCarrier.ord
+/-- The three axes are pairwise distinct (now provable, not axiomatized). -/
+theorem axisB_ne_axisS : axisB ≠ axisS := by
+  intro h
+  have hc : Fin 1 = Fin 2 := congrArg Axis.Carrier h
+  have h1 : Fintype.card (Fin 1) = 1 := Fintype.card_fin 1
+  have h2 : Fintype.card (Fin 2) = 2 := Fintype.card_fin 2
+  have heq : Fintype.card (Fin 1) = Fintype.card (Fin 2) := by simp_rw [hc]
+  omega
 
-/-- The three axes are pairwise distinct. -/
-axiom axisB_ne_axisS : axisB ≠ axisS
-axiom axisB_ne_axisH : axisB ≠ axisH
-axiom axisS_ne_axisH : axisS ≠ axisH
+theorem axisB_ne_axisH : axisB ≠ axisH := by
+  intro h
+  have hc : Fin 1 = Fin 3 := congrArg Axis.Carrier h
+  have h1 : Fintype.card (Fin 1) = 1 := Fintype.card_fin 1
+  have h3 : Fintype.card (Fin 3) = 3 := Fintype.card_fin 3
+  have heq : Fintype.card (Fin 1) = Fintype.card (Fin 3) := by simp_rw [hc]
+  omega
+
+theorem axisS_ne_axisH : axisS ≠ axisH := by
+  intro h
+  have hc : Fin 2 = Fin 3 := congrArg Axis.Carrier h
+  have h2 : Fintype.card (Fin 2) = 2 := Fintype.card_fin 2
+  have h3 : Fintype.card (Fin 3) = 3 := Fintype.card_fin 3
+  have heq : Fintype.card (Fin 2) = Fintype.card (Fin 3) := by simp_rw [hc]
+  omega
 
 /-- The standard axis sets for hierarchical configuration. -/
 noncomputable def axisBSH : AxisSet := [axisB, axisS, axisH]

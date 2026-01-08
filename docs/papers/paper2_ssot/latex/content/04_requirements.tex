@@ -98,7 +98,7 @@ Case 2: $t_D > t_{\text{fix}}$. Then $D$ executes after $F$ is fixed. $D$ can re
 
 Case 3: $t_D = t_{\text{fix}}$. Then $D$ executes at the moment $F$ is fixed. $D$ can both read $F$ and modify derived structures before they are fixed.
 
-Therefore, derivation for structural facts must occur at definition time ($t_D = t_{\text{fix}}$). \qed
+Therefore, derivation for structural facts must occur at definition time ($t_D = t_{\text{fix}}$).
 \end{proof}
 
 \subsection{Requirement 1: Definition-Time Hooks}\label{sec:hooks}
@@ -153,7 +153,7 @@ SSOT for structural facts requires definition-time hooks.
 \begin{proof}
 By Theorem~\ref{thm:timing-forces}, derivation for structural facts must occur at definition time. Without definition-time hooks, no code can execute at that moment. Therefore, derivation is impossible. Without derivation, secondary encodings cannot be automatically updated. DOF $>$ 1 is unavoidable.
 
-Contrapositive: If a language lacks definition-time hooks, SSOT for structural facts is impossible. \qed
+Contrapositive: If a language lacks definition-time hooks, SSOT for structural facts is impossible.
 \end{proof}
 
 \textbf{Languages lacking definition-time hooks:}
@@ -226,7 +226,7 @@ Verification of SSOT requires confirming DOF = 1. This requires:
 
 Step (1) requires introspection: the program must query what structures exist and what they encode. Without introspection, the program cannot enumerate encodings. Verification is impossible.
 
-Without verifiable SSOT, the programmer cannot confirm SSOT holds. They must trust that their code is correct without runtime confirmation. Bugs in derivation logic go undetected. \qed
+Without verifiable SSOT, the programmer cannot confirm SSOT holds. They must trust that their code is correct without runtime confirmation. Bugs in derivation logic go undetected.
 \end{proof}
 
 \textbf{Languages lacking introspection for derivation:}
@@ -256,7 +256,7 @@ The two requirements---definition-time hooks and introspection---are independent
 
 \textbf{(2) Introspection without hooks:} Java provides \texttt{Class.getMethods()}, \texttt{Class.getInterfaces()}, etc. (introspection) but no code executes when a class is defined. Annotations are metadata, not executable hooks.
 
-Therefore, the requirements are independent. \qed
+Therefore, the requirements are independent.
 \end{proof}
 
 \subsection{The Completeness Theorem}\label{sec:completeness}
@@ -286,7 +286,7 @@ $(\Leftarrow)$ \textbf{Sufficiency:} Suppose $L$ provides both definition-time h
 \item Therefore, SSOT is achievable: create one source, derive all others, verify completeness
 \end{itemize}
 
-The if-and-only-if follows. \qed
+The if-and-only-if follows.
 \end{proof}
 
 \begin{corollary}[SSOT-Complete Languages]\label{cor:ssot-complete}
@@ -404,7 +404,7 @@ The fact that $E_2$ was \emph{generated from} $E_1$ does not make it a derivatio
 \item The generation process is external to the language and can be bypassed
 \end{enumerate}
 
-Contrast with Python, where the registry entry exists only in memory, created by the class statement itself. There is no second file. DOF $= 1$. \qed
+Contrast with Python, where the registry entry exists only in memory, created by the class statement itself. There is no second file. DOF $= 1$.
 \end{proof}
 
 \textbf{Why Rust proc macros don't help:}
@@ -420,7 +420,7 @@ This requires enumerating all encodings. If expansion is opaque, the program can
 
 In Rust, after \texttt{\#[derive(Handler)]} expands, the program cannot ask ``what did this macro generate?'' The expansion is compiled into the binary but not introspectable.
 
-Without introspection, the program cannot verify DOF $= 1$. SSOT may hold but cannot be confirmed. \qed
+Without introspection, the program cannot verify DOF $= 1$. SSOT may hold but cannot be confirmed.
 \end{proof}
 
 \textbf{The Gap is Fundamental:}

@@ -2,7 +2,7 @@ OpenHCS Paper Build Log
 ========================
 
 Paper: paper6 - Formality and Universality in Software Engineering
-Package Date: 2026-01-06T06:57:45.909692
+Package Date: 2026-01-07T20:50:38.036307
 Lean Toolchain: leanprover/lean4:v4.27.0-rc1
 
 Proof Statistics:
@@ -15,7 +15,19 @@ Theorems: 0
 Proof Files:
 ------------
 
-Note: Run 'python3 scripts/build_papers.py release' to include compilation output.
+================================================================================
+COMPILATION OUTPUT (lake build)
+================================================================================
+
+ℹ [2615/2633] Replayed DecisionQuotient.Hardness.Sigma2PExhaustive.Summary
+info: ././././DecisionQuotient/Hardness/Sigma2PExhaustive/Summary.lean:51:0: @DecisionProblem.sufficient_contains_relevant : ∀ {A : Type u_1} {S : Type u_2} {n : ℕ} [inst : CoordinateSpace S n]
+  (dp : DecisionProblem A S) (I : Finset (Fin n)), dp.isSufficient I → ∀ (i : Fin n), dp.isRelevant i → i ∈ I
+Build completed successfully.
+
+
+================================================================================
+END COMPILATION OUTPUT
+================================================================================
 
 Build Instructions:
 -------------------

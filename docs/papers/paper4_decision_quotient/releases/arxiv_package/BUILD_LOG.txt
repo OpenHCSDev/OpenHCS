@@ -2,41 +2,77 @@ OpenHCS Paper Build Log
 ========================
 
 Paper: paper4 - Decision Quotient: Formal Semantics of Architectural Choice
-Package Date: 2026-01-03T13:08:14.749638
-Lean Toolchain: leanprover/lean4:v4.27.0-rc1
+Package Date: 2026-01-07T20:50:22.995204
+Lean Toolchain: leanprover/lean4:v4.16.0
 
 Proof Statistics:
 -----------------
-Lean Files: 17
+Lean Files: 50
 Lines of Code: 2760
 Theorems: 106
 
 
 Proof Files:
 ------------
-  - paper4_AlgorithmComplexity.lean
-  - paper4_Basic.lean
-  - paper4_Complexity.lean
-  - paper4_ComplexityMain.lean
-  - paper4_Computation.lean
-  - paper4_DecisionQuotient.lean
-  - paper4_Dichotomy.lean
-  - paper4_Finite.lean
-  - paper4_Hardness.lean
-  - paper4_Information.lean
-  - paper4_Instances.lean
-  - paper4_PolynomialReduction.lean
-  - paper4_QueryComplexity.lean
-  - paper4_Quotient.lean
-  - paper4_Reduction.lean
-  - paper4_Sufficiency.lean
-  - paper4_Tractable.lean
+  - AlgorithmComplexity.lean
+  - Basic.lean
+  - Complexity.lean
+  - ComplexityMain.lean
+  - Computation.lean
+  - AlgorithmComplexity.lean
+  - Basic.lean
+  - Complexity.lean
+  - ComplexityMain.lean
+  - Computation.lean
+  - Dichotomy.lean
+  - Approximation.lean
+  - Elicitation.lean
+  - ValueOfInformation.lean
+  - Finite.lean
+  - ApproximationHardness.lean
+  - CountingComplexity.lean
+  - CoveringLowerBound.lean
+  - QBF.lean
+  - SAT.lean
+  - AnchorSufficiency.lean
+  - Summary.lean
+  - VectorE_CoNP.lean
+  - Sigma2PHardness.lean
+  - Hardness.lean
+  - Information.lean
+  - Instances.lean
+  - PolynomialReduction.lean
+  - QueryComplexity.lean
+  - Quotient.lean
+  - Reduction.lean
+  - Sufficiency.lean
+  - BoundedActions.lean
+  - FPT.lean
+  - SeparableUtility.lean
+  - TreeStructure.lean
+  - Tractable.lean
+  - DecisionQuotient.lean
+  - Dichotomy.lean
+  - Finite.lean
+  - Hardness.lean
+  - Information.lean
+  - Instances.lean
+  - PolynomialReduction.lean
+  - QueryComplexity.lean
+  - Quotient.lean
+  - Reduction.lean
+  - Sufficiency.lean
+  - Tractable.lean
+  - lakefile.lean
 
 ================================================================================
 COMPILATION OUTPUT (lake build)
 ================================================================================
 
-Build completed successfully (3066 jobs).
+ℹ [2615/2633] Replayed DecisionQuotient.Hardness.Sigma2PExhaustive.Summary
+info: ././././DecisionQuotient/Hardness/Sigma2PExhaustive/Summary.lean:51:0: @DecisionProblem.sufficient_contains_relevant : ∀ {A : Type u_1} {S : Type u_2} {n : ℕ} [inst : CoordinateSpace S n]
+  (dp : DecisionProblem A S) (I : Finset (Fin n)), dp.isSufficient I → ∀ (i : Fin n), dp.isRelevant i → i ∈ I
+Build completed successfully.
 
 
 ================================================================================

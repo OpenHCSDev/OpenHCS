@@ -2,37 +2,64 @@ OpenHCS Paper Build Log
 ========================
 
 Paper: paper2 - Formal Foundations for the Single Source of Truth Principle
-Package Date: 2026-01-03T13:08:01.668981
-Lean Toolchain: leanprover/lean4:v4.27.0-rc1
+Package Date: 2026-01-07T20:50:09.321021
+Lean Toolchain: leanprover/lean4:v4.16.0
 
 Proof Statistics:
 -----------------
-Lean Files: 13
+Lean Files: 15
 Lines of Code: 1811
 Theorems: 96
 
 
 Proof Files:
 ------------
-  - paper2_Basic.lean
-  - paper2_Bounds.lean
-  - paper2_CaseStudies.lean
-  - paper2_Completeness.lean
-  - paper2_Derivation.lean
-  - paper2_Foundations.lean
-  - paper2_LangEvaluation.lean
-  - paper2_LangPython.lean
-  - paper2_LangRust.lean
-  - paper2_LangStatic.lean
-  - paper2_Languages.lean
-  - paper2_Requirements.lean
-  - paper2_SSOT.lean
+  - Basic.lean
+  - Bounds.lean
+  - CaseStudies.lean
+  - Coherence.lean
+  - Completeness.lean
+  - Derivation.lean
+  - Foundations.lean
+  - LangEvaluation.lean
+  - LangPython.lean
+  - LangRust.lean
+  - LangStatic.lean
+  - Languages.lean
+  - Requirements.lean
+  - SSOT.lean
+  - lakefile.lean
 
 ================================================================================
 COMPILATION OUTPUT (lake build)
 ================================================================================
 
-Build completed successfully (3066 jobs).
+⚠ [7/16] Replayed Ssot.Bounds
+warning: ././././Ssot/Bounds.lean:18:58: unused variable `hn`
+note: this linter can be disabled with `set_option linter.unusedVariables false`
+⚠ [8/16] Replayed Ssot.Coherence
+warning: ././././Ssot/Coherence.lean:144:53: unused variable `new_val`
+note: this linter can be disabled with `set_option linter.unusedVariables false`
+⚠ [12/16] Replayed Ssot.LangRust
+warning: ././././Ssot/LangRust.lean:162:54: unused variable `macro_name`
+note: this linter can be disabled with `set_option linter.unusedVariables false`
+ℹ [14/16] Replayed Ssot.LangEvaluation
+info: ././././Ssot/LangEvaluation.lean:87:0: init_subclass_in_class_definition : ∀ (rt : PyRuntime) (name : PyId) (bases : List PyId)
+  (attrs methods : List (String × String)) (parent : PyId),
+  parent ∈ bases →
+    ClassDefEvent.init_subclass_called parent name ∈ (execute_class_statement rt name bases attrs methods).snd
+info: ././././Ssot/LangEvaluation.lean:88:0: subclasses_updated_at_definition : ∀ (rt : PyRuntime) (name : PyId) (bases : List PyId)
+  (attrs methods : List (String × String)) (parent : PyId),
+  parent ∈ bases → name ∈ (execute_class_statement rt name bases attrs methods).fst.subclass_registry parent
+info: ././././Ssot/LangEvaluation.lean:104:0: erasure_destroys_source : ∀ (item : RustItem) (macro_name : RustId),
+  let user_state := { items := [user_written_item item], current_phase := CompilePhase.parsing };
+  let macro_state := { items := [macro_generated_item macro_name item], current_phase := CompilePhase.parsing };
+  (erase_to_runtime user_state).items = (erase_to_runtime macro_state).items
+info: ././././Ssot/LangEvaluation.lean:105:0: runtime_item_eq_iff : ∀ (ri1 ri2 : RuntimeItem), ri1 = ri2 ↔ ri1.item = ri2.item
+info: ././././Ssot/LangEvaluation.lean:130:0: java_lacks_definition_hooks : ∀ (def_ : StaticTypeDef) (e : ExecutionEvent),
+  e ∈ java_class_definition_events def_ → is_definition_time_user_code e = false
+info: ././././Ssot/LangEvaluation.lean:131:0: ts_types_erased : ∀ (type_name : String), TSCompileEvent.type_erased type_name ∈ typescript_compile_events type_name
+Build completed successfully.
 
 
 ================================================================================

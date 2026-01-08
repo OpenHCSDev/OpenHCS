@@ -120,18 +120,34 @@ Assume $p = 0.01$ (1\% per-component error rate):
 
 The error model has a direct interpretation in classical reliability theory \cite{patterson2013computer}, connecting software architecture to a mature mathematical framework with 60+ years of theoretical development.
 
-\begin{theorem}[DOF as Series System]\label{thm:series-system}
-An architecture with DOF = $n$ is a \emph{series system}: all $n$ degrees of freedom must be correctly specified for the system to be error-free. Thus:
-\[
-P_{\text{error}}(n) = 1 - R_{\text{series}}(n) \text{ where } R_{\text{series}}(n) = (1-p)^n
-\]
+\begin{theorem}[DOF-Reliability Isomorphism]\label{thm:dof-reliability}
+An architecture with DOF $= n$ is \emph{isomorphic} to a series reliability system with $n$ components. The isomorphism:
+\begin{enumerate}
+\item \textbf{Preserves ordering:} If $\text{DOF}(A_1) < \text{DOF}(A_2)$, then $P_{\text{error}}(A_1) < P_{\text{error}}(A_2)$
+\item \textbf{Is invertible:} Round-trip mapping preserves DOF exactly
+\item \textbf{Connects domains:} $P_{\text{error}}(n) = 1 - R_{\text{series}}(n)$ where $R_{\text{series}}(n) = (1-p)^n$
+\end{enumerate}
 \end{theorem}
 
 \textbf{Interpretation:} Each DOF is a ``component'' that must work correctly. This is the reliability analog of Theorem~\ref{thm:error-independence}, which derives error independence from axis orthogonality.
 
+\begin{theorem}[Approximation Error Bound]\label{thm:approx-bound}
+The linear approximation $P_{\text{error}}(n) \approx n \cdot p$ has error $O(n^2 p^2)$. Specifically:
+\[
+|P_{\text{error}}(n) - n \cdot p| = \frac{n(n-1)p^2}{2} + O(n^3 p^3)
+\]
+For $p = 0.01$ and $n = 10$: error $< 0.5\%$. The approximation preserves all ordering relationships.
+\end{theorem}
+
+\begin{proof}
+By binomial expansion: $(1-p)^n = 1 - np + \binom{n}{2}p^2 - O(p^3)$.
+Therefore: $1 - (1-p)^n = np - \frac{n(n-1)}{2}p^2 + O(n^3 p^3)$.
+The quadratic correction is bounded by $n^2 p^2$, which is negligible in the software regime.
+\end{proof}
+
 \textbf{Linear Approximation Justification:} For small $p$ (the software engineering regime where $p \approx 0.01$), the linear model $P_{\text{error}} \approx n \cdot p$ is:
 \begin{enumerate}
-\item Accurate (first-order Taylor expansion)
+\item Accurate (first-order Taylor expansion with proven $O(n^2 p^2)$ error bound)
 \item Preserves all ordering relationships (if $n_1 < n_2$, then $n_1 p < n_2 p$)
 \item Cleanly provable in natural number arithmetic (avoiding real analysis)
 \end{enumerate}
@@ -149,15 +165,43 @@ The probability model is not axiomatic---it is derived from the epistemic founda
 
 This derivation chain ensures the probability model rests on proven foundations, not assumed axioms.
 
+\subsection{Leverage Gap: Quantitative Predictions}
+
+The leverage framework provides \emph{quantitative}, empirically testable predictions about modification costs.
+
+\begin{theorem}[Leverage Gap]\label{thm:leverage-gap}
+For architectures with equal capabilities, the modification cost ratio equals the inverse leverage ratio:
+\[
+\frac{\text{ModCost}(A_2)}{\text{ModCost}(A_1)} = \frac{\text{DOF}(A_2)}{\text{DOF}(A_1)} = \frac{L(A_1)}{L(A_2)}
+\]
+\end{theorem}
+
+\begin{theorem}[Testable Prediction]\label{thm:testable-prediction}
+If architecture $A_1$ has $n\times$ lower DOF than $A_2$ (for equal capabilities), then $A_1$ requires $n\times$ fewer expected modifications. This is empirically testable against PR/commit data.
+\end{theorem}
+
+\begin{corollary}[DOF Ratio Predicts Error Ratio]\label{cor:dof-ratio}
+The ratio of expected errors between two architectures equals the ratio of their DOF:
+\[
+\frac{\mathbb{E}[\text{errors}(A_2)]}{\mathbb{E}[\text{errors}(A_1)]} = \frac{\text{DOF}(A_2)}{\text{DOF}(A_1)}
+\]
+\end{corollary}
+
+These theorems transform architectural intuitions into testable hypotheses. A claim that ``Pattern X is 3× better than Pattern Y'' can be verified by comparing DOF and measuring modification frequency in real codebases.
+
 \subsection{Formalization}
 
 Formalized in \texttt{Leverage/Probability.lean}:
 \begin{itemize}
-\item \texttt{error\_independence\_from\_orthogonality}: Theorem~\ref{thm:error-independence} (references Paper 1)
-\item \texttt{error\_compounding\_from\_coherence}: Theorem~\ref{thm:error-compound} (references Paper 2)
-\item \texttt{error\_probability\_formula}: Theorem~\ref{thm:error-prob}
-\item \texttt{dof\_error\_monotone}: Corollary~\ref{cor:dof-monotone}
-\item \texttt{expected\_error\_bound}: Theorem~\ref{thm:expected-errors}
-\item \texttt{linear\_model\_preserves\_ordering}: Theorem~\ref{thm:series-system}
+\item \texttt{dof\_reliability\_isomorphism}: Theorem~\ref{thm:dof-reliability} (the central isomorphism)
+\item \texttt{isomorphism\_preserves\_failure\_ordering}: Ordering preservation
+\item \texttt{isomorphism\_roundtrip}: Invertibility proof
+\item \texttt{approximation\_error\_bound}: Theorem~\ref{thm:approx-bound} (Taylor bound)
+\item \texttt{linear\_model\_preserves\_ordering}: Ordering preservation under approximation
+\item \texttt{leverage\_gap}: Theorem~\ref{thm:leverage-gap}
+\item \texttt{testable\_modification\_prediction}: Theorem~\ref{thm:testable-prediction}
+\item \texttt{dof\_ratio\_predicts\_error\_ratio}: Corollary~\ref{cor:dof-ratio}
+\item \texttt{lower\_dof\_lower\_errors}: Corollary~\ref{cor:dof-monotone}
+\item \texttt{ssot\_minimal\_errors}: SSOT minimality
 \end{itemize}
 

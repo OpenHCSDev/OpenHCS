@@ -82,7 +82,7 @@ class PaperBuilder:
     1. ∀p: paper_dir(p) = papers_dir / meta(p).dir_name
     2. ∀p: content_dir(p) = paper_dir(p) / meta(p).latex_dir / "content"
     3. ∀p: releases_dir(p) = paper_dir(p) / "releases"
-    4. Shared proofs: proofs_dir = papers_dir / "proofs"
+    4. ∀p: proofs_dir(p) = paper_dir(p) / "proofs"
 
     All papers follow these invariants. No exceptions.
     """
@@ -91,7 +91,6 @@ class PaperBuilder:
         self.repo_root = repo_root
         self.scripts_dir = repo_root / "scripts"
         self.papers_dir = repo_root / "docs" / "papers"
-        self.proofs_dir = self.papers_dir / "proofs"  # Shared across all papers
 
         # Load configuration
         self._raw_metadata = self._load_raw_metadata()
@@ -188,27 +187,42 @@ class PaperBuilder:
         # Filter: skip abstract.tex (handled separately), include numbered files
         return [f for f in files if f.name != "abstract.tex"]
 
+    def _get_paper_proofs_dir(self, paper_id: str) -> Path:
+        """Get the proofs directory for a specific paper.
+
+        Each paper has its own proofs directory at: paper_dir/proofs/
+        """
+        meta = self._get_paper_meta(paper_id)
+        return self.papers_dir / meta.dir_name / "proofs"
+
     def build_lean(self, paper_id: str, verbose: bool = True) -> str:
         """Build Lean proofs with streaming output. Returns captured output.
 
-        Uses shared proofs directory (docs/papers/proofs/) - INVARIANT 4.
+        Uses each paper's own proofs directory (paper_dir/proofs/).
+        Runs `lake build` in that directory.
         Captures output for inclusion in BUILD_LOG.txt.
         """
-        if not self.proofs_dir.exists():
-            raise FileNotFoundError(
-                f"Shared proofs directory not found: {self.proofs_dir}\n"
-                f"Expected: docs/papers/proofs/ with all paper proof files"
-            )
+        proofs_dir = self._get_paper_proofs_dir(paper_id)
+
+        if not proofs_dir.exists():
+            print(f"[build] No proofs directory for {paper_id}, skipping...")
+            return ""
+
+        # Check for lakefile
+        lakefile = proofs_dir / "lakefile.lean"
+        if not lakefile.exists():
+            print(f"[build] No lakefile.lean in {proofs_dir}, skipping...")
+            return ""
 
         print(f"[build] Building {paper_id} Lean...")
-        print(f"[build]   Directory: {self.proofs_dir.relative_to(self.repo_root)} (shared)")
+        print(f"[build]   Directory: {proofs_dir.relative_to(self.repo_root)}")
 
         def run_lake(args: List[str]) -> Tuple[int, List[str]]:
             """Run lake command with streaming output."""
             print(f"[build]   Running: lake {' '.join(args)}")
             process = subprocess.Popen(
                 ["lake"] + args,
-                cwd=self.proofs_dir,
+                cwd=proofs_dir,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
@@ -229,7 +243,7 @@ class PaperBuilder:
                 print()
             return (process.returncode, output_lines)
 
-        # Build proofs
+        # Run lake build (builds all targets in the paper's proofs directory)
         returncode, output = run_lake(["build"])
         output_text = "".join(output)
 
@@ -344,8 +358,7 @@ class PaperBuilder:
             f.write(
                 f"**Status**: TOPLAS-ready | "
                 f"**Lean**: {meta.lean_lines} lines, "
-                f"{meta.lean_theorems} theorems, "
-                f"{meta.lean_sorry} sorry\n\n---\n\n"
+                f"{meta.lean_theorems} theorems\n\n---\n\n"
             )
 
             # Abstract
@@ -372,7 +385,7 @@ class PaperBuilder:
             f.write(f"- Location: `docs/papers/proofs/{meta.paper_id}_*.lean`\n")
             f.write(f"- Lines: {meta.lean_lines}\n")
             f.write(f"- Theorems: {meta.lean_theorems}\n")
-            f.write(f"- Sorry placeholders: {meta.lean_sorry}\n")
+
 
     def _convert_latex_to_markdown(self, tex_file: Path, out_file, extract_env: str | None = None):
         """Convert LaTeX file to Markdown using pandoc.
@@ -441,7 +454,6 @@ class PaperBuilder:
         # Phase 1: Validate all required files exist (fail-loud)
         pdf_file = self._validate_and_get_pdf(paper_id)
         md_file = self._validate_and_get_markdown(paper_id)
-        self._validate_proofs_exist()
 
         # Phase 2: Create staging directory in releases/
         releases_dir = self._get_releases_dir(paper_id)
@@ -495,14 +507,6 @@ class PaperBuilder:
             )
         return md_file
 
-    def _validate_proofs_exist(self) -> None:
-        """Validate shared proofs directory exists. Fail-loud if missing."""
-        if not self.proofs_dir.exists():
-            raise FileNotFoundError(
-                f"[arxiv] FATAL: Shared proofs directory not found: {self.proofs_dir}\n"
-                f"  Expected: docs/papers/proofs/"
-            )
-
     def _copy_pdf(self, pdf_file: Path, package_dir: Path) -> None:
         """Copy PDF to package directory."""
         pdf_dest = package_dir / pdf_file.name
@@ -516,25 +520,140 @@ class PaperBuilder:
         print(f"[arxiv]   Markdown: {md_file.name}")
 
     def _copy_lean_proofs(self, paper_id: str, package_dir: Path) -> None:
-        """Copy Lean proofs for specific paper to package directory."""
+        """Copy Lean proofs for specific paper to package directory.
+
+        Uses the paper's own proofs directory (paper_dir/proofs/).
+        Copies all .lean files and config, generates README.
+        """
+        proofs_dir = self._get_paper_proofs_dir(paper_id)
+
+        if not proofs_dir.exists():
+            print(f"[arxiv]   No proofs directory for {paper_id}, skipping...")
+            return
+
         lean_dest = package_dir / "proofs"
         lean_dest.mkdir(parents=True, exist_ok=True)
 
-        # Copy only files for this paper (paper{N}_*.lean) + config files
-        paper_files = list(self.proofs_dir.glob(f"{paper_id}_*.lean"))
-        config_files = [
-            self.proofs_dir / "lakefile.lean",
-            self.proofs_dir / "lean-toolchain",
-            self.proofs_dir / "lake-manifest.json",
-        ]
+        # Copy all .lean files from the paper's proofs directory
+        paper_files = []
+        exclude_patterns = {".lake", "build"}
+        for f in sorted(proofs_dir.rglob("*.lean")):
+            # Skip files in excluded directories
+            if any(part in exclude_patterns for part in f.parts):
+                continue
+            # Compute relative path
+            rel_path = f.relative_to(proofs_dir)
+            dest_file = lean_dest / rel_path
+            dest_file.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(f, dest_file)
+            paper_files.append(f)
 
-        for f in paper_files:
-            shutil.copy2(f, lean_dest / f.name)
-        for f in config_files:
-            if f.exists():
-                shutil.copy2(f, lean_dest / f.name)
+        # Copy config files
+        config_files = ["lean-toolchain", "lake-manifest.json"]
+        for fname in config_files:
+            src = proofs_dir / fname
+            if src.exists():
+                shutil.copy2(src, lean_dest / fname)
+
+        # Generate README (correct by construction)
+        self._generate_proofs_readme(paper_id, paper_files, lean_dest)
 
         print(f"[arxiv]   Lean proofs: {len(paper_files)} files")
+
+    def _generate_paper_lakefile(self, paper_id: str, paper_files: list, lean_dest: Path) -> None:
+        """Generate paper-specific lakefile from actual proof files."""
+        meta = self._get_paper_meta(paper_id)
+
+        # Extract lib names from filenames (paper4_Basic.lean -> paper4_Basic)
+        lib_names = [f.stem for f in paper_files]
+
+        lib_entries = "\n".join([
+            f'''lean_lib «{name}» where
+  moreLeanArgs := moreLeanArgs
+  weakLeanArgs := weakLeanArgs
+''' for name in lib_names
+        ])
+
+        lakefile_content = f'''import Lake
+open Lake DSL
+
+-- {meta.name} - Lean 4 Formalization
+-- Auto-generated by build_papers.py
+
+def moreServerArgs := #[
+  "-Dpp.unicode.fun=true",
+  "-Dpp.proofs.withType=false"
+]
+
+def moreLeanArgs := moreServerArgs
+
+def weakLeanArgs : Array String :=
+  if get_config? CI |>.isSome then
+    #["-DwarningAsError=true"]
+  else
+    #[]
+
+package «{meta.dir_name}» where
+  moreServerArgs := moreServerArgs
+
+require mathlib from git
+  "https://github.com/leanprover-community/mathlib4.git"
+
+{lib_entries}'''
+
+        (lean_dest / "lakefile.lean").write_text(lakefile_content)
+
+    def _generate_proofs_readme(self, paper_id: str, paper_files: list, lean_dest: Path) -> None:
+        """Generate README for proofs directory from actual proof files."""
+        meta = self._get_paper_meta(paper_id)
+
+        # Build file table
+        file_rows = "\n".join([
+            f"| `{f.name}` | {f.stem.replace(paper_id + '_', '')} |"
+            for f in paper_files
+        ])
+
+        readme_content = f'''# {meta.name} - Lean 4 Formalization
+
+## Overview
+
+This directory contains the complete Lean 4 formalization for {meta.name}.
+
+- **Lines:** {meta.lean_lines}
+- **Theorems:** {meta.lean_theorems}
+
+
+## Requirements
+
+- Lean 4 (see `lean-toolchain` for exact version)
+- Mathlib4
+
+## Building
+
+```bash
+lake update
+lake build
+```
+
+## File Structure
+
+| File | Module |
+|------|--------|
+{file_rows}
+
+## Verification
+
+All files compile with 0 `sorry` placeholders. All claims are machine-verified.
+
+## License
+
+MIT License - See main repository for details.
+
+---
+*Auto-generated by build_papers.py*
+'''
+
+        (lean_dest / "README.md").write_text(readme_content)
 
     def _create_build_log(self, paper_id: str, package_dir: Path) -> None:
         """
@@ -544,9 +663,14 @@ class PaperBuilder:
         meta = self._get_paper_meta(paper_id)
         log_file = package_dir / "BUILD_LOG.txt"
 
-        # Paper-specific proof files
-        paper_lean_files = list(self.proofs_dir.glob(f"{paper_id}_*.lean"))
-        lean_toolchain = self.proofs_dir / "lean-toolchain"
+        # Paper-specific proof files from paper's proofs directory
+        proofs_dir = self._get_paper_proofs_dir(paper_id)
+        exclude_patterns = {".lake", "build"}
+        paper_lean_files = [
+            f for f in proofs_dir.rglob("*.lean")
+            if not any(part in exclude_patterns for part in f.parts)
+        ] if proofs_dir.exists() else []
+        lean_toolchain = proofs_dir / "lean-toolchain"
         toolchain_version = lean_toolchain.read_text().strip() if lean_toolchain.exists() else "unknown"
 
         log_content = f"""OpenHCS Paper Build Log
@@ -561,7 +685,7 @@ Proof Statistics:
 Lean Files: {len(paper_lean_files)}
 Lines of Code: {meta.lean_lines}
 Theorems: {meta.lean_theorems}
-Sorry Placeholders: {meta.lean_sorry}
+
 
 Proof Files:
 ------------

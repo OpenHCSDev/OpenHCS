@@ -1,0 +1,51 @@
+This is BibTeX, Version 0.99d (TeX Live 2026/dev/Arch Linux)
+Capacity: max_strings=200000, hash_size=200000, hash_prime=170003
+The top-level auxiliary file: main.aux
+The style file: plain.bst
+Database file #1: references.bib
+Warning--entry type for "openhcs2025" isn't style-file defined
+--line 351 of file references.bib
+Warning--I didn't find a database entry for "cook1989inheritance"
+Warning--I didn't find a database entry for "reynolds1983types"
+You've used 30 entries,
+            2118 wiz_defined-function locations,
+            669 strings with 8210 characters,
+and the built_in function-call counts, 8487 in all, are:
+= -- 833
+> -- 332
+< -- 3
++ -- 148
+- -- 104
+* -- 464
+:= -- 1411
+add.period$ -- 99
+call.type$ -- 30
+change.case$ -- 133
+chr.to.int$ -- 0
+cite$ -- 30
+duplicate$ -- 338
+empty$ -- 754
+format.name$ -- 104
+if$ -- 1807
+int.to.chr$ -- 0
+int.to.str$ -- 30
+missing$ -- 31
+newline$ -- 160
+num.names$ -- 60
+pop$ -- 211
+preamble$ -- 1
+purify$ -- 112
+quote$ -- 0
+skip$ -- 232
+stack$ -- 0
+substring$ -- 452
+swap$ -- 58
+text.length$ -- 3
+text.prefix$ -- 0
+top$ -- 0
+type$ -- 100
+warning$ -- 0
+while$ -- 85
+width$ -- 32
+write$ -- 330
+(There were 3 warnings)

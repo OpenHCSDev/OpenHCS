@@ -2,33 +2,63 @@ OpenHCS Paper Build Log
 ========================
 
 Paper: paper3 - Leverage-Driven Software Architecture
-Package Date: 2026-01-03T13:08:08.708638
+Package Date: 2026-01-07T20:50:16.607258
 Lean Toolchain: leanprover/lean4:v4.27.0-rc1
 
 Proof Statistics:
 -----------------
-Lean Files: 9
+Lean Files: 10
 Lines of Code: 741
 Theorems: 35
 
 
 Proof Files:
 ------------
-  - paper3_Examples.lean
-  - paper3_Foundations.lean
-  - paper3_LambdaDR.lean
-  - paper3_Leverage.lean
-  - paper3_Probability.lean
-  - paper3_SSOT.lean
-  - paper3_Theorems.lean
-  - paper3_Typing.lean
-  - paper3_WeightedLeverage.lean
+  - LambdaDR.lean
+  - Examples.lean
+  - Foundations.lean
+  - Probability.lean
+  - SSOT.lean
+  - Theorems.lean
+  - Typing.lean
+  - WeightedLeverage.lean
+  - Leverage.lean
+  - lakefile.lean
 
 ================================================================================
 COMPILATION OUTPUT (lake build)
 ================================================================================
 
-Build completed successfully (3066 jobs).
+⚠ [3065/3072] Replayed Leverage.Foundations
+warning: Leverage/Foundations.lean:165:43: This simp argument is unused:
+  Architecture.mk
+
+Hint: Omit it from the simp argument list.
+  simp only [Architecture.higher_leverage,̵ ̵A̵r̵c̵h̵i̵t̵e̵c̵t̵u̵r̵e̵.̵m̵k̵]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+⚠ [3066/3072] Replayed Leverage.Probability
+warning: Leverage/Probability.lean:344:5: unused variable `h_p`
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+warning: Leverage/Probability.lean:355:5: unused variable `h_caps`
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+warning: Leverage/Probability.lean:357:5: unused variable `h_n`
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+warning: Leverage/Probability.lean:772:5: unused variable `h_eq_caps`
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+⚠ [3069/3072] Replayed Leverage.Examples
+warning: Leverage/Examples.lean:179:45: This simp argument is unused:
+  Architecture.mk
+
+Hint: Omit it from the simp argument list.
+  simp only [expected_errors, p_one_percent,̵ ̵A̵r̵c̵h̵i̵t̵e̵c̵t̵u̵r̵e̵.̵m̵k̵]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+Build completed successfully (3072 jobs).
 
 
 ================================================================================

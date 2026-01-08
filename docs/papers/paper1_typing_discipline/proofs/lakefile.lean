@@ -32,42 +32,56 @@ lean_lib «nominal_resolution» where
   weakLeanArgs := weakLeanArgs
   -- add any library configuration options here
 
+@[default_target]
 lean_lib «abstract_class_system» where
   moreLeanArgs := moreLeanArgs
   weakLeanArgs := weakLeanArgs
   -- Language-independent abstract class system formalization
 
+@[default_target]
 lean_lib «discipline_migration» where
   moreLeanArgs := moreLeanArgs
   weakLeanArgs := weakLeanArgs
   -- Discipline vs migration optimality separation
 
+@[default_target]
 lean_lib «context_formalization» where
   moreLeanArgs := moreLeanArgs
   weakLeanArgs := weakLeanArgs
   -- Greenfield/retrofit classification and requirement detection
 
+@[default_target]
 lean_lib «python_instantiation» where
   moreLeanArgs := moreLeanArgs
   weakLeanArgs := weakLeanArgs
   -- Python-specific instantiation: type(), C3 MRO, complexity costs
 
+@[default_target]
 lean_lib «typescript_instantiation» where
   moreLeanArgs := moreLeanArgs
   weakLeanArgs := weakLeanArgs
   -- TypeScript-specific instantiation: structural + branded nominal axes
 
+@[default_target]
 lean_lib «java_instantiation» where
   moreLeanArgs := moreLeanArgs
   weakLeanArgs := weakLeanArgs
   -- Java-specific instantiation: nominal class tags, reflection observers
 
+@[default_target]
 lean_lib «rust_instantiation» where
   moreLeanArgs := moreLeanArgs
   weakLeanArgs := weakLeanArgs
   -- Rust-specific instantiation: trait sets, type_id-based downcast
 
+@[default_target]
 lean_lib «axis_framework» where
   moreLeanArgs := moreLeanArgs
   weakLeanArgs := weakLeanArgs
   -- Axis-parametric framework: generic minimality and uniqueness proofs
+
+@[default_target]
+lean_lib «PrintAxioms» where
+  moreLeanArgs := moreLeanArgs
+  weakLeanArgs := weakLeanArgs
+  -- Axiom verification file

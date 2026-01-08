@@ -66,6 +66,7 @@ instance/
 
 # Sphinx documentation
 docs/_build/
+docs/build/
 
 # PyBuilder
 target/
@@ -157,3 +158,6 @@ win_logs.txt
 # Chunkhound
 .chunkhound/
 docs/generated_md/
+
+# Lean 4 Lake build artifacts
+.lake/

@@ -24,19 +24,21 @@ lake build
 
 | File | Module |
 |------|--------|
-| `paper2_Basic.lean` | Basic |
-| `paper2_Bounds.lean` | Bounds |
-| `paper2_CaseStudies.lean` | CaseStudies |
-| `paper2_Completeness.lean` | Completeness |
-| `paper2_Derivation.lean` | Derivation |
-| `paper2_Foundations.lean` | Foundations |
-| `paper2_LangEvaluation.lean` | LangEvaluation |
-| `paper2_LangPython.lean` | LangPython |
-| `paper2_LangRust.lean` | LangRust |
-| `paper2_LangStatic.lean` | LangStatic |
-| `paper2_Languages.lean` | Languages |
-| `paper2_Requirements.lean` | Requirements |
-| `paper2_SSOT.lean` | SSOT |
+| `Basic.lean` | Basic |
+| `Bounds.lean` | Bounds |
+| `CaseStudies.lean` | CaseStudies |
+| `Coherence.lean` | Coherence |
+| `Completeness.lean` | Completeness |
+| `Derivation.lean` | Derivation |
+| `Foundations.lean` | Foundations |
+| `LangEvaluation.lean` | LangEvaluation |
+| `LangPython.lean` | LangPython |
+| `LangRust.lean` | LangRust |
+| `LangStatic.lean` | LangStatic |
+| `Languages.lean` | Languages |
+| `Requirements.lean` | Requirements |
+| `SSOT.lean` | SSOT |
+| `lakefile.lean` | lakefile |
 
 ## Verification
 

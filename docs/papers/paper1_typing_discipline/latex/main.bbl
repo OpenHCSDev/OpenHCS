@@ -183,7 +183,7 @@ Jeremy~G Siek and Walid Taha.
 Tristan Simas.
 \newblock Lean 4 formalization: Typing discipline selection theorems.
 \newblock Supplementary material, 2025.
-\newblock 2613 lines, 127 theorems, 0 \texttt{sorry} placeholders. Included
+\newblock 6300+ lines, 190+ theorems, 0 \texttt{sorry} placeholders. Included
   with paper submission.
 
 \bibitem{openhcs2025}

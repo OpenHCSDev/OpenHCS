@@ -133,7 +133,9 @@ We establish four theorems characterizing coherence achievability:
 
 ## Scope {#sec:scope}
 
-This work characterizes SSOT for *structural facts* (class existence, method signatures, type relationships) within language semantics. The complexity analysis is asymptotic, applying to systems where $n$ grows. External tooling can approximate SSOT behavior but operates outside language semantics.
+This work characterizes SSOT for *structural facts* (class existence, method signatures, type relationships) within *single-language* systems. The complexity analysis is asymptotic, applying to systems where $n$ grows. External tooling can approximate SSOT behavior but operates outside language semantics.
+
+**Multi-language systems.** When a system spans multiple languages (e.g., Python backend + TypeScript frontend + protobuf schemas), cross-language SSOT requires external code generation tools. The analysis in this paper characterizes single-language SSOT; multi-language SSOT is noted as future work (Section [\[sec:conclusion\]](#sec:conclusion){reference-type="ref" reference="sec:conclusion"}).
 
 ## Contributions {#sec:contributions}
 
@@ -277,7 +279,7 @@ Before formalizing codebases and edits, we establish the epistemic structure tha
 :::
 
 ::: proof
-*Proof.* By incoherence, $\exists v_1, v_2 \in S: v_1 \neq v_2$. Either $O$ picks $v_1$ (then $v_2$ disagrees) or $O$ doesn't pick $v_1$ (then $v_1$ disagrees). 0◻ ◻
+*Proof.* By incoherence, $\exists v_1, v_2 \in S: v_1 \neq v_2$. Either $O$ picks $v_1$ (then $v_2$ disagrees) or $O$ doesn't pick $v_1$ (then $v_1$ disagrees). ◻
 :::
 
 **Interpretation.** This theorem is not about difficulty---it is about *indeterminacy*. Under incoherence, the encoding system does not determine which value is true. Any resolution requires information external to the encodings.
@@ -291,7 +293,7 @@ Before formalizing codebases and edits, we establish the epistemic structure tha
 :::
 
 ::: proof
-*Proof.* With DOF = 1, exactly one location is independent. All other locations are derived (automatically updated when the source changes). Derived locations cannot diverge from their source. Therefore, all locations hold the value determined by the single independent source. Disagreement is impossible. 0◻ ◻
+*Proof.* With DOF = 1, exactly one location is independent. All other locations are derived (automatically updated when the source changes). Derived locations cannot diverge from their source. Therefore, all locations hold the value determined by the single independent source. Disagreement is impossible. ◻
 :::
 
 ::: theorem
@@ -299,7 +301,7 @@ Before formalizing codebases and edits, we establish the epistemic structure tha
 :::
 
 ::: proof
-*Proof.* With DOF $> 1$, at least two locations are independent. Independent locations can be modified separately. A sequence of edits can set $L_1 = v_1$ and $L_2 = v_2$ where $v_1 \neq v_2$. This is an incoherent state. 0◻ ◻
+*Proof.* With DOF $> 1$, at least two locations are independent. Independent locations can be modified separately. A sequence of edits can set $L_1 = v_1$ and $L_2 = v_2$ where $v_1 \neq v_2$. This is an incoherent state. ◻
 :::
 
 ::: corollary
@@ -345,10 +347,12 @@ The granularity of facts is determined by the specification, not the implementat
 :::
 
 ::: definition
-[]{#def:structural-fact label="def:structural-fact"} A fact $F$ is *structural* iff it concerns the structure of the type system: class existence, inheritance relationships, method signatures, or attribute definitions. Structural facts are fixed at *definition time*, not runtime.
+[]{#def:structural-fact label="def:structural-fact"} A fact $F$ is *structural* with respect to codebase $C$ iff the locations encoding $F$ are syntactic constituents of type definitions: $$\text{structural}(F, C) \Longleftrightarrow \forall L: \text{encodes}(L, F) \rightarrow L \in \text{TypeSyntax}(C)$$ where $\text{TypeSyntax}(C)$ comprises class declarations, method signatures, inheritance clauses, and attribute definitions.
 :::
 
-The distinction between structural and non-structural facts is crucial. A configuration value ("threshold = 0.5") can be changed at runtime. A method signature ("`validate()` returns `bool`") is fixed when the class is defined. SSOT for structural facts requires different mechanisms than SSOT for configuration values.
+**Key property:** Structural facts are fixed at *definition time*. Once a class is defined, its structure (methods, bases, attributes) cannot change without redefining the class. This is why structural SSOT requires definition-time hooks: the encoding locations are only mutable during class creation.
+
+**Non-structural facts** (configuration values, runtime state) have encoding locations outside type syntax. They can be modified at runtime without redefining types. SSOT for non-structural facts requires different mechanisms (e.g., reactive bindings, event systems) and is outside the scope of this paper.
 
 ## Encoding: The Correctness Relationship {#sec:encoding}
 
@@ -407,7 +411,7 @@ Modification complexity is the central metric of this paper. It measures the *co
 
 3.  Locations $L_{j+1}, \ldots, L_k$ reflect $v$ (old)
 
-By Definition [\[def:encodes\]](#def:encodes){reference-type="ref" reference="def:encodes"}, the program is incorrect. Therefore, all $k$ locations must be updated, and $k$ is the minimum. 0◻ ◻
+By Definition [\[def:encodes\]](#def:encodes){reference-type="ref" reference="def:encodes"}, the program is incorrect. Therefore, all $k$ locations must be updated, and $k$ is the minimum. ◻
 :::
 
 ## Independence and Degrees of Freedom {#sec:dof}
@@ -460,7 +464,7 @@ DOF is the key metric. Modification complexity $M$ counts all encoding locations
 :::
 
 ::: proof
-*Proof.* Each independent location can hold a different value. By Definition [\[def:independent\]](#def:independent){reference-type="ref" reference="def:independent"}, no constraint forces agreement between independent locations. Therefore, $k$ independent locations can hold $k$ distinct values. This is an instance of Theorem [\[thm:dof-gt-one-incoherence\]](#thm:dof-gt-one-incoherence){reference-type="ref" reference="thm:dof-gt-one-incoherence"} applied to software. 0◻ ◻
+*Proof.* Each independent location can hold a different value. By Definition [\[def:independent\]](#def:independent){reference-type="ref" reference="def:independent"}, no constraint forces agreement between independent locations. Therefore, $k$ independent locations can hold $k$ distinct values. This is an instance of Theorem [\[thm:dof-gt-one-incoherence\]](#thm:dof-gt-one-incoherence){reference-type="ref" reference="thm:dof-gt-one-incoherence"} applied to software. ◻
 :::
 
 ::: corollary
@@ -498,7 +502,7 @@ DOF values form a lattice with distinct epistemic meanings:
 
 3.  DOF $>$ 1 means multiple independent locations. By Corollary [\[cor:dof-risk\]](#cor:dof-risk){reference-type="ref" reference="cor:dof-risk"}, they can diverge. Incoherence is reachable.
 
-Only DOF = 1 achieves coherent representation. This is epistemic necessity, not design preference. 0◻ ◻
+Only DOF = 1 achieves coherent representation. This is epistemic necessity, not design preference. ◻
 :::
 
 
@@ -529,7 +533,7 @@ SSOT is not a design guideline. It is the unique representation guaranteeing epi
 :::
 
 ::: proof
-*Proof.* By Theorem [\[thm:dof-one-coherence\]](#thm:dof-one-coherence){reference-type="ref" reference="thm:dof-one-coherence"}, DOF = 1 guarantees coherence. Coherence means all encodings hold the same value. Therefore, the value of $F$ is uniquely determined by the single source. 0◻ ◻
+*Proof.* By Theorem [\[thm:dof-one-coherence\]](#thm:dof-one-coherence){reference-type="ref" reference="thm:dof-one-coherence"}, DOF = 1 guarantees coherence. Coherence means all encodings hold the same value. Therefore, the value of $F$ is uniquely determined by the single source. ◻
 :::
 
 Hunt & Thomas's "single, unambiguous, authoritative representation" [@hunt1999pragmatic] corresponds precisely to this epistemic structure:
@@ -555,7 +559,7 @@ When fact $F$ changes:
 
 3.  Coherence is maintained: all locations agree on the new value
 
-Coherence restoration requires 1 edit. 0◻ ◻
+Coherence restoration requires 1 edit. ◻
 :::
 
 ::: theorem
@@ -567,7 +571,7 @@ Coherence restoration requires 1 edit. 0◻ ◻
 
 This leaves only DOF = 1 as coherent representation. DOF = 0 means no independent location encodes $F$---the fact is not represented.
 
-Therefore, DOF = 1 is uniquely coherent. This is epistemic necessity, not design choice. 0◻ ◻
+Therefore, DOF = 1 is uniquely coherent. This is epistemic necessity, not design choice. ◻
 :::
 
 ::: corollary
@@ -575,7 +579,7 @@ Therefore, DOF = 1 is uniquely coherent. This is epistemic necessity, not design
 :::
 
 ::: proof
-*Proof.* Direct application of Theorem [\[thm:dof-gt-one-incoherence\]](#thm:dof-gt-one-incoherence){reference-type="ref" reference="thm:dof-gt-one-incoherence"}. With DOF $> 1$, independent locations can be modified separately, reaching states where they disagree. 0◻ ◻
+*Proof.* Direct application of Theorem [\[thm:dof-gt-one-incoherence\]](#thm:dof-gt-one-incoherence){reference-type="ref" reference="thm:dof-gt-one-incoherence"}. With DOF $> 1$, independent locations can be modified separately, reaching states where they disagree. ◻
 :::
 
 ## Coherence Restoration Complexity {#sec:ssot-vs-m}
@@ -635,7 +639,7 @@ For *structural facts*, derivation must occur at *definition time*. Structural f
 ::: proof
 *Proof.* By Definition [\[def:derivation\]](#def:derivation){reference-type="ref" reference="def:derivation"}, derived locations are automatically updated when the source changes. Let $L_d$ be derived from $L_s$. If $L_s$ encodes value $v$, then $L_d$ encodes $f(v)$ for some function $f$. When $L_s$ changes to $v'$, $L_d$ automatically changes to $f(v')$.
 
-There is no reachable state where $L_s = v'$ and $L_d = f(v)$ with $v' \neq v$. Divergence is impossible. Therefore, $L_d$ does not contribute to DOF. 0◻ ◻
+There is no reachable state where $L_s = v'$ and $L_d = f(v)$ with $v' \neq v$. Divergence is impossible. Therefore, $L_d$ does not contribute to DOF. ◻
 :::
 
 ::: corollary
@@ -643,7 +647,7 @@ There is no reachable state where $L_s = v'$ and $L_d = f(v)$ with $v' \neq v$. 
 :::
 
 ::: proof
-*Proof.* Let $L_s$ be the non-derived encoding. All other encodings $L_1, \ldots, L_k$ are derived from $L_s$. By Theorem [\[thm:derivation-excludes\]](#thm:derivation-excludes){reference-type="ref" reference="thm:derivation-excludes"}, none can diverge. Only $L_s$ is independent. Therefore, $\text{DOF}(C, F) = 1$, and by Theorem [\[thm:dof-one-coherence\]](#thm:dof-one-coherence){reference-type="ref" reference="thm:dof-one-coherence"}, coherence is guaranteed. 0◻ ◻
+*Proof.* Let $L_s$ be the non-derived encoding. All other encodings $L_1, \ldots, L_k$ are derived from $L_s$. By Theorem [\[thm:derivation-excludes\]](#thm:derivation-excludes){reference-type="ref" reference="thm:derivation-excludes"}, none can diverge. Only $L_s$ is independent. Therefore, $\text{DOF}(C, F) = 1$, and by Theorem [\[thm:dof-one-coherence\]](#thm:dof-one-coherence){reference-type="ref" reference="thm:dof-one-coherence"}, coherence is guaranteed. ◻
 :::
 
 ## Coherence Patterns in Python {#sec:ssot-patterns}
@@ -794,7 +798,7 @@ Case 2: $t_D > t_{\text{fix}}$. Then $D$ executes after $F$ is fixed. $D$ can re
 
 Case 3: $t_D = t_{\text{fix}}$. Then $D$ executes at the moment $F$ is fixed. $D$ can both read $F$ and modify derived structures before they are fixed.
 
-Therefore, derivation for structural facts must occur at definition time ($t_D = t_{\text{fix}}$). 0◻ ◻
+Therefore, derivation for structural facts must occur at definition time ($t_D = t_{\text{fix}}$). ◻
 :::
 
 ## Requirement 1: Definition-Time Hooks {#sec:hooks}
@@ -843,7 +847,7 @@ The registration happens at definition time, not at first use. When the `class P
 ::: proof
 *Proof.* By Theorem [\[thm:timing-forces\]](#thm:timing-forces){reference-type="ref" reference="thm:timing-forces"}, derivation for structural facts must occur at definition time. Without definition-time hooks, no code can execute at that moment. Therefore, derivation is impossible. Without derivation, secondary encodings cannot be automatically updated. DOF $>$ 1 is unavoidable.
 
-Contrapositive: If a language lacks definition-time hooks, SSOT for structural facts is impossible. 0◻ ◻
+Contrapositive: If a language lacks definition-time hooks, SSOT for structural facts is impossible. ◻
 :::
 
 **Languages lacking definition-time hooks:**
@@ -910,7 +914,7 @@ This verification is only possible because Python provides `__subclasses__()`. I
 
 Step (1) requires introspection: the program must query what structures exist and what they encode. Without introspection, the program cannot enumerate encodings. Verification is impossible.
 
-Without verifiable SSOT, the programmer cannot confirm SSOT holds. They must trust that their code is correct without runtime confirmation. Bugs in derivation logic go undetected. 0◻ ◻
+Without verifiable SSOT, the programmer cannot confirm SSOT holds. They must trust that their code is correct without runtime confirmation. Bugs in derivation logic go undetected. ◻
 :::
 
 **Languages lacking introspection for derivation:**
@@ -940,7 +944,7 @@ The two requirements---definition-time hooks and introspection---are independent
 
 **(2) Introspection without hooks:** Java provides `Class.getMethods()`, `Class.getInterfaces()`, etc. (introspection) but no code executes when a class is defined. Annotations are metadata, not executable hooks.
 
-Therefore, the requirements are independent. 0◻ ◻
+Therefore, the requirements are independent. ◻
 :::
 
 ## The Completeness Theorem {#sec:completeness}
@@ -968,7 +972,7 @@ $(\Leftarrow)$ **Sufficiency:** Suppose $L$ provides both definition-time hooks 
 
 -   Therefore, SSOT is achievable: create one source, derive all others, verify completeness
 
-The if-and-only-if follows. 0◻ ◻
+The if-and-only-if follows. ◻
 :::
 
 ::: corollary
@@ -1057,7 +1061,7 @@ The fact that $E_2$ was *generated from* $E_1$ does not make it a derivation in 
 
 3.  The generation process is external to the language and can be bypassed
 
-Contrast with Python, where the registry entry exists only in memory, created by the class statement itself. There is no second file. DOF $= 1$. 0◻ ◻
+Contrast with Python, where the registry entry exists only in memory, created by the class statement itself. There is no second file. DOF $= 1$. ◻
 :::
 
 **Why Rust proc macros don't help:**
@@ -1073,7 +1077,7 @@ This requires enumerating all encodings. If expansion is opaque, the program can
 
 In Rust, after `#[derive(Handler)]` expands, the program cannot ask "what did this macro generate?" The expansion is compiled into the binary but not introspectable.
 
-Without introspection, the program cannot verify DOF $= 1$. SSOT may hold but cannot be confirmed. 0◻ ◻
+Without introspection, the program cannot verify DOF $= 1$. SSOT may hold but cannot be confirmed. ◻
 :::
 
 **The Gap is Fundamental:**
@@ -1153,7 +1157,7 @@ This definition excludes niche languages (Haskell, Erlang, Clojure) while includ
   Swift            $\times$      $\times$      $\times$    $\times$      NO
 :::
 
-TypeScript earns $\triangle$ for DEF/INTRO because decorators plus `reflect-metadata` can run at class decoration time and expose limited metadata, but (a) they require compiler flags/transformers instead of being always-on language features, (b) they cannot enumerate implementers at runtime, and (c) they are erased for plain JavaScript consumers. Consequently SSOT remains impossible without external tooling, so the overall verdict stays NO.
+TypeScript earns $\triangle$ for DEF/INTRO because decorators (aligned with ES decorators since TypeScript 5.0, 2023) plus `reflect-metadata` can run at class decoration time and expose limited metadata, but (a) they require `experimentalDecorators` or specific tsconfig flags instead of being always-on language features, (b) they cannot enumerate implementers at runtime (no `__subclasses__()` equivalent), and (c) type information is erased at compile time. Consequently SSOT remains impossible without external tooling, so the overall verdict stays NO. **Note (as of 2026):** While ES decorators are now standard in JavaScript, they still lack subclass enumeration---the fundamental barrier to SSOT remains.
 
 ### Python: Full SSOT Support
 
@@ -1197,7 +1201,7 @@ Python provides all four capabilities:
 
 JavaScript lacks definition-time hooks:
 
-**DEF:** $\times$. No code executes when a class is defined. The `class` syntax is declarative. Decorators (Stage 3 proposal) are not yet standard and have limited capabilities.
+**DEF:** $\times$. No code executes when a class is defined. The `class` syntax is declarative. Decorators (TC39 Stage 3, finalized 2024) exist but cannot access or enumerate subclasses at runtime.
 
 **INTRO:** $\times$. `Object.getPrototypeOf()`, `instanceof` exist but *cannot enumerate subclasses*. No equivalent to `__subclasses__()`.
 
@@ -1282,7 +1286,7 @@ Rust's procedural macros are compile-time and opaque [@rustref2024]:
 :::
 
 ::: proof
-*Proof.* By exhaustive evaluation. We checked all 10 mainstream languages against the four criteria. Only Python satisfies all four. The evaluation is complete. No mainstream language is omitted. 0◻ ◻
+*Proof.* By exhaustive evaluation. We checked all 10 mainstream languages against the four criteria. Only Python satisfies all four. The evaluation is complete. No mainstream language is omitted. ◻
 :::
 
 ## Non-Mainstream Languages {#sec:non-mainstream}
@@ -1331,18 +1335,18 @@ Ruby provides hooks but with limitations [@flanagan2020ruby]:
 
 **INTRO:** . `subclasses`, `ancestors`, `instance_methods` provide introspection.
 
-**STRUCT:** Partial. Can add methods but cannot easily modify class structure during definition.
+**STRUCT:** Partial. Ruby's `inherited` hook receives the subclass *after* its body has been parsed, meaning the hook cannot intercept or transform the class definition as it is being constructed. Contrast with Python's `__init_subclass__`, which executes *during* class creation with access to keyword arguments passed in the class definition (e.g., `class Foo(Base, key=val)`). Ruby can add methods post-hoc via `define_method`, but cannot parameterize class creation or inject attributes before the class body executes.
 
-**HIER:** . `subclasses` enumerates subclasses.
+**HIER:** . `subclasses` enumerates subclasses (added in Ruby 3.1).
 
-Ruby is close to full SSOT support but the structural modification limitations prevent complete SSOT for some use cases.
+Ruby is close to full SSOT support but the structural modification limitations (no parameterized class creation, no pre-body hook) prevent complete SSOT for use cases requiring definition-time configuration.
 
 ::: theorem
 []{#thm:three-lang label="thm:three-lang"} Exactly three languages in common use satisfy complete SSOT requirements: Python, Common Lisp (CLOS), and Smalltalk.
 :::
 
 ::: proof
-*Proof.* By exhaustive evaluation of mainstream and notable non-mainstream languages. Python, CLOS, and Smalltalk satisfy all four criteria. Ruby satisfies three of four (partial STRUCT). All other evaluated languages fail at least two criteria. 0◻ ◻
+*Proof.* By exhaustive evaluation of mainstream and notable non-mainstream languages. Python, CLOS, and Smalltalk satisfy all four criteria. Ruby satisfies three of four (partial STRUCT). All other evaluated languages fail at least two criteria. ◻
 :::
 
 ## Implications for Language Selection {#sec:implications}
@@ -1380,6 +1384,16 @@ The evaluation has practical implications:
 
 We now prove the complexity bounds that make SSOT valuable. The key result: the gap between SSOT-complete and SSOT-incomplete architectures is *unbounded*---it grows without limit as codebases scale.
 
+## Cost Model {#sec:cost-model}
+
+::: definition
+[]{#def:cost-model label="def:cost-model"} Let $\delta_F$ be a modification to fact $F$ in codebase $C$. The *effective modification complexity* $M_{\text{effective}}(C, \delta_F)$ is the number of syntactically distinct edit operations a developer must perform manually. Formally: $$M_{\text{effective}}(C, \delta_F) = |\{L \in \text{Locations}(C) : \text{requires\_manual\_edit}(L, \delta_F)\}|$$ where $\text{requires\_manual\_edit}(L, \delta_F)$ holds iff location $L$ must be updated by the developer (not by automatic derivation) to maintain coherence after $\delta_F$.
+:::
+
+**Unit of cost:** One edit = one syntactic modification to one location. We count locations, not keystrokes or characters. This abstracts over edit complexity to focus on the scaling behavior.
+
+**What we measure:** Manual edits only. Derived locations that update automatically have zero cost. This distinguishes SSOT (where derivation handles propagation) from non-SSOT (where all updates are manual).
+
 ## Upper Bound: SSOT Achieves O(1) {#sec:upper-bound}
 
 ::: theorem
@@ -1397,7 +1411,7 @@ When $F$ changes:
 
 3.  Total manual edits: 1
 
-The number of derived locations $k$ may grow with codebase size, but the number of *manual* edits remains 1. Therefore, $M_{\text{effective}}(C, \delta_F) = O(1)$. 0◻ ◻
+The number of derived locations $k$ may grow with codebase size, but the number of *manual* edits remains 1. Therefore, $M_{\text{effective}}(C, \delta_F) = O(1)$. ◻
 :::
 
 **Note on "effective" vs. "total" complexity:** Total modification complexity $M(C, \delta_F)$ counts all locations that change. Effective modification complexity counts only manual edits. With SSOT, total complexity may be $O(n)$ (many derived locations change), but effective complexity is $O(1)$ (one manual edit).
@@ -1419,7 +1433,7 @@ By Definition [\[def:independent\]](#def:independent){reference-type="ref" refe
 
 3.  Total manual edits: $n$
 
-Therefore, $M_{\text{effective}}(C, \delta_F) = \Omega(n)$. 0◻ ◻
+Therefore, $M_{\text{effective}}(C, \delta_F) = \Omega(n)$. ◻
 :::
 
 ## The Unbounded Gap {#sec:gap}
@@ -1435,7 +1449,7 @@ By Theorem [\[thm:lower-bound\]](#thm:lower-bound){reference-type="ref" referen
 
 The ratio is: $$\frac{M_{\text{incomplete}}(n)}{M_{\text{complete}}} = \frac{n}{1} = n$$
 
-As $n \to \infty$, the ratio $\to \infty$. The gap is unbounded. 0◻ ◻
+As $n \to \infty$, the ratio $\to \infty$. The gap is unbounded. ◻
 :::
 
 ::: corollary
@@ -1443,7 +1457,7 @@ As $n \to \infty$, the ratio $\to \infty$. The gap is unbounded. 0◻ ◻
 :::
 
 ::: proof
-*Proof.* Choose $n = k$. Then $M_{\text{incomplete}}(n) = n = k$ and $M_{\text{complete}} = 1$. The reduction factor is $k/1 = k$. 0◻ ◻
+*Proof.* Choose $n = k$. Then $M_{\text{incomplete}}(n) = n = k$ and $M_{\text{complete}} = 1$. The reduction factor is $k/1 = k$. ◻
 :::
 
 ## Practical Implications {#sec:practical-implications}
@@ -1484,7 +1498,7 @@ The complexity bounds assume a single modification. Over the lifetime of a codeb
 :::
 
 ::: proof
-*Proof.* Each modification costs $O(1)$ with SSOT and $O(n)$ without. Over $m$ modifications, total cost is $m \cdot O(1) = O(m)$ with SSOT and $m \cdot O(n) = O(mn)$ without. 0◻ ◻
+*Proof.* Each modification costs $O(1)$ with SSOT and $O(n)$ without. Over $m$ modifications, total cost is $m \cdot O(1) = O(m)$ with SSOT and $m \cdot O(n) = O(mn)$ without. ◻
 :::
 
 For a fact modified 100 times with 50 encoding locations:
@@ -2046,6 +2060,24 @@ Cross-language code generation (e.g., protobuf) requires external tools. The ana
 All theorems are machine-checked in Lean 4 (1,605 lines across 12 files, 0 `sorry` placeholders). Complete source available at: `proofs/ssot/`.
 
 This appendix presents the actual Lean 4 source code from the repository. Every theorem compiles without `sorry`. The proofs can be verified by running `lake build` in the `proofs/ssot/` directory.
+
+## Model Correspondence {#sec:model-correspondence}
+
+**What the formalization models:** The Lean proofs operate at the level of *abstract language capabilities*, not concrete language semantics. We do not model Python's specific execution semantics or Java's bytecode. Instead, we model:
+
+1.  **DOF as a natural number:** $\text{DOF}(C, F) \in \mathbb{N}$ counts independent encoding locations
+
+2.  **Language capabilities as predicates:** `has_definition_hooks(L)` and `has_introspection(L)` are boolean properties of languages
+
+3.  **Derivation as a relation:** $\text{derives}(L_s, L_d)$ holds when $L_d$'s value is determined by $L_s$
+
+**Soundness argument:** The formalization is sound if:
+
+-   The abstract predicates correspond to actual language features (verified by the evaluation in Section [\[sec:evaluation\]](#sec:evaluation){reference-type="ref" reference="sec:evaluation"})
+
+-   The derivation relation correctly captures automatic propagation (verified by concrete examples in Section [\[sec:empirical\]](#sec:empirical){reference-type="ref" reference="sec:empirical"})
+
+**What we do NOT model:** Performance characteristics, type safety properties, concurrency semantics, or any property orthogonal to SSOT. The model is intentionally narrow: it captures exactly what is needed to prove SSOT requirements, and nothing more.
 
 ## On the Nature of Foundational Proofs {#sec:foundational-nature}
 

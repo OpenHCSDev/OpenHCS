@@ -24,15 +24,15 @@ lemma cheapTalkBound_nonneg (p q : ℝ)
   have h2 : 0 ≤ (1 - p) * q := mul_nonneg h1 hq
   linarith
 
-/-- The cheap talk bound is strictly positive when p>0 and q≥0. -/
+/-- The cheap talk bound is strictly positive when 0<p≤1 and q≥0. -/
 lemma cheapTalkBound_pos (p q : ℝ)
-    (hp : 0 < p) (hq : 0 ≤ q) :
+    (hp : 0 < p) (hp' : p ≤ 1) (hq : 0 ≤ q) :
     0 < cheapTalkBound p q := by
   unfold cheapTalkBound
   have h_denom_pos : 0 < p + (1 - p) * q := by
     have h1 : 0 ≤ (1 - p) * q := mul_nonneg (by linarith) hq
     linarith
-  nlinarith
+  exact div_pos hp h_denom_pos
 
 /-- If mimicability is 0 and p>0, cheap talk credibility is 1. -/
 lemma cheapTalkBound_q_zero (p : ℝ) (hp : 0 < p) :
@@ -68,14 +68,13 @@ lemma cheapTalkBound_lt_one (p q : ℝ)
     linarith
   have hneq : cheapTalkBound p q ≠ 1 := by
     intro h
-    have : p = p + (1 - p) * q := by
+    have heq : p = p + (1 - p) * q := by
       unfold cheapTalkBound at h
-      have hp_pos : 0 < p := hp
-      have hp_ne_zero : p ≠ 0 := ne_of_gt hp_pos
-      have hpos := hdenom_pos
-      have := (div_eq_one_iff_eq hpos.ne').1 h
+      have hp_ne_zero : p ≠ 0 := ne_of_gt hp
+      have := (div_eq_one_iff_eq hdenom_pos.ne').1 h
       linarith
-    have h_q_pos : 0 < q := hq
+    -- From heq: (1 - p) * q = 0, but (1 - p) > 0 and q > 0, contradiction
+    have h_prod_pos : 0 < (1 - p) * q := mul_pos (by linarith) hq
     linarith
   exact lt_of_le_of_ne h1 hneq
 
@@ -246,10 +245,8 @@ lemma cheapTalkBound_strict_antitone_mimicability (p : ℝ) (hp : 0 < p) (hp' : 
     nlinarith
   -- with equal numerators p > 0 and larger denominator, the fraction decreases
   have hp_pos : 0 < p := hp
-  have hfrac : p / (p + (1 - p) * q2) < p / (p + (1 - p) * q1) := by
-    have := div_lt_div_of_pos_left d_lt d1_pos ?pos
-    · simpa using this
-    · exact hp_pos
+  have hfrac : p / (p + (1 - p) * q2) < p / (p + (1 - p) * q1) :=
+    div_lt_div_of_pos_left hp_pos d1_pos d_lt
   simpa [cheapTalkBound] using hfrac
 
 /-- Theorem 3.3: Adding emphasis eventually decreases credibility.
