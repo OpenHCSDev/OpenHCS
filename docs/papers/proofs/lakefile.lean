@@ -79,6 +79,12 @@ lean_lib «paper2_SSOT» where
   moreLeanArgs := moreLeanArgs
   weakLeanArgs := weakLeanArgs
 
+-- Ssot submodules (includes Inconsistency.lean formal model)
+lean_lib «Ssot» where
+  globs := #[.submodules `Ssot]
+  moreLeanArgs := moreLeanArgs
+  weakLeanArgs := weakLeanArgs
+
 -- Paper 3: Leverage
 lean_lib «paper3_Foundations» where
   moreLeanArgs := moreLeanArgs
