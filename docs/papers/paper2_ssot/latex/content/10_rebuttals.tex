@@ -116,4 +116,36 @@ External tools reduce DOF from $n$ to $k$ where $k$ is the number of tool config
 
 Cross-language code generation (e.g., protobuf) requires external tools. The analysis characterizes single-language SSOT.
 
+\subsection{Objection: Inconsistency Is Only in Comments}
+
+\textbf{Objection:} ``The proofs don't formalize `inconsistency'---it only appears in comments. The heavy lifting is done by the comments, not by the formal system.''
+
+\textbf{Response:} This critique was valid for earlier versions. We have since added \texttt{Ssot/Inconsistency.lean} (216 LOC, zero \texttt{sorry}), which formalizes inconsistency as a Lean \texttt{Prop}:
+
+\begin{verbatim}
+structure ConfigSystem where
+  num_locations : Nat
+  value_at : LocationId -> Value
+
+def inconsistent (c : ConfigSystem) : Prop :=
+  exists l1 l2, l1 < c.num_locations /\ l2 < c.num_locations /\
+                l1 != l2 /\ c.value_at l1 != c.value_at l2
+\end{verbatim}
+
+The file proves:
+
+\begin{enumerate}
+\item \textbf{DOF $>$ 1 implies inconsistency possible:} \texttt{dof\_gt\_one\_implies\_inconsistency\_possible}---we constructively exhibit an inconsistent configuration for any $n > 1$.
+
+\item \textbf{Guaranteed consistency requires DOF $\leq$ 1:} \texttt{consistency\_requires\_dof\_le\_one}---contrapositive of the above.
+
+\item \textbf{DOF = 0 means the fact is not encoded:} \texttt{dof\_zero\_means\_not\_encoded}---no locations implies the system cannot represent the value.
+
+\item \textbf{Independence formalized:} \texttt{update\_preserves\_other\_locations}---updating one location does not affect others, formalizing what ``independent'' means.
+
+\item \textbf{Oracle necessity:} \texttt{resolution\_requires\_external\_choice}---when locations disagree, there exist valid oracles that give different resolutions. Therefore, resolving disagreement requires an external, arbitrary choice. The system itself provides no basis to prefer one value over another.
+\end{enumerate}
+
+This addresses the critique directly: inconsistency is now a formal property that Lean knows about, not a comment. The interpretation ``this models real configuration systems'' still requires mapping to reality, but every formalization eventually bottoms out in interpretation. The contribution is making assumptions \emph{explicit and attackable}, not eliminating interpretation entirely.
+
 %==============================================================================

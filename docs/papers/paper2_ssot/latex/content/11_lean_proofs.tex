@@ -1,7 +1,7 @@
 \section{Lean 4 Proof Listings}\label{sec:lean}
 %==============================================================================
 
-All theorems are machine-checked in Lean 4 (1,605 lines across 12 files, 0 \texttt{sorry} placeholders). Complete source available at: \texttt{proofs/ssot/}.
+All theorems are machine-checked in Lean 4 (1,821 lines across 13 files, 0 \texttt{sorry} placeholders). Complete source available at: \texttt{proofs/}.
 
 This appendix presents the actual Lean 4 source code from the repository. Every theorem compiles without \texttt{sorry}. The proofs can be verified by running \texttt{lake build} in the \texttt{proofs/ssot/} directory.
 
@@ -360,6 +360,46 @@ theorem rust_impossibility (L : LanguageFeatures)
   exact impossibility L (Or.inr h_no_intro)
 \end{verbatim}
 
+\subsection{Inconsistency.lean: Formal Inconsistency Model (216 lines)}\label{sec:lean-inconsistency}
+
+This file responds to the critique that ``inconsistency'' was only defined in comments. Here we define \texttt{ConfigSystem}, formalize inconsistency as a \texttt{Prop}, and prove that DOF $>$ 1 implies the existence of inconsistent states.
+
+\begin{verbatim}
+/-
+  ConfigSystem: locations that can hold values for a fact.
+  Inconsistency means two locations disagree on the value.
+-/
+structure ConfigSystem where
+  num_locations : Nat
+  value_at : LocationId -> Value
+
+def inconsistent (c : ConfigSystem) : Prop :=
+  exists l1 l2, l1 < c.num_locations /\ l2 < c.num_locations /\
+                l1 != l2 /\ c.value_at l1 != c.value_at l2
+
+-- DOF > 1 implies there exists an inconsistent configuration
+theorem dof_gt_one_implies_inconsistency_possible (n : Nat) (h : n > 1) :
+    exists c : ConfigSystem, dof c = n /\ inconsistent c
+
+-- Contrapositive: guaranteed consistency requires DOF <= 1
+theorem consistency_requires_dof_le_one (n : Nat)
+    (hall : forall c : ConfigSystem, dof c = n -> consistent c) : n <= 1
+
+-- DOF = 0 means the fact is not encoded
+theorem dof_zero_means_not_encoded (c : ConfigSystem) (h : dof c = 0) :
+    Not (encodes_fact c)
+
+-- Independence: updating one location doesn't affect others
+theorem update_preserves_other_locations (c : ConfigSystem) (loc other : LocationId)
+    (new_val : Value) (h : other != loc) :
+    (update_location c loc new_val).value_at other = c.value_at other
+
+-- Oracle necessity: valid oracles can disagree
+theorem resolution_requires_external_choice :
+    exists o1 o2 : Oracle, valid_oracle o1 /\ valid_oracle o2 /\
+    exists c l1 l2, o1 c l1 l2 != o2 c l1 l2
+\end{verbatim}
+
 \subsection{Verification Summary}\label{sec:lean-summary}
 
 \begin{center}
@@ -375,14 +415,15 @@ Completeness.lean & 130 & 11 \\
 Bounds.lean & 55 & 5 \\
 Languages.lean & 108 & 6 \\
 Foundations.lean & 364 & 15 \\
+Ssot/Inconsistency.lean & 216 & 12 \\
 LangPython.lean & 209 & 8 \\
 LangRust.lean & 184 & 6 \\
 LangStatic.lean & 163 & 5 \\
 LangEvaluation.lean & 155 & 10 \\
 \midrule
-\textbf{Total} & \textbf{1,605} & \textbf{79} \\
+\textbf{Total} & \textbf{1,821} & \textbf{91} \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-\textbf{All 79 theorems compile without \texttt{sorry} placeholders.} The proofs can be verified by running \texttt{lake build} in the \texttt{proofs/ssot/} directory. Every theorem in the paper corresponds to a machine-checked proof.
+\textbf{All 91 theorems compile without \texttt{sorry} placeholders.} The proofs can be verified by running \texttt{lake build} in the \texttt{proofs/} directory. Every theorem in the paper corresponds to a machine-checked proof.
