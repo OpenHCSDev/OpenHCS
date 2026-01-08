@@ -563,8 +563,11 @@ FijiStreamingConfig = create_streaming_config(
     preview_label='FIJI'
 )
 
-# Inject all accumulated fields at the end of module loading
-from openhcs.config_framework.lazy_factory import _inject_all_pending_fields
+# Inject all accumulated fields at the end of module loading.
+# Important: use the same lazy_factory module that registered injections
+# (objectstate.lazy_factory). Importing via openhcs.config_framework.lazy_factory
+# would create a second module with its own empty registry.
+from objectstate.lazy_factory import _inject_all_pending_fields
 _inject_all_pending_fields()
 
 
