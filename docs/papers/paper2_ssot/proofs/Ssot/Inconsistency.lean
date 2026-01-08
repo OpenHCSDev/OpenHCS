@@ -111,6 +111,15 @@ theorem consistency_requires_dof_le_one (n : Nat)
 theorem ssot_is_unique_optimum (n : Nat) : (n ≥ 1 ∧ n ≤ 1) ↔ n = 1 := by
   omega
 
+-- THE MAIN RESULT: Encoding + Consistency → DOF = 1
+-- If you need to encode the fact AND guarantee all configs are consistent, DOF must equal 1
+theorem ssot_required (n : Nat)
+    (h_encodes : n ≥ 1)  -- fact must be encoded somewhere
+    (h_consistent : ∀ c : ConfigSystem, dof c = n → consistent c)  -- all configs consistent
+    : n = 1 := by
+  have h_le := consistency_requires_dof_le_one n h_consistent
+  omega
+
 /-!
 ## DOF = 0: The Fact Is Not Encoded
 
