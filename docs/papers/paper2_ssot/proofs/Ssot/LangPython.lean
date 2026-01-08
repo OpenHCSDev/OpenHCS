@@ -205,5 +205,30 @@ theorem subclasses_query_reflects_definition (rt : PyRuntime) (name : PyId) (bas
   simp [query_subclasses]
   exact subclasses_updated_at_definition rt name bases attrs methods parent h
 
-end Python
+/-!
+## Capability Predicates (Operational)
 
+These connect the concrete Python semantics to the abstract SSOT requirements.
+-/
+
+def HasDefinitionHooks : Prop :=
+  ∀ rt name bases attrs methods parent,
+    parent ∈ bases →
+    ClassDefEvent.init_subclass_called parent name ∈
+      (execute_class_statement rt name bases attrs methods).2
+
+def HasIntrospection : Prop :=
+  ∀ rt name bases attrs methods parent,
+    parent ∈ bases →
+    let rt' := (execute_class_statement rt name bases attrs methods).1
+    name ∈ query_subclasses rt' parent
+
+theorem python_has_hooks : HasDefinitionHooks := by
+  intro rt name bases attrs methods parent h
+  exact init_subclass_in_class_definition rt name bases attrs methods parent h
+
+theorem python_has_introspection : HasIntrospection := by
+  intro rt name bases attrs methods parent h
+  exact subclasses_query_reflects_definition rt name bases attrs methods parent h
+
+end Python

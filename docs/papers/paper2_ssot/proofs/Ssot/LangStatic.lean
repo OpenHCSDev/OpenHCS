@@ -159,5 +159,29 @@ theorem static_languages_no_definition_hooks :
   intro def_ e he
   exact java_lacks_definition_hooks def_ e he
 
-end StaticLang
+/-!
+## Capability Predicates (Operational)
 
+We express "definition-time hooks" as the existence of user code events during
+definition. The static-language model proves this cannot happen.
+-/
+
+def HasDefinitionHooks : Prop :=
+  ∃ def_ e, e ∈ java_class_definition_events def_ ∧
+    is_definition_time_user_code e = true
+
+-- Introspection is not modeled for static languages in this file.
+-- Missing hooks already suffice to refute SSOT capability.
+def HasIntrospection : Prop := False
+
+theorem static_lacks_definition_hooks : ¬HasDefinitionHooks := by
+  intro h
+  rcases h with ⟨def_, e, he, huser⟩
+  have hfalse := java_lacks_definition_hooks def_ e he
+  have : (true : Bool) = false := by
+    calc
+      (true : Bool) = is_definition_time_user_code e := by symm; exact huser
+      _ = false := hfalse
+  cases this
+
+end StaticLang

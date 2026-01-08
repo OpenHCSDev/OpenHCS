@@ -180,5 +180,75 @@ theorem rust_cannot_introspect_macro_source :
 -- There is no "hidden source tag" that could be queried.
 -- This is structural, not an axiom - it follows from RuntimeItem's definition.
 
-end Rust
+/-!
+## Capability Predicates (Operational)
 
+We express "introspection" as the ability to recover source provenance from
+runtime items produced by erasure. This is impossible in Rust because erasure
+forgets source tags (erasure_destroys_source).
+-/
+
+def HasDefinitionHooks : Prop :=
+  ∃ state macro_name generated_items,
+    (expand_macro state macro_name generated_items).current_phase = .macro_expansion
+
+def HasIntrospection : Prop :=
+  ∃ query : RuntimeItem → Option ItemSource,
+    ∀ item macro_name,
+      let user_state : CompileTimeState :=
+        { items := [user_written_item item], current_phase := .parsing }
+      let macro_state : CompileTimeState :=
+        { items := [macro_generated_item macro_name item], current_phase := .parsing }
+      ∃ ru ∈ (erase_to_runtime user_state).items,
+        query ru = some .user_written ∧
+      ∃ rm ∈ (erase_to_runtime macro_state).items,
+        query rm = some (.macro_expanded macro_name)
+
+theorem rust_has_definition_hooks : HasDefinitionHooks := by
+  refine ⟨{ items := [], current_phase := .parsing }, "m", [], ?_⟩
+  rfl
+
+theorem rust_lacks_introspection : ¬HasIntrospection := by
+  intro h
+  rcases h with ⟨query, hq⟩
+  let item : RustItem := RustItem.struct "X" []
+  let macro_name : RustId := "M"
+  have hq' := hq item macro_name
+  -- Name the two compile-time states
+  let user_state : CompileTimeState :=
+    { items := [user_written_item item], current_phase := .parsing }
+  let macro_state : CompileTimeState :=
+    { items := [macro_generated_item macro_name item], current_phase := .parsing }
+  -- Erasure yields identical runtime items (key lemma)
+  have h_eq :
+      (erase_to_runtime user_state).items =
+      (erase_to_runtime macro_state).items := by
+    simpa [user_state, macro_state] using erasure_destroys_source item macro_name
+  -- Extract the witnessed runtime items
+  rcases hq' with ⟨ru, hru, hru_q, rm, hrm, hrm_q⟩
+  -- Move rm into the user_state list using equality
+  have hrm' : rm ∈ (erase_to_runtime user_state).items := by
+    simpa [h_eq] using hrm
+  -- Both lists are singletons containing { item := item }
+  have h_singleton :
+      (erase_to_runtime user_state).items = [{ item := item }] := by
+    simp [user_state, erase_to_runtime, user_written_item]
+  have hru_eq : ru = { item := item } := by
+    rw [h_singleton] at hru
+    simp [List.mem_singleton] at hru
+    exact hru
+  have hrm_eq : rm = { item := item } := by
+    rw [h_singleton] at hrm'
+    simp [List.mem_singleton] at hrm'
+    exact hrm'
+  -- Contradiction: same runtime item would need two different sources
+  have h_src_eq :
+      (some (.user_written) : Option ItemSource) =
+      some (.macro_expanded macro_name) := by
+    calc
+      (some (.user_written) : Option ItemSource) =
+          query { item := item } := by simpa [hru_eq] using hru_q.symm
+      _ = some (.macro_expanded macro_name) := by simpa [hrm_eq] using hrm_q
+  cases h_src_eq
+
+end Rust
