@@ -98,7 +98,7 @@ OpenHCS evolved from EZStitcher, a microscopy stitching library, into a more gen
 
 The codebase implements several patterns that may be of interest:
 
-1. **Dual-Axis Configuration Framework**: Combines context hierarchy (global → pipeline → step) with class inheritance (MRO) for configuration resolution. Extracted as standalone library: [hieraconf](https://github.com/trissim/hieraconf)
+1. **Dual-Axis Configuration Framework**: Combines context hierarchy (global → pipeline → step) with class inheritance (MRO) for configuration resolution. Extracted as standalone library: [objectstate](https://github.com/trissim/objectstate)
 
 2. **Lazy Dataclass Factory**: Runtime generation of configuration classes with `__getattribute__` interception for on-demand resolution.
 
@@ -398,7 +398,7 @@ class LazyPipelineConfig(PipelineConfig):
 - MRO-based dual-axis resolution (context + class hierarchy)
 - Field-level inheritance (different fields can inherit from different sources)
 
-**Extracted as standalone library**: [hieraconf](https://github.com/trissim/hieraconf)
+**Extracted as standalone library**: [objectstate](https://github.com/trissim/objectstate)
 
 **See**: [Configuration Framework](https://openhcs.readthedocs.io/en/latest/architecture/configuration_framework.html)
 
@@ -527,7 +527,7 @@ Example workflows include preprocessing, stitching, and analysis steps with GPU 
 - Type-based UI generation from Python annotations
 
 **Extracted libraries**:
-- [hieraconf](https://github.com/trissim/hieraconf) - Hierarchical configuration framework
+- [objectstate](https://github.com/trissim/objectstate) - Hierarchical configuration framework
 
 **Potential research contributions**:
 - Configuration framework patterns (publishable in JOSS or PL conferences)
