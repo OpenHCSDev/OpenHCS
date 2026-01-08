@@ -799,7 +799,7 @@ class FunctionStep(AbstractStep):
 
     def __init__(
         self,
-        func: Union[Callable, Tuple[Callable, Dict], List[Union[Callable, Tuple[Callable, Dict]]]],
+        func: Union[Callable, Tuple[Callable, Dict], List[Union[Callable, Tuple[Callable, Dict]]]]= [],
         **kwargs
     ):
         # Generate default name from function if not provided

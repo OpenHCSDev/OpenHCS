@@ -43,7 +43,7 @@ class Pipeline(list):
     - Method chaining for fluent pipeline construction
     """
 
-    def __init__(self, steps=None, *, name=None, metadata=None, description=None):
+    def __init__(self, steps=None, *, name=None, metadata=None, description=None, step_scope_ids=None):
         """
         Initialize a pipeline that behaves like a list of steps.
 
@@ -52,6 +52,7 @@ class Pipeline(list):
             name: Human-readable name for the pipeline
             metadata: Additional metadata dictionary
             description: Optional description of what this pipeline does
+            step_scope_ids: List of ObjectState scope IDs for steps (for UI state tracking)
         """
         # Initialize the list part with steps
         super().__init__(steps or [])
@@ -60,6 +61,9 @@ class Pipeline(list):
         self.name = name or f"Pipeline_{id(self)}"
         self.description = description
         self.metadata = metadata or {}
+
+        # ObjectState tracking - list of scope IDs for steps
+        self.step_scope_ids = step_scope_ids or []
 
         # Add creation timestamp for debugging
         from datetime import datetime

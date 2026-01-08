@@ -29,6 +29,8 @@ import logging
 from typing import Dict, Callable, Optional, Protocol
 from PyQt6.QtWidgets import QWidget
 
+from openhcs.config_framework.object_state import ObjectStateRegistry
+
 logger = logging.getLogger(__name__)
 
 
@@ -513,15 +515,26 @@ class WindowManager:
     @classmethod
     def _find_step_by_token(cls, plate_manager, plate_path: str, step_token: str):
         """Find a step in the pipeline by its scope token."""
-        pipeline_steps = plate_manager.plate_pipelines.get(plate_path, [])
+        # Get steps from Pipeline ObjectState instead of deprecated plate_pipelines
+        pipeline_scope = f"{plate_path}::pipeline"
+        pipeline_state = ObjectStateRegistry.get_by_scope(pipeline_scope)
 
-        for step in pipeline_steps:
-            token = getattr(step, '_scope_token', None)
-            if token == step_token:
-                return step
-            token2 = getattr(step, '_pipeline_scope_token', None)
-            if token2 == step_token:
-                return step
+        if not pipeline_state:
+            logger.debug(f"No pipeline state for {plate_path}")
+            return None
 
-        logger.debug(f"Step token '{step_token}' not found in {len(pipeline_steps)} steps")
+        step_scope_ids = pipeline_state.parameters.get("step_scope_ids") or []
+
+        for scope_id in step_scope_ids:
+            step_state = ObjectStateRegistry.get_by_scope(scope_id)
+            if step_state:
+                step = step_state.object_instance
+                token = getattr(step, '_scope_token', None)
+                if token == step_token:
+                    return step
+                token2 = getattr(step, '_pipeline_scope_token', None)
+                if token2 == step_token:
+                    return step
+
+        logger.debug(f"Step token '{step_token}' not found in {len(step_scope_ids)} steps")
         return None

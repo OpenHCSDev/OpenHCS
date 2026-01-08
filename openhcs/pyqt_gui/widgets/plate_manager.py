@@ -50,7 +50,8 @@ from openhcs.pyqt_gui.widgets.shared.scope_visual_config import ListItemType
 logger = logging.getLogger(__name__)
 
 # Root ObjectState scope - tracks all plates in the application
-ROOT_SCOPE_ID = ""
+# NOTE: Cannot use "" as scope_id - that's already used by GlobalPipelineConfig in app.py
+ROOT_SCOPE_ID = "__plates__"
 
 
 class PlateManagerWidget(AbstractManagerWidget):
@@ -171,26 +172,35 @@ class PlateManagerWidget(AbstractManagerWidget):
         logger.info("✅ PlateManagerWidget cleanup completed")
 
     def _on_time_travel_complete(self, dirty_states, triggering_scope):
-        """Clear orchestrator cache after time travel - force recreation.
+        """Clean up stale orchestrators after time travel.
 
         Called automatically by ObjectStateRegistry when time travel completes.
+        Only removes orchestrators for plates that no longer exist after time travel.
+        Keeps orchestrators for plates that still exist to preserve init state.
 
         Args:
             dirty_states: List of (scope_id, ObjectState) tuples that changed
             triggering_scope: The scope that triggered the time travel (if any)
         """
-        # Clear all orchestrators - they're tied to old timeline
-        # User must re-Init Plate to recreate orchestrator instances
-        # This is CORRECT - orchestrator state (READY, COMPILED, etc) is ephemeral
-        logger.info(f"🕰️ Time travel complete, clearing {len(self.orchestrators)} orchestrator(s)")
-        self.orchestrators.clear()
+        # Get current plate paths from restored ObjectState
+        root_state = self._ensure_root_state()
+        current_paths = set(root_state.parameters.get("orchestrator_scope_ids") or [])
+
+        # Only remove orchestrators for plates that no longer exist
+        stale_paths = [path for path in self.orchestrators.keys() if path not in current_paths]
+        for path in stale_paths:
+            logger.info(f"🕰️ Removing stale orchestrator for deleted plate: {path}")
+            del self.orchestrators[path]
+
+        logger.info(f"🕰️ Time travel complete: kept {len(self.orchestrators)} orchestrator(s), removed {len(stale_paths)}")
 
         # Clear plate configs cache - force reload from ObjectState
+        # (PipelineConfig is properly restored by ObjectState time travel)
         logger.info(f"🕰️ Clearing {len(self.plate_configs)} plate config cache(s)")
         self.plate_configs.clear()
 
         # Note: orchestrator_scope_ids list is restored by time travel automatically
-        # Update button states (Init Plate button should be enabled)
+        # Update button states (Init Plate button should be enabled for non-initialized plates)
         self.update_button_states()
 
         # Update UI to reflect restored state
@@ -220,7 +230,7 @@ class PlateManagerWidget(AbstractManagerWidget):
         Each plate dict has 'name' (derived from path) and 'path' keys.
         """
         root_state = self._ensure_root_state()
-        plate_paths = root_state.get_parameter("orchestrator_scope_ids") or []
+        plate_paths = root_state.parameters.get("orchestrator_scope_ids") or []
 
         return [
             {
@@ -398,7 +408,7 @@ class PlateManagerWidget(AbstractManagerWidget):
 
         # Get current plate paths from root ObjectState
         root_state = self._ensure_root_state()
-        current_paths = root_state.get_parameter("orchestrator_scope_ids") or []
+        current_paths = root_state.parameters.get("orchestrator_scope_ids") or []
         new_paths = list(current_paths)  # Copy for mutation
 
         for selected_path in selected_paths:
@@ -831,7 +841,7 @@ class PlateManagerWidget(AbstractManagerWidget):
 
         # Get current plate paths from root ObjectState
         root_state = self._ensure_root_state()
-        current_paths = root_state.get_parameter("orchestrator_scope_ids") or []
+        current_paths = root_state.parameters.get("orchestrator_scope_ids") or []
         existing_paths = set(current_paths)
         new_paths = list(current_paths)  # Copy for mutation
         added_count = 0
@@ -1210,7 +1220,7 @@ class PlateManagerWidget(AbstractManagerWidget):
 
         # Remove from root ObjectState
         root_state = self._ensure_root_state()
-        current_paths = root_state.get_parameter("orchestrator_scope_ids") or []
+        current_paths = root_state.parameters.get("orchestrator_scope_ids") or []
         new_paths = [p for p in current_paths if p not in paths_to_delete]
         root_state.update_parameter("orchestrator_scope_ids", new_paths)
 
