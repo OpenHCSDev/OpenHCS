@@ -1,0 +1,3 @@
+[submodule "external/ObjectState"]
+	path = external/ObjectState
+	url = https://github.com/trissim/ObjectState.git
