@@ -1,2 +1,0 @@
-error: no such file or directory (error code: 2)
-  file: ./lakefile.lean

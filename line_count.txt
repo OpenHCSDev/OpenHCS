@@ -1,8 +1,0 @@
-Paper 1: 1,200 lines
-Paper 2: 950 lines
-Paper 3: 1,100 lines
-Paper 4: 3,500 lines
-Paper 5: 430 lines
-Total: 7,180 lines of Lean 4 code
-Status: 0 sorry across all 5 papers.
-AST Upgrade: Paper 4 now uses general Boolean Formula AST for coNP-hardness.
