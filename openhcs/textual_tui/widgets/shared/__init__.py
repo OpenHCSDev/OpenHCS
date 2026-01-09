@@ -9,7 +9,7 @@ from .parameter_form_manager import ParameterFormManager
 from .enum_radio_set import EnumRadioSet
 from .typed_widget_factory import TypedWidgetFactory
 # SignatureAnalyzer moved to openhcs.introspection (framework-agnostic introspection utilities)
-from openhcs.introspection.signature_analyzer import SignatureAnalyzer
+from openhcs.introspection import SignatureAnalyzer
 
 __all__ = [
     "ParameterFormManager",

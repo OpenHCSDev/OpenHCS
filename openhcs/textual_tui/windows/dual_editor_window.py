@@ -485,7 +485,7 @@ class DualEditorWindow(BaseOpenHCSWindow):
                     func, kwargs = func_item
 
                     # Get expected parameter types from function signature
-                    from openhcs.introspection.signature_analyzer import SignatureAnalyzer
+                    from openhcs.introspection import SignatureAnalyzer
                     from openhcs.textual_tui.widgets.shared.parameter_form_manager import ParameterFormManager
 
                     param_info = SignatureAnalyzer.analyze(func)

@@ -23,7 +23,7 @@ import sys
 from abc import ABC
 import logging
 
-from openhcs.introspection.unified_parameter_analyzer import UnifiedParameterAnalyzer
+from openhcs.introspection import UnifiedParameterAnalyzer
 from openhcs.ui.shared.parameter_form_config_factory import pyqt_config
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.config_framework import get_base_config_type

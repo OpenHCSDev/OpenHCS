@@ -40,7 +40,7 @@ from openhcs.constants.constants import Backend, VariableComponents, Orchestrato
 from openhcs.textual_tui.services.file_browser_service import SelectionMode
 from openhcs.textual_tui.services.window_service import WindowService
 from openhcs.core.path_cache import get_cached_browser_path, PathCacheKey, get_path_cache
-from openhcs.introspection.signature_analyzer import SignatureAnalyzer
+from openhcs.introspection import SignatureAnalyzer
 
 logger = logging.getLogger(__name__)
 

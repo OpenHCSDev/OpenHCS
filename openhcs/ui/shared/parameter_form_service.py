@@ -482,7 +482,7 @@ class ParameterFormService:
         else:
             # Recursively analyze nested structure with proper descriptions for nested fields
             # Use existing infrastructure to extract field descriptions for the nested dataclass
-            from openhcs.introspection.unified_parameter_analyzer import UnifiedParameterAnalyzer
+            from openhcs.introspection import UnifiedParameterAnalyzer
             # OPTIMIZATION: Always analyze the TYPE, not the instance
             # This allows caching and avoids extracting field values we don't need
             nested_param_info = UnifiedParameterAnalyzer.analyze(obj_type)

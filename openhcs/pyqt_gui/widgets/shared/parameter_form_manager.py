@@ -146,7 +146,7 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, FlashMixin, metacla
         Uses self.object_instance (target object for this PFM's scope), NOT self.state.object_instance (root).
         Filters by self.parameters keys (already scoped/stripped for nested PFMs).
         """
-        from openhcs.introspection.unified_parameter_analyzer import UnifiedParameterAnalyzer
+        from openhcs.introspection import UnifiedParameterAnalyzer
         param_info_dict = UnifiedParameterAnalyzer.analyze(self.object_instance)
         return {name: info.param_type for name, info in param_info_dict.items() if name in self.parameters}
 
@@ -230,7 +230,7 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, FlashMixin, metacla
 
                 self.service = ParameterFormService()
                 # Single code path for all object types - that's the point of UnifiedParameterAnalyzer
-                from openhcs.introspection.unified_parameter_analyzer import UnifiedParameterAnalyzer
+                from openhcs.introspection import UnifiedParameterAnalyzer
 
                 param_info_dict = UnifiedParameterAnalyzer.analyze(target_obj)
                 # self.parameters property already filters/strips keys for our prefix

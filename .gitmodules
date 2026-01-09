@@ -1,3 +1,6 @@
 [submodule "external/ObjectState"]
 	path = external/ObjectState
 	url = https://github.com/trissim/ObjectState.git
+[submodule "external/python-introspect"]
+	path = external/python-introspect
+	url = https://github.com/trissim/python-introspect.git

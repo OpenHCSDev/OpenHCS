@@ -9,7 +9,7 @@ from textual.reactive import reactive
 
 from openhcs.textual_tui.services.pattern_data_manager import PatternDataManager
 from .shared.parameter_form_manager import ParameterFormManager
-from openhcs.introspection.signature_analyzer import SignatureAnalyzer
+from openhcs.introspection import SignatureAnalyzer
 from .shared.clickable_help_label import ClickableFunctionTitle
 
 

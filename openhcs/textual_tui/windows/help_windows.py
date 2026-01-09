@@ -8,7 +8,7 @@ from textual.widgets import Button, Static, Markdown
 from textual.css.query import NoMatches
 
 from openhcs.textual_tui.windows.base_window import BaseOpenHCSWindow
-from openhcs.introspection.signature_analyzer import DocstringExtractor
+from openhcs.introspection import DocstringExtractor
 
 
 class BaseHelpWindow(BaseOpenHCSWindow):
