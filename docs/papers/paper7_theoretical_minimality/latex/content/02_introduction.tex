@@ -130,5 +130,27 @@ different queries or contain redundant structure.
 
 The proof is constructive. We show how to compute $T^*$ from $\text{Queries}(D)$.
 
+\subsection{Anticipated Objections}\label{sec:objection-summary}
+
+Before proceeding, we address objections readers are likely forming. Each is refuted in detail in Appendix~\ref{appendix-rebuttals}.
+
+\paragraph{``Uniqueness up to isomorphism is trivial.''}
+Isomorphism is not relabeling. Two theories are isomorphic if they have the same structure---the same query-answer relationships. The theorem says there is exactly one such structure. Different notations for the same theory are not ``different theories.''
+
+\paragraph{``This assumes the One-Universe Framework.''}
+Yes. The uniqueness result depends on truth being absolute, not model-relative. Within model-theoretic pluralism, multiple theories can be ``equally true'' in different models. The OUF collapses this: axioms are definitions, and truth is determined by the mathematical universe $\mathcal{U}$.
+
+\paragraph{``Finite domains are too restrictive.''}
+The finite domain assumption enables constructive proofs. Extension to infinite domains requires additional machinery (compactness, well-foundedness). The finite case captures the essential insight: minimality determines uniqueness.
+
+\paragraph{``This contradicts Quine's underdetermination thesis.''}
+Quine's thesis applies to empirical theories with observational equivalence. Our framework applies to formal theories with query equivalence. The distinction: empirical theories can have observationally equivalent but structurally distinct formulations; formal theories cannot have query-equivalent but structurally distinct minimal formulations.
+
+\paragraph{``The Lean proofs are trivial.''}
+The proofs formalize the uniqueness structure. The value is precision: the informal argument ``minimal implies unique'' becomes a machine-checked derivation. Trivial proofs that compile are more valuable than deep proofs with errors.
+
+\medskip
+\noindent\textbf{If you have an objection not listed above,} check Appendix~\ref{appendix-rebuttals} before concluding it has not been considered.
+
 \begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
 

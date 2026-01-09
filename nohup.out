@@ -1,0 +1,32 @@
+usage: build_papers.py [-h] [-v] [-q]
+                       [{release,all,lean,latex,markdown,arxiv}] [paper]
+build_papers.py: error: unrecognized arguments: --all
+usage: build_papers.py [-h] [-v] [-q]
+                       [{release,all,lean,latex,markdown,arxiv}] [paper]
+build_papers.py: error: unrecognized arguments: --all
+
+==================================================
+[release] Building paper1
+==================================================
+
+[build] Building paper1 Lean...
+[build]   Directory: docs/papers/paper1_typing_discipline/proofs
+[build]   Running: lake build
+Traceback (most recent call last):
+  File "/home/ts/code/projects/openhcs-sequential/scripts/build_papers.py", line 603, in <module>
+    main()
+  File "/home/ts/code/projects/openhcs-sequential/scripts/build_papers.py", line 585, in main
+    builder.build_all(args.build_type, verbose=verbose)
+  File "/home/ts/code/projects/openhcs-sequential/scripts/build_papers.py", line 506, in build_all
+    self.release(paper_id, verbose=verbose)
+  File "/home/ts/code/projects/openhcs-sequential/scripts/build_papers.py", line 491, in release
+    self.build_lean(paper_id, verbose=verbose)
+  File "/home/ts/code/projects/openhcs-sequential/scripts/build_papers.py", line 142, in build_lean
+    returncode, output = run_lake(["build"], "build")
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts/code/projects/openhcs-sequential/scripts/build_papers.py", line 125, in run_lake
+    for line in process.stdout:
+KeyboardInterrupt
+usage: build_papers.py [-h] [-v] [-q]
+                       [{release,all,lean,latex,markdown,arxiv}] [paper]
+build_papers.py: error: unrecognized arguments: --all

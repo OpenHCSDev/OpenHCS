@@ -1,0 +1,101 @@
+\section{Preemptive Rebuttals}\label{appendix-rebuttals}
+
+We address anticipated objections to the theoretical minimality framework.
+
+\subsection{Objection 1: ``Uniqueness up to isomorphism is trivial''}
+
+\textbf{Objection:} ``Saying theories are unique 'up to isomorphism' is vacuous. Any two things are isomorphic under some mapping.''
+
+\textbf{Response:} Isomorphism is not arbitrary relabeling. Two theories are isomorphic if they have the same structure---the same query-answer relationships, the same dependencies, the same computational properties.
+
+The theorem says there is exactly one such structure for any finite domain. Different notations for the same theory (e.g., matrix vs index notation) are not ``different theories''---they are presentations of the same theory.
+
+The uniqueness is substantive: given a domain and query space, the minimal theory is determined. There is no room for ``equally good but structurally distinct'' alternatives.
+
+\subsection{Objection 2: ``This assumes the One-Universe Framework''}
+
+\textbf{Objection:} ``The uniqueness result depends on your One-Universe Framework. Other foundational frameworks allow pluralism.''
+
+\textbf{Response:} Yes. The uniqueness result is conditional on the OUF. Within model-theoretic pluralism, multiple theories can be ``equally true'' in different models.
+
+The OUF collapses this: axioms are definitions (not assumptions), and truth is determined by the mathematical universe $\mathcal{U}$. This is a foundational commitment, not a hidden assumption. The paper is explicit about this grounding.
+
+The contribution is showing that \emph{if} you accept the OUF, \emph{then} minimal theories are unique. Readers who reject the OUF may reject the conclusion---but they must reject the framework, not the derivation.
+
+\subsection{Objection 3: ``Finite domains are too restrictive''}
+
+\textbf{Objection:} ``Real domains are infinite. The finite domain assumption limits applicability.''
+
+\textbf{Response:} The finite domain assumption enables constructive proofs. Extension to infinite domains requires additional machinery:
+
+\begin{itemize}
+\item \textbf{Compactness:} Infinite domains with finite query spaces reduce to finite cases
+\item \textbf{Well-foundedness:} Infinite domains with well-founded query orderings admit inductive proofs
+\item \textbf{Approximation:} Infinite domains can be approximated by finite subdomains
+\end{itemize}
+
+The finite case captures the essential insight: minimality determines uniqueness. The infinite case is future work, not a refutation.
+
+\subsection{Objection 4: ``This contradicts Quine's underdetermination''}
+
+\textbf{Objection:} ``Quine proved that theories are underdetermined by evidence. Your uniqueness result contradicts this.''
+
+\textbf{Response:} Quine's thesis applies to \emph{empirical} theories with \emph{observational} equivalence. Our framework applies to \emph{formal} theories with \emph{query} equivalence.
+
+The distinction:
+\begin{itemize}
+\item \textbf{Empirical:} Theories can be observationally equivalent but structurally distinct (different ontologies, same predictions)
+\item \textbf{Formal:} Theories cannot be query-equivalent but structurally distinct (same queries $\Rightarrow$ same minimal structure)
+\end{itemize}
+
+Quine's underdetermination concerns the gap between observation and theory. Our uniqueness concerns the relationship between queries and minimal structure. These are different claims about different domains.
+
+\subsection{Objection 5: ``The Lean proofs are trivial''}
+
+\textbf{Objection:} ``The proofs just formalize definitions. There's no deep mathematics.''
+
+\textbf{Response:} The value is precision. The informal argument ``minimal implies unique'' becomes a machine-checked derivation. The proofs verify:
+
+\begin{enumerate}
+\item Minimality is well-defined (no proper subset answers all queries)
+\item Uniqueness follows from minimality (two minimal theories must be isomorphic)
+\item Computability follows from finiteness (the minimal theory is extractable)
+\end{enumerate}
+
+Trivial proofs that compile are more valuable than deep proofs with errors.
+
+\subsection{Objection 6: ``Compression necessity is obvious''}
+
+\textbf{Objection:} ``Of course infinite query spaces require compression. This is just information theory.''
+
+\textbf{Response:} The theorem is not that compression is needed, but that compression \emph{determines structure}. Given a query space, the minimal compressed representation is unique.
+
+This connects information theory to theory choice: the ``best'' theory is not a matter of taste but of compression. The theorem makes this precise.
+
+\subsection{Objection 7: ``Anti-pluralism is too strong''}
+
+\textbf{Objection:} ``Theorem 4.1 says pluralism is incoherent. But scientists routinely use multiple equivalent formulations.''
+
+\textbf{Response:} The theorem distinguishes:
+
+\begin{itemize}
+\item \textbf{Notational pluralism:} Different presentations of the same theory (allowed)
+\item \textbf{Structural pluralism:} Different minimal structures for the same queries (impossible)
+\end{itemize}
+
+Scientists use multiple \emph{notations} (Lagrangian vs Hamiltonian mechanics), not multiple \emph{structures}. The underlying theory is unique; the presentations vary.
+
+\subsection{Objection 8: ``This doesn't help practitioners''}
+
+\textbf{Objection:} ``Proving uniqueness doesn't help scientists find theories. This is pure philosophy.''
+
+\textbf{Response:} The result is constructive. Theorem 1.3 shows that the minimal theory is computable from the query space. This provides:
+
+\begin{enumerate}
+\item \textbf{Search guidance:} Look for the minimal structure that answers all queries
+\item \textbf{Termination criterion:} Stop when no further compression is possible
+\item \textbf{Validation:} Check that proposed theories are minimal (no redundant structure)
+\end{enumerate}
+
+The uniqueness result is not just philosophical---it provides algorithmic guidance for theory construction.
+

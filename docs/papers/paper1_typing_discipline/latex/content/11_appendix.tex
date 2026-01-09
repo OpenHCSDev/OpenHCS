@@ -40,6 +40,10 @@ Formal Analysis
 ``Dominance $\neq$ migration'' & Theorem 3.55 (Dominance $\neq$ Migration) \\
 ``Greenfield is undefined'' & Definitions 3.57-3.58, Theorem 3.59 \\
 ``Provenance requirement is circular'' & Theorem 3.61 (Provenance Detection) \\
+``You just need discipline'' & Concern 8: Discipline is the external oracle \\
+``The proofs are trivial'' & Concern 9: Definitional proofs from correct modeling \\
+``Java/Rust can do this too'' & Concern 10: Enable vs enforce distinction \\
+``This is just subtyping'' & Concern 11: Construction vs relationship (orthogonal layers) \\
 \end{longtable}
 \normalsize
 
@@ -126,6 +130,91 @@ OpenHCS demonstrates achievability.
 \emph{Analysis:} Theorem~\ref{thm:dominance-not-migration} formally proves that Pareto dominance of discipline
 A over B does NOT imply that migrating from B to A is beneficial for all
 codebases. Dominance is codebase-independent; migration cost is codebase-dependent.
+
+\paragraph{Concern 8: You Just Need Discipline.}
+\emph{Potential concern:} Real teams maintain consistency through code review, documentation, and discipline. Language features are unnecessary.
+
+\emph{Analysis:} Discipline \emph{is} the external oracle. When multiple locations encode the same fact (DOF $> 1$), consistency requires an oracle to resolve disagreements. ``Code review and documentation'' are exactly that oracle---human-maintained, fallible, bypassable.
+
+The question is whether the oracle is:
+\begin{itemize}
+\tightlist
+\item \textbf{Internal} (language-enforced, automatic, unforgeable), or
+\item \textbf{External} (human-maintained, fallible, bypassable)
+\end{itemize}
+
+Nominal typing with Python's \texttt{\_\_subclasses\_\_()} provides an internal oracle: the language guarantees the registry is complete. Duck typing requires an external oracle: humans must remember to update all locations. Both achieve consistency when they work. The difference is failure mode: language enforcement cannot be forgotten; human discipline can.
+
+This is not a counterargument to our thesis; it is the thesis restated. We prove that systems without nominal typing require external oracles.
+
+\paragraph{Concern 9: The Proofs Are Trivial.}
+\emph{Potential concern:} Most proofs are just \texttt{rfl} (reflexivity). They're trivial tautologies, not real theorems.
+
+\emph{Analysis:} When modeling is correct, theorems become definitional. This is a feature, not a bug.
+
+Consider: ``The sum of two even numbers is even.'' In a well-designed formalization, this might be \texttt{rfl}---not because it's trivial, but because the definition of ``even'' makes the property structural.
+
+Not all proofs are \texttt{rfl}. The \texttt{provenance\_impossibility} theorem requires 40+ lines:
+\begin{enumerate}
+\tightlist
+\item Assume a hypothetical provenance function exists for $\{S\}$-only systems
+\item Construct two types with identical S but different B (different lineages)
+\item Show the function must return different values for indistinguishable inputs
+\item Contradiction
+\end{enumerate}
+
+The proof structure (assumption → construction → contradiction) is genuine mathematical reasoning. The \texttt{rfl} proofs establish scaffolding; substantive proofs build on that scaffolding.
+
+\paragraph{Concern 10: Static Languages Achieve This With Reflection/Macros.}
+\emph{Potential concern:} Java has reflection. Rust has proc macros. These languages can achieve the same capabilities.
+
+\emph{Analysis:} Reflection and macros enable \emph{patterns} but do not \emph{enforce} them. The critical distinction:
+
+\textbf{Java reflection:} You can query \texttt{Class.getDeclaredMethods()} at runtime, but:
+\begin{itemize}
+\tightlist
+\item No automatic hook fires when a class is defined
+\item You must manually maintain registries (DOF $\geq$ 2)
+\item The pattern is bypassable: create a class without registering it
+\end{itemize}
+
+\textbf{Rust proc macros:} You can generate code at compile time, but:
+\begin{itemize}
+\tightlist
+\item Macros are per-item isolated---they cannot see other items during expansion
+\item Registration is bypassable: \texttt{impl Trait} without \texttt{\#[derive]} annotation
+\item The \texttt{inventory} crate uses linker tricks external to language semantics
+\end{itemize}
+
+Contrast Python:
+\begin{verbatim}
+class Handler(Registry):  # __init_subclass__ fires AUTOMATICALLY
+    pass  # Cannot create unregistered subclass---IMPOSSIBLE
+\end{verbatim}
+
+Python's hook is \emph{unforgeable}. The language semantics guarantee that creating a subclass triggers the hook. There is no syntax to bypass this.
+
+The objection confuses ``can create a registry'' with ``can guarantee all items are in the registry.'' Static languages enable the former; Python enforces the latter. This is the difference between DOF $\geq$ 2 and DOF = 1.
+
+\paragraph{Concern 11: This Is Just Subtyping.}
+\emph{Potential concern:} The axis-parametric proposal ($T(\text{scope}=X)$ vs $T(\text{scope}=Y)$) is really about subtyping, and the author is confused about basic type theory.
+
+\emph{Analysis:} This objection conflates two orthogonal concerns:
+
+\begin{enumerate}
+\item \textbf{Type construction} (our claim): How is a type's \emph{identity} determined at creation time?
+\item \textbf{Subtyping} (not our claim): Given two types, can one substitute for the other?
+\end{enumerate}
+
+\textbf{Subtyping} answers: ``Can I use type $A$ where type $B$ is expected?'' This presupposes types $A$ and $B$ already exist. It concerns \emph{relationships between types}: $A <: B$, covariance, contravariance, Liskov substitution.
+
+\textbf{Axis-parametric construction} answers: ``What \emph{is} this type?'' It concerns type \emph{identity} at creation time. Our proposal extends \texttt{type(name, bases, namespace)} to \texttt{type(name, bases, namespace, **axes)}, where axes become part of the type's identity. $T(\text{scope}=X)$ and $T(\text{scope}=Y)$ are simply \emph{different types}---not subtypes, not supertypes, just distinct.
+
+\textbf{The category error:} Responding to ``type constructors should accept semantic axes'' with ``you're confused about subtyping'' is like responding to ``cars should have different engine options'' with ``you're confused about traffic laws.'' Construction and relationship are different layers.
+
+\textbf{Where subtyping \emph{could} enter:} One might later ask: ``Is $T(\text{scope}=X) <: T(\text{scope}=Y)$?'' This is a valid question---but it comes \emph{after} our proposal, not instead of it. We make no claims about subtype relationships between axis-instantiated types. The axes determine identity; subtyping relationships are a separate design choice.
+
+\textbf{The pattern-match failure:} The objection likely arises from pattern-matching ``type parameters'' $\rightarrow$ ``must be about variance/subtyping.'' But type parameters in generics (e.g., \texttt{List[T]}) are indeed subject to variance analysis. Semantic axes are not type parameters in this sense---they are construction-time metadata that become part of type identity, analogous to how \texttt{bases} in \texttt{type(name, bases, ns)} determines identity without being ``about subtyping.''
 
 \subsection{Formal Verification Status}\label{appendix:verification}
 

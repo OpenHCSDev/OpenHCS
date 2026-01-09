@@ -1,0 +1,4 @@
+nohup: ignoring input
+usage: build_papers.py [-h] [-v] [-q]
+                       [{release,all,lean,latex,markdown,arxiv}] [paper]
+build_papers.py: error: unrecognized arguments: --all

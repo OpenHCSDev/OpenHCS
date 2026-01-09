@@ -752,7 +752,7 @@ Repository: https://github.com/trissim/openhcs
 
         return tar_path, zip_path
 
-    def release(self, paper_id: str, verbose: bool = True):
+    def release(self, paper_id: str, verbose: bool = True, axiom_check: bool = False):
         """Full release build: Lean + LaTeX + Markdown + arXiv package."""
         meta = self._get_paper_meta(paper_id)
         print(f"\n{'='*60}")
@@ -765,17 +765,194 @@ Repository: https://github.com/trissim/openhcs
         self.build_markdown(paper_id)
         self.package_arxiv(paper_id)
 
+        if axiom_check:
+            self.check_axioms(paper_id, verbose=verbose)
+
         releases_dir = self._get_releases_dir(paper_id)
         print(f"\n[release] ✓ {paper_id} complete → {releases_dir.relative_to(self.repo_root)}/")
 
-    def build_all(self, build_type: str = "all", verbose: bool = True):
+    def check_axioms(self, paper_id: str, verbose: bool = True) -> dict:
+        """Check what axioms each theorem in a paper depends on.
+
+        Uses `lake env lean` with `#print axioms` to verify theorem foundations.
+        Returns a summary dict with counts by axiom category.
+        """
+        import re
+        from collections import defaultdict
+
+        proofs_dir = self._get_paper_proofs_dir(paper_id)
+        if not proofs_dir.exists():
+            print(f"[axiom-check] No proofs directory for {paper_id}, skipping...")
+            return {}
+
+        print(f"[axiom-check] Checking axioms for {paper_id}...")
+        print(f"[axiom-check]   Directory: {proofs_dir.relative_to(self.repo_root)}")
+
+        # Step 1: Find all theorem/lemma declarations in .lean files
+        theorems = []
+        exclude_patterns = {".lake", "build"}
+        for lean_file in sorted(proofs_dir.rglob("*.lean")):
+            if any(part in exclude_patterns for part in lean_file.parts):
+                continue
+            if lean_file.name in ("lakefile.lean",):
+                continue
+
+            # Compute module name from file path
+            rel_path = lean_file.relative_to(proofs_dir)
+            module_name = str(rel_path.with_suffix("")).replace("/", ".")
+
+            try:
+                content = lean_file.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                content = lean_file.read_text(encoding="latin-1")
+
+            # Find theorem/lemma declarations
+            for match in re.finditer(r"^(theorem|lemma)\s+(\w+['\w]*)", content, re.MULTILINE):
+                thm_name = match.group(2)
+                theorems.append((module_name, thm_name))
+
+        if not theorems:
+            print(f"[axiom-check]   No theorems found in {paper_id}")
+            return {}
+
+        print(f"[axiom-check]   Found {len(theorems)} theorems/lemmas")
+
+        # Step 2: Group by module and check axioms
+        by_module = defaultdict(list)
+        for module, thm in theorems:
+            by_module[module].append(thm)
+
+        results = {
+            "total": len(theorems),
+            "checked": 0,
+            "no_axioms": 0,
+            "propext_only": 0,
+            "quot_sound": 0,
+            "classical": 0,
+            "unknown": 0,
+            "details": [],
+        }
+
+        for module, thms in sorted(by_module.items()):
+            # Create temp file with #print axioms commands
+            import tempfile
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".lean", delete=False) as f:
+                f.write(f"import {module}\n\n")
+                for thm in thms:
+                    # Try with module prefix
+                    f.write(f"#print axioms {module}.{thm}\n")
+                tmpfile = f.name
+
+            try:
+                result = subprocess.run(
+                    ["lake", "env", "lean", tmpfile],
+                    capture_output=True,
+                    text=True,
+                    timeout=300,
+                    cwd=proofs_dir,
+                )
+                output = result.stdout + result.stderr
+
+                # Parse results
+                found_thms = set()
+                unknown_thms = []
+
+                for line in output.split("\n"):
+                    line = line.strip()
+                    if "depends on axioms" in line or "does not depend" in line:
+                        results["checked"] += 1
+                        results["details"].append(line)
+                        if verbose:
+                            print(f"[axiom-check]   ✓ {line}")
+
+                        # Categorize
+                        if "does not depend" in line:
+                            results["no_axioms"] += 1
+                        elif "Classical" in line:
+                            results["classical"] += 1
+                        elif "Quot.sound" in line:
+                            results["quot_sound"] += 1
+                        elif "propext" in line:
+                            results["propext_only"] += 1
+
+                        # Track found
+                        match = re.search(r"'([^']+)'", line)
+                        if match:
+                            found_thms.add(match.group(1).split(".")[-1])
+
+                    elif "Unknown" in line and "constant" in line:
+                        match = re.search(r"Unknown constant `([^`]+)`", line)
+                        if match:
+                            unknown_thms.append(match.group(1))
+
+                # Retry unknown theorems without module prefix
+                if unknown_thms:
+                    with tempfile.NamedTemporaryFile(mode="w", suffix=".lean", delete=False) as f2:
+                        f2.write(f"import {module}\n")
+                        f2.write(f"open {module.split('.')[-1]} in\n")
+                        for unk in unknown_thms:
+                            thm_name = unk.split(".")[-1]
+                            if thm_name not in found_thms:
+                                f2.write(f"#print axioms {thm_name}\n")
+                        tmpfile2 = f2.name
+
+                    result2 = subprocess.run(
+                        ["lake", "env", "lean", tmpfile2],
+                        capture_output=True,
+                        text=True,
+                        timeout=300,
+                        cwd=proofs_dir,
+                    )
+                    output2 = result2.stdout + result2.stderr
+
+                    for line in output2.split("\n"):
+                        line = line.strip()
+                        if "depends on axioms" in line or "does not depend" in line:
+                            results["checked"] += 1
+                            results["details"].append(line)
+                            if verbose:
+                                print(f"[axiom-check]   ✓ (no prefix) {line}")
+
+                            if "does not depend" in line:
+                                results["no_axioms"] += 1
+                            elif "Classical" in line:
+                                results["classical"] += 1
+                            elif "Quot.sound" in line:
+                                results["quot_sound"] += 1
+                            elif "propext" in line:
+                                results["propext_only"] += 1
+                        elif "Unknown" in line:
+                            results["unknown"] += 1
+
+                    Path(tmpfile2).unlink(missing_ok=True)
+
+            except subprocess.TimeoutExpired:
+                print(f"[axiom-check]   TIMEOUT for module {module}")
+            except Exception as e:
+                print(f"[axiom-check]   ERROR: {e}")
+            finally:
+                Path(tmpfile).unlink(missing_ok=True)
+
+        # Print summary
+        print(f"\n[axiom-check] === {paper_id} Summary ===")
+        print(f"[axiom-check]   Total theorems: {results['total']}")
+        print(f"[axiom-check]   Successfully checked: {results['checked']}")
+        print(f"[axiom-check]     - No axioms (constructive): {results['no_axioms']}")
+        print(f"[axiom-check]     - Only propext: {results['propext_only']}")
+        print(f"[axiom-check]     - propext + Quot.sound: {results['quot_sound']}")
+        print(f"[axiom-check]     - Uses Classical.choice: {results['classical']}")
+        print(f"[axiom-check]   Private/not exported: {results['unknown']}")
+
+        return results
+
+    def build_all(self, build_type: str = "all", verbose: bool = True, axiom_check: bool = False):
         """Build all papers of specified type."""
         paper_ids = list(self.papers.keys())
 
         if build_type == "release":
             for paper_id in paper_ids:
                 try:
-                    self.release(paper_id, verbose=verbose)
+                    self.release(paper_id, verbose=verbose, axiom_check=axiom_check)
                 except Exception as e:
                     print(f"[release] ERROR {paper_id}: {e}")
             return
@@ -808,6 +985,13 @@ Repository: https://github.com/trissim/openhcs
                 except Exception as e:
                     print(f"[arxiv] ERROR: {e}")
 
+        if axiom_check:
+            for paper_id in paper_ids:
+                try:
+                    self.check_axioms(paper_id, verbose=verbose)
+                except Exception as e:
+                    print(f"[axiom-check] ERROR: {e}")
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -819,6 +1003,7 @@ Examples:
   python scripts/build_papers.py release paper1    # Full release for paper1 only
   python scripts/build_papers.py lean paper1 -v    # Build Paper 1 Lean proofs (verbose)
   python scripts/build_papers.py latex paper2      # Build Paper 2 LaTeX
+  python scripts/build_papers.py lean paper2 --axiom-check  # Build + check axioms
 """
     )
     parser.add_argument(
@@ -844,6 +1029,11 @@ Examples:
         action="store_true",
         help="Minimal output (errors only)",
     )
+    parser.add_argument(
+        "--axiom-check",
+        action="store_true",
+        help="Run axiom verification on Lean theorems (checks what axioms each theorem depends on)",
+    )
 
     args = parser.parse_args()
     repo_root = Path(__file__).parent.parent
@@ -857,13 +1047,15 @@ Examples:
     else:
         verbose = args.verbose or args.build_type in ("release", "lean")
 
+    axiom_check = args.axiom_check
+
     try:
         builder = PaperBuilder(repo_root)
         if args.paper == "all":
-            builder.build_all(args.build_type, verbose=verbose)
+            builder.build_all(args.build_type, verbose=verbose, axiom_check=axiom_check)
         else:
             if args.build_type == "release":
-                builder.release(args.paper, verbose=verbose)
+                builder.release(args.paper, verbose=verbose, axiom_check=axiom_check)
             elif args.build_type in ("all", "lean"):
                 builder.build_lean(args.paper, verbose=verbose)
             if args.build_type in ("all", "latex"):
@@ -872,6 +1064,8 @@ Examples:
                 builder.build_markdown(args.paper)
             if args.build_type in ("all", "arxiv"):
                 builder.package_arxiv(args.paper)
+            if axiom_check:
+                builder.check_axioms(args.paper, verbose=verbose)
     except Exception as e:
         print(f"[build] FATAL: {e}", file=sys.stderr)
         sys.exit(1)

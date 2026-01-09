@@ -79,6 +79,27 @@ This paper completes the theoretical foundation established in Papers 1--3:
 
 \subsection{Paper Structure}
 
-Section~\ref{sec:foundations} establishes formal foundations: decision problems, coordinate spaces, sufficiency. Section~\ref{sec:hardness} proves hardness results with complete reductions. Section~\ref{sec:dichotomy} develops the complexity dichotomy. Section~\ref{sec:tractable} presents tractable special cases. Section~\ref{sec:implications} discusses implications for software architecture and modeling. Section~\ref{sec:related} surveys related work. Appendix~\ref{app:lean} contains Lean proof listings.
+Section~\ref{sec:foundations} establishes formal foundations: decision problems, coordinate spaces, sufficiency. Section~\ref{sec:hardness} proves hardness results with complete reductions. Section~\ref{sec:dichotomy} develops the complexity dichotomy. Section~\ref{sec:tractable} presents tractable special cases. Section~\ref{sec:implications} discusses implications for software architecture and modeling. Section~\ref{sec:related} surveys related work. Appendix~\ref{app:lean} contains Lean proof listings. Appendix~\ref{appendix-rebuttals} addresses anticipated objections.
 
+\subsection{Anticipated Objections}\label{sec:objection-summary}
+
+Before proceeding, we address objections readers are likely forming. Each is refuted in detail in Appendix~\ref{appendix-rebuttals}; here we summarize the key points.
+
+\paragraph{``coNP-completeness doesn't mean intractable---there might be good heuristics.''}
+Correct, but this strengthens our thesis. The point is not that practitioners cannot find useful approximations, but that \emph{optimal} dimension selection is provably hard. The prevalence of heuristics (feature selection in ML, sensitivity analysis in economics) is itself evidence of the computational barrier.
+
+\paragraph{``Real decision problems don't have clean coordinate structure.''}
+The coordinate structure assumption is weaker than it appears. Any finite state space can be encoded with binary coordinates; the hardness results apply to this encoding. More structured representations make the problem \emph{easier}, not harder---so hardness for structured problems implies hardness for general ones.
+
+\paragraph{``The reduction from SAT is artificial.''}
+All \coNP-completeness proofs use reductions. The reduction demonstrates that SAT instances can be encoded as sufficiency-checking problems while preserving computational structure. This is standard complexity theory methodology \cite{cook1971complexity, karp1972reducibility}. The claim is not that practitioners encounter SAT problems, but that sufficiency checking is at least as hard as SAT.
+
+\paragraph{``The tractable subcases are too restrictive to be useful.''}
+The tractable subcases (bounded actions, separable utility, tree structure) characterize \emph{when} dimension selection becomes feasible. Many real problems fall into these categories. The dichotomy theorem (Theorem~\ref{thm:dichotomy}) precisely identifies the boundary between tractable and intractable.
+
+\paragraph{``This just formalizes the obvious---of course feature selection is hard.''}
+The contribution is making ``obvious'' precise. Prior work established heuristic hardness for specific domains (ML feature selection, economic factor identification). We prove a \emph{universal} result that applies to \emph{any} decision problem with coordinate structure. This unification is the theoretical contribution.
+
+\medskip
+\noindent\textbf{If you have an objection not listed above,} check Appendix~\ref{appendix-rebuttals} (8 objections addressed) before concluding it has not been considered.
 

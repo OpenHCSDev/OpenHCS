@@ -1,0 +1,90 @@
+\section{Preemptive Rebuttals}\label{appendix-rebuttals}
+
+We address anticipated objections to the main results.
+
+\subsection{Objection 1: ``coNP-completeness doesn't mean intractable''}
+
+\textbf{Objection:} ``coNP-complete problems might have good heuristics or approximations. The hardness result doesn't preclude practical solutions.''
+
+\textbf{Response:} This objection actually \emph{strengthens} our thesis. The point is not that practitioners cannot find useful approximations---they clearly do (feature selection heuristics in ML, sensitivity analysis in economics, configuration defaults in software). The point is that \emph{optimal} dimension selection is provably hard.
+
+The prevalence of heuristics across domains is itself evidence of the computational barrier. If optimal selection were tractable, we would see optimal algorithms, not heuristics. The universal adoption of ``include more than necessary'' strategies is the rational response to coNP-completeness.
+
+\subsection{Objection 2: ``Real problems don't have coordinate structure''}
+
+\textbf{Objection:} ``Real decision problems are messier than your clean product-space model. The coordinate structure assumption is too restrictive.''
+
+\textbf{Response:} The assumption is weaker than it appears. Any finite state space can be encoded with binary coordinates; our hardness results apply to this encoding. More structured representations make the problem \emph{easier}, not harder---so hardness for structured problems implies hardness for unstructured ones.
+
+The coordinate structure abstracts common patterns: independent sensors, orthogonal configuration parameters, factored state spaces. These are ubiquitous in practice precisely because they enable tractable reasoning in special cases (Theorem~\ref{thm:tractable}).
+
+\subsection{Objection 3: ``The SAT reduction is artificial''}
+
+\textbf{Objection:} ``The reduction from SAT/TAUT is an artifact of complexity theory. Real decision problems don't encode Boolean formulas.''
+
+\textbf{Response:} All coNP-completeness proofs use reductions. The reduction demonstrates that TAUT instances can be encoded as sufficiency-checking problems while preserving computational structure. This is standard methodology \cite{cook1971complexity, karp1972reducibility}.
+
+The claim is not that practitioners encounter SAT problems in disguise, but that sufficiency checking is \emph{at least as hard as} TAUT. If sufficiency checking were tractable, we could solve TAUT in polynomial time, contradicting the widely-believed $\P \neq \NP$ conjecture.
+
+The reduction is a proof technique, not a claim about problem origins.
+
+\subsection{Objection 4: ``Tractable subcases are too restrictive''}
+
+\textbf{Objection:} ``The tractable subcases (bounded actions, separable utility, tree structure) are too restrictive to cover real problems.''
+
+\textbf{Response:} These subcases characterize \emph{when} dimension selection becomes feasible:
+
+\begin{itemize}
+\item \textbf{Bounded actions:} Many real decisions have few options (buy/sell/hold, accept/reject, left/right/straight)
+\item \textbf{Separable utility:} Additive decomposition is common in economics and operations research
+\item \textbf{Tree structure:} Hierarchical dependencies appear in configuration, organizational decisions, and causal models
+\end{itemize}
+
+The dichotomy theorem (Theorem~\ref{thm:dichotomy}) precisely identifies the boundary. The contribution is not that all problems are hard, but that hardness is the \emph{default} unless special structure exists.
+
+\subsection{Objection 5: ``This just formalizes the obvious''}
+
+\textbf{Objection:} ``Everyone knows feature selection is hard. This paper just adds mathematical notation to folklore.''
+
+\textbf{Response:} The contribution is unification. Prior work established hardness for specific domains (feature selection in ML \cite{guyon2003introduction}, factor identification in economics, variable selection in statistics). We prove a \emph{universal} result that applies to \emph{any} decision problem with coordinate structure.
+
+This universality explains why the same ``over-modeling'' pattern appears across unrelated domains. It's not that each domain independently discovered the same heuristic---it's that each domain independently hit the same computational barrier.
+
+The theorem makes ``obvious'' precise and proves it applies universally. This is the value of formalization.
+
+\subsection{Objection 6: ``The Lean proofs don't capture the real complexity''}
+
+\textbf{Objection:} ``The Lean formalization models an idealized version of the problem. Real coNP-completeness proofs are about Turing machines, not Lean types.''
+
+\textbf{Response:} The Lean formalization captures the mathematical structure of the reduction, not the Turing machine details. We prove:
+
+\begin{enumerate}
+\item The sufficiency-checking problem is in coNP (verifiable counterexample)
+\item TAUT reduces to sufficiency checking (polynomial-time construction)
+\item The reduction preserves yes/no answers (correctness)
+\end{enumerate}
+
+These are the mathematical claims that establish coNP-completeness. The Turing machine encoding is implicit in Lean's computational semantics. The formalization provides machine-checked verification that the reduction is correct.
+
+\subsection{Objection 7: ``The dichotomy is not tight''}
+
+\textbf{Objection:} ``The dichotomy between $O(\log n)$ and $\Omega(n)$ minimal sufficient sets leaves a gap. What about $O(\sqrt{n})$?''
+
+\textbf{Response:} The dichotomy is tight under standard complexity assumptions. The gap corresponds to problems reducible to a polynomial number of SAT instances---exactly the problems in the polynomial hierarchy between P and coNP.
+
+In practice, the dichotomy captures the relevant cases: either the problem has logarithmic dimension (tractable) or linear dimension (intractable). Intermediate cases exist theoretically but are rare in practice.
+
+\subsection{Objection 8: ``This doesn't help practitioners''}
+
+\textbf{Objection:} ``Proving hardness doesn't help engineers solve their problems. This paper offers no constructive guidance.''
+
+\textbf{Response:} Understanding limits is constructive. The paper provides:
+
+\begin{enumerate}
+\item \textbf{Tractable subcases} (Theorem~\ref{thm:tractable}): Check if your problem has bounded actions, separable utility, or tree structure
+\item \textbf{Justification for heuristics}: Over-modeling is not laziness---it's computationally rational
+\item \textbf{Focus for optimization}: Don't waste effort on optimal dimension selection; invest in good defaults and local search
+\end{enumerate}
+
+Knowing that optimal selection is coNP-complete frees practitioners to use heuristics without guilt. This is actionable guidance.
+

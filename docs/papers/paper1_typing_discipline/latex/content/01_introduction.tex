@@ -280,4 +280,38 @@ Zen alignment
 \textbf{Section 9: Conclusion} --- Implications for PL theory and
 practice
 
+\subsection{Anticipated Objections}\label{sec:objection-summary}
+
+Before proceeding, we address objections readers are likely forming. Each is refuted in detail in Appendix~\ref{appendix:robustness}; here we summarize the key points.
+
+\paragraph{``The (B, S) model doesn't capture real type systems.''}
+The model is complete by construction. In Python, \texttt{type(name, bases, namespace)} is the universal type constructor---a type \emph{is} (B, S), not merely has it. Properties like \texttt{\_\_mro\_\_} and \texttt{\_\_module\_\_} are \emph{derived from} (B, S), not independent axes. This is definitional closure: no ``fourth axis'' can exist (Theorem~\ref{thm:model-completeness}, Appendix~\ref{appendix:detailed-concerns}).
+
+\paragraph{``Duck typing is more flexible than nominal typing.''}
+No. Nominal typing provides a strict superset of duck typing capabilities. Duck typing's ``acceptance'' of structurally-equivalent types is not a capability---it is the \emph{absence} of the capability to distinguish them. ``Flexibility'' is the absence of discrimination, not the presence of power (Theorems 3.34--3.36, Appendix~\ref{appendix:detailed-concerns}).
+
+\paragraph{``The axiom that shape-based typing can't distinguish same-shape types is circular.''}
+The axiom is \emph{definitional}, not assumptive. Shape-based typing is \emph{defined} as the discipline that treats types identically when their shapes match. This is what ``shape-based'' means. The theorems follow from the definition (Lemma~\ref{lem:shape-axiom-definitional}, Appendix~\ref{appendix:detailed-concerns}).
+
+\paragraph{``A clever extension could recover provenance for duck typing.''}
+No. Theorem~\ref{thm:extension-impossibility} proves that any computable extension over $\{S\}$ (even with type names) cannot recover provenance. The common response ``just check \texttt{type(x)}'' proves the point: inspecting \texttt{type(x)} consults the B axis. Once you use B, you have adopted nominal typing (Appendix~\ref{appendix:detailed-concerns}).
+
+\paragraph{``You only tested on one codebase (OpenHCS).''}
+This conflates existential witnesses with premises. The dominance theorems are proven from the \emph{definition} of shape-based typing---no codebase is referenced in the proofs. OpenHCS demonstrates that the four capabilities (provenance, identity, enumeration, conflict resolution) are \emph{achievable}, not that the theorems are true. Analogy: proving $\Omega(n \log n)$ for comparison sorts doesn't require testing multiple arrays (Appendix~\ref{appendix:detailed-concerns}).
+
+\paragraph{``Dominance implies you should migrate all legacy codebases.''}
+No. Theorem~\ref{thm:dominance-not-migration} formally proves that Pareto dominance does NOT imply beneficial migration. Dominance is codebase-independent; migration cost is codebase-dependent. The theorem characterizes \emph{capabilities}, not \emph{recommendations} (Appendix~\ref{appendix:detailed-concerns}).
+
+\paragraph{``You just need code review and discipline, not language features.''}
+Discipline \emph{is} the external oracle. When DOF $> 1$, consistency requires an oracle to resolve disagreements. ``Code review'' is exactly that oracle---human-maintained, fallible, bypassable. Language enforcement cannot be forgotten; human discipline can (Appendix~\ref{appendix:detailed-concerns}).
+
+\paragraph{``The proofs are trivial---just \texttt{rfl}.''}
+When modeling is correct, theorems become definitional. This is a feature. Not all proofs are \texttt{rfl}: \texttt{provenance\_impossibility} requires 40+ lines of actual reasoning (assumption → lemma application → contradiction). The contribution is making the right definitions so that consequences follow structurally (Appendix~\ref{appendix:detailed-concerns}).
+
+\paragraph{``This is just subtyping.''}
+No. Subtyping asks: ``Can I use type $A$ where type $B$ is expected?'' This is a \emph{relationship} between types. Our claim is about type \emph{construction}: extending \texttt{type(name, bases, namespace)} to \texttt{type(name, bases, namespace, **axes)}. These are orthogonal concerns. Subtyping operates on types that already exist; axis-parametric construction determines type \emph{identity} at creation time. Whether $T(\text{scope}=X) <: T(\text{scope}=Y)$ is a question that comes \emph{after} our proposal---and we make no claims about it (Appendix~\ref{appendix:detailed-concerns}).
+
+\medskip
+\noindent\textbf{If you have an objection not listed above,} check Appendix~\ref{appendix:robustness} (17 concerns addressed) before concluding it has not been considered.
+
 \begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}

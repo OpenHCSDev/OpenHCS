@@ -51,24 +51,17 @@ This file connects those proofs to the abstract SSOT requirements.
 -- - java_lacks_definition_hooks proves no user code runs at definition time
 -- - ts_types_erased proves TypeScript types are erased
 
--- Language classification based on proven properties
-inductive LangCategory where
-  | has_both : LangCategory        -- Has hooks AND introspection (can achieve SSOT)
-  | compile_only : LangCategory    -- Has compile-time mechanisms but no runtime introspection
-  | no_hooks : LangCategory        -- Lacks definition-time hooks entirely
-  deriving DecidableEq, Repr
+-- A language can achieve SSOT iff it has BOTH hooks and introspection
+def CanAchieveSSOT (has_hooks has_introspection : Prop) : Prop :=
+  has_hooks ∧ has_introspection
 
-def classify_language (lang : String) : LangCategory :=
-  if lang = "Python" ∨ lang = "Ruby" ∨ lang = "Smalltalk" ∨ lang = "CLOS" then
-    .has_both
-  else if lang = "Rust" ∨ lang = "C++" then
-    .compile_only
-  else
-    .no_hooks
+theorem hooks_and_introspection_enable_ssot {H I : Prop} (h1 : H) (h2 : I) :
+    CanAchieveSSOT H I := by
+  exact ⟨h1, h2⟩
 
--- A language can achieve SSOT iff it's in the has_both category
-def can_achieve_ssot (lang : String) : Prop :=
-  classify_language lang = .has_both
+theorem ssot_requires_introspection {H I : Prop} (h : CanAchieveSSOT H I) : I := h.2
+
+theorem ssot_requires_hooks {H I : Prop} (h : CanAchieveSSOT H I) : H := h.1
 
 /-!
 ## Python Evaluation
@@ -80,8 +73,11 @@ From LangPython.lean:
 These are PROVED from the formalized Python semantics.
 -/
 
-theorem python_can_achieve_ssot : can_achieve_ssot "Python" := by
-  simp [can_achieve_ssot, classify_language]
+theorem python_can_achieve_ssot :
+    CanAchieveSSOT Python.HasDefinitionHooks Python.HasIntrospection := by
+  exact hooks_and_introspection_enable_ssot
+    Python.python_has_hooks
+    Python.python_has_introspection
 
 -- The proofs that ground this classification:
 #check @init_subclass_in_class_definition  -- Definition-time hooks
@@ -97,8 +93,10 @@ From LangRust.lean:
 Rust has compile-time macros but NO runtime introspection of macro expansion.
 -/
 
-theorem rust_cannot_achieve_ssot : ¬can_achieve_ssot "Rust" := by
-  simp [can_achieve_ssot, classify_language]
+theorem rust_cannot_achieve_ssot :
+    ¬CanAchieveSSOT Rust.HasDefinitionHooks Rust.HasIntrospection := by
+  intro h
+  exact Rust.rust_lacks_introspection (ssot_requires_introspection h)
 
 -- The proofs that ground this classification:
 #check @erasure_destroys_source  -- Source information is erased
@@ -114,17 +112,25 @@ From LangStatic.lean:
 These languages lack the fundamental requirement of definition-time hooks.
 -/
 
-theorem java_cannot_achieve_ssot : ¬can_achieve_ssot "Java" := by
-  simp [can_achieve_ssot, classify_language]
+theorem java_cannot_achieve_ssot :
+    ¬CanAchieveSSOT StaticLang.HasDefinitionHooks StaticLang.HasIntrospection := by
+  intro h
+  exact StaticLang.static_lacks_definition_hooks (ssot_requires_hooks h)
 
-theorem csharp_cannot_achieve_ssot : ¬can_achieve_ssot "C#" := by
-  simp [can_achieve_ssot, classify_language]
+theorem csharp_cannot_achieve_ssot :
+    ¬CanAchieveSSOT StaticLang.HasDefinitionHooks StaticLang.HasIntrospection := by
+  intro h
+  exact StaticLang.static_lacks_definition_hooks (ssot_requires_hooks h)
 
-theorem typescript_cannot_achieve_ssot : ¬can_achieve_ssot "TypeScript" := by
-  simp [can_achieve_ssot, classify_language]
+theorem typescript_cannot_achieve_ssot :
+    ¬CanAchieveSSOT StaticLang.HasDefinitionHooks StaticLang.HasIntrospection := by
+  intro h
+  exact StaticLang.static_lacks_definition_hooks (ssot_requires_hooks h)
 
-theorem go_cannot_achieve_ssot : ¬can_achieve_ssot "Go" := by
-  simp [can_achieve_ssot, classify_language]
+theorem go_cannot_achieve_ssot :
+    ¬CanAchieveSSOT StaticLang.HasDefinitionHooks StaticLang.HasIntrospection := by
+  intro h
+  exact StaticLang.static_lacks_definition_hooks (ssot_requires_hooks h)
 
 -- The proofs that ground these classifications:
 #check @StaticLang.java_lacks_definition_hooks
@@ -152,4 +158,3 @@ The only attack is to produce code that contradicts the formalized semantics.
 -/
 
 end LanguageEvaluation
-

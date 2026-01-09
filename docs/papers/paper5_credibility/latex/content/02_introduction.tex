@@ -122,5 +122,27 @@ epistemic bounds of communicating that information.
 Lean 4 \cite{demoura2021lean4,mathlib2020}.
 \end{enumerate}
 
+\subsection{Anticipated Objections}\label{sec:objection-summary}
+
+Before proceeding, we address objections readers are likely forming. Each is refuted in detail in Appendix~\ref{appendix-rebuttals}.
+
+\paragraph{``Signaling theory is old---this isn't novel.''}
+Spence's signaling model \cite{spence1973job} and Crawford-Sobel's cheap talk \cite{crawford1982strategic} are foundational. Our contribution is (1) applying these to \emph{meta-assertions} (claims about credibility), (2) proving \emph{computable bounds} on credibility gain, and (3) integrating with the leverage framework. The theorems are new; the foundations are established.
+
+\paragraph{``Real communication doesn't follow Bayesian rationality.''}
+The rationality assumption is an idealization that provides upper bounds. If agents deviate from Bayesian reasoning, credibility bounds may be tighter, not looser. The theorems characterize what is \emph{achievable} under optimal reasoning---a ceiling, not a prediction.
+
+\paragraph{``Costly signals aren't always truth-dependent.''}
+Correct. The definition (Section 2) distinguishes truth-dependent costs (credibility-enhancing) from truth-independent costs (not credibility-enhancing). Expensive signals that are equally costly for liars and truth-tellers remain cheap talk despite their cost.
+
+\paragraph{``The magnitude penalty seems wrong---detailed claims are more credible.''}
+Detail \emph{about the claim} can be credibility-enhancing (costly signal: research effort). Detail \emph{about credibility itself} is cheap talk and subject to the magnitude penalty. The theorem distinguishes signal content from signal cost.
+
+\paragraph{``The Lean proofs are just type-checking, not real mathematics.''}
+The Lean proofs formalize the mathematical structure of signaling theory. They verify that the cheap talk bounds follow from the definitions. The contribution is machine-checked precision, not computational complexity.
+
+\medskip
+\noindent\textbf{If you have an objection not listed above,} check Appendix~\ref{appendix-rebuttals} before concluding it has not been considered.
+
 \begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
 
