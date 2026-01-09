@@ -23,7 +23,7 @@ from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 from openhcs.pyqt_gui.windows.base_form_dialog import BaseFormDialog
 from openhcs.config_framework.object_state import ObjectStateRegistry
-from openhcs.introspection.unified_parameter_analyzer import UnifiedParameterAnalyzer
+from openhcs.introspection import UnifiedParameterAnalyzer
 from typing import List
 logger = logging.getLogger(__name__)
 
