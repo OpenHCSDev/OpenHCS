@@ -319,8 +319,9 @@ class PipelineEditorWidget(AbstractManagerWidget):
         Returns:
             Dict mapping plate paths to their step lists
         """
-        # Get all plate paths from root ObjectState
-        root_state = ObjectStateRegistry.get_by_scope("")
+        # Prefer the plate root scope used by PlateManager (ROOT_SCOPE_ID="__plates__")
+        # Fallback to global scope "" for legacy behavior.
+        root_state = ObjectStateRegistry.get_by_scope("__plates__") or ObjectStateRegistry.get_by_scope("")
         if not root_state:
             return {}
 

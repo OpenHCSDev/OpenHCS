@@ -440,23 +440,47 @@ class PlateManagerWidget(AbstractManagerWidget):
     # action_delete_plate() REMOVED - now uses ABC's action_delete() template with _perform_delete() hook
 
     def _validate_plates_for_operation(self, plates, operation_type):
-        """Unified functional validator for all plate operations."""
-        # Functional validation mapping
+        """Unified functional validator for all plate operations with debug logging."""
+
+        def _validate_compile(p):
+            orch = self.orchestrators.get(p['path'])
+            if not orch:
+                return False, "no_orchestrator_initialized"
+            pipeline_steps = self._get_current_pipeline_definition(p['path'])
+            if not pipeline_steps:
+                return False, "empty_pipeline_definition"
+            return True, "ok"
+
+        def _validate_run(p):
+            orch = self.orchestrators.get(p['path'])
+            if not orch:
+                return False, "no_orchestrator_initialized"
+            if orch.state not in ['COMPILED', 'COMPLETED']:
+                return False, f"orchestrator_state_not_runnable:{orch.state}"
+            return True, "ok"
+
         validators = {
-            'init': lambda p: True,  # Init can work on any plates
-            'compile': lambda p: (
-                self.orchestrators.get(p['path']) and
-                self._get_current_pipeline_definition(p['path'])
-            ),
-            'run': lambda p: (
-                self.orchestrators.get(p['path']) and
-                self.orchestrators[p['path']].state in ['COMPILED', 'COMPLETED']
-            )
+            'init': lambda p: (True, "ok"),  # Init can work on any plates
+            'compile': _validate_compile,
+            'run': _validate_run,
         }
 
-        # Functional pattern: filter invalid plates in one pass
-        validator = validators.get(operation_type, lambda p: True)
-        return [p for p in plates if not validator(p)]
+        validator = validators.get(operation_type, lambda p: (True, "ok"))
+
+        invalid = []
+        for plate in plates:
+            is_valid, reason = validator(plate)
+            if not is_valid:
+                invalid.append(plate)
+                # Greppable trace for troubleshooting validation failures
+                logger.info(
+                    "PLATE_VALIDATION [%s] plate=%s name=%s reason=%s",
+                    operation_type,
+                    plate.get('path'),
+                    plate.get('name'),
+                    reason,
+                )
+        return invalid
 
     def _ensure_context(self):
         """Ensure global config context is set up (for worker threads)."""
@@ -651,6 +675,11 @@ class PlateManagerWidget(AbstractManagerWidget):
         # Let validation failures bubble up as status messages
         if invalid_plates:
             invalid_names = [p['name'] for p in invalid_plates]
+            logger.info(
+                "PLATE_VALIDATION [compile] blocked %d plate(s): %s",
+                len(invalid_names),
+                ", ".join(invalid_names),
+            )
             self.status_message.emit(f"Cannot compile invalid plates: {', '.join(invalid_names)}")
             return
 
