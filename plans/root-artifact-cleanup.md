@@ -34,7 +34,7 @@ Detailed steps to clean the repo root of accidental artifacts, remove or relocat
 [x] Delete or relocate untracked local artifacts into the ignored local-only folder (backup first if needed).
 [x] Update `.gitignore` with narrow root-scoped patterns for local PDFs/MDs/JS and the local-only folder; avoid patterns that match subdirectories unintentionally.
 [x] Validate with `git status -s`, `git diff --stat`, and a root tracked-file listing; ensure only intentional files remain at repo root.
-[ ] Commit cleanup with a clear message; summarize what was removed/moved and where local-only artifacts now live.
+[x] Commit cleanup with a clear message; summarize what was removed/moved and where local-only artifacts now live.
 
 ## Findings (steps 1–3)
 - Tracked root PDFs/MD/JS (via `git ls-files` filtered to root, sorted):
@@ -89,6 +89,7 @@ Detailed steps to clean the repo root of accidental artifacts, remove or relocat
     - `git status -s`: staged deletions for 33 root artifacts; unstaged changes in `.gitignore` and `plans/root-artifact-cleanup.md` (to be staged), no other working changes.
     - `git diff --stat --cached`: shows deletions of the 33 root artifacts (PDF/MD/JS).
     - `git ls-files` root filter: only `README.md`, `CHANGELOG.md` remain.
+  - Commit: `chore: clean root artifacts and add guardrails` (hash: fd704614) — removes 33 root artifacts, tracks the plan, and adds ignore guardrails.
 
 ## Testing and validation
 - `git status -s`
