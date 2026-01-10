@@ -98,7 +98,7 @@ def _get_component_enum_cache_manager():
     global _component_enum_cache_manager
     if _component_enum_cache_manager is None:
         try:
-            from openhcs.core.registry_cache import RegistryCacheManager, CacheConfig
+            from metaclass_registry.cache import RegistryCacheManager, CacheConfig
 
             def get_version():
                 try:

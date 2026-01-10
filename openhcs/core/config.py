@@ -18,7 +18,7 @@ from openhcs.constants.constants import Backend, LiteralDtype, get_default_varia
 from openhcs.constants.input_source import InputSource
 
 # Import decorator for automatic decorator creation
-from openhcs.config_framework import auto_create_decorator
+from objectstate import auto_create_decorator
 
 # Import platform-aware transport mode default
 # This must be imported here to avoid circular imports

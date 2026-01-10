@@ -66,6 +66,7 @@ dependencies = [
     # External dependencies (pin to git commits until PyPI publication)
     "objectstate @ git+https://github.com/trissim/ObjectState.git@0a02629f0b9df23854e49e85f02ff2051605fb99",
     "python-introspect @ git+https://github.com/trissim/python-introspect.git@e9ac34aae163847c39fd0c4b4b9e50dab7a45f45",
+    "metaclass-registry @ git+https://github.com/trissim/metaclass-registry.git",
 ]
 
 [project.optional-dependencies]

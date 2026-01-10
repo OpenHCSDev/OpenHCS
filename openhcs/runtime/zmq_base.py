@@ -16,7 +16,7 @@ from openhcs.constants.constants import (
     CONTROL_PORT_OFFSET, IPC_SOCKET_DIR_NAME, IPC_SOCKET_PREFIX, IPC_SOCKET_EXTENSION
 )
 from openhcs.core.config import TransportMode
-from openhcs.core.auto_register_meta import AutoRegisterMeta, LazyDiscoveryDict
+from metaclass_registry import AutoRegisterMeta, LazyDiscoveryDict
 
 logger = logging.getLogger(__name__)
 

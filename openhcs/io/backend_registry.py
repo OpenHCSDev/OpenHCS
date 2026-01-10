@@ -9,7 +9,7 @@ discovered and registered when their classes are defined.
 import logging
 from typing import Dict
 from openhcs.io.base import BackendBase, DataSink
-from openhcs.core.auto_register_meta import AutoRegisterMeta
+from metaclass_registry import AutoRegisterMeta
 
 logger = logging.getLogger(__name__)
 

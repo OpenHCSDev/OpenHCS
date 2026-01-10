@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Union
 from openhcs.constants.constants import Backend
 from openhcs.io.exceptions import StorageResolutionError
-from openhcs.core.auto_register_meta import AutoRegisterMeta
+from metaclass_registry import AutoRegisterMeta
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +77,7 @@ class BackendBase(metaclass=AutoRegisterMeta):
     __registry_key__ = '_backend_type'
 
     # Enable automatic discovery of backends in openhcs.io package
-    from openhcs.core.auto_register_meta import RegistryConfig, LazyDiscoveryDict
+    from metaclass_registry import RegistryConfig, LazyDiscoveryDict
     __registry_config__ = RegistryConfig(
         registry_dict=LazyDiscoveryDict(),
         key_attribute='_backend_type',

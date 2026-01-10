@@ -11,7 +11,7 @@ from typing import Dict, List, Any, Optional, Tuple, Type
 import pandas as pd
 from pathlib import Path
 
-from openhcs.core.auto_register_meta import AutoRegisterMeta
+from metaclass_registry import AutoRegisterMeta
 
 
 @dataclass(frozen=True)

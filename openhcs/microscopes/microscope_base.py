@@ -13,8 +13,8 @@ from typing import Any, Dict, List, Optional, Tuple, Union, Type
 
 # Import constants
 from openhcs.constants.constants import Backend
-# Import generic metaclass infrastructure
-from openhcs.core.auto_register_meta import (
+# Import generic metaclass infrastructure from external package
+from metaclass_registry import (
     AutoRegisterMeta,
     SecondaryRegistry,
     extract_key_from_handler_suffix,

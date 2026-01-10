@@ -34,7 +34,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 
 from openhcs.core.xdg_paths import get_cache_file_path
 from openhcs.core.memory.stack_utils import unstack_slices, stack_slices
-from openhcs.core.auto_register_meta import AutoRegisterMeta, LazyDiscoveryDict
+from metaclass_registry import AutoRegisterMeta, LazyDiscoveryDict
 from openhcs.core.config import LazyDtypeConfig , LazyWellFilterConfig, LazyStepWellFilterConfig
 
 logger = logging.getLogger(__name__)
