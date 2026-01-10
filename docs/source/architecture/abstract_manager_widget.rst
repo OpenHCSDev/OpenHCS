@@ -158,6 +158,5 @@ See Also
 - :doc:`gui_performance_patterns` - Cross-window preview system
 - :doc:`compilation_service` - Compilation service extracted from PlateManager
 - :doc:`zmq_execution_service_extracted` - ZMQ execution service extracted from PlateManager
-- :doc:`live_context_service` - Cross-window coordination service
 - :doc:`parametric_widget_creation` - Widget creation configuration
 

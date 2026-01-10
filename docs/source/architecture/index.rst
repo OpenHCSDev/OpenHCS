@@ -130,13 +130,15 @@ TUI architecture, UI development patterns, and form management systems.
    tui_system
    widget_protocol_system
    abstract_manager_widget
+   abstract_table_browser
    list_item_preview_system
+   flash_animation_system
+   scope_visual_feedback_system
    plate_manager_services
    parameter_form_lifecycle
    parameter_form_service_architecture
    ui_services_architecture
    field_change_dispatcher
-   live_context_service
    parametric_widget_creation
    compilation_service
    zmq_execution_service_extracted
@@ -168,7 +170,7 @@ Quick Start Paths
 
 **External Integrations?** Start with :doc:`external_integrations_overview` → :doc:`napari_integration_architecture` → :doc:`fiji_streaming_system` → :doc:`omero_backend_system`
 
-**UI Development?** Start with :doc:`widget_protocol_system` → :doc:`abstract_manager_widget` → :doc:`parametric_widget_creation` → :doc:`live_context_service` → :doc:`field_change_dispatcher` → :doc:`ui_services_architecture` → :doc:`compilation_service` → :doc:`tui_system`
+**UI Development?** Start with :doc:`widget_protocol_system` → :doc:`abstract_manager_widget` → :doc:`parametric_widget_creation` → :doc:`field_change_dispatcher` → :doc:`ui_services_architecture` → :doc:`compilation_service` → :doc:`tui_system`
 
 **System Integration?** Jump to :doc:`system_integration` → :doc:`special_io_system` → :doc:`microscope_handler_integration`
 
