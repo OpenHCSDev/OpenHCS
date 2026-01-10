@@ -135,7 +135,13 @@ class ScopeTokenService:
         return type(obj).__name__.lower()
 
     @classmethod
-    def get_generator(cls, parent_scope: str, prefix: str) -> ScopeTokenGenerator:
+    def _normalize_scope(cls, scope) -> str:
+        """Normalize scope to string. Enforces the invariant: scope keys are always strings."""
+        return str(scope) if scope is not None else ""
+
+    @classmethod
+    def get_generator(cls, parent_scope, prefix: str) -> ScopeTokenGenerator:
+        parent_scope = cls._normalize_scope(parent_scope)
         key = (parent_scope, prefix)
         if key not in cls._generators:
             cls._generators[key] = ScopeTokenGenerator(prefix, '_scope_token')
@@ -143,7 +149,8 @@ class ScopeTokenService:
         return cls._generators[key]
 
     @classmethod
-    def ensure_token(cls, parent_scope: str, obj: object) -> str:
+    def ensure_token(cls, parent_scope, obj: object) -> str:
+        parent_scope = cls._normalize_scope(parent_scope)
         prefix = cls._get_prefix(obj)
         return cls.get_generator(parent_scope, prefix).ensure(obj)
 
@@ -151,7 +158,8 @@ class ScopeTokenService:
     _scope_id_cache: dict[tuple[str, int], str] = {}
 
     @classmethod
-    def build_scope_id(cls, parent_scope: str, obj: object) -> str:
+    def build_scope_id(cls, parent_scope, obj: object) -> str:
+        parent_scope = cls._normalize_scope(parent_scope)
         # PERFORMANCE: Check cache first
         cache_key = (parent_scope, id(obj))
         if cache_key in cls._scope_id_cache:
@@ -164,10 +172,11 @@ class ScopeTokenService:
         return result
 
     @classmethod
-    def seed_from_objects(cls, parent_scope: str, objects: Sequence[object]) -> None:
+    def seed_from_objects(cls, parent_scope, objects: Sequence[object]) -> None:
         """Seed generators from existing objects (preserves their tokens)."""
         if not objects:
             return
+        parent_scope = cls._normalize_scope(parent_scope)
         # Group by type prefix
         by_prefix: dict[str, list[object]] = {}
         for obj in objects:
@@ -178,8 +187,9 @@ class ScopeTokenService:
             cls.get_generator(parent_scope, prefix).seed_from_objects(objs)
 
     @classmethod
-    def clear_scope(cls, parent_scope: str) -> None:
+    def clear_scope(cls, parent_scope) -> None:
         """Clear all generators for a parent scope (and nested children)."""
+        parent_scope = cls._normalize_scope(parent_scope)
         keys_to_remove = [k for k in cls._generators if k[0].startswith(parent_scope)]
         for key in keys_to_remove:
             del cls._generators[key]

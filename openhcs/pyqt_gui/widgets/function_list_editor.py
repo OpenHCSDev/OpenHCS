@@ -474,6 +474,15 @@ class FunctionListEditorWidget(QWidget):
 
     def _apply_edited_pattern(self, new_pattern):
         """Apply the edited pattern back to the UI."""
+        from openhcs.config_framework.object_state import ObjectStateRegistry
+
+        # ATOMIC: Coalesce all register + edit snapshots into single "code edit" snapshot
+        # Without this, code mode creates multiple snapshots (one per function register + edit func)
+        with ObjectStateRegistry.atomic("code edit"):
+            self._apply_edited_pattern_internal(new_pattern)
+
+    def _apply_edited_pattern_internal(self, new_pattern):
+        """Internal implementation of apply_edited_pattern (wrapped in atomic block)."""
         try:
             if self.is_dict_mode:
                 if isinstance(new_pattern, dict):
