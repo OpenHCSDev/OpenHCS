@@ -259,6 +259,22 @@ class FunctionListEditorWidget(QWidget):
     
     def _populate_function_list(self):
         """Populate function list with panes (mirrors Textual TUI)."""
+        # Ensure stale ObjectStates for prior function scopes are removed so fresh
+        # parameters/kwargs from code-mode edits take effect.
+        if self.scope_id:
+            from openhcs.config_framework.object_state import ObjectStateRegistry
+            from openhcs.pyqt_gui.widgets.shared.services.scope_token_service import ScopeTokenService
+
+            # Clear scope tokens for this step to avoid reusing old func scope ids
+            ScopeTokenService.clear_scope(self.scope_id)
+
+            # Unregister any ObjectStates under this step scope (functions only)
+            # without touching the step's own ObjectState (exact match).
+            for state in list(ObjectStateRegistry.get_all()):
+                scope = getattr(state, "scope_id", None)
+                if scope and scope.startswith(f"{self.scope_id}::"):
+                    ObjectStateRegistry.unregister(state, _skip_snapshot=True)
+
         # Clear existing panes - CRITICAL: Manually unregister form managers BEFORE deleteLater()
         # This prevents RuntimeError when new widgets try to connect to deleted managers
         for pane in self.function_panes:
