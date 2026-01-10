@@ -56,8 +56,8 @@ class FunctionListEditorWidget(QWidget):
         # CRITICAL: Store step instance for context hierarchy (Function → Step → Pipeline → Global)
         self.step_instance = step_instance
 
-        # CRITICAL: Store scope_id for cross-window live context updates
-        self.scope_id = scope_id
+        # CRITICAL: Store scope_id for cross-window live context updates (always string)
+        self.scope_id = str(scope_id) if scope_id is not None else None
 
         # Scope color scheme for styling newly created panes
         self._scope_color_scheme = None
