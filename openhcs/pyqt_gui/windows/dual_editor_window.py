@@ -337,7 +337,7 @@ class DualEditorWindow(BaseFormDialog):
 
     def _build_step_scope_id(self) -> str:
         from openhcs.pyqt_gui.widgets.shared.services.scope_token_service import ScopeTokenService
-        return ScopeTokenService.build_scope_id(str(self.orchestrator.plate_path), self.editing_step)
+        return ScopeTokenService.build_scope_id(self.orchestrator.plate_path, self.editing_step)
     
     def create_step_tab(self):
         """Create the step settings tab (using dedicated widget)."""
