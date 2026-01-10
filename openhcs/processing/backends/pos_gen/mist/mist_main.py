@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Tuple
 
-from openhcs.core.memory.decorators import cupy as cupy_func
+from openhcs.core.memory import cupy as cupy_func
 from openhcs.core.pipeline.function_contracts import special_inputs, special_outputs
 from openhcs.core.utils import optional_import
 

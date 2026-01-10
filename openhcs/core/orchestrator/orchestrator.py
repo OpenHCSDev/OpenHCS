@@ -61,7 +61,7 @@ except ImportError:
 
 # Optional GPU memory management imports
 try:
-    from openhcs.core.memory.gpu_cleanup import cleanup_all_gpu_frameworks
+    from openhcs.core.memory import cleanup_all_gpu_frameworks
 except ImportError:
     cleanup_all_gpu_frameworks = None
 
@@ -197,7 +197,7 @@ def _execute_axis_with_sequential_combinations(
         # This must happen REGARDLESS of success/failure to prevent memory leaks
         # when worker processes handle multiple wells sequentially
         from openhcs.io.base import reset_memory_backend
-        from openhcs.core.memory.gpu_cleanup import cleanup_all_gpu_frameworks
+        from openhcs.core.memory import cleanup_all_gpu_frameworks
 
         reset_memory_backend()
         if cleanup_all_gpu_frameworks:
@@ -948,7 +948,7 @@ class PipelineOrchestrator:
                 # Clear VFS after each combination to prevent memory accumulation
                 try:
                     from openhcs.io.base import reset_memory_backend
-                    from openhcs.core.memory.gpu_cleanup import cleanup_all_gpu_frameworks
+                    from openhcs.core.memory import cleanup_all_gpu_frameworks
 
                     reset_memory_backend()
                     cleanup_all_gpu_frameworks()

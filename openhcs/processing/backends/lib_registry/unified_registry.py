@@ -33,7 +33,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 
 
 from openhcs.core.xdg_paths import get_cache_file_path
-from openhcs.core.memory.stack_utils import unstack_slices, stack_slices
+from openhcs.core.memory import unstack_slices, stack_slices
 from metaclass_registry import AutoRegisterMeta, LazyDiscoveryDict
 from openhcs.core.config import LazyDtypeConfig , LazyWellFilterConfig, LazyStepWellFilterConfig
 
@@ -352,8 +352,8 @@ class LibraryRegistryBase(ABC, metaclass=AutoRegisterMeta):
     def _execute_slice_by_slice(self, func, image, *args, **kwargs):
         """Shared slice-by-slice execution logic."""
         if image.ndim == 3:
-            from openhcs.core.memory.stack_utils import unstack_slices, stack_slices
-            from openhcs.core.memory.converters import detect_memory_type
+            from openhcs.core.memory import unstack_slices, stack_slices
+            from openhcs.core.memory import detect_memory_type
             mem = detect_memory_type(image)
             slices = unstack_slices(image, mem, 0)
             results = [func(sl, *args, **kwargs) for sl in slices]

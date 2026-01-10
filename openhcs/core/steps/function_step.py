@@ -23,7 +23,7 @@ from openhcs.constants.constants import (DEFAULT_IMAGE_EXTENSIONS,
 from openhcs.core.context.processing_context import ProcessingContext
 from openhcs.core.steps.abstract import AbstractStep
 from openhcs.formats.func_arg_prep import prepare_patterns_and_functions
-from openhcs.core.memory.stack_utils import stack_slices, unstack_slices
+from openhcs.core.memory import stack_slices, unstack_slices
 # OpenHCS imports moved to local imports to avoid circular dependencies
 
 
@@ -529,7 +529,7 @@ def _execute_chain_core(
             raise TypeError(f"Invalid item in function chain: {func_item}.")
 
         # Convert to function's input memory type (noop if same)
-        from openhcs.core.memory.converters import convert_memory
+        from openhcs.core.memory import convert_memory
         current_stack = convert_memory(
             data=current_stack,
             source_type=current_memory_type,

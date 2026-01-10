@@ -20,7 +20,7 @@ import json
 import pyclesperanto as cle
 
 # OpenHCS imports
-from openhcs.core.memory.decorators import pyclesperanto as pyclesperanto_func
+from openhcs.core.memory import pyclesperanto as pyclesperanto_func
 from openhcs.core.pipeline.function_contracts import special_outputs
 from openhcs.constants.constants import Backend
 

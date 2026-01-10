@@ -249,7 +249,7 @@ def _build_nd_image_array(layer_items, stack_components, component_values=None):
     elif len(stack_components) == 1 and len(layer_items) > 1:
         # Old behavior: Single stack component with multiple items - simple 3D stack
         image_stack = [img["data"] for img in layer_items]
-        from openhcs.core.memory.stack_utils import stack_slices
+        from openhcs.core.memory import stack_slices
 
         return stack_slices(image_stack, memory_type="numpy", gpu_id=0)
     elif len(stack_components) == 1 and len(layer_items) == 1:

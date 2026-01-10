@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 
 from openhcs.utils.import_utils import optional_import
-from openhcs.core.memory.decorators import torch as torch_func
+from openhcs.core.memory import torch as torch_func
 
 # Import torch modules as optional dependencies
 from openhcs.core.lazy_gpu_imports import torch
@@ -121,8 +121,8 @@ def non_local_means_denoise_torch(
     # Handle slice_by_slice processing using OpenHCS pattern
     if slice_by_slice:
         # Process each Z-slice independently using 2D non-local means
-        from openhcs.core.memory.stack_utils import unstack_slices, stack_slices
-        from openhcs.core.memory.converters import detect_memory_type
+        from openhcs.core.memory import unstack_slices, stack_slices
+        from openhcs.core.memory import detect_memory_type
 
         # Detect memory type and use proper OpenHCS utilities
         memory_type = detect_memory_type(image_float)

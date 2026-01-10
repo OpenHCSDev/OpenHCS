@@ -365,7 +365,7 @@ def _apply_unified_decoration(original_func, func_name, memory_type, create_wrap
         return original_func
 
     # Step 2: Apply memory type decorator (includes dtype preservation, streams, OOM recovery)
-    from openhcs.core.memory.decorators import numpy, cupy, torch, tensorflow, jax, pyclesperanto
+    from openhcs.core.memory import numpy, cupy, torch, tensorflow, jax, pyclesperanto
 
     if memory_type == MemoryType.NUMPY:
         wrapper_func = numpy(original_func)

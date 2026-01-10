@@ -34,7 +34,7 @@ from openhcs.processing.backends.processors.numpy_processor import (
     create_composite, create_projection, stack_percentile_normalize
 )
 from openhcs.processing.backends.analysis.cell_counting_cpu import count_cells_single_channel, DetectionMethod
-from openhcs.core.memory.decorators import DtypeConversion
+from openhcs.core.memory import DtypeConversion
 
 # Test utilities and fixtures
 from tests.integration.helpers.fixture_utils import (

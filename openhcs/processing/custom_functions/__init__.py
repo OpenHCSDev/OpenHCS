@@ -16,7 +16,7 @@ Example (Processing):
     >>> from openhcs.processing.custom_functions import CustomFunctionManager
     >>> manager = CustomFunctionManager()
     >>> code = '''
-    ... from openhcs.core.memory.decorators import numpy
+    ... from openhcs.core.memory import numpy
     ...
     ... @numpy
     ... def my_function(image, scale=1.0):

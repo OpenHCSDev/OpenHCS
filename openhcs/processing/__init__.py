@@ -19,7 +19,7 @@ from openhcs.processing.func_registry import (FUNC_REGISTRY,
                                                  get_valid_memory_types,
                                                  is_registry_initialized)
 # Import decorators directly from core module (function_registry.py is deprecated)
-from openhcs.core.memory.decorators import (cupy, jax, numpy,
+from openhcs.core.memory import (cupy, jax, numpy,
                                            pyclesperanto, tensorflow, torch)
 
 

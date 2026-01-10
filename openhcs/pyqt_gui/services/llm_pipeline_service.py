@@ -270,7 +270,7 @@ Generate COMPLETE, RUNNABLE Python code. Include ALL imports at the top.
 
 === BASIC FUNCTION (no analysis output) ===
 ```python
-from openhcs.core.memory.decorators import numpy
+from openhcs.core.memory import numpy
 import numpy as np
 
 @numpy
@@ -291,7 +291,7 @@ from dataclasses import dataclass
 from typing import List, Tuple
 import numpy as np
 from skimage.measure import label, regionprops
-from openhcs.core.memory.decorators import numpy
+from openhcs.core.memory import numpy
 from openhcs.core.pipeline.function_contracts import special_outputs
 from openhcs.processing.materialization import csv_materializer
 
@@ -337,7 +337,7 @@ For segmentation masks that become ROIs, return labeled arrays (each region has 
 from typing import List, Tuple
 import numpy as np
 from skimage.measure import label
-from openhcs.core.memory.decorators import numpy
+from openhcs.core.memory import numpy
 from openhcs.core.pipeline.function_contracts import special_outputs
 from openhcs.processing.backends.analysis.cell_counting_cpu import materialize_segmentation_masks
 
@@ -363,7 +363,7 @@ from dataclasses import dataclass
 from typing import List, Tuple
 import numpy as np
 from skimage.measure import label, regionprops
-from openhcs.core.memory.decorators import numpy
+from openhcs.core.memory import numpy
 from openhcs.core.pipeline.function_contracts import special_outputs
 from openhcs.processing.materialization import csv_materializer
 from openhcs.processing.backends.analysis.cell_counting_cpu import materialize_segmentation_masks
@@ -414,7 +414,7 @@ from dataclasses import dataclass
 from typing import List, Tuple
 import numpy as np
 import pyclesperanto as cle
-from openhcs.core.memory.decorators import pyclesperanto
+from openhcs.core.memory import pyclesperanto
 from openhcs.core.pipeline.function_contracts import special_outputs
 from openhcs.processing.materialization import csv_materializer
 from openhcs.processing.backends.analysis.cell_counting_cpu import materialize_segmentation_masks
@@ -487,7 +487,7 @@ from typing import List, Tuple
 import cupy as cp
 from cucim.skimage.filters import gaussian
 from cucim.skimage.measure import label, regionprops_table
-from openhcs.core.memory.decorators import cupy
+from openhcs.core.memory import cupy
 from openhcs.core.pipeline.function_contracts import special_outputs
 from openhcs.processing.materialization import csv_materializer
 from openhcs.processing.backends.analysis.cell_counting_cpu import materialize_segmentation_masks
@@ -550,7 +550,7 @@ IMPORTANT: Use cp.asnumpy() to convert cupy arrays to numpy for output.
 
 === SPECIAL INPUTS (consume data from previous steps) ===
 ```python
-from openhcs.core.memory.decorators import numpy
+from openhcs.core.memory import numpy
 from openhcs.core.pipeline.function_contracts import special_inputs
 
 @numpy
@@ -567,7 +567,7 @@ def analyze_at_positions(image, cell_positions):
         # These are the actual import paths - single source of truth
         return '''=== REQUIRED IMPORTS (use exactly these paths) ===
 # Backend decorators
-from openhcs.core.memory.decorators import numpy, pyclesperanto, cupy
+from openhcs.core.memory import numpy, pyclesperanto, cupy
 
 # Special outputs/inputs (for analysis functions)
 from openhcs.core.pipeline.function_contracts import special_outputs, special_inputs

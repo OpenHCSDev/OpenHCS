@@ -332,7 +332,7 @@ class ZMQExecutionServer(ZMQServer):
         # 3. This creates deadlock potential if any lock is held when gc.collect() is called
         # 4. Python's automatic GC will collect objects eventually without blocking
         try:
-            from openhcs.core.memory.gpu_cleanup import cleanup_all_gpu_frameworks
+            from openhcs.core.memory import cleanup_all_gpu_frameworks
             cleanup_all_gpu_frameworks()
         except Exception as cleanup_error:
             logger.warning(f"[{execution_id}] Failed to trigger GPU cleanup: {cleanup_error}")

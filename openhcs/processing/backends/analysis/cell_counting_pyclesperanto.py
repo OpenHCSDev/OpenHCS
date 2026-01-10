@@ -22,7 +22,7 @@ import pyclesperanto as cle
 from scipy.spatial.distance import cdist
 
 # OpenHCS imports
-from openhcs.core.memory.decorators import pyclesperanto as pyclesperanto_func
+from openhcs.core.memory import pyclesperanto as pyclesperanto_func
 from openhcs.core.pipeline.function_contracts import special_outputs
 from openhcs.constants.constants import Backend
 

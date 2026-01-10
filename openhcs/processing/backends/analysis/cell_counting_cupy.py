@@ -40,7 +40,7 @@ cucim_exposure = optional_import("cucim.skimage.exposure")
 
 
 # OpenHCS imports
-from openhcs.core.memory.decorators import cupy as cupy_func
+from openhcs.core.memory import cupy as cupy_func
 from openhcs.core.pipeline.function_contracts import special_outputs
 from openhcs.constants.constants import Backend
 

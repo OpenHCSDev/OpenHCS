@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 from typing import Any, List, Optional, Tuple
 
-from openhcs.core.memory.decorators import jax as jax_func
+from openhcs.core.memory import jax as jax_func
 from openhcs.core.utils import optional_import
 
 # Import JAX as an optional dependency

@@ -16,7 +16,7 @@ from typing import Any, List, Optional, Tuple
 
 import pkg_resources
 
-from openhcs.core.memory.decorators import tensorflow as tensorflow_func
+from openhcs.core.memory import tensorflow as tensorflow_func
 from openhcs.core.lazy_gpu_imports import tf
 
 # Define error variable

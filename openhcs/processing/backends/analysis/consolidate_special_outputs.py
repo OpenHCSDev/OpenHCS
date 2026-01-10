@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple, Any, Optional
 from enum import Enum
 
-from openhcs.core.memory.decorators import numpy as numpy_func
+from openhcs.core.memory import numpy as numpy_func
 from openhcs.core.pipeline.function_contracts import special_outputs
 from openhcs.constants.constants import Backend
 

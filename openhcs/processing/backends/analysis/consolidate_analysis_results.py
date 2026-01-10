@@ -20,7 +20,7 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
-from openhcs.core.memory.decorators import numpy as numpy_func
+from openhcs.core.memory import numpy as numpy_func
 from openhcs.core.pipeline.function_contracts import special_outputs
 
 # Import config classes with TYPE_CHECKING to avoid circular imports

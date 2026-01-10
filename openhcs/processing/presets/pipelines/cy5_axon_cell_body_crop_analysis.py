@@ -4,7 +4,7 @@
 from openhcs.constants.constants import VariableComponents
 from openhcs.constants.input_source import InputSource
 from openhcs.core.config import LazyStepMaterializationConfig
-from openhcs.core.memory.decorators import DtypeConversion
+from openhcs.core.memory import DtypeConversion
 from openhcs.core.steps.function_step import FunctionStep
 from openhcs.processing.backends.analysis.cell_counting_cpu import DetectionMethod, count_cells_single_channel
 from openhcs.processing.backends.analysis.multi_template_matching import multi_template_crop_reference_channel

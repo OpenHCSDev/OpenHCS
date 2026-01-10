@@ -15,7 +15,7 @@ from typing import Tuple, Dict, List, Optional, Any
 from skimage.feature import canny, blob_dog as local_max
 from skimage.filters import median, threshold_li
 from skimage.morphology import skeletonize
-from openhcs.core.memory.decorators import numpy
+from openhcs.core.memory import numpy
 from openhcs.core.pipeline.function_contracts import special_outputs
 from openhcs.core.utils import optional_import
 

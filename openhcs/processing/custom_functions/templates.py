@@ -67,7 +67,7 @@ def get_template_for_memory_type(memory_type: str) -> str:
 
 # Template constants with proper typing and documentation
 
-NUMPY_TEMPLATE = """from openhcs.core.memory.decorators import numpy
+NUMPY_TEMPLATE = """from openhcs.core.memory import numpy
 import numpy as np
 
 # =============================================================================
@@ -80,7 +80,7 @@ import numpy as np
 #   @jax           - JAX arrays (CPU/GPU/TPU)
 #   @pyclesperanto - GPU via OpenCL (AMD/NVIDIA/Intel)
 #
-# Import: from openhcs.core.memory.decorators import numpy, cupy, torch, ...
+# Import: from openhcs.core.memory import numpy, cupy, torch, ...
 # =============================================================================
 
 @numpy
@@ -136,7 +136,7 @@ def my_custom_function(image, scale: float = 1.0, offset: float = 0.0):
 """
 
 
-CUPY_TEMPLATE = """from openhcs.core.memory.decorators import cupy
+CUPY_TEMPLATE = """from openhcs.core.memory import cupy
 import cupy as cp
 
 @cupy
@@ -167,7 +167,7 @@ def my_custom_function(image, sigma: float = 1.0):
 """
 
 
-TORCH_TEMPLATE = """from openhcs.core.memory.decorators import torch
+TORCH_TEMPLATE = """from openhcs.core.memory import torch
 import torch
 
 @torch
@@ -206,7 +206,7 @@ def my_custom_function(image, kernel_size: int = 3):
 """
 
 
-TENSORFLOW_TEMPLATE = """from openhcs.core.memory.decorators import tensorflow
+TENSORFLOW_TEMPLATE = """from openhcs.core.memory import tensorflow
 import tensorflow as tf
 
 @tensorflow
@@ -236,7 +236,7 @@ def my_custom_function(image, strength: float = 0.5):
 """
 
 
-JAX_TEMPLATE = """from openhcs.core.memory.decorators import jax
+JAX_TEMPLATE = """from openhcs.core.memory import jax
 import jax.numpy as jnp
 
 @jax
@@ -275,7 +275,7 @@ def my_custom_function(image, power: float = 2.0):
 """
 
 
-PYCLESPERANTO_TEMPLATE = """from openhcs.core.memory.decorators import pyclesperanto
+PYCLESPERANTO_TEMPLATE = """from openhcs.core.memory import pyclesperanto
 import pyclesperanto_prototype as cle
 
 @pyclesperanto
@@ -309,7 +309,7 @@ def my_custom_function(image, radius: float = 2.0):
 # ANALYSIS TEMPLATES - For functions that produce structured analysis outputs
 # =============================================================================
 
-NUMPY_ANALYSIS_TEMPLATE = """from openhcs.core.memory.decorators import numpy
+NUMPY_ANALYSIS_TEMPLATE = """from openhcs.core.memory import numpy
 from openhcs.core.pipeline.function_contracts import special_outputs
 from openhcs.processing.materialization import csv_materializer
 from dataclasses import dataclass
@@ -370,7 +370,7 @@ def my_analysis_function(image, threshold: float = 0.5) -> Tuple[np.ndarray, Lis
 """
 
 
-NUMPY_DUAL_OUTPUT_TEMPLATE = """from openhcs.core.memory.decorators import numpy
+NUMPY_DUAL_OUTPUT_TEMPLATE = """from openhcs.core.memory import numpy
 from openhcs.core.pipeline.function_contracts import special_outputs
 from openhcs.processing.materialization import csv_materializer, dual_materializer
 from dataclasses import dataclass

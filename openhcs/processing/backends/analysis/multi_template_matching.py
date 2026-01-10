@@ -20,7 +20,7 @@ except ImportError:
     MTM = None
     logging.warning("MTM (Multi-Template-Matching) not available. Install with: pip install Multi-Template-Matching")
 
-from openhcs.core.memory.decorators import numpy as numpy_func
+from openhcs.core.memory import numpy as numpy_func
 from openhcs.core.pipeline.function_contracts import special_outputs
 
 @dataclass
