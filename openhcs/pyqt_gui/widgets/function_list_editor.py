@@ -265,14 +265,17 @@ class FunctionListEditorWidget(QWidget):
             from openhcs.config_framework.object_state import ObjectStateRegistry
             from openhcs.pyqt_gui.widgets.shared.services.scope_token_service import ScopeTokenService
 
+            parent_scope = str(self.scope_id)
+
             # Clear scope tokens for this step to avoid reusing old func scope ids
-            ScopeTokenService.clear_scope(self.scope_id)
+            ScopeTokenService.clear_scope(parent_scope)
 
             # Unregister any ObjectStates under this step scope (functions only)
             # without touching the step's own ObjectState (exact match).
             for state in list(ObjectStateRegistry.get_all()):
                 scope = getattr(state, "scope_id", None)
-                if scope and scope.startswith(f"{self.scope_id}::"):
+                scope_str = str(scope) if scope is not None else ""
+                if scope_str and scope_str.startswith(parent_scope + "::"):
                     ObjectStateRegistry.unregister(state, _skip_snapshot=True)
 
         # Clear existing panes - CRITICAL: Manually unregister form managers BEFORE deleteLater()
