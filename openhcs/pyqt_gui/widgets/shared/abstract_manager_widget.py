@@ -1722,6 +1722,9 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
                 existing_paths.update(path for _, path in first_line_segments if path)
 
             for field_path in sig_diff_fields:
+                # Skip 'name' - it's already shown as the item title
+                if field_path == 'name':
+                    continue
                 # Skip if already covered by existing segment (exact or prefix)
                 if any(field_path == p or field_path.startswith(p + '.') for p in existing_paths):
                     continue

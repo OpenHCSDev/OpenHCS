@@ -259,24 +259,14 @@ class FunctionListEditorWidget(QWidget):
     
     def _populate_function_list(self):
         """Populate function list with panes (mirrors Textual TUI)."""
-        # Ensure stale ObjectStates for prior function scopes are removed so fresh
-        # parameters/kwargs from code-mode edits take effect.
-        if self.scope_id:
-            from openhcs.config_framework.object_state import ObjectStateRegistry
-            from openhcs.pyqt_gui.widgets.shared.services.scope_token_service import ScopeTokenService
-
-            parent_scope = str(self.scope_id)
-
-            # Clear scope tokens for this step to avoid reusing old func scope ids
-            ScopeTokenService.clear_scope(parent_scope)
-
-            # Unregister any ObjectStates under this step scope (functions only)
-            # without touching the step's own ObjectState (exact match).
-            for state in list(ObjectStateRegistry.get_all()):
-                scope = getattr(state, "scope_id", None)
-                scope_str = str(scope) if scope is not None else ""
-                if scope_str and scope_str.startswith(parent_scope + "::"):
-                    ObjectStateRegistry.unregister(state, _skip_snapshot=True)
+        # NOTE: We do NOT destroy function ObjectStates or clear scope tokens here.
+        # - For code mode: _update_function_object_states() updates existing ObjectStates
+        #   with new kwargs BEFORE this method is called, preserving dirty detection.
+        # - FunctionPaneWidget.create_parameter_form() reuses existing ObjectStates
+        #   (line 297-302 in function_pane.py) if they exist.
+        # - ObjectStates for removed functions are cleaned up when their widgets are destroyed.
+        # - Scope tokens must persist so build_scope_id returns the same scope_id for
+        #   the same function object, allowing ObjectState lookup to succeed.
 
         # Clear existing panes - CRITICAL: Manually unregister form managers BEFORE deleteLater()
         # This prevents RuntimeError when new widgets try to connect to deleted managers
@@ -484,37 +474,49 @@ class FunctionListEditorWidget(QWidget):
     def _apply_edited_pattern_internal(self, new_pattern):
         """Internal implementation of apply_edited_pattern (wrapped in atomic block)."""
         try:
+            # Get the new function list BEFORE updating self.functions
             if self.is_dict_mode:
                 if isinstance(new_pattern, dict):
-                    self.pattern_data = new_pattern
-                    # Update current channel if it exists in new pattern
                     if self.selected_channel and self.selected_channel in new_pattern:
-                        self.functions = self._normalize_function_list(new_pattern[self.selected_channel])
+                        new_functions = self._normalize_function_list(new_pattern[self.selected_channel])
+                    elif new_pattern:
+                        new_channel = next(iter(new_pattern))
+                        new_functions = self._normalize_function_list(new_pattern[new_channel])
                     else:
-                        # Select first channel
-                        if new_pattern:
-                            self.selected_channel = next(iter(new_pattern))
-                            self.functions = self._normalize_function_list(new_pattern[self.selected_channel])
-                        else:
-                            self.functions = []
+                        new_functions = []
                 else:
                     raise ValueError("Expected dict pattern for dict mode")
             else:
                 if isinstance(new_pattern, list):
-                    self.pattern_data = new_pattern
-                    self.functions = self._normalize_function_list(new_pattern)
+                    new_functions = self._normalize_function_list(new_pattern)
                 elif callable(new_pattern):
-                    # Single callable: treat as [(callable, {})]
-                    self.pattern_data = [(new_pattern, {})]
-                    self.functions = [(new_pattern, {})]
+                    new_functions = [(new_pattern, {})]
                 elif isinstance(new_pattern, tuple) and len(new_pattern) == 2 and callable(new_pattern[0]) and isinstance(new_pattern[1], dict):
-                    # Single tuple (callable, kwargs): treat as [(callable, kwargs)]
-                    self.pattern_data = [new_pattern]
-                    self.functions = [new_pattern]
+                    new_functions = [new_pattern]
                 else:
                     raise ValueError(f"Expected list, callable, or (callable, dict) tuple pattern for list mode, got {type(new_pattern)}")
 
+            # CRITICAL FIX: Update existing function ObjectStates with new kwargs BEFORE
+            # creating new widgets. This preserves dirty detection - the ObjectState's
+            # saved baseline stays the same, only the current values change.
+            self._update_function_object_states(self.functions, new_functions)
+
+            # Now update pattern_data and functions
+            if self.is_dict_mode:
+                self.pattern_data = new_pattern
+                if self.selected_channel and self.selected_channel in new_pattern:
+                    self.functions = new_functions
+                elif new_pattern:
+                    self.selected_channel = next(iter(new_pattern))
+                    self.functions = new_functions
+                else:
+                    self.functions = []
+            else:
+                self.pattern_data = new_pattern if isinstance(new_pattern, list) else new_functions
+                self.functions = new_functions
+
             # Refresh the UI and notify of changes
+            # NOTE: _populate_function_list will REUSE ObjectStates that we just updated
             self._populate_function_list()
             self.function_pattern_changed.emit()
 
@@ -525,6 +527,65 @@ class FunctionListEditorWidget(QWidget):
         except Exception as e:
             if self.service_adapter:
                 self.service_adapter.show_error_dialog(f"Failed to apply edited pattern: {str(e)}")
+
+    def _update_function_object_states(self, old_functions: List, new_functions: List) -> None:
+        """Update existing function ObjectStates with new kwargs from code mode edit.
+
+        This is CRITICAL for dirty detection: instead of destroying and recreating
+        ObjectStates (which resets the baseline), we UPDATE existing ones so the
+        saved baseline is preserved and changes are detected as dirty.
+
+        Args:
+            old_functions: Previous function list [(func, kwargs), ...]
+            new_functions: New function list from code mode edit
+        """
+        if not self.scope_id:
+            return
+
+        from openhcs.config_framework.object_state import ObjectStateRegistry
+        from openhcs.pyqt_gui.widgets.shared.services.scope_token_service import ScopeTokenService
+
+        parent_scope = str(self.scope_id)
+
+        # Build mapping of old function scope_ids to their ObjectStates
+        # We match by function identity at the same index position
+        for i, (old_func, old_kwargs) in enumerate(old_functions):
+            if i >= len(new_functions):
+                # This function was removed - let _populate_function_list handle cleanup
+                continue
+
+            new_func, new_kwargs = new_functions[i]
+
+            # Only update if same function at same index (function identity match)
+            if old_func is not new_func:
+                # Different function - ObjectState will be recreated, can't update
+                continue
+
+            # Find the ObjectState for this function
+            # The scope_id is built from step_scope::func_N
+            # We need to find the existing ObjectState
+            func_scope_id = ScopeTokenService.build_scope_id(parent_scope, old_func)
+            state = ObjectStateRegistry.get_by_scope(func_scope_id)
+
+            if state is None:
+                # No ObjectState exists yet - will be created by FunctionPaneWidget
+                continue
+
+            # Update each kwarg that changed
+            for param_name, new_value in new_kwargs.items():
+                old_value = old_kwargs.get(param_name)
+                if old_value != new_value:
+                    # Update the parameter - this triggers dirty detection
+                    if param_name in state.parameters:
+                        state.update_parameter(param_name, new_value)
+                        logger.debug(f"🔧 Code mode: Updated {func_scope_id}.{param_name}: {old_value} → {new_value}")
+
+            # Also handle kwargs that were removed (set to None/default)
+            for param_name in old_kwargs:
+                if param_name not in new_kwargs and param_name in state.parameters:
+                    # Kwarg was removed - reset to None (inherit from context)
+                    state.update_parameter(param_name, None)
+                    logger.debug(f"🔧 Code mode: Reset {func_scope_id}.{param_name} to None (removed from kwargs)")
 
     def _patch_lazy_constructors(self):
         """Context manager that patches lazy dataclass constructors to preserve None vs concrete distinction."""
