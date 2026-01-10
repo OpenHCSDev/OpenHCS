@@ -67,6 +67,7 @@ class PlateManagerWidget(AbstractManagerWidget):
 
     TITLE = "Plate Manager"
     BUTTON_GRID_COLUMNS = 4  # 2x4 grid for 8 buttons
+    ENABLE_STATUS_SCROLLING = True  # Marquee animation for long status messages
     BUTTON_CONFIGS = [
         ("Add", "add_plate", "Add new plate directory"),
         ("Del", "del_plate", "Delete selected plates"),

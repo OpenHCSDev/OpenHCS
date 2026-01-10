@@ -63,9 +63,9 @@ class ListItemFormat:
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
-    QListWidgetItem, QLabel, QSplitter
+    QListWidgetItem, QLabel, QSplitter, QScrollArea, QSizePolicy
 )
-from PyQt6.QtCore import Qt, QRect, pyqtSignal
+from PyQt6.QtCore import Qt, QRect, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont, QColor, QBrush
 
 from openhcs.pyqt_gui.widgets.shared.reorderable_list_widget import ReorderableListWidget
@@ -179,6 +179,9 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
     # Custom data role for scope border color (kept local to avoid delegate coupling)
     SCOPE_BORDER_ROLE = Qt.ItemDataRole.UserRole + 10
 
+    # Status scrolling: enable marquee animation for long status messages
+    ENABLE_STATUS_SCROLLING: bool = False
+
     # Common signals
     status_message = pyqtSignal(str)
 
@@ -219,6 +222,13 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
         self.buttons: Dict[str, QPushButton] = {}
         self.status_label: Optional[QLabel] = None
         self.item_list: Optional[ReorderableListWidget] = None
+
+        # Status scrolling state (only used when ENABLE_STATUS_SCROLLING = True)
+        self._status_scroll: Optional[QWidget] = None  # QScrollArea when scrolling enabled
+        self._status_scroll_timer: Optional[Any] = None  # QTimer for animation
+        self._status_scroll_position: int = 0
+        self._status_single_message_width: int = 0
+        self._current_status_message: str = "Ready"
 
         # Live context resolver for config attribute resolution
         self._live_context_resolver = LiveContextResolver()
@@ -353,7 +363,7 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
         """
         Create header with title and status label.
 
-        Subclass can override to add custom widgets (e.g., PlateManager's status scrolling).
+        When ENABLE_STATUS_SCROLLING is True, uses QScrollArea for marquee animation.
         """
         header = QWidget()
         header_layout = QHBoxLayout(header)
@@ -366,15 +376,45 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
             f"color: {self.color_scheme.to_hex(self.color_scheme.text_accent)};"
         )
         header_layout.addWidget(title_label)
-        header_layout.addStretch()
 
-        # Status label
-        self.status_label = QLabel("Ready")
-        self.status_label.setStyleSheet(
-            f"color: {self.color_scheme.to_hex(self.color_scheme.status_success)}; "
-            f"font-weight: bold;"
-        )
-        header_layout.addWidget(self.status_label)
+        if self.ENABLE_STATUS_SCROLLING:
+            # Status label in scrollable area for marquee animation
+            self._status_scroll = QScrollArea()
+            self._status_scroll.setWidgetResizable(False)
+            self._status_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            self._status_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            self._status_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+            self._status_scroll.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight)
+            self._status_scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            self._status_scroll.setFixedHeight(20)
+            self._status_scroll.setContentsMargins(0, 0, 0, 0)
+            self._status_scroll.setStyleSheet("QScrollArea { padding: 0px; margin: 0px; background: transparent; }")
+
+            self.status_label = QLabel("Ready")
+            self.status_label.setStyleSheet(
+                f"color: {self.color_scheme.to_hex(self.color_scheme.status_success)}; "
+                f"font-weight: bold; padding: 0px; margin: 0px;"
+            )
+            self.status_label.setTextFormat(Qt.TextFormat.PlainText)
+            self.status_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+            self.status_label.setFixedHeight(20)
+            self.status_label.setContentsMargins(0, 0, 0, 0)
+            self.status_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight)
+
+            self._status_scroll.setWidget(self.status_label)
+            header_layout.addWidget(self._status_scroll, 1)
+
+            # Trigger initial layout
+            QTimer.singleShot(0, lambda: self.status_label.adjustSize())
+        else:
+            header_layout.addStretch()
+            # Simple status label without scrolling
+            self.status_label = QLabel("Ready")
+            self.status_label.setStyleSheet(
+                f"color: {self.color_scheme.to_hex(self.color_scheme.status_success)}; "
+                f"font-weight: bold;"
+            )
+            header_layout.addWidget(self.status_label)
 
         return header
 
@@ -849,12 +889,98 @@ class AbstractManagerWidget(QWidget, CrossWindowPreviewMixin, FlashMixin, ABC, m
 
     def update_status(self, message: str) -> None:
         """
-        Update status label.
+        Update status label with optional auto-scrolling marquee.
 
-        Subclass can override for custom behavior (e.g., scrolling animation).
+        When ENABLE_STATUS_SCROLLING is True and text is too long, duplicates
+        text and starts seamless looping animation.
         """
-        if self.status_label:
+        if not self.status_label:
+            return
+
+        self._current_status_message = message
+
+        if not self.ENABLE_STATUS_SCROLLING or not self._status_scroll:
+            # Simple mode: just set text
             self.status_label.setText(message)
+            return
+
+        # Scrolling mode: check if text needs animation
+        self.status_label.setText(message)
+        self.status_label.adjustSize()
+
+        # Calculate single message width for seamless loop reset
+        separator = "     "
+        temp_label = QLabel(f"{message}{separator}")
+        temp_label.setFont(self.status_label.font())
+        temp_label.adjustSize()
+        self._status_single_message_width = temp_label.width()
+
+        # Check if scrolling needed
+        label_width = self.status_label.width()
+        scroll_width = self._status_scroll.viewport().width()
+
+        if label_width > scroll_width:
+            # Duplicate text for seamless loop
+            display_text = f"{message}{separator}{message}{separator}"
+            self.status_label.setText(display_text)
+            self.status_label.adjustSize()
+
+        self._restart_status_scrolling()
+
+    def _restart_status_scrolling(self) -> None:
+        """Restart status scrolling animation if text is too long."""
+        if not self._status_scroll:
+            return
+
+        # Stop existing timer
+        if self._status_scroll_timer:
+            self._status_scroll_timer.stop()
+            self._status_scroll_timer = None
+
+        # Reset position
+        self._status_scroll.horizontalScrollBar().setValue(0)
+        self._status_scroll_position = 0
+
+        # Check if scrolling needed
+        label_width = self.status_label.width()
+        scroll_width = self._status_scroll.viewport().width()
+
+        if label_width > scroll_width:
+            # Start animation timer
+            self._status_scroll_timer = QTimer(self)
+            self._status_scroll_timer.setTimerType(Qt.TimerType.PreciseTimer)
+            self._status_scroll_timer.timeout.connect(self._auto_scroll_status)
+            self._status_scroll_timer.start(50)  # 20 fps scrolling
+
+    def _auto_scroll_status(self) -> None:
+        """Auto-scroll status text in seamless loop."""
+        if not self._status_scroll or not self.status_label:
+            return
+
+        scrollbar = self._status_scroll.horizontalScrollBar()
+        max_scroll = scrollbar.maximum()
+
+        if max_scroll == 0:
+            if self._status_scroll_timer:
+                self._status_scroll_timer.stop()
+            return
+
+        # Advance scroll position
+        self._status_scroll_position += 2  # Scroll speed
+
+        # Reset at duplicate boundary for seamless loop
+        reset_point = self._status_single_message_width or (max_scroll / 2)
+        if self._status_scroll_position >= reset_point:
+            self._status_scroll_position = 0
+
+        scrollbar.setValue(int(self._status_scroll_position))
+
+    def resizeEvent(self, event) -> None:
+        """Handle resize to recalculate status scrolling."""
+        super().resizeEvent(event)
+        if self.ENABLE_STATUS_SCROLLING and self._status_scroll:
+            # Re-apply message to recalculate duplication
+            self.update_status(self._current_status_message)
 
     # ========== Code Editor Hooks (Concrete with defaults) ==========
 
