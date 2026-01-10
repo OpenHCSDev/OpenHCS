@@ -57,33 +57,38 @@ class ScopeColorStrategy(ABC):
 
 
 class IndexBasedStrategy(ScopeColorStrategy):
-    """Color by orchestrator from predetermined palette.
+    """Color by orchestrator from predetermined palette in discovery order.
 
-    Orchestrators (plates) get distinct BASE colors from the primary palette.
-    Steps inherit their orchestrator's base color.
-    Tint/pattern variation is handled in _build_color_scheme_from_rgb.
+    Orchestrators (plates) get distinct BASE colors from the primary palette
+    assigned in the order they are first seen. Steps inherit their orchestrator's
+    base color. Tint/pattern variation is handled in _build_color_scheme_from_rgb.
     """
 
     strategy_type = ColorStrategyType.INDEX_BASED
 
+    def __init__(self) -> None:
+        # Map orchestrator -> palette index assigned in discovery order
+        self._color_map: Dict[str, int] = {}
+        self._next_index: int = 0
+
     def generate_color(self, scope_id: str, step_index: Optional[int] = None) -> Tuple[int, int, int]:
-        # Base color determined by orchestrator (plate), NOT step_index
-        # step_index only affects tint/pattern, handled elsewhere
-        orchestrator_index = self._get_orchestrator_index(scope_id)
-        palette_index = orchestrator_index % len(_PRIMARY_PALETTE_RGB)
+        orchestrator = self._extract_orchestrator(scope_id)
+
+        if orchestrator not in self._color_map:
+            palette_index = self._next_index % len(_PRIMARY_PALETTE_RGB)
+            self._color_map[orchestrator] = palette_index
+            self._next_index += 1
+        else:
+            palette_index = self._color_map[orchestrator]
+
         return _PRIMARY_PALETTE_RGB[palette_index]
 
-    def _get_orchestrator_index(self, scope_id: str) -> int:
-        """Get palette index for orchestrator (deterministic hash)."""
-        # Extract orchestrator part (before ::)
+    @staticmethod
+    def _extract_orchestrator(scope_id: str) -> str:
+        """Extract orchestrator part (before ::) or return the whole scope_id."""
         if "::" in scope_id:
-            orchestrator = scope_id.split("::")[0]
-        else:
-            orchestrator = scope_id
-
-        # Hash orchestrator to palette index
-        hash_bytes = hashlib.md5(orchestrator.encode()).digest()
-        return int.from_bytes(hash_bytes[:2], byteorder="big") % len(_PRIMARY_PALETTE_RGB)
+            return scope_id.split("::", 1)[0]
+        return scope_id
 
 
 class MD5HashStrategy(ScopeColorStrategy):
