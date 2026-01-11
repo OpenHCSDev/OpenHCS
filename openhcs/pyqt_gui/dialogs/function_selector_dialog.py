@@ -19,8 +19,8 @@ from PyQt6.QtGui import QFont
 from openhcs.processing.backends.lib_registry.registry_service import RegistryService
 from openhcs.processing.backends.lib_registry.unified_registry import FunctionMetadata
 from openhcs.processing.custom_functions.signals import custom_function_signals
-from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
-from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
+from pyqt_formgen.theming import ColorScheme
+from pyqt_formgen.theming import StyleSheetGenerator
 from openhcs.pyqt_gui.widgets.shared.function_table_browser import FunctionTableBrowser
 from openhcs.pyqt_gui.widgets.shared.column_filter_widget import MultiColumnFilterPanel
 
@@ -133,7 +133,7 @@ class FunctionSelectorDialog(QDialog):
         self.selected_function = None
 
         # Initialize color scheme and style generator
-        self.color_scheme = PyQt6ColorScheme()
+        self.color_scheme = ColorScheme()
         self.style_generator = StyleSheetGenerator(self.color_scheme)
 
         # Load enhanced function metadata

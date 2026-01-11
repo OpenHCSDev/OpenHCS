@@ -15,8 +15,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont
 
-from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
-from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
+from pyqt_formgen.theming import StyleSheetGenerator
+from pyqt_formgen.theming import ColorScheme
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ class StatusBarWidget(QWidget):
     # Signals
     status_updated = pyqtSignal(str)  # status message
     
-    def __init__(self, color_scheme: Optional[PyQt6ColorScheme] = None, parent=None):
+    def __init__(self, color_scheme: Optional[ColorScheme] = None, parent=None):
         """
         Initialize the status bar widget.
 
@@ -43,7 +43,7 @@ class StatusBarWidget(QWidget):
         super().__init__(parent)
 
         # Initialize color scheme and style generator
-        self.color_scheme = color_scheme or PyQt6ColorScheme()
+        self.color_scheme = color_scheme or ColorScheme()
         self.style_generator = StyleSheetGenerator(self.color_scheme)
 
         # Business logic state

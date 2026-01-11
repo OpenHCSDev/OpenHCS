@@ -40,6 +40,12 @@ from arraybridge import (
     _get_device_id,
 )
 
+# Provide decorators namespace for backward compatibility
+try:
+    from arraybridge import decorators as decorators
+except Exception:  # pragma: no cover - fallback for older arraybridge exports
+    import arraybridge.decorators as decorators
+
 # Keep MemoryType from openhcs constants for backward compatibility
 from openhcs.constants.constants import MemoryType
 
@@ -70,6 +76,7 @@ __all__ = [
     'tensorflow',
     'jax',
     'pyclesperanto',
+    'decorators',
     'DtypeConversion',
     # Stack utilities
     'stack_slices',

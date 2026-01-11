@@ -24,7 +24,8 @@ from openhcs.io.base import _create_storage_registry
 from openhcs.config_framework import LiveContextResolver
 from openhcs.config_framework.lazy_factory import (
     ensure_global_config_context,
-    rebuild_lazy_config_with_new_global_reference
+    rebuild_lazy_config_with_new_global_reference,
+    is_global_config_type,
 )
 from openhcs.config_framework.global_config import (
     set_global_config_for_editing,
@@ -37,15 +38,15 @@ from openhcs.core.config_cache import _sync_save_config
 from openhcs.core.xdg_paths import get_config_file_path
 from openhcs.debug.pickle_to_python import generate_complete_orchestrator_code
 from openhcs.processing.backends.analysis.consolidate_analysis_results import consolidate_multi_plate_summaries
-from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
+from pyqt_formgen.theming import ColorScheme
 from openhcs.pyqt_gui.windows.config_window import ConfigWindow
 from openhcs.pyqt_gui.windows.plate_viewer_window import PlateViewerWindow
-from openhcs.pyqt_gui.services.simple_code_editor import SimpleCodeEditorService
-from openhcs.pyqt_gui.widgets.shared.abstract_manager_widget import AbstractManagerWidget, ListItemFormat
-from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+from pyqt_formgen.widgets.editors.simple_code_editor import SimpleCodeEditorService
+from pyqt_formgen.widgets.shared.abstract_manager_widget import AbstractManagerWidget, ListItemFormat
+from pyqt_formgen.forms import ParameterFormManager
 from openhcs.pyqt_gui.widgets.shared.services.zmq_execution_service import ZMQExecutionService
 from openhcs.pyqt_gui.widgets.shared.services.compilation_service import CompilationService
-from openhcs.pyqt_gui.widgets.shared.scope_visual_config import ListItemType
+from pyqt_formgen.widgets.shared.scope_visual_config import ListItemType
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +115,7 @@ class PlateManagerWidget(AbstractManagerWidget):
     _execution_complete_signal = pyqtSignal(dict, str)
     _execution_error_signal = pyqtSignal(str)
     
-    def __init__(self, service_adapter, color_scheme: Optional[PyQt6ColorScheme] = None,
+    def __init__(self, service_adapter, color_scheme: Optional[ColorScheme] = None,
                  gui_config=None, parent=None):
         """
         Initialize the plate manager widget.
@@ -609,8 +610,6 @@ class PlateManagerWidget(AbstractManagerWidget):
 
         Singleton-per-scope behavior is handled automatically by BaseFormDialog.show().
         """
-        from openhcs.config_framework.lazy_factory import is_global_config_type
-
         # CRITICAL: GlobalPipelineConfig uses scope_id="" (empty string), not None
         # The ObjectState is registered with scope_id="" in app.py, so we must match it
         # to reuse the existing ObjectState instead of creating a new one
@@ -1305,7 +1304,6 @@ class PlateManagerWidget(AbstractManagerWidget):
 
     def _get_scope_for_item(self, item: Any) -> str:
         """PlateManager: scope = plate_path (from orchestrator or dict)."""
-        from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
         if isinstance(item, PipelineOrchestrator):
             return str(item.plate_path)
         return item.get('path', '') if isinstance(item, dict) else ''

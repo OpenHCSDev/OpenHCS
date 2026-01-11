@@ -21,7 +21,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QGroupBox, QMessageBox, QAbstractItemView
 )
 from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot, QTimer
-from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
+from pyqt_formgen.theming import StyleSheetGenerator
 import threading
 
 logger = logging.getLogger(__name__)

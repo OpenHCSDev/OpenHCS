@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
+from pyqt_formgen.forms.widget_strategies import _get_enum_display_text
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +59,6 @@ class GroupBySelectorDialog(QDialog):
     
     def setup_ui(self):
         """Setup the user interface (mirrors Textual TUI layout)."""
-        from openhcs.pyqt_gui.widgets.shared.widget_strategies import _get_enum_display_text
         component_display = _get_enum_display_text(self.group_by).title()
 
         self.setWindowTitle(f"Select {component_display}s")
@@ -191,7 +191,6 @@ class GroupBySelectorDialog(QDialog):
         Returns:
             Formatted display string (e.g., "Channel 1 | HOECHST 33342" or "Channel 1")
         """
-        from openhcs.pyqt_gui.widgets.shared.widget_strategies import _get_enum_display_text
         component_display = _get_enum_display_text(self.group_by).title()
         base_text = f"{component_display} {component_key}"
 

@@ -14,8 +14,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 
-from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
-from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
+from pyqt_formgen.theming import ColorScheme
+from pyqt_formgen.theming import StyleSheetGenerator
 from openhcs.pyqt_gui.windows.base_form_dialog import BaseFormDialog
 
 logger = logging.getLogger(__name__)
@@ -33,7 +33,7 @@ class PlateViewerWindow(BaseFormDialog):
     Only ONE PlateViewerWindow per plate can be open at a time.
     """
 
-    def __init__(self, orchestrator, color_scheme: Optional[PyQt6ColorScheme] = None, parent=None):
+    def __init__(self, orchestrator, color_scheme: Optional[ColorScheme] = None, parent=None):
         """
         Initialize plate viewer window.
 
@@ -44,7 +44,7 @@ class PlateViewerWindow(BaseFormDialog):
         """
         super().__init__(parent)
         self.orchestrator = orchestrator
-        self.color_scheme = color_scheme or PyQt6ColorScheme()
+        self.color_scheme = color_scheme or ColorScheme()
         self.style_gen = StyleSheetGenerator(self.color_scheme)
 
         # scope_id for singleton behavior - one viewer per plate
@@ -281,7 +281,7 @@ class PlateViewerWindow(BaseFormDialog):
     
     def _create_single_metadata_form(self, layout, metadata_instance):
         """Create a single metadata form."""
-        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager, FormManagerConfig
+        from pyqt_formgen.forms import ParameterFormManager, FormManagerConfig
         from openhcs.config_framework.object_state import ObjectState
 
         # Create local ObjectState for metadata viewer
@@ -303,7 +303,7 @@ class PlateViewerWindow(BaseFormDialog):
     def _create_multi_subdirectory_forms(self, layout, subdirs_instances):
         """Create forms for multiple subdirectories."""
         from PyQt6.QtWidgets import QGroupBox
-        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager, FormManagerConfig
+        from pyqt_formgen.forms import ParameterFormManager, FormManagerConfig
         from openhcs.config_framework.object_state import ObjectState
 
         for subdir_name, metadata_instance in subdirs_instances.items():

@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLab
 from PyQt6.QtCore import Qt
 
 from openhcs.pyqt_gui.widgets.shared.plate_view_widget import PlateViewWidget
-from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
+from pyqt_formgen.theming import ColorScheme
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +26,7 @@ class WellSelectorDialog(QDialog):
     - Returns selected wells as a formatted string
     """
     
-    def __init__(self, orchestrator, color_scheme: Optional[PyQt6ColorScheme] = None, parent=None):
+    def __init__(self, orchestrator, color_scheme: Optional[ColorScheme] = None, parent=None):
         """
         Initialize well selector dialog.
         
@@ -37,7 +37,7 @@ class WellSelectorDialog(QDialog):
         """
         super().__init__(parent)
         self.orchestrator = orchestrator
-        self.color_scheme = color_scheme or PyQt6ColorScheme()
+        self.color_scheme = color_scheme or ColorScheme()
         self.selected_wells = set()
         
         self.setWindowTitle("Select Wells")

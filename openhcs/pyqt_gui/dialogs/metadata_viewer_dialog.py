@@ -15,8 +15,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 
 from openhcs.microscopes.openhcs import OpenHCSMetadata
-from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
-from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
+from pyqt_formgen.forms import ParameterFormManager
+from pyqt_formgen.theming import ColorScheme
 from openhcs.pyqt_gui.windows.base_form_dialog import BaseFormDialog
 
 logger = logging.getLogger(__name__)
@@ -33,7 +33,7 @@ class MetadataViewerDialog(BaseFormDialog):
     Only ONE MetadataViewerDialog per plate can be open at a time.
     """
 
-    def __init__(self, orchestrator, color_scheme: Optional[PyQt6ColorScheme] = None, parent=None):
+    def __init__(self, orchestrator, color_scheme: Optional[ColorScheme] = None, parent=None):
         """
         Initialize metadata viewer dialog.
 
@@ -44,7 +44,7 @@ class MetadataViewerDialog(BaseFormDialog):
         """
         super().__init__(parent)
         self.orchestrator = orchestrator
-        self.color_scheme = color_scheme or PyQt6ColorScheme()
+        self.color_scheme = color_scheme or ColorScheme()
 
         # scope_id for singleton behavior - one viewer per plate
         self.scope_id = str(orchestrator.plate_path) if orchestrator else None
@@ -181,7 +181,7 @@ class MetadataViewerDialog(BaseFormDialog):
 
     def _create_single_metadata_form(self, metadata_instance: OpenHCSMetadata):
         """Create a single metadata form for one OpenHCSMetadata instance."""
-        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import FormManagerConfig
+        from pyqt_formgen.forms import FormManagerConfig
         from openhcs.config_framework.object_state import ObjectState
 
         form_layout = QVBoxLayout(self.form_container)
@@ -207,7 +207,7 @@ class MetadataViewerDialog(BaseFormDialog):
 
     def _create_multi_subdirectory_forms(self, subdirs_instances: dict):
         """Create separate forms for each subdirectory in multi-subdirectory plates."""
-        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import FormManagerConfig
+        from pyqt_formgen.forms import FormManagerConfig
         from openhcs.config_framework.object_state import ObjectState
 
         form_layout = QVBoxLayout(self.form_container)

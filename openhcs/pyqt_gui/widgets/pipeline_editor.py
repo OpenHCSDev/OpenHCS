@@ -8,6 +8,7 @@ Uses hybrid approach: extracted business logic + clean PyQt6 UI.
 import logging
 import inspect
 import copy
+from dataclasses import fields, is_dataclass
 from typing import List, Dict, Optional, Callable, Tuple, Any, Iterable, Set
 from pathlib import Path
 
@@ -19,26 +20,35 @@ from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont, QColor
 
 from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
+from openhcs.constants.constants import OrchestratorState
 from openhcs.core.config import GlobalPipelineConfig
 from openhcs.io.filemanager import FileManager
 from openhcs.core.steps.function_step import FunctionStep
 from openhcs.core.pipeline import Pipeline
 # Mixin imports REMOVED - now in ABC (handle_selection_change_with_prevention, CrossWindowPreviewMixin)
-from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
-from openhcs.pyqt_gui.widgets.shared.scope_visual_config import ListItemType
-from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
+from pyqt_formgen.theming import StyleSheetGenerator
+from pyqt_formgen.widgets.shared.scope_visual_config import ListItemType
+from pyqt_formgen.theming import ColorScheme
 from openhcs.pyqt_gui.config import PyQtGUIConfig, get_default_pyqt_gui_config
 from openhcs.config_framework.object_state import ObjectState, ObjectStateRegistry
-from openhcs.pyqt_gui.widgets.shared.services.scope_token_service import ScopeTokenService
+from pyqt_formgen.services.scope_token_service import ScopeTokenService
+from pyqt_formgen.animation import WindowFlashOverlay
 
 # Import shared list widget components (single source of truth)
-from openhcs.pyqt_gui.widgets.shared.reorderable_list_widget import ReorderableListWidget
-from openhcs.pyqt_gui.widgets.shared.list_item_delegate import MultilinePreviewItemDelegate, StyledText
+from pyqt_formgen.core import ReorderableListWidget
+from pyqt_formgen.widgets.shared.list_item_delegate import MultilinePreviewItemDelegate, StyledText
+from pyqt_formgen.widgets.editors.simple_code_editor import SimpleCodeEditorService
 from openhcs.config_framework.lazy_factory import PREVIEW_LABEL_REGISTRY
 from openhcs.core.config import ProcessingConfig
+from openhcs.debug.pickle_to_python import generate_complete_pipeline_steps_code
+from openhcs.io.pipeline_migration import (
+    patch_step_constructors_for_migration,
+    load_pipeline_with_migration,
+)
+from openhcs.pyqt_gui.windows.dual_editor_window import DualEditorWindow
 
 # Import ABC base class (Phase 4 migration)
-from openhcs.pyqt_gui.widgets.shared.abstract_manager_widget import AbstractManagerWidget, ListItemFormat
+from pyqt_formgen.widgets.shared.abstract_manager_widget import AbstractManagerWidget, ListItemFormat
 
 from openhcs.utils.performance_monitor import timer
 
@@ -190,7 +200,7 @@ class PipelineEditorWidget(AbstractManagerWidget):
     step_selected = pyqtSignal(object)  # FunctionStep
     status_message = pyqtSignal(str)  # status message
     
-    def __init__(self, service_adapter, color_scheme: Optional[PyQt6ColorScheme] = None,
+    def __init__(self, service_adapter, color_scheme: Optional[ColorScheme] = None,
                  gui_config: Optional[PyQtGUIConfig] = None, parent=None):
         """
         Initialize the pipeline editor widget.
@@ -430,7 +440,6 @@ class PipelineEditorWidget(AbstractManagerWidget):
                 return f"• {config_attr.replace('_', ' ').title()}: Enabled"
 
         # Use registry to discover preview configs - iterate step's fields
-        from dataclasses import fields, is_dataclass
         if is_dataclass(step):
             for f in fields(step):
                 config = object.__getattribute__(step, f.name)
@@ -457,10 +466,6 @@ class PipelineEditorWidget(AbstractManagerWidget):
 
     def action_add_step(self):
         """Handle Add Step button (adapted from Textual version)."""
-
-        from openhcs.core.steps.function_step import FunctionStep
-        from openhcs.pyqt_gui.windows.dual_editor_window import DualEditorWindow
-
         # Get orchestrator for step creation
         orchestrator = self._get_current_orchestrator()
 
@@ -565,9 +570,6 @@ class PipelineEditorWidget(AbstractManagerWidget):
             return
 
         try:
-            # Use complete pipeline steps code generation
-            from openhcs.debug.pickle_to_python import generate_complete_pipeline_steps_code
-
             # Generate complete pipeline steps code with imports
             python_code = generate_complete_pipeline_steps_code(
                 pipeline_steps=list(self.pipeline_steps),
@@ -575,7 +577,6 @@ class PipelineEditorWidget(AbstractManagerWidget):
             )
 
             # Create simple code editor service
-            from openhcs.pyqt_gui.services.simple_code_editor import SimpleCodeEditorService
             editor_service = SimpleCodeEditorService(self)
 
             # Check if user wants external editor (check environment variable)
@@ -604,7 +605,6 @@ class PipelineEditorWidget(AbstractManagerWidget):
         if "unexpected keyword argument" in error_msg and ("group_by" in error_msg or "variable_components" in error_msg):
             logger.info(f"Detected old-format step constructor, retrying with migration patch: {error}")
             new_namespace = {}
-            from openhcs.io.pipeline_migration import patch_step_constructors_for_migration
             with self._patch_lazy_constructors(), patch_step_constructors_for_migration():
                 exec(code, new_namespace)
             return new_namespace
@@ -647,8 +647,6 @@ class PipelineEditorWidget(AbstractManagerWidget):
         """
         try:
             # Use migration utility to load with backward compatibility
-            from openhcs.io.pipeline_migration import load_pipeline_with_migration
-
             steps = load_pipeline_with_migration(file_path)
 
             if steps is not None:
@@ -733,7 +731,6 @@ class PipelineEditorWidget(AbstractManagerWidget):
 
         # CRITICAL: Invalidate flash overlay cache after rebuilding list
         # This forces geometry recalculation for the new list items
-        from openhcs.pyqt_gui.widgets.shared.flash_mixin import WindowFlashOverlay
         WindowFlashOverlay.invalidate_cache_for_widget(self)
 
         self.update_button_states()
@@ -912,7 +909,6 @@ class PipelineEditorWidget(AbstractManagerWidget):
             return False
 
         # Check if orchestrator is in an initialized state (mirrors Textual TUI logic)
-        from openhcs.constants.constants import OrchestratorState
         return orchestrator.state in [OrchestratorState.READY, OrchestratorState.COMPILED,
                                      OrchestratorState.COMPLETED, OrchestratorState.COMPILE_FAILED,
                                      OrchestratorState.EXEC_FAILED]
@@ -989,9 +985,6 @@ class PipelineEditorWidget(AbstractManagerWidget):
     def _show_item_editor(self, item: Any) -> None:
         """Show DualEditorWindow for step (required abstract method)."""
         step_to_edit = item
-
-        from openhcs.pyqt_gui.windows.dual_editor_window import DualEditorWindow
-
         plate_scope = self.current_plate or "no_plate"
 
         # Find step's current position in pipeline for border pattern

@@ -5,7 +5,11 @@ from PyQt6.QtGui import QPainter, QPen, QColor
 from PyQt6.QtCore import Qt
 import logging
 
-from openhcs.pyqt_gui.widgets.shared.scope_color_utils import tint_color_perceptual
+from pyqt_formgen.widgets.shared.scope_color_utils import (
+    tint_color_perceptual,
+    get_scope_color_scheme,
+)
+from pyqt_formgen.services.scope_color_service import ScopeColorService
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +41,6 @@ class ScopedBorderMixin:
         scope_id = getattr(self, "scope_id", None)
         if not scope_id:
             return
-
-        from openhcs.pyqt_gui.widgets.shared.scope_color_utils import get_scope_color_scheme
 
         # Use explicit step_index if set (for windows matching list item position)
         step_index = getattr(self, "_step_index", None)
@@ -145,8 +147,6 @@ class ScopedBorderMixin:
         """
 
     def _subscribe_to_color_changes(self) -> None:
-        from openhcs.pyqt_gui.widgets.shared.services.scope_color_service import ScopeColorService
-
         service = ScopeColorService.instance()
         scope_id = getattr(self, "scope_id", None)
         if scope_id:

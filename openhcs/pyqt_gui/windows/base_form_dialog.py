@@ -32,15 +32,23 @@ Example:
 """
 
 import logging
-from typing import Optional, Protocol
+from typing import Optional, Protocol, Callable
 
-from PyQt6.QtWidgets import QDialog
-from PyQt6.QtCore import QEvent
+from PyQt6.QtCore import QEvent, Qt
+from PyQt6.QtWidgets import QApplication, QDialog, QPushButton, QWidget
 
-# For save button setup
-from PyQt6.QtWidgets import QPushButton
-from typing import Callable
-from PyQt6.QtCore import Qt
+from pyqt_formgen.animation import WindowFlashOverlay
+from pyqt_formgen.services.parameter_ops_service import ParameterOpsService
+from pyqt_formgen.widgets.function_list_editor import FunctionListEditorWidget
+from pyqt_formgen.widgets.function_pane import FunctionPaneWidget
+from pyqt_formgen.widgets.shared.clickable_help_components import (
+    HelpButton,
+    HelpIndicator,
+    GroupBoxWithHelp,
+)
+from pyqt_formgen.widgets.shared.config_hierarchy_tree import ConfigHierarchyTreeHelper
+from openhcs.config_framework.object_state import ObjectStateRegistry
+from openhcs.pyqt_gui.services.window_manager import WindowManager
 
 # Import ScopedBorderMixin directly from module, avoiding widgets/__init__.py (circular import)
 import openhcs.pyqt_gui.widgets.shared.scoped_border_mixin as _scoped_border_module
@@ -70,8 +78,6 @@ class BaseFormDialog(ScopedBorderMixin, QDialog):
         Also initializes scope-based border styling here (not in __init__) because
         subclasses set scope_id AFTER calling super().__init__().
         """
-        from openhcs.pyqt_gui.services.window_manager import WindowManager
-
         scope_key = self._get_window_scope_key()
         if scope_key is None:
             # No scope_id - just show normally (legacy behavior)
@@ -127,7 +133,6 @@ class BaseFormDialog(ScopedBorderMixin, QDialog):
         The save_callback should accept only close_window as a keyword argument.
         If Shift is held, close_window will be False (update only); otherwise True.
         """
-        from PyQt6.QtWidgets import QApplication
         def _on_save():
             modifiers = QApplication.keyboardModifiers()
             is_shift = modifiers & Qt.KeyboardModifier.ShiftModifier
@@ -150,11 +155,9 @@ class BaseFormDialog(ScopedBorderMixin, QDialog):
         self._apply_state_action('mark_saved')
 
         # Increment global token to invalidate all caches
-        from openhcs.config_framework.object_state import ObjectStateRegistry
         ObjectStateRegistry.increment_token()
 
         # Refresh all form managers with new saved values as baseline
-        from openhcs.pyqt_gui.widgets.shared.services.parameter_ops_service import ParameterOpsService
         for manager in self._get_form_managers():
             ParameterOpsService().refresh_with_live_context(manager)
             # Emit context_changed to notify other windows (bulk refresh)
@@ -310,10 +313,6 @@ class BaseFormDialog(ScopedBorderMixin, QDialog):
         if not accent_color:
             return
 
-        from openhcs.pyqt_gui.widgets.shared.clickable_help_components import HelpButton, HelpIndicator, GroupBoxWithHelp
-        from openhcs.pyqt_gui.widgets.function_pane import FunctionPaneWidget
-        from PyQt6.QtWidgets import QWidget
-
         # Find all HelpButtons, HelpIndicators, GroupBoxWithHelp, and FunctionPaneWidget in entire dialog
         if isinstance(self, QWidget):
             for help_btn in self.findChildren(HelpButton):
@@ -329,7 +328,6 @@ class BaseFormDialog(ScopedBorderMixin, QDialog):
                 for func_pane in self.findChildren(FunctionPaneWidget):
                     func_pane.set_scope_color_scheme(scope_scheme)
                 # FunctionListEditorWidget needs scheme to apply to newly created panes
-                from openhcs.pyqt_gui.widgets.function_list_editor import FunctionListEditorWidget
                 for func_editor in self.findChildren(FunctionListEditorWidget):
                     func_editor.set_scope_color_scheme(scope_scheme)
                 # Apply scope background to hierarchy tree (step editor)
@@ -337,8 +335,6 @@ class BaseFormDialog(ScopedBorderMixin, QDialog):
 
     def _apply_scope_to_hierarchy_trees(self, scope_scheme) -> None:
         """Apply scope-colored background to hierarchy trees in form managers."""
-        from openhcs.pyqt_gui.widgets.shared.config_hierarchy_tree import ConfigHierarchyTreeHelper
-
         for manager in self._get_form_managers():
             # Get tree from parent widget (step_editor has hierarchy_tree)
             parent = getattr(manager, 'parent', None)
@@ -454,7 +450,6 @@ class BaseFormDialog(ScopedBorderMixin, QDialog):
         self._unregister_all_form_managers()
 
         # CRITICAL: Cleanup WindowFlashOverlay to prevent memory leak
-        from openhcs.pyqt_gui.widgets.shared.flash_mixin import WindowFlashOverlay
         self._flash_overlay_cleaned = True
         WindowFlashOverlay.cleanup_window(self)
         logger.info(f"🔍 {self.__class__.__name__}: Cleaned up WindowFlashOverlay")
@@ -469,7 +464,6 @@ class BaseFormDialog(ScopedBorderMixin, QDialog):
         self._unregister_all_form_managers()
 
         # CRITICAL: Cleanup WindowFlashOverlay to prevent memory leak
-        from openhcs.pyqt_gui.widgets.shared.flash_mixin import WindowFlashOverlay
         self._flash_overlay_cleaned = True
         WindowFlashOverlay.cleanup_window(self)
         logger.info(f"🔍 {self.__class__.__name__}: Cleaned up WindowFlashOverlay")
@@ -496,13 +490,11 @@ class BaseFormDialog(ScopedBorderMixin, QDialog):
         # CRITICAL: Cleanup WindowFlashOverlay to prevent memory leak
         # Without this, every window's overlay stays in _overlays dict forever,
         # making flash operations progressively slower (O(n) where n = windows ever opened)
-        from openhcs.pyqt_gui.widgets.shared.flash_mixin import WindowFlashOverlay
         self._flash_overlay_cleaned = True
         WindowFlashOverlay.cleanup_window(self)
         logger.info(f"🔍 {self.__class__.__name__}: Cleaned up WindowFlashOverlay")
 
         # Unregister from WindowManager so window can be reopened
-        from openhcs.pyqt_gui.services.window_manager import WindowManager
         scope_key = self._get_window_scope_key()
         # CRITICAL: Use "is not None" check, not truthiness!
         # scope_key="" (empty string) is a valid scope for GlobalPipelineConfig
@@ -514,7 +506,6 @@ class BaseFormDialog(ScopedBorderMixin, QDialog):
 
         # Trigger global refresh AFTER unregistration so other windows
         # re-collect live context without this window's cancelled values
-        from openhcs.config_framework.object_state import ObjectStateRegistry
         ObjectStateRegistry.increment_token()
         logger.info(f"🔍 {self.__class__.__name__}: Triggered global refresh after closeEvent")
 

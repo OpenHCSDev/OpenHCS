@@ -16,11 +16,13 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 
-from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
-from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
+from pyqt_formgen.theming import ColorScheme
+from pyqt_formgen.theming import StyleSheetGenerator
+from pyqt_formgen.widgets.editors.simple_code_editor import QScintillaCodeEditorDialog
 from openhcs.pyqt_gui.windows.base_form_dialog import BaseFormDialog
 from openhcs.processing.custom_functions import CustomFunctionManager
 from openhcs.processing.custom_functions.signals import custom_function_signals
+from openhcs.processing.custom_functions.templates import get_default_template
 from openhcs.processing.custom_functions.validation import ValidationError
 
 
@@ -49,7 +51,7 @@ class CustomFunctionManagerDialog(BaseFormDialog):
 
         # Initialize manager and color scheme
         self.manager = CustomFunctionManager()
-        self.color_scheme = PyQt6ColorScheme()
+        self.color_scheme = ColorScheme()
         self.style_generator = StyleSheetGenerator(self.color_scheme)
 
         # Setup UI first (widgets must exist before signal connection)
@@ -163,9 +165,6 @@ class CustomFunctionManagerDialog(BaseFormDialog):
 
     def _on_create_clicked(self):
         """Handle create new function button click."""
-        from openhcs.pyqt_gui.services.simple_code_editor import QScintillaCodeEditorDialog
-        from openhcs.processing.custom_functions.templates import get_default_template
-
         # Get default template (numpy backend)
         # NOTE: Default template works for all backends - users can change
         # the decorator (@numpy, @cupy, etc.) in the editor
@@ -204,8 +203,6 @@ class CustomFunctionManagerDialog(BaseFormDialog):
 
     def _on_edit_clicked(self):
         """Handle edit function button click."""
-        from openhcs.pyqt_gui.services.simple_code_editor import QScintillaCodeEditorDialog
-
         selected_items = self.function_list.selectedItems()
         if not selected_items:
             return

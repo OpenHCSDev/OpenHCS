@@ -6,25 +6,34 @@ Uses hybrid approach: extracted business logic + clean PyQt6 UI.
 """
 
 import logging
+from dataclasses import fields, is_dataclass
+from pathlib import Path
 from typing import Optional, Callable, Dict, List
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QTabWidget, QWidget, QStackedWidget
+    QTabWidget, QWidget, QStackedWidget, QSizePolicy, QMessageBox
 )
 from PyQt6.QtCore import pyqtSignal, Qt, QTimer
 from PyQt6.QtGui import QFont
 
 from openhcs.core.steps.function_step import FunctionStep
 from openhcs.constants.constants import GroupBy
+from openhcs.core.config import PipelineConfig
+from openhcs.config_framework import is_global_config_instance
+from openhcs.config_framework.context_manager import config_context
+from openhcs.config_framework.global_config import get_current_global_config
+from openhcs.config_framework.lazy_factory import get_base_type_for_lazy
 from openhcs.ui.shared.pattern_data_manager import PatternDataManager
 
-from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
-from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
+from pyqt_formgen.theming import ColorScheme
+from pyqt_formgen.theming import StyleSheetGenerator
+from pyqt_formgen.services.scope_token_service import ScopeTokenService
+from pyqt_formgen.widgets.function_list_editor import FunctionListEditorWidget
 from openhcs.pyqt_gui.windows.base_form_dialog import BaseFormDialog
 from openhcs.config_framework.object_state import ObjectStateRegistry
 from openhcs.introspection import UnifiedParameterAnalyzer
-from typing import List
+from openhcs.pyqt_gui.widgets.step_parameter_editor import StepParameterEditorWidget
 logger = logging.getLogger(__name__)
 
 
@@ -46,7 +55,7 @@ class DualEditorWindow(BaseFormDialog):
     changes_detected = pyqtSignal(bool)  # has_changes
     
     def __init__(self, step_data: Optional[FunctionStep] = None, is_new: bool = False,
-                 on_save_callback: Optional[Callable] = None, color_scheme: Optional[PyQt6ColorScheme] = None,
+                 on_save_callback: Optional[Callable] = None, color_scheme: Optional[ColorScheme] = None,
                  orchestrator=None, gui_config=None, parent=None, step_index: Optional[int] = None):
         """
         Initialize the dual editor window.
@@ -70,7 +79,7 @@ class DualEditorWindow(BaseFormDialog):
         self.setModal(False)
 
         # Initialize color scheme and style generator
-        self.color_scheme = color_scheme or PyQt6ColorScheme()
+        self.color_scheme = color_scheme or ColorScheme()
         self.style_generator = StyleSheetGenerator(self.color_scheme)
         self.gui_config = gui_config
 
@@ -143,7 +152,6 @@ class DualEditorWindow(BaseFormDialog):
         self.header_label = QLabel()
         self.header_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
         self.header_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_accent)};")
-        from PyQt6.QtWidgets import QSizePolicy
         self.header_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         tab_row.addWidget(self.header_label, 1)
 
@@ -336,14 +344,10 @@ class DualEditorWindow(BaseFormDialog):
                 self.func_editor.header_label.setStyleSheet(f"color: {hex_color}; font-weight: bold; font-size: 14px;")
 
     def _build_step_scope_id(self) -> str:
-        from openhcs.pyqt_gui.widgets.shared.services.scope_token_service import ScopeTokenService
         return ScopeTokenService.build_scope_id(self.orchestrator.plate_path, self.editing_step)
     
     def create_step_tab(self):
         """Create the step settings tab (using dedicated widget)."""
-        from openhcs.pyqt_gui.widgets.step_parameter_editor import StepParameterEditorWidget
-        from openhcs.config_framework.context_manager import config_context
-
         # Create step parameter editor widget with proper nested context
         # Step must be nested: GlobalPipelineConfig -> PipelineConfig -> Step
         # CRITICAL: Use hierarchical scope_id to isolate this step editor + its function panes
@@ -374,8 +378,6 @@ class DualEditorWindow(BaseFormDialog):
 
     def create_function_tab(self):
         """Create the function pattern tab (using dedicated widget)."""
-        from openhcs.pyqt_gui.widgets.function_list_editor import FunctionListEditorWidget
-
         # Convert step func to function list format
         initial_functions = self._convert_step_func_to_list()
 
@@ -532,10 +534,6 @@ class DualEditorWindow(BaseFormDialog):
         Args:
             config: Updated config object (GlobalPipelineConfig, PipelineConfig, or StepConfig)
         """
-        from openhcs.core.config import PipelineConfig
-        from openhcs.config_framework import is_global_config_instance
-        from openhcs.config_framework.global_config import get_current_global_config
-
         # Only care about global configs and PipelineConfig changes
         # (StepConfig changes are handled by the step editor's own form manager)
         is_global = is_global_config_instance(config)
@@ -818,7 +816,6 @@ class DualEditorWindow(BaseFormDialog):
             # CRITICAL FIX: For nested dataclass parameters (like processing_config),
             # don't replace the entire lazy dataclass - instead update individual fields
             # This preserves lazy resolution for fields that weren't changed
-            from dataclasses import is_dataclass, fields
             if is_dataclass(value) and not isinstance(value, type):
                 logger.debug(f"📦 {field_name} is a nested dataclass, updating fields individually")
                 existing_config = getattr(self.editing_step, field_name, None)
@@ -914,7 +911,6 @@ class DualEditorWindow(BaseFormDialog):
             # Validate step
             step_name = getattr(self.editing_step, 'name', None)
             if not step_name or not step_name.strip():
-                from PyQt6.QtWidgets import QMessageBox
                 QMessageBox.warning(self, "Validation Error", "Step name cannot be empty.")
                 return
 
@@ -960,7 +956,6 @@ class DualEditorWindow(BaseFormDialog):
 
         except Exception as e:
             logger.error(f"Failed to save step: {e}")
-            from PyQt6.QtWidgets import QMessageBox
             QMessageBox.critical(self, "Save Error", f"Failed to save step:\n{e}")
 
     def _apply_changes_to_original(self):
@@ -969,8 +964,6 @@ class DualEditorWindow(BaseFormDialog):
             return
 
         # Copy all attributes from editing_step to original_step_reference
-        from dataclasses import fields, is_dataclass
-
         if is_dataclass(self.editing_step):
             # For dataclass steps, copy all field values
             for field in fields(self.editing_step):
@@ -1033,9 +1026,6 @@ class DualEditorWindow(BaseFormDialog):
 
     def _normalize_value_for_change_detection(self, value):
         """Normalize complex values into comparison-friendly primitives."""
-        from dataclasses import is_dataclass, fields
-        from pathlib import Path
-
         if value is None:
             return None
 
@@ -1063,7 +1053,6 @@ class DualEditorWindow(BaseFormDialog):
             return f"{module}.{qualname}"
 
         if is_dataclass(value):
-            from openhcs.config_framework.lazy_factory import get_base_type_for_lazy
             is_lazy_dataclass = get_base_type_for_lazy(type(value)) is not None
             normalized = {}
             for field in fields(value):
@@ -1078,7 +1067,6 @@ class DualEditorWindow(BaseFormDialog):
 
     def _create_new_step(self):
         """Create a new empty step."""
-        from openhcs.core.steps.function_step import FunctionStep
         return FunctionStep(
             func=[],  # Start with empty function list
             name="New_Step"

@@ -8,30 +8,45 @@ Uses hybrid approach: extracted business logic + clean PyQt6 UI.
 import logging
 import dataclasses
 import copy
+import os
 from typing import Type, Any, Callable, Optional, Dict
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QScrollArea, QWidget, QSplitter, QTreeWidget, QTreeWidgetItem,
-    QLineEdit, QSpinBox, QDoubleSpinBox, QCheckBox, QComboBox
+    QLineEdit, QSpinBox, QDoubleSpinBox, QCheckBox, QComboBox, QMessageBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont
 
 # Infrastructure classes removed - functionality migrated to ParameterFormManager service layer
-from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager, FormManagerConfig
-from openhcs.pyqt_gui.widgets.shared.config_hierarchy_tree import ConfigHierarchyTreeHelper
-from openhcs.pyqt_gui.widgets.shared.scrollable_form_mixin import ScrollableFormMixin
-from openhcs.pyqt_gui.widgets.shared.collapsible_splitter_helper import CollapsibleSplitterHelper
-from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
-from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
+from pyqt_formgen.forms import ParameterFormManager, FormManagerConfig
+from pyqt_formgen.widgets.shared.config_hierarchy_tree import ConfigHierarchyTreeHelper
+from pyqt_formgen.widgets.shared.scrollable_form_mixin import ScrollableFormMixin
+from pyqt_formgen.core.collapsible_splitter_helper import CollapsibleSplitterHelper
+from pyqt_formgen.widgets.shared.clickable_help_components import HelpButton
+from pyqt_formgen.services.parameter_ops_service import ParameterOpsService
+from pyqt_formgen.widgets.editors.simple_code_editor import SimpleCodeEditorService
+from pyqt_formgen.theming import StyleSheetGenerator
+from pyqt_formgen.theming import ColorScheme
 from openhcs.pyqt_gui.windows.base_form_dialog import BaseFormDialog
 from openhcs.core.config import GlobalPipelineConfig, PipelineConfig
 from openhcs.config_framework import is_global_config_type
+from openhcs.config_framework.global_config import (
+    set_saved_global_config,
+    set_live_global_config,
+    set_global_config_for_editing,
+)
+from openhcs.debug.pickle_to_python import generate_config_code
 from openhcs.ui.shared.code_editor_form_updater import CodeEditorFormUpdater
-from openhcs.config_framework.object_state import ObjectStateRegistry
+from openhcs.config_framework.object_state import ObjectState, ObjectStateRegistry
 # ❌ REMOVED: require_config_context decorator - enhanced decorator events system handles context automatically
-from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
+from openhcs.core.lazy_placeholder import (
+    LazyDefaultPlaceholderService as FullLazyDefaultPlaceholderService,
+)
+from openhcs.core.lazy_placeholder_simplified import (
+    LazyDefaultPlaceholderService as SimplifiedLazyDefaultPlaceholderService,
+)
 
 
 
@@ -62,7 +77,7 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
 
     def __init__(self, config_class: Type, current_config: Any,
                  on_save_callback: Optional[Callable] = None,
-                 color_scheme: Optional[PyQt6ColorScheme] = None, parent=None,
+                 color_scheme: Optional[ColorScheme] = None, parent=None,
                  scope_id: Optional[str] = None):
         """
         Initialize the configuration window.
@@ -91,15 +106,13 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
         self._needs_global_context_resync = False
 
         # Initialize color scheme and style generator
-        self.color_scheme = color_scheme or PyQt6ColorScheme()
+        self.color_scheme = color_scheme or ColorScheme()
         self.style_generator = StyleSheetGenerator(self.color_scheme)
         self.tree_helper = ConfigHierarchyTreeHelper()
 
         # SIMPLIFIED: Use dual-axis resolution
-        from openhcs.core.lazy_placeholder import LazyDefaultPlaceholderService
-
         # Determine placeholder prefix based on actual instance type (not class type)
-        is_lazy_dataclass = LazyDefaultPlaceholderService.has_lazy_resolution(type(current_config))
+        is_lazy_dataclass = FullLazyDefaultPlaceholderService.has_lazy_resolution(type(current_config))
         placeholder_prefix = "Pipeline default" if is_lazy_dataclass else "Default"
 
         # SIMPLIFIED: Use ParameterFormManager with dual-axis resolution
@@ -112,7 +125,6 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
         # This fixes the circular context bug where reset showed old values instead of global defaults
 
         # Create or lookup ObjectState from registry - callers own state directly
-        from openhcs.config_framework.object_state import ObjectState, ObjectStateRegistry
         self.state = ObjectStateRegistry.get_by_scope(self.scope_id)
         if self.state is None:
             self.state = ObjectState(
@@ -198,7 +210,6 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
         # Add help button for the dataclass itself
         self._help_btn = None
         if dataclasses.is_dataclass(self.config_class):
-            from openhcs.pyqt_gui.widgets.shared.clickable_help_components import HelpButton
             self._help_btn = HelpButton(help_target=self.config_class, text="Help", color_scheme=self.color_scheme)
             self._help_btn.setMaximumWidth(80)
             header_layout.addWidget(self._help_btn)
@@ -371,8 +382,6 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
 
     def _find_field_for_class(self, target_class) -> str:
         """Find the field name that has the given class type (or its lazy version)."""
-        from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
-        import dataclasses
 
         # Get the root dataclass type
         root_config = self.form_manager.object_instance
@@ -390,7 +399,7 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
                 return field.name
 
             # Check if field type is a lazy version of target class
-            if LazyDefaultPlaceholderService.has_lazy_resolution(field_type):
+            if SimplifiedLazyDefaultPlaceholderService.has_lazy_resolution(field_type):
                 # Get the base class of the lazy type
                 for base in field_type.__bases__:
                     if base == target_class:
@@ -471,7 +480,6 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
             if is_global_config_type(self.config_class):
                 # CRITICAL: Update SAVED thread-local on save (what descendants/compiler see)
                 # Also update LIVE thread-local to match saved
-                from openhcs.config_framework.global_config import set_saved_global_config, set_live_global_config
                 set_saved_global_config(self.config_class, new_config)
                 set_live_global_config(self.config_class, new_config)
                 logger.debug(f"Updated SAVED and LIVE thread-local {self.config_class.__name__} on SAVE")
@@ -479,7 +487,6 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
                 # CRITICAL: Invalidate ALL descendant caches so they re-resolve with the new SAVED thread-local
                 # This is necessary when saving None values - descendants must pick up the new None
                 # instead of continuing to use cached values resolved from the old saved thread-local
-                from openhcs.config_framework.object_state import ObjectStateRegistry
                 ObjectStateRegistry.increment_token(notify=True)
                 logger.debug(f"Invalidated all descendant caches after updating SAVED thread-local")
 
@@ -494,18 +501,12 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
 
         except Exception as e:
             logger.error(f"Failed to save configuration: {e}")
-            from PyQt6.QtWidgets import QMessageBox
             QMessageBox.critical(self, "Save Error", f"Failed to save configuration:\n{e}")
     
 
     def _view_code(self):
         """Open code editor to view/edit the configuration as Python code."""
         try:
-            from openhcs.pyqt_gui.services.simple_code_editor import SimpleCodeEditorService
-            from openhcs.debug.pickle_to_python import generate_config_code
-            from openhcs.pyqt_gui.widgets.shared.services.parameter_ops_service import ParameterOpsService
-            import os
-
             # CRITICAL: Refresh with live context BEFORE getting current values
             # This ensures code editor shows unsaved changes from other open windows
             # Example: GlobalPipelineConfig editor open with unsaved zarr_config changes
@@ -533,7 +534,6 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
 
         except Exception as e:
             logger.error(f"Failed to view config code: {e}")
-            from PyQt6.QtWidgets import QMessageBox
             QMessageBox.critical(self, "View Code Error", f"Failed to view code:\n{e}")
 
     def _handle_edited_config_code(self, edited_code: str):
@@ -559,7 +559,6 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
 
             # FIXED: Proper context propagation based on config type
             # ConfigWindow is used for BOTH GlobalPipelineConfig AND PipelineConfig editing
-            from openhcs.config_framework.global_config import set_global_config_for_editing
 
             # Temporarily suppress per-field sync during code-mode bulk update
             suppress_context = is_global_config_type(self.config_class)
@@ -588,7 +587,6 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
 
         except Exception as e:
             logger.error(f"Failed to apply edited config code: {e}")
-            from PyQt6.QtWidgets import QMessageBox
             QMessageBox.critical(self, "Code Edit Error", f"Failed to apply edited code:\n{e}")
 
     def _on_global_config_field_changed(self, param_name: str, value: Any):
@@ -619,7 +617,6 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
         if (is_global_config_type(self.config_class) and
                 getattr(self, '_global_context_dirty', False) and
                 self._original_global_config_snapshot is not None):
-            from openhcs.config_framework.global_config import set_global_config_for_editing
             set_global_config_for_editing(self.config_class,
                                           copy.deepcopy(self._original_global_config_snapshot))
             self._global_context_dirty = False
@@ -645,4 +642,3 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
         self.state.off_state_changed(self._dirty_title_callback)
         self.tree_helper.cleanup_subscriptions()
         super().closeEvent(a0)
-

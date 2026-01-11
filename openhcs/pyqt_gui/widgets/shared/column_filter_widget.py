@@ -14,9 +14,9 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import pyqtSignal, Qt, QSize
 
-from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
-from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
-from openhcs.pyqt_gui.widgets.shared.layout_constants import COMPACT_LAYOUT
+from pyqt_formgen.theming import ColorScheme
+from pyqt_formgen.theming import StyleSheetGenerator
+from pyqt_formgen.forms.layout_constants import COMPACT_LAYOUT
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +99,7 @@ class ColumnFilterWidget(QFrame):
     filter_changed = pyqtSignal()
 
     def __init__(self, column_name: str, unique_values: List[str],
-                 color_scheme: Optional[PyQt6ColorScheme] = None, parent=None):
+                 color_scheme: Optional[ColorScheme] = None, parent=None):
         """
         Initialize column filter widget.
 
@@ -113,7 +113,7 @@ class ColumnFilterWidget(QFrame):
         self.column_name = column_name
         self.unique_values = sorted(unique_values)  # Sort for consistent display
         self.checkboxes: Dict[str, QCheckBox] = {}
-        self.color_scheme = color_scheme or PyQt6ColorScheme()
+        self.color_scheme = color_scheme or ColorScheme()
         self.style_gen = StyleSheetGenerator(self.color_scheme)
 
         # Apply frame styling
@@ -305,11 +305,11 @@ class MultiColumnFilterPanel(QWidget):
 
     filters_changed = pyqtSignal()
 
-    def __init__(self, color_scheme: Optional[PyQt6ColorScheme] = None, parent=None):
+    def __init__(self, color_scheme: Optional[ColorScheme] = None, parent=None):
         """Initialize multi-column filter panel."""
         super().__init__(parent)
         self.column_filters: Dict[str, ColumnFilterWidget] = {}
-        self.color_scheme = color_scheme or PyQt6ColorScheme()
+        self.color_scheme = color_scheme or ColorScheme()
         self._init_ui()
 
     def _init_ui(self):

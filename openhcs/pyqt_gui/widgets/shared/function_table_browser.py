@@ -7,8 +7,8 @@ Used as the table portion of FunctionSelectorDialog.
 
 from typing import Any, Dict, List, Optional
 
-from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
-from openhcs.pyqt_gui.widgets.shared.abstract_table_browser import (
+from pyqt_formgen.theming import ColorScheme
+from pyqt_formgen.widgets.shared.abstract_table_browser import (
     AbstractTableBrowser, ColumnDef
 )
 
@@ -25,7 +25,7 @@ class FunctionTableBrowser(AbstractTableBrowser[Dict[str, Any]]):
     MODULE_WIDTH = 250
     DESCRIPTION_WIDTH = 300
     
-    def __init__(self, color_scheme: Optional[PyQt6ColorScheme] = None, parent=None):
+    def __init__(self, color_scheme: Optional[ColorScheme] = None, parent=None):
         super().__init__(color_scheme=color_scheme, selection_mode='single', parent=parent)
     
     def get_columns(self) -> List[ColumnDef]:
@@ -81,4 +81,3 @@ class FunctionTableBrowser(AbstractTableBrowser[Dict[str, Any]]):
     
     def get_search_placeholder(self) -> str:
         return "Search functions by name, module, contract, or tags..."
-

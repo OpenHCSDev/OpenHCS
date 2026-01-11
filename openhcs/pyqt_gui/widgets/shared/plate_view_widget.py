@@ -12,8 +12,8 @@ from PyQt6.QtWidgets import (
     QLabel, QFrame, QButtonGroup
 )
 from PyQt6.QtCore import Qt, pyqtSignal
-from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
-from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
+from pyqt_formgen.theming import ColorScheme
+from pyqt_formgen.theming import StyleSheetGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -38,10 +38,10 @@ class PlateViewWidget(QWidget):
     wells_selected = pyqtSignal(set)
     detach_requested = pyqtSignal()
     
-    def __init__(self, color_scheme: Optional[PyQt6ColorScheme] = None, parent=None):
+    def __init__(self, color_scheme: Optional[ColorScheme] = None, parent=None):
         super().__init__(parent)
         
-        self.color_scheme = color_scheme or PyQt6ColorScheme()
+        self.color_scheme = color_scheme or ColorScheme()
         self.style_gen = StyleSheetGenerator(self.color_scheme)
         
         # State

@@ -10,7 +10,7 @@ from enum import Enum
 from PyQt6.QtWidgets import QGroupBox, QVBoxLayout
 from PyQt6.QtCore import pyqtSignal
 
-from openhcs.pyqt_gui.widgets.shared.no_scroll_spinbox import NoneAwareCheckBox
+from pyqt_formgen.widgets import NoneAwareCheckBox
 
 
 class CheckboxGroupWidget(QGroupBox):

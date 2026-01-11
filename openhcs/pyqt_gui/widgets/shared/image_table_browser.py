@@ -7,8 +7,8 @@ Used as the table portion of ImageBrowserWidget.
 
 from typing import Any, Dict, List, Optional
 
-from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
-from openhcs.pyqt_gui.widgets.shared.abstract_table_browser import (
+from pyqt_formgen.theming import ColorScheme
+from pyqt_formgen.widgets.shared.abstract_table_browser import (
     AbstractTableBrowser, ColumnDef
 )
 
@@ -21,7 +21,7 @@ class ImageTableBrowser(AbstractTableBrowser[Dict[str, Any]]):
     Multi-select mode for batch streaming operations.
     """
     
-    def __init__(self, color_scheme: Optional[PyQt6ColorScheme] = None, parent=None):
+    def __init__(self, color_scheme: Optional[ColorScheme] = None, parent=None):
         # Columns are dynamic - start with just Filename
         self._metadata_keys: List[str] = []
         super().__init__(color_scheme=color_scheme, selection_mode='multi', parent=parent)
@@ -72,4 +72,3 @@ class ImageTableBrowser(AbstractTableBrowser[Dict[str, Any]]):
     
     def get_search_placeholder(self) -> str:
         return "Search files..."
-

@@ -14,10 +14,11 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction
 
 from openhcs.config_framework.object_state import ObjectStateRegistry
-from openhcs.pyqt_gui.widgets.shared.abstract_table_browser import (
+from pyqt_formgen.widgets.shared.abstract_table_browser import (
     AbstractTableBrowser, ColumnDef
 )
-from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
+from pyqt_formgen.theming import ColorScheme
+from openhcs.pyqt_gui.widgets.shared.time_travel_widget import TimeTravelWidget
 
 
 @dataclass
@@ -84,7 +85,7 @@ class SnapshotTableBrowser(AbstractTableBrowser[SnapshotInfo]):
 class SnapshotBrowserWindow(QMainWindow):
     """Main window for browsing time-travel snapshots."""
 
-    def __init__(self, color_scheme: Optional[PyQt6ColorScheme] = None, parent=None):
+    def __init__(self, color_scheme: Optional[ColorScheme] = None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Snapshot Browser - Time Travel")
         self.resize(700, 500)
@@ -93,7 +94,7 @@ class SnapshotBrowserWindow(QMainWindow):
         # QMainWindow defaults to Window type which tiling WMs tile/fullscreen
         self.setWindowFlags(self.windowFlags() | Qt.WindowType.Dialog)
 
-        self.color_scheme = color_scheme or PyQt6ColorScheme()
+        self.color_scheme = color_scheme or ColorScheme()
 
         # Central widget
         central = QWidget()
@@ -117,7 +118,6 @@ class SnapshotBrowserWindow(QMainWindow):
 
         # Timeline widget at bottom (stays in sync with all other timeline widgets)
         # No browse button - we're already in the browser window
-        from openhcs.pyqt_gui.widgets.shared.time_travel_widget import TimeTravelWidget
         self.timeline_widget = TimeTravelWidget(
             color_scheme=self.color_scheme,
             show_browse_button=False,

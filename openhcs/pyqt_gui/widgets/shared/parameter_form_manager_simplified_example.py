@@ -21,8 +21,8 @@ import logging
 logger = logging.getLogger(__name__)
 
 # Import ABC-based widget system
-from openhcs.ui.shared.widget_operations import WidgetOperations
-from openhcs.ui.shared.widget_factory import WidgetFactory
+from pyqt_formgen.forms import WidgetOperations
+from pyqt_formgen.forms import WidgetFactory
 
 # NO MORE DUCK TYPING DISPATCH TABLES!
 # DELETED: WIDGET_UPDATE_DISPATCH

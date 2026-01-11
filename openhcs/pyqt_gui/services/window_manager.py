@@ -261,7 +261,7 @@ class WindowManager:
 
         # Eagerly create flash overlay so OpenGL context is ready before any flashes
         # This prevents first-paint glitches when GL initializes mid-render
-        from openhcs.pyqt_gui.widgets.shared.flash_mixin import WindowFlashOverlay
+        from pyqt_formgen.animation import WindowFlashOverlay
         WindowFlashOverlay.get_for_window(window)
 
         logger.debug(f"[WINDOW_MGR] Registered window for scope: {scope_id}")

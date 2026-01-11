@@ -16,8 +16,8 @@ from PyQt6.QtCore import Qt, pyqtSignal, QPoint
 from PyQt6.QtGui import QFont
 
 from openhcs.config_framework.object_state import ObjectStateRegistry
-from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
-from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
+from pyqt_formgen.theming import ColorScheme
+from pyqt_formgen.theming import StyleSheetGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -38,9 +38,9 @@ class TimeTravelWidget(QWidget):
     # Emitted when time-travel position changes
     position_changed = pyqtSignal(int)  # (index)
 
-    def __init__(self, color_scheme: Optional[PyQt6ColorScheme] = None, show_browse_button: bool = True, parent=None):
+    def __init__(self, color_scheme: Optional[ColorScheme] = None, show_browse_button: bool = True, parent=None):
         super().__init__(parent)
-        self.color_scheme = color_scheme or PyQt6ColorScheme()
+        self.color_scheme = color_scheme or ColorScheme()
         self.style_gen = StyleSheetGenerator(self.color_scheme)
         self._show_browse_button = show_browse_button
         self._setup_ui()

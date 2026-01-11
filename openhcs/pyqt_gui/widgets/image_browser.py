@@ -21,8 +21,8 @@ from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot
 from openhcs.constants.constants import Backend
 from openhcs.io.filemanager import FileManager
 from openhcs.io.base import storage_registry
-from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
-from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
+from pyqt_formgen.theming import ColorScheme
+from pyqt_formgen.theming import StyleSheetGenerator
 from openhcs.pyqt_gui.widgets.shared.column_filter_widget import MultiColumnFilterPanel
 from openhcs.pyqt_gui.widgets.shared.image_table_browser import ImageTableBrowser
 from openhcs.config_framework.object_state import ObjectState, ObjectStateRegistry
@@ -53,11 +53,11 @@ class ImageBrowserWidget(QWidget):
     image_selected = pyqtSignal(str)  # Emitted when an image is selected
     _status_update_signal = pyqtSignal(str)  # Internal signal for thread-safe status updates
 
-    def __init__(self, orchestrator=None, color_scheme: Optional[PyQt6ColorScheme] = None, parent=None):
+    def __init__(self, orchestrator=None, color_scheme: Optional[ColorScheme] = None, parent=None):
         super().__init__(parent)
 
         self.orchestrator = orchestrator
-        self.color_scheme = color_scheme or PyQt6ColorScheme()
+        self.color_scheme = color_scheme or ColorScheme()
         self.style_gen = StyleSheetGenerator(self.color_scheme)
         # Use orchestrator's filemanager if available, otherwise create a new one with global registry
         # This ensures the image browser can access all backends registered in the orchestrator's registry
@@ -358,7 +358,7 @@ class ImageBrowserWidget(QWidget):
         layout.addWidget(self.napari_enable_checkbox)
 
         # Create PFM scoped to napari_config using field_prefix
-        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager, FormManagerConfig
+        from pyqt_formgen.forms import ParameterFormManager, FormManagerConfig
 
         config = FormManagerConfig(
             parent=panel,
@@ -396,7 +396,7 @@ class ImageBrowserWidget(QWidget):
         layout.addWidget(self.fiji_enable_checkbox)
 
         # Create PFM scoped to fiji_config using field_prefix
-        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager, FormManagerConfig
+        from pyqt_formgen.forms import ParameterFormManager, FormManagerConfig
 
         config = FormManagerConfig(
             parent=panel,

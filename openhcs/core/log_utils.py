@@ -74,6 +74,7 @@ def discover_logs(base_log_path: Optional[str] = None, include_main_log: bool = 
         List of LogFileInfo objects for discovered log files
     """
     discovered_logs = []
+    discovered_paths = set()
 
     # Include current main process log if requested
     if include_main_log:
@@ -83,6 +84,7 @@ def discover_logs(base_log_path: Optional[str] = None, include_main_log: bool = 
             if main_log.exists():
                 log_info = classify_log_file(main_log, base_log_path, include_main_log)
                 discovered_logs.append(log_info)
+                discovered_paths.add(log_info.path)
         except Exception:
             pass  # Main log not available, continue
 
@@ -94,7 +96,9 @@ def discover_logs(base_log_path: Optional[str] = None, include_main_log: bool = 
             for log_file in log_dir.glob("*.log"):
                 if is_relevant_log_file(log_file, base_log_path):
                     log_info = classify_log_file(log_file, base_log_path, include_main_log)
-                    discovered_logs.append(log_info)
+                    if log_info.path not in discovered_paths:
+                        discovered_logs.append(log_info)
+                        discovered_paths.add(log_info.path)
 
     # Discover all OpenHCS logs if no specific base_log_path
     elif log_directory or not base_log_path:
@@ -103,11 +107,12 @@ def discover_logs(base_log_path: Optional[str] = None, include_main_log: bool = 
 
         if log_directory.exists():
             for log_file in log_directory.glob("*.log"):
-                if is_openhcs_log_file(log_file) and log_file not in [log.path for log in discovered_logs]:
+                if is_openhcs_log_file(log_file) and log_file not in discovered_paths:
                     # Infer base_log_path for proper classification
                     inferred_base = infer_base_log_path(log_file) if 'subprocess_' in log_file.name else None
                     log_info = classify_log_file(log_file, inferred_base, include_main_log)
                     discovered_logs.append(log_info)
+                    discovered_paths.add(log_info.path)
 
     return discovered_logs
 
@@ -256,7 +261,6 @@ def infer_base_log_path(file_path: Path) -> str:
         base_name = file_path.stem
 
     return str(file_path.parent / base_name)
-
 
 
 

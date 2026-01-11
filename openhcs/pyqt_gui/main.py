@@ -22,6 +22,11 @@ from openhcs.io.filemanager import FileManager
 from openhcs.io.base import storage_registry
 
 from openhcs.pyqt_gui.services.service_adapter import PyQtServiceAdapter
+from pyqt_formgen.animation.flash_overlay_opengl import prewarm_opengl
+from pyqt_formgen.animation import WindowFlashOverlay
+from pyqt_formgen.widgets.log_viewer import LogViewerWindow
+from pyqt_formgen.widgets.system_monitor import SystemMonitorWidget
+from pyqt_formgen.widgets.editors.simple_code_editor import QScintillaCodeEditorDialog
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +69,6 @@ class OpenHCSMainWindow(QMainWindow):
         self.settings = QSettings("OpenHCS", "PyQt6GUI")
 
         # Pre-warm OpenGL context in background (zero-delay window creation)
-        from openhcs.pyqt_gui.widgets.shared.flash_overlay_opengl import prewarm_opengl
         prewarm_opengl()
 
         # Initialize UI
@@ -117,7 +121,6 @@ class OpenHCSMainWindow(QMainWindow):
         central_layout.setContentsMargins(0, 0, 0, 0)
 
         # Create system monitor immediately so startup screen shows right away
-        from openhcs.pyqt_gui.widgets.system_monitor import SystemMonitorWidget
         self.system_monitor = SystemMonitorWidget()
         central_layout.addWidget(self.system_monitor)
 
@@ -163,7 +166,6 @@ class OpenHCSMainWindow(QMainWindow):
 
     def _ensure_flash_overlay(self, window: QWidget) -> None:
         """Eagerly create flash overlay for a window to avoid first-paint glitches."""
-        from openhcs.pyqt_gui.widgets.shared.flash_mixin import WindowFlashOverlay
         WindowFlashOverlay.get_for_window(window)
 
     def show_default_windows(self):
@@ -316,8 +318,6 @@ class OpenHCSMainWindow(QMainWindow):
         This ensures all server logs are captured regardless of when the
         Log Viewer window is opened by the user.
         """
-        from openhcs.pyqt_gui.widgets.log_viewer import LogViewerWindow
-
         # Create floating window (hidden)
         window = QDialog(self)
         window.setWindowTitle("Log Viewer")
@@ -398,11 +398,9 @@ class OpenHCSMainWindow(QMainWindow):
         # Switch to the log file
         if "log_viewer" in self.floating_windows:
             log_dialog = self.floating_windows["log_viewer"]
-            from openhcs.pyqt_gui.widgets.log_viewer import LogViewerWindow
             log_viewer_widget = log_dialog.findChild(LogViewerWindow)
             if log_viewer_widget:
                 # Switch to the log file
-                from pathlib import Path
                 log_viewer_widget.switch_to_log(Path(log_file_path))
                 logger.info(f"Switched log viewer to: {log_file_path}")
 
@@ -1398,7 +1396,6 @@ class OpenHCSMainWindow(QMainWindow):
 
     def _on_create_custom_function(self):
         """Handle create custom function action."""
-        from openhcs.pyqt_gui.services.simple_code_editor import QScintillaCodeEditorDialog
         from openhcs.processing.custom_functions.templates import get_default_template
         from openhcs.processing.custom_functions import CustomFunctionManager
         from openhcs.processing.custom_functions.validation import ValidationError
