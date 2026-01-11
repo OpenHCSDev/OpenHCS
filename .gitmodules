@@ -4,3 +4,6 @@
 [submodule "external/python-introspect"]
 	path = external/python-introspect
 	url = https://github.com/trissim/python-introspect.git
+[submodule "external/pyqt-formgen"]
+	path = external/pyqt-formgen
+	url = https://github.com/trissim/pyqt-formgen.git
