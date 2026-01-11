@@ -1,0 +1,78 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pyqt-formgen"
+version = "0.1.0"
+description = "React-quality reactive form generation framework for PyQt6"
+authors = [{name = "Tristan Simas", email = "tristan.simas@mail.mcgill.ca"}]
+license = {text = "MIT"}
+readme = "README.md"
+requires-python = ">=3.11"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Software Development :: User Interfaces",
+]
+keywords = ["pyqt6", "forms", "reactive", "gui", "widgets", "dataclass"]
+
+dependencies = [
+    "PyQt6>=6.4.0",
+    "objectstate>=0.1.0",
+    "python-introspect>=0.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-qt>=4.0",
+    "pytest-cov>=4.0",
+    "black>=23.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0",
+]
+docs = [
+    "sphinx>=7.0",
+    "sphinx-rtd-theme>=2.0",
+    "sphinx-autodoc-typehints>=1.25",
+]
+magicgui = [
+    "magicgui>=0.7.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/trissim/pyqt-formgen"
+Repository = "https://github.com/trissim/pyqt-formgen"
+Issues = "https://github.com/trissim/pyqt-formgen/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pyqt_formgen"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "--cov=pyqt_formgen --cov-report=term-missing --cov-report=html"
+
+[tool.black]
+line-length = 100
+target-version = ["py311", "py312", "py313"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
