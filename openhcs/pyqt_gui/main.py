@@ -588,6 +588,11 @@ class OpenHCSMainWindow(QMainWindow):
         # This ensures windows close when time-traveling removes their backing state
         ObjectStateRegistry.add_unregister_callback(self._on_object_state_unregistered)
 
+        # Register OpenHCS window factory for scope-aware window creation
+        from pyqt_formgen.protocols import register_window_factory
+        from openhcs.pyqt_gui.services.window_factory import OpenHCSWindowFactory
+        register_window_factory(OpenHCSWindowFactory())
+
         # Setup global keyboard shortcuts from declarative config
         self._setup_global_shortcuts()
 
@@ -845,7 +850,7 @@ class OpenHCSMainWindow(QMainWindow):
             scope_id: Scope of the unregistered ObjectState
             state: The ObjectState being unregistered
         """
-        from openhcs.pyqt_gui.services.window_manager import WindowManager
+        from pyqt_formgen.services.window_manager import WindowManager
 
         if WindowManager.is_open(scope_id):
             WindowManager.close_window(scope_id)
@@ -864,7 +869,7 @@ class OpenHCSMainWindow(QMainWindow):
             dirty_states: List of (scope_id, ObjectState) tuples with unsaved changes
             triggering_scope: Scope that triggered the snapshot (for logging only)
         """
-        from openhcs.pyqt_gui.services.window_manager import WindowManager
+        from pyqt_formgen.services.window_manager import WindowManager
 
         logger.debug(f"⏱️ TIME_TRAVEL_CALLBACK: triggering_scope={triggering_scope!r} dirty_count={len(dirty_states)}")
 

@@ -48,7 +48,7 @@ from pyqt_formgen.widgets.shared.clickable_help_components import (
 )
 from pyqt_formgen.widgets.shared.config_hierarchy_tree import ConfigHierarchyTreeHelper
 from openhcs.config_framework.object_state import ObjectStateRegistry
-from openhcs.pyqt_gui.services.window_manager import WindowManager
+from pyqt_formgen.services.window_manager import WindowManager
 
 # Import ScopedBorderMixin directly from module, avoiding widgets/__init__.py (circular import)
 import openhcs.pyqt_gui.widgets.shared.scoped_border_mixin as _scoped_border_module
