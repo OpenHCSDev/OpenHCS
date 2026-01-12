@@ -293,14 +293,12 @@ class OpenHCSMainWindow(QMainWindow):
                 if plate_widget:
                     # Connect to plate selection changes
                     def on_plate_selected():
-                        if hasattr(plate_widget, 'get_selected_orchestrator'):
-                            orchestrator = plate_widget.get_selected_orchestrator()
-                            if orchestrator:
-                                image_browser_widget.set_orchestrator(orchestrator)
+                        orchestrator = plate_widget.get_selected_orchestrator()
+                        if orchestrator:
+                            image_browser_widget.set_orchestrator(orchestrator)
 
-                    # Try to connect to selection signal if it exists
-                    if hasattr(plate_widget, 'plate_selected'):
-                        plate_widget.plate_selected.connect(on_plate_selected)
+                    # Connect to plate selection signal
+                    plate_widget.plate_selected.connect(on_plate_selected)
 
                     # Set initial orchestrator if available
                     on_plate_selected()
@@ -765,16 +763,14 @@ class OpenHCSMainWindow(QMainWindow):
 
     def _connect_pipeline_to_plate_manager(self, pipeline_widget):
         """Connect pipeline editor to plate manager (mirrors Textual TUI pattern)."""
+        from openhcs.pyqt_gui.widgets.plate_manager import PlateManagerWidget
+
         # Get plate manager if it exists
         if "plate_manager" in self.floating_windows:
             plate_manager_window = self.floating_windows["plate_manager"]
 
-            # Find the actual plate manager widget
-            plate_manager_widget = None
-            for child in plate_manager_window.findChildren(QWidget):
-                if hasattr(child, 'selected_plate_path') and hasattr(child, 'orchestrators'):
-                    plate_manager_widget = child
-                    break
+            # Find the actual plate manager widget using type-based dispatch
+            plate_manager_widget = plate_manager_window.findChild(PlateManagerWidget)
 
             if plate_manager_widget:
                 # Connect plate selection signal to pipeline editor (mirrors Textual TUI)
@@ -784,8 +780,7 @@ class OpenHCSMainWindow(QMainWindow):
                 plate_manager_widget.orchestrator_config_changed.connect(pipeline_widget.on_orchestrator_config_changed)
 
                 # Set pipeline editor reference in plate manager
-                if hasattr(plate_manager_widget, 'set_pipeline_editor'):
-                    plate_manager_widget.set_pipeline_editor(pipeline_widget)
+                plate_manager_widget.set_pipeline_editor(pipeline_widget)
 
                 # Set plate manager reference in pipeline editor (for step editor signal connections)
                 pipeline_widget.plate_manager = plate_manager_widget
@@ -802,16 +797,14 @@ class OpenHCSMainWindow(QMainWindow):
 
     def _connect_plate_to_pipeline_manager(self, plate_manager_widget):
         """Connect plate manager to pipeline editor (reverse direction)."""
+        from openhcs.pyqt_gui.widgets.pipeline_editor import PipelineEditorWidget
+
         # Get pipeline editor if it exists
         if "pipeline_editor" in self.floating_windows:
             pipeline_editor_window = self.floating_windows["pipeline_editor"]
 
-            # Find the actual pipeline editor widget
-            pipeline_editor_widget = None
-            for child in pipeline_editor_window.findChildren(QWidget):
-                if hasattr(child, 'set_current_plate') and hasattr(child, 'pipeline_steps'):
-                    pipeline_editor_widget = child
-                    break
+            # Find the actual pipeline editor widget using type-based dispatch
+            pipeline_editor_widget = pipeline_editor_window.findChild(PipelineEditorWidget)
 
             if pipeline_editor_widget:
                 # Connect plate selection signal to pipeline editor (mirrors Textual TUI)
@@ -822,8 +815,7 @@ class OpenHCSMainWindow(QMainWindow):
                 plate_manager_widget.orchestrator_config_changed.connect(pipeline_editor_widget.on_orchestrator_config_changed)
 
                 # Set pipeline editor reference in plate manager
-                if hasattr(plate_manager_widget, 'set_pipeline_editor'):
-                    plate_manager_widget.set_pipeline_editor(pipeline_editor_widget)
+                plate_manager_widget.set_pipeline_editor(pipeline_editor_widget)
 
                 # Set plate manager reference in pipeline editor (for step editor signal connections)
                 pipeline_editor_widget.plate_manager = plate_manager_widget
