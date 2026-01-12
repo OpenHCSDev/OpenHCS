@@ -3,6 +3,15 @@
 Extract a **complete distributed execution framework** from `openhcs/runtime/`
 into a standalone `zmqruntime` package. Maximize generic abstractions.
 
+## Coding Conventions
+
+**CRITICAL: Import Style**
+- All imports in zmqruntime MUST use explicit full paths, NOT relative imports
+- ✅ `from zmqruntime.config import TransportMode`
+- ❌ `from .config import TransportMode`
+- All imports MUST be at the top of the file, grouped by: stdlib → third-party → zmqruntime
+- Use `from __future__ import annotations` for forward references
+
 ## Philosophy
 
 The current code mixes **generic patterns** with **openhcs-specific implementations**.
@@ -257,13 +266,19 @@ packages = ["src/zmqruntime"]
 #### Step 2.1: config.py
 Create `zmqruntime/config.py`:
 ```python
+# zmqruntime/config.py
+"""Configuration types for ZMQ transport."""
+from __future__ import annotations
+
+from dataclasses import dataclass
 from enum import Enum
-from dataclasses import dataclass, field
+
 
 class TransportMode(Enum):
     """Transport mode for ZMQ communication."""
     TCP = "tcp"
     IPC = "ipc"
+
 
 @dataclass
 class ZMQConfig:
@@ -289,10 +304,14 @@ No changes needed - file has no openhcs imports.
 Extract URL generation functions from `openhcs/runtime/zmq_base.py`:
 ```python
 # zmqruntime/transport.py
+"""Transport utilities for ZMQ communication."""
+from __future__ import annotations
+
 import platform
 from pathlib import Path
 from typing import Optional
-from .config import TransportMode, ZMQConfig
+
+from zmqruntime.config import TransportMode, ZMQConfig
 
 _default_config = ZMQConfig()
 
@@ -344,8 +363,12 @@ Extract `ZMQClient` ABC from `openhcs/runtime/zmq_base.py`:
 Extract global ack listener pattern:
 ```python
 # zmqruntime/ack_listener.py
-from typing import Callable, Optional
+"""Global acknowledgment listener for ZMQ visualizers."""
+from __future__ import annotations
+
 import threading
+from typing import Callable, Optional
+
 import zmq
 
 class GlobalAckListener:
