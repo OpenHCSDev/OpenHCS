@@ -378,6 +378,11 @@ class WindowManager:
         """
         if scope_id == "":
             return cls._create_global_config_window()
+        elif scope_id == "__plates__":
+            # __plates__ is the root plate list state - no window to create for it
+            # Time-travel changes to the plate list are reflected in PlateManager automatically
+            logger.debug(f"[WINDOW_MGR] Skipping window creation for __plates__ scope")
+            return None
         elif "::" not in scope_id:
             return cls._create_plate_config_window(scope_id)
         else:
@@ -418,7 +423,7 @@ class WindowManager:
             logger.warning("Could not find PlateManager for plate config window")
             return None
 
-        orchestrator = plate_manager.orchestrators.get(scope_id)
+        orchestrator = ObjectStateRegistry.get_object(scope_id)
         if not orchestrator:
             logger.warning(f"No orchestrator found for scope: {scope_id}")
             return None
@@ -459,7 +464,7 @@ class WindowManager:
             logger.warning("Could not find PlateManager for step editor")
             return None
 
-        orchestrator = plate_manager.orchestrators.get(plate_path)
+        orchestrator = ObjectStateRegistry.get_object(plate_path)
         if not orchestrator:
             logger.warning(f"No orchestrator found for plate: {plate_path}")
             return None

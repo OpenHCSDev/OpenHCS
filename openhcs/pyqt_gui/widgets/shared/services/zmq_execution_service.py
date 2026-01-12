@@ -26,7 +26,7 @@ class ExecutionHost(Protocol):
     execution_state: str
     plate_execution_ids: Dict[str, str]
     plate_execution_states: Dict[str, str]
-    orchestrators: Dict[str, Any]
+    # NOTE: orchestrators now accessed via ObjectStateRegistry.get_object(plate_path)
     plate_compiled_data: Dict[str, Any]
     global_config: Any
     current_execution_id: Optional[str]
@@ -90,11 +90,13 @@ class ZMQExecutionService:
             self.host.plate_execution_ids.clear()
             self.host.plate_execution_states.clear()
             
+            from objectstate import ObjectStateRegistry
             for item in ready_items:
                 plate_path = item['path']
                 self.host.plate_execution_states[plate_path] = "queued"
-                if plate_path in self.host.orchestrators:
-                    self.host.orchestrators[plate_path]._state = OrchestratorState.EXECUTING
+                orchestrator = ObjectStateRegistry.get_object(plate_path)
+                if orchestrator is not None:
+                    orchestrator._state = OrchestratorState.EXECUTING
                     self.host.emit_orchestrator_state(plate_path, OrchestratorState.EXECUTING.value)
             
             self.host.execution_state = "running"
@@ -127,9 +129,11 @@ class ZMQExecutionService:
         definition_pipeline = compiled_data['definition_pipeline']
 
         # Get config
-        if plate_path in self.host.orchestrators:
+        from objectstate import ObjectStateRegistry
+        orchestrator = ObjectStateRegistry.get_object(plate_path)
+        if orchestrator is not None:
             global_config = self.host.global_config
-            pipeline_config = self.host.orchestrators[plate_path].pipeline_config
+            pipeline_config = orchestrator.pipeline_config
         else:
             global_config = self.host.global_config
             from openhcs.core.config import PipelineConfig
@@ -165,16 +169,20 @@ class ZMQExecutionService:
             logger.error(f"Plate {plate_path} submission failed: {error_msg}")
             self.host.emit_error(f"Submission failed for {plate_path}: {error_msg}")
             self.host.plate_execution_states[plate_path] = "failed"
-            if plate_path in self.host.orchestrators:
-                self.host.orchestrators[plate_path]._state = OrchestratorState.EXEC_FAILED
+            from objectstate import ObjectStateRegistry
+            orchestrator = ObjectStateRegistry.get_object(plate_path)
+            if orchestrator is not None:
+                orchestrator._state = OrchestratorState.EXEC_FAILED
                 self.host.emit_orchestrator_state(plate_path, OrchestratorState.EXEC_FAILED.value)
 
     async def _handle_execution_failure(self, loop) -> None:
         """Handle execution failure - mark plates and cleanup."""
+        from objectstate import ObjectStateRegistry
         for plate_path in self.host.plate_execution_states.keys():
             self.host.plate_execution_states[plate_path] = "failed"
-            if plate_path in self.host.orchestrators:
-                self.host.orchestrators[plate_path]._state = OrchestratorState.EXEC_FAILED
+            orchestrator = ObjectStateRegistry.get_object(plate_path)
+            if orchestrator is not None:
+                orchestrator._state = OrchestratorState.EXEC_FAILED
                 self.host.emit_orchestrator_state(plate_path, OrchestratorState.EXEC_FAILED.value)
 
         self.host.execution_state = "idle"

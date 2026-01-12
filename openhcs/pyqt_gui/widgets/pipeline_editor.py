@@ -900,11 +900,8 @@ class PipelineEditorWidget(AbstractManagerWidget):
         if not layout or layout.count() == 0:
             return False
 
-        plate_manager_widget = layout.itemAt(0).widget()
-        if not hasattr(plate_manager_widget, 'orchestrators'):
-            return False
-
-        orchestrator = plate_manager_widget.orchestrators.get(self.current_plate)
+        from objectstate import ObjectStateRegistry
+        orchestrator = ObjectStateRegistry.get_object(self.current_plate)
         if orchestrator is None:
             return False
 
@@ -919,19 +916,8 @@ class PipelineEditorWidget(AbstractManagerWidget):
         """Get the orchestrator for the currently selected plate."""
         if not self.current_plate:
             return None
-        main_window = self._find_main_window()
-        if not main_window:
-            return None
-        plate_manager_window = main_window.floating_windows.get("plate_manager")
-        if not plate_manager_window:
-            return None
-        layout = plate_manager_window.layout()
-        if not layout or layout.count() == 0:
-            return None
-        plate_manager_widget = layout.itemAt(0).widget()
-        if not hasattr(plate_manager_widget, 'orchestrators'):
-            return None
-        return plate_manager_widget.orchestrators.get(self.current_plate)
+        from objectstate import ObjectStateRegistry
+        return ObjectStateRegistry.get_object(self.current_plate)
 
 
     # _find_main_window() moved to AbstractManagerWidget

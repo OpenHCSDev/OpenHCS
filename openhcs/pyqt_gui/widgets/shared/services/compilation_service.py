@@ -18,10 +18,10 @@ logger = logging.getLogger(__name__)
 @runtime_checkable
 class CompilationHost(Protocol):
     """Protocol for widgets that host the compilation service."""
-    
+
     # State attributes the service needs access to
     global_config: Any
-    orchestrators: Dict[str, PipelineOrchestrator]
+    # NOTE: orchestrators now accessed via ObjectStateRegistry.get_object(plate_path)
     plate_configs: Dict[str, Dict]
     plate_compiled_data: Dict[str, Any]
     
@@ -118,9 +118,10 @@ class CompilationService:
         """Get existing orchestrator or create and initialize a new one."""
         from openhcs.config_framework.lazy_factory import ensure_global_config_context
         from openhcs.core.config import GlobalPipelineConfig
+        from objectstate import ObjectStateRegistry, ObjectState
 
-        if plate_path in self.host.orchestrators:
-            orchestrator = self.host.orchestrators[plate_path]
+        orchestrator = ObjectStateRegistry.get_object(plate_path)
+        if orchestrator is not None:
             if not orchestrator.is_initialized():
                 def initialize_with_context():
                     ensure_global_config_context(GlobalPipelineConfig, self.host.global_config)
@@ -148,9 +149,15 @@ class CompilationService:
 
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(None, initialize_with_context)
-            self.host.orchestrators[plate_path] = orchestrator
 
-        self.host.orchestrators[plate_path] = orchestrator
+            # Register orchestrator in ObjectState (single source of truth)
+            orchestrator_state = ObjectState(
+                object_instance=orchestrator,
+                scope_id=str(plate_path),
+                parent_state=ObjectStateRegistry.get_by_scope(""),
+            )
+            ObjectStateRegistry.register(orchestrator_state)
+
         return orchestrator
 
     def _fix_step_ids(self, pipeline: List) -> None:

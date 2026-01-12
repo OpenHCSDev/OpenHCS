@@ -207,7 +207,8 @@ class OpenHCSComponentSelectionProvider:
         if not plate_manager:
             return None
         current_plate = plate_manager.selected_plate_path
-        orchestrator = plate_manager.orchestrators.get(current_plate)
+        from objectstate import ObjectStateRegistry
+        orchestrator = ObjectStateRegistry.get_object(current_plate)
         if orchestrator and orchestrator.is_initialized():
             return orchestrator
         return None
@@ -334,10 +335,8 @@ class OpenHCSWindowFactory:
         return window
 
     def _get_orchestrator(self, plate_path: str):
-        plate_manager = self._get_plate_manager()
-        if not plate_manager:
-            return None
-        return plate_manager.orchestrators.get(plate_path)
+        from objectstate import ObjectStateRegistry
+        return ObjectStateRegistry.get_object(plate_path)
 
     def _get_plate_manager(self):
         from PyQt6.QtWidgets import QApplication

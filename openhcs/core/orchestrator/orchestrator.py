@@ -401,6 +401,11 @@ class PipelineOrchestrator:
     potentially in parallel, using `execute_compiled_plate()`.
     """
 
+    # ObjectState delegation: when ObjectState stores this orchestrator, extract
+    # editable parameters from pipeline_config (a dataclass) instead of the orchestrator.
+    # This enables time-travel to track the orchestrator lifecycle while forms edit the config.
+    __objectstate_delegate__ = 'pipeline_config'
+
     def __init__(
         self,
         plate_path: Union[str, Path],
