@@ -68,6 +68,7 @@ dependencies = [
     "python-introspect @ git+https://github.com/trissim/python-introspect.git@e9ac34aae163847c39fd0c4b4b9e50dab7a45f45",
     "metaclass-registry @ git+https://github.com/trissim/metaclass-registry.git",
     "arraybridge @ git+https://github.com/trissim/arraybridge.git",
+    "pyqt-formgen @ git+https://github.com/trissim/pyqt-formgen.git",
 ]
 
 [project.optional-dependencies]
