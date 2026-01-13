@@ -17,7 +17,7 @@ import logging
 # OpenHCS imports
 from openhcs.core.memory import numpy as numpy_func
 from openhcs.core.pipeline.function_contracts import special_outputs
-from openhcs.core.roi import ROI
+from polystore.roi import ROI
 
 logger = logging.getLogger(__name__)
 
@@ -1035,7 +1035,7 @@ def _skeleton_mask_to_rois(skeleton_stack: np.ndarray) -> List[ROI]:
         List of ROI objects, one per skeleton branch
     """
     from skan import Skeleton
-    from openhcs.core.roi import PolylineShape, ROI
+    from polystore.roi import PolylineShape, ROI
 
     rois: List[ROI] = []
 

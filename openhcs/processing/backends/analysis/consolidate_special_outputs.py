@@ -272,8 +272,8 @@ def consolidate_special_outputs(
     Returns:
         Tuple of (image_stack, consolidated_summary, detailed_report)
     """
-    from openhcs.io.filemanager import FileManager
-    from openhcs.io.base import storage_registry
+    from polystore.filemanager import FileManager
+    from polystore.base import storage_registry
     from datetime import datetime
     
     # Initialize FileManager

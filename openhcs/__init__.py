@@ -8,10 +8,30 @@ registrations or other side-effects.
 """
 
 import logging
+import os
 import sys
 import platform
+from pathlib import Path
 
 __version__ = "0.5.0"
+
+# Configure polystore defaults for OpenHCS integration
+os.environ.setdefault("POLYSTORE_METADATA_FILENAME", "openhcs_metadata.json")
+os.environ.setdefault("POLYSTORE_ZMQ_APP_NAME", "openhcs")
+os.environ.setdefault("POLYSTORE_ZMQ_IPC_PREFIX", "openhcs-zmq")
+os.environ.setdefault("POLYSTORE_ZMQ_IPC_DIR", "ipc")
+os.environ.setdefault("POLYSTORE_ZMQ_IPC_EXT", ".sock")
+os.environ.setdefault("POLYSTORE_ZMQ_CONTROL_OFFSET", "1000")
+os.environ.setdefault("POLYSTORE_ZMQ_DEFAULT_PORT", "7777")
+os.environ.setdefault("POLYSTORE_ZMQ_ACK_PORT", "7555")
+if os.getenv("OPENHCS_SUBPROCESS_NO_GPU") == "1":
+    os.environ.setdefault("POLYSTORE_SUBPROCESS_NO_GPU", "1")
+
+# Prefer local polystore checkout when running from source
+_repo_root = Path(__file__).resolve().parent.parent
+_polystore_src = _repo_root / "external" / "PolyStore" / "src"
+if _polystore_src.exists() and str(_polystore_src) not in sys.path:
+    sys.path.insert(0, str(_polystore_src))
 
 # Force UTF-8 encoding for stdout/stderr on Windows
 # This ensures emoji and Unicode characters work in console output

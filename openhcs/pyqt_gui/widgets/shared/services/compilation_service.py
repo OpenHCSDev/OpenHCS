@@ -131,7 +131,7 @@ class CompilationService:
                 await loop.run_in_executor(None, initialize_with_context)
         else:
             # Create new orchestrator with isolated registry
-            from openhcs.io.base import _create_storage_registry
+            from polystore.base import _create_storage_registry
             plate_registry = _create_storage_registry()
 
             orchestrator = PipelineOrchestrator(

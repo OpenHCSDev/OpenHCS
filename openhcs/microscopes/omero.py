@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional, Tuple, Type, Union
 import omero.model
 
 from openhcs.constants.constants import Backend
-from openhcs.io.filemanager import FileManager
+from polystore.filemanager import FileManager
 from openhcs.microscopes.microscope_base import MicroscopeHandler
 from openhcs.microscopes.microscope_interfaces import FilenameParser, MetadataHandler
 

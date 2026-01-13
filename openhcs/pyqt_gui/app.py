@@ -14,8 +14,8 @@ from PyQt6.QtWidgets import QApplication, QMessageBox
 from PyQt6.QtGui import QIcon
 
 from openhcs.core.config import GlobalPipelineConfig
-from openhcs.io.base import storage_registry
-from openhcs.io.filemanager import FileManager
+from polystore.base import storage_registry
+from polystore.filemanager import FileManager
 
 from openhcs.pyqt_gui.main import OpenHCSMainWindow
 
@@ -66,7 +66,7 @@ class OpenHCSPyQtApp(QApplication):
         # Start async storage registry initialization in background thread
         import threading
         def init_storage_registry_background():
-            from openhcs.io.base import ensure_storage_registry
+            from polystore.base import ensure_storage_registry
             ensure_storage_registry()
             logger.info("Storage registry initialized in background")
 

@@ -19,8 +19,8 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from openhcs.core.config import GlobalPipelineConfig, PipelineConfig
 from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator, OrchestratorState
 from openhcs.core.path_cache import PathCacheKey
-from openhcs.io.filemanager import FileManager
-from openhcs.io.base import _create_storage_registry
+from polystore.filemanager import FileManager
+from polystore.base import _create_storage_registry
 from openhcs.config_framework import LiveContextResolver
 from openhcs.config_framework.lazy_factory import (
     ensure_global_config_context,

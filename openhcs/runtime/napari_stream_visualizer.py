@@ -24,7 +24,8 @@ import numpy as np
 from typing import Any, Dict, Optional
 from qtpy.QtCore import QTimer
 
-from openhcs.io.filemanager import FileManager
+from polystore.filemanager import FileManager
+from polystore.backend_registry import register_cleanup_callback
 from openhcs.utils.import_utils import optional_import
 from openhcs.core.config import TransportMode as OpenHCSTransportMode, NapariStreamingConfig
 from openhcs.runtime.zmq_config import OPENHCS_ZMQ_CONFIG
@@ -85,6 +86,9 @@ def _cleanup_global_viewer() -> None:
             _global_viewer_process = None
 
 
+register_cleanup_callback(_cleanup_global_viewer)
+
+
 def _parse_component_info_from_path(path_str: str):
     """
     Fallback component parsing from path (used when component metadata unavailable).
@@ -131,7 +135,7 @@ def _build_nd_shapes(layer_items, stack_components):
     Returns:
         Tuple of (all_shapes_nd, all_shape_types, all_properties)
     """
-    from openhcs.runtime.roi_converters import NapariROIConverter
+    from polystore.roi_converters import NapariROIConverter
 
     all_shapes_nd = []
     all_shape_types = []

@@ -83,12 +83,16 @@ class OpenHCSExecutionServer:
 
     def _register_backend(self):
         """Initialize and register OMERO backend."""
-        from openhcs.io.omero_local import OMEROLocalBackend
-        from openhcs.io.backend_registry import _backend_instances
+        from polystore.omero_local import OMEROLocalBackend
+        from openhcs.omero import get_omero_parser_registry
+        from polystore.backend_registry import _backend_instances
 
         backend = OMEROLocalBackend(
             omero_data_dir=self.omero_data_dir,
-            omero_conn=self.omero_conn
+            omero_conn=self.omero_conn,
+            namespace_prefix="openhcs",
+            parser_registry=get_omero_parser_registry(),
+            lock_dir_name=".openhcs",
         )
 
         _backend_instances['omero_local'] = backend
@@ -244,7 +248,7 @@ class OpenHCSExecutionServer:
             omero_config: {"host": ..., "port": ..., "username": ..., "password": ...}
         """
         from omero.gateway import BlitzGateway
-        from openhcs.io.base import storage_registry
+        from polystore.base import storage_registry
         from openhcs.constants.constants import Backend
 
         # Connect to OMERO
@@ -386,7 +390,7 @@ class OpenHCSExecutionServer:
             from openhcs.core.orchestrator.gpu_scheduler import setup_global_gpu_registry
             from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
             from openhcs.constants import MULTIPROCESSING_AXIS
-            from openhcs.io.base import reset_memory_backend
+            from polystore.base import reset_memory_backend
 
             # Reset ephemeral backends and initialize GPU registry
             reset_memory_backend()
@@ -520,4 +524,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

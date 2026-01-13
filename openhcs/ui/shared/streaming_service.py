@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Literal
 
 if TYPE_CHECKING:
-    from openhcs.io.file_manager import FileManager
+    from polystore.filemanager import FileManager
 
 logger = logging.getLogger(__name__)
 
@@ -162,7 +162,7 @@ class StreamingService:
 
         def _worker():
             try:
-                from openhcs.core.roi import load_rois_from_zip
+                from polystore.roi import load_rois_from_zip
 
                 total = len(roi_filenames)
                 if total == 0:
@@ -212,4 +212,3 @@ class StreamingService:
 
         thread = threading.Thread(target=_worker, daemon=True)
         thread.start()
-

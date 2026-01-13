@@ -39,6 +39,7 @@ os.environ['OPENHCS_SUBPROCESS_MODE'] = '1'
 
 # Prevent GPU library imports in subprocess runner - workers will handle GPU initialization
 os.environ['OPENHCS_SUBPROCESS_NO_GPU'] = '1'
+os.environ['POLYSTORE_SUBPROCESS_NO_GPU'] = '1'
 
 # Subprocess runner doesn't need function registry at all
 # Workers will initialize their own function registries when needed
@@ -151,7 +152,7 @@ def run_single_plate(plate_path: str, pipeline_definition: List, compiled_contex
 
         # NUCLEAR WRAP: Storage registry import (lazy initialization for subprocess mode)
         def import_storage_registry():
-            from openhcs.io.base import storage_registry, ensure_storage_registry
+            from polystore.base import storage_registry, ensure_storage_registry
             ensure_storage_registry()  # Ensure registry is created in subprocess mode
             return storage_registry
         storage_registry = force_error_detection("import_storage_registry", import_storage_registry)

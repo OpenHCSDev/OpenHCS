@@ -318,7 +318,7 @@ class PipelineCompiler:
                 if not already_zarr:
                     # Determine if input uses virtual workspace
                     from openhcs.microscopes.openhcs import OpenHCSMetadataHandler
-                    from openhcs.io.metadata_writer import get_subdirectory_name
+                    from polystore.metadata_writer import get_subdirectory_name
 
                     openhcs_metadata_handler = OpenHCSMetadataHandler(context.filemanager)
                     metadata = openhcs_metadata_handler._load_metadata_dict(plate_path)

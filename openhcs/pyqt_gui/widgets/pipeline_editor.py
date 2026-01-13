@@ -22,7 +22,7 @@ from PyQt6.QtGui import QFont, QColor
 from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
 from openhcs.constants.constants import OrchestratorState
 from openhcs.core.config import GlobalPipelineConfig
-from openhcs.io.filemanager import FileManager
+from polystore.filemanager import FileManager
 from openhcs.core.steps.function_step import FunctionStep
 from openhcs.core.pipeline import Pipeline
 # Mixin imports REMOVED - now in ABC (handle_selection_change_with_prevention, CrossWindowPreviewMixin)
@@ -42,7 +42,7 @@ from openhcs.config_framework.lazy_factory import PREVIEW_LABEL_REGISTRY
 from openhcs.core.config import ProcessingConfig
 import openhcs.serialization.uneval_formatters  # noqa: F401
 from uneval import Assignment, generate_python_source
-from openhcs.io.pipeline_migration import (
+from polystore.pipeline_migration import (
     patch_step_constructors_for_migration,
     load_pipeline_with_migration,
 )

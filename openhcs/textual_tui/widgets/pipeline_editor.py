@@ -14,7 +14,7 @@ from textual.widgets import SelectionList
 from .button_list_widget import ButtonListWidget, ButtonConfig
 
 from openhcs.core.config import GlobalPipelineConfig
-from openhcs.io.filemanager import FileManager
+from polystore.filemanager import FileManager
 from openhcs.core.steps.function_step import FunctionStep
 from openhcs.constants.constants import OrchestratorState
 
@@ -760,7 +760,7 @@ class PipelineEditorWidget(ButtonListWidget):
                         if "unexpected keyword argument" in error_msg and ("group_by" in error_msg or "variable_components" in error_msg):
                             logger.info(f"Detected old-format step constructor, retrying with migration patch: {e}")
                             namespace = {}
-                            from openhcs.io.pipeline_migration import patch_step_constructors_for_migration
+                            from polystore.pipeline_migration import patch_step_constructors_for_migration
                             with patch_step_constructors_for_migration():
                                 exec(edited_code, namespace)
                         else:

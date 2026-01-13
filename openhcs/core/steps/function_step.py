@@ -465,7 +465,7 @@ def _execute_function_core(
                         vfs_path = vfs_path_info  # Fallback if it's already a string
 
                     # DEBUG: List what's currently in VFS before saving
-                    from openhcs.io.base import storage_registry as global_storage_registry
+                    from polystore.base import storage_registry as global_storage_registry
                     global_memory_backend = global_storage_registry[Backend.MEMORY.value]
                     global_existing_keys = list(global_memory_backend._memory_store.keys())
 
@@ -1359,7 +1359,7 @@ class FunctionStep(AbstractStep):
         """Materialize special outputs (ROIs, cell counts) to disk and streaming backends."""
         # Collect backends: main + streaming
         from openhcs.core.config import StreamingConfig
-        from openhcs.io.backend_registry import STORAGE_BACKENDS
+        from polystore.backend_registry import STORAGE_BACKENDS
         
         # Special outputs (ROIs, CSVs, visualizations) are arbitrary file formats
         # Check if the backend class supports them using capability checking
@@ -1436,7 +1436,7 @@ def _update_metadata_for_zarr_conversion(
     If zarr_subdir is None: add zarr to original_subdir's available_backends
     If zarr_subdir is set: create complete metadata for zarr subdirectory, set original main=false
     """
-    from openhcs.io.metadata_writer import get_metadata_path, AtomicMetadataWriter
+    from polystore.metadata_writer import get_metadata_path, AtomicMetadataWriter
     from openhcs.microscopes.openhcs import OpenHCSMetadataGenerator
 
     if zarr_subdir:

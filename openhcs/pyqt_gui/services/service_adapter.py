@@ -538,8 +538,8 @@ class PyQtServiceAdapter:
             return self.app.file_manager
         else:
             # Create default FileManager
-            from openhcs.io.filemanager import FileManager
-            from openhcs.io.base import storage_registry
+            from polystore.filemanager import FileManager
+            from polystore.base import storage_registry
             file_manager = FileManager(storage_registry)
             setattr(self.app, 'file_manager', file_manager)
             return file_manager

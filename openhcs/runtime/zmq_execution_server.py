@@ -120,9 +120,10 @@ class OpenHCSExecutionServer(ExecutionServer):
         from openhcs.core.orchestrator.gpu_scheduler import setup_global_gpu_registry
         from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
         from openhcs.constants import AllComponents, VariableComponents, GroupBy, MULTIPROCESSING_AXIS
-        from openhcs.io.base import reset_memory_backend, storage_registry
+        from polystore.base import reset_memory_backend, storage_registry
         from openhcs.runtime.omero_instance_manager import OMEROInstanceManager
-        from openhcs.io.omero_local import OMEROLocalBackend
+        from polystore.omero_local import OMEROLocalBackend
+        from openhcs.omero import get_omero_parser_registry
 
         try:
             if multiprocessing.get_start_method(allow_none=True) != "spawn":
@@ -154,7 +155,12 @@ class OpenHCSExecutionServer(ExecutionServer):
             omero_manager = OMEROInstanceManager()
             if not omero_manager.connect(timeout=60):
                 raise RuntimeError("OMERO server not available")
-            storage_registry["omero_local"] = OMEROLocalBackend(omero_conn=omero_manager.conn)
+            storage_registry["omero_local"] = OMEROLocalBackend(
+                omero_conn=omero_manager.conn,
+                namespace_prefix="openhcs",
+                parser_registry=get_omero_parser_registry(),
+                lock_dir_name=".openhcs",
+            )
 
             if not plate_path_str.startswith("/omero/"):
                 plate_path_str = f"/omero/plate_{plate_path_str}"

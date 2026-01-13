@@ -19,8 +19,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot
 
 from openhcs.constants.constants import Backend
-from openhcs.io.filemanager import FileManager
-from openhcs.io.base import storage_registry
+from polystore.filemanager import FileManager
+from polystore.base import storage_registry
 from pyqt_formgen.theming import ColorScheme
 from pyqt_formgen.theming import StyleSheetGenerator
 from openhcs.pyqt_gui.widgets.shared.column_filter_widget import MultiColumnFilterPanel
@@ -829,7 +829,7 @@ class ImageBrowserWidget(QWidget):
             plate_path = self.orchestrator.plate_path
 
             # Load metadata JSON directly
-            from openhcs.io.metadata_writer import get_metadata_path
+            from polystore.metadata_writer import get_metadata_path
             import json
 
             metadata_path = get_metadata_path(plate_path)
@@ -1036,7 +1036,7 @@ class ImageBrowserWidget(QWidget):
             try:
                 from pathlib import Path as _Path
                 from PyQt6.QtCore import QTimer
-                from openhcs.core.roi import load_rois_from_zip
+                from polystore.roi import load_rois_from_zip
 
                 # Load ROIs from disk
                 self._status_update_signal.emit(

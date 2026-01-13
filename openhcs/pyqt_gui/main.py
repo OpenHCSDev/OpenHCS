@@ -18,8 +18,8 @@ from PyQt6.QtCore import Qt, QSettings, QTimer, pyqtSignal, QUrl
 from PyQt6.QtGui import QAction, QKeySequence, QDesktopServices
 
 from openhcs.core.config import GlobalPipelineConfig
-from openhcs.io.filemanager import FileManager
-from openhcs.io.base import storage_registry
+from polystore.filemanager import FileManager
+from polystore.base import storage_registry
 
 from openhcs.pyqt_gui.services.service_adapter import PyQtServiceAdapter
 from pyqt_formgen.animation.flash_overlay_opengl import prewarm_opengl

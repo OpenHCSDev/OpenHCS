@@ -79,7 +79,7 @@ class NapariROIConverter:
         Returns:
             List of shape dicts with 'type', 'coordinates', 'metadata'
         """
-        from openhcs.core.roi import PolygonShape, PolylineShape, EllipseShape, PointShape
+        from polystore.roi import PolygonShape, PolylineShape, EllipseShape, PointShape
         
         shapes_data = []
         for roi in rois:
@@ -206,7 +206,7 @@ class FijiROIConverter:
         Returns:
             List of ROI bytes (not base64 encoded)
         """
-        from openhcs.core.roi import PolygonShape, PolylineShape, EllipseShape, PointShape
+        from polystore.roi import PolygonShape, PolylineShape, EllipseShape, PointShape
 
         try:
             from roifile import ImagejRoi, ROI_TYPE

@@ -1564,7 +1564,7 @@ def _handle_rois_for_window(self, window_key: str, items: List[Dict[str, Any]],
     Adds ROIs to ROI Manager with proper CZT positioning using shared coordinate space.
     ROIs are grouped by window_key to associate with corresponding hyperstack.
     """
-    from openhcs.runtime.roi_converters import FijiROIConverter
+    from polystore.roi_converters import FijiROIConverter
     import scyjava as sj
 
     # Get or create RoiManager - MUST be done on EDT to avoid Swing threading issues

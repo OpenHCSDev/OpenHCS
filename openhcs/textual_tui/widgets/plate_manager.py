@@ -33,8 +33,8 @@ from textual import work
 
 from openhcs.core.config import GlobalPipelineConfig, VFSConfig, MaterializationBackend
 from openhcs.core.pipeline import Pipeline
-from openhcs.io.filemanager import FileManager
-from openhcs.io.zarr import ZarrStorageBackend
+from polystore.filemanager import FileManager
+from polystore.zarr import ZarrStorageBackend
 from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
 from openhcs.constants.constants import Backend, VariableComponents, OrchestratorState
 from openhcs.textual_tui.services.file_browser_service import SelectionMode

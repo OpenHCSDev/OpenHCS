@@ -25,10 +25,10 @@ from openhcs.core.pipeline.compiler import PipelineCompiler
 from openhcs.core.steps.abstract import AbstractStep
 from openhcs.core.components.validation import convert_enum_by_value
 from openhcs.core.orchestrator.execution_result import ExecutionResult, ExecutionStatus
-from openhcs.io.filemanager import FileManager
+from polystore.filemanager import FileManager
 # Zarr backend is CPU-only; always import it (even in subprocess/no-GPU mode)
 import os
-from openhcs.io.zarr import ZarrStorageBackend
+from polystore.zarr import ZarrStorageBackend
 # PipelineConfig now imported directly above
 from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization
 from openhcs.microscopes import create_microscope_handler
@@ -196,7 +196,7 @@ def _execute_axis_with_sequential_combinations(
         # Clear VFS after each combination to prevent memory accumulation
         # This must happen REGARDLESS of success/failure to prevent memory leaks
         # when worker processes handle multiple wells sequentially
-        from openhcs.io.base import reset_memory_backend
+        from polystore.base import reset_memory_backend
         from openhcs.core.memory import cleanup_all_gpu_frameworks
 
         reset_memory_backend()
@@ -342,6 +342,7 @@ def _configure_worker_with_gpu(log_file_base: str, global_config_dict: dict):
     # The parent subprocess runner may set OPENHCS_SUBPROCESS_NO_GPU=1 to stay lean,
     # but that flag must not leak into worker processes.
     os.environ.pop('OPENHCS_SUBPROCESS_NO_GPU', None)
+    os.environ.pop('POLYSTORE_SUBPROCESS_NO_GPU', None)
 
     # Configure logging only if log_file_base is provided
     if log_file_base:
@@ -492,7 +493,7 @@ class PipelineOrchestrator:
         else:
             # Use the global registry directly (don't copy) so that reset_memory_backend() works correctly
             # The global registry is a singleton, and VFS clearing needs to clear the same instance
-            from openhcs.io.base import storage_registry as global_storage_registry, ensure_storage_registry
+            from polystore.base import storage_registry as global_storage_registry, ensure_storage_registry
             # Ensure registry is initialized
             ensure_storage_registry()
             self.registry = global_storage_registry
@@ -715,7 +716,7 @@ class PipelineOrchestrator:
 
         # For plates with virtual workspace, metadata is already created by _build_virtual_mapping()
         # We just need to add the component metadata to the existing "." subdirectory
-        from openhcs.io.metadata_writer import get_subdirectory_name
+        from polystore.metadata_writer import get_subdirectory_name
         subdir_name = get_subdirectory_name(self.input_dir, self.plate_path)
 
         # Create context using SAME logic as create_context() to get full metadata
@@ -948,7 +949,7 @@ class PipelineOrchestrator:
 
                 # Clear VFS after each combination to prevent memory accumulation
                 try:
-                    from openhcs.io.base import reset_memory_backend
+                    from polystore.base import reset_memory_backend
                     from openhcs.core.memory import cleanup_all_gpu_frameworks
 
                     reset_memory_backend()

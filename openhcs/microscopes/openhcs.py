@@ -13,9 +13,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union, Type
 
 from openhcs.constants.constants import Backend, GroupBy, AllComponents
-from openhcs.io.exceptions import MetadataNotFoundError
-from openhcs.io.filemanager import FileManager
-from openhcs.io.metadata_writer import AtomicMetadataWriter, MetadataWriteError, get_metadata_path, METADATA_CONFIG
+from polystore.exceptions import MetadataNotFoundError
+from polystore.filemanager import FileManager
+from polystore.metadata_writer import AtomicMetadataWriter, MetadataWriteError, get_metadata_path, METADATA_CONFIG
 from openhcs.microscopes.microscope_interfaces import MetadataHandler
 logger = logging.getLogger(__name__)
 

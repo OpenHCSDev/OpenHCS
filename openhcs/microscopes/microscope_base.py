@@ -21,7 +21,7 @@ from metaclass_registry import (
     PRIMARY_KEY
 )
 # PatternDiscoveryEngine imported locally to avoid circular imports
-from openhcs.io.filemanager import FileManager
+from polystore.filemanager import FileManager
 # Import interfaces from the base interfaces module
 from openhcs.microscopes.microscope_interfaces import (FilenameParser,
                                                             MetadataHandler)
@@ -219,7 +219,7 @@ class MicroscopeHandler(ABC, metaclass=AutoRegisterMeta):
             plate_path: Path to plate directory
             workspace_mapping: Dict mapping virtual paths to real paths
         """
-        from openhcs.io.metadata_writer import AtomicMetadataWriter
+        from polystore.metadata_writer import AtomicMetadataWriter
 
         metadata_path = plate_path / "openhcs_metadata.json"
         writer = AtomicMetadataWriter()
@@ -262,7 +262,7 @@ class MicroscopeHandler(ABC, metaclass=AutoRegisterMeta):
             plate_path: Path to plate directory
             filemanager: FileManager instance
         """
-        from openhcs.io.virtual_workspace import VirtualWorkspaceBackend
+        from polystore.virtual_workspace import VirtualWorkspaceBackend
         from openhcs.constants.constants import Backend
 
         # Always create a new backend for this plate (VirtualWorkspace is plate-specific)
@@ -329,8 +329,8 @@ class MicroscopeHandler(ABC, metaclass=AutoRegisterMeta):
             # When skipping, we need to determine image_dir from metadata
             # Read metadata to get the subdirectory key
             from openhcs.microscopes.openhcs import OpenHCSMetadataHandler
-            from openhcs.io.exceptions import MetadataNotFoundError
-            from openhcs.io.metadata_writer import resolve_subdirectory_path
+            from polystore.exceptions import MetadataNotFoundError
+            from polystore.metadata_writer import resolve_subdirectory_path
 
             openhcs_metadata_handler = OpenHCSMetadataHandler(filemanager)
             metadata = openhcs_metadata_handler._load_metadata_dict(plate_path)
@@ -745,7 +745,7 @@ def _auto_detect_microscope_type(plate_folder: Path, filemanager: FileManager,
         Any other exception from metadata handlers (fail-loud)
     """
     # METADATA_HANDLERS is a SecondaryRegistryDict that auto-triggers discovery
-    from openhcs.io.exceptions import MetadataNotFoundError
+    from polystore.exceptions import MetadataNotFoundError
 
     # Build detection order: openhcsdata first, then filtered/ordered list
     detection_order = ['openhcsdata']  # Always first, always included (correct registration name)

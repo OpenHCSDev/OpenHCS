@@ -17,7 +17,8 @@ from pathlib import Path
 
 import zmq
 
-from openhcs.io.filemanager import FileManager
+from polystore.filemanager import FileManager
+from polystore.backend_registry import register_cleanup_callback
 from openhcs.core.config import TransportMode as OpenHCSTransportMode, FijiStreamingConfig
 from openhcs.runtime.zmq_config import OPENHCS_ZMQ_CONFIG
 from zmqruntime.config import TransportMode as ZMQTransportMode
@@ -53,6 +54,9 @@ def _cleanup_global_fiji_viewer() -> None:
                 _global_fiji_process.join(timeout=1)
 
             _global_fiji_process = None
+
+
+register_cleanup_callback(_cleanup_global_fiji_viewer)
 
 
 def _spawn_detached_fiji_process(

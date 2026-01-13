@@ -133,7 +133,7 @@ def materialize_segmentation_masks(data: List[np.ndarray], path: str, filemanage
         return summary_path
 
     # Extract ROIs from labeled masks
-    from openhcs.core.roi import extract_rois_from_labeled_mask
+    from polystore.roi import extract_rois_from_labeled_mask
 
     all_rois = []
     total_cells = 0

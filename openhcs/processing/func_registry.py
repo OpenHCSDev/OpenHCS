@@ -169,7 +169,7 @@ def _auto_initialize_registry() -> None:
     """
     Auto-initialize the function registry on module import.
 
-    This follows the same pattern as storage_registry in openhcs.io.base.
+    This follows the same pattern as storage_registry in polystore.base.
     """
     with _registry_lock:
         global _registry_initialized
