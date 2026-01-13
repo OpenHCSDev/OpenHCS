@@ -1,18 +1,23 @@
 [submodule "external/ObjectState"]
 	path = external/ObjectState
 	url = https://github.com/OpenHCSDev/ObjectState.git
+	branch = main
 [submodule "external/python-introspect"]
 	path = external/python-introspect
 	url = https://github.com/OpenHCSDev/python-introspect.git
+	branch = master
 [submodule "external/pyqt-formgen"]
 	path = external/pyqt-formgen
 	url = https://github.com/OpenHCSDev/pyqt-formgen.git
+	branch = main
 [submodule "external/arraybridge"]
 	path = external/arraybridge
 	url = https://github.com/OpenHCSDev/arraybridge.git
+	branch = main
 [submodule "external/metaclass-registry"]
 	path = external/metaclass-registry
 	url = https://github.com/OpenHCSDev/metaclass-registry.git
+	branch = main
 [submodule "external/zmqruntime"]
 	path = external/zmqruntime
 	url = https://github.com/OpenHCSDev/zmqruntime.git
@@ -20,6 +25,8 @@
 [submodule "external/uneval"]
 	path = external/uneval
 	url = https://github.com/OpenHCSDev/uneval.git
-[submodule "external/PolyStore"]
-	path = external/PolyStore
-	url = https://github.com/OpenHCSDev/PolyStore.git
+	branch = main
+[submodule "external/polystore"]
+	path = external/polystore
+	url = https://github.com/OpenHCSDev/polystore.git
+	branch = main
