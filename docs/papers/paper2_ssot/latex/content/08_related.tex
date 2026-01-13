@@ -61,6 +61,14 @@ SSOT and information hiding are complementary: information hiding determines \em
 
 \textbf{Generative Programming:} Czarnecki \& Eisenecker~\cite{czarnecki2000generative} established generative programming as a paradigm for automatic program generation. Our SSOT patterns are a specific application: generating derived structures from single sources at definition time.
 
+\subsection{Information-Theoretic Foundations}\label{sec:related-info-theory}
+
+\textbf{Minimum Description Length:} Rissanen~\cite{rissanen1978mdl} established the MDL principle: the best model minimizes total description length (model + data given model). Our DOF = 1 criterion is the software instantiation: the single source is the model; derived locations have zero marginal description length. Grünwald~\cite{gruenwald2007mdl} provides comprehensive treatment of MDL optimality and uniqueness---our Theorem~\ref{thm:dof-optimal} establishes the analogous uniqueness for software representations.
+
+\textbf{Generative Complexity:} Heering~\cite{heering2015generative,heering2003software} formalized \emph{generative complexity} as the Kolmogorov complexity of the shortest generator for a program family. SSOT architectures achieve minimal generative complexity by design: the single source \emph{is} the shortest generator, and derived structures are its output. This connects our formalization to algorithmic information theory while remaining constructive---we exhibit generators, not just prove their existence.
+
+\textbf{Comparison:} Prior work on generative complexity remained largely theoretical (Kolmogorov complexity is uncomputable). Our contribution is the \emph{constructive realization}: specific language features (DEF, INTRO) that achieve the theoretical minimum in practice. The DOF metric operationalizes generative complexity for software engineering.
+
 \subsection{Language Comparison Studies}\label{sec:related-comparison}
 
 \textbf{Programming Language Pragmatics:} Scott~\cite{scott2015programming} surveys programming language features systematically. Our evaluation criteria (DEF, INTRO, STRUCT, HIER) could be added to such surveys.

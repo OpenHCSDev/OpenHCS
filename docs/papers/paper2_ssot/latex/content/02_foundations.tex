@@ -61,7 +61,13 @@ With DOF $> 1$, at least two locations are independent. Independent locations ca
 If coherence must be guaranteed (no incoherent states reachable), then DOF = 1 is necessary and sufficient.
 \end{corollary}
 
-This is the epistemic foundation of SSOT. The following sections instantiate these concepts to software.
+This is the epistemic foundation of SSOT.
+
+\textbf{Information-Theoretic Interpretation.} The DOF = 1 condition has a precise information-theoretic characterization. Rissanen's Minimum Description Length (MDL) principle~\cite{rissanen1978mdl} states that the optimal representation minimizes total description length: $|$model$|$ + $|$data given model$|$. When DOF = 1, the single source \emph{is} the minimal model; all derived locations are the ``data given model'' with zero additional description length (they are fully determined). When DOF $> 1$, the redundant independent locations require explicit synchronization---additional description length that serves no epistemic purpose. Grünwald~\cite{gruenwald2007mdl} provides a comprehensive treatment showing that MDL-optimal representations are unique under mild conditions---precisely what Theorem~\ref{thm:dof-optimal} establishes for DOF.
+
+Heering~\cite{heering2015generative} formalized this connection for software specifically: the \emph{generative complexity} of a program family is the length of the shortest generator. SSOT architectures achieve minimal generative complexity by construction---the single source is the generator, and derived locations are the generated instances. This framing connects our formalization to Kolmogorov complexity theory while remaining constructive (we provide the generator, not just prove its existence).
+
+The following sections instantiate these concepts to software.
 
 %------------------------------------------------------------------------------
 

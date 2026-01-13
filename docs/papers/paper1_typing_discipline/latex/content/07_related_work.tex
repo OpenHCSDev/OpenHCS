@@ -143,6 +143,12 @@ defaults. When \texttt{LazyPathPlanningConfig} inherits from
 (different behavior). The nominal type system tracks that these are
 distinct types with different resolution semantics.
 
+\subsection{Error Detection Timing}\label{error-detection-timing}
+
+\textbf{Boehm~\cite{boehm1981software}.} The foundational work on software engineering economics established empirical data on error cost escalation: errors detected at requirements or design time cost 1x to fix, while errors found during testing cost 10x, and post-release errors cost 50x--100x more~\cite{nasa2010error}. This provides empirical grounding for why compile-time type checking matters.
+
+\textbf{Our contribution:} Nominal typing shifts certain class of errors (type mismatches, spurious subtyping) from runtime to definition time. When a structural system permits an unrelated type with matching shape, the error surfaces as a logic bug during testing or production---a 10x--100x cost multiplier. Nominal typing's requirement for explicit inheritance declarations forces these mismatches to be resolved during development, paying the 1x cost. The $\Omega(n)$ vs $O(1)$ complexity separation (Theorem 4.3) formalizes this: structural systems defer error detection to $n$ call-site inspections; nominal systems detect at the single declaration site.
+
 \subsection{Positioning This Work}\label{positioning-this-work}
 
 \paragraph{7.5.1 Literature Search

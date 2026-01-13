@@ -1,27 +1,29 @@
 \section{Related Work}\label{related-work}
 
-\textbf{Philosophy of Science:} Quine (1951) argued observations underdetermine theory. 
-We prove the opposite: queries determine minimal theory uniquely. Kuhn (1962) described 
-theory choice as paradigm shifts; we show it is algorithmic extraction. Popper (1959) 
+\textbf{Philosophy of Science:} Quine (1951) argued observations underdetermine theory.
+We prove the opposite: queries determine minimal theory uniquely. Kuhn (1962) described
+theory choice as paradigm shifts; we show it is algorithmic extraction. Popper (1959)
 emphasized falsifiability; we prove constructive uniqueness.
 
-\textbf{Kolmogorov Complexity:} Solomonoff (1964), Kolmogorov (1965), and Chaitin (1966) 
-developed algorithmic information theory. Our minimal theories are related but defined 
-by query coverage rather than description length.
+\textbf{Kolmogorov Complexity:} Solomonoff~\cite{solomonoff1964formal} and Kolmogorov~\cite{kolmogorov1965three} independently developed algorithmic information theory, establishing that the complexity of an object is the length of its shortest description. Our minimal theories are the ``shortest descriptions'' for query spaces: the minimal structure sufficient to answer all queries. The connection is precise---minimal theories are Kolmogorov-optimal representations of the domain's semantic content.
 
-\textbf{Learning Theory:} Valiant (1984) established PAC learning. Our learnability 
+\textbf{Generative Complexity:} Heering~\cite{heering2015generative,heering2003software} applied Kolmogorov complexity to software, defining \emph{generative complexity} as the length of the shortest generator for a program family. Our uniqueness theorem (Theorem~\ref{thm:unique-minimal-theory}) extends this: minimal theories are unique shortest generators for query spaces. Where Heering's work remained largely theoretical (Kolmogorov complexity is uncomputable), we provide constructive algorithms (Section~\ref{axis-derivation-algorithm}) that compute minimal theories from domain specifications.
+
+\textbf{Minimum Description Length:} Rissanen~\cite{rissanen1978mdl} established the MDL principle: optimal models minimize total description length. Grünwald~\cite{gruenwald2007mdl} proved MDL-optimal models are unique under mild conditions. Our uniqueness theorem is the epistemic analogue: minimal theories are unique under the constraint of query coverage. The parallel is exact---MDL optimizes description length; we optimize parameter count while maintaining coverage.
+
+\textbf{Learning Theory:} Valiant (1984) established PAC learning. Our learnability
 results (Theorem 7.3) show minimal theories have efficient sample complexity.
 
-\textbf{Model Selection:} Akaike (1974) and Schwarz (1978) developed information 
-criteria for model selection. Our uniqueness result provides theoretical foundation: 
-the minimal theory is not chosen but determined.
+\textbf{Model Selection:} Akaike (1974) and Schwarz (1978) developed information
+criteria for model selection. Our uniqueness result provides theoretical foundation:
+the minimal theory is not chosen but determined. Where AIC/BIC provide heuristics for selecting among candidate models, we prove the minimal model is \emph{unique}---selection becomes extraction.
 
-\textbf{Scientific Realism:} Putnam (1975) and Boyd (1984) defended convergence of 
-scientific theories. Our Theorem~\ref{thm:unique-minimal-theory} formalizes this: 
+\textbf{Scientific Realism:} Putnam (1975) and Boyd (1984) defended convergence of
+scientific theories. Our Theorem~\ref{thm:unique-minimal-theory} formalizes this:
 theories converge because minimal structure is unique.
 
-\textbf{Occam's Razor:} Philosophical tradition favoring simpler explanations. We prove 
-it is computational necessity, not aesthetic preference.
+\textbf{Occam's Razor:} Philosophical tradition favoring simpler explanations. We prove
+it is computational necessity, not aesthetic preference. The razor is not a heuristic but a theorem: minimal theories are unique, so ``preferring'' simplicity is recognizing that the alternative is redundancy.
 
 \begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
 
