@@ -1,19 +1,19 @@
 [submodule "external/ObjectState"]
 	path = external/ObjectState
-	url = https://github.com/trissim/ObjectState.git
+	url = https://github.com/OpenHCSDev/ObjectState.git
 [submodule "external/python-introspect"]
 	path = external/python-introspect
-	url = https://github.com/trissim/python-introspect.git
+	url = https://github.com/OpenHCSDev/python-introspect.git
 [submodule "external/pyqt-formgen"]
 	path = external/pyqt-formgen
-	url = https://github.com/trissim/pyqt-formgen.git
+	url = https://github.com/OpenHCSDev/pyqt-formgen.git
 [submodule "external/arraybridge"]
 	path = external/arraybridge
-	url = https://github.com/trissim/arraybridge.git
+	url = https://github.com/OpenHCSDev/arraybridge.git
 [submodule "external/metaclass-registry"]
 	path = external/metaclass-registry
-	url = https://github.com/trissim/metaclass-registry.git
+	url = https://github.com/OpenHCSDev/metaclass-registry.git
 [submodule "external/zmqruntime"]
 	path = external/zmqruntime
-	url = https://github.com/trissim/zmqruntime
+	url = https://github.com/OpenHCSDev/zmqruntime.git
 	branch = main

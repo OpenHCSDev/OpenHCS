@@ -62,14 +62,14 @@ dependencies = [
 
     # System monitoring (required by ui/shared/system_monitor_core.py)
     "psutil>=5.9.0",
-    "zmqruntime @ git+https://github.com/trissim/zmqruntime.git",
+    "zmqruntime @ git+https://github.com/OpenHCSDev/zmqruntime.git",
 
     # External dependencies (pin to git commits until PyPI publication)
-    "objectstate @ git+https://github.com/trissim/ObjectState.git@0a02629f0b9df23854e49e85f02ff2051605fb99",
-    "python-introspect @ git+https://github.com/trissim/python-introspect.git@e9ac34aae163847c39fd0c4b4b9e50dab7a45f45",
-    "metaclass-registry @ git+https://github.com/trissim/metaclass-registry.git",
-    "arraybridge @ git+https://github.com/trissim/arraybridge.git",
-    "pyqt-formgen @ git+https://github.com/trissim/pyqt-formgen.git",
+    "objectstate @ git+https://github.com/OpenHCSDev/ObjectState.git@0a02629f0b9df23854e49e85f02ff2051605fb99",
+    "python-introspect @ git+https://github.com/OpenHCSDev/python-introspect.git@e9ac34aae163847c39fd0c4b4b9e50dab7a45f45",
+    "metaclass-registry @ git+https://github.com/OpenHCSDev/metaclass-registry.git",
+    "arraybridge @ git+https://github.com/OpenHCSDev/arraybridge.git",
+    "pyqt-formgen @ git+https://github.com/OpenHCSDev/pyqt-formgen.git",
 ]
 
 [project.optional-dependencies]
@@ -174,7 +174,7 @@ gpu = [
     "pyclesperanto>=0.17.1",
 
     # torbi - GPU-accelerated Viterbi decoding (git dependency, install manually if needed)
-    # "torbi @ git+https://github.com/trissim/torbi.git",
+    # "torbi @ git+https://github.com/OpenHCSDev/torbi.git",
 ]
 
 # All non-dev extras combined (TUI excluded - deprecated)
@@ -205,7 +205,7 @@ all = [
     "tensorflow>=2.19.0,<2.20.0",
     "tensorflow-probability[tf]>=0.25.0,<0.26.0",
     "pyclesperanto>=0.17.1",
-    # "torbi @ git+https://github.com/trissim/torbi.git",  # Git dependency, install manually if needed
+    # "torbi @ git+https://github.com/OpenHCSDev/torbi.git",  # Git dependency, install manually if needed
 ]
 
 [project.urls]
