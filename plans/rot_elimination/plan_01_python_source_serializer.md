@@ -346,6 +346,124 @@ flowchart TD
 
 None. This is a standalone refactor.
 
+### External Module Setup
+
+This should be extracted as `uneval` (or `pyuneval`) — an external module following the same pattern as other externals.
+
+#### 1. Create GitHub Repository
+
+Create `https://github.com/OpenHCSDev/uneval.git` (or similar name).
+
+#### 2. Repository Structure
+
+```
+uneval/
+├── README.md
+├── LICENSE
+├── pyproject.toml
+├── src/
+│   └── uneval/
+│       ├── __init__.py          # Public API: to_source, generate_python_source
+│       ├── core.py              # SourceFragment, FormatContext, SourceFormatter ABC
+│       ├── formatters.py        # EnumFormatter, DataclassFormatter, CallableFormatter, etc.
+│       └── imports.py           # resolve_imports
+├── tests/
+│   ├── test_core.py
+│   ├── test_formatters.py
+│   └── test_integration.py
+└── docs/
+    └── ...
+```
+
+#### 3. pyproject.toml Template
+
+```toml
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "uneval"
+version = "0.1.0"
+description = "Declarative Python source code generation from objects"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-cov"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/uneval"]
+```
+
+#### 4. Add as Git Submodule
+
+```bash
+cd /path/to/openhcs
+git submodule add https://github.com/OpenHCSDev/uneval.git external/uneval
+git submodule update --init --recursive
+```
+
+This adds to `.gitmodules`:
+```ini
+[submodule "external/uneval"]
+    path = external/uneval
+    url = https://github.com/OpenHCSDev/uneval.git
+```
+
+#### 5. Update OpenHCS pyproject.toml
+
+Add editable dependency (same pattern as other externals):
+```toml
+[project.optional-dependencies]
+dev = [
+    # ... existing deps ...
+    "uneval @ file:///external/uneval",
+]
+```
+
+Or for editable install during development:
+```bash
+pip install -e external/uneval
+```
+
+#### 6. Update Imports in OpenHCS
+
+Replace imports in callers:
+```python
+# Before
+from openhcs.debug.pickle_to_python import generate_complete_orchestrator_code
+
+# After
+from uneval import generate_python_source
+```
+
+#### 7. Keep OpenHCS-Specific Integration
+
+Create thin adapter in `openhcs/debug/pickle_to_python.py` (~50 lines) that:
+1. Imports from `uneval`
+2. Registers OpenHCS-specific formatters (FunctionStep, lazy dataclasses, etc.)
+3. Provides any OpenHCS-specific headers/context
+
+```python
+# openhcs/debug/pickle_to_python.py (AFTER refactor)
+from uneval import generate_python_source, SourceFormatter, SourceFragment, FormatContext
+from openhcs.core.steps.function_step import FunctionStep
+
+class FunctionStepFormatter(SourceFormatter):
+    """OpenHCS-specific formatter for FunctionStep objects."""
+    def can_format(self, value) -> bool:
+        return isinstance(value, FunctionStep)
+
+    def format(self, value, ctx: FormatContext) -> SourceFragment:
+        # ... OpenHCS-specific logic ...
+        pass
+
+# Register on import
+SourceFormatter.register(FunctionStepFormatter())
+```
+
 ### ❌ ANTIPATTERNS TO AVOID
 
 **DO NOT keep the old functions as wrappers:**
