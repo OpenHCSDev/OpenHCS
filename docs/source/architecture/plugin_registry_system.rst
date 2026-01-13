@@ -490,7 +490,7 @@ Example 3: Library Registry System
 Example 4: ZMQ Server Registry
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**Registry Setup** (``openhcs/runtime/zmq_base.py``):
+**Registry Setup** (``zmqruntime/server.py``):
 
 .. code-block:: python
 
@@ -810,7 +810,6 @@ This plugin registry system integrates with:
 - :doc:`function_registry_system` - Library function discovery and registration
 - :doc:`pattern_detection_system` - Microscope handler plugin architecture
 - :doc:`storage_and_memory_system` - Storage backend plugin architecture
-- :doc:`zmq_execution_system` - ZMQ server plugin architecture
 
 Summary
 -------
@@ -852,4 +851,3 @@ The AutoRegisterMeta plugin registry system provides:
 - ✅ All integration tests passing
 - ✅ Subprocess-safe (multiprocessing, ZMQ)
 - ✅ Ready for PyPI packaging (fully generic)
-

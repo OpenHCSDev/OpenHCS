@@ -570,12 +570,8 @@ class PipelineOrchestrator:
 
         # Generic streaming config handling using polymorphic attributes
         if isinstance(config, StreamingConfig):
-            # Start global ack listener (must be before viewers connect)
-            from openhcs.runtime.zmq_base import start_global_ack_listener
-            start_global_ack_listener(config.transport_mode)
-
             # Pre-create queue tracker using polymorphic attributes
-            from openhcs.runtime.queue_tracker import GlobalQueueTrackerRegistry
+            from zmqruntime.queue_tracker import GlobalQueueTrackerRegistry
             registry = GlobalQueueTrackerRegistry()
             registry.get_or_create_tracker(config.port, config.viewer_type)
 

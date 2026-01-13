@@ -306,6 +306,4 @@ Troubleshooting Worker Issues
 See Also
 --------
 
-- :doc:`../architecture/zmq_execution_system` - ZMQ server architecture
 - :doc:`../development/ui-patterns` - UI performance optimizations
-

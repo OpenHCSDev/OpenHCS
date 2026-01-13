@@ -7,3 +7,13 @@
 [submodule "external/pyqt-formgen"]
 	path = external/pyqt-formgen
 	url = https://github.com/trissim/pyqt-formgen.git
+[submodule "external/arraybridge"]
+	path = external/arraybridge
+	url = https://github.com/trissim/arraybridge.git
+[submodule "external/metaclass-registry"]
+	path = external/metaclass-registry
+	url = https://github.com/trissim/metaclass-registry.git
+[submodule "external/zmqruntime"]
+	path = external/zmqruntime
+	url = https://github.com/trissim/zmqruntime
+	branch = main

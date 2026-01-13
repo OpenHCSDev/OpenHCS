@@ -6,15 +6,18 @@ that send data to external systems without persistent storage capabilities.
 """
 
 import logging
-import time
 import os
+import time
+import uuid
 from pathlib import Path
-from typing import Any, List, Union
+from typing import Any, Callable, List, Union
 import numpy as np
 
 from openhcs.io.base import DataSink
-from openhcs.runtime.zmq_base import get_zmq_transport_url
-from openhcs.core.config import TransportMode
+from openhcs.core.config import TransportMode as OpenHCSTransportMode
+from openhcs.runtime.zmq_config import OPENHCS_ZMQ_CONFIG
+from zmqruntime.ack_listener import GlobalAckListener
+from zmqruntime.transport import coerce_transport_mode, get_zmq_transport_url
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +54,7 @@ class StreamingBackend(DataSink):
         self._context = None
         self._shared_memory_blocks = {}
 
-    def _get_publisher(self, host: str, port: int, transport_mode: TransportMode = TransportMode.IPC):
+    def _get_publisher(self, host: str, port: int, transport_mode: OpenHCSTransportMode = OpenHCSTransportMode.IPC):
         """
         Lazy initialization of ZeroMQ publisher (common for all streaming backends).
 
@@ -67,7 +70,12 @@ class StreamingBackend(DataSink):
             ZeroMQ publisher socket
         """
         # Generate transport URL using centralized function
-        url = get_zmq_transport_url(port, transport_mode, host)
+        url = get_zmq_transport_url(
+            port,
+            host=host,
+            mode=coerce_transport_mode(transport_mode),
+            config=OPENHCS_ZMQ_CONFIG,
+        )
 
         key = url  # Use URL as key instead of host:port
         if key not in self._publishers:
@@ -188,7 +196,12 @@ class StreamingBackend(DataSink):
             'shm_name': shm_name,
         }
 
-    def _register_with_queue_tracker(self, port: int, image_ids: List[str]) -> None:
+    def _register_with_queue_tracker(
+        self,
+        port: int,
+        image_ids: List[str],
+        transport_mode: OpenHCSTransportMode | None = None,
+    ) -> None:
         """
         Register sent images with queue tracker (common for all streaming backends).
 
@@ -196,11 +209,166 @@ class StreamingBackend(DataSink):
             port: Port number for tracker lookup
             image_ids: List of image IDs to register
         """
-        from openhcs.runtime.queue_tracker import GlobalQueueTrackerRegistry
+        listener = GlobalAckListener()
+        listener.start(
+            port=OPENHCS_ZMQ_CONFIG.shared_ack_port,
+            transport_mode=coerce_transport_mode(transport_mode),
+            config=OPENHCS_ZMQ_CONFIG,
+        )
+
+        from zmqruntime.queue_tracker import GlobalQueueTrackerRegistry
         registry = GlobalQueueTrackerRegistry()
         tracker = registry.get_or_create_tracker(port, self.VIEWER_TYPE)
         for image_id in image_ids:
             tracker.register_sent(image_id)
+
+    def _build_component_modes(self, display_config) -> dict:
+        component_modes = {}
+        for comp_name in display_config.COMPONENT_ORDER:
+            mode_field = f"{comp_name}_mode"
+            if hasattr(display_config, mode_field):
+                mode = getattr(display_config, mode_field)
+                component_modes[comp_name] = mode.value
+        return component_modes
+
+    def _build_display_config_base(self, display_config, component_modes: dict) -> dict:
+        return {
+            "component_modes": component_modes,
+            "component_order": display_config.COMPONENT_ORDER,
+        }
+
+    def _collect_component_names_metadata(
+        self,
+        plate_path,
+        microscope_handler,
+        component_names: List[str] | None = None,
+        log_prefix: str | None = None,
+        verbose: bool = False,
+    ) -> dict:
+        component_names = component_names or ["channel", "well", "site"]
+        component_names_metadata = {}
+
+        if not plate_path or not microscope_handler:
+            if verbose and log_prefix:
+                if not plate_path:
+                    logger.warning(f"{log_prefix}: No plate_path in kwargs")
+                if not microscope_handler:
+                    logger.warning(f"{log_prefix}: No microscope_handler")
+            return component_names_metadata
+
+        try:
+            for comp_name in component_names:
+                method_name = f"get_{comp_name}_values"
+                method = getattr(microscope_handler.metadata_handler, method_name, None)
+                if callable(method):
+                    try:
+                        metadata = method(plate_path)
+                        if verbose and log_prefix:
+                            logger.info(f"{log_prefix}: Got {comp_name} metadata: {metadata}")
+                        if metadata:
+                            component_names_metadata[comp_name] = metadata
+                    except Exception as e:
+                        if verbose and log_prefix:
+                            logger.warning(f"{log_prefix}: Could not get {comp_name} metadata: {e}", exc_info=True)
+                elif verbose and log_prefix:
+                    logger.info(f"{log_prefix}: No method {method_name} on metadata_handler")
+        except Exception as e:
+            if verbose and log_prefix:
+                logger.warning(f"{log_prefix}: Could not get component metadata: {e}", exc_info=True)
+
+        return component_names_metadata
+
+    def _prepare_batch_items(
+        self,
+        data_list: List[Any],
+        file_paths: List[Union[str, Path]],
+        microscope_handler,
+        source: str,
+        prepare_item: Callable[[Any, Union[str, Path], Any], tuple[dict, str]],
+    ) -> tuple[list[dict], list[str]]:
+        batch_images = []
+        image_ids = []
+
+        for data, file_path in zip(data_list, file_paths):
+            image_id = str(uuid.uuid4())
+            image_ids.append(image_id)
+
+            data_type = self._detect_data_type(data)
+            component_metadata = self._parse_component_metadata(
+                file_path, microscope_handler, source
+            )
+            item_data, data_type_value = prepare_item(data, file_path, data_type)
+
+            batch_images.append(
+                {
+                    **item_data,
+                    "data_type": data_type_value,
+                    "metadata": component_metadata,
+                    "image_id": image_id,
+                }
+            )
+
+        return batch_images, image_ids
+
+    def _build_batch_message(
+        self,
+        data_list: List[Any],
+        file_paths: List[Union[str, Path]],
+        microscope_handler,
+        source: str,
+        display_config,
+        prepare_item: Callable[[Any, Union[str, Path], Any], tuple[dict, str]],
+        plate_path: Union[str, Path, None] = None,
+        component_names_kwargs: dict | None = None,
+        display_payload_extra: dict | None = None,
+        message_extra: dict | None = None,
+    ) -> tuple[dict, list[dict], list[str]]:
+        if len(data_list) != len(file_paths):
+            raise ValueError("data_list and file_paths must have the same length")
+
+        batch_images, image_ids = self._prepare_batch_items(
+            data_list,
+            file_paths,
+            microscope_handler,
+            source,
+            prepare_item,
+        )
+
+        component_modes = self._build_component_modes(display_config)
+
+        component_names_metadata = self._collect_component_names_metadata(
+            plate_path,
+            microscope_handler,
+            **(component_names_kwargs or {}),
+        )
+
+        display_payload = self._build_display_config_base(display_config, component_modes)
+        if display_payload_extra:
+            display_payload.update(display_payload_extra)
+
+        message = {
+            "type": "batch",
+            "images": batch_images,
+            "display_config": display_payload,
+            "component_names_metadata": component_names_metadata,
+            "timestamp": time.time(),
+        }
+        if message_extra:
+            message.update(message_extra)
+
+        return message, batch_images, image_ids
+
+    def _cleanup_shared_memory_blocks(self, batch_images, unlink: bool = False) -> None:
+        for img in batch_images:
+            shm_name = img.get("shm_name")
+            if shm_name and shm_name in self._shared_memory_blocks:
+                try:
+                    shm = self._shared_memory_blocks.pop(shm_name)
+                    shm.close()
+                    if unlink:
+                        shm.unlink()
+                except Exception as e:
+                    logger.warning(f"Failed to cleanup shared memory {shm_name}: {e}")
 
     def save(self, data: Any, file_path: Union[str, Path], **kwargs) -> None:
         """

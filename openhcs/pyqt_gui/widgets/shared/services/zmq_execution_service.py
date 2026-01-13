@@ -281,11 +281,12 @@ class ZMQExecutionService:
         port = self.port
 
         def kill_server():
-            from openhcs.runtime.zmq_base import ZMQClient
+            from openhcs.runtime.zmq_config import OPENHCS_ZMQ_CONFIG
+            from zmqruntime.client import ZMQClient
             try:
                 graceful = not force
                 logger.info(f"🛑 {'Gracefully' if graceful else 'Force'} killing server on port {port}...")
-                success = ZMQClient.kill_server_on_port(port, graceful=graceful)
+                success = ZMQClient.kill_server_on_port(port, graceful=graceful, config=OPENHCS_ZMQ_CONFIG)
 
                 if success:
                     logger.info(f"✅ Successfully {'quit' if graceful else 'force killed'} server")
@@ -310,4 +311,3 @@ class ZMQExecutionService:
                 logger.warning(f"Error disconnecting ZMQ client: {e}")
             finally:
                 self.zmq_client = None
-

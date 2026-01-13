@@ -27,7 +27,6 @@ from openhcs.pyqt_gui.widgets.shared.column_filter_widget import MultiColumnFilt
 from openhcs.pyqt_gui.widgets.shared.image_table_browser import ImageTableBrowser
 from openhcs.config_framework.object_state import ObjectState, ObjectStateRegistry
 from openhcs.core.config import LazyNapariStreamingConfig, LazyFijiStreamingConfig
-
 logger = logging.getLogger(__name__)
 
 
@@ -117,10 +116,6 @@ class ImageBrowserWidget(QWidget):
                 microscope_handler=orchestrator.microscope_handler,
                 plate_path=orchestrator.plate_path,
             )
-
-        # Start global ack listener for image acknowledgment tracking
-        from openhcs.runtime.zmq_base import start_global_ack_listener
-        start_global_ack_listener()
 
         self.init_ui()
 
@@ -1465,10 +1460,6 @@ class ImageBrowserWidget(QWidget):
 
     def cleanup(self):
         """Clean up resources before widget destruction."""
-        # Stop global ack listener thread
-        from openhcs.runtime.zmq_base import stop_global_ack_listener
-        stop_global_ack_listener()
-
         # Cleanup ZMQ server manager widget (always initialized to None in __init__)
         if self.zmq_manager is not None:
             self.zmq_manager.cleanup()

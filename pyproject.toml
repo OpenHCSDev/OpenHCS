@@ -62,6 +62,7 @@ dependencies = [
 
     # System monitoring (required by ui/shared/system_monitor_core.py)
     "psutil>=5.9.0",
+    "zmqruntime @ git+https://github.com/trissim/zmqruntime.git",
 
     # External dependencies (pin to git commits until PyPI publication)
     "objectstate @ git+https://github.com/trissim/ObjectState.git@0a02629f0b9df23854e49e85f02ff2051605fb99",

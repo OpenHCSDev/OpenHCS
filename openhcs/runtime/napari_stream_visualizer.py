@@ -14,6 +14,7 @@ Doctrinal Clauses:
 import logging
 import multiprocessing
 import os
+import pickle
 import subprocess
 import sys
 import threading
@@ -25,9 +26,18 @@ from qtpy.QtCore import QTimer
 
 from openhcs.io.filemanager import FileManager
 from openhcs.utils.import_utils import optional_import
-from openhcs.runtime.zmq_base import ZMQServer, SHARED_ACK_PORT, get_zmq_transport_url
-from openhcs.runtime.zmq_messages import ImageAck
-from openhcs.core.config import TransportMode, NapariStreamingConfig
+from openhcs.core.config import TransportMode as OpenHCSTransportMode, NapariStreamingConfig
+from openhcs.runtime.zmq_config import OPENHCS_ZMQ_CONFIG
+from zmqruntime.config import TransportMode as ZMQTransportMode
+from zmqruntime.streaming import StreamingVisualizerServer, VisualizerProcessManager
+from zmqruntime.transport import (
+    coerce_transport_mode,
+    get_control_url,
+    get_zmq_transport_url,
+    is_port_in_use,
+    ping_control_port,
+    wait_for_server_ready,
+)
 
 # Optional napari import - this module should only be imported if napari is available
 napari = optional_import("napari")
@@ -602,7 +612,7 @@ def _old_immediate_update_logic_removed():
     # Now using _schedule_layer_update -> _execute_layer_update -> _update_image_layer/_update_shapes_layer
 
 
-class NapariViewerServer(ZMQServer):
+class NapariViewerServer(StreamingVisualizerServer):
     """
     ZMQ server for Napari viewer that receives images from clients.
 
@@ -618,7 +628,7 @@ class NapariViewerServer(ZMQServer):
         viewer_title: str,
         replace_layers: bool = False,
         log_file_path: str = None,
-        transport_mode: TransportMode = TransportMode.IPC,
+        transport_mode: OpenHCSTransportMode = OpenHCSTransportMode.IPC,
     ):
         """
         Initialize Napari viewer server.
@@ -635,10 +645,12 @@ class NapariViewerServer(ZMQServer):
         # Initialize with SUB socket for receiving images
         super().__init__(
             port,
+            viewer_type="napari",
             host="*",
             log_file_path=log_file_path,
             data_socket_type=zmq.SUB,
-            transport_mode=transport_mode,
+            transport_mode=coerce_transport_mode(transport_mode),
+            config=OPENHCS_ZMQ_CONFIG,
         )
 
         self.viewer_title = viewer_title
@@ -661,26 +673,11 @@ class NapariViewerServer(ZMQServer):
         self.pending_updates = {}  # layer_key -> QTimer (debounce)
         self.update_delay_ms = 1000  # Wait 200ms for more items before rebuilding
 
-        # Create PUSH socket for sending acknowledgments to shared ack port
-        self.ack_socket = None
-        self._setup_ack_socket()
+        # Ack socket handled by StreamingVisualizerServer
 
     def _setup_ack_socket(self):
         """Setup PUSH socket for sending acknowledgments."""
-        import zmq
-
-        try:
-            ack_url = get_zmq_transport_url(
-                SHARED_ACK_PORT, self.transport_mode, "localhost"
-            )
-
-            context = zmq.Context.instance()
-            self.ack_socket = context.socket(zmq.PUSH)
-            self.ack_socket.connect(ack_url)
-            logger.info(f"🔬 NAPARI SERVER: Connected ack socket to {ack_url}")
-        except Exception as e:
-            logger.warning(f"🔬 NAPARI SERVER: Failed to setup ack socket: {e}")
-            self.ack_socket = None
+        super()._setup_ack_socket()
 
     def _update_global_component_values(self, stack_components, layer_items):
         """
@@ -1238,22 +1235,7 @@ class NapariViewerServer(ZMQServer):
             status: 'success' or 'error'
             error: Error message if status='error'
         """
-        if not self.ack_socket:
-            return
-
-        try:
-            ack = ImageAck(
-                image_id=image_id,
-                viewer_port=self.port,
-                viewer_type="napari",
-                status=status,
-                timestamp=time.time(),
-                error=error,
-            )
-            self.ack_socket.send_json(ack.to_dict())
-            logger.debug(f"🔬 NAPARI SERVER: Sent ack for image {image_id}")
-        except Exception as e:
-            logger.warning(f"🔬 NAPARI SERVER: Failed to send ack for {image_id}: {e}")
+        self.send_ack(image_id, status=status, error=error)
 
     def _create_pong_response(self) -> Dict[str, Any]:
         """Override to add Napari-specific fields and memory usage."""
@@ -1322,6 +1304,16 @@ class NapariViewerServer(ZMQServer):
         """Handle incoming image data - called by process_messages()."""
         # This will be called from the Qt timer
         pass
+
+    def display_image(self, image_data: np.ndarray, metadata: dict) -> None:
+        """Display a single image payload (best-effort helper)."""
+        image_info = {
+            "data": image_data,
+            "shape": getattr(image_data, "shape", None),
+            "dtype": getattr(image_data, "dtype", None),
+            "metadata": metadata,
+        }
+        self._process_single_image(image_info, {})
 
     def process_image_message(self, message: bytes):
         """
@@ -1479,7 +1471,7 @@ def _napari_viewer_process(
     viewer_title: str,
     replace_layers: bool = False,
     log_file_path: str = None,
-    transport_mode: TransportMode = TransportMode.IPC,
+    transport_mode: OpenHCSTransportMode = OpenHCSTransportMode.IPC,
 ):
     """
     Napari viewer process entry point. Runs in a separate process.
@@ -1603,7 +1595,7 @@ def _spawn_detached_napari_process(
     port: int,
     viewer_title: str,
     replace_layers: bool = False,
-    transport_mode: TransportMode = TransportMode.IPC,
+    transport_mode: OpenHCSTransportMode = OpenHCSTransportMode.IPC,
 ) -> subprocess.Popen:
     """
     Spawn a completely detached napari viewer process that survives parent termination.
@@ -1716,7 +1708,7 @@ except Exception as e:
         raise e
 
 
-class NapariStreamVisualizer:
+class NapariStreamVisualizer(VisualizerProcessManager):
     """
     Manages a Napari viewer instance for real-time visualization of tensors
     streamed from the OpenHCS pipeline. Runs napari in a separate process
@@ -1732,7 +1724,7 @@ class NapariStreamVisualizer:
         port: int = None,
         replace_layers: bool = False,
         display_config=None,
-        transport_mode: TransportMode = TransportMode.IPC,
+        transport_mode: OpenHCSTransportMode = OpenHCSTransportMode.IPC,
     ):
         self.filemanager = filemanager
         self.viewer_title = viewer_title
@@ -1746,11 +1738,12 @@ class NapariStreamVisualizer:
             if port is not None
             else NapariStreamingConfig.__dataclass_fields__["port"].default
         )
+        super().__init__(port=self.port)
         self.replace_layers = (
             replace_layers  # If True, replace existing layers; if False, add new layers
         )
         self.display_config = display_config  # Configuration for display behavior
-        self.transport_mode = transport_mode  # ZMQ transport mode (IPC or TCP)
+        self.transport_mode = coerce_transport_mode(transport_mode) or ZMQTransportMode.IPC  # ZMQ transport mode (IPC or TCP)
         self.process: Optional[multiprocessing.Process] = None
         self.zmq_context: Optional[zmq.Context] = None
         self.zmq_socket: Optional[zmq.Socket] = None
@@ -1820,7 +1813,10 @@ class NapariStreamVisualizer:
         try:
             control_port = self.port + CONTROL_PORT_OFFSET
             control_url = get_zmq_transport_url(
-                control_port, self.transport_mode, "localhost"
+                control_port,
+                host="localhost",
+                mode=self.transport_mode,
+                config=OPENHCS_ZMQ_CONFIG,
             )
 
             ctx = zmq.Context()
@@ -1884,7 +1880,7 @@ class NapariStreamVisualizer:
 
         with self._lock:
             # Check if there's already a napari viewer running on the configured port
-            port_in_use = self._is_port_in_use(self.port)
+            port_in_use = is_port_in_use(self.port, self.transport_mode, config=OPENHCS_ZMQ_CONFIG)
             logger.info(f"🔬 VISUALIZER: Port {self.port} in use: {port_in_use}")
 
             if port_in_use:
@@ -1907,7 +1903,7 @@ class NapariStreamVisualizer:
                         f"🔬 VISUALIZER: Existing viewer on port {self.port} is unresponsive, killing and restarting..."
                     )
                     # Use shared method from ZMQServer ABC
-                    from openhcs.runtime.zmq_base import ZMQServer
+                    from zmqruntime.server import ZMQServer
                     from openhcs.constants.constants import CONTROL_PORT_OFFSET
 
                     ZMQServer.kill_processes_on_port(self.port)
@@ -1970,155 +1966,38 @@ class NapariStreamVisualizer:
 
         Returns True only if we can successfully handshake with the viewer.
         """
-        import zmq
-        import pickle
-        from openhcs.constants.constants import CONTROL_PORT_OFFSET
-
-        # Try to ping the control port to verify viewer is responsive
-        control_port = port + CONTROL_PORT_OFFSET
-        control_url = get_zmq_transport_url(
-            control_port, self.transport_mode, "localhost"
-        )
-        control_context = None
-        control_socket = None
-
         try:
-            control_context = zmq.Context()
-            control_socket = control_context.socket(zmq.REQ)
-            control_socket.setsockopt(zmq.LINGER, 0)
-            control_socket.setsockopt(zmq.RCVTIMEO, 500)  # 500ms timeout
-            control_socket.connect(control_url)
-
-            # Send ping
-            ping_message = {"type": "ping"}
-            control_socket.send(pickle.dumps(ping_message))
-
-            # Wait for pong
-            response = control_socket.recv()
-            response_data = pickle.loads(response)
-
-            if response_data.get("type") == "pong" and response_data.get("ready"):
-                # Viewer is responsive! Set up our ZMQ client
-                control_socket.close()
-                control_context.term()
+            if ping_control_port(
+                port,
+                self.transport_mode,
+                host="localhost",
+                config=OPENHCS_ZMQ_CONFIG,
+                timeout_ms=500,
+                require_ready=True,
+            ):
                 self._setup_zmq_client()
                 return True
-            else:
-                return False
-
+            return False
         except Exception as e:
             logger.debug(f"Failed to connect to existing viewer on port {port}: {e}")
             return False
-        finally:
-            if control_socket:
-                try:
-                    control_socket.close()
-                except:
-                    pass
-            if control_context:
-                try:
-                    control_context.term()
-                except:
-                    pass
-
-    def _is_port_in_use(self, port: int) -> bool:
-        """Check if a port/socket is already in use (indicating existing napari viewer)."""
-        if self.transport_mode == TransportMode.IPC:
-            # For IPC mode, check if socket file exists
-            import platform
-            from pathlib import Path
-            from openhcs.constants.constants import (
-                IPC_SOCKET_DIR_NAME,
-                IPC_SOCKET_PREFIX,
-                IPC_SOCKET_EXTENSION,
-            )
-
-            if platform.system() == "Windows":
-                # Windows named pipes - can't easily check existence, so always return False
-                # (will rely on ping/pong handshake instead)
-                return False
-            else:
-                # Unix domain sockets - check if socket file exists
-                ipc_dir = Path.home() / ".openhcs" / IPC_SOCKET_DIR_NAME
-                socket_name = f"{IPC_SOCKET_PREFIX}-{port}{IPC_SOCKET_EXTENSION}"
-                socket_path = ipc_dir / socket_name
-                return socket_path.exists()
-        else:
-            # TCP mode - check if port is bound
-            import socket
-
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(0.1)
-            try:
-                # Try to bind to the port - if it fails, something is already using it
-                sock.bind(("localhost", port))
-                sock.close()
-                return False  # Port is free
-            except OSError:
-                # Port is already in use
-                sock.close()
-                return True
-            except Exception:
-                return False
 
     def _wait_for_viewer_ready(self, timeout: float = 10.0) -> bool:
         """Wait for the napari viewer to be ready using handshake protocol."""
-        import zmq
-        from openhcs.constants.constants import CONTROL_PORT_OFFSET
-
         logger.info(
             f"🔬 VISUALIZER: Waiting for napari viewer to be ready on port {self.port}..."
         )
-
-        control_port = self.port + CONTROL_PORT_OFFSET
-
-        # First wait for ports to be bound
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            if self._is_port_in_use(self.port) and self._is_port_in_use(control_port):
-                break
-            time.sleep(0.2)
-        else:
-            logger.warning("🔬 VISUALIZER: Timeout waiting for ports to be bound")
-            return False
-
-        # Now use handshake protocol - create fresh socket for each attempt
-        control_url = get_zmq_transport_url(
-            control_port, self.transport_mode, "localhost"
+        ready = wait_for_server_ready(
+            self.port,
+            self.transport_mode,
+            host="localhost",
+            config=OPENHCS_ZMQ_CONFIG,
+            timeout=timeout,
+            require_ready=True,
         )
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            control_context = zmq.Context()
-            control_socket = control_context.socket(zmq.REQ)
-            control_socket.setsockopt(zmq.LINGER, 0)
-            control_socket.setsockopt(zmq.RCVTIMEO, 1000)  # 1 second timeout
-
-            try:
-                control_socket.connect(control_url)
-
-                import pickle
-
-                ping_message = {"type": "ping"}
-                control_socket.send(pickle.dumps(ping_message))
-
-                response = control_socket.recv()
-                response_data = pickle.loads(response)
-
-                if response_data.get("type") == "pong" and response_data.get("ready"):
-                    logger.info(
-                        f"🔬 VISUALIZER: Napari viewer is ready on port {self.port}"
-                    )
-                    return True
-
-            except zmq.Again:
-                pass  # Timeout waiting for response
-            except Exception as e:
-                logger.debug(f"🔬 VISUALIZER: Handshake attempt failed: {e}")
-            finally:
-                control_socket.close()
-                control_context.term()
-
-            time.sleep(0.5)  # Wait before next ping
+        if ready:
+            logger.info(f"🔬 VISUALIZER: Napari viewer is ready on port {self.port}")
+            return True
 
         logger.warning("🔬 VISUALIZER: Timeout waiting for napari viewer handshake")
         return False
@@ -2128,7 +2007,12 @@ class NapariStreamVisualizer:
         if self.port is None:
             raise RuntimeError("Port not set - call start_viewer() first")
 
-        data_url = get_zmq_transport_url(self.port, self.transport_mode, "localhost")
+        data_url = get_zmq_transport_url(
+            self.port,
+            host="localhost",
+            mode=self.transport_mode,
+            config=OPENHCS_ZMQ_CONFIG,
+        )
 
         self.zmq_context = zmq.Context()
         self.zmq_socket = self.zmq_context.socket(zmq.PUB)
@@ -2155,13 +2039,11 @@ class NapariStreamVisualizer:
             )
             return False
 
-        import zmq
-        import pickle
-        from openhcs.constants.constants import CONTROL_PORT_OFFSET
-
-        control_port = self.port + CONTROL_PORT_OFFSET
-        control_url = get_zmq_transport_url(
-            control_port, self.transport_mode, "localhost"
+        control_url = get_control_url(
+            self.port,
+            self.transport_mode,
+            host="localhost",
+            config=OPENHCS_ZMQ_CONFIG,
         )
         control_context = None
         control_socket = None
@@ -2408,3 +2290,47 @@ class NapariStreamVisualizer:
                 exc_info=True,
             )
             return None
+
+
+    def get_launch_command(self) -> list[str]:
+        import os
+        import sys
+
+        current_dir = os.getcwd()
+        log_dir = os.path.expanduser("~/.local/share/openhcs/logs")
+        os.makedirs(log_dir, exist_ok=True)
+        log_file = os.path.join(log_dir, f"napari_detached_port_{self.port}.log")
+
+        python_code = f"""
+import sys
+import os
+sys.path.insert(0, {repr(current_dir)})
+from openhcs.runtime.napari_stream_visualizer import _napari_viewer_process
+from openhcs.core.config import TransportMode
+transport_mode = TransportMode.{self.transport_mode.name}
+_napari_viewer_process({self.port}, {repr(self.viewer_title)}, {self.replace_layers}, {repr(log_file)}, transport_mode)
+"""
+
+        return [sys.executable, "-c", python_code]
+
+    def get_launch_env(self) -> dict:
+        import os
+        import platform
+
+        env = os.environ.copy()
+        if "QT_QPA_PLATFORM" not in env:
+            if platform.system() == "Darwin":
+                env["QT_QPA_PLATFORM"] = "cocoa"
+            elif platform.system() == "Linux":
+                env["QT_QPA_PLATFORM"] = "xcb"
+                env["QT_X11_NO_MITSHM"] = "1"
+        elif platform.system() == "Linux":
+            env["QT_X11_NO_MITSHM"] = "1"
+        return env
+
+    def start(self, detached: bool = True):
+        self.start_viewer(async_mode=False)
+        return self.process
+
+    def stop(self, timeout: float = 5.0):
+        self.stop_viewer()

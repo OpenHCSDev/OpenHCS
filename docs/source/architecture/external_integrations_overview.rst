@@ -392,8 +392,6 @@ See Also
 - :doc:`napari_integration_architecture` - Napari integration details
 - :doc:`fiji_streaming_system` - Fiji streaming architecture
 - :doc:`omero_backend_system` - OMERO backend architecture
-- :doc:`zmq_execution_system` - ZMQ execution pattern
 - :doc:`../guides/omero_integration` - OMERO integration guide
 - :doc:`../guides/viewer_management` - Viewer management guide
 - :doc:`../guides/fiji_viewer_management` - Fiji viewer management
-

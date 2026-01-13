@@ -142,7 +142,8 @@ class OpenHCSServerScanProvider:
 
         from openhcs.core.config import get_all_streaming_ports
         from openhcs.constants.constants import CONTROL_PORT_OFFSET
-        from openhcs.runtime.zmq_base import get_zmq_transport_url, get_default_transport_mode
+        from openhcs.runtime.zmq_config import OPENHCS_ZMQ_CONFIG
+        from zmqruntime.transport import get_zmq_transport_url, get_default_transport_mode
         from openhcs.core.log_utils import classify_log_file
         from pyqt_formgen.core.log_utils import LogFileInfo
 
@@ -158,7 +159,12 @@ class OpenHCSServerScanProvider:
                 socket.setsockopt(zmq.RCVTIMEO, 1000)
 
                 transport_mode = get_default_transport_mode()
-                control_url = get_zmq_transport_url(control_port, transport_mode, 'localhost')
+                control_url = get_zmq_transport_url(
+                    control_port,
+                    host="localhost",
+                    mode=transport_mode,
+                    config=OPENHCS_ZMQ_CONFIG,
+                )
                 socket.connect(control_url)
 
                 socket.send(pickle.dumps({'type': 'ping'}))

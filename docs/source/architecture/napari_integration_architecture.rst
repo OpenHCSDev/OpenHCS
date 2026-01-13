@@ -319,7 +319,5 @@ See Also
 --------
 
 - :doc:`napari_streaming_system` - Materialization-aware streaming
-- :doc:`zmq_execution_system` - ZMQ execution pattern
 - :doc:`../guides/viewer_management` - Viewer management guide
 - :doc:`../user_guide/real_time_visualization` - Real-time visualization guide
-

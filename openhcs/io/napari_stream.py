@@ -13,17 +13,16 @@ SHARED MEMORY OWNERSHIP MODEL:
 """
 
 import logging
-import time
 from pathlib import Path
 from typing import Any, List, Union
-import os
 
-from openhcs.core.config import TransportMode
+import zmq
 
-import numpy as np
-
-from openhcs.io.streaming import StreamingBackend
 from openhcs.constants.constants import Backend
+from openhcs.constants.streaming import StreamingDataType
+from openhcs.core.config import TransportMode
+from openhcs.io.streaming import StreamingBackend
+from openhcs.runtime.roi_converters import NapariROIConverter
 
 logger = logging.getLogger(__name__)
 
@@ -49,13 +48,21 @@ class NapariStreamingBackend(StreamingBackend):
         Returns:
             Dict with shapes data
         """
-        from openhcs.runtime.roi_converters import NapariROIConverter
         shapes_data = NapariROIConverter.rois_to_shapes(data)
 
         return {
             'path': str(file_path),
             'shapes': shapes_data,
         }
+
+    def _prepare_batch_item(self, data: Any, file_path: Union[str, Path], data_type):
+        if data_type in (StreamingDataType.SHAPES, StreamingDataType.POINTS):
+            item_data = self._prepare_shapes_data(data, file_path)
+            data_type_value = data_type.value
+        else:
+            item_data = self._create_shared_memory(data, file_path)
+            data_type_value = data_type.value
+        return item_data, data_type_value
 
     def save_batch(self, data_list: List[Any], file_paths: List[Union[str, Path]], **kwargs) -> None:
         """
@@ -66,11 +73,6 @@ class NapariStreamingBackend(StreamingBackend):
             file_paths: List of path identifiers
             **kwargs: Additional metadata
         """
-        from openhcs.constants.streaming import StreamingDataType
-
-        if len(data_list) != len(file_paths):
-            raise ValueError("data_list and file_paths must have the same length")
-
         # Extract kwargs using generic polymorphic names
         host = kwargs.get('host', 'localhost')
         port = kwargs['port']
@@ -79,88 +81,30 @@ class NapariStreamingBackend(StreamingBackend):
         display_config = kwargs['display_config']
         microscope_handler = kwargs['microscope_handler']
         source = kwargs.get('source', 'unknown_source')  # Pre-built source value
-
-        # Prepare batch of images/ROIs
-        batch_images = []
-        image_ids = []
-
-        for data, file_path in zip(data_list, file_paths):
-            # Generate unique ID
-            import uuid
-            image_id = str(uuid.uuid4())
-            image_ids.append(image_id)
-
-            # Detect data type using ABC helper
-            data_type = self._detect_data_type(data)
-
-            # Parse component metadata using ABC helper (ONCE for all types)
-            component_metadata = self._parse_component_metadata(
-                file_path, microscope_handler, source
-            )
-
-            # Prepare data based on type
-            if data_type == StreamingDataType.SHAPES or data_type == StreamingDataType.POINTS:
-                # Both shapes and points use the same converter (it marks them appropriately)
-                item_data = self._prepare_shapes_data(data, file_path)
-            else:  # IMAGE
-                item_data = self._create_shared_memory(data, file_path)
-
-            # Build batch item
-            batch_images.append({
-                **item_data,
-                'data_type': data_type.value,
-                'metadata': component_metadata,
-                'image_id': image_id
-            })
-
-        # Build component modes for ALL components in component_order (including virtual components)
-        component_modes = {}
-        for comp_name in display_config.COMPONENT_ORDER:
-            mode_field = f"{comp_name}_mode"
-            if hasattr(display_config, mode_field):
-                mode = getattr(display_config, mode_field)
-                component_modes[comp_name] = mode.value
-
-        # Try to get component name metadata (channels, wells, etc.) from microscope handler
-        # This will be used for dimension labels in napari (e.g., "Ch1: DAPI" instead of "Channel 1")
-        component_names_metadata = {}
         plate_path = kwargs.get('plate_path')
-        if plate_path and microscope_handler:
-            try:
-                # Get metadata for common components using metadata_handler methods
-                for comp_name in ['channel', 'well', 'site']:
-                    try:
-                        method_name = f'get_{comp_name}_values'
-                        if hasattr(microscope_handler.metadata_handler, method_name):
-                            method = getattr(microscope_handler.metadata_handler, method_name)
-                            metadata = method(plate_path)
-                            if metadata:
-                                component_names_metadata[comp_name] = metadata
-                    except Exception as e:
-                        logger.debug(f"Could not get {comp_name} metadata: {e}")
-            except Exception as e:
-                logger.debug(f"Could not get component metadata: {e}")
-        
-        # Send batch message
-        message = {
-            'type': 'batch',
-            'images': batch_images,
-            'display_config': {
-                'colormap': display_config.get_colormap_name(),
-                'component_modes': component_modes,
-                'component_order': display_config.COMPONENT_ORDER,
-                'variable_size_handling': display_config.variable_size_handling.value if hasattr(display_config, 'variable_size_handling') and display_config.variable_size_handling else None
-            },
-            'component_names_metadata': component_names_metadata,  # Add component names for dimension labels
-            'timestamp': time.time()
+        display_payload_extra = {
+            "colormap": display_config.get_colormap_name(),
+            "variable_size_handling": display_config.variable_size_handling.value
+            if hasattr(display_config, "variable_size_handling") and display_config.variable_size_handling
+            else None,
         }
+
+        message, batch_images, image_ids = self._build_batch_message(
+            data_list,
+            file_paths,
+            microscope_handler,
+            source,
+            display_config,
+            self._prepare_batch_item,
+            plate_path=plate_path,
+            display_payload_extra=display_payload_extra,
+        )
 
         # Register sent images with queue tracker BEFORE sending
         # This prevents race condition with IPC mode where acks arrive before registration
-        self._register_with_queue_tracker(port, image_ids)
+        self._register_with_queue_tracker(port, image_ids, transport_mode=transport_mode)
 
         # Send non-blocking to prevent hanging if Napari is slow to process (matches Fiji pattern)
-        import zmq
         send_succeeded = False
         try:
             publisher.send_json(message, flags=zmq.NOBLOCK)
@@ -175,25 +119,7 @@ class NapariStreamingBackend(StreamingBackend):
 
         finally:
             # Unified cleanup: close our handle after successful send, close+unlink after failure
-            self._cleanup_shared_memory(batch_images, unlink=not send_succeeded)
-
-    def _cleanup_shared_memory(self, batch_images, unlink=False):
-        """Clean up shared memory blocks for a batch of images.
-
-        Args:
-            batch_images: List of image dictionaries with optional 'shm_name' keys
-            unlink: If True, both close and unlink. If False, only close (viewer will unlink)
-        """
-        for img in batch_images:
-            shm_name = img.get('shm_name')  # ROI items don't have shm_name
-            if shm_name and shm_name in self._shared_memory_blocks:
-                try:
-                    shm = self._shared_memory_blocks.pop(shm_name)
-                    shm.close()
-                    if unlink:
-                        shm.unlink()
-                except Exception as e:
-                    logger.warning(f"Failed to cleanup shared memory {shm_name}: {e}")
+            self._cleanup_shared_memory_blocks(batch_images, unlink=not send_succeeded)
 
     # cleanup() now inherited from ABC
 
