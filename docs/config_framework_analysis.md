@@ -135,7 +135,7 @@ class ObjectState:
 
 ```python
 # Export any config at any scope:
-config_code = generate_config_code(pipeline_config, PipelineConfig, clean_mode=True)
+config_code = generate_python_source(Assignment("config", pipeline_config), clean_mode=True)
 
 # Output:
 """
@@ -180,4 +180,3 @@ AFTER (materialized):
 ```
 
 This eliminates the last class of timing bugs where UI could query stale state.
-

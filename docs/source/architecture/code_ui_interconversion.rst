@@ -129,10 +129,7 @@ The complete round-trip workflow ensures perfect fidelity:
 
     1. User clicks "Code" button in TUI widget
     2. Widget extracts current state (functions, parameters, configuration)
-    3. Appropriate generation function called:
-       - generate_complete_function_pattern_code()
-       - generate_complete_pipeline_steps_code()  
-       - generate_complete_orchestrator_code()
+    3. generate_python_source(...) called with the appropriate Assignment/CodeBlock
     4. Import collection system traverses data structures
     5. Complete Python code generated with all imports
     6. TerminalLauncher creates temporary file with code

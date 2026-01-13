@@ -1587,10 +1587,10 @@ class PlateManagerWidget(ButtonListWidget):
                 else:
                     pipeline_data[plate_path] = []
 
-            # Use existing pickle_to_python logic to generate complete script
+            # Use uneval-based serializer to generate complete script
             from openhcs.textual_tui.services.terminal_launcher import TerminalLauncher
 
-            # Create data structure like pickle_to_python expects
+            # Create data structure the serializer expects
             data = {
                 'plate_paths': plate_paths,
                 'pipeline_data': pipeline_data,
@@ -1602,13 +1602,19 @@ class PlateManagerWidget(ButtonListWidget):
             pipeline_data = data['pipeline_data']
 
             # Generate just the orchestrator configuration (no execution wrapper)
-            from openhcs.debug.pickle_to_python import generate_complete_orchestrator_code
+            import openhcs.serialization.uneval_formatters  # noqa: F401
+            from uneval import Assignment, BlankLine, CodeBlock, generate_python_source
 
-            python_code = generate_complete_orchestrator_code(
-                plate_paths=plate_paths,
-                pipeline_data=pipeline_data,
-                global_config=self.app.global_config,
-                clean_mode=True  # Default to clean mode - only show non-default values
+            python_code = generate_python_source(
+                CodeBlock.from_items([
+                    Assignment("plate_paths", plate_paths),
+                    BlankLine(),
+                    Assignment("global_config", self.app.global_config),
+                    BlankLine(),
+                    Assignment("pipeline_data", pipeline_data),
+                ]),
+                header="# Edit this orchestrator configuration and save to apply changes",
+                clean_mode=True,  # Default to clean mode - only show non-default values
             )
 
             # Create callback to handle edited code
@@ -1699,14 +1705,14 @@ class PlateManagerWidget(ButtonListWidget):
                 else:
                     pipeline_data[plate_path] = []
 
-            # Create data structure like pickle_to_python expects
+            # Create data structure the serializer expects
             data = {
                 'plate_paths': plate_paths,
                 'pipeline_data': pipeline_data,
                 'global_config': self.app.global_config
             }
 
-            # Generate complete executable Python script using pickle_to_python logic
+            # Generate complete executable Python script using the serializer
             python_code = self._generate_executable_script(data)
 
             # Launch file browser to save the script
@@ -1760,10 +1766,10 @@ class PlateManagerWidget(ButtonListWidget):
             self.app.current_status = f"Failed to save script: {e}"
 
     def _generate_executable_script(self, data: Dict) -> str:
-        """Generate fully executable Python script by creating a temp pickle and using existing convert_pickle_to_python."""
+        """Generate fully executable Python script by creating a temp pickle and using convert_pickle_to_python."""
         import tempfile
         import dill as pickle
-        from openhcs.debug.pickle_to_python import convert_pickle_to_python
+        from openhcs.debug.pickle_converter import convert_pickle_to_python
 
         # Create temporary pickle file
         with tempfile.NamedTemporaryFile(mode='wb', suffix='.pkl', delete=False) as temp_pickle:
@@ -1792,5 +1798,3 @@ class PlateManagerWidget(ButtonListWidget):
                 os.unlink(temp_output_path)
             except:
                 pass
-
-

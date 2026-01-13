@@ -35,7 +35,8 @@ from openhcs.pyqt_gui.config import PyQtGUIConfig, get_default_pyqt_gui_config
 # uses existing lazy dataclass instances from the step
 from pyqt_formgen.forms import ParameterTypeUtils
 from openhcs.ui.shared.code_editor_form_updater import CodeEditorFormUpdater
-from openhcs.debug.pickle_to_python import generate_step_code
+import openhcs.serialization.uneval_formatters  # noqa: F401
+from uneval import Assignment, generate_python_source
 from openhcs.config_framework.object_state import ObjectState, ObjectStateRegistry
 
 logger = logging.getLogger(__name__)
@@ -545,7 +546,11 @@ class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
                 logger.debug(f"Using func from step instance: {current_step.func}")
 
             # Generate code using existing pattern
-            python_code = generate_step_code(current_step, clean_mode=False)
+            python_code = generate_python_source(
+                Assignment("step", current_step),
+                header="# Function Step",
+                clean_mode=False,
+            )
 
             # Launch editor
             editor_service = SimpleCodeEditorService(self)

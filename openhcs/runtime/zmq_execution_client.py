@@ -38,7 +38,8 @@ class OpenHCSExecutionClient(ExecutionClient):
         )
 
     def serialize_task(self, task: Any, config: Any = None) -> dict:
-        from openhcs.debug.pickle_to_python import generate_complete_pipeline_steps_code, generate_config_code
+        import openhcs.serialization.uneval_formatters  # noqa: F401
+        from uneval import Assignment, generate_python_source
         from openhcs.core.config import GlobalPipelineConfig, PipelineConfig
 
         plate_id = task.get("plate_id")
@@ -47,14 +48,26 @@ class OpenHCSExecutionClient(ExecutionClient):
         pipeline_config = task.get("pipeline_config")
         config_params = task.get("config_params")
 
-        pipeline_code = generate_complete_pipeline_steps_code(pipeline_steps, clean_mode=True)
+        pipeline_code = generate_python_source(
+            Assignment("pipeline_steps", pipeline_steps),
+            header="# Edit this pipeline and save to apply changes",
+            clean_mode=True,
+        )
         request = {"type": "execute", "plate_id": str(plate_id), "pipeline_code": pipeline_code}
         if config_params:
             request["config_params"] = config_params
         else:
-            request["config_code"] = generate_config_code(global_config, GlobalPipelineConfig, clean_mode=True)
+            request["config_code"] = generate_python_source(
+                Assignment("config", global_config),
+                header="# Configuration Code",
+                clean_mode=True,
+            )
             if pipeline_config:
-                request["pipeline_config_code"] = generate_config_code(pipeline_config, PipelineConfig, clean_mode=True)
+                request["pipeline_config_code"] = generate_python_source(
+                    Assignment("config", pipeline_config),
+                    header="# Configuration Code",
+                    clean_mode=True,
+                )
         return request
 
     def submit_pipeline(self, plate_id, pipeline_steps, global_config, pipeline_config=None, config_params=None):

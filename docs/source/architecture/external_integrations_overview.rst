@@ -249,7 +249,7 @@ Pattern 4: Code-Based Serialization
 .. code-block:: python
 
    # Client: Object → Code
-   config_code = generate_config_code(config_obj)
+   config_code = generate_python_source(Assignment("config", config_obj))
    # Result: "config = GlobalPipelineConfig(num_workers=4, ...)"
    
    # Server: Code → Object
