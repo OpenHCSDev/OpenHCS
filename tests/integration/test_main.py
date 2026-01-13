@@ -434,7 +434,8 @@ def _initialize_orchestrator(test_config: TestConfig, sequential_config=None) ->
 
 def _export_pipeline_to_file(pipeline: Pipeline, plate_dir: Path) -> None:
     """Export pipeline to Python file in the plate directory using the same code as the Code button."""
-    from openhcs.debug.pickle_to_python import generate_complete_pipeline_steps_code
+    import openhcs.serialization.uneval_formatters  # noqa: F401
+    from uneval import Assignment, generate_python_source
     from datetime import datetime
 
     # Create output path in the plate directory
@@ -442,9 +443,10 @@ def _export_pipeline_to_file(pipeline: Pipeline, plate_dir: Path) -> None:
 
     # Generate code using the same function as the pipeline editor Code button
     # This ensures consistency between UI and test exports
-    python_code = generate_complete_pipeline_steps_code(
-        pipeline_steps=pipeline.steps,
-        clean_mode=True
+    python_code = generate_python_source(
+        Assignment("pipeline_steps", pipeline.steps),
+        header="# Edit this pipeline and save to apply changes",
+        clean_mode=True,
     )
 
     # Wrap in a complete script with header and main block
@@ -709,7 +711,7 @@ def _test_main_with_code_serialization(plate_dir: Union[Path, str, int], backend
     """
     DISABLED: Code serialization test (not run as pytest test).
 
-    This function tests pickle_to_python for code-based object serialization,
+    This function tests the code serializer for code-based object serialization,
     but is disabled because:
     1. It's redundant with test_main (which tests the actual integration)
     2. Code serialization is already tested in the PyQt UI
@@ -718,7 +720,7 @@ def _test_main_with_code_serialization(plate_dir: Union[Path, str, int], backend
     The function is kept for reference but prefixed with _ to exclude from pytest.
 
     Original purpose:
-    - Test using pickle_to_python for code-based object serialization
+    - Test using the serializer for code-based object serialization
     - Mirror the UI's approach: create objects → convert to code → exec → use
     - Prove code-based serialization works for remote execution
     """
@@ -752,22 +754,32 @@ def _test_main_with_code_serialization(plate_dir: Union[Path, str, int], backend
     print(f"   - PipelineConfig: {type(pipeline_config).__name__}")
     print(f"   - Pipeline: {len(pipeline.steps)} steps")
 
-    # Step 2: Convert to Python code using pickle_to_python
-    from openhcs.debug.pickle_to_python import (
-        generate_config_code,
-        generate_complete_pipeline_steps_code
-    )
+    # Step 2: Convert to Python code using the serializer
+    import openhcs.serialization.uneval_formatters  # noqa: F401
+    from uneval import Assignment, generate_python_source
 
     print("\n🔄 Step 2: Converting objects to Python code...")
 
     # Generate code for GlobalPipelineConfig
-    global_config_code = generate_config_code(global_config, GlobalPipelineConfig, clean_mode=True)
+    global_config_code = generate_python_source(
+        Assignment("config", global_config),
+        header="# Configuration Code",
+        clean_mode=True,
+    )
 
     # Generate code for PipelineConfig
-    pipeline_config_code = generate_config_code(pipeline_config, PipelineConfig, clean_mode=True)
+    pipeline_config_code = generate_python_source(
+        Assignment("config", pipeline_config),
+        header="# Configuration Code",
+        clean_mode=True,
+    )
 
     # Generate code for Pipeline steps
-    pipeline_steps_code = generate_complete_pipeline_steps_code(pipeline.steps, clean_mode=True)
+    pipeline_steps_code = generate_python_source(
+        Assignment("pipeline_steps", pipeline.steps),
+        header="# Edit this pipeline and save to apply changes",
+        clean_mode=True,
+    )
 
     print(f"   - GlobalPipelineConfig code: {len(global_config_code)} chars")
     print(f"   - PipelineConfig code: {len(pipeline_config_code)} chars")
@@ -850,6 +862,3 @@ def _test_main_with_code_serialization(plate_dir: Union[Path, str, int], backend
     print(f"\n{CONSTANTS.SUCCESS_INDICATOR} [CODE SERIALIZATION TEST] ({len(results)} wells processed)")
     print("✅ Code-based serialization works perfectly!")
     print("   This proves we can use Python code instead of pickling for remote execution.")
-
-
-

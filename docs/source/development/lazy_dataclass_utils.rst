@@ -170,7 +170,7 @@ The code editor form updater uses patched constructors to preserve None values. 
 - **Raw None** (via ``object.__getattribute__``): Field inherits from parent config (show placeholder)
 - **Raw concrete value**: Field explicitly set (show actual value)
 
-This is the same pattern used in ``pickle_to_python`` code generation.
+This is the same pattern used in the uneval-based code serializer.
 
 Shared Constructor Patching
 ----------------------------
@@ -361,4 +361,3 @@ Selective Patching
         finally:
             for lazy_type in types_to_patch:
                 lazy_type.__init__ = original_inits[lazy_type]
-

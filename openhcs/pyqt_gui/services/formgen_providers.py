@@ -21,6 +21,7 @@ from pyqt_formgen.protocols import (
     register_component_selection_provider,
     register_function_selection_provider,
 )
+import openhcs.serialization.uneval_formatters  # noqa: F401
 
 
 @dataclass
@@ -36,37 +37,73 @@ class OpenHCSFormGenConfig(FormGenConfig):
 
 
 class OpenHCSCodegenProvider:
-    """Codegen provider backed by openhcs.debug.pickle_to_python."""
+    """Codegen provider backed by uneval with OpenHCS formatters."""
 
     def generate_complete_orchestrator_code(self, plate_paths, pipeline_data, global_config=None,
                                             per_plate_configs=None, pipeline_config=None, clean_mode=True) -> str:
-        from openhcs.debug.pickle_to_python import generate_complete_orchestrator_code
-        return generate_complete_orchestrator_code(
-            plate_paths=plate_paths,
-            pipeline_data=pipeline_data,
-            global_config=global_config,
-            pipeline_config=pipeline_config,
-            per_plate_configs=per_plate_configs,
+        from openhcs.core.config import PipelineConfig
+        from uneval import Assignment, BlankLine, CodeBlock, generate_python_source
+
+        code_items = [
+            Assignment("plate_paths", plate_paths),
+            BlankLine(),
+            Assignment("global_config", global_config),
+            BlankLine(),
+        ]
+
+        if per_plate_configs:
+            code_items.append(Assignment("per_plate_configs", per_plate_configs))
+            code_items.append(BlankLine())
+        elif pipeline_config is not None:
+            code_items.append(Assignment("pipeline_config", pipeline_config))
+            code_items.append(BlankLine())
+        else:
+            code_items.append(Assignment("pipeline_config", PipelineConfig()))
+            code_items.append(BlankLine())
+
+        code_items.append(Assignment("pipeline_data", pipeline_data))
+
+        return generate_python_source(
+            CodeBlock.from_items(code_items),
+            header="# Edit this orchestrator configuration and save to apply changes",
             clean_mode=clean_mode,
         )
 
     def generate_complete_pipeline_steps_code(self, pipeline_steps, clean_mode=True) -> str:
-        from openhcs.debug.pickle_to_python import generate_complete_pipeline_steps_code
-        return generate_complete_pipeline_steps_code(pipeline_steps, clean_mode=clean_mode)
+        from uneval import Assignment, generate_python_source
+
+        return generate_python_source(
+            Assignment("pipeline_steps", pipeline_steps),
+            header="# Edit this pipeline and save to apply changes",
+            clean_mode=clean_mode,
+        )
 
     def generate_complete_function_pattern_code(self, func_obj, clean_mode=False) -> str:
-        from openhcs.debug.pickle_to_python import generate_complete_function_pattern_code
-        return generate_complete_function_pattern_code(func_obj, clean_mode=clean_mode)
+        from uneval import Assignment, generate_python_source
+
+        return generate_python_source(
+            Assignment("pattern", func_obj),
+            header="# Edit this function pattern and save to apply changes",
+            clean_mode=clean_mode,
+        )
 
     def generate_step_code(self, step_obj, clean_mode=True) -> str:
-        from openhcs.debug.pickle_to_python import generate_step_code
-        return generate_step_code(step_obj, clean_mode=clean_mode)
+        from uneval import Assignment, generate_python_source
+
+        return generate_python_source(
+            Assignment("step", step_obj),
+            header="# Function Step",
+            clean_mode=clean_mode,
+        )
 
     def generate_config_code(self, config_obj, clean_mode=True, config_class: Optional[type] = None) -> str:
-        from openhcs.debug.pickle_to_python import generate_config_code
-        if config_class is None:
-            config_class = type(config_obj)
-        return generate_config_code(config_obj, config_class, clean_mode=clean_mode)
+        from uneval import Assignment, generate_python_source
+
+        return generate_python_source(
+            Assignment("config", config_obj),
+            header="# Configuration Code",
+            clean_mode=clean_mode,
+        )
 
 
 class OpenHCSFunctionRegistry:

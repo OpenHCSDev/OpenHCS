@@ -36,7 +36,8 @@ from openhcs.config_framework.object_state import ObjectState, ObjectStateRegist
 from openhcs.config_framework.collection_containers import RootState
 from openhcs.core.config_cache import _sync_save_config
 from openhcs.core.xdg_paths import get_config_file_path
-from openhcs.debug.pickle_to_python import generate_complete_orchestrator_code
+import openhcs.serialization.uneval_formatters  # noqa: F401
+from uneval import Assignment, BlankLine, CodeBlock, generate_python_source
 from openhcs.processing.backends.analysis.consolidate_analysis_results import consolidate_multi_plate_summaries
 from pyqt_formgen.theming import ColorScheme
 from openhcs.pyqt_gui.windows.config_window import ConfigWindow
@@ -844,12 +845,28 @@ class PlateManagerWidget(AbstractManagerWidget):
                 if orchestrator:
                     per_plate_configs[plate_path] = orchestrator.pipeline_config
 
-            python_code = generate_complete_orchestrator_code(
-                plate_paths=plate_paths,
-                pipeline_data=pipeline_data,
-                global_config=self.global_config,
-                per_plate_configs=per_plate_configs or None,
-                clean_mode=True
+            pipeline_config = None
+            code_items = [
+                Assignment("plate_paths", plate_paths),
+                BlankLine(),
+                Assignment("global_config", self.global_config),
+                BlankLine(),
+            ]
+
+            if per_plate_configs:
+                code_items.append(Assignment("per_plate_configs", per_plate_configs))
+                code_items.append(BlankLine())
+            else:
+                pipeline_config = PipelineConfig()
+                code_items.append(Assignment("pipeline_config", pipeline_config))
+                code_items.append(BlankLine())
+
+            code_items.append(Assignment("pipeline_data", pipeline_data))
+
+            python_code = generate_python_source(
+                CodeBlock.from_items(code_items),
+                header="# Edit this orchestrator configuration and save to apply changes",
+                clean_mode=True,
             )
 
             editor_service = SimpleCodeEditorService(self)
@@ -857,7 +874,8 @@ class PlateManagerWidget(AbstractManagerWidget):
             code_data = {
                 'clean_mode': True, 'plate_paths': plate_paths,
                 'pipeline_data': pipeline_data, 'global_config': self.global_config,
-                'per_plate_configs': per_plate_configs
+                'per_plate_configs': per_plate_configs,
+                'pipeline_config': pipeline_config,
             }
             editor_service.edit_code(
                 initial_content=python_code, title="Edit Orchestrator Configuration",

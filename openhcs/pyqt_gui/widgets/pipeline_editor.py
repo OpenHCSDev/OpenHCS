@@ -40,7 +40,8 @@ from pyqt_formgen.widgets.shared.list_item_delegate import MultilinePreviewItemD
 from pyqt_formgen.widgets.editors.simple_code_editor import SimpleCodeEditorService
 from openhcs.config_framework.lazy_factory import PREVIEW_LABEL_REGISTRY
 from openhcs.core.config import ProcessingConfig
-from openhcs.debug.pickle_to_python import generate_complete_pipeline_steps_code
+import openhcs.serialization.uneval_formatters  # noqa: F401
+from uneval import Assignment, generate_python_source
 from openhcs.io.pipeline_migration import (
     patch_step_constructors_for_migration,
     load_pipeline_with_migration,
@@ -571,9 +572,10 @@ class PipelineEditorWidget(AbstractManagerWidget):
 
         try:
             # Generate complete pipeline steps code with imports
-            python_code = generate_complete_pipeline_steps_code(
-                pipeline_steps=list(self.pipeline_steps),
-                clean_mode=True
+            python_code = generate_python_source(
+                Assignment("pipeline_steps", list(self.pipeline_steps)),
+                header="# Edit this pipeline and save to apply changes",
+                clean_mode=True,
             )
 
             # Create simple code editor service

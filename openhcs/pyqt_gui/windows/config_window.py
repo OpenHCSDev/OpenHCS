@@ -37,7 +37,8 @@ from openhcs.config_framework.global_config import (
     set_live_global_config,
     set_global_config_for_editing,
 )
-from openhcs.debug.pickle_to_python import generate_config_code
+import openhcs.serialization.uneval_formatters  # noqa: F401
+from uneval import Assignment, generate_python_source
 from openhcs.ui.shared.code_editor_form_updater import CodeEditorFormUpdater
 from openhcs.config_framework.object_state import ObjectState, ObjectStateRegistry
 # ❌ REMOVED: require_config_context decorator - enhanced decorator events system handles context automatically
@@ -517,7 +518,11 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
             current_config = self.state.to_object()
 
             # Generate code using existing function
-            python_code = generate_config_code(current_config, self.config_class, clean_mode=True)
+            python_code = generate_python_source(
+                Assignment("config", current_config),
+                header="# Configuration Code",
+                clean_mode=True,
+            )
 
             # Launch editor
             editor_service = SimpleCodeEditorService(self)
