@@ -20,3 +20,6 @@
 [submodule "external/uneval"]
 	path = external/uneval
 	url = https://github.com/OpenHCSDev/uneval.git
+[submodule "external/PolyStore"]
+	path = external/PolyStore
+	url = https://github.com/OpenHCSDev/PolyStore.git
