@@ -24,13 +24,6 @@ os.environ.setdefault("POLYSTORE_ZMQ_IPC_EXT", ".sock")
 os.environ.setdefault("POLYSTORE_ZMQ_CONTROL_OFFSET", "1000")
 os.environ.setdefault("POLYSTORE_ZMQ_DEFAULT_PORT", "7777")
 os.environ.setdefault("POLYSTORE_ZMQ_ACK_PORT", "7555")
-os.environ.setdefault("POLYSTORE_LEGACY_ATTR_PREFIXES", "openhcs")
-os.environ.setdefault("POLYSTORE_PLATE_NAME", "OpenHCS_Plate")
-os.environ.setdefault("POLYSTORE_OMERO_DESCRIPTION", "Processed by OpenHCS")
-os.environ.setdefault(
-    "POLYSTORE_OMERO_WELL_DESCRIPTION_TEMPLATE",
-    "OpenHCS processed image for well {well_id}, site {site}",
-)
 if os.getenv("OPENHCS_SUBPROCESS_NO_GPU") == "1":
     os.environ.setdefault("POLYSTORE_SUBPROCESS_NO_GPU", "1")
 
