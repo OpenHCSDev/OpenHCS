@@ -43,4 +43,180 @@ Based on our theoretical results:
 \item \textbf{Invest in heuristics:} For general problems, develop domain-specific heuristics rather than seeking optimal solutions.
 \end{enumerate}
 
+\subsection{Hardness Distribution: Right Place vs Wrong Place}\label{sec:hardness-distribution}
+
+A fundamental principle emerges from the complexity results: problem hardness is conserved but can be \emph{distributed} across a system in qualitatively different ways.
+
+\begin{definition}[Hardness Distribution]\label{def:hardness-distribution}
+Let $P$ be a problem with intrinsic hardness $H(P)$ (measured in computational steps, implementation effort, or error probability). A \emph{solution architecture} $S$ partitions this hardness into:
+\begin{itemize}
+\item $H_{\text{central}}(S)$: hardness paid once, at design time or in a shared component
+\item $H_{\text{distributed}}(S)$: hardness paid per use site
+\end{itemize}
+For $n$ use sites, total realized hardness is:
+\[H_{\text{total}}(S) = H_{\text{central}}(S) + n \cdot H_{\text{distributed}}(S)\]
+\end{definition}
+
+\begin{theorem}[Hardness Conservation]\label{thm:hardness-conservation}
+For any problem $P$ with intrinsic hardness $H(P)$, any solution $S$ satisfies:
+\[H_{\text{central}}(S) + H_{\text{distributed}}(S) \geq H(P)\]
+Hardness cannot be eliminated, only redistributed.
+\end{theorem}
+
+\begin{proof}
+By definition of intrinsic hardness: any correct solution must perform at least $H(P)$ units of work (computational, cognitive, or error-handling). This work is either centralized or distributed. \qed
+\end{proof}
+
+\begin{definition}[Hardness Efficiency]\label{def:hardness-efficiency}
+The \emph{hardness efficiency} of solution $S$ with $n$ use sites is:
+\[\eta(S, n) = \frac{H_{\text{central}}(S)}{H_{\text{central}}(S) + n \cdot H_{\text{distributed}}(S)}\]
+\end{definition}
+
+High $\eta$ indicates centralized hardness (paid once); low $\eta$ indicates distributed hardness (paid repeatedly).
+
+\begin{theorem}[Centralization Dominance]\label{thm:centralization-dominance}
+For $n > 1$ use sites, solutions with higher $H_{\text{central}}$ and lower $H_{\text{distributed}}$ yield:
+\begin{enumerate}
+\item Lower total realized hardness: $H_{\text{total}}(S_1) < H_{\text{total}}(S_2)$ when $H_{\text{distributed}}(S_1) < H_{\text{distributed}}(S_2)$
+\item Fewer error sites: errors in centralized components affect 1 location; errors in distributed components affect $n$ locations
+\item Higher leverage (Paper 3): one unit of central effort affects $n$ sites
+\end{enumerate}
+\end{theorem}
+
+\begin{proof}
+(1) follows from the total hardness formula. (2) follows from error site counting. (3) follows from Paper 3's leverage definition $L = \Delta\text{Effect}/\Delta\text{Effort}$. \qed
+\end{proof}
+
+\begin{corollary}[Right Hardness vs Wrong Hardness]\label{cor:right-wrong-hardness}
+A solution exhibits \emph{hardness in the right place} when:
+\begin{itemize}
+\item Hardness is centralized (high $H_{\text{central}}$, low $H_{\text{distributed}}$)
+\item Hardness is paid at design/compile time rather than runtime
+\item Hardness is enforced by tooling (type checker, compiler) rather than convention
+\end{itemize}
+A solution exhibits \emph{hardness in the wrong place} when:
+\begin{itemize}
+\item Hardness is distributed (low $H_{\text{central}}$, high $H_{\text{distributed}}$)
+\item Hardness is paid repeatedly at each use site
+\item Hardness relies on human discipline rather than mechanical enforcement
+\end{itemize}
+\end{corollary}
+
+\textbf{Example: Type System Instantiation.} Consider a capability $C$ (e.g., provenance tracking) that requires hardness $H(C)$:
+
+\begin{center}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Approach} & $H_{\text{central}}$ & $H_{\text{distributed}}$ \\
+\midrule
+Native type system support & High (learning cost) & Low (type checker enforces) \\
+Manual implementation & Low (no new concepts) & High (reimplement per site) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+For $n$ use sites, manual implementation costs $n \cdot H_{\text{distributed}}$, growing without bound. Native support costs $H_{\text{central}}$ once, amortized across all uses. The ``simpler'' approach (manual) is only simpler at $n = 1$; for $n > H_{\text{central}}/H_{\text{distributed}}$, native support dominates.
+
+\begin{remark}[Connection to Decision Quotient]
+The decision quotient (Section~\ref{sec:foundations}) measures which coordinates are decision-relevant. Hardness distribution measures where the cost of \emph{handling} those coordinates is paid. A high-axis system makes relevance explicit (central hardness); a low-axis system requires users to track relevance themselves (distributed hardness).
+\end{remark}
+
+\subsection{The Simplicity Tax Theorem}\label{sec:simplicity-tax}
+
+A common intuition holds that ``simpler is better.'' This section proves that intuition is context-dependent: using a simple tool for a complex problem is \emph{necessarily harder} than using a tool matched to the problem's complexity.
+
+\begin{definition}[Problem and Tool]\label{def:problem-tool}
+A \emph{problem} $P$ has a set of \emph{required axes} $R(P)$---the dimensions of variation that must be represented. A \emph{tool} $T$ has a set of \emph{native axes} $A(T)$---what it can represent directly.
+\end{definition}
+
+This terminology is grounded in Papers 1--2: ``axes'' correspond to Paper 1's axis framework (\texttt{requiredAxesOf}) and Paper 2's degrees of freedom.
+
+\begin{definition}[Expressive Gap]\label{def:expressive-gap}
+The \emph{expressive gap} between tool $T$ and problem $P$ is:
+\[\text{Gap}(T, P) = R(P) \setminus A(T)\]
+The \emph{simplicity tax} is $|\text{Gap}(T, P)|$: the number of axes the tool cannot handle natively.
+\end{definition}
+
+\begin{definition}[Complete vs. Incomplete Tools]\label{def:complete-incomplete}
+Tool $T$ is \emph{complete} for problem $P$ if $R(P) \subseteq A(T)$. Otherwise $T$ is \emph{incomplete} for $P$.
+\end{definition}
+
+\begin{theorem}[Complete Tools Pay No Tax]\label{thm:complete-no-tax}
+If $T$ is complete for $P$, then $\text{SimplicityTax}(T, P) = 0$.
+\end{theorem}
+
+\begin{proof}
+$R(P) \subseteq A(T)$ implies $R(P) \setminus A(T) = \emptyset$, so $|\text{Gap}| = 0$. \qed
+\end{proof}
+
+\begin{theorem}[Incomplete Tools Pay Positive Tax]\label{thm:incomplete-positive-tax}
+If $T$ is incomplete for $P$, then $\text{SimplicityTax}(T, P) > 0$.
+\end{theorem}
+
+\begin{proof}
+$\neg(R(P) \subseteq A(T))$ means $\exists a \in R(P)$ with $a \notin A(T)$, so $|R(P) \setminus A(T)| \geq 1$. \qed
+\end{proof}
+
+\begin{theorem}[Simplicity Tax is Non-Negotiable]\label{thm:tax-conservation}
+The gap axes \emph{must} be specified somewhere. For $n$ use sites:
+\[\text{TotalExternalWork}(T, P, n) = n \times \text{SimplicityTax}(T, P)\]
+This work cannot be eliminated---only redistributed (to users, configuration, runtime checks, etc.).
+\end{theorem}
+
+\begin{proof}
+Each gap axis represents information the tool cannot encode. This information must be supplied externally at each use site. By Paper 2's DOF theory, independent specifications cannot be derived from each other. \qed
+\end{proof}
+
+\begin{theorem}[Simplicity Tax Grows Linearly]\label{thm:tax-grows}
+For incomplete tools, total external work grows linearly with use sites:
+\[\forall n < m: \text{TotalExternalWork}(T, P, n) < \text{TotalExternalWork}(T, P, m)\]
+\end{theorem}
+
+\begin{theorem}[Complete Dominates Incomplete]\label{thm:complete-dominates}
+For any problem $P$ and tools $T_c$ (complete) and $T_i$ (incomplete), for all $n > 0$:
+\[\text{TotalExternalWork}(T_c, P, n) < \text{TotalExternalWork}(T_i, P, n)\]
+\end{theorem}
+
+\begin{proof}
+Complete: $0 \times n = 0$. Incomplete: $k \times n$ for $k \geq 1$. Thus $0 < k \times n$ for $n > 0$. \qed
+\end{proof}
+
+\begin{corollary}[The Simplicity Preference Fallacy]\label{cor:simplicity-fallacy}
+``I prefer simpler tools'' is coherent only when the problem is also simple. When problem complexity exceeds tool expressiveness, preferring ``simplicity'' means preferring to pay the simplicity tax at every use site.
+
+The ``simpler'' tool is only simpler if you ignore the external work it creates.
+\end{corollary}
+
+\textbf{Example.} Consider a capability requiring 3 independent axes $\{A_1, A_2, A_3\}$:
+\begin{center}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Tool} & \textbf{Native Axes} & \textbf{Tax/Site} & \textbf{Total for $n=100$} \\
+\midrule
+Native support & $\{A_1, A_2, A_3\}$ & 0 & 0 \\
+Partial support & $\{A_1\}$ & 2 & 200 \\
+No support & $\emptyset$ & 3 & 300 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The ``simplest'' tool (no native support) creates the most total work. Simplicity becomes a liability when mismatched to problem complexity.
+
+\subsection{Lean 4 Formalization}\label{sec:simplicity-lean}
+
+The simplicity tax theorems are machine-checked in \texttt{DecisionQuotient/HardnessDistribution.lean}:
+
+\begin{itemize}
+\item \texttt{Problem}: structure with \texttt{requiredAxes : Finset $\mathbb{N}$}
+\item \texttt{Tool}: structure with \texttt{nativeAxes : Finset $\mathbb{N}$}
+\item \texttt{expressiveGap}: $P.\text{requiredAxes} \setminus T.\text{nativeAxes}$
+\item \texttt{simplicityTax}: $|\text{expressiveGap}|$
+\item \texttt{complete\_tool\_no\_tax}: complete $\Rightarrow$ tax $= 0$
+\item \texttt{incomplete\_tool\_positive\_tax}: incomplete $\Rightarrow$ tax $> 0$
+\item \texttt{simplicityTax\_grows}: tax grows linearly with $n$
+\item \texttt{complete\_dominates\_incomplete}: complete tools dominate
+\item \texttt{simplicity\_preference\_fallacy}: the main theorem
+\end{itemize}
+
+All theorems compile with zero \texttt{sorry} placeholders. The formalization uses \texttt{Finset} for axes, making the tax a computable $\mathbb{N}$.
 
