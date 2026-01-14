@@ -760,7 +760,7 @@ class PipelineEditorWidget(ButtonListWidget):
                         if "unexpected keyword argument" in error_msg and ("group_by" in error_msg or "variable_components" in error_msg):
                             logger.info(f"Detected old-format step constructor, retrying with migration patch: {e}")
                             namespace = {}
-                            from polystore.pipeline_migration import patch_step_constructors_for_migration
+                            from openhcs.utils.pipeline_migration import patch_step_constructors_for_migration
                             with patch_step_constructors_for_migration():
                                 exec(edited_code, namespace)
                         else:

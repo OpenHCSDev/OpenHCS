@@ -42,7 +42,7 @@ from openhcs.config_framework.lazy_factory import PREVIEW_LABEL_REGISTRY
 from openhcs.core.config import ProcessingConfig
 import openhcs.serialization.uneval_formatters  # noqa: F401
 from uneval import Assignment, generate_python_source
-from polystore.pipeline_migration import (
+from openhcs.utils.pipeline_migration import (
     patch_step_constructors_for_migration,
     load_pipeline_with_migration,
 )

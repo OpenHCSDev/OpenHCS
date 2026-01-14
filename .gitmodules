@@ -26,7 +26,7 @@
 	path = external/uneval
 	url = https://github.com/OpenHCSDev/uneval.git
 	branch = main
-[submodule "external/polystore"]
-	path = external/polystore
-	url = https://github.com/OpenHCSDev/polystore.git
+[submodule "external/PolyStore"]
+	path = external/PolyStore
+	url = https://github.com/OpenHCSDev/PolyStore.git
 	branch = main
