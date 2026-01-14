@@ -39,7 +39,7 @@ This follows the tradition of verified complexity theory: just as Nipkow \& Klei
 
 \subsection{Module Structure}
 
-The formalization consists of 25 files organized as follows:
+The formalization consists of 26 files organized as follows:
 
 \begin{itemize}
 \item \texttt{Basic.lean} -- Core definitions (DecisionProblem, CoordinateSet, Projection)
@@ -50,6 +50,7 @@ The formalization consists of 25 files organized as follows:
 \item \texttt{Tractability/} -- Bounded actions, separable utilities, tree structure, FPT
 \item \texttt{Economics/} -- Value of information and elicitation connections
 \item \texttt{Dichotomy.lean} and \texttt{ComplexityMain.lean} -- Summary results
+\item \texttt{HardnessDistribution.lean} -- Simplicity Tax Theorem (Section~\ref{sec:simplicity-tax})
 \end{itemize}
 
 \subsection{Key Theorems}
@@ -65,11 +66,33 @@ theorem PolyReduction.comp_exists
       forall a, h.reduce a = g.reduce (f.reduce a)
 \end{verbatim}
 
+\begin{theorem}[Simplicity Tax Conservation, Lean]\label{thm:tax-conservation-lean}
+The simplicity tax plus covered axes equals required axes (partition).
+\end{theorem}
+
+\begin{verbatim}
+theorem simplicityTax_conservation :
+    simplicityTax P T + (P.requiredAxes inter T.nativeAxes).card
+      = P.requiredAxes.card
+\end{verbatim}
+
+\begin{theorem}[Simplicity Preference Fallacy, Lean]\label{thm:fallacy-lean}
+Incomplete tools always cost more than complete tools for $n > 0$ use sites.
+\end{theorem}
+
+\begin{verbatim}
+theorem simplicity_preference_fallacy (T_simple T_complex : Tool)
+    (h_simple_incomplete : isIncomplete P T_simple)
+    (h_complex_complete : isComplete P T_complex)
+    (n : Nat) (hn : n > 0) :
+    totalExternalWork P T_complex n < totalExternalWork P T_simple n
+\end{verbatim}
+
 \subsection{Verification Status}
 
 \begin{itemize}
-\item Total lines: 3,400+
-\item Theorems: $\sim$60
-\item Files: 25
-\item Status: All proofs in this directory compile with no \texttt{sorry}
+\item Total lines: 3,600+
+\item Theorems: $\sim$70
+\item Files: 26
+\item Status: All proofs compile with no \texttt{sorry}
 \end{itemize}

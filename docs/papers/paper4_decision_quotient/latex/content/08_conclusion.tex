@@ -82,6 +82,20 @@ The theorems proven here are \emph{ceiling results}---no stronger claims are pos
 
 These results close the complexity landscape for coordinate sufficiency. Within classical complexity theory, the characterization is complete.
 
+\subsection*{The Simplicity Tax: A Major Practical Consequence}
+
+A widespread belief holds that ``simpler is better''---that preferring simple tools and minimal models is a mark of sophistication. This paper proves that belief is context-dependent and often wrong.
+
+The \emph{Simplicity Tax Theorem} (Section~\ref{sec:simplicity-tax}) establishes: when a problem requires $k$ axes of variation and a tool natively supports only $j < k$ of them, the remaining $k - j$ axes must be handled externally at \emph{every use site}. For $n$ use sites, the ``simpler'' tool creates $(k-j) \times n$ units of external work. A tool matched to the problem's complexity creates zero external work.
+
+\begin{quote}
+\textbf{True sophistication is matching tool complexity to problem complexity.}
+\end{quote}
+
+Preferring ``simple'' tools for complex problems is not wisdom---it is a failure to account for distributed costs. The simplicity tax is paid invisibly, at every use site, by every user, forever. The sophisticated engineer asks not ``which tool is simpler?'' but ``which tool matches my problem's intrinsic complexity?''
+
+This result is machine-checked in Lean 4 (\texttt{HardnessDistribution.lean}). The formalization proves conservation (you can't eliminate the tax, only redistribute it), dominance (complete tools always beat incomplete tools), and the amortization threshold (beyond which the ``complex'' tool is strictly cheaper).
+
 \subsection*{The Foundational Contribution}
 
 This paper proves a universal constraint on optimization under uncertainty. The constraint is:
@@ -92,6 +106,8 @@ This paper proves a universal constraint on optimization under uncertainty. The 
 \end{itemize}
 
 The result explains phenomena across disciplines: why feature selection uses heuristics, why configuration files grow, why sensitivity analysis is approximate, why model selection is art rather than science. These are not separate problems with separate explanations. They are manifestations of a single computational constraint, now formally characterized.
+
+The Simplicity Tax Theorem adds a practical corollary: the universal response to intractability (over-modeling) is not just rational---attempting to avoid it by using ``simpler'' tools is actively counterproductive. Simplicity that mismatches problem complexity creates more work, not less.
 
 Open questions remain (fixed-parameter tractability, quantum complexity, average-case behavior under natural distributions), but the foundational question---\emph{is identifying relevance fundamentally hard?}---is answered: yes.
 
