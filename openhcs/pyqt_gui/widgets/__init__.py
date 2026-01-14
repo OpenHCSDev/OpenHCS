@@ -9,7 +9,7 @@ from pyqt_formgen.widgets.system_monitor import SystemMonitorWidget
 from openhcs.pyqt_gui.widgets.plate_manager import PlateManagerWidget
 from openhcs.pyqt_gui.widgets.pipeline_editor import PipelineEditorWidget
 from pyqt_formgen.widgets.function_pane import FunctionPaneWidget
-from openhcs.pyqt_gui.widgets.status_bar import StatusBarWidget
+from pyqt_formgen.widgets.status_bar import StatusBarWidget
 
 __all__ = [
     "SystemMonitorWidget",

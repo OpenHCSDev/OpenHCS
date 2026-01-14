@@ -51,7 +51,7 @@ from openhcs.config_framework.object_state import ObjectStateRegistry
 from pyqt_formgen.services.window_manager import WindowManager
 
 # Import ScopedBorderMixin directly from module, avoiding widgets/__init__.py (circular import)
-import openhcs.pyqt_gui.widgets.shared.scoped_border_mixin as _scoped_border_module
+import pyqt_formgen.widgets.shared.scoped_border_mixin as _scoped_border_module
 ScopedBorderMixin = _scoped_border_module.ScopedBorderMixin
 
 logger = logging.getLogger(__name__)

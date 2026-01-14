@@ -270,13 +270,12 @@ class OpenHCSComponentSelectionProvider:
 
     def select_components(self, available_components: Iterable[str], selected_components: Iterable[str],
                           group_by: Any, parent: Optional[Any] = None, **context: Any) -> Optional[List[str]]:
-        from openhcs.pyqt_gui.dialogs.group_by_selector_dialog import GroupBySelectorDialog
-        orchestrator = self._get_current_orchestrator()
+        from pyqt_formgen.dialogs.group_by_selector_dialog import GroupBySelectorDialog
         return GroupBySelectorDialog.select_components(
             available_components=list(available_components),
             selected_components=list(selected_components),
             group_by=group_by,
-            orchestrator=orchestrator,
+            metadata_lookup=self.get_component_display_name,
             parent=parent,
         )
 

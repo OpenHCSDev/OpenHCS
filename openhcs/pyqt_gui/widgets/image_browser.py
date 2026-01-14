@@ -23,8 +23,8 @@ from polystore.filemanager import FileManager
 from polystore.base import storage_registry
 from pyqt_formgen.theming import ColorScheme
 from pyqt_formgen.theming import StyleSheetGenerator
-from openhcs.pyqt_gui.widgets.shared.column_filter_widget import MultiColumnFilterPanel
-from openhcs.pyqt_gui.widgets.shared.image_table_browser import ImageTableBrowser
+from pyqt_formgen.widgets.shared.column_filter_widget import MultiColumnFilterPanel
+from pyqt_formgen.widgets.shared.image_table_browser import ImageTableBrowser
 from openhcs.config_framework.object_state import ObjectState, ObjectStateRegistry
 from openhcs.core.config import LazyNapariStreamingConfig, LazyFijiStreamingConfig
 logger = logging.getLogger(__name__)
