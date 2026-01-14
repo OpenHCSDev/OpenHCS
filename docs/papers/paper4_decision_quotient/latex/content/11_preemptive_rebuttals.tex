@@ -88,3 +88,47 @@ In practice, the dichotomy captures the relevant cases: either the problem has l
 
 Knowing that optimal selection is coNP-complete frees practitioners to use heuristics without guilt. This is actionable guidance.
 
+\subsection{Objection 9: ``But simple tools are easier to learn''}
+
+\textbf{Objection:} ``The Simplicity Tax analysis ignores learning costs. Simple tools have lower barrier to entry, which matters for team adoption.''
+
+\textbf{Response:} This objection conflates $H_{\text{central}}$ (learning cost) with total cost. Yes, simple tools have lower learning cost. But for $n$ use sites, the total cost is:
+\[H_{\text{total}} = H_{\text{central}} + n \times H_{\text{distributed}}\]
+
+The learning cost is paid once; the per-site cost is paid $n$ times. For $n > H_{\text{central}} / H_{\text{distributed}}$, the ``complex'' tool with higher learning cost has lower total cost.
+
+The objection is actually an argument for training, not for tool avoidance. If the learning cost is the barrier, pay it---the amortization makes it worthwhile.
+
+\subsection{Objection 10: ``My team doesn't know metaclasses/types/frameworks''}
+
+\textbf{Objection:} ``In practice, teams use what they know. Advocating for 'complex' tools ignores organizational reality.''
+
+\textbf{Response:} The Simplicity Tax is paid regardless of whether your team recognizes it. Ignorance of the tax does not exempt you from paying it.
+
+If your team writes boilerplate at 50 locations because they don't know metaclasses, they pay the tax---in time, bugs, and maintenance. The tax is real whether it appears on a ledger or not.
+
+Organizational reality is a constraint on \emph{implementation}, not on \emph{what is optimal}. The Simplicity Tax Theorem tells you the optimal; your job is to approach it within organizational constraints. ``We don't know X'' is a gap to close, not a virtue to preserve.
+
+\subsection{Objection 11: ``We can always refactor later''}
+
+\textbf{Objection:} ``Start simple, refactor when needed. Technical debt is manageable.''
+
+\textbf{Response:} Refactoring from distributed to centralized is $O(n)$ work---you are paying the accumulated Simplicity Tax all at once. If you have $n$ sites each paying tax $k$, refactoring costs at least $nk$ effort.
+
+``Refactor later'' is not free. It is deferred payment with interest. The Simplicity Tax accrues whether you pay it incrementally (per-site workarounds) or in bulk (refactoring).
+
+Moreover, distributed implementations create dependencies. Each workaround becomes a local assumption that must be preserved during refactoring. The refactoring cost is often \emph{superlinear} in $n$.
+
+\subsection{Objection 12: ``The Simplicity Tax assumes all axes are equally important''}
+
+\textbf{Objection:} ``Real problems have axes of varying importance. A tool that covers the important axes might be good enough.''
+
+\textbf{Response:} The theorem is conservative: it counts axes uniformly. Weighted versions strengthen the result.
+
+If axis $a$ has importance $w_a$, define weighted tax:
+\[\text{WeightedTax}(T, P) = \sum_{a \in R(P) \setminus A(T)} w_a\]
+
+Now the incomplete tool pays $\sum w_a \times n$ while the complete tool pays 0. The qualitative result is unchanged: incomplete tools pay per-site; complete tools do not.
+
+The ``cover important axes'' heuristic only works if you \emph{correctly identify} which axes are important. By Theorem~\ref{thm:sufficiency-conp}, this identification is coNP-complete. You are back to the original hardness result.
+
