@@ -571,8 +571,9 @@ with complete proofs (no \texttt{sorry} placeholders):
 
 \begin{verbatim}
 -- The two axes of a class system
--- NOTE: "Name" (N) is NOT an independent axis: it is derivable from B.
--- If a type has a name, it has B. The minimal model is (B, S).
+-- NOTE: "Name" (N) is NOT an independent axis: it is metadata stored in
+-- the namespace (S axis) as __name__. It contributes no typing capability.
+-- The minimal model is (B, S).
 inductive Axis where
   | Bases      -- B: inheritance hierarchy
   | Namespace  -- S: attribute declarations (shape)

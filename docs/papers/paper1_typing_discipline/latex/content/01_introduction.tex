@@ -121,7 +121,9 @@ This paper makes five contributions, ordered from most general to most specific:
 \begin{itemize}
 \item \textbf{Fixed Axis Incompleteness:} Any classification system with fixed axes is incomplete for some domain. This is information-theoretic: the data required to answer the domain's queries does not exist in the fixed axis set.
 \item \textbf{Uniqueness of Minimal Complete Sets:} All minimal complete axis sets for a domain have equal cardinality. Dimension is well-defined for classification problems.
-\item \textbf{Minimality $\Rightarrow$ Orthogonality:} Every minimal complete axis set is orthogonal. Redundant (non-orthogonal) systems are never minimal.
+\item \textbf{Minimality $\Rightarrow$ Orthogonality:} Every minimal complete axis set is orthogonal. Redundant (non-orthogonal) systems are never minimal. This is a \emph{theorem}, not an assumption.
+\item \textbf{Matroid Structure (Theorem 2.32):} Orthogonal axis sets satisfy the matroid exchange property. This gives basis equicardinality and makes dimension well-defined.
+\item \textbf{Semantic Non-Embeddability (Theorem 3.13a):} Disciplines with fewer axes cannot embed disciplines with more axes. Structural typing cannot simulate nominal typing---the information is simply absent.
 \item \textbf{Axis-Parametric Dominance:} Systems that derive axes from requirements strictly dominate fixed-axis systems. The gap is not a tradeoff; it is absolute.
 \end{itemize}
 These theorems apply to \emph{any} classification system: type systems, ontologies, taxonomies, schemas.
@@ -130,6 +132,7 @@ These theorems apply to \emph{any} classification system: type systems, ontologi
 \begin{itemize}
 \item \textbf{Theorem 3.32 (Model Completeness):} $(B, S)$ captures all runtime-available type information for class-based systems.
 \item \textbf{Theorem 3.13 (Provenance Impossibility):} No system excluding $B$ can compute provenance. This is information-theoretic impossibility.
+\item \textbf{Theorem 3.13a (Non-Embeddability):} Nominal typing cannot be embedded into structural typing. The information gap is absolute, not a matter of encoding.
 \item \textbf{Theorem 3.24 (Complexity Lower Bound):} Systems using only $\{S\}$ incoherently require $\Omega(n)$ error localization. Systems using $\{B, S\}$ achieve $O(1)$. The gap is unbounded.
 \item \textbf{Theorem 3.5:} Systems including $\{B, S\}$ strictly dominate systems using only $\{S\}$ when $B \neq \emptyset$. (In type system terminology: nominal typing dominates structural typing.)
 \end{itemize}
@@ -285,7 +288,7 @@ practice
 Before proceeding, we address objections readers are likely forming. Each is refuted in detail in Appendix~\ref{appendix:robustness}; here we summarize the key points.
 
 \paragraph{``The (B, S) model doesn't capture real type systems.''}
-The model is complete by construction. In Python, \texttt{type(name, bases, namespace)} is the universal type constructor---a type \emph{is} (B, S), not merely has it. Properties like \texttt{\_\_mro\_\_} and \texttt{\_\_module\_\_} are \emph{derived from} (B, S), not independent axes. This is definitional closure: no ``fourth axis'' can exist (Theorem~\ref{thm:model-completeness}, Appendix~\ref{appendix:detailed-concerns}).
+The model is complete by construction. In Python, \texttt{type(name, bases, namespace)} is the universal type constructor---a type \emph{is} (B, S), not merely has it. The syntactic name (\texttt{\_\_name\_\_}) is metadata stored in the namespace (S axis), not a separate axis. Properties like \texttt{\_\_mro\_\_} and \texttt{\_\_module\_\_} are \emph{derived from} (B, S), not independent axes. This is definitional closure: no third axis can exist (Theorem~\ref{thm:model-completeness}, Appendix~\ref{appendix:detailed-concerns}).
 
 \paragraph{``Duck typing is more flexible than nominal typing.''}
 No. Nominal typing provides a strict superset of duck typing capabilities. Duck typing's ``acceptance'' of structurally-equivalent types is not a capability---it is the \emph{absence} of the capability to distinguish them. ``Flexibility'' is the absence of discrimination, not the presence of power (Theorems 3.34--3.36, Appendix~\ref{appendix:detailed-concerns}).

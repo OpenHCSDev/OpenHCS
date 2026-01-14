@@ -349,6 +349,14 @@ present in its input. \qed
 provenance.'' It is ``NO model over \((S)\) can have provenance.''
 The impossibility is mathematical, not implementational.
 
+\textbf{Theorem 3.13a (Semantic Non-Embeddability).}\label{thm:non-embeddability} Nominal typing cannot be embedded into structural typing. Formally: there exists no function \(f : \mathcal{D}_{\{B,S\}} \to \mathcal{D}_{\{S\}}\) that preserves type query answers.
+
+\emph{Proof.} By Theorem 3.13, provenance is answerable in \(\mathcal{D}_{\{B,S\}}\) but not in \(\mathcal{D}_{\{S\}}\). Any embedding must preserve query answers. Since no function in \(\mathcal{D}_{\{S\}}\) computes provenance, no such embedding exists. \qed
+
+\textbf{Corollary 3.13b (Strict Information Gap).} The gap between nominal and structural typing is not a matter of convenience or expressiveness---it is an information-theoretic impossibility. Structural typing has strictly less information content than nominal typing. No encoding, simulation, or workaround can bridge this gap.
+
+This result generalizes: for any axis sets \(\mathcal{A}_1 \subset \mathcal{A}_2\), the discipline using \(\mathcal{A}_1\) cannot embed the discipline using \(\mathcal{A}_2\).
+
 \paragraph{3.8.2 The Derived Characterization
 Theorem}\label{the-derived-characterization-theorem}
 
@@ -728,6 +736,8 @@ of the model's coverage.
 captures all information constitutive of a type. Any computable function
 over types is expressible as a function of \((B, S)\).
 
+\textbf{Remark (Two Senses of Completeness).} ``Model completeness'' (this theorem) means \((B, S)\) captures all constitutive information of a type object. ``Axis set completeness for domain \(D\)'' (Definition 2.22) means the axis set can answer all queries in \(D\). These are distinct: \((B, S)\) is model-complete (captures all type information) but may be domain-incomplete (cannot answer queries requiring axes beyond \(B\) and \(S\), such as scope-chain queries requiring \(H\)).
+
 \emph{Proof.} The proof proceeds by constitutive definition, not empirical
 enumeration.
 
@@ -750,13 +760,13 @@ are not counterexamples: MRO is computed from \(B\) by C3 linearization;
 \emph{derived from} or \emph{contained in} \((B, S)\), not independent
 of it.
 
-This is a definitional closure: a critic cannot exhibit a ``fourth axis''
-because any proposed axis is either (a) stored in \(S\), (b) computable
-from \((B, S)\), or (c) not part of the type's semantic identity
+This is a definitional closure: a critic cannot exhibit a third axis
+because any proposed axis is either (a) stored in \(S\) (including \texttt{\_\_name\_\_}),
+(b) computable from \((B, S)\), or (c) not part of the type's semantic identity
 (e.g., memory address). \qed
 
 \textbf{Corollary 3.33 (No Hidden Information).} There exists no
-``fourth axis'' that shape-based typing could use to recover provenance.
+third axis that shape-based typing could use to recover provenance.
 The information is structurally absent, not because we failed to model
 it, but because types \emph{are} \((B, S)\) by construction.
 
@@ -1253,7 +1263,7 @@ not escape the \((B, S)\) model:
   traverses MRO.
 \end{itemize}
 
-No mainstream type system feature introduces a fourth axis orthogonal to
+No mainstream type system feature introduces a third axis orthogonal to
 \((B, S)\).
 
 \paragraph{3.11.7 Scope Expansion: From Greenfield to

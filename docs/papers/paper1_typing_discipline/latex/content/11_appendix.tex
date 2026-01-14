@@ -60,10 +60,11 @@ aspects of type systems.
 definition. In Python, \texttt{type(name, bases, namespace)} is the universal
 type constructor. A type does not merely \emph{have} $(B, S)$; a type
 \emph{is} $(B, S)$. Any computable function over types is therefore
-definitionally a function of this triple. Properties like \texttt{\_\_mro\_\_}
+definitionally a function of this pair. Properties like \texttt{\_\_mro\_\_}
 or \texttt{\_\_module\_\_} are not counterexamples: they are derived from or
-stored within $(B, S)$. This is definitional closure, not empirical
-enumeration. No ``fourth axis'' can exist because the triple is constitutive.
+stored within $(B, S)$. The syntactic name (\texttt{\_\_name\_\_}) is metadata
+stored in the namespace (S axis), not an independent axis. This is definitional
+closure, not empirical enumeration. No third axis can exist because the pair is constitutive.
 
 \paragraph{Concern 2: Duck Typing Tradeoffs.}
 \emph{Potential concern:} Duck typing has flexibility that nominal typing lacks.

@@ -122,8 +122,8 @@ of Python's class system is: - \textbf{bases}: inheritance relationships
 (\(\rightarrow\) MRO, nominal typing) - \textbf{namespace}: attributes
 and methods (\(\rightarrow\) behavior, structural typing)
 
-The \texttt{name} axis is orthogonal to both and carries no semantic
-weight.
+The \texttt{name} is metadata stored in the namespace (as \texttt{\_\_name\_\_}),
+not an independent axis. It carries no semantic weight for typing purposes.
 
 \textbf{Theorem 2.4 (Orthogonality of Semantic Axes).} The
 \texttt{bases} and \texttt{namespace} axes are orthogonal.
@@ -263,7 +263,7 @@ discipline.
 least} \(T\)'s interface. Full compatibility (\(=\)) requires exact
 match. Both are \(\{S\}\)-only disciplines; the capability gap (Theorem
 2.17) applies to both. The distinction is a refinement \emph{within} the
-S axis, not a fourth axis.
+S axis, not a third axis.
 
 \textbf{Definition 2.10a (Typing Discipline Completeness).} A typing
 discipline is \emph{complete} if it provides a well-defined,
@@ -799,7 +799,7 @@ C++ & \texttt{vector\textless{}T\textgreater{}} & Parameterized N:
 \texttt{(vector,\ {[}T{]})} & Template instantiation \\
 \end{longtable}
 
-\textbf{Key observation:} No major language invented a fourth axis for
+\textbf{Key observation:} No major language invented a third axis for
 generics. Generic type parameters extend the $(B, S)$ axes: type arguments become part of the namespace $S$ (determining available operations) and may influence $B$ (inheritance from parameterized parents). The $(B, S)$ model is \textbf{universal} across generic type systems.
 
 \subsection{The Axis Lattice
@@ -1030,6 +1030,8 @@ We now develop a general framework where axis sets are \emph{derived} from domai
 
 \textbf{Definition 2.22 (Completeness).} An axis set \(\mathcal{A}\) is \emph{complete} for domain \(D\) iff every query \(q \in D\) is answerable using only axes in \(\mathcal{A}\).
 
+\textbf{Remark 2.22a (Completeness is Domain-Relative).} Completeness is always relative to a domain. An axis set can be complete for domain \(D_1\) and incomplete for domain \(D_2\). For example, \((B, S)\) is complete for standard class semantics but incomplete for hierarchical configuration systems requiring scope chains. There is no ``absolutely complete'' axis set: for any fixed set \(\mathcal{A}\), there exists a domain requiring an axis not in \(\mathcal{A}\) (Theorem 2.28).
+
 \textbf{Definition 2.23 (Minimality).} An axis set \(\mathcal{A}\) is \emph{minimal} for domain \(D\) iff:
 \begin{enumerate}
 \item \(\mathcal{A}\) is complete for \(D\), and
@@ -1083,5 +1085,47 @@ The question ``nominal or structural?'' presupposes a choice exists. Theorem 2.2
 \end{enumerate}
 
 Section 3 establishes these results formally. The type system instantiation (``nominal vs structural'') is one application among many.
+
+\subsection{Matroid Structure and Axis Independence}\label{matroid-structure}
+
+The axis framework possesses deep combinatorial structure: \textbf{minimal complete axis sets form matroids}. This is not an assumption---it is a theorem, proven mechanically in Lean (see \texttt{axis\_framework.lean}).
+
+\paragraph{2.7.1 Core Results}\label{matroid-core-results}
+
+\textbf{Definition 2.30 (Axis Orthogonality).} Axes \(A_1, A_2\) are \emph{orthogonal} iff neither is derivable from the other: there exist queries answerable by \(A_1\) but not \(A_2\), and vice versa.
+
+\textbf{Theorem 2.31 (Minimality Implies Orthogonality).} If axis set \(\mathcal{A}\) is minimal complete for domain \(D\), then all axes in \(\mathcal{A}\) are pairwise orthogonal.
+
+\emph{Proof.} Suppose \(\mathcal{A}\) is minimal but contains non-orthogonal axes \(a, b\) where \(a\) is derivable from \(b\). Then \(\mathcal{A} \setminus \{a\}\) remains complete (any query requiring \(a\) can be answered via \(b\)). This contradicts minimality. \qed
+
+\textbf{Theorem 2.32 (Orthogonality Implies Exchange Property).} If \(\mathcal{A}\) is an orthogonal axis set, then for any independent subsets \(I, J \subseteq \mathcal{A}\) with \(|I| < |J|\), there exists \(x \in J \setminus I\) such that \(I \cup \{x\}\) is independent.
+
+This is the \emph{matroid exchange axiom}. Orthogonal axis sets satisfy it.
+
+\textbf{Theorem 2.33 (Basis Equicardinality).} All minimal complete axis sets for a domain \(D\) have the same cardinality.
+
+\emph{Proof.} Standard matroid theory. If two maximal independent sets had different sizes, the exchange property would yield a contradiction. \qed
+
+\paragraph{2.7.2 Why Matroids Matter}\label{why-matroids-matter}
+
+The matroid structure has three critical consequences:
+
+\begin{enumerate}
+\item \textbf{Dimension is well-defined.} The ``dimension'' of a domain (number of required axes) is unique. There are no alternative minimal decompositions with different numbers of axes.
+
+\item \textbf{Orthogonality is necessary, not optional.} A type system with redundant (non-orthogonal) axes is provably suboptimal---it contains derivable structure that adds complexity without capability.
+
+\item \textbf{The (B, S) decomposition is canonical for standard class semantics.} The two-axis model is not a modeling choice---it is the unique minimal complete axis set for the domain of standard class queries (provenance, identity, compatibility). Extended domains requiring additional queries (e.g., scope-chain resolution) require additional axes (e.g., H for hierarchy). This is exactly what the theory predicts: axes are derived from domain requirements.
+\end{enumerate}
+
+\textbf{Theorem 2.34 (Semantic Non-Embeddability).} Let \(D_1\) and \(D_2\) be typing disciplines with axis sets \(\mathcal{A}_1 \subset \mathcal{A}_2\) (strict subset). Then:
+
+\[\text{There exists no function } f : D_2 \to D_1 \text{ that preserves query answers.}\]
+
+In particular, nominal typing (\(\{B, S\}\)) cannot be embedded into structural typing (\(\{S\}\)).
+
+\emph{Proof.} Let \(a \in \mathcal{A}_2 \setminus \mathcal{A}_1\). By axis independence, \(\exists\) query \(q\) requiring \(a\). Any embedding \(f\) must map types to \(D_1\)'s representation. But \(D_1\) lacks axis \(a\), so \(q\) is unanswerable in \(D_1\). Therefore \(f\) cannot preserve \(q\)'s answers. \qed
+
+\textbf{Significance:} This is an \textbf{impossibility theorem about information}, not about implementations. Structural typing cannot ``simulate'' nominal typing because the information content is strictly smaller. The gap is mathematical, not technical.
 
 \begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}

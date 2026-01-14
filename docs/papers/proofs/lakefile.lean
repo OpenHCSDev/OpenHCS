@@ -99,6 +99,12 @@ lean_lib «paper4_Basic» where
   moreLeanArgs := moreLeanArgs
   weakLeanArgs := weakLeanArgs
 
+-- DecisionQuotient submodules
+lean_lib «DecisionQuotient» where
+  globs := #[.submodules `DecisionQuotient]
+  moreLeanArgs := moreLeanArgs
+  weakLeanArgs := weakLeanArgs
+
 lean_lib «paper4_DecisionQuotient» where
   moreLeanArgs := moreLeanArgs
   weakLeanArgs := weakLeanArgs

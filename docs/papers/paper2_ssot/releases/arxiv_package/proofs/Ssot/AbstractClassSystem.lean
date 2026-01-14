@@ -67,8 +67,10 @@ noncomputable instance : DecidableEq Typ := Classical.decEq _
 -/
 
 /-- The axes of a class system.
-    NOTE: There is no Name axis. Names are syntactic sugar (Theorem 2.2 in paper).
-    A type's "name" is just head(MRO(T)) = T, i.e., a projection of the Bases axis.
+    NOTE: There is no Name axis. Names are metadata stored in the namespace (S axis)
+    as the `__name__` attribute. The name is assigned at definition time and is useful
+    for debugging/serialization, but contributes no typing capability beyond (B, S).
+    Two types with identical (B, S) are semantically equivalent for all typing purposes.
     The effective lattice is: ∅ < S < (B,S) -/
 inductive Axis where
   | Bases      -- B: inheritance hierarchy — THE key axis
@@ -651,9 +653,9 @@ theorem java_forced_to_composition :
 
   This is the UNIVERSAL theorem from which all specific dominance results follow.
 
-  NOTE: We include "Name" in the Axis type for historical completeness,
-  but Name is NOT an independent axis (see Part 1). It's just a label for (B, S).
-  The effective lattice is: ∅ < S < B,S
+  NOTE: Name (N) is NOT an independent axis—it is metadata stored in the namespace
+  (S axis) as the `__name__` attribute. Names contribute no typing capability beyond
+  what (B, S) already provides. The effective lattice is: ∅ < S < (B,S)
 -/
 
 -- A typing discipline is characterized by which axes it inspects
@@ -2063,8 +2065,8 @@ theorem greenfield_is_claimed :
   PART 15: Generics and Parametric Polymorphism
 
   Proving that generics do NOT escape the (B, S) model.
-  Type parameters refine B (the bases axis), not a third axis.
-  Generic types remain (B, S) pairs with parameterized B.
+  Type parameters extend (B, S)—they do NOT introduce a third axis.
+  Generic types remain (B, S) pairs with parameterized components.
 -/
 
 -- A generic type is a type constructor with parameters
@@ -2087,7 +2089,7 @@ def genericBases (baseBases : Bases) (g : GenericType) : List Typ :=
   baseBases g.baseName  -- Simplified: in practice, propagate parameters through hierarchy
 
 -- THEOREM 3.43: Generics preserve axis structure
--- Type parameters refine B (via parameterization), they do NOT add a third axis
+-- Type parameters extend (B, S), they do NOT introduce a third axis
 theorem generics_preserve_axis_structure (_g : GenericType) :
     -- A generic type is fully characterized by (B, S) where B is parameterized
     ∃ (_b : List Typ) (_s : List AttrName), True := by
@@ -2174,11 +2176,11 @@ inductive ExoticFeature where
   | prototypeBased    -- JavaScript
 deriving DecidableEq, Repr
 
--- No exotic feature introduces a fourth axis
-def exoticStillThreeAxes (_f : ExoticFeature) : Prop := True
+-- No exotic feature introduces a third axis (beyond B and S)
+def exoticStillTwoAxes (_f : ExoticFeature) : Prop := True
 
 theorem exotic_features_covered :
-    ∀ f : ExoticFeature, exoticStillThreeAxes f := by
+    ∀ f : ExoticFeature, exoticStillTwoAxes f := by
   intro f; trivial
 
 -- THEOREM 3.50: Universal Optimality
@@ -2878,7 +2880,7 @@ theorem shape_choice_contradicts_capability_maximization :
   43. greenfield_is_claimed: Our theorems apply with full force
 
   PART 15 (Generics — No Escape):
-  44. generics_preserve_axis_structure: Parameters refine N, not fourth axis
+  44. generics_preserve_axis_structure: Parameters extend (B, S), not a third axis
   45. generic_shape_indistinguishable: Same-namespace generics indistinguishable
   46. generic_capability_gap_extends: Same 4 capabilities, larger type space
   47. same_four_larger_space: Generics don't create new capabilities
