@@ -1,48 +1,52 @@
 # Documentation Audit: Off-Topic Content in External Modules
 
 ## Summary
-Found several documentation files in `external/pyqt-reactor/` that document ObjectState instead of pyqt-reactor. These appear to be copy-pasted from the ObjectState module and need to be rewritten.
+Found and fixed several documentation files in `external/pyqt-reactor/` that documented ObjectState instead of pyqt-reactor. These were copy-pasted from the ObjectState module and have been completely rewritten.
 
-## Critical Issues
+## Issues Found & Fixed
 
-### 1. `external/pyqt-reactor/docs/api/modules.rst`
-**Problem**: Documents ObjectState modules, not pyqt-reactor
-- Lists: `objectstate.config`, `objectstate.lazy_factory`, `objectstate.context_manager`, etc.
-- Should document: `pyqt_reactor.forms`, `pyqt_reactor.widgets`, `pyqt_reactor.theming`, `pyqt_reactor.protocols`, etc.
+### ✅ 1. `external/pyqt-reactor/docs/api/modules.rst`
+**Was**: Documents ObjectState modules
+**Now**: Documents pyqt-reactor modules (core, protocols, services, forms, widgets, theming, animation, windows, dialogs)
 
-### 2. `external/pyqt-reactor/docs/state_management.rst`
-**Problem**: Documents ObjectState class, not pyqt-reactor
-- Describes `objectstate.object_state.ObjectState` and `ObjectStateRegistry`
-- Should describe: pyqt-reactor's form management, widget lifecycle, state binding
+### ✅ 2. `external/pyqt-reactor/docs/state_management.rst`
+**Was**: Described ObjectState internals (ObjectState class, ObjectStateRegistry)
+**Now**: Describes form state management and ObjectState integration patterns
 
-### 3. `external/pyqt-reactor/docs/undo_redo.rst`
-**Problem**: Documents ObjectState undo/redo system
-- Describes git-like DAG snapshots from ObjectState
-- Should describe: pyqt-reactor's undo/redo integration (if any)
+### ✅ 3. `external/pyqt-reactor/docs/undo_redo.rst`
+**Was**: Described ObjectState DAG history system
+**Now**: Describes undo/redo integration with forms
 
-### 4. `external/pyqt-reactor/docs/examples/ui.rst`
-**Problem**: ObjectState UI examples, not pyqt-reactor
-- Shows `LazyDataclassFactory`, `config_context`, `extract_all_configs`
-- Should show: pyqt-reactor form creation, widget binding, reactive updates
+### ✅ 4. `external/pyqt-reactor/docs/examples/ui.rst`
+**Was**: ObjectState examples (LazyDataclassFactory, config_context, etc.)
+**Now**: pyqt-reactor form examples:
+- Basic form generation from dataclasses
+- ObjectState integration with inherited values
+- Reactive field updates with FieldChangeDispatcher
+- Theming and styling
+- Flash animations
 
-### 5. `external/pyqt-reactor/docs/examples/index.rst`
-**Problem**: References objectstate examples
-- Lists: `basic`, `dual_axis`, `ui`, `atomic_operations`
-- Should list: pyqt-reactor-specific examples
+### ✅ 5. `external/pyqt-reactor/docs/examples/index.rst`
+**Was**: References ObjectState examples (basic, dual_axis, ui, atomic_operations)
+**Now**: References pyqt-reactor examples (ui)
 
-## Fixed Issues
+## Additional Fixes
 
 ✅ `.gitmodules` - Updated submodule name and URL
 ✅ `openhcs/pyqt_gui/services/` - Renamed `formgen_providers.py` → `reactor_providers.py`
 ✅ `external/uneval/paper.bib` - Updated citation key `@pyqtformgen` → `@pyqtreactor`
 
-## Recommendation
+## Commits
 
-The pyqt-reactor docs need a complete rewrite to document:
-- Form generation from dataclasses
-- Widget protocols and adapters
-- Theming system
-- Flash animations
-- Window management
-- Integration with ObjectState (as a dependency, not the main topic)
+1. **openhcs**:
+   - `02958ff6` - Renamed formgen_providers to reactor_providers
+   - `d197b0a4` - Updated .gitmodules
+   - `6cbfde6e` - Documented audit findings
+   - `0f4a66ae` - Updated pyqt-reactor submodule
+
+2. **pyqt-reactor**:
+   - `5570cdd` - Fixed all off-topic ObjectState content in docs
+
+3. **uneval**:
+   - `f7acfe5` - Updated citation key to pyqtreactor
 
