@@ -1,4 +1,13 @@
-"""OpenHCS adapters for pyqt-formgen provider protocols."""
+"""OpenHCS adapters for pyqt-reactor provider protocols.
+
+This module registers OpenHCS-specific providers with pyqt-reactor:
+- LLM service for pipeline generation
+- Codegen provider for Python code generation
+- Function registry for discoverable functions
+- Log discovery provider
+- Server scan provider
+- Window factory for launching PyQt windows
+"""
 
 from __future__ import annotations
 
@@ -8,7 +17,7 @@ from typing import Any, Optional, Callable, Iterable, List, Dict
 
 from PyQt6.QtWidgets import QWidget
 
-from pyqt_formgen.protocols import (
+from pyqt_reactor.protocols import (
     FormGenConfig,
     set_form_config,
     register_llm_service,
@@ -26,7 +35,7 @@ import openhcs.serialization.uneval_formatters  # noqa: F401
 
 @dataclass
 class OpenHCSFormGenConfig(FormGenConfig):
-    """OpenHCS-specific overrides for pyqt-formgen config."""
+    """OpenHCS-specific overrides for pyqt-reactor config."""
 
     log_dir: Optional[str] = None
     log_prefixes: List[str] = field(default_factory=lambda: ["openhcs_"])
@@ -157,11 +166,11 @@ class OpenHCSLogDiscoveryProvider:
     def discover_logs(self, base_log_path: Optional[str] = None, include_main_log: bool = True,
                       log_directory: Optional[Path] = None):
         from openhcs.core.log_utils import discover_logs
-        from pyqt_formgen.core.log_utils import LogFileInfo
+        from pyqt_reactor.core.log_utils import LogFileInfo
 
         logs = discover_logs(base_log_path=base_log_path, include_main_log=include_main_log,
                              log_directory=log_directory)
-        # Convert to pyqt_formgen LogFileInfo for consistency
+        # Convert to pyqt_reactor LogFileInfo for consistency
         converted = [
             LogFileInfo(path=l.path, log_type=l.log_type, worker_id=l.worker_id, display_name=l.display_name)
             for l in logs
@@ -182,7 +191,7 @@ class OpenHCSServerScanProvider:
         from openhcs.runtime.zmq_config import OPENHCS_ZMQ_CONFIG
         from zmqruntime.transport import get_zmq_transport_url, get_default_transport_mode
         from openhcs.core.log_utils import classify_log_file
-        from pyqt_formgen.core.log_utils import LogFileInfo
+        from pyqt_reactor.core.log_utils import LogFileInfo
 
         discovered = []
         ports_to_scan = get_all_streaming_ports(num_ports_per_type=10)
@@ -270,7 +279,7 @@ class OpenHCSComponentSelectionProvider:
 
     def select_components(self, available_components: Iterable[str], selected_components: Iterable[str],
                           group_by: Any, parent: Optional[Any] = None, **context: Any) -> Optional[List[str]]:
-        from pyqt_formgen.dialogs.group_by_selector_dialog import GroupBySelectorDialog
+        from pyqt_reactor.dialogs.group_by_selector_dialog import GroupBySelectorDialog
         return GroupBySelectorDialog.select_components(
             available_components=list(available_components),
             selected_components=list(selected_components),
@@ -409,8 +418,8 @@ class OpenHCSWindowFactory:
         return None
 
 
-def register_formgen_providers() -> None:
-    """Register all OpenHCS providers with pyqt-formgen."""
+def register_reactor_providers() -> None:
+    """Register all OpenHCS providers with pyqt-reactor."""
     # FormGenConfig with OpenHCS paths
     config = OpenHCSFormGenConfig()
     try:

@@ -116,9 +116,9 @@ class OpenHCSPyQtApp(QApplication):
 
         logger.info("Global configuration context established for lazy dataclass resolution")
 
-        # Register pyqt-formgen providers (LLM, codegen, log discovery, window factory, etc.)
-        from openhcs.pyqt_gui.services.formgen_providers import register_formgen_providers
-        register_formgen_providers()
+        # Register pyqt-reactor providers (LLM, codegen, log discovery, window factory, etc.)
+        from openhcs.pyqt_gui.services.reactor_providers import register_reactor_providers
+        register_reactor_providers()
 
         # Set application icon (if available)
         icon_path = Path(__file__).parent / "resources" / "openhcs_icon.png"
