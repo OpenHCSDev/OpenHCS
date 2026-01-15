@@ -648,6 +648,13 @@ The three-dimensional frontier shows:
 
 -   Interface-only observers trade tag length for distortion (zero $L$, but $D = 1$)
 
+Figure [1](#fig:lwd-tradeoff){reference-type="ref" reference="fig:lwd-tradeoff"} visualizes the $(L, W, D)$ tradeoff space. The key observation: *nominal tags trade storage for query cost*, achieving the optimal $(L, W, D) = (\log_2 k, O(1), 0)$ point.
+
+<figure id="fig:lwd-tradeoff">
+
+<figcaption>The <span class="math inline">(<em>L</em>, <em>W</em>)</span> tradeoff for <span class="math inline"><em>D</em> = 0</span> (zero distortion). Duck typing (interface-only) requires <span class="math inline"><em>W</em> = <em>Ω</em>(<em>n</em>)</span> queries but <span class="math inline"><em>L</em> = 0</span> storage; it incurs <span class="math inline"><em>D</em> &gt; 0</span> when types are interface-equivalent. Structural typing achieves <span class="math inline"><em>D</em> = 0</span> with <span class="math inline"><em>W</em> = <em>O</em>(<em>n</em>)</span>. Nominal typing achieves <span class="math inline"><em>W</em> = <em>O</em>(1)</span> with <span class="math inline"><em>L</em> = ⌈log<sub>2</sub><em>k</em>⌉</span> bits. The shaded region is the achievable <span class="math inline">(<em>L</em>, <em>W</em>)</span> region for <span class="math inline"><em>D</em> = 0</span>. Hybrid strategies interpolate along the dashed line.</figcaption>
+</figure>
+
 The Lean 4 formalization (Appendix [\[sec:lean\]](#sec:lean){reference-type="ref" reference="sec:lean"}) provides a machine-checked proof of Pareto optimality for nominal-tag observers in the $(L, W, D)$ tradeoff.
 
 ::: remark
@@ -724,6 +731,66 @@ Rust resolves type identity at compile time via its nominal type system. At runt
   : Witness cost for identity across classification systems. Nominal tags achieve $O(1)$; attribute-only pays $O(n)$ or $O(k)$.
 
 The pattern is universal: systems with nominal tags achieve $O(1)$ witness cost; systems without them pay $O(n)$ or $O(k)$. This is not domain-specific---it is the information barrier theorem instantiated across classification systems.
+
+
+## Noisy Query Model
+
+Throughout this paper, queries are deterministic: $q_I(v) \in \{0,1\}$ is a fixed function of $v$. In practice, observations may be corrupted. We sketch an extension to noisy queries and state the resulting open problems.
+
+::: definition
+A *noisy observation channel* with crossover probability $\epsilon \in [0, 1/2)$ returns: $$\tilde{q}_I(v) = \begin{cases}
+q_I(v) & \text{with probability } 1 - \epsilon \\
+1 - q_I(v) & \text{with probability } \epsilon
+\end{cases}$$ Each query response is an independent BSC$(\epsilon)$ corruption of the true value.
+:::
+
+::: definition
+The *$\epsilon$-noisy identification capacity* is the supremum rate (in bits per entity) at which zero-error identification is achievable when all attribute queries pass through a BSC$(\epsilon)$.
+:::
+
+In the noiseless case ($\epsilon = 0$), Theorem [\[thm:identification-capacity\]](#thm:identification-capacity){reference-type="ref" reference="thm:identification-capacity"} shows the capacity is binary: $\log_2 k$ if $\pi$ is class-injective, $0$ otherwise. For $\epsilon > 0$, the situation is richer:
+
+::: conjecture
+For $\epsilon > 0$ and class-injective $\pi$:
+
+1.  Zero-error identification is impossible with any finite number of queries (since BSC has nonzero error probability).
+
+2.  With bounded error $\delta > 0$, the identification cost scales as $W = \Theta\left(\frac{\log(1/\delta)}{(1 - 2\epsilon)^2}\right)$ queries per entity.
+
+3.  A nominal tag of $L \geq \lceil \log_2 k \rceil$ bits (transmitted noiselessly) restores $O(1)$ identification, regardless of query noise.
+:::
+
+The third point is the key insight: *nominal tags provide a noise-free side channel*. Even when attribute observations are corrupted, a clean tag enables $O(1)$ identification. This strengthens the case for nominal tagging in noisy environments---precisely the regime where "duck typing" would require many repeated queries to achieve confidence.
+
+**Connection to identification via channels.** The noisy model connects more directly to Ahlswede-Dueck identification [@ahlswede1989identification]. In their framework, identification capacity over a noisy channel can exceed Shannon capacity (double-exponential codebook sizes). Our setting differs: we have *adaptive queries* rather than block codes, and the decoder must identify a *class* rather than test a hypothesis. Characterizing the interplay between adaptive query strategies and channel noise is an open problem.
+
+## Rate-Distortion-Query Tradeoff Surface
+
+The $(L, W, D)$ tradeoff admits a natural geometric interpretation. We have characterized the Pareto frontier (Theorem [\[thm:lwd-optimal\]](#thm:lwd-optimal){reference-type="ref" reference="thm:lwd-optimal"}), but the full tradeoff surface contains additional structure.
+
+**Fixed-$W$ slices.** For fixed query budget $W$, what is the minimum tag rate $L$ to achieve distortion $D$? When $W \geq d$ (the distinguishing dimension), zero distortion is achievable with $L = 0$ via exhaustive querying. When $W < d$, the observer cannot distinguish all classes, and either:
+
+-   Accept $D > 0$ (misidentification), or
+
+-   Add tags ($L > 0$) to compensate for insufficient queries.
+
+**Fixed-$L$ slices.** For fixed tag rate $L < \log_2 k$, the tag partitions the $k$ classes into $2^L$ groups. Within each group, the observer must use queries to distinguish. The query cost is determined by the distinguishing dimension *within each group*---potentially much smaller than the global dimension.
+
+::: conjecture
+For a tag of rate $L$ partitioning classes into groups $G_1, \ldots, G_{2^L}$: $$W(L) \leq \max_i d(G_i)$$ where $d(G_i)$ is the distinguishing dimension within group $G_i$. Optimal tag design minimizes this maximum.
+:::
+
+## Semantic Distortion Measures
+
+We have treated distortion $D$ as binary (correct identification or not). Richer distortion measures are possible:
+
+-   **Hierarchical distortion**: Misidentifying a class within the same genus (biological) or module (type system) is less severe than cross-genus errors.
+
+-   **Weighted distortion**: Some misidentifications have higher cost than others (e.g., type errors causing security vulnerabilities vs. benign type confusion).
+
+-   **Rate-distortion-perception**: Following Blau and Michaeli [@blau2019rethinking], add a "perception" constraint requiring the output distribution to match some target---relevant when classification systems must preserve statistical properties.
+
+Formalizing these extensions would connect identification capacity to the broader rate-distortion-perception literature.
 
 
 This paper presents an information-theoretic analysis of classification under observational constraints. We prove three main results:

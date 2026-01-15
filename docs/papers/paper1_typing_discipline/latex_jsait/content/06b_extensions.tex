@@ -1,0 +1,66 @@
+\subsection{Noisy Query Model}
+
+Throughout this paper, queries are deterministic: $q_I(v) \in \{0,1\}$ is a fixed function of $v$. In practice, observations may be corrupted. We sketch an extension to noisy queries and state the resulting open problems.
+
+\begin{definition}[Noisy observation channel]
+A \emph{noisy observation channel} with crossover probability $\epsilon \in [0, 1/2)$ returns:
+\[
+\tilde{q}_I(v) = \begin{cases}
+q_I(v) & \text{with probability } 1 - \epsilon \\
+1 - q_I(v) & \text{with probability } \epsilon
+\end{cases}
+\]
+Each query response is an independent BSC$(\epsilon)$ corruption of the true value.
+\end{definition}
+
+\begin{definition}[Noisy identification capacity]
+The \emph{$\epsilon$-noisy identification capacity} is the supremum rate (in bits per entity) at which zero-error identification is achievable when all attribute queries pass through a BSC$(\epsilon)$.
+\end{definition}
+
+In the noiseless case ($\epsilon = 0$), Theorem~\ref{thm:identification-capacity} shows the capacity is binary: $\log_2 k$ if $\pi$ is class-injective, $0$ otherwise. For $\epsilon > 0$, the situation is richer:
+
+\begin{conjecture}[Noisy identification capacity]
+For $\epsilon > 0$ and class-injective $\pi$:
+\begin{enumerate}
+\item Zero-error identification is impossible with any finite number of queries (since BSC has nonzero error probability).
+\item With bounded error $\delta > 0$, the identification cost scales as $W = \Theta\left(\frac{\log(1/\delta)}{(1 - 2\epsilon)^2}\right)$ queries per entity.
+\item A nominal tag of $L \geq \lceil \log_2 k \rceil$ bits (transmitted noiselessly) restores $O(1)$ identification, regardless of query noise.
+\end{enumerate}
+\end{conjecture}
+
+The third point is the key insight: \emph{nominal tags provide a noise-free side channel}. Even when attribute observations are corrupted, a clean tag enables $O(1)$ identification. This strengthens the case for nominal tagging in noisy environments---precisely the regime where ``duck typing'' would require many repeated queries to achieve confidence.
+
+\textbf{Connection to identification via channels.} The noisy model connects more directly to Ahlswede-Dueck identification \cite{ahlswede1989identification}. In their framework, identification capacity over a noisy channel can exceed Shannon capacity (double-exponential codebook sizes). Our setting differs: we have \emph{adaptive queries} rather than block codes, and the decoder must identify a \emph{class} rather than test a hypothesis. Characterizing the interplay between adaptive query strategies and channel noise is an open problem.
+
+\subsection{Rate-Distortion-Query Tradeoff Surface}
+
+The $(L, W, D)$ tradeoff admits a natural geometric interpretation. We have characterized the Pareto frontier (Theorem~\ref{thm:lwd-optimal}), but the full tradeoff surface contains additional structure.
+
+\textbf{Fixed-$W$ slices.} For fixed query budget $W$, what is the minimum tag rate $L$ to achieve distortion $D$? When $W \geq d$ (the distinguishing dimension), zero distortion is achievable with $L = 0$ via exhaustive querying. When $W < d$, the observer cannot distinguish all classes, and either:
+\begin{itemize}
+\item Accept $D > 0$ (misidentification), or
+\item Add tags ($L > 0$) to compensate for insufficient queries.
+\end{itemize}
+
+\textbf{Fixed-$L$ slices.} For fixed tag rate $L < \log_2 k$, the tag partitions the $k$ classes into $2^L$ groups. Within each group, the observer must use queries to distinguish. The query cost is determined by the distinguishing dimension \emph{within each group}---potentially much smaller than the global dimension.
+
+\begin{conjecture}[Subadditivity of query cost]
+For a tag of rate $L$ partitioning classes into groups $G_1, \ldots, G_{2^L}$:
+\[
+W(L) \leq \max_i d(G_i)
+\]
+where $d(G_i)$ is the distinguishing dimension within group $G_i$. Optimal tag design minimizes this maximum.
+\end{conjecture}
+
+\subsection{Semantic Distortion Measures}
+
+We have treated distortion $D$ as binary (correct identification or not). Richer distortion measures are possible:
+
+\begin{itemize}
+\item \textbf{Hierarchical distortion}: Misidentifying a class within the same genus (biological) or module (type system) is less severe than cross-genus errors.
+\item \textbf{Weighted distortion}: Some misidentifications have higher cost than others (e.g., type errors causing security vulnerabilities vs. benign type confusion).
+\item \textbf{Rate-distortion-perception}: Following Blau and Michaeli \cite{blau2019rethinking}, add a ``perception'' constraint requiring the output distribution to match some target---relevant when classification systems must preserve statistical properties.
+\end{itemize}
+
+Formalizing these extensions would connect identification capacity to the broader rate-distortion-perception literature.
+
