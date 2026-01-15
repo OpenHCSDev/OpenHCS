@@ -16,6 +16,14 @@ A distinguishing set $S$ is \emph{minimal} if no proper subset of $S$ is disting
 
 \subsection{Matroid Structure of Query Families}
 
+\textbf{Structural assumptions.} The matroid theorem below is \emph{unconditional} given the definitions above. It depends only on:
+\begin{enumerate}
+\item Queries are binary-valued functions $q: \mathcal{V} \to \{0, 1\}$.
+\item ``Distinguishing'' is defined by: $\exists q \in S$ such that $q(v) \neq q(w)$.
+\item ``Minimal'' means no proper subset suffices.
+\end{enumerate}
+No further assumptions on the query family, value space, or type structure are required. The proof constructs a closure operator satisfying extensivity, monotonicity, and idempotence, from which basis exchange follows (see Lean formalization).
+
 \begin{definition}[Bases family]
 Let $E = \mathcal{Q}$ be the ground set of all queries. Let $\mathcal{B} \subseteq 2^E$ be the family of minimal distinguishing sets.
 \end{definition}
@@ -25,7 +33,7 @@ For any $B_1, B_2 \in \mathcal{B}$ and any $q \in B_1 \setminus B_2$, there exis
 \end{lemma}
 
 \begin{proof}
-See Lean formalization: \texttt{proofs/matroid.lean}, lemma \texttt{basis\_exchange}.
+See Lean formalization: \texttt{proofs/abstract\_class\_system.lean}, namespace \texttt{AxisClosure}. The closure operator $\text{cl}(X) = \{a : X\text{-equality forces }a\text{-equality}\}$ satisfies the matroid closure axioms; basis exchange follows.
 \end{proof}
 
 \begin{theorem}[Matroid bases]

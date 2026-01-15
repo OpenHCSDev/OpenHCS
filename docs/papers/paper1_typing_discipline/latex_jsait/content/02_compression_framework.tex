@@ -1,8 +1,8 @@
 \subsection{Semantic Compression: The Problem}
 
-The fundamental problem of semantic compression is: given a value $v$ from a large space $\mathcal{V}$, how can we represent $v$ compactly while preserving the ability to answer semantic queries about $v$?
+The fundamental problem of \emph{semantic compression} is: given a value $v$ from a large space $\mathcal{V}$, how can we represent $v$ compactly while preserving the ability to answer semantic queries about $v$? This differs from classical source coding in that the goal is not reconstruction but \emph{identification}---determining which equivalence class $v$ belongs to.
 
-Classical rate-distortion theory \cite{shannon1959coding} studies the tradeoff between representation size and reconstruction fidelity. We extend this framework to a discrete classification setting with three dimensions: \emph{tag length} $L$ (storage cost), \emph{witness cost} $W$ (query complexity), and \emph{distortion} $D$ (semantic fidelity).
+Classical rate-distortion theory \cite{shannon1959coding} studies the tradeoff between representation size and reconstruction fidelity. We extend this to a discrete classification setting with three dimensions: \emph{tag length} $L$ (bits of storage), \emph{witness cost} $W$ (interactive identification cost---queries or bits of communication required to determine class membership), and \emph{distortion} $D$ (semantic fidelity).
 
 \subsection{Universe of Discourse}
 
@@ -152,8 +152,18 @@ $D = 0$ means the observation strategy is \emph{sound}: type equality (as comput
 
 \subsection{The $(L, W, D)$ Tradeoff Space}
 
+\textbf{Admissible schemes.} To make the Pareto-optimality claim precise, we specify the class of admissible observation strategies:
+\begin{itemize}
+\item \textbf{Deterministic or randomized}: Schemes may use randomness; $W$ is worst-case query count.
+\item \textbf{Computationally unbounded}: No time/space restrictions; the constraint is observational.
+\item \textbf{No preprocessing over type universe}: The scheme cannot precompute a global lookup table indexed by all possible types. (With such preprocessing, any problem reduces to $O(1)$ lookups.)
+\item \textbf{Tags are injective on classes}: A nominal tag $\tau(v)$ uniquely identifies the type of $v$. Variable-length or compressed tags are permitted; $L$ counts bits.
+\item \textbf{No amortization across queries}: $W$ is per-identification cost, not amortized over a sequence.
+\end{itemize}
+Under these rules, ``dominance'' means strict improvement on at least one of $(L, W, D)$ with no regression on others.
+
 \begin{definition}[Achievable region]
-A point $(L, W, D)$ is \emph{achievable} if there exists an observation strategy realizing those values. Let $\mathcal{R} \subseteq \mathbb{R}_{\geq 0} \times \mathbb{R}_{\geq 0} \times \{0, 1\}$ denote the achievable region.
+A point $(L, W, D)$ is \emph{achievable} if there exists an admissible observation strategy realizing those values. Let $\mathcal{R} \subseteq \mathbb{R}_{\geq 0} \times \mathbb{R}_{\geq 0} \times [0,1]$ denote the achievable region.
 \end{definition}
 
 \begin{definition}[Pareto optimality]

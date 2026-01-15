@@ -162,9 +162,9 @@ Section [\[sec:framework\]](#sec:framework){reference-type="ref" reference="sec
 
 ## Semantic Compression: The Problem
 
-The fundamental problem of semantic compression is: given a value $v$ from a large space $\mathcal{V}$, how can we represent $v$ compactly while preserving the ability to answer semantic queries about $v$?
+The fundamental problem of *semantic compression* is: given a value $v$ from a large space $\mathcal{V}$, how can we represent $v$ compactly while preserving the ability to answer semantic queries about $v$? This differs from classical source coding in that the goal is not reconstruction but *identification*---determining which equivalence class $v$ belongs to.
 
-Classical rate-distortion theory [@shannon1959coding] studies the tradeoff between representation size and reconstruction fidelity. We extend this framework to a discrete classification setting with three dimensions: *tag length* $L$ (storage cost), *witness cost* $W$ (query complexity), and *distortion* $D$ (semantic fidelity).
+Classical rate-distortion theory [@shannon1959coding] studies the tradeoff between representation size and reconstruction fidelity. We extend this to a discrete classification setting with three dimensions: *tag length* $L$ (bits of storage), *witness cost* $W$ (interactive identification cost---queries or bits of communication required to determine class membership), and *distortion* $D$ (semantic fidelity).
 
 ## Universe of Discourse
 
@@ -292,8 +292,22 @@ $D = 0$ means the observation strategy is *sound*: type equality (as computed by
 
 ## The $(L, W, D)$ Tradeoff Space
 
+**Admissible schemes.** To make the Pareto-optimality claim precise, we specify the class of admissible observation strategies:
+
+-   **Deterministic or randomized**: Schemes may use randomness; $W$ is worst-case query count.
+
+-   **Computationally unbounded**: No time/space restrictions; the constraint is observational.
+
+-   **No preprocessing over type universe**: The scheme cannot precompute a global lookup table indexed by all possible types. (With such preprocessing, any problem reduces to $O(1)$ lookups.)
+
+-   **Tags are injective on classes**: A nominal tag $\tau(v)$ uniquely identifies the type of $v$. Variable-length or compressed tags are permitted; $L$ counts bits.
+
+-   **No amortization across queries**: $W$ is per-identification cost, not amortized over a sequence.
+
+Under these rules, "dominance" means strict improvement on at least one of $(L, W, D)$ with no regression on others.
+
 ::: definition
-A point $(L, W, D)$ is *achievable* if there exists an observation strategy realizing those values. Let $\mathcal{R} \subseteq \mathbb{R}_{\geq 0} \times \mathbb{R}_{\geq 0} \times \{0, 1\}$ denote the achievable region.
+A point $(L, W, D)$ is *achievable* if there exists an admissible observation strategy realizing those values. Let $\mathcal{R} \subseteq \mathbb{R}_{\geq 0} \times \mathbb{R}_{\geq 0} \times [0,1]$ denote the achievable region.
 :::
 
 ::: definition
@@ -321,6 +335,16 @@ A distinguishing set $S$ is *minimal* if no proper subset of $S$ is distinguishi
 
 ## Matroid Structure of Query Families
 
+**Structural assumptions.** The matroid theorem below is *unconditional* given the definitions above. It depends only on:
+
+1.  Queries are binary-valued functions $q: \mathcal{V} \to \{0, 1\}$.
+
+2.  "Distinguishing" is defined by: $\exists q \in S$ such that $q(v) \neq q(w)$.
+
+3.  "Minimal" means no proper subset suffices.
+
+No further assumptions on the query family, value space, or type structure are required. The proof constructs a closure operator satisfying extensivity, monotonicity, and idempotence, from which basis exchange follows (see Lean formalization).
+
 ::: definition
 Let $E = \mathcal{Q}$ be the ground set of all queries. Let $\mathcal{B} \subseteq 2^E$ be the family of minimal distinguishing sets.
 :::
@@ -330,7 +354,7 @@ For any $B_1, B_2 \in \mathcal{B}$ and any $q \in B_1 \setminus B_2$, there exis
 :::
 
 ::: proof
-*Proof.* See Lean formalization: `proofs/matroid.lean`, lemma `basis_exchange`. ◻
+*Proof.* See Lean formalization: `proofs/abstract_class_system.lean`, namespace `AxisClosure`. The closure operator $\text{cl}(X) = \{a : X\text{-equality forces }a\text{-equality}\}$ satisfies the matroid closure axioms; basis exchange follows. ◻
 :::
 
 ::: theorem
