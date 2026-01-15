@@ -162,17 +162,12 @@ class PlateManagerWidget(AbstractManagerWidget):
         self._execution_complete_signal.connect(self._on_execution_complete)
         self._execution_error_signal.connect(self._on_execution_error)
 
-        # Register time travel callback to clear ephemeral caches
-        ObjectStateRegistry.add_time_travel_complete_callback(self._on_time_travel_complete)
-
         logger.debug("Plate manager widget initialized")
 
     def cleanup(self):
         """Cleanup resources before widget destruction."""
         logger.info("🧹 Cleaning up PlateManagerWidget resources...")
         self._zmq_service.disconnect()
-        # Unregister time travel callback
-        ObjectStateRegistry.remove_time_travel_complete_callback(self._on_time_travel_complete)
         logger.info("✅ PlateManagerWidget cleanup completed")
 
     def _on_time_travel_complete(self, dirty_states, triggering_scope):

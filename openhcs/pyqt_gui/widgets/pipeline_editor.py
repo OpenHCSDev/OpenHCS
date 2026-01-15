@@ -1088,3 +1088,14 @@ class PipelineEditorWidget(AbstractManagerWidget):
 
         # Call parent closeEvent
         super().closeEvent(event)
+
+    def _on_time_travel_complete(self, dirty_states, triggering_scope):
+        """Refresh pipeline list after time travel to reflect restored step order."""
+        if self.current_plate:
+            self.pipeline_steps = self._get_steps_from_pipeline_state(self.current_plate)
+        else:
+            self.pipeline_steps = []
+
+        self._normalize_step_scope_tokens()
+        self.update_item_list()
+        self.update_button_states()
