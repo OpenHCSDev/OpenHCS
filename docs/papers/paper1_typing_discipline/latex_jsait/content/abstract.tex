@@ -1,12 +1,16 @@
 \begin{abstract}
-\textbf{Impossibility.} An observer limited to interface-membership queries cannot determine type identity---even with unlimited computation. We prove this is an information barrier, not a computational one: interface-only observers are constant on equivalence classes of values sharing identical interface profiles. No algorithm, however sophisticated, can extract information the observations do not contain.
+Classification systems---type systems, database schemas, biological taxonomies, knowledge graphs---must answer queries about entities using a fixed set of observable attributes. We prove fundamental limits on what such systems can compute.
 
-\textbf{Optimality.} A single additional primitive---nominal-tag access---reduces witness cost from $\Omega(n)$ to $O(1)$. We prove this is Pareto-optimal: no observer achieves lower witness cost without increasing tag length or semantic distortion. The $(L, W, D)$ tradeoff admits exactly one optimal point.
+\textbf{Impossibility.} An observer limited to attribute-membership queries cannot determine entity identity when distinct entities share identical attribute profiles. This is an information barrier, not a computational limitation: no algorithm can extract information the observations do not contain.
 
-\textbf{Structure.} Minimal complete observation sets form the bases of a matroid. Consequence: all such sets have equal cardinality, and the ``semantic dimension'' of a domain is well-defined.
+\textbf{Optimality.} A single additional primitive---a nominal tag identifying each entity's class---reduces witness cost from $\Omega(n)$ to $O(1)$. We prove this is Pareto-optimal in the $(L, W, D)$ tradeoff space (tag length, witness cost, semantic distortion).
+
+\textbf{Structure.} Minimal complete observation sets form the bases of a matroid. All such sets have equal cardinality; the ``semantic dimension'' of a classification problem is well-defined.
+
+\textbf{Universality.} The results apply to any classification system: programming language runtimes (type identity), databases (primary keys), biological taxonomy (species identity), library classification (ISBN). Type systems are one instantiation; the theorems are general.
 
 All results are machine-checked in Lean 4 (6,000+ lines, 0 \texttt{sorry}).
 
-\textbf{Keywords:} information barriers, witness complexity, Pareto optimality, matroid structure, formal verification
+\textbf{Keywords:} classification theory, information barriers, witness complexity, matroid structure, formal verification
 \end{abstract}
 

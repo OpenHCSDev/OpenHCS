@@ -1,36 +1,50 @@
-# Paper: Semantic Compression via Type Systems: Matroid Structure and Kolmogorov-Optimal Witnesses
+# Paper: Information Barriers in Classification Systems: Matroid Structure and Witness Complexity
 
-**Status**: TOPLAS-ready | **Lean**: 6086 lines, 265 theorems
+**Status**: JSAIT-ready | **Lean**: 6086 lines, 265 theorems
 
 ---
 
 ## Abstract
 
-**Impossibility.** An observer limited to interface-membership queries cannot determine type identity---even with unlimited computation. We prove this is an information barrier, not a computational one: interface-only observers are constant on equivalence classes of values sharing identical interface profiles. No algorithm, however sophisticated, can extract information the observations do not contain.
+Classification systems---type systems, database schemas, biological taxonomies, knowledge graphs---must answer queries about entities using a fixed set of observable attributes. We prove fundamental limits on what such systems can compute.
 
-**Optimality.** A single additional primitive---nominal-tag access---reduces witness cost from $\Omega(n)$ to $O(1)$. We prove this is Pareto-optimal: no observer achieves lower witness cost without increasing tag length or semantic distortion. The $(L, W, D)$ tradeoff admits exactly one optimal point.
+**Impossibility.** An observer limited to attribute-membership queries cannot determine entity identity when distinct entities share identical attribute profiles. This is an information barrier, not a computational limitation: no algorithm can extract information the observations do not contain.
 
-**Structure.** Minimal complete observation sets form the bases of a matroid. Consequence: all such sets have equal cardinality, and the "semantic dimension" of a domain is well-defined.
+**Optimality.** A single additional primitive---a nominal tag identifying each entity's class---reduces witness cost from $\Omega(n)$ to $O(1)$. We prove this is Pareto-optimal in the $(L, W, D)$ tradeoff space (tag length, witness cost, semantic distortion).
+
+**Structure.** Minimal complete observation sets form the bases of a matroid. All such sets have equal cardinality; the "semantic dimension" of a classification problem is well-defined.
+
+**Universality.** The results apply to any classification system: programming language runtimes (type identity), databases (primary keys), biological taxonomy (species identity), library classification (ISBN). Type systems are one instantiation; the theorems are general.
 
 All results are machine-checked in Lean 4 (6,000+ lines, 0 `sorry`).
 
-**Keywords:** information barriers, witness complexity, Pareto optimality, matroid structure, formal verification
+**Keywords:** classification theory, information barriers, witness complexity, matroid structure, formal verification
 
 
-## Motivation: Semantic Inference Under Observational Constraints
+## The Classification Problem
 
-Consider the following inference problem, which arises in programming language runtimes, distributed systems, and semantic compression: an observer must determine semantic properties of a value (e.g., type identity, provenance, behavioral equivalence) but has access only to a restricted family of observations.
+Every system that classifies entities faces a fundamental question: *which attributes should we observe?* A database schema chooses columns. A biological taxonomy chooses morphological features. A type system chooses between structural properties and nominal identity. A library classification system chooses subject facets.
 
-This paper studies the *information-theoretic limits* of such inference. We prove that certain observation families are fundamentally insufficient---no amount of computation can overcome the information barrier. We then characterize the minimal augmentation (nominal tagging) that achieves optimal witness cost.
+This paper proves that the choice has unavoidable information-theoretic consequences. Specifically:
 
-The results connect to classical rate-distortion theory: we establish a three-dimensional tradeoff between tag length (rate), witness cost (query complexity), and semantic distortion. Nominal tagging achieves the unique Pareto-optimal point in this tradeoff.
+1.  **Information barriers exist.** Observers limited to a fixed attribute family cannot compute properties that vary within equivalence classes induced by those attributes. This is not a computational limitation---it is an impossibility rooted in the observations themselves.
+
+2.  **Nominal tags are optimal.** Adding a single primitive---a tag identifying each entity's class---reduces witness cost from $\Omega(n)$ to $O(1)$. This is Pareto-optimal: no observer achieves lower cost without increasing tag length or semantic distortion.
+
+3.  **Minimal observation sets have matroid structure.** All minimal complete observation sets for a domain have equal cardinality. The "semantic dimension" of a classification problem is well-defined.
+
+The results apply universally. Programming language runtimes, database systems, biological taxonomies, and knowledge graphs all instantiate the same abstract structure. We develop the theory in full generality, then show how specific systems realize it.
 
 ## The Observation Model
 
-We formalize the observational constraint as a family of binary predicates.
+We formalize the observational constraint as a family of binary predicates. The terminology is deliberately abstract; concrete instantiations follow in Section [\[sec:applications\]](#sec:applications){reference-type="ref" reference="sec:applications"}.
 
 ::: definition
-Let $\mathcal{V}$ be a set of values (e.g., program objects, data records). Let $\mathcal{I}$ be a finite set of *interfaces*---abstract specifications of capabilities or properties.
+Let $\mathcal{V}$ be a set of entities (program objects, database records, biological specimens, library items). Let $\mathcal{I}$ be a finite set of *attributes*---observable properties that partition the entity space.
+:::
+
+::: remark
+We use "attribute" for the abstract concept. In type systems, attributes are *interfaces* or *method signatures*. In databases, they are *columns*. In taxonomy, they are *phenotypic characters*. In library science, they are *facets*. The mathematics is identical.
 :::
 
 ::: definition
@@ -470,9 +484,35 @@ In programming language terms: *nominal typing* corresponds to nominal-tag obser
 :::
 
 
-The preceding sections established abstract results about observer classes and witness cost. We now ground these in concrete runtime mechanisms, showing that real systems instantiate the theoretical categories---and that the complexity bounds are not artifacts of the model but observable properties of deployed implementations.
+The preceding sections established abstract results about observer classes and witness cost. We now ground these in concrete systems across multiple domains, showing that real classification systems instantiate the theoretical categories---and that the complexity bounds are not artifacts of the model but observable properties of deployed implementations.
 
-## CPython: The `ob_type` Pointer
+## Biological Taxonomy: Phenotype vs Genotype
+
+Linnean taxonomy classifies organisms by observable phenotypic characters: morphology, behavior, habitat. This is attribute-only observation. The information barrier applies: phenotypically identical organisms from distinct species are indistinguishable.
+
+**The cryptic species problem:** Cryptic species share identical phenotypic profiles but are reproductively isolated and genetically distinct. Attribute-only observation (morphology) cannot distinguish them---$\pi(A) = \pi(B)$ but $\text{species}(A) \neq \text{species}(B)$.
+
+**The nominal tag:** DNA barcoding provides the resolution. A short genetic sequence (e.g., mitochondrial COI) acts as the nominal tag: $O(1)$ identity verification via sequence comparison. This reduced cryptic species identification from $\Omega(n)$ morphological examination to constant-time molecular lookup.
+
+## Library Classification: Subject vs ISBN
+
+Library classification systems like Dewey Decimal observe subject matter---a form of attribute-only classification. Two books on the same subject are indistinguishable by subject code alone.
+
+**The nominal tag:** The ISBN (International Standard Book Number) is the nominal tag. Given two physical books, identity verification is $O(1)$: compare ISBNs. Without ISBNs, distinguishing two copies of different editions on the same subject requires $O(n)$ attribute inspection (publication date, page count, publisher, etc.).
+
+## Database Systems: Columns vs Primary Keys
+
+Relational databases observe entities via column values. The information barrier applies: rows with identical column values (excluding the key) are indistinguishable.
+
+**The nominal tag:** The primary key is the nominal tag. Entity identity is $O(1)$: compare keys. This is why database theory requires keys---without them, the system cannot answer "is this the same entity?"
+
+**Natural vs surrogate keys:** Natural keys (composed of attributes) are attribute-only observation and inherit its limitations. Surrogate keys (auto-increment IDs, UUIDs) are pure nominal tags: no semantic content, pure identity.
+
+## Programming Language Runtimes
+
+Type systems are the motivating example for this work. We survey four runtimes.
+
+### CPython: The `ob_type` Pointer
 
 Every CPython heap object begins with a `PyObject` header containing an `ob_type` pointer to its type object [@CPythonDocs]. This is the nominal tag: a single machine word encoding complete type identity.
 
@@ -480,76 +520,80 @@ Every CPython heap object begins with a `PyObject` header containing an `ob_type
 
 **Contrast with `hasattr`:** Interface-only observation in Python uses `hasattr(obj, name)` for each required method. To verify an object satisfies a protocol with $k$ methods requires $k$ attribute lookups. Worse: different call sites may check different subsets, creating $\Omega(n)$ total checks where $n$ is the number of call sites. The nominal tag eliminates this entirely.
 
-## Java: `.getClass()` and the Method Table
+### Java: `.getClass()` and the Method Table
 
 Java's object model stores a pointer to the class object in every instance header. The `.getClass()` method exposes this, and `instanceof` checks traverse the class hierarchy.
 
-**Key observation:** Java's `instanceof` is $O(d)$ where $d$ is inheritance depth, not $O(|\mathcal{I}|)$ where $|\mathcal{I}|$ is the number of interfaces. This is because `instanceof` walks the MRO (a $B$-axis query), not the interface list (an $S$-axis query). The JVM caches frequent `instanceof` results, but even without caching, the bound depends on inheritance depth---typically small---not interface count.
+**Key observation:** Java's `instanceof` is $O(d)$ where $d$ is inheritance depth, not $O(|\mathcal{I}|)$ where $|\mathcal{I}|$ is the number of interfaces. This is because `instanceof` walks the inheritance hierarchy (a nominal-tag query), not the interface list (an attribute query).
 
-## TypeScript: Structural Equivalence
+### TypeScript: Structural Equivalence
 
-TypeScript uses interface-only (declared) observation: the compiler checks structural compatibility, not nominal identity. Two types are assignment-compatible iff their structures match.
+TypeScript uses attribute-only (declared) observation: the compiler checks structural compatibility, not nominal identity. Two types are assignment-compatible iff their structures match.
 
-**Implication:** Type identity checking requires traversing the structure. For a type with $n$ fields/methods, $W(\text{type-identity}) = O(n)$. This is not a limitation of TypeScript's implementation; it is inherent to the observation model. The information barrier theorem applies: no compilation strategy can reduce this to $O(1)$ without adding nominal tags.
+**Implication:** Type identity checking requires traversing the structure. For a type with $n$ fields/methods, $W(\text{type-identity}) = O(n)$. This is inherent to the observation model: no compilation strategy can reduce this to $O(1)$ without adding nominal tags.
 
-**Runtime erasure:** TypeScript compiles to JavaScript with types erased. At runtime, there are no type tags---only the objects themselves. This is interface-only observation in its purest form: the runtime literally cannot perform nominal-tag queries because the tags do not exist.
+### Rust: Static Nominal Tags
 
-## Rust: Static Nominal Tags
+Rust resolves type identity at compile time via its nominal type system. At runtime, `std::any::TypeId` provides nominal-tag access.
 
-Rust resolves type identity at compile time via its nominal type system. At runtime, `std::any::TypeId` provides nominal-tag access for `’static` types.
+**The `dyn Trait` case:** Rust's trait objects include a vtable pointer but not a type tag. This is attribute-only observation: the vtable encodes which methods exist, not which type provided them.
 
-**The `dyn Trait` case:** Rust's trait objects (`dyn Trait`) include a vtable pointer but not a type tag. This is interface-only observation: the vtable encodes which methods exist, not which type provided them. Consequently, `dyn Trait` values cannot answer "which concrete type am I?" without additional machinery (`Any` downcasting, which re-introduces the nominal tag).
+## Cross-Domain Summary
 
-## Summary
+  **Domain**      **Attribute-Only**       **Nominal Tag**      **$W$**
+  --------------- ------------------------ ------------------- ---------
+  Biology         Phenotype (morphology)   DNA barcode (COI)    $O(1)$
+  Libraries       Subject (Dewey)          ISBN                 $O(1)$
+  Databases       Column values            Primary key          $O(1)$
+  CPython         `hasattr` probing        `ob_type` pointer    $O(1)$
+  Java            Interface check          `.getClass()`        $O(1)$
+  TypeScript      Structural check         (none at runtime)    $O(n)$
+  Rust (static)   Trait bounds             `TypeId`             $O(1)$
 
-  **Language**    **Mechanism**             **$W$**  **Notes**
-  --------------- ------------------------ --------- ---------------------------
-  CPython         `ob_type` pointer         $O(1)$   Per-object header
-  Java            Class pointer + vtable    $O(1)$   `instanceof` is $O(d)$
-  TypeScript      Structural check          $O(n)$   Types erased at runtime
-  Rust (static)   `TypeId`                  $O(1)$   Compile-time resolution
-  Rust (`dyn`)    Vtable only               $O(k)$   No type tag without `Any`
+  : Witness cost for identity across classification systems. Nominal tags achieve $O(1)$; attribute-only pays $O(n)$ or $O(k)$.
 
-  : Witness cost for type identity. $n$ = structure size, $d$ = inheritance depth, $k$ = interface count.
-
-The pattern is consistent: systems with nominal tags achieve $O(1)$ witness cost; systems without them pay $O(n)$ or $O(k)$. This is not coincidence---it is the information barrier theorem instantiated in production runtimes.
+The pattern is universal: systems with nominal tags achieve $O(1)$ witness cost; systems without them pay $O(n)$ or $O(k)$. This is not domain-specific---it is the information barrier theorem instantiated across classification systems.
 
 
-This paper presents an information-theoretic analysis of semantic inference under observational constraints. We prove three main results:
+This paper presents an information-theoretic analysis of classification under observational constraints. We prove three main results:
 
-1.  **Impossibility Barrier**: No interface-only observer can compute properties that vary within indistinguishability classes.
+1.  **Information Barrier**: Observers limited to attribute-membership queries cannot compute properties that vary within indistinguishability classes. This is universal: it applies to biological taxonomy, database systems, library classification, and programming language runtimes alike.
 
-2.  **Constant-Witness Result**: Nominal-tag observers achieve $W(\text{type-identity}) = O(1)$, the minimum witness cost.
+2.  **Witness Optimality**: Nominal-tag observers achieve $W(\text{identity}) = O(1)$, the minimum witness cost. The gap from attribute-only observation ($\Omega(n)$) is unbounded.
 
-3.  **Pareto Optimality**: Nominal-tag observers achieve the unique Pareto-optimal point in the $(L, W, D)$ tradeoff: minimal tag length, minimal witness cost, zero distortion.
+3.  **Matroid Structure**: Minimal complete observation sets form the bases of a matroid. The semantic dimension of a classification problem is well-defined and computable.
+
+## The Universal Pattern
+
+Across domains, the same structure recurs:
+
+-   **Biology**: Phenotypic observation cannot distinguish cryptic species. DNA barcoding (nominal tag) resolves them in $O(1)$.
+
+-   **Databases**: Column-value queries cannot distinguish rows with identical attributes. Primary keys (nominal tag) provide $O(1)$ identity.
+
+-   **Type systems**: Interface observation cannot distinguish structurally identical types. Type tags provide $O(1)$ identity.
+
+The information barrier is not a quirk of any particular domain---it is a mathematical necessity arising from the quotient structure induced by limited observations.
 
 ## Implications
 
-These results have several implications:
+-   **Nominal tags are not optional** when identity queries are required. They are the unique mechanism achieving $O(1)$ witness cost with zero distortion.
 
--   **Nominal-tag observers are provably optimal** for type identity checking, not just a design choice.
+-   **The barrier is informational, not computational**: even with unbounded resources, attribute-only observers cannot overcome it.
 
--   **Interface-only observers are provably limited**: they cannot achieve $D = 0$ regardless of computational resources.
-
--   **The barrier is informational, not computational**: even with unbounded time and memory, interface-only observers cannot overcome the indistinguishability barrier.
-
-::: remark
-**Remark (PL instantiation).** The theorems instantiate in programming language runtimes: CPython and Java use nominal-tag observers; Python `hasattr` uses interface-only observers; TypeScript uses interface-only (declared) observers ($D = 0$, $W = O(n)$).
-:::
+-   **Classification system design is constrained**: the choice of observation family determines which properties are computable.
 
 ## Future Work
 
-This work opens several directions:
+1.  **Other classification domains**: What is the matroid structure of observation spaces in chemistry (molecular fingerprints), linguistics (phonetic features), or machine learning (feature embeddings)?
 
-1.  **Other observation families**: Do other semantic concepts (modules, inheritance, generics) induce matroid structure on their observation spaces?
+2.  **Witness complexity of other properties**: Beyond identity, what are the witness costs for provenance, equivalence, or subsumption?
 
-2.  **Witness complexity of other properties**: What are the witness costs for provenance, mutability, or ownership semantics?
-
-3.  **Hybrid observers**: Can we design observer strategies that achieve better $(L, W, D)$ tradeoffs by combining tag and interface queries?
+3.  **Hybrid observers**: Can observer strategies that combine tags and attributes achieve better $(L, W, D)$ tradeoffs for specific query distributions?
 
 ## Conclusion
 
-Semantic inference under observational constraints admits a clean information-theoretic analysis. Nominal-tag observers are not merely a design choice---they are the provably optimal strategy for type identity under the $(L, W, D)$ tradeoff. All proofs are machine-verified in Lean 4.
+Classification under observational constraints admits a clean information-theoretic analysis. Nominal tags are not a design preference---they are the provably optimal strategy for identity verification under the $(L, W, D)$ tradeoff. The results are universal, and all proofs are machine-verified in Lean 4.
 
 
 # Formalization and Verification

@@ -1,18 +1,27 @@
-\subsection{Motivation: Semantic Inference Under Observational Constraints}
+\subsection{The Classification Problem}
 
-Consider the following inference problem, which arises in programming language runtimes, distributed systems, and semantic compression: an observer must determine semantic properties of a value (e.g., type identity, provenance, behavioral equivalence) but has access only to a restricted family of observations.
+Every system that classifies entities faces a fundamental question: \emph{which attributes should we observe?} A database schema chooses columns. A biological taxonomy chooses morphological features. A type system chooses between structural properties and nominal identity. A library classification system chooses subject facets.
 
-This paper studies the \emph{information-theoretic limits} of such inference. We prove that certain observation families are fundamentally insufficient---no amount of computation can overcome the information barrier. We then characterize the minimal augmentation (nominal tagging) that achieves optimal witness cost.
+This paper proves that the choice has unavoidable information-theoretic consequences. Specifically:
+\begin{enumerate}
+\item \textbf{Information barriers exist.} Observers limited to a fixed attribute family cannot compute properties that vary within equivalence classes induced by those attributes. This is not a computational limitation---it is an impossibility rooted in the observations themselves.
+\item \textbf{Nominal tags are optimal.} Adding a single primitive---a tag identifying each entity's class---reduces witness cost from $\Omega(n)$ to $O(1)$. This is Pareto-optimal: no observer achieves lower cost without increasing tag length or semantic distortion.
+\item \textbf{Minimal observation sets have matroid structure.} All minimal complete observation sets for a domain have equal cardinality. The ``semantic dimension'' of a classification problem is well-defined.
+\end{enumerate}
 
-The results connect to classical rate-distortion theory: we establish a three-dimensional tradeoff between tag length (rate), witness cost (query complexity), and semantic distortion. Nominal tagging achieves the unique Pareto-optimal point in this tradeoff.
+The results apply universally. Programming language runtimes, database systems, biological taxonomies, and knowledge graphs all instantiate the same abstract structure. We develop the theory in full generality, then show how specific systems realize it.
 
 \subsection{The Observation Model}
 
-We formalize the observational constraint as a family of binary predicates.
+We formalize the observational constraint as a family of binary predicates. The terminology is deliberately abstract; concrete instantiations follow in Section~\ref{sec:applications}.
 
-\begin{definition}[Value space and interface family]
-Let $\mathcal{V}$ be a set of values (e.g., program objects, data records). Let $\mathcal{I}$ be a finite set of \emph{interfaces}---abstract specifications of capabilities or properties.
+\begin{definition}[Entity space and attribute family]
+Let $\mathcal{V}$ be a set of entities (program objects, database records, biological specimens, library items). Let $\mathcal{I}$ be a finite set of \emph{attributes}---observable properties that partition the entity space.
 \end{definition}
+
+\begin{remark}[Terminology]
+We use ``attribute'' for the abstract concept. In type systems, attributes are \emph{interfaces} or \emph{method signatures}. In databases, they are \emph{columns}. In taxonomy, they are \emph{phenotypic characters}. In library science, they are \emph{facets}. The mathematics is identical.
+\end{remark}
 
 \begin{definition}[Interface observation family]
 For each $I \in \mathcal{I}$, define the interface-membership observation $q_I: \mathcal{V} \to \{0,1\}$:
