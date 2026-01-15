@@ -6,15 +6,15 @@
 
 ## Abstract
 
-Classification systems---type systems, database schemas, biological taxonomies, knowledge graphs---must answer queries about entities using a fixed set of observable attributes. We prove fundamental limits on what such systems can compute.
+Classification systems---database schemas, biological taxonomies, type systems, knowledge graphs---must answer queries about entities using a fixed set of observable attributes. We prove fundamental limits on what such systems can compute.
 
 **Impossibility.** An observer limited to attribute-membership queries cannot determine entity identity when distinct entities share identical attribute profiles. This is an information barrier, not a computational limitation: no algorithm can extract information the observations do not contain.
 
-**Optimality.** A single additional primitive---a nominal tag identifying each entity's class---reduces witness cost from $\Omega(n)$ to $O(1)$. We prove this is Pareto-optimal in the $(L, W, D)$ tradeoff space (tag length, witness cost, semantic distortion).
+**Optimality.** A single additional primitive---a nominal tag identifying each entity's class---reduces witness cost from $\Omega(n)$ to $O(1)$. We prove this is Pareto-optimal in the $(L, W, D)$ tradeoff space (tag length, witness cost, semantic distortion). The optimality is *unique*: no other observation strategy achieves $D = 0$ with lower witness cost.
 
-**Structure.** Minimal distinguishing query sets form the bases of a matroid. All such sets have equal cardinality; the "distinguishing dimension" of a classification problem is well-defined.
+**Structure.** Minimal distinguishing query sets form the bases of a matroid. All such sets have equal cardinality; the "distinguishing dimension" of a classification problem is well-defined and computable.
 
-**Universality.** The results apply to any classification system: programming language runtimes (type identity), databases (primary keys), biological taxonomy (species identity), library classification (ISBN). Type systems are one instantiation; the theorems are general.
+**Significance.** Classification system design is not a matter of preference---it has information-theoretic consequences. Attribute-only observation incurs unavoidable costs that nominal tagging eliminates. This resolves a 35-year debate in programming language theory (duck typing vs. nominal typing) with an objective answer: the gap is unbounded. The theory is prescriptive: it explains why programming languages have converged on hybrid systems (Python's ABCs, TypeScript's brands, Rust's traits), and suggests design principles for classification systems in databases, taxonomy, and knowledge representation.
 
 All results are machine-checked in Lean 4 (6,000+ lines, 0 `sorry`).
 
@@ -143,11 +143,17 @@ This paper establishes the following results:
 
 ## Related Work and Positioning
 
-The information barrier (Theorem [\[thm:information-barrier\]](#thm:information-barrier){reference-type="ref" reference="thm:information-barrier"}) is related to results in query complexity and communication complexity, where limited observations constrain computable functions. The matroid structure of type axes connects to lattice-theoretic approaches in abstract interpretation [@cousot1977abstract].
+The information barrier (Theorem [\[thm:information-barrier\]](#thm:information-barrier){reference-type="ref" reference="thm:information-barrier"}) is related to results in query complexity and communication complexity, where limited observations constrain computable functions. The matroid structure connects to lattice-theoretic approaches in abstract interpretation [@cousot1977abstract].
 
 The rate-distortion analysis extends classical rate-distortion theory [@shannon1959coding; @berger1971rate] to a discrete setting with three dimensions: tag length (analogous to rate), witness cost (query complexity), and semantic distortion (fidelity).
 
-This paper does not advocate for particular programming language design choices. We establish information-theoretic facts about observation families that hold regardless of implementation context. The programming language instantiations (Section [\[sec:applications\]](#sec:applications){reference-type="ref" reference="sec:applications"}) are illustrative corollaries.
+**Historical context.** In programming language theory, the question of whether "duck typing" (attribute-only observation) is equivalent to nominal typing has been debated since Smalltalk (1980) and formalized in discussions of structural vs. nominal subtyping [@cardelli1985understanding]. Proponents argue that if two entities "walk like a duck and quack like a duck," they should be treated identically. Critics argue that provenance matters.
+
+This paper resolves the debate with an objective answer: the gap between duck typing and nominal typing is not aesthetic---it is information-theoretic and unbounded. Duck typing incurs $\Omega(n)$ witness cost where nominal tagging achieves $O(1)$.
+
+**Prescriptive implications.** The theory does not merely describe existing systems; it prescribes design. Programming languages have independently converged on hybrid classification: Python added Abstract Base Classes (PEP 3119), TypeScript introduced branded types, Rust's trait system combines structural interfaces with nominal identity. This convergence is not coincidental---it reflects the information-theoretic optimality of nominal tags. The same principles apply to database schema design (primary keys as nominal tags), biological taxonomy (species identifiers), and knowledge representation (entity URIs).
+
+The contribution is not advocacy for a particular language feature, but identification of a universal tradeoff that any classification system must navigate.
 
 ## Paper Organization
 
@@ -393,47 +399,63 @@ The Lean 4 formalization (Appendix [\[sec:lean\]](#sec:lean){reference-type="re
 
 ## The Error Localization Theorem
 
-**Definition 4.1 (Error Location).** Let E(T) be the number of source locations that must be inspected to find all potential violations of a type constraint under discipline T.
+::: definition
+Let $E(\mathcal{O})$ be the number of locations that must be inspected to find all potential violations of a constraint under observation family $\mathcal{O}$.
+:::
 
-**Theorem 4.1 (nominal-tag Typing Complexity).** E(nominal-tag) = O(1).
+::: theorem
+[]{#thm:nominal-localization label="thm:nominal-localization"} $E(\text{nominal-tag}) = O(1)$.
+:::
 
-*Proof.* Under nominal-tag observation, constraint "x must be an A" is satisfied iff type(x) inherits from A. This property is determined at class definition time, at exactly one location: the class definition of type(x). If the class does not list A in its bases (transitively), the constraint fails. One location. 0◻
+::: proof
+*Proof.* Under nominal-tag observation, the constraint "$v$ must be of class $A$" is satisfied iff $\tau(v) \in \text{subtypes}(A)$. This is determined at a single location: the definition of $\tau(v)$'s class. One location. ◻
+:::
 
-**Remark:** In type system terminology, nominal-tag observation corresponds to nominal-tag observation.
+::: theorem
+[]{#thm:declared-localization label="thm:declared-localization"} $E(\text{interface-only, declared}) = O(k)$ where $k$ = number of entity classes.
+:::
 
-**Theorem 4.2 (Interface-Only Declared Complexity).** E(interface-only (declared)) = O(k) where k = number of classes.
+::: proof
+*Proof.* With declared interfaces, the constraint "$v$ must satisfy interface $I$" requires verifying that each class implements all attributes in $I$. For $k$ classes, $O(k)$ locations. ◻
+:::
 
-*Proof.* Under interface-only typing with declared interfaces, constraint "x must satisfy interface A" requires checking that type(x) implements all methods in signature(A). This check occurs at each class definition. For k classes, O(k) locations. 0◻
+::: theorem
+[]{#thm:attribute-localization label="thm:attribute-localization"} $E(\text{attribute-only}) = \Omega(n)$ where $n$ = number of query sites.
+:::
 
-**Remark:** In type system terminology, this is called interface-only (declared) observation.
+::: proof
+*Proof.* Under attribute-only observation, each query site independently checks "does $v$ have attribute $a$?" with no centralized declaration. For $n$ query sites, each must be inspected. Lower bound is $\Omega(n)$. ◻
+:::
 
-**Theorem 4.3 (Interface-Only Incoherent Complexity).** E(interface-only) = $\Omega(n)$ where n = number of call sites.
-
-*Proof.* Under interface-only typing, constraint "x must have method m" is encoded as `hasattr(x, "m")` at each call site. There is no central declaration. For n call sites, each must be inspected. Lower bound is $\Omega(n)$. 0◻
-
-**Remark:** This incoherent pattern is traditionally called \"interface-only observation.\"
-
-**Corollary 4.4 (Strict Dominance).** nominal-tag observation strictly dominates interface-only: E(nominal-tag) = O(1) \< $\Omega(n)$ = E(interface-only) for all n \> 1.
-
-**Remark:** In type system terminology, this shows nominal-tag observation dominates interface-only observation.
+::: corollary
+[]{#cor:strict-dominance label="cor:strict-dominance"} Nominal-tag observation strictly dominates attribute-only: $E(\text{nominal-tag}) = O(1) < \Omega(n) = E(\text{attribute-only})$ for all $n > 1$.
+:::
 
 ## The Information Scattering Theorem
 
-**Definition 4.2 (Constraint Encoding Locations).** Let I(T, c) be the set of source locations where constraint c is encoded under discipline T.
+::: definition
+Let $I(\mathcal{O}, c)$ be the set of locations where constraint $c$ is encoded under observation family $\mathcal{O}$.
+:::
 
-**Theorem 4.5 (Interface-Only Incoherent Scattering).** For interface-only typing, I(interface-only, c) = O(n) where n = call sites using constraint c.
+::: theorem
+[]{#thm:attribute-scattering label="thm:attribute-scattering"} For attribute-only observation, $|I(\text{attribute-only}, c)| = O(n)$ where $n$ = query sites using constraint $c$.
+:::
 
-**Remark:** This describes the scattering problem in \"interface-only observation.\"
+::: proof
+*Proof.* Each attribute query independently encodes the constraint. No shared reference exists. Constraint encodings scale with query sites. ◻
+:::
 
-*Proof.* Each `hasattr(x, "method")` call independently encodes the constraint. No shared reference. Constraints scale with call sites. 0◻
+::: theorem
+[]{#thm:nominal-centralization label="thm:nominal-centralization"} For nominal-tag observation, $|I(\text{nominal-tag}, c)| = O(1)$.
+:::
 
-**Theorem 4.6 (nominal-tag Typing Centralizes).** For nominal-tag observation, I(nominal-tag, c) = O(1).
+::: proof
+*Proof.* The constraint "must be of class $A$" is encoded once in the definition of $A$. All tag checks reference this single definition. ◻
+:::
 
-*Proof.* Constraint c = "must inherit from A" is encoded once: in the ABC/Protocol definition of A. All `isinstance(x, A)` checks reference this single definition. 0◻
-
-**Remark:** In type system terminology, nominal-tag observation corresponds to nominal-tag observation.
-
-**Corollary 4.7 (Maintenance Entropy).** interface-only typing maximizes maintenance entropy; nominal-tag observation minimizes it.
+::: corollary
+[]{#cor:maintenance-entropy label="cor:maintenance-entropy"} Attribute-only observation maximizes maintenance entropy; nominal-tag observation minimizes it.
+:::
 
 
 ## Three-Dimensional Tradeoff: Tag Length, Witness Cost, Distortion

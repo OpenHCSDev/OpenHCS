@@ -1,75 +1,63 @@
 \section{Core Theorems}\label{core-theorems}
 
-\subsection{The Error Localization
-Theorem}\label{the-error-localization-theorem}
+\subsection{The Error Localization Theorem}\label{the-error-localization-theorem}
 
-\textbf{Definition 4.1 (Error Location).} Let E(T) be the number of
-source locations that must be inspected to find all potential violations
-of a type constraint under discipline T.
+\begin{definition}[Error location count]
+Let $E(\mathcal{O})$ be the number of locations that must be inspected to find all potential violations of a constraint under observation family $\mathcal{O}$.
+\end{definition}
 
-\textbf{Theorem 4.1 (nominal-tag Typing Complexity).} E(nominal-tag) = O(1).
+\begin{theorem}[Nominal-tag localization]\label{thm:nominal-localization}
+$E(\text{nominal-tag}) = O(1)$.
+\end{theorem}
 
-\emph{Proof.} Under nominal-tag observation, constraint ``x must be an A'' is
-satisfied iff type(x) inherits from A. This property is determined at
-class definition time, at exactly one location: the class definition of
-type(x). If the class does not list A in its bases (transitively), the
-constraint fails. One location. \qed
+\begin{proof}
+Under nominal-tag observation, the constraint ``$v$ must be of class $A$'' is satisfied iff $\tau(v) \in \text{subtypes}(A)$. This is determined at a single location: the definition of $\tau(v)$'s class. One location.
+\end{proof}
 
-\textbf{Remark:} In type system terminology, nominal-tag observation corresponds to nominal-tag observation.
+\begin{theorem}[Declared interface localization]\label{thm:declared-localization}
+$E(\text{interface-only, declared}) = O(k)$ where $k$ = number of entity classes.
+\end{theorem}
 
-\textbf{Theorem 4.2 (Interface-Only Declared Complexity).} E(interface-only (declared)) = O(k) where
-k = number of classes.
+\begin{proof}
+With declared interfaces, the constraint ``$v$ must satisfy interface $I$'' requires verifying that each class implements all attributes in $I$. For $k$ classes, $O(k)$ locations.
+\end{proof}
 
-\emph{Proof.} Under interface-only typing with declared interfaces, constraint ``x must satisfy
-interface A'' requires checking that type(x) implements all methods in
-signature(A). This check occurs at each class definition. For k classes,
-O(k) locations. \qed
+\begin{theorem}[Attribute-only localization]\label{thm:attribute-localization}
+$E(\text{attribute-only}) = \Omega(n)$ where $n$ = number of query sites.
+\end{theorem}
 
-\textbf{Remark:} In type system terminology, this is called interface-only (declared) observation.
+\begin{proof}
+Under attribute-only observation, each query site independently checks ``does $v$ have attribute $a$?'' with no centralized declaration. For $n$ query sites, each must be inspected. Lower bound is $\Omega(n)$.
+\end{proof}
 
-\textbf{Theorem 4.3 (Interface-Only Incoherent Complexity).} E(interface-only) = $\Omega(n)$
-where n = number of call sites.
+\begin{corollary}[Strict dominance]\label{cor:strict-dominance}
+Nominal-tag observation strictly dominates attribute-only: $E(\text{nominal-tag}) = O(1) < \Omega(n) = E(\text{attribute-only})$ for all $n > 1$.
+\end{corollary}
 
-\emph{Proof.} Under interface-only typing, constraint ``x must have method m'' is
-encoded as \texttt{hasattr(x,\ "m")} at each call site. There is no
-central declaration. For n call sites, each must be inspected. Lower
-bound is $\Omega(n)$. \qed
+\subsection{The Information Scattering Theorem}\label{the-information-scattering-theorem}
 
-\textbf{Remark:} This incoherent pattern is traditionally called "interface-only observation."
+\begin{definition}[Constraint encoding locations]
+Let $I(\mathcal{O}, c)$ be the set of locations where constraint $c$ is encoded under observation family $\mathcal{O}$.
+\end{definition}
 
-\textbf{Corollary 4.4 (Strict Dominance).} nominal-tag observation strictly
-dominates interface-only: E(nominal-tag) = O(1) \textless{} $\Omega(n)$ =
-E(interface-only) for all n \textgreater{} 1.
+\begin{theorem}[Attribute-only scattering]\label{thm:attribute-scattering}
+For attribute-only observation, $|I(\text{attribute-only}, c)| = O(n)$ where $n$ = query sites using constraint $c$.
+\end{theorem}
 
-\textbf{Remark:} In type system terminology, this shows nominal-tag observation dominates interface-only observation.
+\begin{proof}
+Each attribute query independently encodes the constraint. No shared reference exists. Constraint encodings scale with query sites.
+\end{proof}
 
-\subsection{The Information Scattering
-Theorem}\label{the-information-scattering-theorem}
+\begin{theorem}[Nominal-tag centralization]\label{thm:nominal-centralization}
+For nominal-tag observation, $|I(\text{nominal-tag}, c)| = O(1)$.
+\end{theorem}
 
-\textbf{Definition 4.2 (Constraint Encoding Locations).} Let I(T, c) be
-the set of source locations where constraint c is encoded under
-discipline T.
+\begin{proof}
+The constraint ``must be of class $A$'' is encoded once in the definition of $A$. All tag checks reference this single definition.
+\end{proof}
 
-\textbf{Theorem 4.5 (Interface-Only Incoherent Scattering).} For interface-only typing,
-\textbar I(interface-only, c)\textbar{} = O(n) where n = call sites using
-constraint c.
-
-\textbf{Remark:} This describes the scattering problem in "interface-only observation."
-
-\emph{Proof.} Each \texttt{hasattr(x,\ "method")} call independently
-encodes the constraint. No shared reference. Constraints scale with call
-sites. \qed
-
-\textbf{Theorem 4.6 (nominal-tag Typing Centralizes).} For nominal-tag observation,
-\textbar I(nominal-tag, c)\textbar{} = O(1).
-
-\emph{Proof.} Constraint c = ``must inherit from A'' is encoded once: in
-the ABC/Protocol definition of A. All \texttt{isinstance(x,\ A)} checks
-reference this single definition. \qed
-
-\textbf{Remark:} In type system terminology, nominal-tag observation corresponds to nominal-tag observation.
-
-\textbf{Corollary 4.7 (Maintenance Entropy).} interface-only typing maximizes
-maintenance entropy; nominal-tag observation minimizes it.
+\begin{corollary}[Maintenance entropy]\label{cor:maintenance-entropy}
+Attribute-only observation maximizes maintenance entropy; nominal-tag observation minimizes it.
+\end{corollary}
 
 

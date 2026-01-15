@@ -147,11 +147,17 @@ This paper establishes the following results:
 
 \subsection{Related Work and Positioning}
 
-The information barrier (Theorem~\ref{thm:information-barrier}) is related to results in query complexity and communication complexity, where limited observations constrain computable functions. The matroid structure of type axes connects to lattice-theoretic approaches in abstract interpretation \cite{cousot1977abstract}.
+The information barrier (Theorem~\ref{thm:information-barrier}) is related to results in query complexity and communication complexity, where limited observations constrain computable functions. The matroid structure connects to lattice-theoretic approaches in abstract interpretation \cite{cousot1977abstract}.
 
 The rate-distortion analysis extends classical rate-distortion theory \cite{shannon1959coding, berger1971rate} to a discrete setting with three dimensions: tag length (analogous to rate), witness cost (query complexity), and semantic distortion (fidelity).
 
-This paper does not advocate for particular programming language design choices. We establish information-theoretic facts about observation families that hold regardless of implementation context. The programming language instantiations (Section~\ref{sec:applications}) are illustrative corollaries.
+\textbf{Historical context.} In programming language theory, the question of whether ``duck typing'' (attribute-only observation) is equivalent to nominal typing has been debated since Smalltalk (1980) and formalized in discussions of structural vs.\ nominal subtyping \cite{cardelli1985understanding}. Proponents argue that if two entities ``walk like a duck and quack like a duck,'' they should be treated identically. Critics argue that provenance matters.
+
+This paper resolves the debate with an objective answer: the gap between duck typing and nominal typing is not aesthetic---it is information-theoretic and unbounded. Duck typing incurs $\Omega(n)$ witness cost where nominal tagging achieves $O(1)$.
+
+\textbf{Prescriptive implications.} The theory does not merely describe existing systems; it prescribes design. Programming languages have independently converged on hybrid classification: Python added Abstract Base Classes (PEP 3119), TypeScript introduced branded types, Rust's trait system combines structural interfaces with nominal identity. This convergence is not coincidental---it reflects the information-theoretic optimality of nominal tags. The same principles apply to database schema design (primary keys as nominal tags), biological taxonomy (species identifiers), and knowledge representation (entity URIs).
+
+The contribution is not advocacy for a particular language feature, but identification of a universal tradeoff that any classification system must navigate.
 
 \subsection{Paper Organization}
 

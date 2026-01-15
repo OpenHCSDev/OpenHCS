@@ -3,12 +3,13 @@ Capacity: max_strings=200000, hash_size=200000, hash_prime=170003
 The top-level auxiliary file: type_compression_jsait.aux
 The style file: plain.bst
 Database file #1: references.bib
+Warning--I didn't find a database entry for "cardelli1985understanding"
 Warning--empty booktitle in abadi1996theory
 Warning--empty booktitle in liskov1994behavioral
 Warning--can't use both volume and number fields in liskov1994behavioral
 You've used 18 entries,
             2118 wiz_defined-function locations,
-            602 strings with 6530 characters,
+            603 strings with 6555 characters,
 and the built_in function-call counts, 5099 in all, are:
 = -- 495
 > -- 187
@@ -47,4 +48,4 @@ warning$ -- 3
 while$ -- 51
 width$ -- 20
 write$ -- 187
-(There were 3 warnings)
+(There were 4 warnings)
