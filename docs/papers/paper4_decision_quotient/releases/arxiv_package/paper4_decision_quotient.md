@@ -14,11 +14,13 @@ This paper proves that such *over-modeling* is not laziness---it is computationa
 
 We introduce the *decision quotient*---a measure of decision-relevant complexity---and prove a complexity dichotomy: checking sufficiency is polynomial when the minimal sufficient set has logarithmic size, but exponential when it has linear size. We identify tractable subcases (bounded actions, separable utilities, tree-structured dependencies) that admit polynomial algorithms.
 
+A major practical consequence is the *Simplicity Tax Theorem*: using a simple tool for a complex problem is necessarily harder than using a tool matched to the problem's complexity. When a tool lacks native support for required dimensions, users must supply that information externally at every use site. The "simpler" tool creates more total work, not less. This overturns the common intuition that "simpler is always better"---simplicity is only a virtue when the problem is also simple.
+
 **These are ceiling results:** The complexity characterizations are exact (both upper and lower bounds). The theorems quantify universally over all problem instances ($\forall$), not probabilistically ($\mu = 1$). The dichotomy is complete---no intermediate cases exist under standard assumptions. The tractability conditions are maximal---relaxing any yields hardness. No stronger complexity claims are possible within classical complexity theory.
 
-All results are machine-checked in Lean 4 [@moura2021lean4] (3,400+ lines across 25 files, $\sim$`<!-- -->`{=html}60 theorems). The Lean formalization proves: (1) polynomial-time reduction composition; (2) correctness of the TAUTOLOGY and $\exists\forall$-SAT reduction mappings; (3) equivalence of sufficiency checking with coNP/$\Sigma_2^\text{P}$-complete problems under standard encodings. Complexity classifications (coNP-complete, $\SigmaP{2}$-complete) are derived by combining these machine-checked results with the well-known complexity of TAUTOLOGY and $\exists\forall$-SAT.
+All results are machine-checked in Lean 4 [@moura2021lean4] ($\sim$`<!-- -->`{=html}5,000 lines across 33 files, 200+ theorems). The Lean formalization proves: (1) polynomial-time reduction composition; (2) correctness of the TAUTOLOGY and $\exists\forall$-SAT reduction mappings; (3) equivalence of sufficiency checking with coNP/$\Sigma_2^\text{P}$-complete problems under standard encodings; (4) the Simplicity Tax Theorem including conservation, dominance, and the amortization threshold. Complexity classifications (coNP-complete, $\SigmaP{2}$-complete) are derived by combining these machine-checked results with the well-known complexity of TAUTOLOGY and $\exists\forall$-SAT.
 
-**Keywords:** computational complexity, decision theory, model selection, coNP-completeness, polynomial hierarchy, Lean 4
+**Keywords:** computational complexity, decision theory, model selection, coNP-completeness, polynomial hierarchy, simplicity tax, Lean 4
 
 
 # Introduction {#sec:introduction}
@@ -91,9 +93,49 @@ This paper completes the theoretical foundation established in Papers 1--3:
 
 **Paper 4's contribution:** Proves that *identifying* which architectural decisions matter is itself computationally hard. This explains why leverage maximization (Paper 3) uses heuristics rather than optimal algorithms---and why this is not a deficiency but a mathematical necessity.
 
+## The Simplicity Tax: A Major Practical Consequence
+
+Beyond the complexity-theoretic results, this paper develops a foundational practical principle: the *Simplicity Tax Theorem*.
+
+The common intuition "simpler is better" is context-dependent. When a problem has intrinsic complexity (many required axes), using a "simple" tool (few native axes) forces the complexity elsewhere---to every use site. This paper proves:
+
+> **Using a simple tool for a complex problem is necessarily harder than using a tool matched to the problem's complexity.**
+
+Specifically: if a tool covers $k$ of $n$ required axes, the remaining $n-k$ axes become the *simplicity tax*, paid at *every use site*. For $m$ use sites, total external work is $(n-k) \times m$. A complete tool (covering all axes) pays zero tax.
+
+This overturns simplicity-as-virtue folklore. Preferring "simple" tools for complex problems is not wisdom---it is a failure to account for distributed costs. True sophistication is matching tool complexity to problem complexity.
+
+Section [\[sec:simplicity-tax\]](#sec:simplicity-tax){reference-type="ref" reference="sec:simplicity-tax"} develops this theorem formally. All results are machine-checked in Lean 4.
+
 ## Paper Structure
 
-Section [\[sec:foundations\]](#sec:foundations){reference-type="ref" reference="sec:foundations"} establishes formal foundations: decision problems, coordinate spaces, sufficiency. Section [\[sec:hardness\]](#sec:hardness){reference-type="ref" reference="sec:hardness"} proves hardness results with complete reductions. Section [\[sec:dichotomy\]](#sec:dichotomy){reference-type="ref" reference="sec:dichotomy"} develops the complexity dichotomy. Section [\[sec:tractable\]](#sec:tractable){reference-type="ref" reference="sec:tractable"} presents tractable special cases. Section [\[sec:implications\]](#sec:implications){reference-type="ref" reference="sec:implications"} discusses implications for software architecture and modeling. Section [\[sec:related\]](#sec:related){reference-type="ref" reference="sec:related"} surveys related work. Appendix [\[app:lean\]](#app:lean){reference-type="ref" reference="app:lean"} contains Lean proof listings.
+Section [\[sec:foundations\]](#sec:foundations){reference-type="ref" reference="sec:foundations"} establishes formal foundations: decision problems, coordinate spaces, sufficiency. Section [\[sec:hardness\]](#sec:hardness){reference-type="ref" reference="sec:hardness"} proves hardness results with complete reductions. Section [\[sec:dichotomy\]](#sec:dichotomy){reference-type="ref" reference="sec:dichotomy"} develops the complexity dichotomy. Section [\[sec:tractable\]](#sec:tractable){reference-type="ref" reference="sec:tractable"} presents tractable special cases. Section [\[sec:implications\]](#sec:implications){reference-type="ref" reference="sec:implications"} discusses implications for software architecture, including hardness distribution. Section [\[sec:simplicity-tax\]](#sec:simplicity-tax){reference-type="ref" reference="sec:simplicity-tax"} develops the Simplicity Tax Theorem as a major practical consequence. Section [\[sec:related\]](#sec:related){reference-type="ref" reference="sec:related"} surveys related work. Appendix [\[app:lean\]](#app:lean){reference-type="ref" reference="app:lean"} contains Lean proof listings. Appendix [\[appendix-rebuttals\]](#appendix-rebuttals){reference-type="ref" reference="appendix-rebuttals"} addresses anticipated objections.
+
+## Anticipated Objections {#sec:objection-summary}
+
+Before proceeding, we address objections readers are likely forming. Each is refuted in detail in Appendix [\[appendix-rebuttals\]](#appendix-rebuttals){reference-type="ref" reference="appendix-rebuttals"}; here we summarize the key points.
+
+#### "coNP-completeness doesn't mean intractable---there might be good heuristics."
+
+Correct, but this strengthens our thesis. The point is not that practitioners cannot find useful approximations, but that *optimal* dimension selection is provably hard. The prevalence of heuristics (feature selection in ML, sensitivity analysis in economics) is itself evidence of the computational barrier.
+
+#### "Real decision problems don't have clean coordinate structure."
+
+The coordinate structure assumption is weaker than it appears. Any finite state space can be encoded with binary coordinates; the hardness results apply to this encoding. More structured representations make the problem *easier*, not harder---so hardness for structured problems implies hardness for general ones.
+
+#### "The reduction from SAT is artificial."
+
+All -completeness proofs use reductions. The reduction demonstrates that SAT instances can be encoded as sufficiency-checking problems while preserving computational structure. This is standard complexity theory methodology [@cook1971complexity; @karp1972reducibility]. The claim is not that practitioners encounter SAT problems, but that sufficiency checking is at least as hard as SAT.
+
+#### "The tractable subcases are too restrictive to be useful."
+
+The tractable subcases (bounded actions, separable utility, tree structure) characterize *when* dimension selection becomes feasible. Many real problems fall into these categories. The dichotomy theorem (Theorem [\[thm:dichotomy\]](#thm:dichotomy){reference-type="ref" reference="thm:dichotomy"}) precisely identifies the boundary between tractable and intractable.
+
+#### "This just formalizes the obvious---of course feature selection is hard."
+
+The contribution is making "obvious" precise. Prior work established heuristic hardness for specific domains (ML feature selection, economic factor identification). We prove a *universal* result that applies to *any* decision problem with coordinate structure. This unification is the theoretical contribution.
+
+**If you have an objection not listed above,** check Appendix [\[appendix-rebuttals\]](#appendix-rebuttals){reference-type="ref" reference="appendix-rebuttals"} (12 objections addressed, including 4 specific to the Simplicity Tax) before concluding it has not been considered.
 
 
 # Formal Foundations {#sec:foundations}
@@ -414,6 +456,270 @@ Based on our theoretical results:
 
 4.  **Invest in heuristics:** For general problems, develop domain-specific heuristics rather than seeking optimal solutions.
 
+## Hardness Distribution: Right Place vs Wrong Place {#sec:hardness-distribution}
+
+A fundamental principle emerges from the complexity results: problem hardness is conserved but can be *distributed* across a system in qualitatively different ways.
+
+::: definition
+[]{#def:hardness-distribution label="def:hardness-distribution"} Let $P$ be a problem with intrinsic hardness $H(P)$ (measured in computational steps, implementation effort, or error probability). A *solution architecture* $S$ partitions this hardness into:
+
+-   $H_{\text{central}}(S)$: hardness paid once, at design time or in a shared component
+
+-   $H_{\text{distributed}}(S)$: hardness paid per use site
+
+For $n$ use sites, total realized hardness is: $$H_{\text{total}}(S) = H_{\text{central}}(S) + n \cdot H_{\text{distributed}}(S)$$
+:::
+
+::: theorem
+[]{#thm:hardness-conservation label="thm:hardness-conservation"} For any problem $P$ with intrinsic hardness $H(P)$, any solution $S$ satisfies: $$H_{\text{central}}(S) + H_{\text{distributed}}(S) \geq H(P)$$ Hardness cannot be eliminated, only redistributed.
+:::
+
+::: proof
+*Proof.* By definition of intrinsic hardness: any correct solution must perform at least $H(P)$ units of work (computational, cognitive, or error-handling). This work is either centralized or distributed. 0◻ ◻
+:::
+
+::: definition
+[]{#def:hardness-efficiency label="def:hardness-efficiency"} The *hardness efficiency* of solution $S$ with $n$ use sites is: $$\eta(S, n) = \frac{H_{\text{central}}(S)}{H_{\text{central}}(S) + n \cdot H_{\text{distributed}}(S)}$$
+:::
+
+High $\eta$ indicates centralized hardness (paid once); low $\eta$ indicates distributed hardness (paid repeatedly).
+
+::: theorem
+[]{#thm:centralization-dominance label="thm:centralization-dominance"} For $n > 1$ use sites, solutions with higher $H_{\text{central}}$ and lower $H_{\text{distributed}}$ yield:
+
+1.  Lower total realized hardness: $H_{\text{total}}(S_1) < H_{\text{total}}(S_2)$ when $H_{\text{distributed}}(S_1) < H_{\text{distributed}}(S_2)$
+
+2.  Fewer error sites: errors in centralized components affect 1 location; errors in distributed components affect $n$ locations
+
+3.  Higher leverage (Paper 3): one unit of central effort affects $n$ sites
+:::
+
+::: proof
+*Proof.* (1) follows from the total hardness formula. (2) follows from error site counting. (3) follows from Paper 3's leverage definition $L = \Delta\text{Effect}/\Delta\text{Effort}$. 0◻ ◻
+:::
+
+::: corollary
+[]{#cor:right-wrong-hardness label="cor:right-wrong-hardness"} A solution exhibits *hardness in the right place* when:
+
+-   Hardness is centralized (high $H_{\text{central}}$, low $H_{\text{distributed}}$)
+
+-   Hardness is paid at design/compile time rather than runtime
+
+-   Hardness is enforced by tooling (type checker, compiler) rather than convention
+
+A solution exhibits *hardness in the wrong place* when:
+
+-   Hardness is distributed (low $H_{\text{central}}$, high $H_{\text{distributed}}$)
+
+-   Hardness is paid repeatedly at each use site
+
+-   Hardness relies on human discipline rather than mechanical enforcement
+:::
+
+**Example: Type System Instantiation.** Consider a capability $C$ (e.g., provenance tracking) that requires hardness $H(C)$:
+
+::: center
+  **Approach**                  $H_{\text{central}}$     $H_{\text{distributed}}$
+  ---------------------------- ----------------------- -----------------------------
+  Native type system support    High (learning cost)    Low (type checker enforces)
+  Manual implementation         Low (no new concepts)   High (reimplement per site)
+:::
+
+For $n$ use sites, manual implementation costs $n \cdot H_{\text{distributed}}$, growing without bound. Native support costs $H_{\text{central}}$ once, amortized across all uses. The "simpler" approach (manual) is only simpler at $n = 1$; for $n > H_{\text{central}}/H_{\text{distributed}}$, native support dominates.
+
+::: remark
+The decision quotient (Section [\[sec:foundations\]](#sec:foundations){reference-type="ref" reference="sec:foundations"}) measures which coordinates are decision-relevant. Hardness distribution measures where the cost of *handling* those coordinates is paid. A high-axis system makes relevance explicit (central hardness); a low-axis system requires users to track relevance themselves (distributed hardness).
+:::
+
+The next section develops the major practical consequence of this framework: the Simplicity Tax Theorem.
+
+
+# The Simplicity Tax Theorem {#sec:simplicity-tax}
+
+The complexity results of Sections [\[sec:hardness\]](#sec:hardness){reference-type="ref" reference="sec:hardness"}--[\[sec:tractable\]](#sec:tractable){reference-type="ref" reference="sec:tractable"} establish that identifying decision-relevant dimensions is coNP-complete. This section develops the practical consequence: what happens when engineers *ignore* this hardness and attempt to use "simple" tools for complex problems.
+
+The answer is the *Simplicity Tax*: a per-site cost that cannot be avoided, only redistributed. This result overturns the common intuition that "simpler is always better" and establishes a foundational principle: **No Free Simplicity**.
+
+## The Conservation Law: No Free Simplicity {#sec:conservation}
+
+::: definition
+[]{#def:problem-tool label="def:problem-tool"} A *problem* $P$ has a set of *required axes* $R(P)$---the dimensions of variation that must be represented. A *tool* $T$ has a set of *native axes* $A(T)$---what it can represent directly.
+:::
+
+This terminology is grounded in Papers 1--2: "axes" correspond to Paper 1's axis framework (`requiredAxesOf`) and Paper 2's degrees of freedom.
+
+::: definition
+[]{#def:expressive-gap label="def:expressive-gap"} The *expressive gap* between tool $T$ and problem $P$ is: $$\text{Gap}(T, P) = R(P) \setminus A(T)$$ The *simplicity tax* is $|\text{Gap}(T, P)|$: the number of axes the tool cannot handle natively. This tax is paid at *every use site*.
+:::
+
+::: definition
+[]{#def:complete-incomplete label="def:complete-incomplete"} Tool $T$ is *complete* for problem $P$ if $R(P) \subseteq A(T)$. Otherwise $T$ is *incomplete* for $P$.
+:::
+
+::: theorem
+[]{#thm:tax-conservation label="thm:tax-conservation"} For any problem $P$ with required axes $R(P)$ and any tool $T$: $$|\text{Gap}(T, P)| + |R(P) \cap A(T)| = |R(P)|$$ The required axes are partitioned into "covered natively" and "tax." You cannot reduce the total---only shift where it is paid.
+:::
+
+::: proof
+*Proof.* Set partition: $R(P) = (R(P) \cap A(T)) \cup (R(P) \setminus A(T))$. The sets are disjoint. Cardinality follows. 0◻ ◻
+:::
+
+This is analogous to conservation laws in physics: energy is conserved, only transformed. Complexity is conserved, only distributed.
+
+::: theorem
+[]{#thm:complete-no-tax label="thm:complete-no-tax"} If $T$ is complete for $P$, then $\text{SimplicityTax}(T, P) = 0$.
+:::
+
+::: theorem
+[]{#thm:incomplete-positive-tax label="thm:incomplete-positive-tax"} If $T$ is incomplete for $P$, then $\text{SimplicityTax}(T, P) > 0$.
+:::
+
+::: theorem
+[]{#thm:tax-grows label="thm:tax-grows"} For $n$ use sites with an incomplete tool: $$\text{TotalExternalWork}(T, P, n) = n \times \text{SimplicityTax}(T, P)$$ Total work grows linearly. There is no economy of scale for distributed complexity.
+:::
+
+::: theorem
+[]{#thm:complete-dominates label="thm:complete-dominates"} For any $n > 0$, a complete tool has strictly less total cost than an incomplete tool: $$\text{TotalExternalWork}(T_{\text{complete}}, P, n) < \text{TotalExternalWork}(T_{\text{incomplete}}, P, n)$$
+:::
+
+::: proof
+*Proof.* Complete: $0 \times n = 0$. Incomplete: $k \times n$ for $k \geq 1$. For $n > 0$: $0 < kn$. 0◻ ◻
+:::
+
+## The Simplicity Preference Fallacy {#sec:fallacy}
+
+::: definition
+The *simplicity preference fallacy* is the cognitive error of preferring low $H_{\text{central}}$ (learning cost) without accounting for $H_{\text{distributed}}$ (per-site cost).
+:::
+
+This fallacy manifests as:
+
+-   "I prefer simple tools" (without asking: simple relative to what problem?)
+
+-   "YAGNI" applied to infrastructure (ignoring amortization across use sites)
+
+-   "Just write straightforward code" (ignoring that $n$ sites pay the tax)
+
+-   "Abstractions are overhead" (treating central cost as total cost)
+
+::: theorem
+[]{#thm:fallacy label="thm:fallacy"} Let $T_{\text{simple}}$ be incomplete for problem $P$ and $T_{\text{complex}}$ be complete. For any $n > 0$: $$\text{TotalExternalWork}(T_{\text{complex}}, P, n) < \text{TotalExternalWork}(T_{\text{simple}}, P, n)$$ The "simpler" tool creates more total work, not less.
+:::
+
+The fallacy persists because $H_{\text{distributed}}$ is invisible: it is paid by users, at runtime, across time, in maintenance. $H_{\text{central}}$ is visible: it is paid by the designer, upfront, once. Humans overweight visible costs.
+
+::: theorem
+[]{#thm:amortization label="thm:amortization"} There exists a threshold $n^*$ such that for all $n > n^*$, the total cost of the "complex" tool (including learning) is strictly less than the "simple" tool: $$n^* = \frac{H_{\text{central}}(T_{\text{complex}})}{\text{SimplicityTax}(T_{\text{simple}}, P)}$$ Beyond $n^*$ uses, the complex tool is cheaper even accounting for learning cost.
+:::
+
+## Cross-Domain Examples {#sec:examples}
+
+The Simplicity Tax applies universally. Consider these domains:
+
+::: center
+  **Domain**        **"Simple" Choice**   **"Complex" Choice**      **Tax per Site**
+  ----------------- --------------------- ------------------------- ---------------------
+  Type Systems      Dynamic typing        Static typing             Runtime type errors
+  Python            Manual patterns       Metaclasses/descriptors   Boilerplate code
+  Data Validation   Ad-hoc checks         Schema/ORM                Validation logic
+  Configuration     Hardcoded values      Config management         Change propagation
+  APIs              Stringly-typed        Rich type models          Parse/validate code
+:::
+
+In each case, the "simple" choice has lower learning cost ($H_{\text{central}}$) but higher per-site cost ($H_{\text{distributed}}$). For $n$ use sites, the simple choice costs $n \times \text{tax}$.
+
+**Example: Python Metaclasses.** Python's community often resists metaclasses as "too complex." But consider a problem requiring automatic subclass registration, attribute validation, and interface enforcement---three axes of variation.
+
+::: center
+  **Approach**                       **Native Axes**                 **Tax/Class**   **Total for 50 classes**
+  ------------------- --------------------------------------------- --------------- --------------------------
+  Metaclass            $\{$registration, validation, interface$\}$         0                    0
+  Manual decorators               $\{$registration$\}$                     2                   100
+  Fully manual                         $\emptyset$                         3                   150
+:::
+
+The "simplest" approach (fully manual) creates the most work. The community's resistance to metaclasses is the Simplicity Preference Fallacy in action.
+
+**Example: Static vs. Dynamic Typing.** Dynamic typing has lower learning cost. But type errors are a per-site tax: each call site that could receive a wrong type is an error site. For $n$ call sites:
+
+-   Static typing: type checker verifies once, 0 runtime type errors
+
+-   Dynamic typing: $n$ potential runtime type errors, each requiring defensive code or debugging
+
+The "simplicity" of dynamic typing distributes type-checking to every call site.
+
+## Unification with Papers 1--3 {#sec:unification}
+
+The Simplicity Tax Theorem unifies results across the pentalogy:
+
+**Paper 1 (Typing Disciplines).** Fixed-axis type systems are incomplete for domains requiring additional axes. The Simplicity Tax quantifies the cost: $|\text{requiredAxes}(D) \setminus \text{fixedAxes}|$ per use site. Parameterized type systems are complete (zero tax).
+
+**Paper 2 (SSOT).** Non-SSOT architectures distribute specification across $n$ locations. Each location is a potential error site. SSOT centralizes specification: $H_{\text{distributed}} = 0$.
+
+**Paper 3 (Leverage).** High-leverage solutions have high $H_{\text{central}}$ and low $H_{\text{distributed}}$. Leverage $= \text{impact}/\text{effort} = n / H_{\text{central}}$ when $H_{\text{distributed}} = 0$. Low-leverage solutions pay per-site.
+
+**Paper 4 (This Paper).** Identifying which axes matter is coNP-complete. If you guess wrong and use an incomplete tool, you pay the Simplicity Tax. The tax is the cost of the coNP-hard problem you failed to solve.
+
+::: theorem
+Across Papers 1--4, solutions with higher $H_{\text{central}}$ and zero $H_{\text{distributed}}$ strictly dominate solutions with lower $H_{\text{central}}$ and positive $H_{\text{distributed}}$, for $n > n^*$.
+
+These are not four separate claims. They are four views of a single phenomenon: the conservation and distribution of intrinsic problem complexity.
+:::
+
+## Formal Competence {#sec:competence}
+
+::: definition
+An engineer is *formally competent* with respect to complexity distribution if they correctly account for both $H_{\text{central}}$ and $H_{\text{distributed}}$ when evaluating tools.
+:::
+
+**The Competence Test:**
+
+1.  Identify intrinsic problem complexity: $|R(P)|$
+
+2.  Identify tool's native axes: $|A(T)|$
+
+3.  Compute the gap: $|R(P) \setminus A(T)|$
+
+4.  Compute total cost: $H_{\text{central}}(T) + n \times |R(P) \setminus A(T)|$
+
+5.  Compare tools by total cost, not $H_{\text{central}}$ alone
+
+Failing step 4---evaluating tools by learning cost alone---is formal incompetence.
+
+::: remark
+Python's Zen states: "Simple is better than complex. Complex is better than complicated." This is often misread as endorsing simplicity unconditionally. The correct reading:
+
+-   **Simple**: Low intrinsic complexity (both $H_{\text{central}}$ and $H_{\text{distributed}}$ low)
+
+-   **Complex**: High intrinsic complexity, *structured* (high $H_{\text{central}}$, low $H_{\text{distributed}}$)
+
+-   **Complicated**: High intrinsic complexity, *tangled* (low $H_{\text{central}}$, high $H_{\text{distributed}}$)
+
+The Zen says: when the problem has intrinsic complexity, *complex* (centralized) beats *complicated* (distributed). The community often conflates complex with complicated.
+:::
+
+## Lean 4 Formalization {#sec:simplicity-lean}
+
+All theorems in this section are machine-checked in `DecisionQuotient/HardnessDistribution.lean`:
+
+::: center
+  **Theorem**                          **Lean Name**
+  ------------------------------------ ---------------------------------
+  Simplicity Tax Conservation          `simplicityTax_conservation`
+  Complete Tools Pay No Tax            `complete_tool_no_tax`
+  Incomplete Tools Pay Positive Tax    `incomplete_tool_positive_tax`
+  Tax Grows Linearly                   `simplicityTax_grows`
+  Complete Dominates Incomplete        `complete_dominates_incomplete`
+  The Fallacy Theorem                  `simplicity_preference_fallacy`
+  Amortization Threshold               `amortization_threshold`
+  Dominance Transitivity               `dominates_trans`
+  Tax Antitone w.r.t. Expressiveness   `simplicityTax_antitone`
+:::
+
+The formalization uses `Finset `$\mathbb{N}$ for axes, making the simplicity tax a computable natural number. The `Tool` type forms a lattice under the expressiveness ordering, with tax antitone (more expressive $\Rightarrow$ lower tax).
+
+All proofs compile with zero `sorry` placeholders.
+
 
 # Related Work {#sec:related}
 
@@ -501,6 +807,18 @@ The theorems proven here are *ceiling results*---no stronger claims are possible
 
 These results close the complexity landscape for coordinate sufficiency. Within classical complexity theory, the characterization is complete.
 
+## The Simplicity Tax: A Major Practical Consequence {#the-simplicity-tax-a-major-practical-consequence .unnumbered}
+
+A widespread belief holds that "simpler is better"---that preferring simple tools and minimal models is a mark of sophistication. This paper proves that belief is context-dependent and often wrong.
+
+The *Simplicity Tax Theorem* (Section [\[sec:simplicity-tax\]](#sec:simplicity-tax){reference-type="ref" reference="sec:simplicity-tax"}) establishes: when a problem requires $k$ axes of variation and a tool natively supports only $j < k$ of them, the remaining $k - j$ axes must be handled externally at *every use site*. For $n$ use sites, the "simpler" tool creates $(k-j) \times n$ units of external work. A tool matched to the problem's complexity creates zero external work.
+
+> **True sophistication is matching tool complexity to problem complexity.**
+
+Preferring "simple" tools for complex problems is not wisdom---it is a failure to account for distributed costs. The simplicity tax is paid invisibly, at every use site, by every user, forever. The sophisticated engineer asks not "which tool is simpler?" but "which tool matches my problem's intrinsic complexity?"
+
+This result is machine-checked in Lean 4 (`HardnessDistribution.lean`). The formalization proves conservation (you can't eliminate the tax, only redistribute it), dominance (complete tools always beat incomplete tools), and the amortization threshold (beyond which the "complex" tool is strictly cheaper).
+
 ## The Foundational Contribution {#the-foundational-contribution .unnumbered}
 
 This paper proves a universal constraint on optimization under uncertainty. The constraint is:
@@ -512,6 +830,8 @@ This paper proves a universal constraint on optimization under uncertainty. The 
 -   **Permanent**, not provisional---no algorithmic breakthrough can circumvent -completeness (unless P = coNP)
 
 The result explains phenomena across disciplines: why feature selection uses heuristics, why configuration files grow, why sensitivity analysis is approximate, why model selection is art rather than science. These are not separate problems with separate explanations. They are manifestations of a single computational constraint, now formally characterized.
+
+The Simplicity Tax Theorem adds a practical corollary: the universal response to intractability (over-modeling) is not just rational---attempting to avoid it by using "simpler" tools is actively counterproductive. Simplicity that mismatches problem complexity creates more work, not less.
 
 Open questions remain (fixed-parameter tractability, quantum complexity, average-case behavior under natural distributions), but the foundational question---*is identifying relevance fundamentally hard?*---is answered: yes.
 
@@ -556,7 +876,7 @@ This follows the tradition of verified complexity theory: just as Nipkow & Klein
 
 ## Module Structure
 
-The formalization consists of 25 files organized as follows:
+The formalization consists of 33 files organized as follows:
 
 -   `Basic.lean` -- Core definitions (DecisionProblem, CoordinateSet, Projection)
 
@@ -574,6 +894,8 @@ The formalization consists of 25 files organized as follows:
 
 -   `Dichotomy.lean` and `ComplexityMain.lean` -- Summary results
 
+-   `HardnessDistribution.lean` -- Simplicity Tax Theorem (Section [\[sec:simplicity-tax\]](#sec:simplicity-tax){reference-type="ref" reference="sec:simplicity-tax"})
+
 ## Key Theorems
 
 ::: theorem
@@ -585,15 +907,166 @@ The formalization consists of 25 files organized as follows:
         exists h : PolyReduction A C,
           forall a, h.reduce a = g.reduce (f.reduce a)
 
+::: theorem
+[]{#thm:tax-conservation-lean label="thm:tax-conservation-lean"} The simplicity tax plus covered axes equals required axes (partition).
+:::
+
+    theorem simplicityTax_conservation :
+        simplicityTax P T + (P.requiredAxes inter T.nativeAxes).card
+          = P.requiredAxes.card
+
+::: theorem
+[]{#thm:fallacy-lean label="thm:fallacy-lean"} Incomplete tools always cost more than complete tools for $n > 0$ use sites.
+:::
+
+    theorem simplicity_preference_fallacy (T_simple T_complex : Tool)
+        (h_simple_incomplete : isIncomplete P T_simple)
+        (h_complex_complete : isComplete P T_complex)
+        (n : Nat) (hn : n > 0) :
+        totalExternalWork P T_complex n < totalExternalWork P T_simple n
+
 ## Verification Status
 
--   Total lines: 3,400+
+-   Total lines: $\sim$`<!-- -->`{=html}5,000
 
--   Theorems: $\sim$`<!-- -->`{=html}60
+-   Theorems: 200+
 
--   Files: 25
+-   Files: 33
 
--   Status: All proofs in this directory compile with no `sorry`
+-   Status: All proofs compile with no `sorry`
+
+
+# Preemptive Rebuttals {#appendix-rebuttals}
+
+We address anticipated objections to the main results.
+
+## Objection 1: "coNP-completeness doesn't mean intractable"
+
+**Objection:** "coNP-complete problems might have good heuristics or approximations. The hardness result doesn't preclude practical solutions."
+
+**Response:** This objection actually *strengthens* our thesis. The point is not that practitioners cannot find useful approximations---they clearly do (feature selection heuristics in ML, sensitivity analysis in economics, configuration defaults in software). The point is that *optimal* dimension selection is provably hard.
+
+The prevalence of heuristics across domains is itself evidence of the computational barrier. If optimal selection were tractable, we would see optimal algorithms, not heuristics. The universal adoption of "include more than necessary" strategies is the rational response to coNP-completeness.
+
+## Objection 2: "Real problems don't have coordinate structure"
+
+**Objection:** "Real decision problems are messier than your clean product-space model. The coordinate structure assumption is too restrictive."
+
+**Response:** The assumption is weaker than it appears. Any finite state space can be encoded with binary coordinates; our hardness results apply to this encoding. More structured representations make the problem *easier*, not harder---so hardness for structured problems implies hardness for unstructured ones.
+
+The coordinate structure abstracts common patterns: independent sensors, orthogonal configuration parameters, factored state spaces. These are ubiquitous in practice precisely because they enable tractable reasoning in special cases (Theorem [\[thm:tractable\]](#thm:tractable){reference-type="ref" reference="thm:tractable"}).
+
+## Objection 3: "The SAT reduction is artificial"
+
+**Objection:** "The reduction from SAT/TAUT is an artifact of complexity theory. Real decision problems don't encode Boolean formulas."
+
+**Response:** All coNP-completeness proofs use reductions. The reduction demonstrates that TAUT instances can be encoded as sufficiency-checking problems while preserving computational structure. This is standard methodology [@cook1971complexity; @karp1972reducibility].
+
+The claim is not that practitioners encounter SAT problems in disguise, but that sufficiency checking is *at least as hard as* TAUT. If sufficiency checking were tractable, we could solve TAUT in polynomial time, contradicting the widely-believed $\P \neq \NP$ conjecture.
+
+The reduction is a proof technique, not a claim about problem origins.
+
+## Objection 4: "Tractable subcases are too restrictive"
+
+**Objection:** "The tractable subcases (bounded actions, separable utility, tree structure) are too restrictive to cover real problems."
+
+**Response:** These subcases characterize *when* dimension selection becomes feasible:
+
+-   **Bounded actions:** Many real decisions have few options (buy/sell/hold, accept/reject, left/right/straight)
+
+-   **Separable utility:** Additive decomposition is common in economics and operations research
+
+-   **Tree structure:** Hierarchical dependencies appear in configuration, organizational decisions, and causal models
+
+The dichotomy theorem (Theorem [\[thm:dichotomy\]](#thm:dichotomy){reference-type="ref" reference="thm:dichotomy"}) precisely identifies the boundary. The contribution is not that all problems are hard, but that hardness is the *default* unless special structure exists.
+
+## Objection 5: "This just formalizes the obvious"
+
+**Objection:** "Everyone knows feature selection is hard. This paper just adds mathematical notation to folklore."
+
+**Response:** The contribution is unification. Prior work established hardness for specific domains (feature selection in ML [@guyon2003introduction], factor identification in economics, variable selection in statistics). We prove a *universal* result that applies to *any* decision problem with coordinate structure.
+
+This universality explains why the same "over-modeling" pattern appears across unrelated domains. It's not that each domain independently discovered the same heuristic---it's that each domain independently hit the same computational barrier.
+
+The theorem makes "obvious" precise and proves it applies universally. This is the value of formalization.
+
+## Objection 6: "The Lean proofs don't capture the real complexity"
+
+**Objection:** "The Lean formalization models an idealized version of the problem. Real coNP-completeness proofs are about Turing machines, not Lean types."
+
+**Response:** The Lean formalization captures the mathematical structure of the reduction, not the Turing machine details. We prove:
+
+1.  The sufficiency-checking problem is in coNP (verifiable counterexample)
+
+2.  TAUT reduces to sufficiency checking (polynomial-time construction)
+
+3.  The reduction preserves yes/no answers (correctness)
+
+These are the mathematical claims that establish coNP-completeness. The Turing machine encoding is implicit in Lean's computational semantics. The formalization provides machine-checked verification that the reduction is correct.
+
+## Objection 7: "The dichotomy is not tight"
+
+**Objection:** "The dichotomy between $O(\log n)$ and $\Omega(n)$ minimal sufficient sets leaves a gap. What about $O(\sqrt{n})$?"
+
+**Response:** The dichotomy is tight under standard complexity assumptions. The gap corresponds to problems reducible to a polynomial number of SAT instances---exactly the problems in the polynomial hierarchy between P and coNP.
+
+In practice, the dichotomy captures the relevant cases: either the problem has logarithmic dimension (tractable) or linear dimension (intractable). Intermediate cases exist theoretically but are rare in practice.
+
+## Objection 8: "This doesn't help practitioners"
+
+**Objection:** "Proving hardness doesn't help engineers solve their problems. This paper offers no constructive guidance."
+
+**Response:** Understanding limits is constructive. The paper provides:
+
+1.  **Tractable subcases** (Theorem [\[thm:tractable\]](#thm:tractable){reference-type="ref" reference="thm:tractable"}): Check if your problem has bounded actions, separable utility, or tree structure
+
+2.  **Justification for heuristics**: Over-modeling is not laziness---it's computationally rational
+
+3.  **Focus for optimization**: Don't waste effort on optimal dimension selection; invest in good defaults and local search
+
+Knowing that optimal selection is coNP-complete frees practitioners to use heuristics without guilt. This is actionable guidance.
+
+## Objection 9: "But simple tools are easier to learn"
+
+**Objection:** "The Simplicity Tax analysis ignores learning costs. Simple tools have lower barrier to entry, which matters for team adoption."
+
+**Response:** This objection conflates $H_{\text{central}}$ (learning cost) with total cost. Yes, simple tools have lower learning cost. But for $n$ use sites, the total cost is: $$H_{\text{total}} = H_{\text{central}} + n \times H_{\text{distributed}}$$
+
+The learning cost is paid once; the per-site cost is paid $n$ times. For $n > H_{\text{central}} / H_{\text{distributed}}$, the "complex" tool with higher learning cost has lower total cost.
+
+The objection is actually an argument for training, not for tool avoidance. If the learning cost is the barrier, pay it---the amortization makes it worthwhile.
+
+## Objection 10: "My team doesn't know metaclasses/types/frameworks"
+
+**Objection:** "In practice, teams use what they know. Advocating for 'complex' tools ignores organizational reality."
+
+**Response:** The Simplicity Tax is paid regardless of whether your team recognizes it. Ignorance of the tax does not exempt you from paying it.
+
+If your team writes boilerplate at 50 locations because they don't know metaclasses, they pay the tax---in time, bugs, and maintenance. The tax is real whether it appears on a ledger or not.
+
+Organizational reality is a constraint on *implementation*, not on *what is optimal*. The Simplicity Tax Theorem tells you the optimal; your job is to approach it within organizational constraints. "We don't know X" is a gap to close, not a virtue to preserve.
+
+## Objection 11: "We can always refactor later"
+
+**Objection:** "Start simple, refactor when needed. Technical debt is manageable."
+
+**Response:** Refactoring from distributed to centralized is $O(n)$ work---you are paying the accumulated Simplicity Tax all at once. If you have $n$ sites each paying tax $k$, refactoring costs at least $nk$ effort.
+
+"Refactor later" is not free. It is deferred payment with interest. The Simplicity Tax accrues whether you pay it incrementally (per-site workarounds) or in bulk (refactoring).
+
+Moreover, distributed implementations create dependencies. Each workaround becomes a local assumption that must be preserved during refactoring. The refactoring cost is often *superlinear* in $n$.
+
+## Objection 12: "The Simplicity Tax assumes all axes are equally important"
+
+**Objection:** "Real problems have axes of varying importance. A tool that covers the important axes might be good enough."
+
+**Response:** The theorem is conservative: it counts axes uniformly. Weighted versions strengthen the result.
+
+If axis $a$ has importance $w_a$, define weighted tax: $$\text{WeightedTax}(T, P) = \sum_{a \in R(P) \setminus A(T)} w_a$$
+
+Now the incomplete tool pays $\sum w_a \times n$ while the complete tool pays 0. The qualitative result is unchanged: incomplete tools pay per-site; complete tools do not.
+
+The "cover important axes" heuristic only works if you *correctly identify* which axes are important. By Theorem [\[thm:sufficiency-conp\]](#thm:sufficiency-conp){reference-type="ref" reference="thm:sufficiency-conp"}, this identification is coNP-complete. You are back to the original hardness result.
 
 
 

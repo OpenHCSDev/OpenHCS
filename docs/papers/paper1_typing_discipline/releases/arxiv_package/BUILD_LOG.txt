@@ -2,7 +2,7 @@ OpenHCS Paper Build Log
 ========================
 
 Paper: paper1 - A Universal Typing Discipline for Polymorphic Abstraction
-Package Date: 2026-01-07T20:50:03.362492
+Package Date: 2026-01-14T16:04:17.483966
 Lean Toolchain: leanprover/lean4:v4.27.0-rc1
 
 Proof Statistics:
@@ -33,9 +33,9 @@ COMPILATION OUTPUT (lake build)
 ================================================================================
 
 ℹ [7818/7831] Replayed abstract_class_system
-info: abstract_class_system.lean:693:0: []
-info: abstract_class_system.lean:694:0: [AbstractClassSystem.UnifiedCapability.interfaceCheck]
-info: abstract_class_system.lean:695:0: [AbstractClassSystem.UnifiedCapability.identity,
+info: abstract_class_system.lean:695:0: []
+info: abstract_class_system.lean:696:0: [AbstractClassSystem.UnifiedCapability.interfaceCheck]
+info: abstract_class_system.lean:697:0: [AbstractClassSystem.UnifiedCapability.identity,
  AbstractClassSystem.UnifiedCapability.provenance,
  AbstractClassSystem.UnifiedCapability.enumeration,
  AbstractClassSystem.UnifiedCapability.conflictResolution,

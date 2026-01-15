@@ -1,5 +1,27 @@
 \section{Foundations}\label{foundations}
 
+\subsection{Two Credibility Domains}\label{two-credibility-domains}
+
+This paper distinguishes two fundamentally different credibility domains that obey different dynamics:
+
+\textbf{Definition 2.0a (Mathematical Credibility).} \emph{Mathematical credibility} $C_M$ measures the probability that a claim is logically sound. The audience is a formal verifier (proof assistant, compiler, test suite). The signal space consists of artifacts that can be mechanically checked. Mathematical credibility is binary at the limit: a proof compiles or it doesn't.
+
+\textbf{Definition 2.0b (Social Credibility).} \emph{Social credibility} $C_S$ measures the probability that a social audience accepts a claim. The audience is human agents with priors shaped by institutional hierarchy, reputation, and group membership. The signal space consists of credentials, affiliations, endorsements, and communication patterns.
+
+\textbf{Theorem 2.0c (Domain Independence).} Mathematical credibility and social credibility are orthogonal:
+\[C_M(c, s) \not\Rightarrow C_S(c, s) \quad \text{and} \quad C_S(c, s) \not\Rightarrow C_M(c, s)\]
+A signal maximizing one domain does not necessarily affect the other.
+
+\emph{Proof.} Constructive. (1) High $C_M$, low $C_S$: a correct proof by an unknown author receives $C_M \to 1$ (it compiles) but may receive $C_S \approx P_{\text{prior}}$ (no institutional endorsement). (2) High $C_S$, low $C_M$: a claim by a prestigious institution without formal verification receives high $C_S$ (reputation transfer) but $C_M$ is undefined or low (no proof). \qed
+
+\textbf{Corollary 2.0d (Costly Signal Domain-Specificity).} Costly signals are domain-specific:
+\begin{itemize}
+\item Machine-checked proofs are maximally costly in the mathematical domain (cannot compile a false proof) but may be cheap talk in the social domain (anyone can claim to have proofs).
+\item Institutional credentials (PhD, tenure, affiliation) are costly in the social domain (years of compliance) but cheap talk in the mathematical domain (credential $\not\Rightarrow$ soundness).
+\end{itemize}
+
+\textbf{Remark (Credibility Domain Conflict).} When a signal achieves $C_M \to 1$ but $C_S \approx 0$, the mathematical and social domains are in conflict. A rational response in the mathematical domain (engage with proofs) differs from a rational response in the social domain (defer to hierarchy). Observers may respond in either domain. This paper's theorems apply within each domain separately; cross-domain dynamics require modeling both simultaneously.
+
 \subsection{Signals and Costs}\label{signals-and-costs}
 
 \textbf{Definition 2.1 (Signal).} A \emph{signal} is a tuple

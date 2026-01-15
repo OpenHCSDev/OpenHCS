@@ -61,6 +61,32 @@ This paper builds on and synthesizes results from the preceding papers:
 
 This paper synthesizes: formal proofs are costly signals (Paper 5) because compilation is truth-dependent cost. "In your model" objections are cheap talk. The asymmetry is total.
 
+## Anticipated Objections {#sec:objection-summary}
+
+Before proceeding, we address objections readers are likely forming. Each is refuted in detail in Appendix [\[appendix-rebuttals\]](#appendix-rebuttals){reference-type="ref" reference="appendix-rebuttals"}.
+
+#### "Formality excludes important truths."
+
+The claim is not that informal propositions are false, but that they are *local*---useful only to agents sharing context. Formal propositions are universal precisely because they don't require shared context. Both have value; they have different scope.
+
+#### "The formal-universal equivalence is circular."
+
+The definitions are independent. Formality is defined by verifier existence; universality is defined by agent-independence. The theorem proves they coincide. This is a substantive claim, not a tautology.
+
+#### "Mathematics isn't universal---it requires training."
+
+Training enables *running* the verifier, not *accepting* the result. A Song dynasty mathematician and a modern computer scientist may use different notation, but both can verify the same proof. The verification is universal; the pedagogy is local.
+
+#### "This is just logical positivism repackaged."
+
+Logical positivism claimed informal statements are *meaningless*. We claim they are *local*. The distinction is crucial: local propositions can be true, useful, and important---they just don't compile everywhere.
+
+#### "The Lean proofs are trivial."
+
+The proofs formalize the equivalence structure. The value is precision: the informal argument "formal implies universal" becomes a machine-checked derivation. Trivial proofs that compile are more valuable than deep proofs with errors.
+
+**If you have an objection not listed above,** check Appendix [\[appendix-rebuttals\]](#appendix-rebuttals){reference-type="ref" reference="appendix-rebuttals"} before concluding it has not been considered.
+
 
 # Opinion as Complexity Class {#sec:opinion}
 
@@ -337,6 +363,111 @@ Full formalization in progress. Modules:
 -   `CoherentAgent.lean`: Coherent agency and failure modes
 
 -   `CheapTalkConnection.lean`: Integration with Paper 5 bounds
+
+
+# Preemptive Rebuttals {#appendix-rebuttals}
+
+We address anticipated objections to the formal-universal equivalence.
+
+## Objection 1: "Formality excludes important truths"
+
+**Objection:** "Many important truths---ethical, aesthetic, experiential---cannot be formalized. Your framework dismisses them."
+
+**Response:** The claim is not that informal propositions are false or unimportant, but that they are *local*. A proposition is local if its usefulness depends on shared context (language, culture, assumptions).
+
+Formal propositions are universal precisely because they don't require shared context. Both have value; they have different scope:
+
+-   **Local:** "This painting is beautiful" (requires aesthetic context)
+
+-   **Universal:** "$2 + 2 = 4$" (compiles for any agent)
+
+The framework distinguishes scope, not importance.
+
+## Objection 2: "The equivalence is circular"
+
+**Objection:** "You define formal as 'verifiable by any agent' and universal as 'useful to any agent.' These are the same thing."
+
+**Response:** The definitions are independent:
+
+-   **Formal:** There exists a verifier $V$ such that any agent can run $V$ and $V$ decides $P$
+
+-   **Universal:** For all agents, $P$ is useful
+
+The theorem proves these coincide. This is substantive: it's not obvious that verifiability implies usefulness or vice versa. The proof shows that agent-independence (universality) requires explicit rules (formality), and explicit rules (formality) enable agent-independence (universality).
+
+## Objection 3: "Mathematics requires training"
+
+**Objection:** "Mathematics isn't universal---it requires years of training to understand. A child can't verify a proof."
+
+**Response:** Training enables *running* the verifier, not *accepting* the result. The distinction:
+
+-   **Running:** Executing the verification procedure (requires training)
+
+-   **Accepting:** Trusting the output once verified (universal)
+
+A Song dynasty mathematician and a modern computer scientist may use different notation, but both can verify the same proof. The verification is universal; the pedagogy is local.
+
+Moreover, machine verification eliminates the training requirement. Lean doesn't need to "understand" mathematics---it executes the verifier. This is the ultimate universality: even non-mathematical agents can verify.
+
+## Objection 4: "This is logical positivism"
+
+**Objection:** "This sounds like logical positivism---the claim that non-verifiable statements are meaningless. That view was refuted."
+
+**Response:** Logical positivism claimed informal statements are *meaningless*. We claim they are *local*. The distinction is crucial:
+
+-   **Positivism:** "God exists" is meaningless (no verification procedure)
+
+-   **Our claim:** "God exists" is local (useful only to agents sharing theological context)
+
+Local propositions can be true, useful, and important. They just don't compile everywhere. This is a scope claim, not a meaning claim.
+
+## Objection 5: "The Lean proofs are trivial"
+
+**Objection:** "The proofs just formalize definitions. There's no deep mathematics."
+
+**Response:** The value is precision. The informal argument "formal implies universal" becomes a machine-checked derivation. The proofs verify:
+
+1.  The forward direction (formal $\to$ universal) follows from verifier universality
+
+2.  The backward direction (universal $\to$ formal) follows from agent-independence requiring explicit rules
+
+3.  The equivalence is symmetric and transitive
+
+Trivial proofs that compile are more valuable than deep proofs with errors.
+
+## Objection 6: "Opinion complexity is not well-defined"
+
+**Objection:** "You claim opinions have complexity, but complexity is a property of algorithms, not beliefs."
+
+**Response:** Opinion complexity is defined as the minimum description length of the context required to make the opinion useful. This is well-defined:
+
+-   **Low complexity:** "$2 + 2 = 4$" (no context required)
+
+-   **High complexity:** "This wine is excellent" (requires shared aesthetic, cultural, experiential context)
+
+The definition uses Kolmogorov complexity of the context, which is a standard measure.
+
+## Objection 7: "Universe denial is too strong"
+
+**Objection:** "Theorem 3.1 says rejecting formal proofs requires denying the universe. This is hyperbolic."
+
+**Response:** The theorem is precise. To reject a machine-checked proof, you must deny one of:
+
+1.  The verifier is correct (deny mathematics)
+
+2.  The machine executed correctly (deny physics)
+
+3.  The output is what you observed (deny perception)
+
+Each denial has unbounded cost---it undermines all reasoning in that domain. "Denying the universe" is shorthand for this unbounded cost. The theorem is not hyperbolic; it's a precise characterization of the epistemic cost of rejection.
+
+## Objection 8: "Coherent agency is too restrictive"
+
+**Objection:** "Your definition of coherent agency excludes agents with inconsistent beliefs. Most humans are incoherent."
+
+**Response:** Coherent agency is a normative ideal, not a descriptive claim. The theorems characterize what *coherent* agents must accept. Incoherent agents can reject anything---but at the cost of incoherence.
+
+The framework provides a standard: if you want to be coherent, you must accept formal proofs. If you reject them, you are (by definition) incoherent. This is not a criticism of humans; it's a characterization of the epistemic landscape.
 
 
 

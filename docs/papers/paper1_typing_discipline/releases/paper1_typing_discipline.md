@@ -16,9 +16,11 @@
 
 -   **The Asymmetry:** Fixed systems guarantee failure for some domain. Parameterized systems guarantee success for all domains. One dominates the other absolutely.
 
--   **Uniqueness:** For any domain $D$, all minimal complete axis sets have equal cardinality. "Dimension" is well-defined for classification problems.
+-   **Semantic Non-Embeddability:** Disciplines with fewer axes cannot embed disciplines with more axes. The gap is information-theoretic: no encoding, simulation, or workaround can bridge it.
 
--   **Minimality $\Rightarrow$ Orthogonality:** Every minimal complete axis set is orthogonal. Orthogonality is not imposed; it is derived from minimality.
+-   **Minimality $\Rightarrow$ Orthogonality:** Every minimal complete axis set is orthogonal. Orthogonality is not imposed; it is *derived* from minimality.
+
+-   **Matroid Structure:** Orthogonal axis sets satisfy the matroid exchange property. Consequence: all minimal complete sets have equal cardinality (dimension is well-defined).
 
 **The Prescriptive Force.** These are not design recommendations. They are mathematical necessities:
 
@@ -30,11 +32,13 @@
 
 **Application to Type Systems.** We instantiate the framework to programming language type systems, proving:
 
--   $(B, S)$ (Bases and Namespace) is the unique minimal complete representation of class semantics
+-   $(B, S)$ (Bases and Namespace) is the unique minimal complete axis set for *the domain of standard class semantics*. It is still incomplete for domains requiring additional axes.
 
--   $(B, S, H)$ extends this for hierarchical configuration systems (adding a Scope axis)
+-   $(B, S, H)$ extends this for hierarchical configuration systems. H (hierarchy) was derived when OpenHCS required scope-chain queries that $(B, S)$ could not answer.
 
--   B-inclusive systems strictly dominate B-exclusive systems when $B \neq \emptyset$ (in type system terminology: nominal typing dominates structural typing)
+-   B-inclusive systems strictly dominate B-exclusive systems when $B \neq \emptyset$ (nominal typing dominates structural typing)
+
+-   Structural typing cannot embed nominal typing---the four capabilities (provenance, identity, enumeration, conflict resolution) are information-theoretically absent from $\{S\}$-only systems
 
 -   Systems using only $\{S\}$ require $\Omega(n)$ error localization; systems using $\{B, S\}$ achieve $O(1)$
 
@@ -130,7 +134,11 @@ This paper makes five contributions, ordered from most general to most specific:
 
 -   **Uniqueness of Minimal Complete Sets:** All minimal complete axis sets for a domain have equal cardinality. Dimension is well-defined for classification problems.
 
--   **Minimality $\Rightarrow$ Orthogonality:** Every minimal complete axis set is orthogonal. Redundant (non-orthogonal) systems are never minimal.
+-   **Minimality $\Rightarrow$ Orthogonality:** Every minimal complete axis set is orthogonal. Redundant (non-orthogonal) systems are never minimal. This is a *theorem*, not an assumption.
+
+-   **Matroid Structure (Theorem 2.32):** Orthogonal axis sets satisfy the matroid exchange property. This gives basis equicardinality and makes dimension well-defined.
+
+-   **Semantic Non-Embeddability (Theorem 3.13a):** Disciplines with fewer axes cannot embed disciplines with more axes. Structural typing cannot simulate nominal typing---the information is simply absent.
 
 -   **Axis-Parametric Dominance:** Systems that derive axes from requirements strictly dominate fixed-axis systems. The gap is not a tradeoff; it is absolute.
 
@@ -141,6 +149,8 @@ These theorems apply to *any* classification system: type systems, ontologies, t
 -   **Theorem 3.32 (Model Completeness):** $(B, S)$ captures all runtime-available type information for class-based systems.
 
 -   **Theorem 3.13 (Provenance Impossibility):** No system excluding $B$ can compute provenance. This is information-theoretic impossibility.
+
+-   **Theorem 3.13a (Non-Embeddability):** Nominal typing cannot be embedded into structural typing. The information gap is absolute, not a matter of encoding.
 
 -   **Theorem 3.24 (Complexity Lower Bound):** Systems using only $\{S\}$ incoherently require $\Omega(n)$ error localization. Systems using $\{B, S\}$ achieve $O(1)$. The gap is unbounded.
 
@@ -244,6 +254,48 @@ The requirements determine the axes; the axes determine the capabilities. System
 
 **Section 9: Conclusion** --- Implications for PL theory and practice
 
+## Anticipated Objections {#sec:objection-summary}
+
+Before proceeding, we address objections readers are likely forming. Each is refuted in detail in Appendix [\[appendix:robustness\]](#appendix:robustness){reference-type="ref" reference="appendix:robustness"}; here we summarize the key points.
+
+#### "The (B, S) model doesn't capture real type systems."
+
+The model is complete by construction. In Python, `type(name, bases, namespace)` is the universal type constructor---a type *is* (B, S), not merely has it. The syntactic name (`__name__`) is metadata stored in the namespace (S axis), not a separate axis. Properties like `__mro__` and `__module__` are *derived from* (B, S), not independent axes. This is definitional closure: no third axis can exist (Theorem [\[thm:model-completeness\]](#thm:model-completeness){reference-type="ref" reference="thm:model-completeness"}, Appendix [\[appendix:detailed-concerns\]](#appendix:detailed-concerns){reference-type="ref" reference="appendix:detailed-concerns"}).
+
+#### "Duck typing is more flexible than nominal typing."
+
+No. Nominal typing provides a strict superset of duck typing capabilities. Duck typing's "acceptance" of structurally-equivalent types is not a capability---it is the *absence* of the capability to distinguish them. "Flexibility" is the absence of discrimination, not the presence of power (Theorems 3.34--3.36, Appendix [\[appendix:detailed-concerns\]](#appendix:detailed-concerns){reference-type="ref" reference="appendix:detailed-concerns"}).
+
+#### "The axiom that shape-based typing can't distinguish same-shape types is circular."
+
+The axiom is *definitional*, not assumptive. Shape-based typing is *defined* as the discipline that treats types identically when their shapes match. This is what "shape-based" means. The theorems follow from the definition (Lemma [\[lem:shape-axiom-definitional\]](#lem:shape-axiom-definitional){reference-type="ref" reference="lem:shape-axiom-definitional"}, Appendix [\[appendix:detailed-concerns\]](#appendix:detailed-concerns){reference-type="ref" reference="appendix:detailed-concerns"}).
+
+#### "A clever extension could recover provenance for duck typing."
+
+No. Theorem [\[thm:extension-impossibility\]](#thm:extension-impossibility){reference-type="ref" reference="thm:extension-impossibility"} proves that any computable extension over $\{S\}$ (even with type names) cannot recover provenance. The common response "just check `type(x)`" proves the point: inspecting `type(x)` consults the B axis. Once you use B, you have adopted nominal typing (Appendix [\[appendix:detailed-concerns\]](#appendix:detailed-concerns){reference-type="ref" reference="appendix:detailed-concerns"}).
+
+#### "You only tested on one codebase (OpenHCS)."
+
+This conflates existential witnesses with premises. The dominance theorems are proven from the *definition* of shape-based typing---no codebase is referenced in the proofs. OpenHCS demonstrates that the four capabilities (provenance, identity, enumeration, conflict resolution) are *achievable*, not that the theorems are true. Analogy: proving $\Omega(n \log n)$ for comparison sorts doesn't require testing multiple arrays (Appendix [\[appendix:detailed-concerns\]](#appendix:detailed-concerns){reference-type="ref" reference="appendix:detailed-concerns"}).
+
+#### "Dominance implies you should migrate all legacy codebases."
+
+No. Theorem [\[thm:dominance-not-migration\]](#thm:dominance-not-migration){reference-type="ref" reference="thm:dominance-not-migration"} formally proves that Pareto dominance does NOT imply beneficial migration. Dominance is codebase-independent; migration cost is codebase-dependent. The theorem characterizes *capabilities*, not *recommendations* (Appendix [\[appendix:detailed-concerns\]](#appendix:detailed-concerns){reference-type="ref" reference="appendix:detailed-concerns"}).
+
+#### "You just need code review and discipline, not language features."
+
+Discipline *is* the external oracle. When DOF $> 1$, consistency requires an oracle to resolve disagreements. "Code review" is exactly that oracle---human-maintained, fallible, bypassable. Language enforcement cannot be forgotten; human discipline can (Appendix [\[appendix:detailed-concerns\]](#appendix:detailed-concerns){reference-type="ref" reference="appendix:detailed-concerns"}).
+
+#### "The proofs are trivial---just `rfl`."
+
+When modeling is correct, theorems become definitional. This is a feature. Not all proofs are `rfl`: `provenance_impossibility` requires 40+ lines of actual reasoning (assumption → lemma application → contradiction). The contribution is making the right definitions so that consequences follow structurally (Appendix [\[appendix:detailed-concerns\]](#appendix:detailed-concerns){reference-type="ref" reference="appendix:detailed-concerns"}).
+
+#### "This is just subtyping."
+
+No. Subtyping asks: "Can I use type $A$ where type $B$ is expected?" This is a *relationship* between types. Our claim is about type *construction*: extending `type(name, bases, namespace)` to `type(name, bases, namespace, **axes)`. These are orthogonal concerns. Subtyping operates on types that already exist; axis-parametric construction determines type *identity* at creation time. Whether $T(\text{scope}=X) <: T(\text{scope}=Y)$ is a question that comes *after* our proposal---and we make no claims about it (Appendix [\[appendix:detailed-concerns\]](#appendix:detailed-concerns){reference-type="ref" reference="appendix:detailed-concerns"}).
+
+**If you have an objection not listed above,** check Appendix [\[appendix:robustness\]](#appendix:robustness){reference-type="ref" reference="appendix:robustness"} (17 concerns addressed) before concluding it has not been considered.
+
 ::: center
 
 ----------------------------------------------------------------------------------------------------
@@ -311,7 +363,7 @@ Without name, the system is semantically complete but practically unusable. 0�
 
 **Definition 2.6 (The Two-Axis Semantic Core).** The semantic core of Python's class system is: - **bases**: inheritance relationships ($\rightarrow$ MRO, nominal typing) - **namespace**: attributes and methods ($\rightarrow$ behavior, structural typing)
 
-The `name` axis is orthogonal to both and carries no semantic weight.
+The `name` is metadata stored in the namespace (as `__name__`), not an independent axis. It carries no semantic weight for typing purposes.
 
 **Theorem 2.4 (Orthogonality of Semantic Axes).** The `bases` and `namespace` axes are orthogonal.
 
@@ -365,7 +417,7 @@ Shape-based typing projects out the $B$ axis entirely. It cannot distinguish typ
 
 **Remark (Operational Characterization).** In Python, shape-based compatibility reduces to capability probing via `hasattr`: `all(hasattr(x, a) for a in S(T))`. We use `hasattr` (not `getattr`) because shape-based typing is about *capability detection*, not attribute retrieval. `getattr` involves metaprogramming machinery (`__getattr__`, `__getattribute__`, descriptors) orthogonal to type discipline.
 
-**Remark (Partial vs Full Structural Compatibility).** Definition 2.10 uses partial compatibility ($\supseteq$): $x$ has *at least* $T$'s interface. Full compatibility ($=$) requires exact match. Both are $\{S\}$-only disciplines; the capability gap (Theorem 2.17) applies to both. The distinction is a refinement *within* the S axis, not a fourth axis.
+**Remark (Partial vs Full Structural Compatibility).** Definition 2.10 uses partial compatibility ($\supseteq$): $x$ has *at least* $T$'s interface. Full compatibility ($=$) requires exact match. Both are $\{S\}$-only disciplines; the capability gap (Theorem 2.17) applies to both. The distinction is a refinement *within* the S axis, not a third axis.
 
 **Definition 2.10a (Typing Discipline Completeness).** A typing discipline is *complete* if it provides a well-defined, deterministic answer to "when is $x$ compatible with $T$?" for all $x$ and declared $T$. Formally: there exists a predicate $\text{compatible}(x, T)$ that is well-defined for all $(x, T)$ pairs where $T$ is a declared type constraint.
 
@@ -595,7 +647,7 @@ The critical difference lies in which axes the **type system** inspects.
   Scala        `List``[``T``]`   Parameterized N: `(List, ``[``T``]``)`     Erased
   C++          `vector<T>`       Parameterized N: `(vector, ``[``T``]``)`   Template instantiation
 
-**Key observation:** No major language invented a fourth axis for generics. Generic type parameters extend the $(B, S)$ axes: type arguments become part of the namespace $S$ (determining available operations) and may influence $B$ (inheritance from parameterized parents). The $(B, S)$ model is **universal** across generic type systems.
+**Key observation:** No major language invented a third axis for generics. Generic type parameters extend the $(B, S)$ axes: type arguments become part of the namespace $S$ (determining available operations) and may influence $B$ (inheritance from parameterized parents). The $(B, S)$ model is **universal** across generic type systems.
 
 ## The Axis Lattice Metatheorem
 
@@ -724,6 +776,8 @@ We now develop a general framework where axis sets are *derived* from domain req
 
 **Definition 2.22 (Completeness).** An axis set $\mathcal{A}$ is *complete* for domain $D$ iff every query $q \in D$ is answerable using only axes in $\mathcal{A}$.
 
+**Remark 2.22a (Completeness is Domain-Relative).** Completeness is always relative to a domain. An axis set can be complete for domain $D_1$ and incomplete for domain $D_2$. For example, $(B, S)$ is complete for standard class semantics but incomplete for hierarchical configuration systems requiring scope chains. There is no "absolutely complete" axis set: for any fixed set $\mathcal{A}$, there exists a domain requiring an axis not in $\mathcal{A}$ (Theorem 2.28).
+
 **Definition 2.23 (Minimality).** An axis set $\mathcal{A}$ is *minimal* for domain $D$ iff:
 
 1.  $\mathcal{A}$ is complete for $D$, and
@@ -778,6 +832,46 @@ The question "nominal or structural?" presupposes a choice exists. Theorem 2.26 
 3.  Demonstrating that type system debates arise from wrongly framing axis derivation as preference
 
 Section 3 establishes these results formally. The type system instantiation ("nominal vs structural") is one application among many.
+
+## Matroid Structure and Axis Independence {#matroid-structure}
+
+The axis framework possesses deep combinatorial structure: **minimal complete axis sets form matroids**. This is not an assumption---it is a theorem, proven mechanically in Lean (see `axis_framework.lean`).
+
+#### 2.7.1 Core Results {#matroid-core-results}
+
+**Definition 2.30 (Axis Orthogonality).** Axes $A_1, A_2$ are *orthogonal* iff neither is derivable from the other: there exist queries answerable by $A_1$ but not $A_2$, and vice versa.
+
+**Theorem 2.31 (Minimality Implies Orthogonality).** If axis set $\mathcal{A}$ is minimal complete for domain $D$, then all axes in $\mathcal{A}$ are pairwise orthogonal.
+
+*Proof.* Suppose $\mathcal{A}$ is minimal but contains non-orthogonal axes $a, b$ where $a$ is derivable from $b$. Then $\mathcal{A} \setminus \{a\}$ remains complete (any query requiring $a$ can be answered via $b$). This contradicts minimality. 0◻
+
+**Theorem 2.32 (Orthogonality Implies Exchange Property).** If $\mathcal{A}$ is an orthogonal axis set, then for any independent subsets $I, J \subseteq \mathcal{A}$ with $|I| < |J|$, there exists $x \in J \setminus I$ such that $I \cup \{x\}$ is independent.
+
+This is the *matroid exchange axiom*. Orthogonal axis sets satisfy it.
+
+**Theorem 2.33 (Basis Equicardinality).** All minimal complete axis sets for a domain $D$ have the same cardinality.
+
+*Proof.* Standard matroid theory. If two maximal independent sets had different sizes, the exchange property would yield a contradiction. 0◻
+
+#### 2.7.2 Why Matroids Matter
+
+The matroid structure has three critical consequences:
+
+1.  **Dimension is well-defined.** The "dimension" of a domain (number of required axes) is unique. There are no alternative minimal decompositions with different numbers of axes.
+
+2.  **Orthogonality is necessary, not optional.** A type system with redundant (non-orthogonal) axes is provably suboptimal---it contains derivable structure that adds complexity without capability.
+
+3.  **The (B, S) decomposition is canonical for standard class semantics.** The two-axis model is not a modeling choice---it is the unique minimal complete axis set for the domain of standard class queries (provenance, identity, compatibility). Extended domains requiring additional queries (e.g., scope-chain resolution) require additional axes (e.g., H for hierarchy). This is exactly what the theory predicts: axes are derived from domain requirements.
+
+**Theorem 2.34 (Semantic Non-Embeddability).** Let $D_1$ and $D_2$ be typing disciplines with axis sets $\mathcal{A}_1 \subset \mathcal{A}_2$ (strict subset). Then:
+
+$$\text{There exists no function } f : D_2 \to D_1 \text{ that preserves query answers.}$$
+
+In particular, nominal typing ($\{B, S\}$) cannot be embedded into structural typing ($\{S\}$).
+
+*Proof.* Let $a \in \mathcal{A}_2 \setminus \mathcal{A}_1$. By axis independence, $\exists$ query $q$ requiring $a$. Any embedding $f$ must map types to $D_1$'s representation. But $D_1$ lacks axis $a$, so $q$ is unanswerable in $D_1$. Therefore $f$ cannot preserve $q$'s answers. 0◻
+
+**Significance:** This is an **impossibility theorem about information**, not about implementations. Structural typing cannot "simulate" nominal typing because the information content is strictly smaller. The gap is mathematical, not technical.
 
 ::: center
 
@@ -969,6 +1063,14 @@ This section establishes the formal foundation of our results. We prove three th
 *Proof.* The proof of Theorem 3.13 shows that the input $(S)$ contains strictly less information than required to determine $\text{prov}$. No computation can extract information that is not present in its input. 0◻
 
 **Significance:** This is not "our model doesn't have provenance." It is "NO model over $(S)$ can have provenance." The impossibility is mathematical, not implementational.
+
+**Theorem 3.13a (Semantic Non-Embeddability).**[]{#thm:non-embeddability label="thm:non-embeddability"} Nominal typing cannot be embedded into structural typing. Formally: there exists no function $f : \mathcal{D}_{\{B,S\}} \to \mathcal{D}_{\{S\}}$ that preserves type query answers.
+
+*Proof.* By Theorem 3.13, provenance is answerable in $\mathcal{D}_{\{B,S\}}$ but not in $\mathcal{D}_{\{S\}}$. Any embedding must preserve query answers. Since no function in $\mathcal{D}_{\{S\}}$ computes provenance, no such embedding exists. 0◻
+
+**Corollary 3.13b (Strict Information Gap).** The gap between nominal and structural typing is not a matter of convenience or expressiveness---it is an information-theoretic impossibility. Structural typing has strictly less information content than nominal typing. No encoding, simulation, or workaround can bridge this gap.
+
+This result generalizes: for any axis sets $\mathcal{A}_1 \subset \mathcal{A}_2$, the discipline using $\mathcal{A}_1$ cannot embed the discipline using $\mathcal{A}_2$.
 
 #### 3.8.2 The Derived Characterization Theorem
 
@@ -1190,6 +1292,8 @@ This section presents additional theorems that establish the completeness and ro
 
 **Theorem 3.32 (Model Completeness).**[]{#thm:model-completeness label="thm:model-completeness"} The $(B, S)$ model captures all information constitutive of a type. Any computable function over types is expressible as a function of $(B, S)$.
 
+**Remark (Two Senses of Completeness).** "Model completeness" (this theorem) means $(B, S)$ captures all constitutive information of a type object. "Axis set completeness for domain $D$" (Definition 2.22) means the axis set can answer all queries in $D$. These are distinct: $(B, S)$ is model-complete (captures all type information) but may be domain-incomplete (cannot answer queries requiring axes beyond $B$ and $S$, such as scope-chain queries requiring $H$).
+
 *Proof.* The proof proceeds by constitutive definition, not empirical enumeration.
 
 In Python, `type(name, bases, namespace)` is the universal type constructor. Every type $T$ is created by some invocation `type(n, b, s)`, either explicitly or via the `class` statement (which is syntactic sugar for `type()`). A type does not merely *have* $(B, S)$; a type *is* $(B, S)$. There is no other information constitutive of a type object.
@@ -1198,9 +1302,9 @@ Therefore, for any computable function $g : \text{Type} \to \alpha$: $$g(T) = g(
 
 **Remark (Derived vs. Constitutive).** Properties like `__mro__` (method resolution order) or `__module__` are not counterexamples: MRO is computed from $B$ by C3 linearization; `__module__` is stored in the namespace $S$. These are *derived from* or *contained in* $(B, S)$, not independent of it.
 
-This is a definitional closure: a critic cannot exhibit a "fourth axis" because any proposed axis is either (a) stored in $S$, (b) computable from $(B, S)$, or (c) not part of the type's semantic identity (e.g., memory address). 0◻
+This is a definitional closure: a critic cannot exhibit a third axis because any proposed axis is either (a) stored in $S$ (including `__name__`), (b) computable from $(B, S)$, or (c) not part of the type's semantic identity (e.g., memory address). 0◻
 
-**Corollary 3.33 (No Hidden Information).** There exists no "fourth axis" that shape-based typing could use to recover provenance. The information is structurally absent, not because we failed to model it, but because types *are* $(B, S)$ by construction.
+**Corollary 3.33 (No Hidden Information).** There exists no third axis that shape-based typing could use to recover provenance. The information is structurally absent, not because we failed to model it, but because types *are* $(B, S)$ by construction.
 
 #### 3.11.2 Capability Comparison
 
@@ -1445,7 +1549,7 @@ The capability gap exists at both levels. 0◻
 
 -   **Prototype-based inheritance** (JavaScript): Prototype chain IS the $B$ axis at object level. `Object.getPrototypeOf()` traverses MRO.
 
-No mainstream type system feature introduces a fourth axis orthogonal to $(B, S)$.
+No mainstream type system feature introduces a third axis orthogonal to $(B, S)$.
 
 #### 3.11.7 Scope Expansion: From Greenfield to Universal
 
@@ -2684,8 +2788,9 @@ $$\text{ExternalMap cannot answer: "Which type in MRO(type(obj)) provided attrib
 The abstract class system model (Section 2.4) is formalized in Lean 4 with complete proofs (no `sorry` placeholders):
 
     -- The two axes of a class system
-    -- NOTE: "Name" (N) is NOT an independent axis: it is derivable from B.
-    -- If a type has a name, it has B. The minimal model is (B, S).
+    -- NOTE: "Name" (N) is NOT an independent axis: it is metadata stored in
+    -- the namespace (S axis) as __name__. It contributes no typing capability.
+    -- The minimal model is (B, S).
     inductive Axis where
       | Bases      -- B: inheritance hierarchy
       | Namespace  -- S: attribute declarations (shape)
@@ -2897,6 +3002,12 @@ They found that C++ Boost template metaprogramming can be "over-complex" when ab
 **Liskov & Wing [@liskov1994behavioral].** The Liskov Substitution Principle formally defines behavioral subtyping: *"any property proved about supertype objects should hold for its subtype objects."* Nominal typing enables this by requiring explicit `is-a` declarations.
 
 **Our contribution:** The `@global_pipeline_config` chain enforces behavioral subtyping through field inheritance with modified defaults. When `LazyPathPlanningConfig` inherits from `PathPlanningConfig`, it **must** have the same fields (guaranteed by runtime type generation), but with `None` defaults (different behavior). The nominal type system tracks that these are distinct types with different resolution semantics.
+
+## Error Detection Timing
+
+**Boehm [@boehm1981software].** The foundational work on software engineering economics established empirical data on error cost escalation: errors detected at requirements or design time cost 1x to fix, while errors found during testing cost 10x, and post-release errors cost 50x--100x more [@nasa2010error]. This provides empirical grounding for why compile-time type checking matters.
+
+**Our contribution:** Nominal typing shifts certain class of errors (type mismatches, spurious subtyping) from runtime to definition time. When a structural system permits an unrelated type with matching shape, the error surfaces as a logic bug during testing or production---a 10x--100x cost multiplier. Nominal typing's requirement for explicit inheritance declarations forces these mismatches to be resolved during development, paying the 1x cost. The $\Omega(n)$ vs $O(1)$ complexity separation (Theorem 4.3) formalizes this: structural systems defer error detection to $n$ call-site inspections; nominal systems detect at the single declaration site.
 
 ## Positioning This Work
 
@@ -3666,7 +3777,7 @@ This appendix provides detailed analysis addressing potential concerns about the
 We identify the major categories of potential concerns and demonstrate why each does not affect our conclusions.
 
   Potential Concern                        Formal Analysis
-  ---------------------------------------- -----------------------------------------------------------
+  ---------------------------------------- --------------------------------------------------------------
   "Model is incomplete"                    Theorem 3.32 (Model Completeness)
   "Duck typing has tradeoffs"              Theorems 3.34-3.36 (Capability Comparison)
   "Axioms are assumptive"                  Lemma 3.37 (Axiom is Definitional)
@@ -3683,6 +3794,10 @@ We identify the major categories of potential concerns and demonstrate why each 
   "Dominance $\neq$ migration"             Theorem 3.55 (Dominance $\neq$ Migration)
   "Greenfield is undefined"                Definitions 3.57-3.58, Theorem 3.59
   "Provenance requirement is circular"     Theorem 3.61 (Provenance Detection)
+  "You just need discipline"               Concern 8: Discipline is the external oracle
+  "The proofs are trivial"                 Concern 9: Definitional proofs from correct modeling
+  "Java/Rust can do this too"              Concern 10: Enable vs enforce distinction
+  "This is just subtyping"                 Concern 11: Construction vs relationship (orthogonal layers)
 
 ## Detailed Analysis of Each Concern {#appendix:detailed-concerns}
 
@@ -3692,7 +3807,7 @@ We expand the most common concerns below; the remaining items in the table above
 
 *Potential concern:* The (B, S) model may fail to capture relevant aspects of type systems.
 
-*Analysis:* Theorem [\[thm:model-completeness\]](#thm:model-completeness){reference-type="ref" reference="thm:model-completeness"} establishes model completeness by constitutive definition. In Python, `type(name, bases, namespace)` is the universal type constructor. A type does not merely *have* $(B, S)$; a type *is* $(B, S)$. Any computable function over types is therefore definitionally a function of this triple. Properties like `__mro__` or `__module__` are not counterexamples: they are derived from or stored within $(B, S)$. This is definitional closure, not empirical enumeration. No "fourth axis" can exist because the triple is constitutive.
+*Analysis:* Theorem [\[thm:model-completeness\]](#thm:model-completeness){reference-type="ref" reference="thm:model-completeness"} establishes model completeness by constitutive definition. In Python, `type(name, bases, namespace)` is the universal type constructor. A type does not merely *have* $(B, S)$; a type *is* $(B, S)$. Any computable function over types is therefore definitionally a function of this pair. Properties like `__mro__` or `__module__` are not counterexamples: they are derived from or stored within $(B, S)$. The syntactic name (`__name__`) is metadata stored in the namespace (S axis), not an independent axis. This is definitional closure, not empirical enumeration. No third axis can exist because the pair is constitutive.
 
 #### Concern 2: Duck Typing Tradeoffs.
 
@@ -3735,6 +3850,93 @@ OpenHCS appears only to demonstrate that the four capabilities are *achievable*.
 *Potential concern:* Discipline dominance implies migration recommendation.
 
 *Analysis:* Theorem [\[thm:dominance-not-migration\]](#thm:dominance-not-migration){reference-type="ref" reference="thm:dominance-not-migration"} formally proves that Pareto dominance of discipline A over B does NOT imply that migrating from B to A is beneficial for all codebases. Dominance is codebase-independent; migration cost is codebase-dependent.
+
+#### Concern 8: You Just Need Discipline.
+
+*Potential concern:* Real teams maintain consistency through code review, documentation, and discipline. Language features are unnecessary.
+
+*Analysis:* Discipline *is* the external oracle. When multiple locations encode the same fact (DOF $> 1$), consistency requires an oracle to resolve disagreements. "Code review and documentation" are exactly that oracle---human-maintained, fallible, bypassable.
+
+The question is whether the oracle is:
+
+-   **Internal** (language-enforced, automatic, unforgeable), or
+
+-   **External** (human-maintained, fallible, bypassable)
+
+Nominal typing with Python's `__subclasses__()` provides an internal oracle: the language guarantees the registry is complete. Duck typing requires an external oracle: humans must remember to update all locations. Both achieve consistency when they work. The difference is failure mode: language enforcement cannot be forgotten; human discipline can.
+
+This is not a counterargument to our thesis; it is the thesis restated. We prove that systems without nominal typing require external oracles.
+
+#### Concern 9: The Proofs Are Trivial.
+
+*Potential concern:* Most proofs are just `rfl` (reflexivity). They're trivial tautologies, not real theorems.
+
+*Analysis:* When modeling is correct, theorems become definitional. This is a feature, not a bug.
+
+Consider: "The sum of two even numbers is even." In a well-designed formalization, this might be `rfl`---not because it's trivial, but because the definition of "even" makes the property structural.
+
+Not all proofs are `rfl`. The `provenance_impossibility` theorem requires 40+ lines:
+
+1.  Assume a hypothetical provenance function exists for $\{S\}$-only systems
+
+2.  Construct two types with identical S but different B (different lineages)
+
+3.  Show the function must return different values for indistinguishable inputs
+
+4.  Contradiction
+
+The proof structure (assumption → construction → contradiction) is genuine mathematical reasoning. The `rfl` proofs establish scaffolding; substantive proofs build on that scaffolding.
+
+#### Concern 10: Static Languages Achieve This With Reflection/Macros.
+
+*Potential concern:* Java has reflection. Rust has proc macros. These languages can achieve the same capabilities.
+
+*Analysis:* Reflection and macros enable *patterns* but do not *enforce* them. The critical distinction:
+
+**Java reflection:** You can query `Class.getDeclaredMethods()` at runtime, but:
+
+-   No automatic hook fires when a class is defined
+
+-   You must manually maintain registries (DOF $\geq$ 2)
+
+-   The pattern is bypassable: create a class without registering it
+
+**Rust proc macros:** You can generate code at compile time, but:
+
+-   Macros are per-item isolated---they cannot see other items during expansion
+
+-   Registration is bypassable: `impl Trait` without `#[derive]` annotation
+
+-   The `inventory` crate uses linker tricks external to language semantics
+
+Contrast Python:
+
+    class Handler(Registry):  # __init_subclass__ fires AUTOMATICALLY
+        pass  # Cannot create unregistered subclass---IMPOSSIBLE
+
+Python's hook is *unforgeable*. The language semantics guarantee that creating a subclass triggers the hook. There is no syntax to bypass this.
+
+The objection confuses "can create a registry" with "can guarantee all items are in the registry." Static languages enable the former; Python enforces the latter. This is the difference between DOF $\geq$ 2 and DOF = 1.
+
+#### Concern 11: This Is Just Subtyping.
+
+*Potential concern:* The axis-parametric proposal ($T(\text{scope}=X)$ vs $T(\text{scope}=Y)$) is really about subtyping, and the author is confused about basic type theory.
+
+*Analysis:* This objection conflates two orthogonal concerns:
+
+1.  **Type construction** (our claim): How is a type's *identity* determined at creation time?
+
+2.  **Subtyping** (not our claim): Given two types, can one substitute for the other?
+
+**Subtyping** answers: "Can I use type $A$ where type $B$ is expected?" This presupposes types $A$ and $B$ already exist. It concerns *relationships between types*: $A <: B$, covariance, contravariance, Liskov substitution.
+
+**Axis-parametric construction** answers: "What *is* this type?" It concerns type *identity* at creation time. Our proposal extends `type(name, bases, namespace)` to `type(name, bases, namespace, **axes)`, where axes become part of the type's identity. $T(\text{scope}=X)$ and $T(\text{scope}=Y)$ are simply *different types*---not subtypes, not supertypes, just distinct.
+
+**The category error:** Responding to "type constructors should accept semantic axes" with "you're confused about subtyping" is like responding to "cars should have different engine options" with "you're confused about traffic laws." Construction and relationship are different layers.
+
+**Where subtyping *could* enter:** One might later ask: "Is $T(\text{scope}=X) <: T(\text{scope}=Y)$?" This is a valid question---but it comes *after* our proposal, not instead of it. We make no claims about subtype relationships between axis-instantiated types. The axes determine identity; subtyping relationships are a separate design choice.
+
+**The pattern-match failure:** The objection likely arises from pattern-matching "type parameters" $\rightarrow$ "must be about variance/subtyping." But type parameters in generics (e.g., `List[T]`) are indeed subject to variance analysis. Semantic axes are not type parameters in this sense---they are construction-time metadata that become part of type identity, analogous to how `bases` in `type(name, bases, ns)` determines identity without being "about subtyping."
 
 ## Formal Verification Status {#appendix:verification}
 

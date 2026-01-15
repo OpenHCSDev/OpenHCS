@@ -342,7 +342,13 @@ Before formalizing codebases and edits, we establish the epistemic structure tha
 []{#cor:coherence-forces-ssot label="cor:coherence-forces-ssot"} If coherence must be guaranteed (no incoherent states reachable), then DOF = 1 is necessary and sufficient.
 :::
 
-This is the epistemic foundation of SSOT. The following sections instantiate these concepts to software.
+This is the epistemic foundation of SSOT.
+
+**Information-Theoretic Interpretation.** The DOF = 1 condition has a precise information-theoretic characterization. Rissanen's Minimum Description Length (MDL) principle [@rissanen1978mdl] states that the optimal representation minimizes total description length: $|$model$|$ + $|$data given model$|$. When DOF = 1, the single source *is* the minimal model; all derived locations are the "data given model" with zero additional description length (they are fully determined). When DOF $> 1$, the redundant independent locations require explicit synchronization---additional description length that serves no epistemic purpose. Grünwald [@gruenwald2007mdl] provides a comprehensive treatment showing that MDL-optimal representations are unique under mild conditions---precisely what Theorem [\[thm:dof-optimal\]](#thm:dof-optimal){reference-type="ref" reference="thm:dof-optimal"} establishes for DOF.
+
+Heering [@heering2015generative] formalized this connection for software specifically: the *generative complexity* of a program family is the length of the shortest generator. SSOT architectures achieve minimal generative complexity by construction---the single source is the generator, and derived locations are the generated instances. This framing connects our formalization to Kolmogorov complexity theory while remaining constructive (we provide the generator, not just prove its existence).
+
+The following sections instantiate these concepts to software.
 
 ## Software Instantiation: Codebases {#sec:edit-space}
 
@@ -1880,6 +1886,14 @@ SSOT and information hiding are complementary: information hiding determines *wh
 **Verified Software:** The CompCert project [@leroy2009compcert] demonstrated that production software can be formally verified. Our Lean 4 [@demoura2021lean4] proofs are in this tradition, though at a higher level of abstraction.
 
 **Generative Programming:** Czarnecki & Eisenecker [@czarnecki2000generative] established generative programming as a paradigm for automatic program generation. Our SSOT patterns are a specific application: generating derived structures from single sources at definition time.
+
+## Information-Theoretic Foundations {#sec:related-info-theory}
+
+**Minimum Description Length:** Rissanen [@rissanen1978mdl] established the MDL principle: the best model minimizes total description length (model + data given model). Our DOF = 1 criterion is the software instantiation: the single source is the model; derived locations have zero marginal description length. Grünwald [@gruenwald2007mdl] provides comprehensive treatment of MDL optimality and uniqueness---our Theorem [\[thm:dof-optimal\]](#thm:dof-optimal){reference-type="ref" reference="thm:dof-optimal"} establishes the analogous uniqueness for software representations.
+
+**Generative Complexity:** Heering [@heering2015generative; @heering2003software] formalized *generative complexity* as the Kolmogorov complexity of the shortest generator for a program family. SSOT architectures achieve minimal generative complexity by design: the single source *is* the shortest generator, and derived structures are its output. This connects our formalization to algorithmic information theory while remaining constructive---we exhibit generators, not just prove their existence.
+
+**Comparison:** Prior work on generative complexity remained largely theoretical (Kolmogorov complexity is uncomputable). Our contribution is the *constructive realization*: specific language features (DEF, INTRO) that achieve the theoretical minimum in practice. The DOF metric operationalizes generative complexity for software engineering.
 
 ## Language Comparison Studies {#sec:related-comparison}
 

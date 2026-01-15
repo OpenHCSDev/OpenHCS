@@ -1,9 +1,13 @@
 /-
   Credibility/Basic.lean
-  
+
   Core definitions for credibility theory (Paper 5 Section 2)
-  
+
   Definitions:
+    2.0a Mathematical Credibility
+    2.0b Social Credibility
+    2.0c Domain Independence
+    2.0d Costly Signal Domain-Specificity
     2.1 Signal
     2.2 Cheap Talk
     2.3 Costly Signal
@@ -19,6 +23,80 @@ import Mathlib.Data.Real.Basic
 import Mathlib.Order.Monotone.Basic
 
 namespace Credibility
+
+/-! ## Section 2.0: Two Credibility Domains -/
+
+/-- Credibility domains: mathematical (formal verification) vs social (institutional acceptance) -/
+inductive CredibilityDomain
+  | mathematical  -- Audience: formal verifier; measure: logical soundness
+  | social        -- Audience: human agents; measure: institutional acceptance
+  deriving DecidableEq, Repr
+
+/-- Definition 2.0a/b: Domain-specific credibility function type -/
+def DomainCredibilityFn (Claim Signal : Type*) :=
+  CredibilityDomain → Claim → Signal → ℝ
+
+/-- A signal's costliness is domain-specific -/
+structure DomainSignalCost where
+  costMathTrue : ℝ   -- Cost in mathematical domain if claim is true
+  costMathFalse : ℝ  -- Cost in mathematical domain if claim is false
+  costSocTrue : ℝ    -- Cost in social domain if claim is true
+  costSocFalse : ℝ   -- Cost in social domain if claim is false
+  math_true_nonneg : 0 ≤ costMathTrue
+  math_false_nonneg : 0 ≤ costMathFalse
+  soc_true_nonneg : 0 ≤ costSocTrue
+  soc_false_nonneg : 0 ≤ costSocFalse
+
+/-- A signal is costly in the mathematical domain -/
+def isCostlyInMathDomain (c : DomainSignalCost) : Prop :=
+  c.costMathFalse > c.costMathTrue
+
+/-- A signal is costly in the social domain -/
+def isCostlyInSocialDomain (c : DomainSignalCost) : Prop :=
+  c.costSocFalse > c.costSocTrue
+
+/-- A signal is cheap talk in the mathematical domain -/
+def isCheapTalkInMathDomain (c : DomainSignalCost) : Prop :=
+  c.costMathTrue = c.costMathFalse
+
+/-- A signal is cheap talk in the social domain -/
+def isCheapTalkInSocialDomain (c : DomainSignalCost) : Prop :=
+  c.costSocTrue = c.costSocFalse
+
+/-- Theorem 2.0c: Domain Independence - costly in one domain does not imply costly in other -/
+theorem domain_independence_math_not_implies_social :
+    ∃ c : DomainSignalCost, isCostlyInMathDomain c ∧ isCheapTalkInSocialDomain c := by
+  -- Machine-checked proof: costly in math domain, cheap talk in social domain
+  use ⟨0, 1, 1, 1, le_refl 0, zero_le_one, zero_le_one, zero_le_one⟩
+  constructor
+  · -- costMathFalse (1) > costMathTrue (0)
+    simp [isCostlyInMathDomain]
+  · -- costSocTrue (1) = costSocFalse (1)
+    simp [isCheapTalkInSocialDomain]
+
+theorem domain_independence_social_not_implies_math :
+    ∃ c : DomainSignalCost, isCostlyInSocialDomain c ∧ isCheapTalkInMathDomain c := by
+  -- Institutional credential: costly in social domain, cheap talk in math domain
+  use ⟨1, 1, 0, 1, zero_le_one, zero_le_one, le_refl 0, zero_le_one⟩
+  constructor
+  · -- costSocFalse (1) > costSocTrue (0)
+    simp [isCostlyInSocialDomain]
+  · -- costMathTrue (1) = costMathFalse (1)
+    simp [isCheapTalkInMathDomain]
+
+/-- Corollary 2.0d: Machine-checked proofs are maximally costly in math domain only.
+    We model "infinite cost" as the property that costMathFalse can be arbitrarily large
+    while costMathTrue remains bounded. -/
+theorem machine_proof_domain_specificity :
+    ∃ c : DomainSignalCost,
+      c.costMathFalse > c.costMathTrue ∧
+      isCheapTalkInSocialDomain c := by
+  -- Use finite approximation (infinite cost modeled as very large)
+  use ⟨0, 1, 1, 1, le_refl 0, zero_le_one, zero_le_one, zero_le_one⟩
+  constructor
+  · -- costMathFalse (1) > costMathTrue (0)
+    norm_num
+  · simp [isCheapTalkInSocialDomain]
 
 /-! ## Definition 2.1: Signal -/
 

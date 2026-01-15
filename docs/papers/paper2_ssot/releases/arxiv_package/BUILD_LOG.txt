@@ -2,7 +2,7 @@ OpenHCS Paper Build Log
 ========================
 
 Paper: paper2 - Formal Foundations for the Single Source of Truth Principle
-Package Date: 2026-01-08T08:14:22.998909
+Package Date: 2026-01-14T16:04:26.798685
 Lean Toolchain: leanprover/lean4:v4.27.0-rc1
 
 Proof Statistics:
@@ -106,9 +106,9 @@ info: Ssot/LangEvaluation.lean:136:0: java_lacks_definition_hooks : ∀ (def_ : 
   e ∈ java_class_definition_events def_ → is_definition_time_user_code e = false
 info: Ssot/LangEvaluation.lean:137:0: ts_types_erased : ∀ (type_name : String), TSCompileEvent.type_erased type_name ∈ typescript_compile_events type_name
 ℹ [7832/7840] Replayed Ssot.AbstractClassSystem
-info: Ssot/AbstractClassSystem.lean:693:0: []
-info: Ssot/AbstractClassSystem.lean:694:0: [AbstractClassSystem.UnifiedCapability.interfaceCheck]
-info: Ssot/AbstractClassSystem.lean:695:0: [AbstractClassSystem.UnifiedCapability.identity,
+info: Ssot/AbstractClassSystem.lean:695:0: []
+info: Ssot/AbstractClassSystem.lean:696:0: [AbstractClassSystem.UnifiedCapability.interfaceCheck]
+info: Ssot/AbstractClassSystem.lean:697:0: [AbstractClassSystem.UnifiedCapability.identity,
  AbstractClassSystem.UnifiedCapability.provenance,
  AbstractClassSystem.UnifiedCapability.enumeration,
  AbstractClassSystem.UnifiedCapability.conflictResolution,

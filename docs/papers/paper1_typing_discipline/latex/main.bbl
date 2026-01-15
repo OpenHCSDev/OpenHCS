@@ -47,6 +47,13 @@ Manuel Blum.
 \newblock On the size of machines.
 \newblock {\em Information and Control}, 11(3), 1967.
 
+\bibitem{boehm1981software}
+Barry~W. Boehm.
+\newblock {\em Software Engineering Economics}.
+\newblock Prentice Hall, 1981.
+\newblock Provides data on cost of error fixing vs development phase -- earlier
+  detection is cheaper (10x-100x cost multiplier for late vs early detection).
+
 \bibitem{cardelli1988semantics}
 Luca Cardelli.
 \newblock A semantics of multiple inheritance.
@@ -151,6 +158,14 @@ Donna Malayeri and Jonathan Aldrich.
 \newblock Proposal/experiment for unique/nominal-ish types (pr \#33038).
 \newblock GitHub pull request, 2019.
 \newblock Online: github.com/microsoft/TypeScript/pull/33038.
+
+\bibitem{nasa2010error}
+{NASA IV\&V Facility}.
+\newblock Error cost escalation through the project life cycle.
+\newblock Technical report, NASA, 2010.
+\newblock Updated figures on relative error correction costs: bugs found at
+  requirements/design time cost 1x to fix; at testing 10x; post-release
+  50x-100x.
 
 \bibitem{jlsErasure}
 {Oracle}.

@@ -4,7 +4,52 @@
 Get all Lean 4 proofs in `docs/papers/paper5_credibility/proofs/` to compile successfully with `lake build`.
 
 ## Current Status
-**Last action**: Fixed type mismatch errors in `Leverage.lean` and `Impossibility.lean`
+**Last action**: Added credibility domain distinction (mathematical vs social) to Basic.lean
+
+---
+
+## NEW: Credibility Domain Distinction (2026-01-14)
+
+### What was added
+
+**LaTeX** (`content/03_foundations.tex`):
+- Section 2.0: Two Credibility Domains
+- Definition 2.0a: Mathematical Credibility (logical soundness, audience = verifier)
+- Definition 2.0b: Social Credibility (institutional acceptance, audience = humans)
+- Theorem 2.0c: Domain Independence (orthogonality proof)
+- Corollary 2.0d: Costly Signal Domain-Specificity
+- Remark: The Pientka Phenomenon (conflict between domains)
+
+**Lean** (`Credibility/Basic.lean`):
+- `CredibilityDomain` inductive type (mathematical | social)
+- `DomainSignalCost` structure with costs for both domains
+- `isCostlyInMathDomain` / `isCostlyInSocialDomain` predicates
+- `isCheapTalkInMathDomain` / `isCheapTalkInSocialDomain` predicates
+- `domain_independence_math_not_implies_social` theorem (PROVEN)
+- `domain_independence_social_not_implies_math` theorem (PROVEN)
+- `machine_proof_domain_specificity` theorem (PROVEN)
+
+### What still needs to be done
+
+1. **Fix pre-existing CheapTalk.lean errors** (lines 33, 250)
+2. **Add domain-parameterized versions of cheap talk theorems**:
+   - `cheapTalkBound_in_domain : CredibilityDomain → ...`
+   - Show that the bound formula applies within each domain separately
+3. **Cross-domain interaction theorems** (optional, more advanced):
+   - Formalize when high C_M can eventually shift C_S (e.g., via third-party verification)
+   - Formalize when high C_S provides no information about C_M
+
+### Build status
+
+```bash
+lake build Credibility.Basic  # ✅ PASSES (warnings only)
+lake build                     # ❌ FAILS (pre-existing CheapTalk.lean issues)
+```
+
+---
+
+## Previous Status
+**Previous action**: Fixed type mismatch errors in `Leverage.lean` and `Impossibility.lean`
 
 **Build command**: `lake build` (run from `docs/papers/paper5_credibility/proofs/`)
 

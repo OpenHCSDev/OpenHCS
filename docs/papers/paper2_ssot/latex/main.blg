@@ -5,45 +5,45 @@ The style file: plain.bst
 Database file #1: references.bib
 Warning--entry type for "openhcs2025" isn't style-file defined
 --line 351 of file references.bib
-You've used 32 entries,
+You've used 36 entries,
             2118 wiz_defined-function locations,
-            681 strings with 8500 characters,
-and the built_in function-call counts, 9275 in all, are:
-= -- 919
-> -- 357
-< -- 4
-+ -- 158
-- -- 112
-* -- 513
-:= -- 1530
-add.period$ -- 106
-call.type$ -- 32
-change.case$ -- 143
+            707 strings with 9380 characters,
+and the built_in function-call counts, 10480 in all, are:
+= -- 1049
+> -- 385
+< -- 6
++ -- 171
+- -- 120
+* -- 585
+:= -- 1727
+add.period$ -- 123
+call.type$ -- 36
+change.case$ -- 158
 chr.to.int$ -- 0
-cite$ -- 32
-duplicate$ -- 372
-empty$ -- 821
-format.name$ -- 112
-if$ -- 1983
+cite$ -- 36
+duplicate$ -- 427
+empty$ -- 931
+format.name$ -- 120
+if$ -- 2243
 int.to.chr$ -- 0
-int.to.str$ -- 32
-missing$ -- 33
-newline$ -- 170
-num.names$ -- 64
-pop$ -- 222
+int.to.str$ -- 36
+missing$ -- 38
+newline$ -- 194
+num.names$ -- 72
+pop$ -- 236
 preamble$ -- 1
-purify$ -- 120
+purify$ -- 132
 quote$ -- 0
-skip$ -- 257
+skip$ -- 289
 stack$ -- 0
-substring$ -- 519
-swap$ -- 70
-text.length$ -- 4
+substring$ -- 603
+swap$ -- 81
+text.length$ -- 6
 text.prefix$ -- 0
 top$ -- 0
-type$ -- 108
+type$ -- 122
 warning$ -- 0
-while$ -- 94
-width$ -- 34
-write$ -- 353
+while$ -- 109
+width$ -- 38
+write$ -- 406
 (There was 1 warning)

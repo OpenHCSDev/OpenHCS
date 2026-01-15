@@ -93,6 +93,29 @@ H.~Paul Grice.
 \newblock In Peter Cole and Jerry~L. Morgan, editors, {\em Syntax and
   Semantics, Volume 3: Speech Acts}, pages 41--58. Academic Press, 1975.
 
+\bibitem{gruenwald2007mdl}
+Peter~D. Gr{\"u}nwald.
+\newblock {\em The Minimum Description Length Principle}.
+\newblock MIT Press, 2007.
+\newblock Comprehensive treatment of MDL; minimal theory is the MDL-optimal
+  representation.
+
+\bibitem{heering2003software}
+Jan Heering.
+\newblock Software architecture and software configuration management.
+\newblock In {\em Software Configuration Management}, volume 2649 of {\em
+  Lecture Notes in Computer Science}, pages 1--16. Springer, 2003.
+\newblock Introduces generative complexity as structural complexity measure for
+  software.
+
+\bibitem{heering2015generative}
+Jan Heering.
+\newblock Generative software complexity.
+\newblock {\em Science of Computer Programming}, 97:82--85, 2015.
+\newblock Proposes Kolmogorov complexity to measure software structure; the
+  shortest generator for a set of programs indicates maximal complexity
+  reduction achievable.
+
 \bibitem{hintikka1962knowledge}
 Jaakko Hintikka.
 \newblock {\em Knowledge and Belief: An Introduction to the Logic of the Two
@@ -103,6 +126,12 @@ Jaakko Hintikka.
 Emir Kamenica and Matthew Gentzkow.
 \newblock Bayesian persuasion.
 \newblock {\em American Economic Review}, 101(6):2590--2615, 2011.
+
+\bibitem{kolmogorov1965three}
+Andrey~N. Kolmogorov.
+\newblock Three approaches to the quantitative definition of information.
+\newblock {\em Problems of Information Transmission}, 1(1):1--7, 1965.
+\newblock Foundational paper defining algorithmic (Kolmogorov) complexity.
 
 \bibitem{mascolell1995microeconomic}
 Andreu Mas-Colell, Michael~D. Whinston, and Jerry~R. Green.
@@ -119,6 +148,12 @@ Roger~B. Myerson.
 \newblock Incentive compatibility and the bargaining problem.
 \newblock {\em Econometrica}, 47(1):61--73, 1979.
 
+\bibitem{rissanen1978mdl}
+Jorma Rissanen.
+\newblock Modeling by shortest data description.
+\newblock {\em Automatica}, 14(5):465--471, 1978.
+\newblock Foundational paper on Minimum Description Length (MDL) principle.
+
 \bibitem{shannon1948}
 Claude~E Shannon.
 \newblock A mathematical theory of communication.
@@ -128,6 +163,13 @@ Claude~E Shannon.
 Joel Sobel.
 \newblock A theory of credibility.
 \newblock {\em The Review of Economic Studies}, 52(4):557--573, 1985.
+
+\bibitem{solomonoff1964formal}
+Ray~J. Solomonoff.
+\newblock A formal theory of inductive inference.
+\newblock {\em Information and Control}, 7(1--2):1--22, 224--254, 1964.
+\newblock Independent discovery of algorithmic complexity; connects to
+  inductive inference.
 
 \bibitem{spence1973job}
 Michael Spence.

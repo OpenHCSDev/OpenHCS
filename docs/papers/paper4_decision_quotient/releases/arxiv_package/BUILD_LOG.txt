@@ -2,12 +2,12 @@ OpenHCS Paper Build Log
 ========================
 
 Paper: paper4 - Decision Quotient: Formal Semantics of Architectural Choice
-Package Date: 2026-01-07T20:50:22.995204
+Package Date: 2026-01-14T16:04:40.293231
 Lean Toolchain: leanprover/lean4:v4.16.0
 
 Proof Statistics:
 -----------------
-Lean Files: 50
+Lean Files: 51
 Lines of Code: 2760
 Theorems: 106
 
@@ -39,6 +39,7 @@ Proof Files:
   - VectorE_CoNP.lean
   - Sigma2PHardness.lean
   - Hardness.lean
+  - HardnessDistribution.lean
   - Information.lean
   - Instances.lean
   - PolynomialReduction.lean
@@ -69,7 +70,14 @@ Proof Files:
 COMPILATION OUTPUT (lake build)
 ================================================================================
 
-ℹ [2615/2633] Replayed DecisionQuotient.Hardness.Sigma2PExhaustive.Summary
+⚠ [2610/2634] Replayed DecisionQuotient.HardnessDistribution
+warning: ././././DecisionQuotient/HardnessDistribution.lean:123:70: unused variable `hn`
+note: this linter can be disabled with `set_option linter.unusedVariables false`
+warning: ././././DecisionQuotient/HardnessDistribution.lean:168:5: unused variable `caps`
+note: this linter can be disabled with `set_option linter.unusedVariables false`
+warning: ././././DecisionQuotient/HardnessDistribution.lean:171:5: unused variable `hd_pos`
+note: this linter can be disabled with `set_option linter.unusedVariables false`
+ℹ [2616/2634] Replayed DecisionQuotient.Hardness.Sigma2PExhaustive.Summary
 info: ././././DecisionQuotient/Hardness/Sigma2PExhaustive/Summary.lean:51:0: @DecisionProblem.sufficient_contains_relevant : ∀ {A : Type u_1} {S : Type u_2} {n : ℕ} [inst : CoordinateSpace S n]
   (dp : DecisionProblem A S) (I : Finset (Fin n)), dp.isSufficient I → ∀ (i : Fin n), dp.isRelevant i → i ∈ I
 Build completed successfully.

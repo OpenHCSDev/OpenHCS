@@ -141,6 +141,36 @@ Section [\[foundations\]](#foundations){reference-type="ref" reference="foundat
 
 Section 2 provides formal foundations (definitions). Section 3 derives the probability model from Papers 1 and 2. Section 4 proves main theorems. Section 5 presents instances (SSOT, typing, microservices, APIs, configuration, databases). Section 6 demonstrates practical application via before/after examples. Section 7 surveys related work. Section 8 concludes.
 
+## Anticipated Objections {#sec:objection-summary}
+
+Before proceeding, we address objections readers are likely forming. Each is refuted in detail in Appendix [\[appendix-rebuttals\]](#appendix-rebuttals){reference-type="ref" reference="appendix-rebuttals"}; here we summarize the key points.
+
+#### "Leverage is just a heuristic, not rigorous."
+
+Leverage is *formally defined* (Definition 1.4) and *machine-checked* in Lean 4. Theorem 3.1 *proves* that maximizing leverage minimizes error probability. The contribution is 1,463 lines of Lean proofs with zero `sorry` placeholders.
+
+#### "Different domains need different metrics."
+
+The framework is domain-agnostic. We demonstrate instances across programming languages (SSOT, nominal typing), system architecture (microservices), API design (REST), configuration (convention vs explicit), and database design (normalization). The same principle ($L = |\text{Cap}|/\text{DOF}$) applies universally.
+
+#### "Capabilities can't be quantified."
+
+We don't need absolute quantification. Theorem 3.1 requires only *relative ordering*: if capabilities are equal and DOF differs, the lower-DOF architecture has higher leverage. For architectures with different capabilities, we count cardinality.
+
+#### "The independence assumption is unrealistic."
+
+Axiom 2.1 (independent errors) is clearly stated. Even with correlated errors (coefficient $\rho$), error probability remains monotonically increasing in DOF. High-leverage architectures remain preferable. Extension to correlated errors is noted as future work.
+
+#### "Performance matters more than error probability."
+
+We agree. The framework addresses *one dimension*: error probability. Multi-objective optimization (Pareto frontier over leverage, performance, security) is recommended for full architectural evaluation. For domains where correctness dominates (safety-critical, financial), leverage should be primary.
+
+#### "The proofs are trivial."
+
+The value is not in difficulty but in *existence*. Machine-checked proofs provide precision (every step explicit), verification (computer-checked), and reproducibility (anyone can run them). "Trivial" proofs that compile are more valuable than "deep" proofs with errors.
+
+**If you have an objection not listed above,** check Appendix [\[appendix-rebuttals\]](#appendix-rebuttals){reference-type="ref" reference="appendix-rebuttals"} (8 objections addressed) before concluding it has not been considered.
+
 
 # Foundations
 
@@ -1051,6 +1081,10 @@ Our framework explains *why* these patterns work: they maximize leverage.
 **ATAM and CBAM:** Architecture Tradeoff Analysis Method [@kazman2000atam] and Cost Benefit Analysis Method [@bachmann2000cbam]. Evaluate architectures against quality attributes (performance, modifiability, security). See also Bass et al. [@bass2012software].
 
 **Difference:** ATAM is qualitative; our framework provides quantitative optimization criterion (maximize $L$).
+
+**Necessity Specifications:** Mackay et al. [@mackay2022necessity] formalize *necessity specifications*---robustness guarantees that modules do only what their specification requires, even under adversarial clients. Soundness is mechanized in Coq.
+
+**Connection:** Necessity specifications address *behavioral minimality*: modules commit to no more behavior than required. Our framework addresses *structural minimality*: architectures commit to no more DOF than required. Both derive minimal commitments from requirements and prove sufficiency.
 
 ## Software Metrics Research
 

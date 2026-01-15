@@ -34,6 +34,29 @@ James Gosling, Bill Joy, Guy Steele, Gilad Bracha, Alex Buckley, Daniel Smith,
 \newblock Oracle America, Inc., 2021.
 \newblock Online: docs.oracle.com/javase/specs/.
 
+\bibitem{gruenwald2007mdl}
+Peter~D. Gr{\"u}nwald.
+\newblock {\em The Minimum Description Length Principle}.
+\newblock MIT Press, 2007.
+\newblock Comprehensive treatment of MDL; DOF=1 (SSOT) can be framed as the
+  MDL-optimal representation for redundant facts.
+
+\bibitem{heering2003software}
+Jan Heering.
+\newblock Software architecture and software configuration management.
+\newblock In {\em Software Configuration Management}, volume 2649 of {\em
+  Lecture Notes in Computer Science}, pages 1--16. Springer, 2003.
+\newblock Introduces generative complexity as structural complexity measure for
+  software.
+
+\bibitem{heering2015generative}
+Jan Heering.
+\newblock Generative software complexity.
+\newblock {\em Science of Computer Programming}, 97:82--85, 2015.
+\newblock Proposes Kolmogorov complexity to measure software structure; the
+  shortest generator for a set of programs indicates maximal complexity
+  reduction.
+
 \bibitem{hunt1999pragmatic}
 Andrew Hunt and David Thomas.
 \newblock {\em The Pragmatic Programmer: From Journeyman to Master}.
@@ -86,6 +109,14 @@ Lutz Prechelt.
 John~C Reynolds.
 \newblock Types, abstraction and parametric polymorphism.
 \newblock {\em Information Processing}, 83:513--523, 1983.
+
+\bibitem{rissanen1978mdl}
+Jorma Rissanen.
+\newblock Modeling by shortest data description.
+\newblock {\em Automatica}, 14(5):465--471, 1978.
+\newblock Foundational paper on Minimum Description Length (MDL) principle:
+  total description = model + data given model; optimal model minimizes this
+  sum.
 
 \bibitem{roy2007survey}
 Chanchal~K Roy and James~R Cordy.

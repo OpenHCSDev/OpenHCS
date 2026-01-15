@@ -3,9 +3,10 @@ Capacity: max_strings=200000, hash_size=200000, hash_prime=170003
 The top-level auxiliary file: decision_quotient_arxiv.aux
 The style file: plain.bst
 Database file #1: references.bib
+Warning--I didn't find a database entry for "guyon2003introduction"
 You've used 20 entries,
             2118 wiz_defined-function locations,
-            615 strings with 6642 characters,
+            616 strings with 6663 characters,
 and the built_in function-call counts, 6060 in all, are:
 = -- 613
 > -- 199
@@ -44,3 +45,4 @@ warning$ -- 0
 while$ -- 66
 width$ -- 22
 write$ -- 217
+(There was 1 warning)

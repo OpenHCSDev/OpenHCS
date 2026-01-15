@@ -49,6 +49,7 @@ lake build
 | `VectorE_CoNP.lean` | VectorE_CoNP |
 | `Sigma2PHardness.lean` | Sigma2PHardness |
 | `Hardness.lean` | Hardness |
+| `HardnessDistribution.lean` | HardnessDistribution |
 | `Information.lean` | Information |
 | `Instances.lean` | Instances |
 | `PolynomialReduction.lean` | PolynomialReduction |

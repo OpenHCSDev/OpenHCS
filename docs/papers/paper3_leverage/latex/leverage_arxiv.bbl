@@ -112,6 +112,12 @@ Barbara~H. Liskov and Jeannette~M. Wing.
 \newblock {\em ACM Transactions on Programming Languages and Systems},
   16(6):1811--1841, 1994.
 
+\bibitem{mackay2022necessity}
+Julian Mackay, Sophia Drossopoulou, James Noble, and Susan Eisenbach.
+\newblock Necessity specifications for robustness.
+\newblock Zenodo, 2022.
+\newblock Coq mechanization of necessity specifications for module robustness.
+
 \bibitem{maes1987concepts}
 Pattie Maes.
 \newblock Concepts and experiments in computational reflection.
