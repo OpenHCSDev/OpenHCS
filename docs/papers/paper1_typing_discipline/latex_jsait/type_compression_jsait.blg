@@ -11,45 +11,45 @@ Warning--I didn't find a database entry for "cook1990inheritance"
 Warning--I didn't find a database entry for "abadi1996theory"
 Warning--I didn't find a database entry for "liskov1994behavioral"
 Warning--I didn't find a database entry for "reynolds1983types"
-You've used 2 entries,
+You've used 1 entry,
             2118 wiz_defined-function locations,
-            515 strings with 4434 characters,
-and the built_in function-call counts, 436 in all, are:
-= -- 40
-> -- 14
+            511 strings with 4333 characters,
+and the built_in function-call counts, 228 in all, are:
+= -- 20
+> -- 7
 < -- 0
-+ -- 6
-- -- 4
-* -- 14
-:= -- 79
-add.period$ -- 6
-call.type$ -- 2
-change.case$ -- 8
++ -- 3
+- -- 2
+* -- 8
+:= -- 44
+add.period$ -- 3
+call.type$ -- 1
+change.case$ -- 4
 chr.to.int$ -- 0
-cite$ -- 2
-duplicate$ -- 14
-empty$ -- 45
-format.name$ -- 4
-if$ -- 93
+cite$ -- 1
+duplicate$ -- 7
+empty$ -- 23
+format.name$ -- 2
+if$ -- 47
 int.to.chr$ -- 0
-int.to.str$ -- 2
+int.to.str$ -- 1
 missing$ -- 0
-newline$ -- 13
-num.names$ -- 4
-pop$ -- 16
+newline$ -- 8
+num.names$ -- 2
+pop$ -- 8
 preamble$ -- 1
-purify$ -- 6
+purify$ -- 3
 quote$ -- 0
-skip$ -- 14
+skip$ -- 7
 stack$ -- 0
-substring$ -- 10
-swap$ -- 2
+substring$ -- 5
+swap$ -- 1
 text.length$ -- 0
 text.prefix$ -- 0
 top$ -- 0
-type$ -- 8
+type$ -- 4
 warning$ -- 0
-while$ -- 4
-width$ -- 3
-write$ -- 22
+while$ -- 2
+width$ -- 2
+write$ -- 12
 (There were 8 warnings)

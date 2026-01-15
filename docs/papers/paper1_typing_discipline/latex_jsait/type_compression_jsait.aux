@@ -53,40 +53,38 @@
 \newlabel{sec:rate-distortion}{{7}{9}{Rate-Distortion Analysis}{section.7}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {7.1}Three-Dimensional Tradeoff: Tag Length, Witness Cost, Distortion}{9}{subsection.7.1}\protected@file@percent }
 \citation{CPythonDocs}
-\citation{PythonDocs}
 \@writefile{toc}{\contentsline {subsection}{\numberline {7.2}Pareto Frontier}{10}{subsection.7.2}\protected@file@percent }
 \@writefile{toc}{\contentsline {section}{\numberline {8}Instantiations in Real Runtimes}{10}{section.8}\protected@file@percent }
 \newlabel{sec:applications}{{8}{10}{Instantiations in Real Runtimes}{section.8}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {8.1}CPython: Nominal-Tag Access}{10}{subsection.8.1}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {8.2}Java: Nominal-Tag Access}{11}{subsection.8.2}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {8.3}TypeScript: Structural Typing}{11}{subsection.8.3}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {8.4}Rust: Nominal-Tag Access (Compile-Time)}{11}{subsection.8.4}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {8.5}Summary: Witness Cost Across Runtimes}{11}{subsection.8.5}\protected@file@percent }
-\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Witness cost for type identity across programming language runtimes.}}{11}{table.2}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {9}Conclusion}{11}{section.9}\protected@file@percent }
-\newlabel{sec:conclusion}{{9}{11}{Conclusion}{section.9}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {9.1}Implications}{11}{subsection.9.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {8.1}CPython: The \texttt  {ob\_type} Pointer}{11}{subsection.8.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {8.2}Java: \texttt  {.getClass()} and the Method Table}{11}{subsection.8.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {8.3}TypeScript: Structural Equivalence}{11}{subsection.8.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {8.4}Rust: Static Nominal Tags}{11}{subsection.8.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {8.5}Summary}{11}{subsection.8.5}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Witness cost for type identity. $n$ = structure size, $d$ = inheritance depth, $k$ = interface count.}}{12}{table.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {9}Conclusion}{12}{section.9}\protected@file@percent }
+\newlabel{sec:conclusion}{{9}{12}{Conclusion}{section.9}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {9.1}Implications}{12}{subsection.9.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {9.2}Future Work}{12}{subsection.9.2}\protected@file@percent }
 \bibstyle{plain}
 \bibdata{references}
 \bibcite{CPythonDocs}{1}
-\bibcite{PythonDocs}{2}
-\@writefile{toc}{\contentsline {subsection}{\numberline {9.2}Future Work}{12}{subsection.9.2}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {9.3}Conclusion}{12}{subsection.9.3}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {A}Lean 4 Formalization}{12}{appendix.A}\protected@file@percent }
-\newlabel{sec:lean}{{A}{12}{Lean 4 Formalization}{appendix.A}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {B}Formalization and Verification}{12}{appendix.B}\protected@file@percent }
-\newlabel{formalization-and-verification}{{B}{12}{Formalization and Verification}{appendix.B}{}}
 \gdef \LT@i {\LT@entry 
     {1}{90.6251pt}\LT@entry 
     {1}{86.042pt}\LT@entry 
     {1}{191.83333pt}\LT@entry 
     {1}{101.2082pt}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {B.1}Type Universe and Registry}{13}{subsection.B.1}\protected@file@percent }
-\newlabel{type-universe-and-registry}{{B.1}{13}{Type Universe and Registry}{subsection.B.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {9.3}Conclusion}{13}{subsection.9.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {A}Lean 4 Formalization}{13}{appendix.A}\protected@file@percent }
+\newlabel{sec:lean}{{A}{13}{Lean 4 Formalization}{appendix.A}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {B}Formalization and Verification}{13}{appendix.B}\protected@file@percent }
+\newlabel{formalization-and-verification}{{B}{13}{Formalization and Verification}{appendix.B}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {B.1}Type Universe and Registry}{14}{subsection.B.1}\protected@file@percent }
+\newlabel{type-universe-and-registry}{{B.1}{14}{Type Universe and Registry}{subsection.B.1}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {B.2}MRO and Scope Stack}{14}{subsection.B.2}\protected@file@percent }
 \newlabel{mro-and-scope-stack}{{B.2}{14}{MRO and Scope Stack}{subsection.B.2}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {B.3}The RESOLVE Algorithm}{14}{subsection.B.3}\protected@file@percent }
-\newlabel{the-resolve-algorithm}{{B.3}{14}{The RESOLVE Algorithm}{subsection.B.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {B.3}The RESOLVE Algorithm}{15}{subsection.B.3}\protected@file@percent }
+\newlabel{the-resolve-algorithm}{{B.3}{15}{The RESOLVE Algorithm}{subsection.B.3}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {B.4}GETATTRIBUTE Implementation}{15}{subsection.B.4}\protected@file@percent }
 \newlabel{getattribute-implementation}{{B.4}{15}{GETATTRIBUTE Implementation}{subsection.B.4}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {B.5}Theorem 6.1: Resolution Completeness}{15}{subsection.B.5}\protected@file@percent }
@@ -105,14 +103,14 @@
 \newlabel{verification-status}{{B.9}{18}{Verification Status}{subsection.B.9}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {B.10}What the Lean Proofs Guarantee}{19}{subsection.B.10}\protected@file@percent }
 \newlabel{what-the-lean-proofs-guarantee}{{B.10}{19}{What the Lean Proofs Guarantee}{subsection.B.10}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {B.11}On the Nature of Foundational Proofs}{20}{subsection.B.11}\protected@file@percent }
+\newlabel{foundational-proofs}{{B.11}{20}{On the Nature of Foundational Proofs}{subsection.B.11}{}}
 \citation{cook1990inheritance}
 \citation{abadi1996theory}
 \citation{liskov1994behavioral}
 \citation{reynolds1983types}
-\@writefile{toc}{\contentsline {subsection}{\numberline {B.11}On the Nature of Foundational Proofs}{20}{subsection.B.11}\protected@file@percent }
-\newlabel{foundational-proofs}{{B.11}{20}{On the Nature of Foundational Proofs}{subsection.B.11}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {B.12}External Provenance Map Rebuttal}{21}{subsection.B.12}\protected@file@percent }
 \newlabel{external-provenance-map-rebuttal}{{B.12}{21}{External Provenance Map Rebuttal}{subsection.B.12}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {B.13}Abstract Model Lean Formalization}{21}{subsection.B.13}\protected@file@percent }
-\newlabel{abstract-model-lean-formalization}{{B.13}{21}{Abstract Model Lean Formalization}{subsection.B.13}{}}
-\gdef \@abspage@last{24}
+\@writefile{toc}{\contentsline {subsection}{\numberline {B.13}Abstract Model Lean Formalization}{22}{subsection.B.13}\protected@file@percent }
+\newlabel{abstract-model-lean-formalization}{{B.13}{22}{Abstract Model Lean Formalization}{subsection.B.13}{}}
+\gdef \@abspage@last{25}

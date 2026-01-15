@@ -6,9 +6,15 @@
 
 ## Abstract
 
-We study semantic inference under observational constraints. An interface-only observer queries membership in a fixed family of interfaces $\Phi_{\mathcal{I}} = \{q_I : I \in \mathcal{I}\}$ and must decide semantic properties such as type identity. We prove an information barrier: every interface-only observer is constant on indistinguishability classes (values with identical interface profiles), hence cannot compute any property that varies within such a class. In contrast, a nominal-tag observer---with access to a single type identifier per value---achieves constant witness cost: $W(\text{type-identity}) = O(1)$ primitive queries. We further establish that minimal complete axis sets form the bases of a matroid, and that nominal-tag observers achieve the unique Pareto-optimal point in the $(L, W, D)$ tradeoff (tag length, witness cost, distortion). All results are machine-checked in Lean 4.
+**Impossibility.** An observer limited to interface-membership queries cannot determine type identity---even with unlimited computation. We prove this is an information barrier, not a computational one: interface-only observers are constant on equivalence classes of values sharing identical interface profiles. No algorithm, however sophisticated, can extract information the observations do not contain.
 
-**Keywords:** semantic inference, observational constraints, information barriers, witness cost, matroid structure, type systems, Lean 4
+**Optimality.** A single additional primitive---nominal-tag access---reduces witness cost from $\Omega(n)$ to $O(1)$. We prove this is Pareto-optimal: no observer achieves lower witness cost without increasing tag length or semantic distortion. The $(L, W, D)$ tradeoff admits exactly one optimal point.
+
+**Structure.** Minimal complete observation sets form the bases of a matroid. Consequence: all such sets have equal cardinality, and the "semantic dimension" of a domain is well-defined.
+
+All results are machine-checked in Lean 4 (6,000+ lines, 0 `sorry`).
+
+**Keywords:** information barriers, witness complexity, Pareto optimality, matroid structure, formal verification
 
 
 ## Motivation: Semantic Inference Under Observational Constraints
@@ -464,44 +470,49 @@ In programming language terms: *nominal typing* corresponds to nominal-tag obser
 :::
 
 
-## CPython: Nominal-Tag Access
+The preceding sections established abstract results about observer classes and witness cost. We now ground these in concrete runtime mechanisms, showing that real systems instantiate the theoretical categories---and that the complexity bounds are not artifacts of the model but observable properties of deployed implementations.
 
-::: corollary
-CPython realizes nominal-tag access: the runtime stores a type tag (`ob_type` pointer) per object and exposes it via the `type()` builtin. Therefore, the constant-witness construction applies: $W(\text{type-identity}) = O(1)$ in CPython.
-:::
+## CPython: The `ob_type` Pointer
 
-**Evidence:** The CPython object model stores a pointer to the type object (`ob_type`) in every heap-allocated value [@CPythonDocs]. The `type()` builtin [@PythonDocs] is a single pointer dereference, hence $O(1)$ primitive queries.
+Every CPython heap object begins with a `PyObject` header containing an `ob_type` pointer to its type object [@CPythonDocs]. This is the nominal tag: a single machine word encoding complete type identity.
 
-## Java: Nominal-Tag Access
+**Witness procedure:** Given objects `a` and `b`, type identity is `type(a) is type(b)`---two pointer dereferences and one pointer comparison. Cost: $O(1)$ primitive operations, independent of interface count.
 
-::: corollary
-Java realizes nominal-tag access via the `.getClass()` method, which returns the runtime type object. Like CPython, Java achieves $W(\text{type-identity}) = O(1)$.
-:::
+**Contrast with `hasattr`:** Interface-only observation in Python uses `hasattr(obj, name)` for each required method. To verify an object satisfies a protocol with $k$ methods requires $k$ attribute lookups. Worse: different call sites may check different subsets, creating $\Omega(n)$ total checks where $n$ is the number of call sites. The nominal tag eliminates this entirely.
 
-## TypeScript: Structural Typing
+## Java: `.getClass()` and the Method Table
 
-::: corollary
-TypeScript uses interface-only (declared) observation: two types are equivalent iff they have the same structure (fields and method signatures). Type identity checking requires traversing the structure, hence $W(\text{type-identity}) = O(n)$ where $n$ is the structure size.
-:::
+Java's object model stores a pointer to the class object in every instance header. The `.getClass()` method exposes this, and `instanceof` checks traverse the class hierarchy.
 
-## Rust: Nominal-Tag Access (Compile-Time)
+**Key observation:** Java's `instanceof` is $O(d)$ where $d$ is inheritance depth, not $O(|\mathcal{I}|)$ where $|\mathcal{I}|$ is the number of interfaces. This is because `instanceof` walks the MRO (a $B$-axis query), not the interface list (an $S$-axis query). The JVM caches frequent `instanceof` results, but even without caching, the bound depends on inheritance depth---typically small---not interface count.
 
-::: corollary
-Rust uses nominal typing at compile time: type identity is resolved statically via the type system. At runtime, Rust provides `std::any::type_id()` for nominal-tag access, achieving $W(\text{type-identity}) = O(1)$.
-:::
+## TypeScript: Structural Equivalence
 
-## Summary: Witness Cost Across Runtimes
+TypeScript uses interface-only (declared) observation: the compiler checks structural compatibility, not nominal identity. Two types are assignment-compatible iff their structures match.
 
-  **Language**       **Observer Class**       **Witness Cost $W$**
-  -------------- --------------------------- ----------------------
-  CPython                Nominal-tag                 $O(1)$
-  Java                   Nominal-tag                 $O(1)$
-  TypeScript      Interface-only (declared)          $O(n)$
-  Rust                   Nominal-tag                 $O(1)$
+**Implication:** Type identity checking requires traversing the structure. For a type with $n$ fields/methods, $W(\text{type-identity}) = O(n)$. This is not a limitation of TypeScript's implementation; it is inherent to the observation model. The information barrier theorem applies: no compilation strategy can reduce this to $O(1)$ without adding nominal tags.
 
-  : Witness cost for type identity across programming language runtimes.
+**Runtime erasure:** TypeScript compiles to JavaScript with types erased. At runtime, there are no type tags---only the objects themselves. This is interface-only observation in its purest form: the runtime literally cannot perform nominal-tag queries because the tags do not exist.
 
-These instantiations realize the abstract observer model: nominal-tag observers achieve constant witness cost, while interface-only observers require linear witness cost in the number of interfaces.
+## Rust: Static Nominal Tags
+
+Rust resolves type identity at compile time via its nominal type system. At runtime, `std::any::TypeId` provides nominal-tag access for `’static` types.
+
+**The `dyn Trait` case:** Rust's trait objects (`dyn Trait`) include a vtable pointer but not a type tag. This is interface-only observation: the vtable encodes which methods exist, not which type provided them. Consequently, `dyn Trait` values cannot answer "which concrete type am I?" without additional machinery (`Any` downcasting, which re-introduces the nominal tag).
+
+## Summary
+
+  **Language**    **Mechanism**             **$W$**  **Notes**
+  --------------- ------------------------ --------- ---------------------------
+  CPython         `ob_type` pointer         $O(1)$   Per-object header
+  Java            Class pointer + vtable    $O(1)$   `instanceof` is $O(d)$
+  TypeScript      Structural check          $O(n)$   Types erased at runtime
+  Rust (static)   `TypeId`                  $O(1)$   Compile-time resolution
+  Rust (`dyn`)    Vtable only               $O(k)$   No type tag without `Any`
+
+  : Witness cost for type identity. $n$ = structure size, $d$ = inheritance depth, $k$ = interface count.
+
+The pattern is consistent: systems with nominal tags achieve $O(1)$ witness cost; systems without them pay $O(n)$ or $O(k)$. This is not coincidence---it is the information barrier theorem instantiated in production runtimes.
 
 
 This paper presents an information-theoretic analysis of semantic inference under observational constraints. We prove three main results:

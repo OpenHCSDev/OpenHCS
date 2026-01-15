@@ -6,9 +6,4 @@ Python~Software Foundation.
 \newblock \url{https://github.com/python/cpython/blob/main/Include/object.h},
   2024.
 
-\bibitem{PythonDocs}
-Python~Software Foundation.
-\newblock Python data model: type().
-\newblock \url{https://docs.python.org/3/reference/datamodel.html}, 2024.
-
 \end{thebibliography}
