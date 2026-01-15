@@ -37,7 +37,7 @@ Interface-only observers achieve:
 See Lean formalization: \texttt{proofs/python\_instantiation.lean}. The proof verifies:
 \begin{enumerate}
 \item \texttt{nominal\_cost\_constant}: Nominal-tag achieves $(L, W, D) = (O(1), O(1), 0)$
-\item \texttt{duck\_cost\_linear}: Interface-only requires $O(n)$ queries
+\item \texttt{interface\_cost\_linear}: Interface-only requires $O(n)$ queries
 \item \texttt{python\_gap\_unbounded}: The cost gap is unbounded in the limit
 \item Interface observations alone cannot distinguish provenance; nominal tags can
 \end{enumerate}
@@ -51,7 +51,7 @@ The three-dimensional frontier shows:
 \item Interface-only observers trade tag length for distortion (zero $L$, but $D = 1$)
 \end{itemize}
 
-To our knowledge, this is the first formal proof of Pareto optimality for nominal-tag observers in the $(L, W, D)$ tradeoff.
+The Lean 4 formalization (Appendix~\ref{sec:lean}) provides a machine-checked proof of Pareto optimality for nominal-tag observers in the $(L, W, D)$ tradeoff.
 
 \begin{remark}[Programming language instantiations]
 In programming language terms: \emph{nominal typing} corresponds to nominal-tag observers (e.g., CPython's \texttt{isinstance}, Java's \texttt{.getClass()}). \emph{Duck typing} corresponds to interface-only observers (e.g., Python's \texttt{hasattr}). \emph{Structural typing} is an intermediate case with $D = 0$ but $W = O(n)$.

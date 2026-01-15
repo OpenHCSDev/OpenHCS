@@ -111,6 +111,41 @@ The Simplicity Tax Theorem adds a practical corollary: the universal response to
 
 Open questions remain (fixed-parameter tractability, quantum complexity, average-case behavior under natural distributions), but the foundational question---\emph{is identifying relevance fundamentally hard?}---is answered: yes.
 
+\subsection*{Future Work: Learning Cost as Concept Matroids}
+
+The Simplicity Tax Theorem uses a simplified model of learning cost ($H_{\text{central}}$). A more precise formalization would treat learning cost as \emph{concept axes}---the prerequisite concepts required to use a tool effectively.
+
+Paper 1 established that type axes form a matroid structure: minimal complete axis sets have equal cardinality, and the \texttt{type()} operation witnesses axis membership. An analogous structure may govern learning:
+
+\begin{itemize}
+\item Each prerequisite concept (classes, inheritance, descriptors, MRO, etc.) is an axis
+\item \textbf{Different minimal learning paths exist with equal cardinality} (the matroid property)
+\item Learning cost = rank of the concept matroid (size of any minimal generating set)
+\item The primitive witnessing concept mastery = \textbf{Minimal Working Example (MWE)}
+\end{itemize}
+
+The witness deserves elaboration. Paper 1 used \texttt{type(x)} as the primitive witnessing type-axis membership. For concept axes, the analogue is the \emph{Minimal Working Example}---the shortest program demonstrating correct usage of a capability. This is precisely the Kolmogorov complexity of competence, measured in AST nodes rather than bits:
+\[
+\text{LearningCost}(T) = \min \{ |\text{AST}(p)| : p \text{ correctly uses capability } T \}
+\]
+
+For \texttt{type()}: the MWE is \texttt{type(x)} ($\sim$1 node). For metaclasses: the MWE requires class definition, inheritance from \texttt{type}, \texttt{\_\_new\_\_} override, and \texttt{super()} delegation ($\sim$15 nodes). The ratio of AST node counts is the ratio of learning costs.
+
+The matroid structure is non-trivial: to learn metaclasses, one might traverse concepts via inheritance and \texttt{\_\_new\_\_}, or via descriptors and \texttt{\_\_call\_\_}, or via class decorators. These are \emph{different} minimal paths, but the exchange property guarantees they have the same length. This is precisely why learning cost can be a well-defined scalar (the rank) despite multiple valid learning trajectories.
+
+This yields a three-level hierarchy:
+\begin{enumerate}
+\item \textbf{Problem axes}: what the domain requires
+\item \textbf{Tool axes}: what the tool natively handles
+\item \textbf{Concept axes}: what must be learned to access tool axes
+\end{enumerate}
+
+Complete mastery requires: concept axes $\supseteq$ tool axes $\supseteq$ problem axes.
+
+The amortization threshold (Theorem~\ref{thm:amortization}) would then have a precise characterization: $n^* = \text{rank}(\text{ConceptMatroid}(T)) / \text{SimplicityTax}(T, P)$.
+
+Full development of concept matroids is deferred to future work. The key conjecture: \emph{learning cost, like type structure, admits matroid formalization, making the Simplicity Tax quantitatively precise rather than merely qualitatively correct.}
+
 
 \appendix
 

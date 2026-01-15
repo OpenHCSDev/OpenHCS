@@ -21,7 +21,7 @@ These results have several implications:
 \end{itemize}
 
 \begin{remark}[Programming language instantiations]
-In PL terms: nominal typing (CPython, Java) instantiates nominal-tag observers; duck typing (Python \texttt{hasattr}) instantiates interface-only observers; structural typing is intermediate ($D = 0$, $W = O(n)$).
+\textbf{Remark (PL instantiation).} The theorems instantiate in programming language runtimes: CPython and Java use nominal-tag observers; Python \texttt{hasattr} uses interface-only observers; TypeScript uses interface-only (declared) observers ($D = 0$, $W = O(n)$).
 \end{remark}
 
 \subsection{Future Work}

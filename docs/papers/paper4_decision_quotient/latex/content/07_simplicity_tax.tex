@@ -85,6 +85,10 @@ There exists a threshold $n^*$ such that for all $n > n^*$, the total cost of th
 Beyond $n^*$ uses, the complex tool is cheaper even accounting for learning cost.
 \end{theorem}
 
+\begin{remark}[On the Learning Cost Model]
+This theorem models learning cost as $H_{\text{central}}$, a scalar. A more precise formalization would treat learning cost as the rank of a \emph{concept matroid}---the prerequisite concepts required to master the tool (see Conclusion, Future Work). Paper 1 established that type axes form matroids; concept axes may admit similar structure. Critically, the matroid property ensures that \emph{different minimal learning paths have equal cardinality}, making the scalar well-defined despite multiple valid trajectories. The qualitative result (amortization threshold exists) is robust to the learning cost model; the quantitative threshold depends on its precise formalization.
+\end{remark}
+
 \subsection{Cross-Domain Examples}\label{sec:examples}
 
 The Simplicity Tax applies universally. Consider these domains:

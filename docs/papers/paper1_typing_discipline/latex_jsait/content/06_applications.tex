@@ -15,7 +15,7 @@ Java realizes nominal-tag access via the \texttt{.getClass()} method, which retu
 \subsection{TypeScript: Structural Typing}
 
 \begin{corollary}[TypeScript instantiation]
-TypeScript uses structural typing: two types are equivalent iff they have the same structure (fields and method signatures). Type identity checking requires traversing the structure, hence $W(\text{type-identity}) = O(n)$ where $n$ is the structure size.
+TypeScript uses interface-only (declared) observation: two types are equivalent iff they have the same structure (fields and method signatures). Type identity checking requires traversing the structure, hence $W(\text{type-identity}) = O(n)$ where $n$ is the structure size.
 \end{corollary}
 
 \subsection{Rust: Nominal-Tag Access (Compile-Time)}
@@ -34,12 +34,12 @@ Rust uses nominal typing at compile time: type identity is resolved statically v
 \hline
 CPython & Nominal-tag & $O(1)$ \\
 Java & Nominal-tag & $O(1)$ \\
-TypeScript & Interface-only (structural) & $O(n)$ \\
+TypeScript & Interface-only (declared) & $O(n)$ \\
 Rust & Nominal-tag & $O(1)$ \\
 \hline
 \end{tabular}
 \caption{Witness cost for type identity across programming language runtimes.}
 \end{table}
 
-These instantiations confirm the theoretical predictions: nominal-tag observers achieve constant witness cost, while interface-only observers require linear witness cost in the number of interfaces.
+These instantiations realize the abstract observer model: nominal-tag observers achieve constant witness cost, while interface-only observers require linear witness cost in the number of interfaces.
 

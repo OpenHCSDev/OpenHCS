@@ -1,0 +1,29 @@
+OpenHCS Paper Build Log
+========================
+
+Paper: paper6 - Formality and Universality in Software Engineering
+Package Date: 2026-01-15T01:56:33.372469
+Lean Toolchain: leanprover/lean4:v4.27.0-rc1
+
+Proof Statistics:
+-----------------
+Lean Files: 0
+Lines of Code: 0
+Theorems: 0
+
+
+Proof Files:
+------------
+
+Note: Run 'python3 scripts/build_papers.py release' to include compilation output.
+
+Build Instructions:
+-------------------
+To verify the proofs compile:
+
+  cd proofs/
+  lake build
+
+All theorems will be machine-verified if compilation succeeds.
+
+Repository: https://github.com/trissim/openhcs

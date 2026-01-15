@@ -1,0 +1,39 @@
+OpenHCS Paper Build Log
+========================
+
+Paper: paper3 - Leverage-Driven Software Architecture
+Package Date: 2026-01-15T01:56:15.607417
+Lean Toolchain: leanprover/lean4:v4.27.0-rc1
+
+Proof Statistics:
+-----------------
+Lean Files: 10
+Lines of Code: 741
+Theorems: 35
+
+
+Proof Files:
+------------
+  - LambdaDR.lean
+  - Examples.lean
+  - Foundations.lean
+  - Probability.lean
+  - SSOT.lean
+  - Theorems.lean
+  - Typing.lean
+  - WeightedLeverage.lean
+  - Leverage.lean
+  - lakefile.lean
+
+Note: Run 'python3 scripts/build_papers.py release' to include compilation output.
+
+Build Instructions:
+-------------------
+To verify the proofs compile:
+
+  cd proofs/
+  lake build
+
+All theorems will be machine-verified if compilation succeeds.
+
+Repository: https://github.com/trissim/openhcs

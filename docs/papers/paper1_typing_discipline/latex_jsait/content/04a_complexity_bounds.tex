@@ -1,0 +1,91 @@
+\section{Core Theorems}\label{core-theorems}
+
+\subsection{The Error Localization
+Theorem}\label{the-error-localization-theorem}
+
+\textbf{Definition 4.1 (Error Location).} Let E(T) be the number of
+source locations that must be inspected to find all potential violations
+of a type constraint under discipline T.
+
+\textbf{Theorem 4.1 (nominal-tag Typing Complexity).} E(nominal-tag) = O(1).
+
+\emph{Proof.} Under nominal-tag observation, constraint ``x must be an A'' is
+satisfied iff type(x) inherits from A. This property is determined at
+class definition time, at exactly one location: the class definition of
+type(x). If the class does not list A in its bases (transitively), the
+constraint fails. One location. \qed
+
+\textbf{Remark:} In type system terminology, nominal-tag observation corresponds to nominal-tag observation.
+
+\textbf{Theorem 4.2 (Interface-Only Declared Complexity).} E(interface-only (declared)) = O(k) where
+k = number of classes.
+
+\emph{Proof.} Under interface-only typing with declared interfaces, constraint ``x must satisfy
+interface A'' requires checking that type(x) implements all methods in
+signature(A). This check occurs at each class definition. For k classes,
+O(k) locations. \qed
+
+\textbf{Remark:} In type system terminology, this is called interface-only (declared) observation.
+
+\textbf{Theorem 4.3 (Interface-Only Incoherent Complexity).} E(interface-only) = $\Omega(n)$
+where n = number of call sites.
+
+\emph{Proof.} Under interface-only typing, constraint ``x must have method m'' is
+encoded as \texttt{hasattr(x,\ "m")} at each call site. There is no
+central declaration. For n call sites, each must be inspected. Lower
+bound is $\Omega(n)$. \qed
+
+\textbf{Remark:} This incoherent pattern is traditionally called "interface-only observation."
+
+\textbf{Corollary 4.4 (Strict Dominance).} nominal-tag observation strictly
+dominates interface-only: E(nominal-tag) = O(1) \textless{} $\Omega(n)$ =
+E(interface-only) for all n \textgreater{} 1.
+
+\textbf{Remark:} In type system terminology, this shows nominal-tag observation dominates interface-only observation.
+
+\subsection{The Information Scattering
+Theorem}\label{the-information-scattering-theorem}
+
+\textbf{Definition 4.2 (Constraint Encoding Locations).} Let I(T, c) be
+the set of source locations where constraint c is encoded under
+discipline T.
+
+\textbf{Theorem 4.5 (Interface-Only Incoherent Scattering).} For interface-only typing,
+\textbar I(interface-only, c)\textbar{} = O(n) where n = call sites using
+constraint c.
+
+\textbf{Remark:} This describes the scattering problem in "interface-only observation."
+
+\emph{Proof.} Each \texttt{hasattr(x,\ "method")} call independently
+encodes the constraint. No shared reference. Constraints scale with call
+sites. \qed
+
+\textbf{Theorem 4.6 (nominal-tag Typing Centralizes).} For nominal-tag observation,
+\textbar I(nominal-tag, c)\textbar{} = O(1).
+
+\emph{Proof.} Constraint c = ``must inherit from A'' is encoded once: in
+the ABC/Protocol definition of A. All \texttt{isinstance(x,\ A)} checks
+reference this single definition. \qed
+
+\textbf{Remark:} In type system terminology, nominal-tag observation corresponds to nominal-tag observation.
+
+\textbf{Corollary 4.7 (Maintenance Entropy).} interface-only typing maximizes
+maintenance entropy; nominal-tag observation minimizes it.
+
+\textbf{Remark:} Traditional terms: interface-only observation vs nominal-tag observation.
+
+\subsection{Empirical
+Demonstration}\label{empirical-demonstration}
+
+The theoretical complexity bounds in Theorems 4.1-4.3 are demonstrated
+empirically in Section 5, Case Study 1 (WellFilterConfig hierarchy). Two
+classes with identical structure but different nominal identities
+require O(1) disambiguation under nominal-tag observation but \(\Omega\)(n)
+call-site inspection under interface-only typing. Case Study 5 illustrates this:
+migrating from incoherent to nominal-tag observation replaced scattered
+\texttt{hasattr()} checks across 47 call sites with centralized ABC
+contract validation at a single definition point.
+
+\textbf{Remark:} In type system terminology, nominal-tag is nominal-tag observation; interface-only is interface-only observation.
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
