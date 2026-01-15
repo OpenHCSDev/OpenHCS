@@ -14,21 +14,18 @@ A \emph{complete type system} must distinguish types along all necessary axes. A
 \subsection{Matroid Theorem}
 
 \begin{theorem}[Type Axes Form a Matroid]
-The set of type axes forms a matroid $M = (E, \mathcal{I})$ where:
-\begin{itemize}
-\item $E$ = all possible type axes
-\item $\mathcal{I}$ = all minimal complete axis sets
-\end{itemize}
+Let $E$ be the set of all type axes, and let $\mathcal{B}$ be the family of minimal complete axis sets. Then $\mathcal{B}$ satisfies the basis-exchange axiom:
 
-All bases (minimal complete axis sets) have equal cardinality.
+For any $B_1, B_2 \in \mathcal{B}$ and any $x \in B_1 \setminus B_2$, there exists $y \in B_2 \setminus B_1$ such that $(B_1 \setminus \{x\}) \cup \{y\} \in \mathcal{B}$.
+
+Therefore $\mathcal{B}$ is the set of bases of a matroid on $E$. By the equicardinality theorem for matroid bases, all minimal complete axis sets have equal cardinality.
 \end{theorem}
 
 \begin{proof}
-See Lean formalization: \texttt{theorems/matroid\_structure.lean}. The proof verifies:
+See Lean formalization: \texttt{proofs/abstract\_class\_system.lean}. The proof verifies:
 \begin{enumerate}
-\item Hereditary property: Any subset of a complete set is independent
-\item Exchange property: Any two minimal complete sets have equal cardinality
-\item Basis property: All maximal independent sets have equal size
+\item Basis-exchange: swapping one axis for another preserves minimal completeness
+\item Equicardinality follows from standard matroid theory
 \end{enumerate}
 \end{proof}
 

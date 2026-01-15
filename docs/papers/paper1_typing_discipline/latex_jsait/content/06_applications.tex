@@ -4,7 +4,7 @@
 CPython realizes nominal-tag access: the runtime stores a type tag (\texttt{ob\_type} pointer) per object and exposes it via the \texttt{type()} builtin. Therefore, the constant-witness construction applies: $W(\text{type-identity}) = O(1)$ in CPython.
 \end{corollary}
 
-\textbf{Evidence:} The CPython object model stores a pointer to the type object in every heap-allocated value. The \texttt{type()} function is a single pointer dereference, hence $O(1)$ time and $O(1)$ AST size.
+\textbf{Evidence:} The CPython object model stores a pointer to the type object (\texttt{ob\_type}) in every heap-allocated value \cite{CPythonDocs}. The \texttt{type()} builtin \cite{PythonDocs} is a single pointer dereference, hence $O(1)$ time and $O(1)$ AST size.
 
 \subsection{Java: Nominal-Tag Access}
 

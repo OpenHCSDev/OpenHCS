@@ -5,7 +5,7 @@ All theorems in this paper are formalized and machine-verified in Lean 4. The pr
 \subsection{Proof Statistics}
 
 \begin{itemize}
-\item \textbf{Total Lines}: \textasciitilde3,000
+\item \textbf{Total Lines}: \textasciitilde6,000
 \item \textbf{Theorems}: 265
 \item \textbf{Lemmas}: 150+
 \item \textbf{Sorry Placeholders}: 0 (all proofs complete)
@@ -15,13 +15,12 @@ All theorems in this paper are formalized and machine-verified in Lean 4. The pr
 \subsection{Key Proof Files}
 
 \begin{enumerate}
-\item \texttt{matroid\_structure.lean}: Proof that type axes form a matroid
-\item \texttt{kolmogorov\_witness.lean}: Proof of Kolmogorov optimality
-\item \texttt{rate\_distortion.lean}: Proof of rate-distortion optimality
-\item \texttt{nominal\_resolution.lean}: Nominal typing instantiation
-\item \texttt{structural\_resolution.lean}: Structural typing instantiation
-\item \texttt{duck\_typing.lean}: Duck typing instantiation
+\item \texttt{abstract\_class\_system.lean}: Core formalization including matroid structure, witness complexity, and typing discipline comparisons
 \end{enumerate}
+
+\begin{remark}
+The proofs are consolidated in a single file for ease of verification. All theorems referenced in this paper (matroid structure, witness optimality, Pareto dominance) are contained therein.
+\end{remark}
 
 \subsection{Building the Proofs}
 

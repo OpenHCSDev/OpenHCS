@@ -3,10 +3,10 @@
 Let $\mathcal{V}$ denote the space of all program values. An \emph{observation} is a predicate $\phi: \mathcal{V} \to \{0,1\}$ that tests interface membership.
 
 \begin{definition}[Interface-only equivalence]
-Values $x, y \in \mathcal{V}$ are interface-equivalent, written $x \equiv_I y$, iff $\phi(x) = \phi(y)$ for all interface observations $\phi$.
+Values $x, y \in \mathcal{V}$ are interface-equivalent, written $x \sim y$, iff $\phi(x) = \phi(y)$ for all interface observations $\phi$.
 \end{definition}
 
-An interface-only procedure can only distinguish values that are not interface-equivalent. Therefore, any property computed by an interface-only procedure must be constant on equivalence classes.
+An interface-only procedure can only distinguish values that are not interface-equivalent. Therefore, any property computed by an interface-only procedure must be constant on $\sim$-equivalence classes.
 
 \subsection{Witness Description Length}
 
@@ -25,7 +25,7 @@ Witness description length is related to Kolmogorov complexity, but differs in t
 We analyze type identity checking under three dimensions:
 
 \begin{definition}[Tag length]
-The tag length $L$ is the number of bits required to store a type identifier per value.
+The tag length $L$ is the number of machine words required to store a type identifier per value. (Under a fixed word size $w$, this corresponds to $\Theta(w)$ bits.)
 \end{definition}
 
 \begin{definition}[Witness length]
@@ -33,7 +33,11 @@ The witness length $W$ is the minimum AST size to implement type identity checki
 \end{definition}
 
 \begin{definition}[Distortion]
-The distortion $D$ is the probability of semantic misclassification: $D = \Pr[\text{type}(v_1) = \text{type}(v_2) \text{ but } \text{behavior}(v_1) \neq \text{behavior}(v_2)]$.
+The distortion $D$ is a worst-case semantic failure flag:
+\[
+D = 0 \iff \forall v_1, v_2 \,[\, \text{type}(v_1) = \text{type}(v_2) \Rightarrow \text{behavior}(v_1) \equiv \text{behavior}(v_2) \,]
+\]
+Otherwise $D = 1$. Here $\text{behavior}(v)$ denotes the observable behavior of $v$ under program execution (e.g., method dispatch outcomes).
 \end{definition}
 
 A type system is characterized by a point $(L, W, D)$ in this three-dimensional space. The question is: which points are achievable, and which are Pareto-optimal?

@@ -2,31 +2,31 @@
 
 Recall from Section 2 that type systems are characterized by three dimensions:
 \begin{itemize}
-\item \textbf{Tag length} $L$: bits required to store a type identifier per value
+\item \textbf{Tag length} $L$: machine words required to store a type identifier per value
 \item \textbf{Witness length} $W$: minimum AST size to implement type identity checking
-\item \textbf{Distortion} $D$: probability of semantic misclassification
+\item \textbf{Distortion} $D$: worst-case semantic failure flag ($D = 0$ or $D = 1$)
 \end{itemize}
 
 \begin{theorem}[Pareto Optimality of Nominal Typing]
 Nominal typing achieves the unique Pareto-optimal point in the $(L, W, D)$ space:
 \begin{itemize}
-\item \textbf{Tag length}: $L = O(1)$ bits per value
+\item \textbf{Tag length}: $L = O(1)$ machine words per value
 \item \textbf{Witness length}: $W = O(1)$ AST nodes
-\item \textbf{Distortion}: $D = 0$ (zero misclassification)
+\item \textbf{Distortion}: $D = 0$ (type equality implies behavior equivalence)
 \end{itemize}
 
 Structural typing achieves:
 \begin{itemize}
-\item \textbf{Tag length}: $L = O(n)$ bits per value
+\item \textbf{Tag length}: $L = O(n)$ machine words per value
 \item \textbf{Witness length}: $W = O(n)$ AST nodes
-\item \textbf{Distortion}: $D = 0$ (zero misclassification)
+\item \textbf{Distortion}: $D = 0$ (type equality implies behavior equivalence)
 \end{itemize}
 
 Duck typing achieves:
 \begin{itemize}
-\item \textbf{Tag length}: $L = 0$ bits per value (no explicit tag)
+\item \textbf{Tag length}: $L = 0$ (no explicit tag)
 \item \textbf{Witness length}: $W = O(n)$ AST nodes
-\item \textbf{Distortion}: $D > 0$ (positive misclassification probability)
+\item \textbf{Distortion}: $D = 1$ (type equality does not imply behavior equivalence)
 \end{itemize}
 \end{theorem}
 
@@ -49,5 +49,5 @@ The three-dimensional frontier shows:
 \item Duck typing trades tag length for distortion (zero $L$, but positive $D$)
 \end{itemize}
 
-This is the first formal proof that nominal typing is Pareto-optimal in the $(L, W, D)$ tradeoff for type systems.
+To our knowledge, this is the first formal proof that nominal typing is Pareto-optimal in the $(L, W, D)$ tradeoff for type systems.
 
