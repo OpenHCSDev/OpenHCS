@@ -1,22 +1,22 @@
-The preceding sections established abstract results about observer classes and witness cost. We now ground these in concrete systems across multiple domains, showing that real classification systems instantiate the theoretical categories---and that the complexity bounds are not artifacts of the model but observable properties of deployed implementations.
+The preceding sections established abstract results about observer classes and witness cost. We now ground these in concrete systems across multiple domains, showing that real classification systems instantiate the theoretical categories and that the complexity bounds are not artifacts of the model but observable properties of deployed implementations.
 
 \subsection{Biological Taxonomy: Phenotype vs Genotype}
 
 Linnean taxonomy classifies organisms by observable phenotypic characters: morphology, behavior, habitat. This is attribute-only observation. The information barrier applies: phenotypically identical organisms from distinct species are indistinguishable.
 
-\textbf{The cryptic species problem:} Cryptic species share identical phenotypic profiles but are reproductively isolated and genetically distinct. Attribute-only observation (morphology) cannot distinguish them---$\pi(A) = \pi(B)$ but $\text{species}(A) \neq \text{species}(B)$.
+\textbf{The cryptic species problem:} Cryptic species share identical phenotypic profiles but are reproductively isolated and genetically distinct. Attribute-only observation (morphology) cannot distinguish them: $\pi(A) = \pi(B)$ but $\text{species}(A) \neq \text{species}(B)$.
 
 \textbf{The nominal tag:} DNA barcoding provides the resolution \cite{DNABarcoding}. A short genetic sequence (e.g., mitochondrial COI) acts as the nominal tag: $O(1)$ identity verification via sequence comparison. This reduced cryptic species identification from $\Omega(n)$ morphological examination to constant-time molecular lookup.
 
 \subsection{Library Classification: Subject vs ISBN}
 
-Library classification systems like Dewey Decimal observe subject matter---a form of attribute-only classification. Two books on the same subject are indistinguishable by subject code alone.
+Library classification systems like Dewey Decimal observe subject matter, a form of attribute-only classification. Two books on the same subject are indistinguishable by subject code alone.
 
 \textbf{The nominal tag:} The ISBN (International Standard Book Number) is the nominal tag \cite{ISBN}. Given two physical books, identity verification is $O(1)$: compare ISBNs. Without ISBNs, distinguishing two copies of different editions on the same subject requires $O(n)$ attribute inspection (publication date, page count, publisher, etc.).
 
 \subsection{Database Systems: Columns vs Primary Keys}
 
-Relational databases observe entities via column values. The information barrier applies: rows with identical column values (excluding the key) are indistinguishable.
+Relational databases observe entities via column values. The information barrier applies: rows with identical column values, excluding the key, are indistinguishable.
 
 \textbf{The nominal tag:} The primary key is the nominal tag \cite{Codd1990}. Entity identity is $O(1)$: compare keys. This is why database theory requires keys---without them, the system cannot answer ``is this the same entity?''
 
@@ -72,5 +72,5 @@ Rust (static) & Trait bounds & \texttt{TypeId} & $O(1)$ \\
 \caption{Witness cost for identity across classification systems. Nominal tags achieve $O(1)$; attribute-only pays $O(n)$ or $O(k)$.}
 \end{table}
 
-The pattern is universal: systems with nominal tags achieve $O(1)$ witness cost; systems without them pay $O(n)$ or $O(k)$. This is not domain-specific---it is the information barrier theorem instantiated across classification systems.
+The pattern is universal: systems with nominal tags achieve $O(1)$ witness cost; systems without them pay $O(n)$ or $O(k)$. This is not domain-specific; it is the information barrier theorem instantiated across classification systems.
 

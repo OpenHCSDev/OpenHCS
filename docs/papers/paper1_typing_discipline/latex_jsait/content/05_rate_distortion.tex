@@ -55,47 +55,40 @@ Figure~\ref{fig:lwd-tradeoff} visualizes the $(L, W, D)$ tradeoff space. The key
 
 \begin{figure}[t]
 \centering
-\begin{tikzpicture}[scale=0.9]
-  % Axes
-  \draw[->] (0,0) -- (6.5,0) node[right] {Tag rate $L$ (bits)};
-  \draw[->] (0,0) -- (0,5) node[above] {Query cost $W$};
+\begin{tikzpicture}[scale=0.8]
+  % Shaded D=0 achievable region (draw FIRST)
+  \fill[blue!8] (0,0) -- (5,0) -- (5,0.6) -- (0,2.8) -- cycle;
+
+  % D=0 Pareto frontier
+  \draw[thick, blue] (0,2.8) -- (5,0.6);
+
+  % Axes (draw after shading)
+  \draw[->] (0,0) -- (5.8,0) node[right] {Tag rate $L$};
+  \draw[->] (0,0) -- (0,3.5) node[above] {Query cost $W$};
 
   % Axis labels
-  \node[below] at (1.5,0) {$0$};
+  \node[below left] at (0,0) {$0$};
   \node[below] at (5,0) {$\log_2 k$};
-  \draw (1.5,0.1) -- (1.5,-0.1);
-  \draw (5,0.1) -- (5,-0.1);
+  \draw (5,0.08) -- (5,-0.08);
 
-  % Zero-distortion curve (D=0 achievable region boundary)
-  \draw[thick, blue] (1.5,4.2) .. controls (2.5,2.5) and (3.5,1.2) .. (5,0.5);
-  \node[blue, right] at (2.8,3.2) {$D = 0$ frontier};
+  % Region labels
+  \node[blue] at (3.2,2.3) {\small $D = 0$};
+  \node[blue] at (3.2,1.95) {\small frontier};
+  \node[gray] at (2.2,0.8) {\footnotesize achievable};
 
-  % Points
-  % Duck typing: L=0, W=Omega(n), D>0 (but shown at L=0 boundary)
-  \filldraw[red] (1.5,4.2) circle (3pt);
-  \node[red, left] at (1.3,4.2) {\small Duck ($D > 0$)};
+  % Points on the D=0 frontier
+  \filldraw[orange] (0,2.8) circle (2.5pt);
+  \node[orange, left] at (-0.1,2.8) {\footnotesize Structural ($D{=}0$)};
 
-  % Structural typing: L=0, W=O(n), D=0
-  \filldraw[orange] (1.5,3.5) circle (3pt);
-  \node[orange, left] at (1.3,3.5) {\small Structural};
+  \filldraw[green!60!black] (5,0.6) circle (2.5pt);
+  \node[green!60!black, right] at (5.1,0.6) {\footnotesize Nominal ($D{=}0$)};
 
-  % Nominal typing: L=log k, W=O(1), D=0
-  \filldraw[green!60!black] (5,0.5) circle (3pt);
-  \node[green!60!black, right] at (5.1,0.5) {\small Nominal};
-
-  % Hybrid region
-  \draw[dashed, gray] (1.5,3.5) -- (5,0.5);
-  \node[gray] at (3.8,1.6) {\small Hybrid};
-
-  % Shaded infeasible region (below D=0 curve)
-  \fill[blue!10] (5,0) -- (5,0.5) .. controls (3.5,1.2) and (2.5,2.5) .. (1.5,4.2) -- (1.5,0) -- cycle;
-
-  % Annotations
-  \draw[<->, thick] (1.7,4.2) -- (1.7,0.5);
-  \node[rotate=90] at (1.3,2.3) {\small $\Omega(n)$ gap};
+  % Duck typing: below frontier, accepts D>0
+  \filldraw[red] (0,1.8) circle (2.5pt);
+  \node[red, left] at (-0.1,1.8) {\footnotesize Duck ($D{>}0$)};
 
 \end{tikzpicture}
-\caption{The $(L, W)$ tradeoff for $D = 0$ (zero distortion). Duck typing (interface-only) requires $W = \Omega(n)$ queries but $L = 0$ storage; it incurs $D > 0$ when types are interface-equivalent. Structural typing achieves $D = 0$ with $W = O(n)$. Nominal typing achieves $W = O(1)$ with $L = \lceil \log_2 k \rceil$ bits. The shaded region is the achievable $(L, W)$ region for $D = 0$. Hybrid strategies interpolate along the dashed line.}
+\caption{Schematic illustration of the $(L, W, D)$ tradeoff. The $D=0$ frontier is the Pareto boundary for zero-error type identification: Structural typing (no tags, high query cost) and Nominal typing (full tags, minimal queries) lie on this frontier. Duck typing operates below the frontier by accepting $D > 0$; it uses fewer queries but cannot distinguish interface-equivalent types. Exact frontier shape depends on the type system; the qualitative relationships are general.}
 \label{fig:lwd-tradeoff}
 \end{figure}
 

@@ -1,6 +1,6 @@
 # Paper: Credibility: Formal Verification of Architectural Claims
 
-**Status**: TOPLAS-ready | **Lean**: 58 lines, 0 theorems
+**Status**: Draft-ready | **Lean**: 58 lines, 0 theorems
 
 ---
 

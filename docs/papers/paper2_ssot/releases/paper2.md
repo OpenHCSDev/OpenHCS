@@ -1,6 +1,6 @@
 # Paper: Formal Foundations for the Single Source of Truth Principle
 
-**Status**: TOPLAS-ready | **Lean**: 1811 lines, 96 theorems
+**Status**: Draft-ready | **Lean**: 1811 lines, 96 theorems
 
 ---
 

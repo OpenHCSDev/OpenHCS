@@ -1,6 +1,6 @@
 # Paper: Decision Quotient: Formal Semantics of Architectural Choice
 
-**Status**: TOPLAS-ready | **Lean**: 2760 lines, 106 theorems
+**Status**: Draft-ready | **Lean**: 2760 lines, 106 theorems
 
 ---
 

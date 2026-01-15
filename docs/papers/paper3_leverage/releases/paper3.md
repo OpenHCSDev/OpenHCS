@@ -1,6 +1,6 @@
 # Paper: Leverage-Driven Software Architecture
 
-**Status**: TOPLAS-ready | **Lean**: 741 lines, 35 theorems
+**Status**: Draft-ready | **Lean**: 741 lines, 35 theorems
 
 ---
 

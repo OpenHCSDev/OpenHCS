@@ -116,16 +116,4 @@ R.~Foundation, ``Rust std::any::type\_id,''
 ------, ``The rust reference: Trait objects,''
   \url{https://doc.rust-lang.org/reference/types/trait-object.html}, 2024.
 
-\bibitem{abadi1996theory}
-M.~Abadi and L.~Cardelli, ``A theory of objects.''\hskip 1em plus 0.5em minus
-  0.4em\relax Springer-Verlag, 1996.
-
-\bibitem{liskov1994behavioral}
-B.~Liskov and J.~M. Wing, ``A behavioral notion of subtyping,'' vol.~16, no.~6,
-  1994, pp. 1811--1841.
-
-\bibitem{reynolds1983types}
-J.~C. Reynolds, ``Types, abstraction and parametric polymorphism,''
-  \emph{Information Processing}, vol.~83, pp. 513--523, 1983.
-
 \end{thebibliography}
