@@ -1,8 +1,8 @@
-# Type Compression (JSAIT) - Lean 4 Formalization
+# Classification Theory (JSAIT) - Lean 4 Formalization
 
 ## Overview
 
-This directory contains the complete Lean 4 formalization for Type Compression (JSAIT).
+This directory contains the complete Lean 4 formalization for Classification Theory (JSAIT).
 
 - **Lines:** 6086
 - **Theorems:** 265

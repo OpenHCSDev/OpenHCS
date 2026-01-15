@@ -1,6 +1,6 @@
 # Paper: Information Barriers in Classification Systems: Matroid Structure and Witness Complexity
 
-**Status**: JSAIT-ready | **Lean**: 6086 lines, 265 theorems
+**Status**: TOPLAS-ready | **Lean**: 6086 lines, 265 theorems
 
 ---
 

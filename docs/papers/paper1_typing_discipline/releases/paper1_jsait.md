@@ -1,4 +1,4 @@
-# Paper: Semantic Compression via Type Systems: Matroid Structure and Kolmogorov-Optimal Witnesses
+# Paper: Information Barriers in Classification Systems: Matroid Structure and Witness Complexity
 
 **Status**: TOPLAS-ready | **Lean**: 6086 lines, 265 theorems
 
