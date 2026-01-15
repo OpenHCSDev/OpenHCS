@@ -1,16 +1,18 @@
 \begin{abstract}
-Classification systems---database schemas, biological taxonomies, type systems, knowledge graphs---must answer queries about entities using a fixed set of observable attributes. We prove fundamental limits on what such systems can compute.
+We study the \emph{identification capacity} of classification systems---the ability to determine which class an entity belongs to given limited observations. An observer receives binary query responses (``does entity $v$ satisfy attribute $I$?'') and must identify the entity's class. We prove fundamental limits on identification cost as a function of observation model.
 
-\textbf{Impossibility.} An observer limited to attribute-membership queries cannot determine entity identity when distinct entities share identical attribute profiles. This is an information barrier, not a computational limitation: no algorithm can extract information the observations do not contain.
+\textbf{Information barrier.} When distinct classes share identical attribute profiles, no algorithm---regardless of computational power---can identify the class from attribute queries alone. This is a channel capacity result: the mutual information $I(C; \pi(V)) < H(C)$ when the attribute mapping $\pi$ is not injective on classes.
 
-\textbf{Optimality.} A single additional primitive---a nominal tag identifying each entity's class---reduces witness cost from $\Omega(n)$ to $O(1)$. We prove this is Pareto-optimal in the $(L, W, D)$ tradeoff space (tag length, witness cost, semantic distortion). The optimality is \emph{unique}: no other observation strategy achieves $D = 0$ with lower witness cost.
+\textbf{Rate-identification tradeoff.} We analyze the tradeoff between \emph{tag rate} $L$ (bits per entity), \emph{identification cost} $W$ (queries per identification), and \emph{error rate} $D$. A nominal tag achieving $L = \lceil \log_2 k \rceil$ bits for $k$ classes yields $W = O(1)$ with $D = 0$. Without tags ($L = 0$), identification requires $W = \Omega(n)$ queries and may incur $D > 0$.
 
-\textbf{Structure.} Minimal distinguishing query sets form the bases of a matroid. All such sets have equal cardinality; the ``distinguishing dimension'' of a classification problem is well-defined and computable.
+\textbf{Converse.} Any scheme achieving $D = 0$ requires $L \geq \log_2 k$ bits. This is tight: nominal tagging achieves the bound with $W = O(1)$.
 
-\textbf{Significance.} Classification system design is not a matter of preference---it has information-theoretic consequences. Attribute-only observation incurs unavoidable costs that nominal tagging eliminates. The witness-cost gap is unbounded: $\Omega(n)$ for duck typing versus $O(1)$ for nominal tagging. This explains why programming languages have converged on hybrid systems (Python's ABCs, TypeScript's brands, Rust's traits), and provides design principles for classification systems in databases, taxonomy, and knowledge representation.
+\textbf{Matroid structure.} Minimal sufficient query sets form the bases of a matroid. The \emph{identification dimension}---common cardinality of all minimal query sets---is well-defined and computable.
+
+\textbf{Applications.} The theory instantiates to type systems (duck vs.\ nominal typing), databases (attribute vs.\ key lookup), and biological taxonomy (phenotype vs.\ species identifier). The unbounded gap $\Omega(n)$ vs.\ $O(1)$ explains convergence toward hybrid systems in practice.
 
 All results are machine-checked in Lean 4 (6,000+ lines, 0 \texttt{sorry}).
 
-\textbf{Keywords:} classification theory, information barriers, witness complexity, matroid structure, formal verification
+\textbf{Keywords:} identification capacity, query complexity, rate-distortion, matroid structure, classification systems
 \end{abstract}
 

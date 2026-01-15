@@ -172,3 +172,41 @@ A point $(L^*, W^*, D^*)$ is \emph{Pareto-optimal} if there is no achievable $(L
 
 The main result of Section~\ref{sec:lwd} is that nominal-tag observation achieves the unique Pareto-optimal point with $D = 0$.
 
+\subsection{Converse: Tag Rate Lower Bound}
+
+\begin{theorem}[Converse]\label{thm:converse}
+Any scheme achieving $D = 0$ (zero-error identification) requires tag length $L \geq \log_2 k$, where $k$ is the number of distinct classes.
+\end{theorem}
+
+\begin{proof}
+Zero error requires that distinct classes map to distinct decoder outputs. With $k$ classes, at least $\log_2 k$ bits are needed to encode $k$ distinct values. Without tags ($L = 0$), the decoder sees only query responses $\pi(v) \in \{0,1\}^{|\mathcal{I}|}$. If $\pi$ is not injective on classes (i.e., $\exists$ classes $c_1 \neq c_2$ with identical profiles), zero error is impossible. The converse is tight: $L = \lceil \log_2 k \rceil$ suffices.
+\end{proof}
+
+\subsection{Rate-Distortion Tradeoff}
+
+When $D > 0$ is permitted, we obtain a classic rate-distortion tradeoff:
+
+\begin{proposition}[Lossy identification]
+For any $\epsilon \in (0, 1)$, there exist schemes with $L = 0$ (no tags) achieving $D \leq \epsilon$ with query cost $W = O(\log(1/\epsilon) \cdot d)$, where $d$ is the identification dimension. The tradeoff: smaller $D$ requires larger $W$.
+\end{proposition}
+
+The zero-error corner ($D = 0$) is special: nominal tagging is the unique Pareto optimum. Relaxing to $D > 0$ enables tag-free schemes at the cost of increased query complexity. This mirrors the classical distinction between zero-error and $\epsilon$-error capacity in channel coding.
+
+\subsection{Concrete Example}
+
+\textbf{Worked example.} Consider a type system with $k = 1000$ classes, each characterized by a subset of $n = 50$ interface methods.
+
+\begin{center}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Strategy} & \textbf{Tag $L$} & \textbf{Witness $W$} \\
+\midrule
+Nominal (class ID) & $\lceil \log_2 1000 \rceil = 10$ bits & $O(1)$ \\
+Duck typing (query all) & $0$ & $\leq 50$ queries \\
+Adaptive duck typing & $0$ & $\geq d$ queries \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Here $d$ is the identification dimension---the size of any minimal distinguishing query set. For typical type hierarchies, $d \approx 5$--$15$. The gap between 10 bits of storage vs.\ 5--50 queries per identification is the cost of forgoing nominal tagging. At scale (millions of identifications), the cumulative query cost dominates.
+

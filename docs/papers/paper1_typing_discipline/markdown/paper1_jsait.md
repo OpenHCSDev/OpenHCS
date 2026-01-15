@@ -6,34 +6,42 @@
 
 ## Abstract
 
-Classification systems---database schemas, biological taxonomies, type systems, knowledge graphs---must answer queries about entities using a fixed set of observable attributes. We prove fundamental limits on what such systems can compute.
+We study the *identification capacity* of classification systems---the ability to determine which class an entity belongs to given limited observations. An observer receives binary query responses ("does entity $v$ satisfy attribute $I$?") and must identify the entity's class. We prove fundamental limits on identification cost as a function of observation model.
 
-**Impossibility.** An observer limited to attribute-membership queries cannot determine entity identity when distinct entities share identical attribute profiles. This is an information barrier, not a computational limitation: no algorithm can extract information the observations do not contain.
+**Information barrier.** When distinct classes share identical attribute profiles, no algorithm---regardless of computational power---can identify the class from attribute queries alone. This is a channel capacity result: the mutual information $I(C; \pi(V)) < H(C)$ when the attribute mapping $\pi$ is not injective on classes.
 
-**Optimality.** A single additional primitive---a nominal tag identifying each entity's class---reduces witness cost from $\Omega(n)$ to $O(1)$. We prove this is Pareto-optimal in the $(L, W, D)$ tradeoff space (tag length, witness cost, semantic distortion). The optimality is *unique*: no other observation strategy achieves $D = 0$ with lower witness cost.
+**Rate-identification tradeoff.** We analyze the tradeoff between *tag rate* $L$ (bits per entity), *identification cost* $W$ (queries per identification), and *error rate* $D$. A nominal tag achieving $L = \lceil \log_2 k \rceil$ bits for $k$ classes yields $W = O(1)$ with $D = 0$. Without tags ($L = 0$), identification requires $W = \Omega(n)$ queries and may incur $D > 0$.
 
-**Structure.** Minimal distinguishing query sets form the bases of a matroid. All such sets have equal cardinality; the "distinguishing dimension" of a classification problem is well-defined and computable.
+**Converse.** Any scheme achieving $D = 0$ requires $L \geq \log_2 k$ bits. This is tight: nominal tagging achieves the bound with $W = O(1)$.
 
-**Significance.** Classification system design is not a matter of preference---it has information-theoretic consequences. Attribute-only observation incurs unavoidable costs that nominal tagging eliminates. The witness-cost gap is unbounded: $\Omega(n)$ for duck typing versus $O(1)$ for nominal tagging. This explains why programming languages have converged on hybrid systems (Python's ABCs, TypeScript's brands, Rust's traits), and provides design principles for classification systems in databases, taxonomy, and knowledge representation.
+**Matroid structure.** Minimal sufficient query sets form the bases of a matroid. The *identification dimension*---common cardinality of all minimal query sets---is well-defined and computable.
+
+**Applications.** The theory instantiates to type systems (duck vs. nominal typing), databases (attribute vs. key lookup), and biological taxonomy (phenotype vs. species identifier). The unbounded gap $\Omega(n)$ vs. $O(1)$ explains convergence toward hybrid systems in practice.
 
 All results are machine-checked in Lean 4 (6,000+ lines, 0 `sorry`).
 
-**Keywords:** classification theory, information barriers, witness complexity, matroid structure, formal verification
+**Keywords:** identification capacity, query complexity, rate-distortion, matroid structure, classification systems
 
 
-## The Classification Problem
+## The Identification Problem
 
-Every system that classifies entities faces a fundamental question: *which attributes should we observe?* A database schema chooses columns. A biological taxonomy chooses morphological features. A type system chooses between structural properties and nominal identity. A library classification system chooses subject facets.
+Consider an encoder-decoder pair communicating about entities from a large universe $\mathcal{V}$. The decoder must *identify* each entity---determine which of $k$ classes it belongs to---using only:
 
-This paper proves that the choice has unavoidable information-theoretic consequences. Specifically:
+-   A *tag* of $L$ bits stored with the entity, and/or
 
-1.  **Information barriers exist.** Observers limited to a fixed attribute family cannot compute properties that vary within equivalence classes induced by those attributes. This is not a computational limitation---it is an impossibility rooted in the observations themselves.
+-   *Queries* to a binary oracle: "does entity $v$ satisfy attribute $I$?"
 
-2.  **Nominal tags are optimal.** Adding a single primitive---a tag identifying each entity's class---reduces witness cost from $\Omega(n)$ to $O(1)$. This is Pareto-optimal: no observer achieves lower cost without increasing tag length or semantic distortion.
+This is not reconstruction (the decoder need not recover $v$), but *identification* in the sense of Ahlswede and Dueck [@ahlswede1989identification]: the decoder must answer "which class?" with zero or bounded error.
 
-3.  **Minimal observation sets have matroid structure.** All minimal distinguishing query sets for a domain have equal cardinality. The "distinguishing dimension" of a classification problem is well-defined.
+We prove three results:
 
-The results apply universally. Programming language runtimes, database systems, biological taxonomies, and knowledge graphs all instantiate the same abstract structure. We develop the theory in full generality, then show how specific systems realize it.
+1.  **Information barrier (capacity limit).** When the attribute profile $\pi: \mathcal{V} \to \{0,1\}^n$ is not injective on classes, the channel $C \to \pi(V)$ has $I(C; \pi(V)) < H(C)$. Zero-error identification via queries alone is impossible.
+
+2.  **Optimal tagging (achievability).** A tag of $L = \lceil \log_2 k \rceil$ bits achieves zero-error identification with $W = O(1)$ query cost. This is Pareto-optimal in the $(L, W, D)$ tradeoff space.
+
+3.  **Matroid structure (query complexity).** Minimal sufficient query sets form the bases of a matroid. The *identification dimension*---common cardinality of all minimal sets---lower-bounds the query cost $W$ for any tag-free scheme.
+
+These results are universal: the theory applies to type systems, databases, biological taxonomy, and knowledge graphs. We develop the mathematics in full generality, then exhibit concrete instantiations.
 
 ## The Observation Model
 
@@ -315,6 +323,40 @@ A point $(L^*, W^*, D^*)$ is *Pareto-optimal* if there is no achievable $(L, W, 
 :::
 
 The main result of Section [\[sec:lwd\]](#sec:lwd){reference-type="ref" reference="sec:lwd"} is that nominal-tag observation achieves the unique Pareto-optimal point with $D = 0$.
+
+## Converse: Tag Rate Lower Bound
+
+::: theorem
+[]{#thm:converse label="thm:converse"} Any scheme achieving $D = 0$ (zero-error identification) requires tag length $L \geq \log_2 k$, where $k$ is the number of distinct classes.
+:::
+
+::: proof
+*Proof.* Zero error requires that distinct classes map to distinct decoder outputs. With $k$ classes, at least $\log_2 k$ bits are needed to encode $k$ distinct values. Without tags ($L = 0$), the decoder sees only query responses $\pi(v) \in \{0,1\}^{|\mathcal{I}|}$. If $\pi$ is not injective on classes (i.e., $\exists$ classes $c_1 \neq c_2$ with identical profiles), zero error is impossible. The converse is tight: $L = \lceil \log_2 k \rceil$ suffices. ◻
+:::
+
+## Rate-Distortion Tradeoff
+
+When $D > 0$ is permitted, we obtain a classic rate-distortion tradeoff:
+
+::: proposition
+For any $\epsilon \in (0, 1)$, there exist schemes with $L = 0$ (no tags) achieving $D \leq \epsilon$ with query cost $W = O(\log(1/\epsilon) \cdot d)$, where $d$ is the identification dimension. The tradeoff: smaller $D$ requires larger $W$.
+:::
+
+The zero-error corner ($D = 0$) is special: nominal tagging is the unique Pareto optimum. Relaxing to $D > 0$ enables tag-free schemes at the cost of increased query complexity. This mirrors the classical distinction between zero-error and $\epsilon$-error capacity in channel coding.
+
+## Concrete Example
+
+**Worked example.** Consider a type system with $k = 1000$ classes, each characterized by a subset of $n = 50$ interface methods.
+
+::: center
+  **Strategy**                            **Tag $L$**                 **Witness $W$**
+  ------------------------- --------------------------------------- -------------------
+  Nominal (class ID)         $\lceil \log_2 1000 \rceil = 10$ bits        $O(1)$
+  Duck typing (query all)                     $0$                    $\leq 50$ queries
+  Adaptive duck typing                        $0$                    $\geq d$ queries
+:::
+
+Here $d$ is the identification dimension---the size of any minimal distinguishing query set. For typical type hierarchies, $d \approx 5$--$15$. The gap between 10 bits of storage vs. 5--50 queries per identification is the cost of forgoing nominal tagging. At scale (millions of identifications), the cumulative query cost dominates.
 
 
 ## Query Families and Distinguishing Sets

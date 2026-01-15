@@ -21,6 +21,10 @@
 \providecommand{\BIBdecl}{\relax}
 \BIBdecl
 
+\bibitem{ahlswede1989identification}
+R.~Ahlswede and G.~Dueck, ``Identification via channels,'' \emph{IEEE
+  Transactions on Information Theory}, vol.~35, no.~1, pp. 15--29, 1989.
+
 \bibitem{cousot1977abstract}
 P.~Cousot and R.~Cousot, ``Abstract interpretation: A unified lattice model for
   static analysis of programs by construction or approximation of fixpoints,''

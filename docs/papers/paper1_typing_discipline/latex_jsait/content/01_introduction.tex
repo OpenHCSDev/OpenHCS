@@ -1,15 +1,21 @@
-\subsection{The Classification Problem}
+\subsection{The Identification Problem}
 
-Every system that classifies entities faces a fundamental question: \emph{which attributes should we observe?} A database schema chooses columns. A biological taxonomy chooses morphological features. A type system chooses between structural properties and nominal identity. A library classification system chooses subject facets.
+Consider an encoder-decoder pair communicating about entities from a large universe $\mathcal{V}$. The decoder must \emph{identify} each entity---determine which of $k$ classes it belongs to---using only:
+\begin{itemize}
+\item A \emph{tag} of $L$ bits stored with the entity, and/or
+\item \emph{Queries} to a binary oracle: ``does entity $v$ satisfy attribute $I$?''
+\end{itemize}
 
-This paper proves that the choice has unavoidable information-theoretic consequences. Specifically:
+This is not reconstruction (the decoder need not recover $v$), but \emph{identification} in the sense of Ahlswede and Dueck \cite{ahlswede1989identification}: the decoder must answer ``which class?'' with zero or bounded error.
+
+We prove three results:
 \begin{enumerate}
-\item \textbf{Information barriers exist.} Observers limited to a fixed attribute family cannot compute properties that vary within equivalence classes induced by those attributes. This is not a computational limitation---it is an impossibility rooted in the observations themselves.
-\item \textbf{Nominal tags are optimal.} Adding a single primitive---a tag identifying each entity's class---reduces witness cost from $\Omega(n)$ to $O(1)$. This is Pareto-optimal: no observer achieves lower cost without increasing tag length or semantic distortion.
-\item \textbf{Minimal observation sets have matroid structure.} All minimal distinguishing query sets for a domain have equal cardinality. The ``distinguishing dimension'' of a classification problem is well-defined.
+\item \textbf{Information barrier (capacity limit).} When the attribute profile $\pi: \mathcal{V} \to \{0,1\}^n$ is not injective on classes, the channel $C \to \pi(V)$ has $I(C; \pi(V)) < H(C)$. Zero-error identification via queries alone is impossible.
+\item \textbf{Optimal tagging (achievability).} A tag of $L = \lceil \log_2 k \rceil$ bits achieves zero-error identification with $W = O(1)$ query cost. This is Pareto-optimal in the $(L, W, D)$ tradeoff space.
+\item \textbf{Matroid structure (query complexity).} Minimal sufficient query sets form the bases of a matroid. The \emph{identification dimension}---common cardinality of all minimal sets---lower-bounds the query cost $W$ for any tag-free scheme.
 \end{enumerate}
 
-The results apply universally. Programming language runtimes, database systems, biological taxonomies, and knowledge graphs all instantiate the same abstract structure. We develop the theory in full generality, then show how specific systems realize it.
+These results are universal: the theory applies to type systems, databases, biological taxonomy, and knowledge graphs. We develop the mathematics in full generality, then exhibit concrete instantiations.
 
 \subsection{The Observation Model}
 
