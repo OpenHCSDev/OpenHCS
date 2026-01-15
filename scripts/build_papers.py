@@ -191,9 +191,12 @@ class PaperBuilder:
         """Get the proofs directory for a specific paper.
 
         Each paper has its own proofs directory at: paper_dir/proofs/
+        For variants (e.g., paper1_jsait), use the base paper's proofs.
         """
         meta = self._get_paper_meta(paper_id)
-        return self.papers_dir / meta.dir_name / "proofs"
+        # Handle variants: paper1_jsait -> paper1_typing_discipline/proofs
+        base_dir_name = meta.dir_name
+        return self.papers_dir / base_dir_name / "proofs"
 
     def build_lean(self, paper_id: str, verbose: bool = True) -> str:
         """Build Lean proofs with streaming output. Returns captured output.
@@ -272,6 +275,8 @@ class PaperBuilder:
 
         Runs full build cycle: pdflatex → bibtex → pdflatex → pdflatex
         to resolve citations and cross-references.
+
+        For variants (e.g., paper1_jsait), uses variant-specific naming.
         """
         meta = self._get_paper_meta(paper_id)
         paper_dir = self._get_paper_dir(paper_id)
@@ -313,6 +318,7 @@ class PaperBuilder:
                 print(f"[build] {step_name} had warnings/errors (exit {result.returncode})")
 
         # Copy PDF to releases/ (INVARIANT 3)
+        # Use variant-specific naming to avoid conflicts
         pdf_name = latex_file.stem + ".pdf"
         pdf_src = latex_dir / pdf_name
         if pdf_src.exists():
@@ -326,11 +332,14 @@ class PaperBuilder:
 
         Uses INVARIANT 2: content is at paper_dir/latex/content/
         Content files are auto-discovered, not hardcoded.
+
+        For variants (e.g., paper1_jsait), uses variant-specific naming.
         """
         meta = self._get_paper_meta(paper_id)
         content_dir = self._get_content_dir(paper_id)
         out_dir = self._get_paper_dir(paper_id) / "markdown"
-        out_file = out_dir / f"{meta.dir_name}.md"
+        # Use paper_id for variant-specific naming
+        out_file = out_dir / f"{paper_id}.md"
 
         if not content_dir.exists():
             print(f"[build-md] Skipping {paper_id}: content_dir not found: {content_dir}")
@@ -450,14 +459,16 @@ class PaperBuilder:
         - Markdown (full text for LLM consumption)
         - Lean proofs (source code)
         - BUILD_LOG.txt (actual lake build output as compilation proof)
+
+        For variants (e.g., paper1_jsait), uses variant-specific staging directory.
         """
         # Phase 1: Validate all required files exist (fail-loud)
         pdf_file = self._validate_and_get_pdf(paper_id)
         md_file = self._validate_and_get_markdown(paper_id)
 
-        # Phase 2: Create staging directory in releases/
+        # Phase 2: Create staging directory in releases/ with variant-specific naming
         releases_dir = self._get_releases_dir(paper_id)
-        package_dir = releases_dir / "arxiv_package"
+        package_dir = releases_dir / f"arxiv_package_{paper_id}"
         if package_dir.exists():
             shutil.rmtree(package_dir)
         package_dir.mkdir(parents=True)
@@ -728,44 +739,57 @@ Repository: https://github.com/trissim/openhcs
         print(f"[arxiv]   Build log: BUILD_LOG.txt (with compilation output)")
 
     def _create_archive(self, paper_id: str, package_dir: Path) -> tuple[Path, Path]:
-        """Create compressed tar.gz and zip archives of package in releases/."""
+        """Create compressed tar.gz and zip archives of package in releases/.
+
+        For variants (e.g., paper1_jsait), uses variant-specific naming.
+        """
         import tarfile
         import zipfile
 
         meta = self._get_paper_meta(paper_id)
         releases_dir = self._get_releases_dir(paper_id)
 
-        # Create tar.gz
-        tar_name = f"{meta.dir_name}_arxiv.tar.gz"
+        # Create tar.gz with variant-specific naming
+        tar_name = f"{paper_id}_arxiv.tar.gz"
         tar_path = releases_dir / tar_name
         with tarfile.open(tar_path, "w:gz") as tar:
-            tar.add(package_dir, arcname=meta.dir_name)
+            tar.add(package_dir, arcname=paper_id)
 
-        # Create zip
-        zip_name = f"{meta.dir_name}_arxiv.zip"
+        # Create zip with variant-specific naming
+        zip_name = f"{paper_id}_arxiv.zip"
         zip_path = releases_dir / zip_name
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
             for file_path in package_dir.rglob("*"):
                 if file_path.is_file():
-                    arcname = meta.dir_name / file_path.relative_to(package_dir)
+                    arcname = paper_id / file_path.relative_to(package_dir)
                     zf.write(file_path, arcname)
 
         return tar_path, zip_path
 
     def release(self, paper_id: str, verbose: bool = True, axiom_check: bool = False):
-        """Full release build: Lean + LaTeX + Markdown + arXiv package."""
+        """Full release build: Lean + LaTeX + Markdown + arXiv package.
+
+        For variants (e.g., paper1_jsait), only build Lean once (shared proofs).
+        """
         meta = self._get_paper_meta(paper_id)
         print(f"\n{'='*60}")
         print(f"[release] Building {paper_id}: {meta.name}")
         print(f"{'='*60}\n")
 
+        # For variants, only build Lean if it's the base paper
+        is_variant = paper_id != meta.dir_name.replace("_", "").lower()
+
         # Build in order: Lean → LaTeX → Markdown → Package
-        self.build_lean(paper_id, verbose=verbose)
+        if not is_variant:
+            self.build_lean(paper_id, verbose=verbose)
+        else:
+            print(f"[release] Skipping Lean build for variant {paper_id} (shared proofs)")
+
         self.build_latex(paper_id, verbose=verbose)
         self.build_markdown(paper_id)
         self.package_arxiv(paper_id)
 
-        if axiom_check:
+        if axiom_check and not is_variant:
             self.check_axioms(paper_id, verbose=verbose)
 
         releases_dir = self._get_releases_dir(paper_id)

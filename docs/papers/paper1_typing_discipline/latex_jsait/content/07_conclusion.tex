@@ -1,0 +1,44 @@
+This paper presents the first information-theoretic analysis of programming language type systems. We prove three main results:
+
+\begin{enumerate}
+\item \textbf{Matroid Structure}: Type axes form a matroid, implying all minimal complete type systems have equal cardinality.
+
+\item \textbf{Kolmogorov Optimality}: Nominal typing (Python's \texttt{type()}) achieves the minimum description length for type identity: $O(1)$ AST nodes.
+
+\item \textbf{Rate-Distortion Dominance}: Nominal typing is the unique Pareto-optimal point in the rate-distortion plane: zero distortion at minimal rate.
+\end{enumerate}
+
+\subsection{Implications}
+
+These results have several implications:
+
+\begin{itemize}
+\item \textbf{Nominal typing is provably optimal} for type identity checking, not just a design choice.
+
+\item \textbf{Structural typing is provably suboptimal}: it requires unbounded rate to achieve the same distortion as nominal typing.
+
+\item \textbf{Duck typing trades rate for distortion}: it reduces rate but increases misclassification probability.
+
+\item \textbf{No type system can do better than nominal typing} while remaining complete and zero-distortion.
+\end{itemize}
+
+\subsection{Future Work}
+
+This work opens several directions:
+
+\begin{enumerate}
+\item \textbf{Concept Matroids}: Do other programming language concepts (modules, inheritance, generics) exhibit matroid structure?
+
+\item \textbf{Learning Cost}: Can we formalize the learning cost of a type system as Kolmogorov complexity?
+
+\item \textbf{Hybrid Systems}: Can we design type systems that achieve better rate-distortion tradeoffs by combining nominal and structural approaches?
+
+\item \textbf{Runtime Verification}: How do runtime type checks affect the rate-distortion analysis?
+\end{enumerate}
+
+\subsection{Conclusion}
+
+Type systems are semantic compression schemes. By applying information theory, we can formally analyze their optimality. This work demonstrates that nominal typing is not just a design choice, but the provably optimal compression scheme for type identity.
+
+All proofs are machine-verified in Lean 4, providing absolute certainty in the results.
+

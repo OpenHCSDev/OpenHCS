@@ -1,0 +1,45 @@
+\subsection{Rate-Distortion Tradeoff}
+
+Following Cover and Thomas, we analyze the rate-distortion frontier for type systems.
+
+\begin{theorem}[Rate-Distortion Optimality]
+Nominal typing achieves the unique Pareto-optimal point in the rate-distortion plane:
+\begin{itemize}
+\item \textbf{Rate}: $R = O(1)$ bits per type
+\item \textbf{Distortion}: $D = 0$ (zero misclassification)
+\end{itemize}
+
+Structural typing achieves:
+\begin{itemize}
+\item \textbf{Rate}: $R = O(n)$ bits per type (unbounded)
+\item \textbf{Distortion}: $D = 0$ (zero misclassification)
+\end{itemize}
+
+Duck typing achieves:
+\begin{itemize}
+\item \textbf{Rate}: $R = O(1)$ bits per type
+\item \textbf{Distortion}: $D > 0$ (positive misclassification probability)
+\end{itemize}
+\end{theorem}
+
+\begin{proof}
+See Lean formalization: \texttt{theorems/rate\_distortion.lean}. The proof verifies:
+\begin{enumerate}
+\item Nominal achieves $(R, D) = (O(1), 0)$ via \texttt{type()} primitive
+\item Structural requires $O(n)$ bits to encode structure
+\item Duck typing cannot guarantee zero distortion (runtime behavior varies)
+\item No other scheme achieves $(O(1), 0)$
+\end{enumerate}
+\end{proof}
+
+\subsection{Pareto Frontier}
+
+The rate-distortion frontier shows:
+\begin{itemize}
+\item Nominal typing dominates all other schemes
+\item Structural typing is suboptimal (higher rate, same distortion)
+\item Duck typing trades rate for distortion (lower rate, higher distortion)
+\end{itemize}
+
+This is the first formal proof that nominal typing is Pareto-optimal for type systems.
+

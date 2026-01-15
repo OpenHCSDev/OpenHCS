@@ -33,6 +33,17 @@ papers:
     lean_theorems: 265
     lean_sorry: 1
 
+  paper1_jsait:
+    name: "Type Compression (JSAIT)"
+    full_name: "Semantic Compression via Type Systems: Matroid Structure and Kolmogorov-Optimal Witnesses"
+    dir: "paper1_typing_discipline"
+    latex_dir: "latex_jsait"
+    latex_file: "type_compression_jsait.tex"
+    # Same proofs as paper1, different framing
+    lean_lines: 6086
+    lean_theorems: 265
+    lean_sorry: 1
+
   paper2:
     name: "SSOT Foundations"
     full_name: "Formal Foundations for the Single Source of Truth Principle"

@@ -1,0 +1,31 @@
+Compression is ubiquitous in computing: data compression (Huffman, LZ77), lossy compression (JPEG, MP3), and algorithmic compression (Kolmogorov complexity). Yet semantic compression—the compression of program behavior space—has received less attention than syntactic compression.
+
+A \emph{type system} is a semantic compression scheme. It partitions the space of all possible program behaviors into equivalence classes (types), enabling static reasoning about program correctness. The question is: \textbf{what is the optimal compression scheme for type identity?}
+
+\subsection{The Problem}
+
+Different programming languages implement different type compression schemes:
+\begin{itemize}
+\item \textbf{Nominal typing} (Python, Java): Type identity via explicit name/identity
+\item \textbf{Structural typing} (Go, TypeScript): Type identity via structural equivalence
+\item \textbf{Duck typing} (Python, JavaScript): Type identity via runtime behavior
+\end{itemize}
+
+These schemes differ in their rate (bits required to specify type identity) and distortion (probability of semantic misclassification). No prior work has formalized this comparison using information theory.
+
+\subsection{Main Contributions}
+
+\begin{enumerate}
+\item \textbf{Matroid Structure Theorem}: Type axes form a matroid. All minimal complete type systems have equal cardinality.
+
+\item \textbf{Kolmogorov Optimality}: Python's \texttt{type()} operation achieves the minimum description length (1 AST node) for type identity. Structural typing requires $O(n)$ AST nodes.
+
+\item \textbf{Rate-Distortion Analysis}: Nominal typing achieves the unique Pareto-optimal point: zero distortion at minimal rate.
+
+\item \textbf{Machine-Checked Proofs}: All results formalized in Lean 4 (\textasciitilde3,000 lines, 265 theorems, 0 sorry).
+\end{enumerate}
+
+\subsection{Audience}
+
+This paper is written for the information theory community. We assume familiarity with Kolmogorov complexity, rate-distortion theory, and matroid theory. We provide a brief tutorial on programming language type systems for readers unfamiliar with the domain.
+

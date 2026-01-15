@@ -1,0 +1,84 @@
+\documentclass[11pt]{article}
+
+% IEEE JSAIT Format
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{fancyvrb}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{cite}
+\usepackage{listings}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+
+\geometry{margin=1in}
+
+% Allow URLs to break at any character
+\makeatletter
+\g@addto@macro{\UrlBreaks}{\UrlOrds}
+\makeatother
+
+% Prevent overfull hboxes
+\sloppy
+
+% Load preamble
+\input{preamble}
+
+% Hyperref setup
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue,
+  citecolor=blue,
+  urlcolor=blue
+}
+
+% Title and Author (will be removed for double-blind review)
+\title{Semantic Compression via Type Systems: Matroid Structure and Kolmogorov-Optimal Witnesses}
+
+\author{Anonymous}
+\date{January 15, 2026}
+
+\begin{document}
+
+\maketitle
+
+% Include abstract
+\input{content/abstract.tex}
+
+% Main content sections
+\section{Introduction}
+\input{content/01_introduction.tex}
+
+\section{Compression Framework}
+\input{content/02_compression_framework.tex}
+
+\section{Matroid Structure}
+\input{content/03_matroid_structure.tex}
+
+\section{Kolmogorov Witness}
+\input{content/04_kolmogorov_witness.tex}
+
+\section{Rate-Distortion Analysis}
+\input{content/05_rate_distortion.tex}
+
+\section{Applications: Programming Language Tutorial}
+\input{content/06_applications.tex}
+
+\section{Conclusion}
+\input{content/07_conclusion.tex}
+
+% References
+\bibliographystyle{plain}
+\bibliography{references}
+
+% Appendix
+\appendix
+\section{Lean 4 Formalization}
+\input{content/appendix_lean.tex}
+
+\end{document}
+

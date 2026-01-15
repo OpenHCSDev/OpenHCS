@@ -1,0 +1,37 @@
+\subsection{Semantic Compression}
+
+Let $\mathcal{B}$ be the space of all possible program behaviors (execution traces, memory states, I/O sequences). A \emph{type system} defines a partition $\mathcal{T} = \{T_1, T_2, \ldots, T_k\}$ of $\mathcal{B}$ into equivalence classes.
+
+\textbf{Definition (Semantic Compression):} A type system compresses $\mathcal{B}$ by assigning each behavior $b \in \mathcal{B}$ to a type $T_i \in \mathcal{T}$. The compression ratio is $\log_2 |\mathcal{T}| / \log_2 |\mathcal{B}|$.
+
+\subsection{Type Identity Problem}
+
+The core problem is: \textbf{given two program values $v_1, v_2$, are they of the same type?}
+
+Different compression schemes answer this differently:
+\begin{itemize}
+\item \textbf{Nominal}: Compare explicit type identifiers (names, object IDs)
+\item \textbf{Structural}: Compare type structure (fields, methods, signatures)
+\item \textbf{Duck}: Compare runtime behavior (method availability)
+\end{itemize}
+
+\subsection{Rate and Distortion}
+
+Following Shannon and Cover-Thomas, we define:
+
+\textbf{Rate:} The number of bits required to specify type identity. Formally, $R = \log_2 |\mathcal{T}|$ (bits per type).
+
+\textbf{Distortion:} The probability of semantic misclassification. Formally, $D = \Pr[\text{type}(v_1) = \text{type}(v_2) \text{ but } \text{behavior}(v_1) \neq \text{behavior}(v_2)]$.
+
+\subsection{Witness Complexity}
+
+A \emph{witness} is a program that answers the type identity question. Formally, a witness is an AST (abstract syntax tree) that, when executed, returns the type of a value.
+
+\textbf{Definition (Witness Complexity):} The witness complexity of a type system is the minimum AST size required to implement type identity checking.
+
+For nominal typing: $W_{\text{nominal}} = O(1)$ (just call \texttt{type()})
+
+For structural typing: $W_{\text{structural}} = O(n)$ (must traverse structure)
+
+For duck typing: $W_{\text{duck}} = O(n)$ (must test all methods)
+
