@@ -1,9 +1,9 @@
-\subsection{Three-Dimensional Tradeoff: Tag Length, Witness Length, Distortion}
+\subsection{Three-Dimensional Tradeoff: Tag Length, Witness Cost, Distortion}
 
 Recall from Section 2 that type systems are characterized by three dimensions:
 \begin{itemize}
 \item \textbf{Tag length} $L$: machine words required to store a type identifier per value
-\item \textbf{Witness length} $W$: minimum AST size to implement type identity checking
+\item \textbf{Witness cost} $W$: minimum number of primitive queries to implement type identity checking
 \item \textbf{Distortion} $D$: worst-case semantic failure flag ($D = 0$ or $D = 1$)
 \end{itemize}
 
@@ -11,32 +11,32 @@ Recall from Section 2 that type systems are characterized by three dimensions:
 Nominal typing achieves the unique Pareto-optimal point in the $(L, W, D)$ space:
 \begin{itemize}
 \item \textbf{Tag length}: $L = O(1)$ machine words per value
-\item \textbf{Witness length}: $W = O(1)$ AST nodes
+\item \textbf{Witness cost}: $W = O(1)$ primitive queries (one tag read)
 \item \textbf{Distortion}: $D = 0$ (type equality implies behavior equivalence)
 \end{itemize}
 
 Structural typing achieves:
 \begin{itemize}
 \item \textbf{Tag length}: $L = O(n)$ machine words per value
-\item \textbf{Witness length}: $W = O(n)$ AST nodes
+\item \textbf{Witness cost}: $W = O(n)$ primitive queries (traverse structure)
 \item \textbf{Distortion}: $D = 0$ (type equality implies behavior equivalence)
 \end{itemize}
 
 Duck typing achieves:
 \begin{itemize}
 \item \textbf{Tag length}: $L = 0$ (no explicit tag)
-\item \textbf{Witness length}: $W = O(n)$ AST nodes
+\item \textbf{Witness cost}: $W = O(n)$ primitive queries (shape queries only)
 \item \textbf{Distortion}: $D = 1$ (type equality does not imply behavior equivalence)
 \end{itemize}
 \end{theorem}
 
 \begin{proof}
-See Lean formalization: \texttt{theorems/rate\_distortion.lean}. The proof verifies:
+See Lean formalization: \texttt{proofs/python\_instantiation.lean}. The proof verifies:
 \begin{enumerate}
-\item Nominal achieves $(L, W, D) = (O(1), O(1), 0)$ via nominal-tag access
-\item Structural requires $O(n)$ bits and $O(n)$ AST nodes to encode structure
-\item Duck typing cannot guarantee zero distortion (runtime behavior varies)
-\item No other scheme achieves $(O(1), O(1), 0)$
+\item \texttt{nominal\_cost\_constant}: Nominal achieves $(L, W, D) = (O(1), O(1), 0)$
+\item \texttt{duck\_cost\_linear}: Duck typing requires $O(n)$ shape queries
+\item \texttt{python\_gap\_unbounded}: The cost gap is unbounded in the limit
+\item Shape queries alone (\texttt{hasattr}) cannot distinguish provenance; nominal queries (\texttt{isinstance}) can
 \end{enumerate}
 \end{proof}
 

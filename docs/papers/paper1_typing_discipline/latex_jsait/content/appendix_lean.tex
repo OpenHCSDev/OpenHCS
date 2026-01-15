@@ -15,11 +15,13 @@ All theorems in this paper are formalized and machine-verified in Lean 4. The pr
 \subsection{Key Proof Files}
 
 \begin{enumerate}
-\item \texttt{abstract\_class\_system.lean}: Core formalization including matroid structure, witness complexity, and typing discipline comparisons
+\item \texttt{abstract\_class\_system.lean}: Core formalization of the class system model, shape equivalence, and impossibility theorem
+\item \texttt{axis\_framework.lean}: Type axis matroid structure, equicardinality proofs (\texttt{semantically\_minimal\_implies\_orthogonal}, \texttt{minimal\_complete\_unique\_orthogonal})
+\item \texttt{python\_instantiation.lean}: Witness cost proofs (\texttt{nominal\_cost\_constant}, \texttt{duck\_cost\_linear}, \texttt{python\_gap\_unbounded})
 \end{enumerate}
 
 \begin{remark}
-The proofs are consolidated in a single file for ease of verification. All theorems referenced in this paper (matroid structure, witness optimality, Pareto dominance) are contained therein.
+The key theorems referenced in this paper are distributed across these files. The paper cites specific lemma names to enable direct verification.
 \end{remark}
 
 \subsection{Building the Proofs}

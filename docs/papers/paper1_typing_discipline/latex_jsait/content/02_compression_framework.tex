@@ -1,23 +1,23 @@
 \subsection{Formal Model: Observations and Equivalence}
 
-Let $\mathcal{V}$ denote the space of all program values. An \emph{observation} is a predicate $\phi: \mathcal{V} \to \{0,1\}$ that tests interface membership.
+Let $\mathcal{V}$ denote the space of all program values, and let $\mathcal{Q}$ be the shape query set (Definition 1).
 
-\begin{definition}[Interface-only equivalence]
-Values $x, y \in \mathcal{V}$ are interface-equivalent, written $x \sim y$, iff $\phi(x) = \phi(y)$ for all interface observations $\phi$.
+\begin{definition}[Shape equivalence]
+Values $x, y \in \mathcal{V}$ are shape-equivalent, written $x \sim y$, iff $q(x) = q(y)$ for all shape queries $q \in \mathcal{Q}$.
 \end{definition}
 
-An interface-only procedure can only distinguish values that are not interface-equivalent. Therefore, any property computed by an interface-only procedure must be constant on $\sim$-equivalence classes.
+A shape-only procedure can only distinguish values that are not shape-equivalent. Therefore, any property computed by a shape-only procedure must be constant on $\sim$-equivalence classes.
 
-\subsection{Witness Description Length}
+\subsection{Witness Cost}
 
-A \emph{witness} for a property $P$ is a program (represented as an AST) that, given access to a value, computes $P$.
+A \emph{witness} for a property $P$ is a procedure that, given access to a value, computes $P$ using primitive queries.
 
-\begin{definition}[Witness description length]
-The witness description length of property $P$ is $W(P) = \min \{ |w| : w \text{ is a witness program for } P \}$, where $|w|$ is the AST size under a fixed encoding.
+\begin{definition}[Witness cost]
+The witness cost of property $P$ is $W(P) = \min \{ c(w) : w \text{ is a witness procedure for } P \}$, where $c(w)$ is the number of primitive queries (shape queries or nominal-tag accesses) required by $w$.
 \end{definition}
 
 \begin{remark}[Connection to algorithmic information theory]
-Witness description length is related to Kolmogorov complexity, but differs in that the encoding and reference machine are fixed (not universal). This makes $W$ a concrete, computable quantity suitable for comparing practical systems.
+Witness cost is related to Kolmogorov complexity, but measures query count under a fixed primitive set rather than description length under a universal machine. This makes $W$ a concrete, computable quantity suitable for comparing practical systems.
 \end{remark}
 
 \subsection{Rate–Witness–Distortion Tradeoff}
@@ -28,8 +28,8 @@ We analyze type identity checking under three dimensions:
 The tag length $L$ is the number of machine words required to store a type identifier per value. (Under a fixed word size $w$, this corresponds to $\Theta(w)$ bits.)
 \end{definition}
 
-\begin{definition}[Witness length]
-The witness length $W$ is the minimum AST size to implement type identity checking (Definition above).
+\begin{definition}[Witness cost]
+The witness cost $W$ is the minimum number of primitive queries required to implement type identity checking (Definition above).
 \end{definition}
 
 \begin{definition}[Distortion]

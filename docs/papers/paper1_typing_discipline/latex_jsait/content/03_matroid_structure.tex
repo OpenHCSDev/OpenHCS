@@ -11,23 +11,19 @@ A \emph{type axis} is a semantic dimension along which types can vary. Examples:
 
 A \emph{complete type system} must distinguish types along all necessary axes. A \emph{minimal complete type system} uses the fewest axes while remaining complete.
 
-\subsection{Matroid Theorem}
+\subsection{Equicardinality Theorem}
 
-\begin{theorem}[Type Axes Form a Matroid]
-Let $E$ be the set of all type axes, and let $\mathcal{B}$ be the family of minimal complete axis sets. Then $\mathcal{B}$ satisfies the basis-exchange axiom:
-
-For any $B_1, B_2 \in \mathcal{B}$ and any $x \in B_1 \setminus B_2$, there exists $y \in B_2 \setminus B_1$ such that $(B_1 \setminus \{x\}) \cup \{y\} \in \mathcal{B}$.
-
-Therefore $\mathcal{B}$ is the set of bases of a matroid on $E$. By the equicardinality theorem for matroid bases, all minimal complete axis sets have equal cardinality.
+\begin{theorem}[Equicardinality of Minimal Complete Axis Sets]
+Let $E$ be the set of all type axes. All minimal complete axis sets have equal cardinality.
 \end{theorem}
 
 \begin{proof}
-See Lean formalization: \texttt{proofs/abstract\_class\_system.lean}. The proof verifies:
-\begin{enumerate}
-\item Basis-exchange: swapping one axis for another preserves minimal completeness
-\item Equicardinality follows from standard matroid theory
-\end{enumerate}
+See Lean formalization: \texttt{proofs/axis\_framework.lean}. The proof establishes that minimal complete sets are ``semantically orthogonal'' bases; the lemmas \texttt{semantically\_minimal\_implies\_orthogonal} and \texttt{minimal\_complete\_unique\_orthogonal} yield equicardinality.
 \end{proof}
+
+\begin{remark}[Matroid structure]
+The family of minimal complete axis sets $\mathcal{B}$ satisfies the basis-exchange property: for any $B_1, B_2 \in \mathcal{B}$ and $x \in B_1 \setminus B_2$, there exists $y \in B_2 \setminus B_1$ such that $(B_1 \setminus \{x\}) \cup \{y\} \in \mathcal{B}$. This makes $\mathcal{B}$ the set of bases of a matroid on $E$. Equicardinality then follows from standard matroid theory.
+\end{remark}
 
 \subsection{Compression Optimality}
 
