@@ -2,9 +2,9 @@
 
 Recall from Section 2 that observer strategies are characterized by three dimensions:
 \begin{itemize}
-\item \textbf{Tag length} $L$: machine words required to store a type identifier per value
-\item \textbf{Witness cost} $W$: minimum number of primitive queries to implement type identity checking
-\item \textbf{Distortion} $D$: worst-case semantic failure flag ($D = 0$ or $D = 1$)
+\item \textbf{Tag length} $L$: bits required to encode a type identifier ($L \geq \log_2 k$ for $k$ types)
+\item \textbf{Witness cost} $W$: minimum number of primitive queries for type identity checking
+\item \textbf{Distortion} $D$: expected misclassification rate ($D = 0$ in the zero-error regime)
 \end{itemize}
 
 We compare two observer classes:
@@ -18,18 +18,18 @@ An observer that may read a single type identifier (nominal tag) per value, in a
 \end{definition}
 
 \begin{theorem}[Pareto Optimality of Nominal-Tag Observers]
-Nominal-tag observers achieve the unique Pareto-optimal point in the $(L, W, D)$ space:
+Nominal-tag observers achieve the unique Pareto-optimal point in the $(L, W, D)$ space with $D = 0$:
 \begin{itemize}
-\item \textbf{Tag length}: $L = O(1)$ machine words per value
-\item \textbf{Witness cost}: $W = O(1)$ primitive queries (one tag read)
+\item \textbf{Tag length}: $L = \lceil \log_2 k \rceil$ bits for $k$ types
+\item \textbf{Witness cost}: $W = O(1)$ queries (one tag read)
 \item \textbf{Distortion}: $D = 0$ (type equality implies behavior equivalence)
 \end{itemize}
 
 Interface-only observers achieve:
 \begin{itemize}
-\item \textbf{Tag length}: $L = 0$ (no explicit tag)
-\item \textbf{Witness cost}: $W = O(n)$ primitive queries (must query $n$ interfaces)
-\item \textbf{Distortion}: $D = 1$ (type equality does not imply behavior equivalence)
+\item \textbf{Tag length}: $L = 0$ bits (no explicit tag)
+\item \textbf{Witness cost}: $W = \Omega(n)$ queries (must query $n$ interfaces)
+\item \textbf{Distortion}: $D > 0$ (may conflate behaviorally distinct types)
 \end{itemize}
 \end{theorem}
 

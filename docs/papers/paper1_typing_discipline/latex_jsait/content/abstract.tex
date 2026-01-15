@@ -7,7 +7,7 @@ Classification systems---database schemas, biological taxonomies, type systems, 
 
 \textbf{Structure.} Minimal distinguishing query sets form the bases of a matroid. All such sets have equal cardinality; the ``distinguishing dimension'' of a classification problem is well-defined and computable.
 
-\textbf{Significance.} Classification system design is not a matter of preference---it has information-theoretic consequences. Attribute-only observation incurs unavoidable costs that nominal tagging eliminates. This resolves a 35-year debate in programming language theory (duck typing vs.\ nominal typing) with an objective answer: the gap is unbounded. The theory is prescriptive: it explains why programming languages have converged on hybrid systems (Python's ABCs, TypeScript's brands, Rust's traits), and suggests design principles for classification systems in databases, taxonomy, and knowledge representation.
+\textbf{Significance.} Classification system design is not a matter of preference---it has information-theoretic consequences. Attribute-only observation incurs unavoidable costs that nominal tagging eliminates. The witness-cost gap is unbounded: $\Omega(n)$ for duck typing versus $O(1)$ for nominal tagging. This explains why programming languages have converged on hybrid systems (Python's ABCs, TypeScript's brands, Rust's traits), and provides design principles for classification systems in databases, taxonomy, and knowledge representation.
 
 All results are machine-checked in Lean 4 (6,000+ lines, 0 \texttt{sorry}).
 

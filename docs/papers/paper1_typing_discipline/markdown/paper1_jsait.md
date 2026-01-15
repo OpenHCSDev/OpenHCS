@@ -14,7 +14,7 @@ Classification systems---database schemas, biological taxonomies, type systems, 
 
 **Structure.** Minimal distinguishing query sets form the bases of a matroid. All such sets have equal cardinality; the "distinguishing dimension" of a classification problem is well-defined and computable.
 
-**Significance.** Classification system design is not a matter of preference---it has information-theoretic consequences. Attribute-only observation incurs unavoidable costs that nominal tagging eliminates. This resolves a 35-year debate in programming language theory (duck typing vs. nominal typing) with an objective answer: the gap is unbounded. The theory is prescriptive: it explains why programming languages have converged on hybrid systems (Python's ABCs, TypeScript's brands, Rust's traits), and suggests design principles for classification systems in databases, taxonomy, and knowledge representation.
+**Significance.** Classification system design is not a matter of preference---it has information-theoretic consequences. Attribute-only observation incurs unavoidable costs that nominal tagging eliminates. The witness-cost gap is unbounded: $\Omega(n)$ for duck typing versus $O(1)$ for nominal tagging. This explains why programming languages have converged on hybrid systems (Python's ABCs, TypeScript's brands, Rust's traits), and provides design principles for classification systems in databases, taxonomy, and knowledge representation.
 
 All results are machine-checked in Lean 4 (6,000+ lines, 0 `sorry`).
 
@@ -149,9 +149,9 @@ The $(L, W, D)$ analysis extends classical rate-distortion theory [@shannon1959c
 
 **Historical context.** In programming language theory, the question of whether "duck typing" (attribute-only observation) is equivalent to nominal typing has been debated since Smalltalk (1980) and formalized in discussions of structural vs. nominal subtyping [@Cardelli1985]. Proponents argue that if two entities "walk like a duck and quack like a duck," they should be treated identically. Critics argue that provenance matters.
 
-This paper resolves the debate with an objective answer: the gap between duck typing and nominal typing is not aesthetic---it is information-theoretic and unbounded. Duck typing incurs $\Omega(n)$ witness cost where nominal tagging achieves $O(1)$.
+We prove that the witness-cost gap between duck typing and nominal typing is unbounded: duck typing incurs $\Omega(n)$ witness cost where nominal tagging achieves $O(1)$. This is not an approximation or heuristic---it is a machine-checked theorem (Lean 4, 0 `sorry`).
 
-**Prescriptive implications.** The theory does not merely describe existing systems; it prescribes design. Programming languages have independently converged on hybrid classification: Python added Abstract Base Classes (PEP 3119), TypeScript introduced branded types, Rust's trait system combines structural interfaces with nominal identity. This convergence is not coincidental---it reflects the information-theoretic optimality of nominal tags. The same principles apply to database schema design (primary keys as nominal tags), biological taxonomy (species identifiers), and knowledge representation (entity URIs).
+**Prescriptive implications.** Programming languages have independently converged on hybrid classification: Python added Abstract Base Classes (PEP 3119), TypeScript introduced branded types, Rust's trait system combines structural interfaces with nominal identity. This convergence reflects the information-theoretic optimality of nominal tags proved in this paper. The same principles apply to database schema design (primary keys as nominal tags), biological taxonomy (species identifiers), and knowledge representation (entity URIs).
 
 The contribution is not advocacy for a particular language feature, but identification of a universal tradeoff that any classification system must navigate.
 
@@ -265,28 +265,29 @@ For any property $P$:
 
 ## The $(L, W, D)$ Tradeoff
 
-We now define the three-dimensional tradeoff space that characterizes observation strategies.
+We now define the three-dimensional tradeoff space that characterizes observation strategies, using information-theoretic units.
 
 ::: definition
-The *tag length* $L$ is the number of machine words required to store a type identifier per value: $$L = \begin{cases}
-O(1) & \text{if nominal tags are stored} \\
-0 & \text{if no explicit tags}
-\end{cases}$$ Under a fixed word size $w$ bits, $L = O(1)$ corresponds to $\Theta(w)$ bits per value.
+Let $\mathcal{T}$ be the set of type identifiers (tags) with $|\mathcal{T}| = k$. The *tag length* $L$ is the number of bits required to encode a type identifier: $$L \geq \log_2 k \quad \text{bits per value}$$ For nominal-tag observers, $L = \lceil \log_2 k \rceil$ (optimal prefix-free encoding). For interface-only observers, $L = 0$ (no explicit tag stored). Under a distribution $P$ over types, the expected tag length is $\mathbb{E}[L] \geq H(P)$ by Shannon's source coding theorem [@shannon1959coding].
 :::
 
 ::: definition
-The *witness cost* $W$ is the minimum number of primitive queries required for type identity checking: $$W = W(\text{type-identity})$$
+The *witness cost* $W$ is the minimum number of primitive queries (or bits of interactive communication) required for type identity checking: $$W = \min_{A \text{ decides type-identity}} c(A)$$ where $c(A)$ is the worst-case query count. This is a form of query complexity [@buhrman2002complexity] or interactive identification cost.
 :::
 
 ::: definition
-The *distortion* $D$ is a worst-case semantic failure indicator: $$D = \begin{cases}
-0 & \text{if } \forall v_1, v_2: \text{type}(v_1) = \text{type}(v_2) \Rightarrow \text{behavior}(v_1) \equiv \text{behavior}(v_2) \\
-1 & \text{otherwise}
-\end{cases}$$ Here $\text{behavior}(v)$ denotes the observable behavior of $v$ under program execution (method dispatch outcomes, attribute access results).
+Let $d: \mathcal{V} \times \mathcal{V} \to \{0, 1\}$ be the misclassification indicator: $$d(v, \hat{v}) = \begin{cases}
+0 & \text{if } \text{type}(v) = \text{type}(\hat{v}) \Rightarrow \text{behavior}(v) \equiv \text{behavior}(\hat{v}) \\
+1 & \text{otherwise (semantic error)}
+\end{cases}$$ Here $\text{behavior}(v)$ denotes the observable behavior of $v$ under program execution.
+:::
+
+::: definition
+Given a distribution $P$ over values, the *expected distortion* is: $$D = \mathbb{E}_{v \sim P}[d(v, \hat{v})]$$ The *zero-error regime* requires $D = 0$ (no semantic errors for any $v$). All theorems in this paper are proved in the zero-error regime---the strongest case, where the separation is sharpest.
 :::
 
 ::: remark
-$D = 0$ means the observation strategy is *sound*: type equality (as computed by the observer) implies behavioral equivalence. $D = 1$ means the strategy may conflate behaviorally distinct values.
+$D = 0$ means the observation strategy is *sound*: type equality (as computed by the observer) implies behavioral equivalence. $D > 0$ means the strategy may conflate behaviorally distinct values with positive probability.
 :::
 
 ## The $(L, W, D)$ Tradeoff Space
@@ -460,11 +461,11 @@ Let $I(\mathcal{O}, c)$ be the set of locations where constraint $c$ is encoded 
 
 Recall from Section 2 that observer strategies are characterized by three dimensions:
 
--   **Tag length** $L$: machine words required to store a type identifier per value
+-   **Tag length** $L$: bits required to encode a type identifier ($L \geq \log_2 k$ for $k$ types)
 
--   **Witness cost** $W$: minimum number of primitive queries to implement type identity checking
+-   **Witness cost** $W$: minimum number of primitive queries for type identity checking
 
--   **Distortion** $D$: worst-case semantic failure flag ($D = 0$ or $D = 1$)
+-   **Distortion** $D$: expected misclassification rate ($D = 0$ in the zero-error regime)
 
 We compare two observer classes:
 
@@ -477,21 +478,21 @@ An observer that may read a single type identifier (nominal tag) per value, in a
 :::
 
 ::: theorem
-Nominal-tag observers achieve the unique Pareto-optimal point in the $(L, W, D)$ space:
+Nominal-tag observers achieve the unique Pareto-optimal point in the $(L, W, D)$ space with $D = 0$:
 
--   **Tag length**: $L = O(1)$ machine words per value
+-   **Tag length**: $L = \lceil \log_2 k \rceil$ bits for $k$ types
 
--   **Witness cost**: $W = O(1)$ primitive queries (one tag read)
+-   **Witness cost**: $W = O(1)$ queries (one tag read)
 
 -   **Distortion**: $D = 0$ (type equality implies behavior equivalence)
 
 Interface-only observers achieve:
 
--   **Tag length**: $L = 0$ (no explicit tag)
+-   **Tag length**: $L = 0$ bits (no explicit tag)
 
--   **Witness cost**: $W = O(n)$ primitive queries (must query $n$ interfaces)
+-   **Witness cost**: $W = \Omega(n)$ queries (must query $n$ interfaces)
 
--   **Distortion**: $D = 1$ (type equality does not imply behavior equivalence)
+-   **Distortion**: $D > 0$ (may conflate behaviorally distinct types)
 :::
 
 ::: proof

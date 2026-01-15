@@ -109,39 +109,45 @@ For any property $P$:
 
 \subsection{The $(L, W, D)$ Tradeoff}
 
-We now define the three-dimensional tradeoff space that characterizes observation strategies.
+We now define the three-dimensional tradeoff space that characterizes observation strategies, using information-theoretic units.
 
 \begin{definition}[Tag length (Rate)]
-The \emph{tag length} $L$ is the number of machine words required to store a type identifier per value:
+Let $\mathcal{T}$ be the set of type identifiers (tags) with $|\mathcal{T}| = k$. The \emph{tag length} $L$ is the number of bits required to encode a type identifier:
 \[
-L = \begin{cases}
-O(1) & \text{if nominal tags are stored} \\
-0 & \text{if no explicit tags}
-\end{cases}
+L \geq \log_2 k \quad \text{bits per value}
 \]
-Under a fixed word size $w$ bits, $L = O(1)$ corresponds to $\Theta(w)$ bits per value.
+For nominal-tag observers, $L = \lceil \log_2 k \rceil$ (optimal prefix-free encoding). For interface-only observers, $L = 0$ (no explicit tag stored). Under a distribution $P$ over types, the expected tag length is $\mathbb{E}[L] \geq H(P)$ by Shannon's source coding theorem \cite{shannon1959coding}.
 \end{definition}
 
-\begin{definition}[Witness cost (Query complexity)]
-The \emph{witness cost} $W$ is the minimum number of primitive queries required for type identity checking:
+\begin{definition}[Witness cost (Query/Communication complexity)]
+The \emph{witness cost} $W$ is the minimum number of primitive queries (or bits of interactive communication) required for type identity checking:
 \[
-W = W(\text{type-identity})
+W = \min_{A \text{ decides type-identity}} c(A)
 \]
+where $c(A)$ is the worst-case query count. This is a form of query complexity \cite{buhrman2002complexity} or interactive identification cost.
 \end{definition}
 
-\begin{definition}[Distortion (Semantic fidelity)]
-The \emph{distortion} $D$ is a worst-case semantic failure indicator:
+\begin{definition}[Distortion function]
+Let $d: \mathcal{V} \times \mathcal{V} \to \{0, 1\}$ be the misclassification indicator:
 \[
-D = \begin{cases}
-0 & \text{if } \forall v_1, v_2: \text{type}(v_1) = \text{type}(v_2) \Rightarrow \text{behavior}(v_1) \equiv \text{behavior}(v_2) \\
-1 & \text{otherwise}
+d(v, \hat{v}) = \begin{cases}
+0 & \text{if } \text{type}(v) = \text{type}(\hat{v}) \Rightarrow \text{behavior}(v) \equiv \text{behavior}(\hat{v}) \\
+1 & \text{otherwise (semantic error)}
 \end{cases}
 \]
-Here $\text{behavior}(v)$ denotes the observable behavior of $v$ under program execution (method dispatch outcomes, attribute access results).
+Here $\text{behavior}(v)$ denotes the observable behavior of $v$ under program execution.
+\end{definition}
+
+\begin{definition}[Expected and worst-case distortion]
+Given a distribution $P$ over values, the \emph{expected distortion} is:
+\[
+D = \mathbb{E}_{v \sim P}[d(v, \hat{v})]
+\]
+The \emph{zero-error regime} requires $D = 0$ (no semantic errors for any $v$). All theorems in this paper are proved in the zero-error regime---the strongest case, where the separation is sharpest.
 \end{definition}
 
 \begin{remark}[Distortion interpretation]
-$D = 0$ means the observation strategy is \emph{sound}: type equality (as computed by the observer) implies behavioral equivalence. $D = 1$ means the strategy may conflate behaviorally distinct values.
+$D = 0$ means the observation strategy is \emph{sound}: type equality (as computed by the observer) implies behavioral equivalence. $D > 0$ means the strategy may conflate behaviorally distinct values with positive probability.
 \end{remark}
 
 \subsection{The $(L, W, D)$ Tradeoff Space}
