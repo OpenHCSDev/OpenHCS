@@ -58,6 +58,7 @@ class PaperMeta:
     lean_lines: int
     lean_theorems: int
     lean_sorry: int
+    venue: str              # Target venue, e.g., "JSAIT", "TOPLAS"
 
     @classmethod
     def from_dict(cls, paper_id: str, d: dict) -> "PaperMeta":
@@ -71,6 +72,7 @@ class PaperMeta:
             lean_lines=d.get("lean_lines", 0),
             lean_theorems=d.get("lean_theorems", 0),
             lean_sorry=d.get("lean_sorry", 0),
+            venue=d.get("venue", "Draft"),
         )
 
 
@@ -365,7 +367,7 @@ class PaperBuilder:
             # Header
             f.write(f"# Paper: {meta.full_name}\n\n")
             f.write(
-                f"**Status**: TOPLAS-ready | "
+                f"**Status**: {meta.venue}-ready | "
                 f"**Lean**: {meta.lean_lines} lines, "
                 f"{meta.lean_theorems} theorems\n\n---\n\n"
             )

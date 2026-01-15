@@ -28,6 +28,7 @@ papers:
     dir: "paper1_typing_discipline"
     latex_dir: "latex"
     latex_file: "main.tex"
+    venue: "TOPLAS"
     # Statistics from shared proofs (auto-updated by build system)
     lean_lines: 6086
     lean_theorems: 265
@@ -39,6 +40,7 @@ papers:
     dir: "paper1_typing_discipline"
     latex_dir: "latex_jsait"
     latex_file: "type_compression_jsait.tex"
+    venue: "JSAIT"
     # Same proofs as paper1, different framing
     lean_lines: 6086
     lean_theorems: 265
@@ -50,6 +52,7 @@ papers:
     dir: "paper2_ssot"
     latex_dir: "latex"
     latex_file: "main.tex"
+    venue: "Draft"
     lean_lines: 1811
     lean_theorems: 96
     lean_sorry: 0
@@ -60,6 +63,7 @@ papers:
     dir: "paper3_leverage"
     latex_dir: "latex"
     latex_file: "leverage_arxiv.tex"
+    venue: "Draft"
     lean_lines: 741
     lean_theorems: 35
     lean_sorry: 4
@@ -70,6 +74,7 @@ papers:
     dir: "paper4_decision_quotient"
     latex_dir: "latex"
     latex_file: "decision_quotient_arxiv.tex"
+    venue: "Draft"
     lean_lines: 2760
     lean_theorems: 106
     lean_sorry: 0
@@ -80,6 +85,7 @@ papers:
     dir: "paper5_credibility"
     latex_dir: "latex"
     latex_file: "credibility_arxiv.tex"
+    venue: "Draft"
     lean_lines: 58
     lean_theorems: 0
     lean_sorry: 1
@@ -90,6 +96,7 @@ papers:
     dir: "paper6_formality_universality"
     latex_dir: "latex"
     latex_file: "formality_arxiv.tex"
+    venue: "Draft"
     # No Lean proofs yet
     lean_lines: 0
     lean_theorems: 0
