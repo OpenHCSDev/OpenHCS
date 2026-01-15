@@ -1,31 +1,52 @@
-Compression is ubiquitous in computing: data compression (Huffman, LZ77), lossy compression (JPEG, MP3), and algorithmic compression (Kolmogorov complexity). Yet semantic compression—the compression of program behavior space—has received less attention than syntactic compression.
+\subsection{Observational Constraints and Semantic Inference}
 
-A \emph{type system} is a semantic compression scheme. It partitions the space of all possible program behaviors into equivalence classes (types), enabling static reasoning about program correctness. The question is: \textbf{what is the optimal compression scheme for type identity?}
+Consider the following inference problem: a procedure observes a program value and must determine its semantic properties (e.g., type identity, provenance). The procedure's access is restricted to \emph{interface-only evidence}: it may query whether the value belongs to certain interface classes, but cannot inspect internal structure or identity tags.
 
-\subsection{The Problem}
+\begin{definition}[Interface-only procedure]
+An interface-only procedure is any algorithm whose interaction with a value is limited to interface membership queries.
+\end{definition}
 
-Different programming languages implement different type compression schemes:
-\begin{itemize}
-\item \textbf{Nominal typing} (Python, Java): Type identity via explicit name/identity
-\item \textbf{Structural typing} (Go, TypeScript): Type identity via structural equivalence
-\item \textbf{Duck typing} (Python, JavaScript): Type identity via runtime behavior
-\end{itemize}
+\begin{definition}[Indistinguishability]
+For values $x, y$, write $x \sim y$ iff every interface membership query returns the same answer on $x$ and on $y$.
+\end{definition}
 
-These schemes differ in their rate (bits required to specify type identity) and distortion (probability of semantic misclassification). No prior work has formalized this comparison using information theory.
+The central question is: \textbf{what semantic properties can an interface-only procedure compute?}
+
+\subsection{The Impossibility Barrier}
+
+\begin{theorem}[Impossibility from interface-only evidence]
+Every interface-only procedure is constant on $\sim$-equivalence classes. Consequently, no interface-only procedure can compute any property that differs for some $x \sim y$.
+\end{theorem}
+
+This is an information barrier: the restriction is not computational (unbounded time/memory does not help) but informational (the evidence itself is insufficient).
+
+\subsection{The Positive Result: Nominal Tagging}
+
+In contrast, nominal tagging—storing an explicit type identifier per value—provides constant-size evidence for type identity.
+
+\begin{definition}[Witness description length]
+Let $W(P)$ denote the minimum description length (e.g., AST size under a fixed encoding) of a witness program for property $P$.
+\end{definition}
+
+\begin{theorem}[Constant witness for nominal type identity]
+Nominal-tag access admits a constant-length witness for type identity: $W(\text{type-identity}) = O(1)$.
+\end{theorem}
 
 \subsection{Main Contributions}
 
 \begin{enumerate}
-\item \textbf{Matroid Structure Theorem}: Type axes form a matroid. All minimal complete type systems have equal cardinality.
+\item \textbf{Impossibility Theorem}: No interface-only procedure can compute properties that vary within indistinguishability classes (Theorem 1).
 
-\item \textbf{Kolmogorov Optimality}: Python's \texttt{type()} operation achieves the minimum description length (1 AST node) for type identity. Structural typing requires $O(n)$ AST nodes.
+\item \textbf{Constant-Witness Result}: Nominal tagging achieves $W(\text{type-identity}) = O(1)$ (Theorem 2).
 
-\item \textbf{Rate-Distortion Analysis}: Nominal typing achieves the unique Pareto-optimal point: zero distortion at minimal rate.
+\item \textbf{Matroid Structure}: The space of semantic queries decomposes as a matroid; all minimal complete query sets have equal cardinality.
+
+\item \textbf{Rate–Witness–Distortion Optimality}: Nominal tagging achieves the unique Pareto-optimal point in the (tag-length, witness-length, error-rate) tradeoff.
 
 \item \textbf{Machine-Checked Proofs}: All results formalized in Lean 4 (\textasciitilde3,000 lines, 265 theorems, 0 sorry).
 \end{enumerate}
 
-\subsection{Audience}
+\subsection{Audience and Scope}
 
-This paper is written for the information theory community. We assume familiarity with Kolmogorov complexity, rate-distortion theory, and matroid theory. We provide a brief tutorial on programming language type systems for readers unfamiliar with the domain.
+This paper is written for the information theory and compression community. We assume familiarity with matroid theory and basic information-theoretic concepts. We provide concrete instantiations in widely used programming language runtimes (CPython, Java, TypeScript, Rust) as corollaries to the main theorems.
 

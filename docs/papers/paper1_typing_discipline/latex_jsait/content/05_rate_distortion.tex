@@ -1,23 +1,31 @@
-\subsection{Rate-Distortion Tradeoff}
+\subsection{Three-Dimensional Tradeoff: Tag Length, Witness Length, Distortion}
 
-Following Cover and Thomas, we analyze the rate-distortion frontier for type systems.
-
-\begin{theorem}[Rate-Distortion Optimality]
-Nominal typing achieves the unique Pareto-optimal point in the rate-distortion plane:
+Recall from Section 2 that type systems are characterized by three dimensions:
 \begin{itemize}
-\item \textbf{Rate}: $R = O(1)$ bits per type
+\item \textbf{Tag length} $L$: bits required to store a type identifier per value
+\item \textbf{Witness length} $W$: minimum AST size to implement type identity checking
+\item \textbf{Distortion} $D$: probability of semantic misclassification
+\end{itemize}
+
+\begin{theorem}[Pareto Optimality of Nominal Typing]
+Nominal typing achieves the unique Pareto-optimal point in the $(L, W, D)$ space:
+\begin{itemize}
+\item \textbf{Tag length}: $L = O(1)$ bits per value
+\item \textbf{Witness length}: $W = O(1)$ AST nodes
 \item \textbf{Distortion}: $D = 0$ (zero misclassification)
 \end{itemize}
 
 Structural typing achieves:
 \begin{itemize}
-\item \textbf{Rate}: $R = O(n)$ bits per type (unbounded)
+\item \textbf{Tag length}: $L = O(n)$ bits per value
+\item \textbf{Witness length}: $W = O(n)$ AST nodes
 \item \textbf{Distortion}: $D = 0$ (zero misclassification)
 \end{itemize}
 
 Duck typing achieves:
 \begin{itemize}
-\item \textbf{Rate}: $R = O(1)$ bits per type
+\item \textbf{Tag length}: $L = 0$ bits per value (no explicit tag)
+\item \textbf{Witness length}: $W = O(n)$ AST nodes
 \item \textbf{Distortion}: $D > 0$ (positive misclassification probability)
 \end{itemize}
 \end{theorem}
@@ -25,21 +33,21 @@ Duck typing achieves:
 \begin{proof}
 See Lean formalization: \texttt{theorems/rate\_distortion.lean}. The proof verifies:
 \begin{enumerate}
-\item Nominal achieves $(R, D) = (O(1), 0)$ via \texttt{type()} primitive
-\item Structural requires $O(n)$ bits to encode structure
+\item Nominal achieves $(L, W, D) = (O(1), O(1), 0)$ via nominal-tag access
+\item Structural requires $O(n)$ bits and $O(n)$ AST nodes to encode structure
 \item Duck typing cannot guarantee zero distortion (runtime behavior varies)
-\item No other scheme achieves $(O(1), 0)$
+\item No other scheme achieves $(O(1), O(1), 0)$
 \end{enumerate}
 \end{proof}
 
 \subsection{Pareto Frontier}
 
-The rate-distortion frontier shows:
+The three-dimensional frontier shows:
 \begin{itemize}
-\item Nominal typing dominates all other schemes
-\item Structural typing is suboptimal (higher rate, same distortion)
-\item Duck typing trades rate for distortion (lower rate, higher distortion)
+\item Nominal typing dominates all other schemes (minimal on all three dimensions)
+\item Structural typing is suboptimal (higher $L$ and $W$, same $D$)
+\item Duck typing trades tag length for distortion (zero $L$, but positive $D$)
 \end{itemize}
 
-This is the first formal proof that nominal typing is Pareto-optimal for type systems.
+This is the first formal proof that nominal typing is Pareto-optimal in the $(L, W, D)$ tradeoff for type systems.
 

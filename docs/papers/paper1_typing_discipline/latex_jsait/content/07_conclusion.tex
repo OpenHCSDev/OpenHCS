@@ -1,11 +1,11 @@
 This paper presents the first information-theoretic analysis of programming language type systems. We prove three main results:
 
 \begin{enumerate}
-\item \textbf{Matroid Structure}: Type axes form a matroid, implying all minimal complete type systems have equal cardinality.
+\item \textbf{Impossibility Barrier}: No interface-only procedure can compute properties that vary within indistinguishability classes.
 
-\item \textbf{Kolmogorov Optimality}: Nominal typing (Python's \texttt{type()}) achieves the minimum description length for type identity: $O(1)$ AST nodes.
+\item \textbf{Constant-Witness Result}: Nominal tagging achieves $W(\text{type-identity}) = O(1)$, the minimum witness description length.
 
-\item \textbf{Rate-Distortion Dominance}: Nominal typing is the unique Pareto-optimal point in the rate-distortion plane: zero distortion at minimal rate.
+\item \textbf{Pareto Optimality}: Nominal typing is the unique Pareto-optimal point in the $(L, W, D)$ tradeoff: minimal tag length, minimal witness length, zero distortion.
 \end{enumerate}
 
 \subsection{Implications}
@@ -15,11 +15,13 @@ These results have several implications:
 \begin{itemize}
 \item \textbf{Nominal typing is provably optimal} for type identity checking, not just a design choice.
 
-\item \textbf{Structural typing is provably suboptimal}: it requires unbounded rate to achieve the same distortion as nominal typing.
+\item \textbf{Structural typing is provably suboptimal}: it requires unbounded witness length to achieve the same distortion as nominal typing.
 
-\item \textbf{Duck typing trades rate for distortion}: it reduces rate but increases misclassification probability.
+\item \textbf{Duck typing trades tag length for distortion}: it reduces tag length but increases misclassification probability.
 
 \item \textbf{No type system can do better than nominal typing} while remaining complete and zero-distortion.
+
+\item \textbf{The barrier is informational, not computational}: even with unbounded time and memory, interface-only procedures cannot overcome the indistinguishability barrier.
 \end{itemize}
 
 \subsection{Future Work}
@@ -29,16 +31,16 @@ This work opens several directions:
 \begin{enumerate}
 \item \textbf{Concept Matroids}: Do other programming language concepts (modules, inheritance, generics) exhibit matroid structure?
 
-\item \textbf{Learning Cost}: Can we formalize the learning cost of a type system as Kolmogorov complexity?
+\item \textbf{Witness Complexity of Other Properties}: Can we formalize the witness complexity of other semantic properties (e.g., provenance, mutability)?
 
-\item \textbf{Hybrid Systems}: Can we design type systems that achieve better rate-distortion tradeoffs by combining nominal and structural approaches?
+\item \textbf{Hybrid Systems}: Can we design type systems that achieve better $(L, W, D)$ tradeoffs by combining nominal and structural approaches?
 
-\item \textbf{Runtime Verification}: How do runtime type checks affect the rate-distortion analysis?
+\item \textbf{Runtime Verification}: How do runtime type checks affect the witness complexity analysis?
 \end{enumerate}
 
 \subsection{Conclusion}
 
-Type systems are semantic compression schemes. By applying information theory, we can formally analyze their optimality. This work demonstrates that nominal typing is not just a design choice, but the provably optimal compression scheme for type identity.
+Type systems are semantic compression schemes under observational constraints. By applying information theory, we can formally analyze their optimality. This work demonstrates that nominal typing is not just a design choice, but the provably optimal compression scheme for type identity.
 
 All proofs are machine-verified in Lean 4, providing absolute certainty in the results.
 

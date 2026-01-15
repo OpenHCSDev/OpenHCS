@@ -1,56 +1,45 @@
-\subsection{Tutorial: Type Systems for Information Theorists}
+\subsection{CPython: Nominal-Tag Access}
 
-For readers unfamiliar with programming languages, we provide a brief tutorial on how type systems work and why they matter.
+\begin{corollary}[CPython instantiation]
+CPython realizes nominal-tag access: the runtime stores a type tag (\texttt{ob\_type} pointer) per object and exposes it via the \texttt{type()} builtin. Therefore, the constant-witness construction applies: $W(\text{type-identity}) = O(1)$ in CPython.
+\end{corollary}
 
-\subsubsection{What is a Type?}
+\textbf{Evidence:} The CPython object model stores a pointer to the type object in every heap-allocated value. The \texttt{type()} function is a single pointer dereference, hence $O(1)$ time and $O(1)$ AST size.
 
-A \emph{type} is a set of values that behave identically for the purposes of a program. For example:
-\begin{itemize}
-\item \texttt{int}: All 32-bit integers (same operations: +, -, *, /)
-\item \texttt{string}: All sequences of characters (same operations: concatenate, slice)
-\item \texttt{list[int]}: All sequences of integers (same operations: append, index)
-\end{itemize}
+\subsection{Java: Nominal-Tag Access}
 
-\subsubsection{Why Types Matter}
+\begin{corollary}[Java instantiation]
+Java realizes nominal-tag access via the \texttt{.getClass()} method, which returns the runtime type object. Like CPython, Java achieves $W(\text{type-identity}) = O(1)$.
+\end{corollary}
 
-Types enable \emph{static reasoning}: the compiler can verify that operations are valid before the program runs. For example:
-\begin{itemize}
-\item \texttt{x + y} is valid only if \texttt{x} and \texttt{y} are both numbers
-\item \texttt{x[0]} is valid only if \texttt{x} is a sequence
-\item \texttt{x.method()} is valid only if \texttt{x} has that method
-\end{itemize}
+\subsection{TypeScript: Structural Typing}
 
-\subsubsection{Nominal vs. Structural}
+\begin{corollary}[TypeScript instantiation]
+TypeScript uses structural typing: two types are equivalent iff they have the same structure (fields and method signatures). Type identity checking requires traversing the structure, hence $W(\text{type-identity}) = O(n)$ where $n$ is the structure size.
+\end{corollary}
 
-\textbf{Nominal typing} (Python, Java): Two types are the same if they have the same name.
+\subsection{Rust: Nominal-Tag Access (Compile-Time)}
 
-\textbf{Structural typing} (Go, TypeScript): Two types are the same if they have the same structure (fields, methods).
+\begin{corollary}[Rust instantiation]
+Rust uses nominal typing at compile time: type identity is resolved statically via the type system. At runtime, Rust provides \texttt{std::any::type\_id()} for nominal-tag access, achieving $W(\text{type-identity}) = O(1)$.
+\end{corollary}
 
-Example:
-\begin{lstlisting}
-# Python (nominal)
-class Dog: pass
-class Cat: pass
-d = Dog()
-c = Cat()
-type(d) == type(c)  # False (different names)
+\subsection{Summary: Witness Complexity Across Runtimes}
 
-# Go (structural)
-type Dog struct { name string }
-type Cat struct { name string }
-d := Dog{"Fido"}
-c := Cat{"Whiskers"}
-// d and c have the same type (same structure)
-\end{lstlisting}
+\begin{table}[h]
+\centering
+\begin{tabular}{|l|c|c|}
+\hline
+\textbf{Language} & \textbf{Typing Discipline} & \textbf{Witness Length} \\
+\hline
+CPython & Nominal & $O(1)$ \\
+Java & Nominal & $O(1)$ \\
+TypeScript & Structural & $O(n)$ \\
+Rust & Nominal & $O(1)$ \\
+\hline
+\end{tabular}
+\caption{Witness complexity for type identity across programming language runtimes.}
+\end{table}
 
-\subsection{Compression Ratios in Practice}
-
-We measure compression ratios for real Python programs:
-\begin{itemize}
-\item \textbf{Nominal typing}: 1 bit per type identity check
-\item \textbf{Structural typing}: 10-100 bits per type identity check (depends on structure complexity)
-\item \textbf{Duck typing}: 0 bits (no explicit type check, but higher runtime cost)
-\end{itemize}
-
-This demonstrates the practical advantage of nominal typing: minimal overhead for type identity.
+These instantiations confirm the theoretical predictions: nominal-tag access achieves constant witness length, while structural typing requires linear witness length in the structure size.
 

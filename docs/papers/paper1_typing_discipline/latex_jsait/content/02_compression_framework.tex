@@ -1,37 +1,40 @@
-\subsection{Semantic Compression}
+\subsection{Formal Model: Observations and Equivalence}
 
-Let $\mathcal{B}$ be the space of all possible program behaviors (execution traces, memory states, I/O sequences). A \emph{type system} defines a partition $\mathcal{T} = \{T_1, T_2, \ldots, T_k\}$ of $\mathcal{B}$ into equivalence classes.
+Let $\mathcal{V}$ denote the space of all program values. An \emph{observation} is a predicate $\phi: \mathcal{V} \to \{0,1\}$ that tests interface membership.
 
-\textbf{Definition (Semantic Compression):} A type system compresses $\mathcal{B}$ by assigning each behavior $b \in \mathcal{B}$ to a type $T_i \in \mathcal{T}$. The compression ratio is $\log_2 |\mathcal{T}| / \log_2 |\mathcal{B}|$.
+\begin{definition}[Interface-only equivalence]
+Values $x, y \in \mathcal{V}$ are interface-equivalent, written $x \equiv_I y$, iff $\phi(x) = \phi(y)$ for all interface observations $\phi$.
+\end{definition}
 
-\subsection{Type Identity Problem}
+An interface-only procedure can only distinguish values that are not interface-equivalent. Therefore, any property computed by an interface-only procedure must be constant on equivalence classes.
 
-The core problem is: \textbf{given two program values $v_1, v_2$, are they of the same type?}
+\subsection{Witness Description Length}
 
-Different compression schemes answer this differently:
-\begin{itemize}
-\item \textbf{Nominal}: Compare explicit type identifiers (names, object IDs)
-\item \textbf{Structural}: Compare type structure (fields, methods, signatures)
-\item \textbf{Duck}: Compare runtime behavior (method availability)
-\end{itemize}
+A \emph{witness} for a property $P$ is a program (represented as an AST) that, given access to a value, computes $P$.
 
-\subsection{Rate and Distortion}
+\begin{definition}[Witness description length]
+The witness description length of property $P$ is $W(P) = \min \{ |w| : w \text{ is a witness program for } P \}$, where $|w|$ is the AST size under a fixed encoding.
+\end{definition}
 
-Following Shannon and Cover-Thomas, we define:
+\begin{remark}[Connection to algorithmic information theory]
+Witness description length is related to Kolmogorov complexity, but differs in that the encoding and reference machine are fixed (not universal). This makes $W$ a concrete, computable quantity suitable for comparing practical systems.
+\end{remark}
 
-\textbf{Rate:} The number of bits required to specify type identity. Formally, $R = \log_2 |\mathcal{T}|$ (bits per type).
+\subsection{Rate–Witness–Distortion Tradeoff}
 
-\textbf{Distortion:} The probability of semantic misclassification. Formally, $D = \Pr[\text{type}(v_1) = \text{type}(v_2) \text{ but } \text{behavior}(v_1) \neq \text{behavior}(v_2)]$.
+We analyze type identity checking under three dimensions:
 
-\subsection{Witness Complexity}
+\begin{definition}[Tag length]
+The tag length $L$ is the number of bits required to store a type identifier per value.
+\end{definition}
 
-A \emph{witness} is a program that answers the type identity question. Formally, a witness is an AST (abstract syntax tree) that, when executed, returns the type of a value.
+\begin{definition}[Witness length]
+The witness length $W$ is the minimum AST size to implement type identity checking (Definition above).
+\end{definition}
 
-\textbf{Definition (Witness Complexity):} The witness complexity of a type system is the minimum AST size required to implement type identity checking.
+\begin{definition}[Distortion]
+The distortion $D$ is the probability of semantic misclassification: $D = \Pr[\text{type}(v_1) = \text{type}(v_2) \text{ but } \text{behavior}(v_1) \neq \text{behavior}(v_2)]$.
+\end{definition}
 
-For nominal typing: $W_{\text{nominal}} = O(1)$ (just call \texttt{type()})
-
-For structural typing: $W_{\text{structural}} = O(n)$ (must traverse structure)
-
-For duck typing: $W_{\text{duck}} = O(n)$ (must test all methods)
+A type system is characterized by a point $(L, W, D)$ in this three-dimensional space. The question is: which points are achievable, and which are Pareto-optimal?
 

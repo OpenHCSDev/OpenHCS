@@ -1,18 +1,6 @@
 \begin{abstract}
-Programming languages implement implicit compression schemes for semantic information. A \emph{type system} compresses the space of possible program behaviors into equivalence classes, enabling static reasoning. We prove that these compression schemes exhibit matroid structure: minimal complete axis sets have equal cardinality.
+We study semantic representation under observational constraints: a procedure is allowed to query only interface-membership evidence of a value, and must decide semantic properties such as type identity or provenance. We formalize the indistinguishability relation induced by interface-only evidence and prove an information barrier: every interface-only procedure is constant on indistinguishability classes, hence cannot compute any property that varies within such a class. In contrast, nominal tagging provides constant-size evidence: type identity admits a constant-length witness under our witness-description-length measure. We further establish that the space of semantic queries decomposes as a matroid, and that nominal tagging achieves the unique Pareto-optimal point in the rate–witness–distortion tradeoff. All stated results are machine-checked in Lean 4.
 
-The key result is a Kolmogorov-optimal witness theorem: the Python \texttt{type()} operation achieves minimum description length (1 AST node) for type identity queries. Alternative compression schemes (structural typing, duck typing) require asymptotically larger witnesses.
-
-We formalize a rate-distortion framework where:
-\begin{itemize}
-\item \textbf{Rate} = bits required to specify type identity
-\item \textbf{Distortion} = probability of semantic misclassification
-\end{itemize}
-
-Nominal typing (compression via identity) achieves optimal rate-distortion: zero distortion at minimal rate. Structural typing requires unbounded rate to achieve zero distortion.
-
-All results are machine-checked in Lean 4 (\textasciitilde3,000 lines). This is the first information-theoretic analysis of programming language type systems.
-
-\textbf{Keywords:} Kolmogorov complexity, semantic compression, matroid theory, rate-distortion, type systems, Lean 4
+\textbf{Keywords:} semantic compression, observational constraints, information barriers, witness complexity, matroid structure, type systems, Lean 4
 \end{abstract}
 

@@ -1,40 +1,41 @@
-\subsection{Kolmogorov Complexity of Type Identity}
+\subsection{Witness Description Length for Type Identity}
 
-The Kolmogorov complexity $K(x)$ of a string $x$ is the length of the shortest program that outputs $x$. For type identity, we ask: what is the shortest program that determines if two values have the same type?
+Recall from Section 2 that the witness description length $W(P)$ is the minimum AST size of a program that computes property $P$. For type identity, we ask: what is the shortest program that determines if two values have the same type?
 
-\begin{theorem}[Kolmogorov Optimality of Nominal Typing]
-The Python \texttt{type()} operation achieves the Kolmogorov-optimal minimum description length for type identity:
-$$K(\text{type identity}) = O(1)$$
+\begin{theorem}[Nominal Typing Achieves Minimum Witness Length]
+Nominal-tag access achieves the minimum witness description length for type identity:
+$$W(\text{type identity}) = O(1)$$
 
 Specifically, the witness is a single AST node: \texttt{type(v1) == type(v2)}.
 
-All other type systems require $K(\text{type identity}) = \Omega(n)$ where $n$ is the complexity of the type structure.
+All other type systems require $W(\text{type identity}) = \Omega(n)$ where $n$ is the complexity of the type structure.
 \end{theorem}
 
 \begin{proof}
-See Lean formalization: \texttt{theorems/kolmogorov\_witness.lean}. The proof shows:
+See Lean formalization: \texttt{theorems/nominal\_resolution.lean}. The proof shows:
 \begin{enumerate}
-\item The \texttt{type()} operation is a primitive in Python (1 AST node)
+\item The nominal-tag access operation is a primitive (1 AST node)
 \item Structural typing requires traversing the entire type structure ($O(n)$ nodes)
 \item Duck typing requires testing all methods ($O(n)$ nodes)
-\item No shorter witness exists (by definition of Kolmogorov complexity)
+\item No shorter witness exists (by definition of witness description length)
 \end{enumerate}
 \end{proof}
 
-\subsection{Witness Complexity Comparison}
+\subsection{Witness Complexity Across Type Systems}
 
 \begin{table}[h]
 \centering
-\begin{tabular}{|l|c|c|c|}
+\begin{tabular}{|l|c|c|}
 \hline
-\textbf{Type System} & \textbf{Witness} & \textbf{AST Size} & \textbf{Kolmogorov} \\
+\textbf{Type System} & \textbf{Witness Program} & \textbf{Witness Length} \\
 \hline
-Nominal (Python) & \texttt{type(v1) == type(v2)} & 1 & $O(1)$ \\
-Structural & Compare all fields & $O(n)$ & $\Omega(n)$ \\
-Duck & Test all methods & $O(n)$ & $\Omega(n)$ \\
+Nominal & \texttt{type(v1) == type(v2)} & $O(1)$ \\
+Structural & Compare all fields & $O(n)$ \\
+Duck & Test all methods & $O(n)$ \\
 \hline
 \end{tabular}
+\caption{Witness description length for type identity across type systems.}
 \end{table}
 
-This is the first formal proof that nominal typing is Kolmogorov-optimal for type identity.
+This is the first formal proof that nominal-tag access minimizes witness description length for type identity.
 
