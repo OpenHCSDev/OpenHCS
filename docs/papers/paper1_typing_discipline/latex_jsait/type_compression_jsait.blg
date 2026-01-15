@@ -3,53 +3,48 @@ Capacity: max_strings=200000, hash_size=200000, hash_prime=170003
 The top-level auxiliary file: type_compression_jsait.aux
 The style file: plain.bst
 Database file #1: references.bib
-Warning--I didn't find a database entry for "cousot1977abstract"
-Warning--I didn't find a database entry for "shannon1959coding"
-Warning--I didn't find a database entry for "berger1971rate"
-Warning--I didn't find a database entry for "buhrman2002complexity"
-Warning--I didn't find a database entry for "cook1990inheritance"
-Warning--I didn't find a database entry for "abadi1996theory"
-Warning--I didn't find a database entry for "liskov1994behavioral"
-Warning--I didn't find a database entry for "reynolds1983types"
-You've used 1 entry,
+Warning--empty booktitle in abadi1996theory
+Warning--empty booktitle in liskov1994behavioral
+Warning--can't use both volume and number fields in liskov1994behavioral
+You've used 17 entries,
             2118 wiz_defined-function locations,
-            511 strings with 4333 characters,
-and the built_in function-call counts, 228 in all, are:
-= -- 20
-> -- 7
-< -- 0
-+ -- 3
-- -- 2
-* -- 8
-:= -- 44
-add.period$ -- 3
-call.type$ -- 1
-change.case$ -- 4
+            596 strings with 6460 characters,
+and the built_in function-call counts, 4884 in all, are:
+= -- 476
+> -- 180
+< -- 4
++ -- 78
+- -- 56
+* -- 248
+:= -- 786
+add.period$ -- 50
+call.type$ -- 17
+change.case$ -- 77
 chr.to.int$ -- 0
-cite$ -- 1
-duplicate$ -- 7
-empty$ -- 23
-format.name$ -- 2
-if$ -- 47
+cite$ -- 20
+duplicate$ -- 201
+empty$ -- 447
+format.name$ -- 56
+if$ -- 1060
 int.to.chr$ -- 0
-int.to.str$ -- 1
-missing$ -- 0
-newline$ -- 8
-num.names$ -- 2
-pop$ -- 8
+int.to.str$ -- 17
+missing$ -- 13
+newline$ -- 87
+num.names$ -- 34
+pop$ -- 125
 preamble$ -- 1
-purify$ -- 3
+purify$ -- 62
 quote$ -- 0
-skip$ -- 7
+skip$ -- 162
 stack$ -- 0
-substring$ -- 5
-swap$ -- 1
-text.length$ -- 0
+substring$ -- 263
+swap$ -- 50
+text.length$ -- 4
 text.prefix$ -- 0
 top$ -- 0
-type$ -- 4
-warning$ -- 0
-while$ -- 2
-width$ -- 2
-write$ -- 12
-(There were 8 warnings)
+type$ -- 62
+warning$ -- 3
+while$ -- 49
+width$ -- 19
+write$ -- 177
+(There were 3 warnings)

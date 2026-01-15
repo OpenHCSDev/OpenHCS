@@ -492,19 +492,19 @@ Linnean taxonomy classifies organisms by observable phenotypic characters: morph
 
 **The cryptic species problem:** Cryptic species share identical phenotypic profiles but are reproductively isolated and genetically distinct. Attribute-only observation (morphology) cannot distinguish them---$\pi(A) = \pi(B)$ but $\text{species}(A) \neq \text{species}(B)$.
 
-**The nominal tag:** DNA barcoding provides the resolution. A short genetic sequence (e.g., mitochondrial COI) acts as the nominal tag: $O(1)$ identity verification via sequence comparison. This reduced cryptic species identification from $\Omega(n)$ morphological examination to constant-time molecular lookup.
+**The nominal tag:** DNA barcoding provides the resolution [@DNABarcoding]. A short genetic sequence (e.g., mitochondrial COI) acts as the nominal tag: $O(1)$ identity verification via sequence comparison. This reduced cryptic species identification from $\Omega(n)$ morphological examination to constant-time molecular lookup.
 
 ## Library Classification: Subject vs ISBN
 
 Library classification systems like Dewey Decimal observe subject matter---a form of attribute-only classification. Two books on the same subject are indistinguishable by subject code alone.
 
-**The nominal tag:** The ISBN (International Standard Book Number) is the nominal tag. Given two physical books, identity verification is $O(1)$: compare ISBNs. Without ISBNs, distinguishing two copies of different editions on the same subject requires $O(n)$ attribute inspection (publication date, page count, publisher, etc.).
+**The nominal tag:** The ISBN (International Standard Book Number) is the nominal tag [@ISBN]. Given two physical books, identity verification is $O(1)$: compare ISBNs. Without ISBNs, distinguishing two copies of different editions on the same subject requires $O(n)$ attribute inspection (publication date, page count, publisher, etc.).
 
 ## Database Systems: Columns vs Primary Keys
 
 Relational databases observe entities via column values. The information barrier applies: rows with identical column values (excluding the key) are indistinguishable.
 
-**The nominal tag:** The primary key is the nominal tag. Entity identity is $O(1)$: compare keys. This is why database theory requires keys---without them, the system cannot answer "is this the same entity?"
+**The nominal tag:** The primary key is the nominal tag [@Codd1990]. Entity identity is $O(1)$: compare keys. This is why database theory requires keys---without them, the system cannot answer "is this the same entity?"
 
 **Natural vs surrogate keys:** Natural keys (composed of attributes) are attribute-only observation and inherit its limitations. Surrogate keys (auto-increment IDs, UUIDs) are pure nominal tags: no semantic content, pure identity.
 
@@ -522,21 +522,21 @@ Every CPython heap object begins with a `PyObject` header containing an `ob_type
 
 ### Java: `.getClass()` and the Method Table
 
-Java's object model stores a pointer to the class object in every instance header. The `.getClass()` method exposes this, and `instanceof` checks traverse the class hierarchy.
+Java's object model stores a pointer to the class object in every instance header [@JVMSpec]. The `.getClass()` method exposes this [@JavaDocs], and `instanceof` checks traverse the class hierarchy.
 
 **Key observation:** Java's `instanceof` is $O(d)$ where $d$ is inheritance depth, not $O(|\mathcal{I}|)$ where $|\mathcal{I}|$ is the number of interfaces. This is because `instanceof` walks the inheritance hierarchy (a nominal-tag query), not the interface list (an attribute query).
 
 ### TypeScript: Structural Equivalence
 
-TypeScript uses attribute-only (declared) observation: the compiler checks structural compatibility, not nominal identity. Two types are assignment-compatible iff their structures match.
+TypeScript uses attribute-only (declared) observation [@TypeScriptDocs]: the compiler checks structural compatibility, not nominal identity. Two types are assignment-compatible iff their structures match.
 
 **Implication:** Type identity checking requires traversing the structure. For a type with $n$ fields/methods, $W(\text{type-identity}) = O(n)$. This is inherent to the observation model: no compilation strategy can reduce this to $O(1)$ without adding nominal tags.
 
 ### Rust: Static Nominal Tags
 
-Rust resolves type identity at compile time via its nominal type system. At runtime, `std::any::TypeId` provides nominal-tag access.
+Rust resolves type identity at compile time via its nominal type system. At runtime, `std::any::TypeId` provides nominal-tag access [@RustDocs].
 
-**The `dyn Trait` case:** Rust's trait objects include a vtable pointer but not a type tag. This is attribute-only observation: the vtable encodes which methods exist, not which type provided them.
+**The `dyn Trait` case:** Rust's trait objects include a vtable pointer but not a type tag [@RustTraitObjects]. This is attribute-only observation: the vtable encodes which methods exist, not which type provided them.
 
 ## Cross-Domain Summary
 
@@ -594,6 +594,10 @@ The information barrier is not a quirk of any particular domain---it is a mathem
 ## Conclusion
 
 Classification under observational constraints admits a clean information-theoretic analysis. Nominal tags are not a design preference---they are the provably optimal strategy for identity verification under the $(L, W, D)$ tradeoff. The results are universal, and all proofs are machine-verified in Lean 4.
+
+## AI Disclosure {#ai-disclosure .unnumbered}
+
+This work was developed with AI assistance (Claude, Anthropic). The AI contributed to exposition, code generation, and proof exploration. All mathematical claims were verified by the authors and machine-checked in Lean 4. The Lean proofs are the authoritative source; no theorem depends solely on AI-generated reasoning.
 
 
 # Formalization and Verification

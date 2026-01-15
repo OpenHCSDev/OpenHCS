@@ -1,9 +1,99 @@
-\begin{thebibliography}{1}
+\begin{thebibliography}{10}
+
+\bibitem{abadi1996theory}
+Mart{\'\i}n Abadi and Luca Cardelli.
+\newblock A theory of objects.
+\newblock Springer-Verlag, 1996.
+
+\bibitem{berger1971rate}
+Toby Berger.
+\newblock {\em Rate Distortion Theory: A Mathematical Basis for Data
+  Compression}.
+\newblock Prentice-Hall, 1971.
+
+\bibitem{buhrman2002complexity}
+Harry Buhrman, Lance Fortnow, Michal Koucký, and Bruno Loff.
+\newblock Computational complexity of discrete problems.
+\newblock {\em Bulletin of the EATCS}, 77:42--56, 2002.
+
+\bibitem{Codd1990}
+Edgar~F. Codd.
+\newblock {\em The Relational Model for Database Management: Version 2}.
+\newblock Addison-Wesley, 1990.
+
+\bibitem{cook1990inheritance}
+William~R. Cook, Walter Hill, and Peter~S. Canning.
+\newblock Inheritance is not subtyping.
+\newblock In {\em Proceedings of the 17th ACM SIGPLAN-SIGACT Symposium on
+  Principles of Programming Languages}, pages 125--135, 1990.
+
+\bibitem{cousot1977abstract}
+Patrick Cousot and Radhia Cousot.
+\newblock Abstract interpretation: A unified lattice model for static analysis
+  of programs by construction or approximation of fixpoints.
+\newblock In {\em Proceedings of the 4th ACM SIGACT-SIGPLAN Symposium on
+  Principles of Programming Languages}, pages 238--252, 1977.
 
 \bibitem{CPythonDocs}
 Python~Software Foundation.
 \newblock Cpython object implementation: Object structure.
 \newblock \url{https://github.com/python/cpython/blob/main/Include/object.h},
   2024.
+
+\bibitem{RustTraitObjects}
+Rust Foundation.
+\newblock The rust reference: Trait objects.
+\newblock \url{https://doc.rust-lang.org/reference/types/trait-object.html},
+  2024.
+
+\bibitem{RustDocs}
+Rust Foundation.
+\newblock Rust std::any::type\_id.
+\newblock \url{https://doc.rust-lang.org/std/any/fn.type_id.html}, 2024.
+
+\bibitem{DNABarcoding}
+Paul D.~N. Hebert, Alina Cywinska, Shelley~L. Ball, and Jeremy~R. deWaard.
+\newblock Biological identifications through dna barcodes, 2003.
+
+\bibitem{ISBN}
+{International ISBN Agency}.
+\newblock {\em ISBN Users' Manual}.
+\newblock International ISBN Agency, 7th edition, 2017.
+
+\bibitem{liskov1994behavioral}
+Barbara Liskov and Jeannette~M. Wing.
+\newblock A behavioral notion of subtyping.
+\newblock volume~16, pages 1811--1841, 1994.
+
+\bibitem{TypeScriptDocs}
+Microsoft.
+\newblock Typescript handbook: Type compatibility.
+\newblock
+  \url{https://www.typescriptlang.org/docs/handbook/type-compatibility.html},
+  2024.
+
+\bibitem{JavaDocs}
+Oracle.
+\newblock Java object: getclass().
+\newblock
+  \url{https://docs.oracle.com/javase/8/docs/api/java/lang/Object.html#getClass--},
+  2024.
+
+\bibitem{JVMSpec}
+Oracle.
+\newblock The java virtual machine specification: Chapter 2.5 runtime data
+  areas.
+\newblock
+  \url{https://docs.oracle.com/javase/specs/jvms/se21/html/jvms-2.html}, 2024.
+
+\bibitem{reynolds1983types}
+John~C. Reynolds.
+\newblock Types, abstraction and parametric polymorphism.
+\newblock {\em Information Processing}, 83:513--523, 1983.
+
+\bibitem{shannon1959coding}
+Claude~E. Shannon.
+\newblock Coding theorems for a discrete source with a fidelity criterion.
+\newblock {\em IRE National Convention Record}, 7:142--163, 1959.
 
 \end{thebibliography}
