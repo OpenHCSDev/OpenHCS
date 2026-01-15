@@ -1,31 +1,34 @@
 \subsection{Three-Dimensional Tradeoff: Tag Length, Witness Cost, Distortion}
 
-Recall from Section 2 that type systems are characterized by three dimensions:
+Recall from Section 2 that observer strategies are characterized by three dimensions:
 \begin{itemize}
 \item \textbf{Tag length} $L$: machine words required to store a type identifier per value
 \item \textbf{Witness cost} $W$: minimum number of primitive queries to implement type identity checking
 \item \textbf{Distortion} $D$: worst-case semantic failure flag ($D = 0$ or $D = 1$)
 \end{itemize}
 
-\begin{theorem}[Pareto Optimality of Nominal Typing]
-Nominal typing achieves the unique Pareto-optimal point in the $(L, W, D)$ space:
+We compare two observer classes:
+
+\begin{definition}[Interface-only observer]
+An observer that queries only interface membership ($q_I \in \Phi_{\mathcal{I}}$), with no access to explicit type tags.
+\end{definition}
+
+\begin{definition}[Nominal-tag observer]
+An observer that may read a single type identifier (nominal tag) per value, in addition to interface queries.
+\end{definition}
+
+\begin{theorem}[Pareto Optimality of Nominal-Tag Observers]
+Nominal-tag observers achieve the unique Pareto-optimal point in the $(L, W, D)$ space:
 \begin{itemize}
 \item \textbf{Tag length}: $L = O(1)$ machine words per value
 \item \textbf{Witness cost}: $W = O(1)$ primitive queries (one tag read)
 \item \textbf{Distortion}: $D = 0$ (type equality implies behavior equivalence)
 \end{itemize}
 
-Structural typing achieves:
-\begin{itemize}
-\item \textbf{Tag length}: $L = O(n)$ machine words per value
-\item \textbf{Witness cost}: $W = O(n)$ primitive queries (traverse structure)
-\item \textbf{Distortion}: $D = 0$ (type equality implies behavior equivalence)
-\end{itemize}
-
-Duck typing achieves:
+Interface-only observers achieve:
 \begin{itemize}
 \item \textbf{Tag length}: $L = 0$ (no explicit tag)
-\item \textbf{Witness cost}: $W = O(n)$ primitive queries (interface observations only)
+\item \textbf{Witness cost}: $W = O(n)$ primitive queries (must query $n$ interfaces)
 \item \textbf{Distortion}: $D = 1$ (type equality does not imply behavior equivalence)
 \end{itemize}
 \end{theorem}
@@ -33,10 +36,10 @@ Duck typing achieves:
 \begin{proof}
 See Lean formalization: \texttt{proofs/python\_instantiation.lean}. The proof verifies:
 \begin{enumerate}
-\item \texttt{nominal\_cost\_constant}: Nominal achieves $(L, W, D) = (O(1), O(1), 0)$
-\item \texttt{duck\_cost\_linear}: Duck typing requires $O(n)$ interface observations
+\item \texttt{nominal\_cost\_constant}: Nominal-tag achieves $(L, W, D) = (O(1), O(1), 0)$
+\item \texttt{duck\_cost\_linear}: Interface-only requires $O(n)$ queries
 \item \texttt{python\_gap\_unbounded}: The cost gap is unbounded in the limit
-\item Interface observations alone (\texttt{hasattr}) cannot distinguish provenance; nominal queries (\texttt{isinstance}) can
+\item Interface observations alone cannot distinguish provenance; nominal tags can
 \end{enumerate}
 \end{proof}
 
@@ -44,10 +47,13 @@ See Lean formalization: \texttt{proofs/python\_instantiation.lean}. The proof ve
 
 The three-dimensional frontier shows:
 \begin{itemize}
-\item Nominal typing dominates all other schemes (minimal on all three dimensions)
-\item Structural typing is suboptimal (higher $L$ and $W$, same $D$)
-\item Duck typing trades tag length for distortion (zero $L$, but positive $D$)
+\item Nominal-tag observers dominate interface-only observers on all three dimensions
+\item Interface-only observers trade tag length for distortion (zero $L$, but $D = 1$)
 \end{itemize}
 
-To our knowledge, this is the first formal proof that nominal typing is Pareto-optimal in the $(L, W, D)$ tradeoff for type systems.
+To our knowledge, this is the first formal proof of Pareto optimality for nominal-tag observers in the $(L, W, D)$ tradeoff.
+
+\begin{remark}[Programming language instantiations]
+In programming language terms: \emph{nominal typing} corresponds to nominal-tag observers (e.g., CPython's \texttt{isinstance}, Java's \texttt{.getClass()}). \emph{Duck typing} corresponds to interface-only observers (e.g., Python's \texttt{hasattr}). \emph{Structural typing} is an intermediate case with $D = 0$ but $W = O(n)$.
+\end{remark}
 

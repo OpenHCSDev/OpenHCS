@@ -6,9 +6,9 @@
 
 ## Abstract
 
-We study semantic representation under observational constraints: a procedure is allowed to query only interface-membership evidence of a value, and must decide semantic properties such as type identity or provenance. We formalize the indistinguishability relation induced by interface-only evidence and prove an information barrier: every interface-only procedure is constant on indistinguishability classes, hence cannot compute any property that varies within such a class. In contrast, nominal tagging provides constant-size evidence: type identity admits a constant-length witness under our witness-description-length measure. We further establish that the space of semantic queries decomposes as a matroid, and that nominal tagging achieves the unique Pareto-optimal point in the rate--witness--distortion tradeoff. All stated results are machine-checked in Lean 4.
+We study semantic inference under observational constraints. An interface-only observer queries membership in a fixed family of interfaces $\Phi_{\mathcal{I}} = \{q_I : I \in \mathcal{I}\}$ and must decide semantic properties such as type identity. We prove an information barrier: every interface-only observer is constant on indistinguishability classes (values with identical interface profiles), hence cannot compute any property that varies within such a class. In contrast, a nominal-tag observer---with access to a single type identifier per value---achieves constant witness cost: $W(\text{type-identity}) = O(1)$ primitive queries. We further establish that minimal complete axis sets form the bases of a matroid, and that nominal-tag observers achieve the unique Pareto-optimal point in the $(L, W, D)$ tradeoff (tag length, witness cost, distortion). All results are machine-checked in Lean 4.
 
-**Keywords:** semantic compression, observational constraints, information barriers, witness complexity, matroid structure, type systems, Lean 4
+**Keywords:** semantic inference, observational constraints, information barriers, witness cost, matroid structure, type systems, Lean 4
 
 
 ## Observational Constraints and Semantic Inference
@@ -61,7 +61,7 @@ Nominal-tag access admits a constant-cost witness for type identity: $W(\text{ty
 
 3.  **Equicardinality Theorem**: All minimal complete type axis sets have equal cardinality (a consequence of matroid-like structure).
 
-4.  **Rate--Witness--Distortion Optimality**: Nominal tagging achieves the unique Pareto-optimal point in the (tag-length, witness-length, error-rate) tradeoff.
+4.  **Rate--Witness--Distortion Optimality**: Nominal-tag observers achieve the unique Pareto-optimal point in the $(L, W, D)$ tradeoff (tag length, witness cost, distortion).
 
 5.  **Machine-Checked Proofs**: All results formalized in Lean 4 (\~6,000 lines, 265 theorems, 0 sorry).
 
@@ -159,51 +159,48 @@ All minimal complete axis sets have equal cardinality. Hence the "semantic dimen
 All minimal complete type systems achieve the same compression ratio. No type system can be strictly more efficient than another while remaining complete.
 :::
 
-This means: nominal typing, structural typing, and duck typing all achieve the same compression ratio when minimal. The difference is in *witness complexity*, not compression efficiency.
+This means: all observer strategies achieve the same compression ratio when using minimal complete axis sets. The difference between nominal-tag and interface-only observers lies in *witness cost*, not compression efficiency.
 
 
-## Witness Description Length for Type Identity
+## Witness Cost for Type Identity
 
-Recall from Section 2 that the witness description length $W(P)$ is the minimum AST size of a program that computes property $P$. For type identity, we ask: what is the shortest program that determines if two values have the same type?
+Recall from Section 2 that the witness cost $W(P)$ is the minimum number of primitive queries required to compute property $P$. For type identity, we ask: what is the minimum number of queries to determine if two values have the same type?
 
 ::: theorem
-Nominal-tag access achieves the minimum witness description length for type identity: $$W(\text{type identity}) = O(1)$$
+Nominal-tag observers achieve the minimum witness cost for type identity: $$W(\text{type identity}) = O(1)$$
 
-Specifically, the witness is a single AST node: `type(v1) == type(v2)`.
+Specifically, the witness is a single tag read: compare $\text{tag}(v_1) = \text{tag}(v_2)$.
 
-All other type systems require $W(\text{type identity}) = \Omega(n)$ where $n$ is the complexity of the type structure.
+Interface-only observers require $W(\text{type identity}) = \Omega(n)$ where $n$ is the number of interfaces.
 :::
 
 ::: proof
-*Proof.* See Lean formalization: `theorems/nominal_resolution.lean`. The proof shows:
+*Proof.* See Lean formalization: `proofs/nominal_resolution.lean`. The proof shows:
 
-1.  The nominal-tag access operation is a primitive (1 AST node)
+1.  Nominal-tag access is a single primitive query
 
-2.  Structural typing requires traversing the entire type structure ($O(n)$ nodes)
+2.  Interface-only observers must query $n$ interfaces to distinguish all types
 
-3.  Duck typing requires testing all methods ($O(n)$ nodes)
-
-4.  No shorter witness exists (by definition of witness description length)
+3.  No shorter witness exists for interface-only observers (by the information barrier)
 
  ◻
 :::
 
-## Witness Complexity Across Type Systems
+## Witness Cost Comparison
 
-  **Type System**     **Witness Program**     **Witness Length**
-  ----------------- ------------------------ --------------------
-  Nominal            `type(v1) == type(v2)`         $O(1)$
-  Structural           Compare all fields           $O(n)$
-  Duck                  Test all methods            $O(n)$
+  **Observer Class**    **Witness Procedure**   **Witness Cost $W$**
+  -------------------- ----------------------- ----------------------
+  Nominal-tag              Single tag read             $O(1)$
+  Interface-only        Query $n$ interfaces           $O(n)$
 
-  : Witness description length for type identity across type systems.
+  : Witness cost for type identity by observer class.
 
-This is the first formal proof that nominal-tag access minimizes witness description length for type identity.
+To our knowledge, this is the first formal proof that nominal-tag access minimizes witness cost for type identity.
 
 
 ## Three-Dimensional Tradeoff: Tag Length, Witness Cost, Distortion
 
-Recall from Section 2 that type systems are characterized by three dimensions:
+Recall from Section 2 that observer strategies are characterized by three dimensions:
 
 -   **Tag length** $L$: machine words required to store a type identifier per value
 
@@ -211,8 +208,18 @@ Recall from Section 2 that type systems are characterized by three dimensions:
 
 -   **Distortion** $D$: worst-case semantic failure flag ($D = 0$ or $D = 1$)
 
+We compare two observer classes:
+
+::: definition
+An observer that queries only interface membership ($q_I \in \Phi_{\mathcal{I}}$), with no access to explicit type tags.
+:::
+
+::: definition
+An observer that may read a single type identifier (nominal tag) per value, in addition to interface queries.
+:::
+
 ::: theorem
-Nominal typing achieves the unique Pareto-optimal point in the $(L, W, D)$ space:
+Nominal-tag observers achieve the unique Pareto-optimal point in the $(L, W, D)$ space:
 
 -   **Tag length**: $L = O(1)$ machine words per value
 
@@ -220,19 +227,11 @@ Nominal typing achieves the unique Pareto-optimal point in the $(L, W, D)$ space
 
 -   **Distortion**: $D = 0$ (type equality implies behavior equivalence)
 
-Structural typing achieves:
-
--   **Tag length**: $L = O(n)$ machine words per value
-
--   **Witness cost**: $W = O(n)$ primitive queries (traverse structure)
-
--   **Distortion**: $D = 0$ (type equality implies behavior equivalence)
-
-Duck typing achieves:
+Interface-only observers achieve:
 
 -   **Tag length**: $L = 0$ (no explicit tag)
 
--   **Witness cost**: $W = O(n)$ primitive queries (interface observations only)
+-   **Witness cost**: $W = O(n)$ primitive queries (must query $n$ interfaces)
 
 -   **Distortion**: $D = 1$ (type equality does not imply behavior equivalence)
 :::
@@ -240,13 +239,13 @@ Duck typing achieves:
 ::: proof
 *Proof.* See Lean formalization: `proofs/python_instantiation.lean`. The proof verifies:
 
-1.  `nominal_cost_constant`: Nominal achieves $(L, W, D) = (O(1), O(1), 0)$
+1.  `nominal_cost_constant`: Nominal-tag achieves $(L, W, D) = (O(1), O(1), 0)$
 
-2.  `duck_cost_linear`: Duck typing requires $O(n)$ interface observations
+2.  `duck_cost_linear`: Interface-only requires $O(n)$ queries
 
 3.  `python_gap_unbounded`: The cost gap is unbounded in the limit
 
-4.  Interface observations alone (`hasattr`) cannot distinguish provenance; nominal queries (`isinstance`) can
+4.  Interface observations alone cannot distinguish provenance; nominal tags can
 
  ◻
 :::
@@ -255,13 +254,15 @@ Duck typing achieves:
 
 The three-dimensional frontier shows:
 
--   Nominal typing dominates all other schemes (minimal on all three dimensions)
+-   Nominal-tag observers dominate interface-only observers on all three dimensions
 
--   Structural typing is suboptimal (higher $L$ and $W$, same $D$)
+-   Interface-only observers trade tag length for distortion (zero $L$, but $D = 1$)
 
--   Duck typing trades tag length for distortion (zero $L$, but positive $D$)
+To our knowledge, this is the first formal proof of Pareto optimality for nominal-tag observers in the $(L, W, D)$ tradeoff.
 
-To our knowledge, this is the first formal proof that nominal typing is Pareto-optimal in the $(L, W, D)$ tradeoff for type systems.
+::: remark
+In programming language terms: *nominal typing* corresponds to nominal-tag observers (e.g., CPython's `isinstance`, Java's `.getClass()`). *Duck typing* corresponds to interface-only observers (e.g., Python's `hasattr`). *Structural typing* is an intermediate case with $D = 0$ but $W = O(n)$.
+:::
 
 
 ## CPython: Nominal-Tag Access
@@ -270,7 +271,7 @@ To our knowledge, this is the first formal proof that nominal typing is Pareto-o
 CPython realizes nominal-tag access: the runtime stores a type tag (`ob_type` pointer) per object and exposes it via the `type()` builtin. Therefore, the constant-witness construction applies: $W(\text{type-identity}) = O(1)$ in CPython.
 :::
 
-**Evidence:** The CPython object model stores a pointer to the type object (`ob_type`) in every heap-allocated value [@CPythonDocs]. The `type()` builtin [@PythonDocs] is a single pointer dereference, hence $O(1)$ time and $O(1)$ AST size.
+**Evidence:** The CPython object model stores a pointer to the type object (`ob_type`) in every heap-allocated value [@CPythonDocs]. The `type()` builtin [@PythonDocs] is a single pointer dereference, hence $O(1)$ primitive queries.
 
 ## Java: Nominal-Tag Access
 
@@ -290,59 +291,55 @@ TypeScript uses structural typing: two types are equivalent iff they have the sa
 Rust uses nominal typing at compile time: type identity is resolved statically via the type system. At runtime, Rust provides `std::any::type_id()` for nominal-tag access, achieving $W(\text{type-identity}) = O(1)$.
 :::
 
-## Summary: Witness Complexity Across Runtimes
+## Summary: Witness Cost Across Runtimes
 
-  **Language**    **Typing Discipline**   **Witness Length**
-  -------------- ----------------------- --------------------
-  CPython                Nominal                $O(1)$
-  Java                   Nominal                $O(1)$
-  TypeScript           Structural               $O(n)$
-  Rust                   Nominal                $O(1)$
+  **Language**        **Observer Class**        **Witness Cost $W$**
+  -------------- ----------------------------- ----------------------
+  CPython                 Nominal-tag                  $O(1)$
+  Java                    Nominal-tag                  $O(1)$
+  TypeScript      Interface-only (structural)          $O(n)$
+  Rust                    Nominal-tag                  $O(1)$
 
-  : Witness complexity for type identity across programming language runtimes.
+  : Witness cost for type identity across programming language runtimes.
 
-These instantiations confirm the theoretical predictions: nominal-tag access achieves constant witness length, while structural typing requires linear witness length in the structure size.
+These instantiations confirm the theoretical predictions: nominal-tag observers achieve constant witness cost, while interface-only observers require linear witness cost in the number of interfaces.
 
 
-This paper presents an information-theoretic analysis of programming language type systems. We prove three main results:
+This paper presents an information-theoretic analysis of semantic inference under observational constraints. We prove three main results:
 
-1.  **Impossibility Barrier**: No interface-only procedure can compute properties that vary within indistinguishability classes.
+1.  **Impossibility Barrier**: No interface-only observer can compute properties that vary within indistinguishability classes.
 
-2.  **Constant-Witness Result**: Nominal tagging achieves $W(\text{type-identity}) = O(1)$, the minimum witness description length.
+2.  **Constant-Witness Result**: Nominal-tag observers achieve $W(\text{type-identity}) = O(1)$, the minimum witness cost.
 
-3.  **Pareto Optimality**: Nominal typing is the unique Pareto-optimal point in the $(L, W, D)$ tradeoff: minimal tag length, minimal witness length, zero distortion.
+3.  **Pareto Optimality**: Nominal-tag observers achieve the unique Pareto-optimal point in the $(L, W, D)$ tradeoff: minimal tag length, minimal witness cost, zero distortion.
 
 ## Implications
 
 These results have several implications:
 
--   **Nominal typing is provably optimal** for type identity checking, not just a design choice.
+-   **Nominal-tag observers are provably optimal** for type identity checking, not just a design choice.
 
--   **Structural typing is provably suboptimal**: it requires unbounded witness length to achieve the same distortion as nominal typing.
+-   **Interface-only observers are provably limited**: they cannot achieve $D = 0$ regardless of computational resources.
 
--   **Duck typing trades tag length for distortion**: it reduces tag length but cannot guarantee $D = 0$.
+-   **The barrier is informational, not computational**: even with unbounded time and memory, interface-only observers cannot overcome the indistinguishability barrier.
 
--   **No type system can do better than nominal typing** while remaining complete and zero-distortion.
-
--   **The barrier is informational, not computational**: even with unbounded time and memory, interface-only procedures cannot overcome the indistinguishability barrier.
+::: remark
+In PL terms: nominal typing (CPython, Java) instantiates nominal-tag observers; duck typing (Python `hasattr`) instantiates interface-only observers; structural typing is intermediate ($D = 0$, $W = O(n)$).
+:::
 
 ## Future Work
 
 This work opens several directions:
 
-1.  **Concept Matroids**: Do other programming language concepts (modules, inheritance, generics) exhibit matroid structure?
+1.  **Other observation families**: Do other semantic concepts (modules, inheritance, generics) induce matroid structure on their observation spaces?
 
-2.  **Witness Complexity of Other Properties**: Can we formalize the witness complexity of other semantic properties (e.g., provenance, mutability)?
+2.  **Witness complexity of other properties**: What are the witness costs for provenance, mutability, or ownership semantics?
 
-3.  **Hybrid Systems**: Can we design type systems that achieve better $(L, W, D)$ tradeoffs by combining nominal and structural approaches?
-
-4.  **Runtime Verification**: How do runtime type checks affect the witness complexity analysis?
+3.  **Hybrid observers**: Can we design observer strategies that achieve better $(L, W, D)$ tradeoffs by combining tag and interface queries?
 
 ## Conclusion
 
-Type systems are semantic compression schemes under observational constraints. By applying information theory, we can formally analyze their optimality. This work demonstrates that nominal typing is not just a design choice, but the provably optimal compression scheme for type identity.
-
-All proofs are machine-verified in Lean 4, providing absolute certainty in the results.
+Semantic inference under observational constraints admits a clean information-theoretic analysis. Nominal-tag observers are not merely a design choice---they are the provably optimal strategy for type identity under the $(L, W, D)$ tradeoff. All proofs are machine-verified in Lean 4.
 
 
 All theorems in this paper are formalized and machine-verified in Lean 4. The proofs are located in the repository at:
@@ -363,7 +360,7 @@ All theorems in this paper are formalized and machine-verified in Lean 4. The pr
 
 ## Key Proof Files
 
-1.  `abstract_class_system.lean`: Core formalization of the class system model, shape equivalence, and impossibility theorem
+1.  `abstract_class_system.lean`: Core formalization of the class system model, interface equivalence, and information barrier theorem
 
 2.  `axis_framework.lean`: Type axis matroid structure, equicardinality proofs (`semantically_minimal_implies_orthogonal`, `minimal_complete_unique_orthogonal`)
 

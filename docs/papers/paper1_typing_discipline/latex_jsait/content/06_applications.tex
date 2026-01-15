@@ -4,7 +4,7 @@
 CPython realizes nominal-tag access: the runtime stores a type tag (\texttt{ob\_type} pointer) per object and exposes it via the \texttt{type()} builtin. Therefore, the constant-witness construction applies: $W(\text{type-identity}) = O(1)$ in CPython.
 \end{corollary}
 
-\textbf{Evidence:} The CPython object model stores a pointer to the type object (\texttt{ob\_type}) in every heap-allocated value \cite{CPythonDocs}. The \texttt{type()} builtin \cite{PythonDocs} is a single pointer dereference, hence $O(1)$ time and $O(1)$ AST size.
+\textbf{Evidence:} The CPython object model stores a pointer to the type object (\texttt{ob\_type}) in every heap-allocated value \cite{CPythonDocs}. The \texttt{type()} builtin \cite{PythonDocs} is a single pointer dereference, hence $O(1)$ primitive queries.
 
 \subsection{Java: Nominal-Tag Access}
 
@@ -24,22 +24,22 @@ TypeScript uses structural typing: two types are equivalent iff they have the sa
 Rust uses nominal typing at compile time: type identity is resolved statically via the type system. At runtime, Rust provides \texttt{std::any::type\_id()} for nominal-tag access, achieving $W(\text{type-identity}) = O(1)$.
 \end{corollary}
 
-\subsection{Summary: Witness Complexity Across Runtimes}
+\subsection{Summary: Witness Cost Across Runtimes}
 
 \begin{table}[h]
 \centering
 \begin{tabular}{|l|c|c|}
 \hline
-\textbf{Language} & \textbf{Typing Discipline} & \textbf{Witness Length} \\
+\textbf{Language} & \textbf{Observer Class} & \textbf{Witness Cost $W$} \\
 \hline
-CPython & Nominal & $O(1)$ \\
-Java & Nominal & $O(1)$ \\
-TypeScript & Structural & $O(n)$ \\
-Rust & Nominal & $O(1)$ \\
+CPython & Nominal-tag & $O(1)$ \\
+Java & Nominal-tag & $O(1)$ \\
+TypeScript & Interface-only (structural) & $O(n)$ \\
+Rust & Nominal-tag & $O(1)$ \\
 \hline
 \end{tabular}
-\caption{Witness complexity for type identity across programming language runtimes.}
+\caption{Witness cost for type identity across programming language runtimes.}
 \end{table}
 
-These instantiations confirm the theoretical predictions: nominal-tag access achieves constant witness length, while structural typing requires linear witness length in the structure size.
+These instantiations confirm the theoretical predictions: nominal-tag observers achieve constant witness cost, while interface-only observers require linear witness cost in the number of interfaces.
 

@@ -1,41 +1,39 @@
-\subsection{Witness Description Length for Type Identity}
+\subsection{Witness Cost for Type Identity}
 
-Recall from Section 2 that the witness description length $W(P)$ is the minimum AST size of a program that computes property $P$. For type identity, we ask: what is the shortest program that determines if two values have the same type?
+Recall from Section 2 that the witness cost $W(P)$ is the minimum number of primitive queries required to compute property $P$. For type identity, we ask: what is the minimum number of queries to determine if two values have the same type?
 
-\begin{theorem}[Nominal Typing Achieves Minimum Witness Length]
-Nominal-tag access achieves the minimum witness description length for type identity:
+\begin{theorem}[Nominal-Tag Observers Achieve Minimum Witness Cost]
+Nominal-tag observers achieve the minimum witness cost for type identity:
 $$W(\text{type identity}) = O(1)$$
 
-Specifically, the witness is a single AST node: \texttt{type(v1) == type(v2)}.
+Specifically, the witness is a single tag read: compare $\text{tag}(v_1) = \text{tag}(v_2)$.
 
-All other type systems require $W(\text{type identity}) = \Omega(n)$ where $n$ is the complexity of the type structure.
+Interface-only observers require $W(\text{type identity}) = \Omega(n)$ where $n$ is the number of interfaces.
 \end{theorem}
 
 \begin{proof}
-See Lean formalization: \texttt{theorems/nominal\_resolution.lean}. The proof shows:
+See Lean formalization: \texttt{proofs/nominal\_resolution.lean}. The proof shows:
 \begin{enumerate}
-\item The nominal-tag access operation is a primitive (1 AST node)
-\item Structural typing requires traversing the entire type structure ($O(n)$ nodes)
-\item Duck typing requires testing all methods ($O(n)$ nodes)
-\item No shorter witness exists (by definition of witness description length)
+\item Nominal-tag access is a single primitive query
+\item Interface-only observers must query $n$ interfaces to distinguish all types
+\item No shorter witness exists for interface-only observers (by the information barrier)
 \end{enumerate}
 \end{proof}
 
-\subsection{Witness Complexity Across Type Systems}
+\subsection{Witness Cost Comparison}
 
 \begin{table}[h]
 \centering
 \begin{tabular}{|l|c|c|}
 \hline
-\textbf{Type System} & \textbf{Witness Program} & \textbf{Witness Length} \\
+\textbf{Observer Class} & \textbf{Witness Procedure} & \textbf{Witness Cost $W$} \\
 \hline
-Nominal & \texttt{type(v1) == type(v2)} & $O(1)$ \\
-Structural & Compare all fields & $O(n)$ \\
-Duck & Test all methods & $O(n)$ \\
+Nominal-tag & Single tag read & $O(1)$ \\
+Interface-only & Query $n$ interfaces & $O(n)$ \\
 \hline
 \end{tabular}
-\caption{Witness description length for type identity across type systems.}
+\caption{Witness cost for type identity by observer class.}
 \end{table}
 
-This is the first formal proof that nominal-tag access minimizes witness description length for type identity.
+To our knowledge, this is the first formal proof that nominal-tag access minimizes witness cost for type identity.
 
