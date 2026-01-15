@@ -75,6 +75,45 @@ H(\mathcal{V}) - H(\mathcal{V}/{\sim}) = H(\mathcal{V} | \pi)
 where $H$ denotes entropy. This quantity is positive whenever multiple types share the same interface profile.
 \end{corollary}
 
+\subsection{Identification Capacity}\label{sec:identification-capacity}
+
+We now formalize the identification problem in channel-theoretic terms. Let $C: \mathcal{V} \to \{1, \ldots, k\}$ denote the class assignment function, and let $\pi: \mathcal{V} \to \{0,1\}^n$ denote the attribute profile.
+
+\begin{definition}[Identification channel]
+The \emph{identification channel} induced by observation family $\Phi$ is the mapping $C \to \pi(V)$ for a random entity $V$ drawn from distribution $P_V$ over $\mathcal{V}$. The channel output is the attribute profile; the channel input is implicitly the class $C(V)$.
+\end{definition}
+
+\begin{theorem}[Identification capacity]\label{thm:identification-capacity}
+Let $\mathcal{C} = \{1, \ldots, k\}$ be the class space. The \emph{zero-error identification capacity} of the observation channel is:
+\[
+C_{\text{id}} = \begin{cases}
+\log_2 k & \text{if } \pi \text{ is injective on classes} \\
+0 & \text{otherwise}
+\end{cases}
+\]
+That is, zero-error identification of all $k$ classes is achievable if and only if every class has a distinct attribute profile. When $\pi$ is not class-injective, no rate of identification is achievable with zero error.
+\end{theorem}
+
+\begin{proof}
+\emph{Achievability}: If $\pi$ is injective on classes, then observing $\pi(v)$ determines $C(v)$ uniquely. The decoder simply inverts the class-to-profile mapping.
+
+\emph{Converse}: Suppose classes $c_1 \neq c_2$ share a profile: $\exists v_1 \in c_1, v_2 \in c_2$ with $\pi(v_1) = \pi(v_2)$. Then $I(C; \pi(V)) < H(C)$ since the channel conflates $c_1$ and $c_2$. Zero-error identification requires $I(C; \pi(V)) = H(C)$, which fails.
+\end{proof}
+
+\begin{remark}[Relation to Ahlswede-Dueck]
+In the identification paradigm of \cite{ahlswede1989identification}, the decoder asks ``is the message $m$?'' rather than ``what is the message?'' This yields double-exponential codebook sizes. Our setting is different: we require zero-error identification of the \emph{class}, not hypothesis testing. The capacity threshold---$\pi$ must be class-injective---is thus binary rather than a rate.
+\end{remark}
+
+The key insight is that tagging provides a \emph{side channel} that restores identifiability when the attribute channel fails:
+
+\begin{theorem}[Tag-restored capacity]\label{thm:tag-restored}
+A tag of length $L \geq \lceil \log_2 k \rceil$ bits restores zero-error identification capacity, regardless of whether $\pi$ is class-injective. The tag provides a noiseless side channel with capacity $L$ bits.
+\end{theorem}
+
+\begin{proof}
+A nominal tag $\tau: \mathcal{V} \to \{1, \ldots, k\}$ assigns a unique identifier to each class. Reading $\tau(v)$ determines $C(v)$ in $O(1)$ queries, independent of the attribute channel.
+\end{proof}
+
 \subsection{Witness Cost: Query Complexity for Semantic Properties}
 
 \begin{definition}[Witness procedure]

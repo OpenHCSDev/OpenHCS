@@ -15,45 +15,45 @@ Warning--empty booktitle in abadi1996theory
 Warning--empty booktitle in liskov1994behavioral
 
 Done.
-You've used 20 entries,
+You've used 24 entries,
             4087 wiz_defined-function locations,
-            940 strings with 10164 characters,
-and the built_in function-call counts, 11943 in all, are:
-= -- 946
-> -- 213
-< -- 91
-+ -- 118
-- -- 33
-* -- 501
-:= -- 1840
-add.period$ -- 41
-call.type$ -- 20
-change.case$ -- 17
-chr.to.int$ -- 219
-cite$ -- 22
-duplicate$ -- 884
-empty$ -- 1072
-format.name$ -- 41
-if$ -- 2782
+            960 strings with 10601 characters,
+and the built_in function-call counts, 15208 in all, are:
+= -- 1244
+> -- 265
+< -- 132
++ -- 151
+- -- 38
+* -- 652
+:= -- 2347
+add.period$ -- 49
+call.type$ -- 24
+change.case$ -- 21
+chr.to.int$ -- 312
+cite$ -- 26
+duplicate$ -- 1110
+empty$ -- 1290
+format.name$ -- 47
+if$ -- 3539
 int.to.chr$ -- 0
-int.to.str$ -- 20
-missing$ -- 152
-newline$ -- 83
-num.names$ -- 20
-pop$ -- 388
+int.to.str$ -- 24
+missing$ -- 181
+newline$ -- 95
+num.names$ -- 24
+pop$ -- 432
 preamble$ -- 1
 purify$ -- 0
 quote$ -- 2
-skip$ -- 956
+skip$ -- 1213
 stack$ -- 0
-substring$ -- 515
-swap$ -- 649
-text.length$ -- 18
+substring$ -- 735
+swap$ -- 857
+text.length$ -- 28
 text.prefix$ -- 0
 top$ -- 5
-type$ -- 20
+type$ -- 24
 warning$ -- 2
-while$ -- 57
-width$ -- 22
-write$ -- 193
+while$ -- 77
+width$ -- 26
+write$ -- 235
 (There were 2 warnings)

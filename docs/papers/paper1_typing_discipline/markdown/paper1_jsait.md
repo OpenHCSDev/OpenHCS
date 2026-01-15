@@ -6,21 +6,21 @@
 
 ## Abstract
 
-We study the *identification capacity* of classification systems---the ability to determine which class an entity belongs to given limited observations. An observer receives binary query responses ("does entity $v$ satisfy attribute $I$?") and must identify the entity's class. We prove fundamental limits on identification cost as a function of observation model.
+We extend classical rate-distortion theory to a discrete classification setting with three resources: *tag rate* $L$ (bits of storage per entity), *identification cost* $W$ (queries to determine class membership), and *distortion* $D$ (misidentification probability). The fundamental question is: how do these resources trade off when an observer must identify an entity's class from limited observations?
 
-**Information barrier.** When distinct classes share identical attribute profiles, no algorithm---regardless of computational power---can identify the class from attribute queries alone. This is a channel capacity result: the mutual information $I(C; \pi(V)) < H(C)$ when the attribute mapping $\pi$ is not injective on classes.
+**Information barrier (zero-error capacity).** When distinct classes share identical attribute profiles, no algorithm---regardless of computational power---can identify the class from attribute queries alone. Formally, the zero-error identification capacity is zero when the attribute mapping $\pi$ is not injective on classes. This is a channel capacity result: $I(C; \pi(V)) < H(C)$.
 
-**Rate-identification tradeoff.** We analyze the tradeoff between *tag rate* $L$ (bits per entity), *identification cost* $W$ (queries per identification), and *error rate* $D$. A nominal tag achieving $L = \lceil \log_2 k \rceil$ bits for $k$ classes yields $W = O(1)$ with $D = 0$. Without tags ($L = 0$), identification requires $W = \Omega(n)$ queries and may incur $D > 0$.
+**Rate-identification tradeoff.** We characterize the Pareto frontier of the $(L, W, D)$ tradeoff space. A nominal tag of $L = \lceil \log_2 k \rceil$ bits for $k$ classes yields $W = O(1)$ with $D = 0$. Without tags ($L = 0$), identification requires $W = \Omega(n)$ queries and may incur $D > 0$.
 
 **Converse.** Any scheme achieving $D = 0$ requires $L \geq \log_2 k$ bits. This is tight: nominal tagging achieves the bound with $W = O(1)$.
 
-**Matroid structure.** Minimal sufficient query sets form the bases of a matroid. The *identification dimension*---common cardinality of all minimal query sets---is well-defined and computable.
+**Matroid structure.** Minimal sufficient query sets form the bases of a matroid. The *identification dimension*---common cardinality of all minimal query sets---is well-defined and computable, connecting to zero-error source coding via graph entropy.
 
-**Applications.** The theory instantiates to type systems (duck vs. nominal typing), databases (attribute vs. key lookup), and biological taxonomy (phenotype vs. species identifier). The unbounded gap $\Omega(n)$ vs. $O(1)$ explains convergence toward hybrid systems in practice.
+**Applications.** The theory instantiates to type systems (duck vs. nominal typing), databases (attribute vs. key lookup), and biological taxonomy (phenotype vs. species identifier). The unbounded gap $\Omega(n)$ vs. $O(1)$ explains convergence toward hybrid systems combining structural observation with nominal tagging.
 
 All results are machine-checked in Lean 4 (6,000+ lines, 0 `sorry`).
 
-**Keywords:** identification capacity, query complexity, rate-distortion, matroid structure, classification systems
+**Keywords:** rate-distortion theory, identification capacity, zero-error source coding, query complexity, matroid structure, classification systems
 
 
 ## The Identification Problem
@@ -151,17 +151,19 @@ This paper establishes the following results:
 
 ## Related Work and Positioning
 
-The information barrier (Theorem [\[thm:information-barrier\]](#thm:information-barrier){reference-type="ref" reference="thm:information-barrier"}) is related to results in query complexity and communication complexity, where limited observations constrain computable functions. The matroid structure connects to lattice-theoretic approaches in abstract interpretation [@cousot1977abstract].
+**Identification via channels.** Our work extends the identification paradigm introduced by Ahlswede and Dueck [@ahlswede1989identification; @ahlswede1989identification2]. In their framework, a decoder need not reconstruct a message but only answer "is the message $m$?" for a given hypothesis. This yields dramatically different capacity---double-exponential codebook sizes become achievable. Our setting differs in three ways: (1) we consider zero-error identification rather than vanishing error, (2) queries are adaptive rather than block codes, and (3) we allow auxiliary tagging (rate $L$) to reduce query cost. The $(L, W, D)$ tradeoff generalizes Ahlswede-Dueck to a multi-dimensional operating regime.
 
-The $(L, W, D)$ analysis extends classical rate-distortion theory [@shannon1959coding; @berger1971rate] to a discrete classification setting with three dimensions: tag length $L$, witness cost $W$ (query complexity), and semantic distortion $D$ (fidelity).
+**Rate-distortion theory.** The $(L, W, D)$ framework connects to Shannon's rate-distortion theory [@shannon1959coding; @berger1971rate] with an important twist: the "distortion" $D$ is semantic (class misidentification), and there is a second resource $W$ (query cost) alongside rate $L$. Classical rate-distortion asks: what is the minimum rate to achieve distortion $D$? We ask: given rate $L$, what is the minimum query cost $W$ to achieve distortion $D = 0$? The Pareto frontier (Theorem [\[thm:lwd-optimal\]](#thm:lwd-optimal){reference-type="ref" reference="thm:lwd-optimal"}) characterizes this three-dimensional tradeoff. Recent work on rate-distortion-perception tradeoffs [@blau2019rethinking] similarly extends classical RD theory to multiple objectives; our query-cost dimension $W$ plays an analogous role to their perception constraint.
 
-**Historical context.** In programming language theory, the relationship between "duck typing" (attribute-only observation) and nominal typing has been discussed since Smalltalk (1980) and formalized in work on structural vs. nominal subtyping [@Cardelli1985]. Proponents of structural typing argue that if two entities "walk like a duck and quack like a duck," they should be treated identically. Proponents of nominal typing argue that provenance matters.
+**Zero-error information theory.** The matroid structure (Section [\[sec:matroid\]](#sec:matroid){reference-type="ref" reference="sec:matroid"}) connects to zero-error capacity and graph entropy. Körner [@korner1973coding] and Witsenhausen [@witsenhausen1976zero] studied zero-error source coding where confusable symbols must be distinguished. Our distinguishing dimension (Definition [\[def:distinguishing-dimension\]](#def:distinguishing-dimension){reference-type="ref" reference="def:distinguishing-dimension"}) is the minimum number of binary queries to separate all classes---precisely the zero-error identification cost when $L = 0$.
 
-Within our observation model, we prove a quantitative separation: duck typing incurs $\Omega(n)$ witness cost where nominal tagging achieves $O(1)$. This is a machine-checked theorem (Lean 4, 0 `sorry`). The result does not "resolve" the debate---which involves usability, expressiveness, and tooling concerns beyond this model---but it does establish that the tradeoff has a precise information-theoretic component.
+**Query complexity and communication complexity.** The $\Omega(n)$ lower bound for interface-only identification relates to decision tree complexity [@buhrman2002complexity] and interactive communication [@orlitsky1991worst]. The key distinction is that our queries are constrained to a fixed attribute family $\mathcal{I}$, not arbitrary predicates. This constraint models practical systems where the observer's interface to entities is architecturally fixed.
 
-**Practical implications.** Programming languages have independently converged on hybrid classification: Python added Abstract Base Classes (PEP 3119), TypeScript introduced branded types, Rust's trait system combines structural interfaces with nominal identity. This convergence is consistent with the information-theoretic analysis: nominal tags provide $O(1)$ identification at the cost of $O(\log k)$ bits of storage. The same tradeoff appears in database schema design (primary keys), biological taxonomy (species identifiers), and knowledge representation (entity URIs).
+**Compression in classification systems.** Our framework instantiates to type systems, where the compression question becomes: how many bits must be stored per object to enable $O(1)$ type identification? The answer---$\lceil \log_2 k \rceil$ bits for $k$ classes---matches the converse bound (Theorem [\[thm:converse\]](#thm:converse){reference-type="ref" reference="thm:converse"}). This provides an information-theoretic foundation for the nominal-vs-structural typing debate in programming language theory [@Cardelli1985; @cook1990inheritance].
 
-The contribution is not advocacy for a particular language feature, but a formal framework for analyzing the identification-cost tradeoff in any classification system.
+**Historical context.** The "duck typing" philosophy ("if it walks like a duck and quacks like a duck, it's a duck") advocates structural observation over nominal tagging. Within our model, we prove this incurs $\Omega(n)$ witness cost where tagging achieves $O(1)$. The result does not "resolve" the broader debate---which involves usability and tooling concerns beyond this model---but establishes that the tradeoff has a precise information-theoretic component.
+
+**Practical convergence.** Modern systems have converged on hybrid classification: Python's Abstract Base Classes, TypeScript's branded types, Rust's trait system, DNA barcoding in taxonomy [@DNABarcoding]. This convergence is consistent with the rate-query tradeoff: nominal tags provide $O(1)$ identification at cost $O(\log k)$ bits. The contribution is not advocacy for any design, but a formal framework for analyzing identification cost in classification systems.
 
 ## Paper Organization
 
@@ -239,6 +241,41 @@ The relation $\sim$ partitions $\mathcal{V}$ into equivalence classes. Let $\mat
 
 ::: corollary
 The information lost by interface-only observation is: $$H(\mathcal{V}) - H(\mathcal{V}/{\sim}) = H(\mathcal{V} | \pi)$$ where $H$ denotes entropy. This quantity is positive whenever multiple types share the same interface profile.
+:::
+
+## Identification Capacity {#sec:identification-capacity}
+
+We now formalize the identification problem in channel-theoretic terms. Let $C: \mathcal{V} \to \{1, \ldots, k\}$ denote the class assignment function, and let $\pi: \mathcal{V} \to \{0,1\}^n$ denote the attribute profile.
+
+::: definition
+The *identification channel* induced by observation family $\Phi$ is the mapping $C \to \pi(V)$ for a random entity $V$ drawn from distribution $P_V$ over $\mathcal{V}$. The channel output is the attribute profile; the channel input is implicitly the class $C(V)$.
+:::
+
+::: theorem
+[]{#thm:identification-capacity label="thm:identification-capacity"} Let $\mathcal{C} = \{1, \ldots, k\}$ be the class space. The *zero-error identification capacity* of the observation channel is: $$C_{\text{id}} = \begin{cases}
+\log_2 k & \text{if } \pi \text{ is injective on classes} \\
+0 & \text{otherwise}
+\end{cases}$$ That is, zero-error identification of all $k$ classes is achievable if and only if every class has a distinct attribute profile. When $\pi$ is not class-injective, no rate of identification is achievable with zero error.
+:::
+
+::: proof
+*Proof.* *Achievability*: If $\pi$ is injective on classes, then observing $\pi(v)$ determines $C(v)$ uniquely. The decoder simply inverts the class-to-profile mapping.
+
+*Converse*: Suppose classes $c_1 \neq c_2$ share a profile: $\exists v_1 \in c_1, v_2 \in c_2$ with $\pi(v_1) = \pi(v_2)$. Then $I(C; \pi(V)) < H(C)$ since the channel conflates $c_1$ and $c_2$. Zero-error identification requires $I(C; \pi(V)) = H(C)$, which fails. ◻
+:::
+
+::: remark
+In the identification paradigm of [@ahlswede1989identification], the decoder asks "is the message $m$?" rather than "what is the message?" This yields double-exponential codebook sizes. Our setting is different: we require zero-error identification of the *class*, not hypothesis testing. The capacity threshold---$\pi$ must be class-injective---is thus binary rather than a rate.
+:::
+
+The key insight is that tagging provides a *side channel* that restores identifiability when the attribute channel fails:
+
+::: theorem
+[]{#thm:tag-restored label="thm:tag-restored"} A tag of length $L \geq \lceil \log_2 k \rceil$ bits restores zero-error identification capacity, regardless of whether $\pi$ is class-injective. The tag provides a noiseless side channel with capacity $L$ bits.
+:::
+
+::: proof
+*Proof.* A nominal tag $\tau: \mathcal{V} \to \{1, \ldots, k\}$ assigns a unique identifier to each class. Reading $\tau(v)$ determines $C(v)$ in $O(1)$ queries, independent of the attribute channel. ◻
 :::
 
 ## Witness Cost: Query Complexity for Semantic Properties
@@ -431,8 +468,12 @@ $\mathcal{B}$ is the set of bases of a matroid on ground set $E$.
 *Proof.* By the basis-exchange lemma and the standard characterization of matroid bases [@Welsh1976]. ◻
 :::
 
+::: definition
+[]{#def:distinguishing-dimension label="def:distinguishing-dimension"} The *distinguishing dimension* of a classification system is the common cardinality of all minimal distinguishing sets.
+:::
+
 ::: corollary
-All minimal distinguishing sets have equal cardinality. We call this the *distinguishing dimension* of the classification system.
+All minimal distinguishing sets have equal cardinality. Thus the distinguishing dimension (Definition [\[def:distinguishing-dimension\]](#def:distinguishing-dimension){reference-type="ref" reference="def:distinguishing-dimension"}) is well-defined.
 :::
 
 ## Implications for Witness Cost
@@ -568,7 +609,7 @@ An observer that may read a single type identifier (nominal tag) per value, in a
 :::
 
 ::: theorem
-Nominal-tag observers achieve the unique Pareto-optimal point in the $(L, W, D)$ space with $D = 0$:
+[]{#thm:lwd-optimal label="thm:lwd-optimal"} Nominal-tag observers achieve the unique Pareto-optimal point in the $(L, W, D)$ space with $D = 0$:
 
 -   **Tag length**: $L = \lceil \log_2 k \rceil$ bits for $k$ types
 

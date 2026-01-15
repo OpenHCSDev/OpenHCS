@@ -25,11 +25,10 @@
 R.~Ahlswede and G.~Dueck, ``Identification via channels,'' \emph{IEEE
   Transactions on Information Theory}, vol.~35, no.~1, pp. 15--29, 1989.
 
-\bibitem{cousot1977abstract}
-P.~Cousot and R.~Cousot, ``Abstract interpretation: A unified lattice model for
-  static analysis of programs by construction or approximation of fixpoints,''
-  in \emph{Proceedings of the 4th ACM SIGACT-SIGPLAN Symposium on Principles of
-  Programming Languages}, 1977, pp. 238--252.
+\bibitem{ahlswede1989identification2}
+------, ``Identification in the presence of feedback---a discovery of new
+  capacity formulas,'' \emph{IEEE Transactions on Information Theory}, vol.~35,
+  no.~1, pp. 30--36, 1989.
 
 \bibitem{shannon1959coding}
 C.~E. Shannon, ``Coding theorems for a discrete source with a fidelity
@@ -40,22 +39,47 @@ C.~E. Shannon, ``Coding theorems for a discrete source with a fidelity
 T.~Berger, \emph{Rate Distortion Theory: A Mathematical Basis for Data
   Compression}.\hskip 1em plus 0.5em minus 0.4em\relax Prentice-Hall, 1971.
 
-\bibitem{Cardelli1985}
-L.~Cardelli and P.~Wegner, ``On understanding types, data abstraction, and
-  polymorphism,'' \emph{ACM Computing Surveys}, vol.~17, no.~4, pp. 471--523,
-  1985.
+\bibitem{blau2019rethinking}
+Y.~Blau and T.~Michaeli, ``Rethinking lossy compression: The
+  rate-distortion-perception tradeoff,'' \emph{Proceedings of the 36th
+  International Conference on Machine Learning}, pp. 675--685, 2019.
+
+\bibitem{korner1973coding}
+J.~K{\"o}rner, ``Coding of an information source having ambiguous alphabet and
+  the entropy of graphs,'' \emph{6th Prague Conference on Information Theory},
+  pp. 411--425, 1973.
+
+\bibitem{witsenhausen1976zero}
+H.~S. Witsenhausen, ``The zero-error side information problem and chromatic
+  numbers,'' \emph{IEEE Transactions on Information Theory}, vol.~22, no.~5,
+  pp. 592--593, 1976.
 
 \bibitem{buhrman2002complexity}
 H.~Buhrman, L.~Fortnow, M.~Koucký, and B.~Loff, ``Computational complexity of
   discrete problems,'' \emph{Bulletin of the EATCS}, vol.~77, pp. 42--56, 2002.
 
-\bibitem{Welsh1976}
-D.~J.~A. Welsh, \emph{Matroid Theory}.\hskip 1em plus 0.5em minus 0.4em\relax
-  Academic Press, 1976.
+\bibitem{orlitsky1991worst}
+A.~Orlitsky, ``Worst-case interactive communication i: Two messages are almost
+  optimal,'' \emph{IEEE Transactions on Information Theory}, vol.~37, no.~4,
+  pp. 994--1009, 1991.
+
+\bibitem{Cardelli1985}
+L.~Cardelli and P.~Wegner, ``On understanding types, data abstraction, and
+  polymorphism,'' \emph{ACM Computing Surveys}, vol.~17, no.~4, pp. 471--523,
+  1985.
+
+\bibitem{cook1990inheritance}
+W.~R. Cook, W.~Hill, and P.~S. Canning, ``Inheritance is not subtyping,'' in
+  \emph{Proceedings of the 17th ACM SIGPLAN-SIGACT Symposium on Principles of
+  Programming Languages}, 1990, pp. 125--135.
 
 \bibitem{DNABarcoding}
 P.~D.~N. Hebert, A.~Cywinska, S.~L. Ball, and J.~R. deWaard, ``Biological
   identifications through dna barcodes,'' pp. 313--321, 2003.
+
+\bibitem{Welsh1976}
+D.~J.~A. Welsh, \emph{Matroid Theory}.\hskip 1em plus 0.5em minus 0.4em\relax
+  Academic Press, 1976.
 
 \bibitem{ISBN}
 {International ISBN Agency}, \emph{ISBN Users' Manual}, 7th~ed.\hskip 1em plus
@@ -91,11 +115,6 @@ R.~Foundation, ``Rust std::any::type\_id,''
 \bibitem{RustTraitObjects}
 ------, ``The rust reference: Trait objects,''
   \url{https://doc.rust-lang.org/reference/types/trait-object.html}, 2024.
-
-\bibitem{cook1990inheritance}
-W.~R. Cook, W.~Hill, and P.~S. Canning, ``Inheritance is not subtyping,'' in
-  \emph{Proceedings of the 17th ACM SIGPLAN-SIGACT Symposium on Principles of
-  Programming Languages}, 1990, pp. 125--135.
 
 \bibitem{abadi1996theory}
 M.~Abadi and L.~Cardelli, ``A theory of objects.''\hskip 1em plus 0.5em minus
