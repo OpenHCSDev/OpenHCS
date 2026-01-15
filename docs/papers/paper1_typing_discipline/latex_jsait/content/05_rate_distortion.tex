@@ -25,7 +25,7 @@ Structural typing achieves:
 Duck typing achieves:
 \begin{itemize}
 \item \textbf{Tag length}: $L = 0$ (no explicit tag)
-\item \textbf{Witness cost}: $W = O(n)$ primitive queries (shape queries only)
+\item \textbf{Witness cost}: $W = O(n)$ primitive queries (interface observations only)
 \item \textbf{Distortion}: $D = 1$ (type equality does not imply behavior equivalence)
 \end{itemize}
 \end{theorem}
@@ -34,9 +34,9 @@ Duck typing achieves:
 See Lean formalization: \texttt{proofs/python\_instantiation.lean}. The proof verifies:
 \begin{enumerate}
 \item \texttt{nominal\_cost\_constant}: Nominal achieves $(L, W, D) = (O(1), O(1), 0)$
-\item \texttt{duck\_cost\_linear}: Duck typing requires $O(n)$ shape queries
+\item \texttt{duck\_cost\_linear}: Duck typing requires $O(n)$ interface observations
 \item \texttt{python\_gap\_unbounded}: The cost gap is unbounded in the limit
-\item Shape queries alone (\texttt{hasattr}) cannot distinguish provenance; nominal queries (\texttt{isinstance}) can
+\item Interface observations alone (\texttt{hasattr}) cannot distinguish provenance; nominal queries (\texttt{isinstance}) can
 \end{enumerate}
 \end{proof}
 

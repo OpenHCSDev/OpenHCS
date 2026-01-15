@@ -9,21 +9,33 @@ A \emph{type axis} is a semantic dimension along which types can vary. Examples:
 \item \textbf{Mutability}: Whether instances can be modified
 \end{itemize}
 
-A \emph{complete type system} must distinguish types along all necessary axes. A \emph{minimal complete type system} uses the fewest axes while remaining complete.
+A \emph{complete} axis set distinguishes all semantically distinct types. A \emph{minimal complete} axis set is complete with no proper complete subset.
 
-\subsection{Equicardinality Theorem}
+\subsection{Matroid Structure of Type Axes}
 
-\begin{theorem}[Equicardinality of Minimal Complete Axis Sets]
-Let $E$ be the set of all type axes. All minimal complete axis sets have equal cardinality.
+\begin{definition}[Axis bases family]
+Let $E$ be the set of all type axes. Let $\mathcal{B} \subseteq 2^E$ be the family of minimal complete axis sets.
+\end{definition}
+
+\begin{lemma}[Basis exchange]
+For any $B_1, B_2 \in \mathcal{B}$ and any $e \in B_1 \setminus B_2$, there exists $f \in B_2 \setminus B_1$ such that $(B_1 \setminus \{e\}) \cup \{f\} \in \mathcal{B}$.
+\end{lemma}
+
+\begin{proof}
+See Lean formalization: \texttt{proofs/axis\_framework.lean}, lemma \texttt{basis\_exchange}.
+\end{proof}
+
+\begin{theorem}[Matroid bases]
+$\mathcal{B}$ is the set of bases of a matroid on ground set $E$.
 \end{theorem}
 
 \begin{proof}
-See Lean formalization: \texttt{proofs/axis\_framework.lean}. The proof establishes that minimal complete sets are ``semantically orthogonal'' bases; the lemmas \texttt{semantically\_minimal\_implies\_orthogonal} and \texttt{minimal\_complete\_unique\_orthogonal} yield equicardinality.
+By the basis-exchange lemma and the standard characterization of matroid bases.
 \end{proof}
 
-\begin{remark}[Matroid structure]
-The family of minimal complete axis sets $\mathcal{B}$ satisfies the basis-exchange property: for any $B_1, B_2 \in \mathcal{B}$ and $x \in B_1 \setminus B_2$, there exists $y \in B_2 \setminus B_1$ such that $(B_1 \setminus \{x\}) \cup \{y\} \in \mathcal{B}$. This makes $\mathcal{B}$ the set of bases of a matroid on $E$. Equicardinality then follows from standard matroid theory.
-\end{remark}
+\begin{corollary}[Well-defined semantic dimension]
+All minimal complete axis sets have equal cardinality. Hence the ``semantic dimension'' of a type system is well-defined.
+\end{corollary}
 
 \subsection{Compression Optimality}
 

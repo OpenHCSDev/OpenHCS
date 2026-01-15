@@ -1,19 +1,19 @@
 \subsection{Formal Model: Observations and Equivalence}
 
-Let $\mathcal{V}$ denote the space of all program values, and let $\mathcal{Q}$ be the shape query set (Definition 1).
+Let $\mathcal{V}$ denote the space of all program values, $\mathcal{I}$ the set of interfaces, and $\Phi_{\mathcal{I}}$ the interface observation family (Definition 1).
 
-\begin{definition}[Shape equivalence]
-Values $x, y \in \mathcal{V}$ are shape-equivalent, written $x \sim y$, iff $q(x) = q(y)$ for all shape queries $q \in \mathcal{Q}$.
+\begin{definition}[Interface equivalence]
+Values $v, w \in \mathcal{V}$ are interface-equivalent, written $v \sim w$, iff $\pi(v) = \pi(w)$---i.e., they satisfy exactly the same interfaces.
 \end{definition}
 
-A shape-only procedure can only distinguish values that are not shape-equivalent. Therefore, any property computed by a shape-only procedure must be constant on $\sim$-equivalence classes.
+An interface-only procedure can only distinguish values that are not interface-equivalent. Therefore, any property computed by an interface-only procedure must be constant on $\sim$-equivalence classes.
 
 \subsection{Witness Cost}
 
 A \emph{witness} for a property $P$ is a procedure that, given access to a value, computes $P$ using primitive queries.
 
 \begin{definition}[Witness cost]
-The witness cost of property $P$ is $W(P) = \min \{ c(w) : w \text{ is a witness procedure for } P \}$, where $c(w)$ is the number of primitive queries (shape queries or nominal-tag accesses) required by $w$.
+The witness cost of property $P$ is $W(P) = \min \{ c(w) : w \text{ is a witness procedure for } P \}$, where $c(w)$ is the number of primitive queries (interface observations or nominal-tag accesses) required by $w$.
 \end{definition}
 
 \begin{remark}[Connection to algorithmic information theory]

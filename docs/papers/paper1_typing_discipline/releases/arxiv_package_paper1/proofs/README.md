@@ -1,8 +1,8 @@
-# Type Compression (JSAIT) - Lean 4 Formalization
+# Typing Discipline - Lean 4 Formalization
 
 ## Overview
 
-This directory contains the complete Lean 4 formalization for Type Compression (JSAIT).
+This directory contains the complete Lean 4 formalization for Typing Discipline.
 
 - **Lines:** 6086
 - **Theorems:** 265

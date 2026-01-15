@@ -1,25 +1,29 @@
 \subsection{Observational Constraints and Semantic Inference}
 
-Consider the following inference problem: a procedure observes a program value and must determine its semantic properties (e.g., type identity, provenance). The procedure's access is restricted to a fixed set of \emph{shape queries}---observations that depend only on the structural interface of a value, not on its identity or provenance.
+Consider the following inference problem: a procedure observes a program value and must determine its semantic properties (e.g., type identity, provenance). The procedure's access is restricted to a fixed family of \emph{interface observations}---predicates that test membership in declared interfaces.
 
-\begin{definition}[Shape query set]
-The \emph{shape query set} $\mathcal{Q}$ is the set of all predicates $q: \mathcal{V} \to \{0,1\}$ that are \emph{shape-respecting}: if two values have the same structural interface (fields, methods, signatures), then $q$ returns the same answer on both. Examples include ``has method \texttt{foo}'' or ``field \texttt{x} has type \texttt{int}.''
+\begin{definition}[Interface observation family]
+Fix a set of interfaces $\mathcal{I}$. For each $I \in \mathcal{I}$, define the interface-membership observation $q_I: \mathcal{V} \to \{0,1\}$, where $q_I(v) = 1$ iff $v$ satisfies interface $I$. Let $\Phi_{\mathcal{I}} = \{q_I : I \in \mathcal{I}\}$.
 \end{definition}
 
-\begin{definition}[Shape-only procedure]
-A shape-only procedure is any algorithm whose interaction with a value is limited to queries in $\mathcal{Q}$.
+\begin{definition}[Interface profile]
+Define $\pi: \mathcal{V} \to \{0,1\}^{\mathcal{I}}$ by $\pi(v) = (q_I(v))_{I \in \mathcal{I}}$.
 \end{definition}
 
-\begin{definition}[Shape equivalence]
-For values $x, y$, write $x \sim y$ iff $q(x) = q(y)$ for all $q \in \mathcal{Q}$.
+\begin{definition}[Interface indistinguishability]
+$v \sim w$ iff $\pi(v) = \pi(w)$.
 \end{definition}
 
-The central question is: \textbf{what semantic properties can a shape-only procedure compute?}
+\begin{definition}[Interface-only procedure]
+An interface-only procedure is any algorithm whose interaction with a value is limited to queries in $\Phi_{\mathcal{I}}$.
+\end{definition}
+
+The central question is: \textbf{what semantic properties can an interface-only procedure compute?}
 
 \subsection{The Impossibility Barrier}
 
-\begin{theorem}[Impossibility from shape-only evidence]
-Every shape-only procedure is constant on $\sim$-equivalence classes. Consequently, no shape-only procedure can compute any property that differs for some $x \sim y$.
+\begin{theorem}[Information barrier from interface-only evidence]
+Every interface-only procedure is constant on $\sim$-equivalence classes. Consequently, no interface-only procedure can compute any property that differs for some $v \sim w$.
 \end{theorem}
 
 This is an information barrier: the restriction is not computational (unbounded time/memory does not help) but informational (the evidence itself is insufficient).
@@ -29,7 +33,7 @@ This is an information barrier: the restriction is not computational (unbounded 
 In contrast, nominal tagging—storing an explicit type identifier per value—provides constant-size evidence for type identity.
 
 \begin{definition}[Witness cost]
-Let $W(P)$ denote the minimum number of primitive queries required to compute property $P$. A primitive query is either a shape query $q \in \mathcal{Q}$ or a nominal-tag access (reading the type identifier).
+Let $W(P)$ denote the minimum number of primitive queries required to compute property $P$. A primitive query is either an interface observation $q_I \in \Phi_{\mathcal{I}}$ or a nominal-tag access (reading the type identifier).
 \end{definition}
 
 \begin{theorem}[Constant witness for nominal type identity]
@@ -39,7 +43,7 @@ Nominal-tag access admits a constant-cost witness for type identity: $W(\text{ty
 \subsection{Main Contributions}
 
 \begin{enumerate}
-\item \textbf{Impossibility Theorem}: No shape-only procedure can compute properties that vary within $\sim$-equivalence classes (Theorem 1).
+\item \textbf{Impossibility Theorem}: No interface-only procedure can compute properties that vary within $\sim$-equivalence classes (Theorem 1).
 
 \item \textbf{Constant-Witness Result}: Nominal tagging achieves $W(\text{type-identity}) = O(1)$ (Theorem 2).
 
