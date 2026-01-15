@@ -2,7 +2,7 @@ OpenHCS Paper Build Log
 ========================
 
 Paper: paper5 - Credibility: Formal Verification of Architectural Claims
-Package Date: 2026-01-15T01:56:28.391493
+Package Date: 2026-01-15T03:13:44.174916
 Lean Toolchain: leanprover/lean4:v4.27.0-rc1
 
 Proof Statistics:

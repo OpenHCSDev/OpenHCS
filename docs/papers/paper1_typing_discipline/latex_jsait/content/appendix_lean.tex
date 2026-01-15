@@ -5,43 +5,29 @@ We provide machine-checked proofs of our core theorems in Lean 4. The
 complete development (6300+ lines across eleven modules, 0 \texttt{sorry}
 placeholders) is organized as follows:
 
+\begin{table*}[t]
+\centering
+\caption{Lean 4 Formalization Modules}
+\label{tab:lean-modules}
 \small
-\begin{longtable}[]{@{}
-  >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{0.1951}}
-  >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{0.1707}}
-  >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{0.4146}}
-  >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{0.2195}}@{}}
-\toprule\noalign{}
-\begin{minipage}[b]{\linewidth}\raggedright
-Module
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-Lines
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-Theorems/Lemmas
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-Purpose
-\end{minipage} \\
-\midrule\noalign{}
-\endhead
-\bottomrule\noalign{}
-\endlastfoot
-\texttt{abstract\_class\_system.lean} & 3082 & 90+ & Core formalization:
-two-axis model, dominance, complexity \\
-\texttt{axis\_framework.lean} & 1667 & 40+ & Axis parametric theory,
-matroid structure, fixed-axis incompleteness \\
-\texttt{nominal\_resolution.lean} & 556 & 21 & Resolution, capability
-exhaustiveness, adapter amortization \\
-\texttt{discipline\_migration.lean} & 142 & 11 & Discipline vs migration
-optimality separation \\
-\texttt{context\_formalization.lean} & 215 & 7 & Greenfield/retrofit
-classification, requirement detection \\
-\texttt{python\_instantiation.lean} & 247 & 12 & Python-specific
-instantiation of abstract model \\
+\begin{tabular}{@{}llll@{}}
+\toprule
+Module & Lines & Theorems & Purpose \\
+\midrule
+\texttt{abstract\_class\_system.lean} & 3082 & 90+ & Core: two-axis model, dominance \\
+\texttt{axis\_framework.lean} & 1667 & 40+ & Matroid structure \\
+\texttt{nominal\_resolution.lean} & 556 & 21 & Resolution, capabilities \\
+\texttt{discipline\_migration.lean} & 142 & 11 & Discipline vs migration \\
+\texttt{context\_formalization.lean} & 215 & 7 & Greenfield/retrofit \\
+\texttt{python\_instantiation.lean} & 247 & 12 & Python instantiation \\
 \texttt{typescript\_instantiation.lean} & 65 & 3 & TypeScript instantiation \\
 \texttt{java\_instantiation.lean} & 63 & 3 & Java instantiation \\
 \texttt{rust\_instantiation.lean} & 64 & 3 & Rust instantiation \\
+\midrule
 \textbf{Total} & \textbf{6100+} & \textbf{190+} & \\
-\end{longtable}
+\bottomrule
+\end{tabular}
+\end{table*}
 
 \begin{enumerate}
 \def\labelenumi{\arabic{enumi}.}
@@ -376,64 +362,18 @@ WHICH type provided the value, even if types have the same structure.
 
 \subsection{Verification Status}\label{verification-status}
 
-\small
-\begin{longtable}[]{@{}
-  >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep) * \real{0.4231}}
-  >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep) * \real{0.2692}}
-  >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep) * \real{0.3077}}@{}}
-\toprule\noalign{}
-\begin{minipage}[b]{\linewidth}\raggedright
-Component
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-Lines
-\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-Status
-\end{minipage} \\
-\midrule\noalign{}
-\endhead
-\bottomrule\noalign{}
-\endlastfoot
-AbstractClassSystem namespace & 475 & PASS Compiles, no warnings \\
-- Three-axis model (B, S) & 80 & PASS Definitions \\
-- Typing discipline capabilities & 100 & PASS Proved \\
-- Strict dominance (Theorem 2.18) & 60 & PASS Proved \\
-- Mixin dominance (Theorem 8.1) & 80 & PASS Proved \\
-- Axis lattice metatheorem & 90 & PASS Proved \\
-- Information-theoretic completeness & 65 & PASS Proved \\
-NominalResolution namespace & 157 & PASS Compiles, no warnings \\
-- Type definitions \& registry & 40 & PASS Proved \\
-- Normalization idempotence & 12 & PASS Proved \\
-- MRO \& scope structures & 30 & PASS Compiles \\
-- RESOLVE algorithm & 25 & PASS Compiles \\
-- Theorem 6.1 (completeness) & 25 & PASS Proved \\
-- Theorem 6.2 (uniqueness) & 25 & PASS Proved \\
-DuckTyping namespace & 127 & PASS Compiles, no warnings \\
-- InterfaceValue structure & 20 & PASS Compiles \\
-- Structural equivalence & 30 & PASS Proved (equivalence relation) \\
-- Interface-only observation axiom & 10 & PASS Definition \\
-- Corollary 6.3 (impossibility) & 40 & PASS Proved \\
-- Nominal contrast & 10 & PASS Proved \\
-MetaprogrammingGap namespace & 156 & PASS Compiles, no warnings \\
-- Declaration/Query/Hook definitions & 30 & PASS Definitions \\
-- Theorem 2.10p (Hooks Require Declarations) & 20 & PASS Proved \\
-- Interface-only (declared) observation model & 35 & PASS Definitions \\
-- Theorem 2.10q (Enumeration Requires Registration) & 30 & PASS
-Proved \\
-- Capability model \& dominance & 35 & PASS Proved \\
-- Corollary 2.10r (No Declaration No Hook) & 15 & PASS Proved \\
-CapabilityExhaustiveness namespace & 42 & PASS Compiles, no warnings \\
-- List operation/capability definitions & 20 & PASS Definitions \\
-- Theorem 3.43a (capability\_exhaustiveness) & 12 & PASS Proved \\
-- Corollary 3.43b (no\_missing\_capability) & 10 & PASS Proved \\
-AdapterAmortization namespace & 60 & PASS Compiles, no warnings \\
-- Cost model definitions & 25 & PASS Definitions \\
-- Theorem 3.43d (adapter\_amortization) & 10 & PASS Proved \\
-- Corollary 3.43e (adapter\_always\_wins) & 10 & PASS Proved \\
-- Theorem (adapter\_cost\_constant) & 8 & PASS Proved \\
-- Theorem (manual\_cost\_grows) & 10 & PASS Proved \\
-\textbf{Total} & \textbf{556} & \textbf{PASS All proofs verified, 0
-\texttt{sorry}, 0 warnings} \\
-\end{longtable}
+All proofs compile without warnings or \texttt{sorry} placeholders. The verification covers:
+
+\begin{itemize}
+\item \textbf{AbstractClassSystem} (475 lines): Two-axis model, strict dominance, axis lattice metatheorem
+\item \textbf{NominalResolution} (157 lines): Resolution algorithm, completeness (Thm.~6.1), uniqueness (Thm.~6.2)
+\item \textbf{DuckTyping} (127 lines): Structural equivalence, impossibility (Cor.~6.3)
+\item \textbf{MetaprogrammingGap} (156 lines): Declaration/query model, hook requirements
+\item \textbf{CapabilityExhaustiveness} (42 lines): Capability completeness theorems
+\item \textbf{AdapterAmortization} (60 lines): Cost model, amortization proofs
+\end{itemize}
+
+\noindent\textbf{Total:} 6,100+ lines, 190+ theorems, 0 \texttt{sorry}, 0 warnings.
 
 \subsection{What the Lean Proofs
 Guarantee}\label{what-the-lean-proofs-guarantee}

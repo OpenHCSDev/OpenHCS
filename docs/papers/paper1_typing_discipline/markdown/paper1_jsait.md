@@ -137,7 +137,7 @@ This paper establishes the following results:
 
 4.  **Matroid Structure** (Section [\[sec:matroid\]](#sec:matroid){reference-type="ref" reference="sec:matroid"}): Minimal distinguishing query sets form the bases of a matroid. All such sets have equal cardinality, establishing a well-defined "distinguishing dimension."
 
-5.  **Rate--Witness--Distortion Optimality** (Section [\[sec:rate-distortion\]](#sec:rate-distortion){reference-type="ref" reference="sec:rate-distortion"}): Nominal-tag observers achieve the unique Pareto-optimal point in the $(L, W, D)$ tradeoff space.
+5.  **$(L, W, D)$ Optimality** (Section [\[sec:lwd\]](#sec:lwd){reference-type="ref" reference="sec:lwd"}): Nominal-tag observers achieve the unique Pareto-optimal point in the $(L, W, D)$ tradeoff space (tag length, witness cost, distortion).
 
 6.  **Machine-Checked Proofs**: All results formalized in Lean 4 (6,086 lines, 265 theorems, 0 `sorry` placeholders).
 
@@ -145,9 +145,9 @@ This paper establishes the following results:
 
 The information barrier (Theorem [\[thm:information-barrier\]](#thm:information-barrier){reference-type="ref" reference="thm:information-barrier"}) is related to results in query complexity and communication complexity, where limited observations constrain computable functions. The matroid structure connects to lattice-theoretic approaches in abstract interpretation [@cousot1977abstract].
 
-The rate-distortion analysis extends classical rate-distortion theory [@shannon1959coding; @berger1971rate] to a discrete setting with three dimensions: tag length (analogous to rate), witness cost (query complexity), and semantic distortion (fidelity).
+The $(L, W, D)$ analysis extends classical rate-distortion theory [@shannon1959coding; @berger1971rate] to a discrete classification setting with three dimensions: tag length $L$, witness cost $W$ (query complexity), and semantic distortion $D$ (fidelity).
 
-**Historical context.** In programming language theory, the question of whether "duck typing" (attribute-only observation) is equivalent to nominal typing has been debated since Smalltalk (1980) and formalized in discussions of structural vs. nominal subtyping [@cardelli1985understanding]. Proponents argue that if two entities "walk like a duck and quack like a duck," they should be treated identically. Critics argue that provenance matters.
+**Historical context.** In programming language theory, the question of whether "duck typing" (attribute-only observation) is equivalent to nominal typing has been debated since Smalltalk (1980) and formalized in discussions of structural vs. nominal subtyping [@Cardelli1985]. Proponents argue that if two entities "walk like a duck and quack like a duck," they should be treated identically. Critics argue that provenance matters.
 
 This paper resolves the debate with an objective answer: the gap between duck typing and nominal typing is not aesthetic---it is information-theoretic and unbounded. Duck typing incurs $\Omega(n)$ witness cost where nominal tagging achieves $O(1)$.
 
@@ -157,16 +157,14 @@ The contribution is not advocacy for a particular language feature, but identifi
 
 ## Paper Organization
 
-Section [\[sec:framework\]](#sec:framework){reference-type="ref" reference="sec:framework"} formalizes the compression framework and defines the $(L, W, D)$ tradeoff. Section [\[sec:complexity\]](#sec:complexity){reference-type="ref" reference="sec:complexity"} establishes complexity bounds for error localization. Section [\[sec:matroid\]](#sec:matroid){reference-type="ref" reference="sec:matroid"} proves the matroid structure of type axes. Section [\[sec:witness\]](#sec:witness){reference-type="ref" reference="sec:witness"} analyzes witness cost in detail. Section [\[sec:rate-distortion\]](#sec:rate-distortion){reference-type="ref" reference="sec:rate-distortion"} proves Pareto optimality. Section [\[sec:applications\]](#sec:applications){reference-type="ref" reference="sec:applications"} instantiates the theory in real runtimes. Section [\[sec:conclusion\]](#sec:conclusion){reference-type="ref" reference="sec:conclusion"} concludes. Appendix [\[sec:lean\]](#sec:lean){reference-type="ref" reference="sec:lean"} describes the Lean 4 formalization.
+Section [\[sec:framework\]](#sec:framework){reference-type="ref" reference="sec:framework"} formalizes the compression framework and defines the $(L, W, D)$ tradeoff. Section [\[sec:complexity\]](#sec:complexity){reference-type="ref" reference="sec:complexity"} establishes complexity bounds for error localization. Section [\[sec:matroid\]](#sec:matroid){reference-type="ref" reference="sec:matroid"} proves the matroid structure of type axes. Section [\[sec:witness\]](#sec:witness){reference-type="ref" reference="sec:witness"} analyzes witness cost in detail. Section [\[sec:lwd\]](#sec:lwd){reference-type="ref" reference="sec:lwd"} proves Pareto optimality. Section [\[sec:applications\]](#sec:applications){reference-type="ref" reference="sec:applications"} instantiates the theory in real runtimes. Section [\[sec:conclusion\]](#sec:conclusion){reference-type="ref" reference="sec:conclusion"} concludes. Appendix [\[sec:lean\]](#sec:lean){reference-type="ref" reference="sec:lean"} describes the Lean 4 formalization.
 
-
-[]{#sec:framework label="sec:framework"}
 
 ## Semantic Compression: The Problem
 
 The fundamental problem of semantic compression is: given a value $v$ from a large space $\mathcal{V}$, how can we represent $v$ compactly while preserving the ability to answer semantic queries about $v$?
 
-Classical rate-distortion theory [@shannon1959coding] studies the tradeoff between representation size (rate) and reconstruction fidelity (distortion). We extend this framework to include a third dimension: *witness cost*---the number of queries required to compute a semantic property.
+Classical rate-distortion theory [@shannon1959coding] studies the tradeoff between representation size and reconstruction fidelity. We extend this framework to a discrete classification setting with three dimensions: *tag length* $L$ (storage cost), *witness cost* $W$ (query complexity), and *distortion* $D$ (semantic fidelity).
 
 ## Universe of Discourse
 
@@ -265,7 +263,7 @@ For any property $P$:
 3.  With nominal-tag access: $W(\text{type-identity}) = O(1)$
 :::
 
-## Rate--Witness--Distortion Tradeoff
+## The $(L, W, D)$ Tradeoff
 
 We now define the three-dimensional tradeoff space that characterizes observation strategies.
 
@@ -301,7 +299,7 @@ A point $(L, W, D)$ is *achievable* if there exists an observation strategy real
 A point $(L^*, W^*, D^*)$ is *Pareto-optimal* if there is no achievable $(L, W, D)$ with $L \leq L^*$, $W \leq W^*$, $D \leq D^*$, and at least one strict inequality.
 :::
 
-The main result of Section [\[sec:rate-distortion\]](#sec:rate-distortion){reference-type="ref" reference="sec:rate-distortion"} is that nominal-tag observation achieves the unique Pareto-optimal point with $D = 0$.
+The main result of Section [\[sec:lwd\]](#sec:lwd){reference-type="ref" reference="sec:lwd"} is that nominal-tag observation achieves the unique Pareto-optimal point with $D = 0$.
 
 
 ## Query Families and Distinguishing Sets
@@ -645,18 +643,20 @@ This work was developed with AI assistance (Claude, Anthropic). The AI contribut
 
 We provide machine-checked proofs of our core theorems in Lean 4. The complete development (6300+ lines across eleven modules, 0 `sorry` placeholders) is organized as follows:
 
-  Module                            Lines       Theorems/Lemmas   Purpose
-  --------------------------------- ----------- ----------------- ----------------------------------------------------------------------
-  `abstract_class_system.lean`                  \+                Core formalization: two-axis model, dominance, complexity
-  `axis_framework.lean`                         \+                Axis parametric theory, matroid structure, fixed-axis incompleteness
-  `nominal_resolution.lean`                                       Resolution, capability exhaustiveness, adapter amortization
-  `discipline_migration.lean`                                     Discipline vs migration optimality separation
-  `context_formalization.lean`                                    Greenfield/retrofit classification, requirement detection
-  `python_instantiation.lean`                                     Python-specific instantiation of abstract model
-  `typescript_instantiation.lean`                                 TypeScript instantiation
-  `java_instantiation.lean`                                       Java instantiation
-  `rust_instantiation.lean`                                       Rust instantiation
-  **Total**                         **6100+**   **190+**          
+::: table*
+  Module                            Lines       Theorems   Purpose
+  --------------------------------- ----------- ---------- ---------------------------------
+  `abstract_class_system.lean`      3082        90+        Core: two-axis model, dominance
+  `axis_framework.lean`             1667        40+        Matroid structure
+  `nominal_resolution.lean`         556         21         Resolution, capabilities
+  `discipline_migration.lean`       142         11         Discipline vs migration
+  `context_formalization.lean`      215         7          Greenfield/retrofit
+  `python_instantiation.lean`       247         12         Python instantiation
+  `typescript_instantiation.lean`   65          3          TypeScript instantiation
+  `java_instantiation.lean`         63          3          Java instantiation
+  `rust_instantiation.lean`         64          3          Rust instantiation
+  **Total**                         **6100+**   **190+**   
+:::
 
 1.  **Language-agnostic layer** (Section 6.12): The two-axis model $(B, S)$, axis lattice metatheorem, and strict dominance: proving nominal-tag observation dominates interface-only observation in **any** class system with explicit inheritance. These proofs require no Python-specific axioms.
 
@@ -916,46 +916,21 @@ Therefore, `ResolveResult.sourceType` is meaningful: it tells you WHICH type pro
 
 ## Verification Status
 
-  Component                                              Lines     Status
-  ------------------------------------------------------ --------- -----------------------------------------------------
-  AbstractClassSystem namespace                                    PASS Compiles, no warnings
-  \- Three-axis model (B, S)                                       PASS Definitions
-  \- Typing discipline capabilities                                PASS Proved
-  \- Strict dominance (Theorem 2.18)                               PASS Proved
-  \- Mixin dominance (Theorem 8.1)                                 PASS Proved
-  \- Axis lattice metatheorem                                      PASS Proved
-  \- Information-theoretic completeness                            PASS Proved
-  NominalResolution namespace                                      PASS Compiles, no warnings
-  \- Type definitions & registry                                   PASS Proved
-  \- Normalization idempotence                                     PASS Proved
-  \- MRO & scope structures                                        PASS Compiles
-  \- RESOLVE algorithm                                             PASS Compiles
-  \- Theorem 6.1 (completeness)                                    PASS Proved
-  \- Theorem 6.2 (uniqueness)                                      PASS Proved
-  DuckTyping namespace                                             PASS Compiles, no warnings
-  \- InterfaceValue structure                                      PASS Compiles
-  \- Structural equivalence                                        PASS Proved (equivalence relation)
-  \- Interface-only observation axiom                              PASS Definition
-  \- Corollary 6.3 (impossibility)                                 PASS Proved
-  \- Nominal contrast                                              PASS Proved
-  MetaprogrammingGap namespace                                     PASS Compiles, no warnings
-  \- Declaration/Query/Hook definitions                            PASS Definitions
-  \- Theorem 2.10p (Hooks Require Declarations)                    PASS Proved
-  \- Interface-only (declared) observation model                   PASS Definitions
-  \- Theorem 2.10q (Enumeration Requires Registration)             PASS Proved
-  \- Capability model & dominance                                  PASS Proved
-  \- Corollary 2.10r (No Declaration No Hook)                      PASS Proved
-  CapabilityExhaustiveness namespace                               PASS Compiles, no warnings
-  \- List operation/capability definitions                         PASS Definitions
-  \- Theorem 3.43a (capability_exhaustiveness)                     PASS Proved
-  \- Corollary 3.43b (no_missing_capability)                       PASS Proved
-  AdapterAmortization namespace                                    PASS Compiles, no warnings
-  \- Cost model definitions                                        PASS Definitions
-  \- Theorem 3.43d (adapter_amortization)                          PASS Proved
-  \- Corollary 3.43e (adapter_always_wins)                         PASS Proved
-  \- Theorem (adapter_cost_constant)                               PASS Proved
-  \- Theorem (manual_cost_grows)                                   PASS Proved
-  **Total**                                              **556**   **PASS All proofs verified, 0 `sorry`, 0 warnings**
+All proofs compile without warnings or `sorry` placeholders. The verification covers:
+
+-   **AbstractClassSystem** (475 lines): Two-axis model, strict dominance, axis lattice metatheorem
+
+-   **NominalResolution** (157 lines): Resolution algorithm, completeness (Thm. 6.1), uniqueness (Thm. 6.2)
+
+-   **DuckTyping** (127 lines): Structural equivalence, impossibility (Cor. 6.3)
+
+-   **MetaprogrammingGap** (156 lines): Declaration/query model, hook requirements
+
+-   **CapabilityExhaustiveness** (42 lines): Capability completeness theorems
+
+-   **AdapterAmortization** (60 lines): Cost model, amortization proofs
+
+**Total:** 6,100+ lines, 190+ theorems, 0 `sorry`, 0 warnings.
 
 ## What the Lean Proofs Guarantee
 

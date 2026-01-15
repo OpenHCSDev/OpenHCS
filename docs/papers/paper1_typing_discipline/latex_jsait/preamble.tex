@@ -1,5 +1,5 @@
 % Shared preamble for Paper 1 JSAIT Version: Type Compression
-% Common packages and definitions
+% IEEEtran-compatible definitions
 
 % Common packages
 \usepackage{booktabs}
@@ -12,7 +12,8 @@
 \providecommand{\tightlist}{%
   \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
 
-% Theorem environments (numbered within section)
+% IEEEtran-compatible theorem environments
+% IEEEtran doesn't load amsthm by default, so we use it
 \newtheorem{theorem}{Theorem}[section]
 \newtheorem{lemma}[theorem]{Lemma}
 \newtheorem{corollary}[theorem]{Corollary}
@@ -27,7 +28,10 @@
 
 % Common commands
 \providecommand{\real}[1]{#1}
-% Use filled black square for QED symbol, inline (left-aligned) instead of right-aligned
+% Use filled black square for QED symbol
 \renewcommand{\qedsymbol}{$\blacksquare$}
 \renewcommand{\qed}{\hspace{0.5em}\qedsymbol}
+
+% IEEE-specific: ensure proper float placement
+\usepackage{stfloats}
 

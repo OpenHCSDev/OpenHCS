@@ -1,21 +1,18 @@
-\documentclass[11pt]{article}
+\documentclass[journal]{IEEEtran}
 
-% IEEE JSAIT Format
+% IEEE JSAIT Format - IEEEtran class
 \usepackage[utf8]{inputenc}
 \usepackage[T1]{fontenc}
 \usepackage{amsmath,amssymb,amsthm}
 \usepackage{graphicx}
 \usepackage{xcolor}
 \usepackage{fancyvrb}
-\usepackage{geometry}
 \usepackage{hyperref}
 \usepackage{url}
 \usepackage{cite}
 \usepackage{listings}
 \usepackage{algorithm}
 \usepackage{algpseudocode}
-
-\geometry{margin=1in}
 
 % Allow URLs to break at any character
 \makeatletter
@@ -36,15 +33,13 @@
   urlcolor=blue
 }
 
-% Title and Author
-\title{Information Barriers in Classification Systems: Matroid Structure and Witness Complexity}
+% Title
+\title{Information Barriers in Classification Systems:\\ Matroid Structure and Witness Complexity}
 
-\author{
-  Tristan Simas\\
-  McGill University\\
-  \texttt{tristan.simas@mail.mcgill.ca}
-}
-\date{January 15, 2026}
+% Author block - IEEE format
+\author{Tristan~Simas%
+\thanks{T. Simas is with McGill University, Montreal, QC, Canada (e-mail: tristan.simas@mail.mcgill.ca).}%
+\thanks{Manuscript received January 15, 2026.}}
 
 \begin{document}
 
@@ -88,7 +83,7 @@
 \input{content/07_conclusion.tex}
 
 % References
-\bibliographystyle{plain}
+\bibliographystyle{IEEEtran}
 \bibliography{references}
 
 % Appendix

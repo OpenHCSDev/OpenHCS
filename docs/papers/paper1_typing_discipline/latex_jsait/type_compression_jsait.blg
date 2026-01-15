@@ -1,51 +1,59 @@
 This is BibTeX, Version 0.99d (TeX Live 2026/dev/Arch Linux)
 Capacity: max_strings=200000, hash_size=200000, hash_prime=170003
 The top-level auxiliary file: type_compression_jsait.aux
-The style file: plain.bst
+The style file: IEEEtran.bst
+Reallocated singl_function (elt_size=8) to 100 items from 50.
+Reallocated singl_function (elt_size=8) to 100 items from 50.
+Reallocated singl_function (elt_size=8) to 100 items from 50.
+Reallocated wiz_functions (elt_size=8) to 6000 items from 3000.
+Reallocated singl_function (elt_size=8) to 100 items from 50.
 Database file #1: references.bib
-Warning--I didn't find a database entry for "cardelli1985understanding"
+-- IEEEtran.bst version 1.14 (2015/08/26) by Michael Shell.
+-- http://www.michaelshell.org/tex/ieeetran/bibtex/
+-- See the "IEEEtran_bst_HOWTO.pdf" manual for usage information.
 Warning--empty booktitle in abadi1996theory
 Warning--empty booktitle in liskov1994behavioral
-Warning--can't use both volume and number fields in liskov1994behavioral
-You've used 18 entries,
-            2118 wiz_defined-function locations,
-            603 strings with 6555 characters,
-and the built_in function-call counts, 5099 in all, are:
-= -- 495
-> -- 187
-< -- 4
-+ -- 81
-- -- 58
-* -- 256
-:= -- 824
-add.period$ -- 53
-call.type$ -- 18
-change.case$ -- 80
-chr.to.int$ -- 0
+
+Done.
+You've used 19 entries,
+            4087 wiz_defined-function locations,
+            933 strings with 10026 characters,
+and the built_in function-call counts, 11127 in all, are:
+= -- 872
+> -- 198
+< -- 82
++ -- 110
+- -- 31
+* -- 461
+:= -- 1712
+add.period$ -- 39
+call.type$ -- 19
+change.case$ -- 16
+chr.to.int$ -- 201
 cite$ -- 21
-duplicate$ -- 213
-empty$ -- 469
-format.name$ -- 58
-if$ -- 1106
+duplicate$ -- 826
+empty$ -- 1015
+format.name$ -- 38
+if$ -- 2593
 int.to.chr$ -- 0
-int.to.str$ -- 18
-missing$ -- 15
-newline$ -- 92
-num.names$ -- 36
-pop$ -- 133
+int.to.str$ -- 19
+missing$ -- 143
+newline$ -- 80
+num.names$ -- 19
+pop$ -- 373
 preamble$ -- 1
-purify$ -- 65
-quote$ -- 0
-skip$ -- 168
+purify$ -- 0
+quote$ -- 2
+skip$ -- 891
 stack$ -- 0
-substring$ -- 268
-swap$ -- 51
-text.length$ -- 4
+substring$ -- 472
+swap$ -- 597
+text.length$ -- 15
 text.prefix$ -- 0
-top$ -- 0
-type$ -- 64
-warning$ -- 3
-while$ -- 51
-width$ -- 20
-write$ -- 187
-(There were 4 warnings)
+top$ -- 5
+type$ -- 19
+warning$ -- 2
+while$ -- 52
+width$ -- 21
+write$ -- 182
+(There were 2 warnings)

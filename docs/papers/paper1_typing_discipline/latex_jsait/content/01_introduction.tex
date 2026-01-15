@@ -151,7 +151,7 @@ The information barrier (Theorem~\ref{thm:information-barrier}) is related to re
 
 The $(L, W, D)$ analysis extends classical rate-distortion theory \cite{shannon1959coding, berger1971rate} to a discrete classification setting with three dimensions: tag length $L$, witness cost $W$ (query complexity), and semantic distortion $D$ (fidelity).
 
-\textbf{Historical context.} In programming language theory, the question of whether ``duck typing'' (attribute-only observation) is equivalent to nominal typing has been debated since Smalltalk (1980) and formalized in discussions of structural vs.\ nominal subtyping \cite{cardelli1985understanding}. Proponents argue that if two entities ``walk like a duck and quack like a duck,'' they should be treated identically. Critics argue that provenance matters.
+\textbf{Historical context.} In programming language theory, the question of whether ``duck typing'' (attribute-only observation) is equivalent to nominal typing has been debated since Smalltalk (1980) and formalized in discussions of structural vs.\ nominal subtyping \cite{Cardelli1985}. Proponents argue that if two entities ``walk like a duck and quack like a duck,'' they should be treated identically. Critics argue that provenance matters.
 
 This paper resolves the debate with an objective answer: the gap between duck typing and nominal typing is not aesthetic---it is information-theoretic and unbounded. Duck typing incurs $\Omega(n)$ witness cost where nominal tagging achieves $O(1)$.
 
