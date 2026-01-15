@@ -16,8 +16,8 @@ from PyQt6.QtCore import Qt, pyqtSignal, QPoint
 from PyQt6.QtGui import QFont
 
 from openhcs.config_framework.object_state import ObjectStateRegistry
-from pyqt_formgen.theming import ColorScheme
-from pyqt_formgen.theming import StyleSheetGenerator
+from pyqt_reactor.theming import ColorScheme
+from pyqt_reactor.theming import StyleSheetGenerator
 
 logger = logging.getLogger(__name__)
 

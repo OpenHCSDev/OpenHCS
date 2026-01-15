@@ -5,11 +5,11 @@ Widget components for the OpenHCS PyQt6 GUI application.
 All widgets migrated from Textual TUI with full feature parity.
 """
 
-from pyqt_formgen.widgets.system_monitor import SystemMonitorWidget
+from pyqt_reactor.widgets.system_monitor import SystemMonitorWidget
 from openhcs.pyqt_gui.widgets.plate_manager import PlateManagerWidget
 from openhcs.pyqt_gui.widgets.pipeline_editor import PipelineEditorWidget
-from pyqt_formgen.widgets.function_pane import FunctionPaneWidget
-from pyqt_formgen.widgets.status_bar import StatusBarWidget
+from pyqt_reactor.widgets.function_pane import FunctionPaneWidget
+from pyqt_reactor.widgets.status_bar import StatusBarWidget
 
 __all__ = [
     "SystemMonitorWidget",

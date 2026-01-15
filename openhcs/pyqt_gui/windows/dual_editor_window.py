@@ -26,10 +26,10 @@ from openhcs.config_framework.global_config import get_current_global_config
 from openhcs.config_framework.lazy_factory import get_base_type_for_lazy
 from openhcs.ui.shared.pattern_data_manager import PatternDataManager
 
-from pyqt_formgen.theming import ColorScheme
-from pyqt_formgen.theming import StyleSheetGenerator
-from pyqt_formgen.services.scope_token_service import ScopeTokenService
-from pyqt_formgen.widgets.function_list_editor import FunctionListEditorWidget
+from pyqt_reactor.theming import ColorScheme
+from pyqt_reactor.theming import StyleSheetGenerator
+from pyqt_reactor.services.scope_token_service import ScopeTokenService
+from pyqt_reactor.widgets.function_list_editor import FunctionListEditorWidget
 from openhcs.pyqt_gui.windows.base_form_dialog import BaseFormDialog
 from openhcs.config_framework.object_state import ObjectStateRegistry
 from openhcs.introspection import UnifiedParameterAnalyzer

@@ -19,10 +19,10 @@ from PyQt6.QtGui import QFont
 from openhcs.processing.backends.lib_registry.registry_service import RegistryService
 from openhcs.processing.backends.lib_registry.unified_registry import FunctionMetadata
 from openhcs.processing.custom_functions.signals import custom_function_signals
-from pyqt_formgen.theming import ColorScheme
-from pyqt_formgen.theming import StyleSheetGenerator
-from pyqt_formgen.widgets.shared.function_table_browser import FunctionTableBrowser
-from pyqt_formgen.widgets.shared.column_filter_widget import MultiColumnFilterPanel
+from pyqt_reactor.theming import ColorScheme
+from pyqt_reactor.theming import StyleSheetGenerator
+from pyqt_reactor.widgets.shared.function_table_browser import FunctionTableBrowser
+from pyqt_reactor.widgets.shared.column_filter_widget import MultiColumnFilterPanel
 
 logger = logging.getLogger(__name__)
 

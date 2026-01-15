@@ -2,7 +2,7 @@
 ## Component: Documentation
 
 ### Objective
-Create comprehensive documentation for `pyqt-formgen` including API reference, usage examples, and architecture overview.
+Create comprehensive documentation for `pyqt-reactor` including API reference, usage examples, and architecture overview.
 
 ### Plan
 

@@ -11,8 +11,8 @@ from textual.widgets import Button
 from textual.app import ComposeResult
 
 # Import our comprehensive shared infrastructure
-from pyqt_formgen.forms import ParameterFormManagerBase
-from pyqt_formgen.forms import ParameterFormService
+from pyqt_reactor.forms import ParameterFormManagerBase
+from pyqt_reactor.forms import ParameterFormService
 from openhcs.ui.shared.parameter_form_config_factory import textual_config
 from openhcs.ui.shared.parameter_form_constants import CONSTANTS
 # Old field path detection removed - using simple field name matching
@@ -104,7 +104,7 @@ class ParameterFormManager(ParameterFormManagerBase):
             
             # Iterate through analyzed parameter structure
             # Type-safe dispatch using discriminated unions
-            from pyqt_formgen.forms import OptionalDataclassInfo, DirectDataclassInfo, GenericInfo
+            from pyqt_reactor.forms import OptionalDataclassInfo, DirectDataclassInfo, GenericInfo
 
             for param_info in self.form_structure.parameters:
                 if isinstance(param_info, OptionalDataclassInfo):
@@ -113,7 +113,7 @@ class ParameterFormManager(ParameterFormManagerBase):
                     yield from self._create_nested_dataclass_widget(param_info)
                 elif isinstance(param_info, GenericInfo):
                     # Check if it's Optional[regular] by checking the type
-                    from pyqt_formgen.forms import ParameterTypeUtils
+                    from pyqt_reactor.forms import ParameterTypeUtils
                     if ParameterTypeUtils.is_optional(param_info.type):
                         yield from self._create_optional_regular_widget(param_info)
                     else:
@@ -248,7 +248,7 @@ class ParameterFormManager(ParameterFormManagerBase):
         yield checkbox
 
         # Get inner type and create widget for it
-        from pyqt_formgen.forms import ParameterTypeUtils
+        from pyqt_reactor.forms import ParameterTypeUtils
         inner_type = ParameterTypeUtils.get_optional_inner_type(param_info.type)
 
         # Create the actual widget for the inner type
@@ -369,7 +369,7 @@ class ParameterFormManager(ParameterFormManagerBase):
             Converted value
         """
         # Delegate to shared service layer
-        from pyqt_formgen.forms import ParameterFormService
+        from pyqt_reactor.forms import ParameterFormService
         service = ParameterFormService()
         return service.convert_value_to_type(string_value, param_type, "convert_string_to_type")
 

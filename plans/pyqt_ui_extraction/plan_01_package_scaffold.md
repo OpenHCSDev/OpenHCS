@@ -2,13 +2,13 @@
 ## Component: Package Scaffold
 
 ### Objective
-Create the external package structure for `pyqt-formgen` with proper Python packaging, matching the ObjectState package structure in `external/ObjectState`.
+Create the external package structure for `pyqt-reactor` with proper Python packaging, matching the ObjectState package structure in `external/ObjectState`.
 
 ### Plan
 
 1. **Create directory structure**:
    ```
-   external/pyqt-formgen/
+   external/pyqt-reactor/
    ├── src/
    │   └── pyqt_formgen/
    │       ├── __init__.py
@@ -63,12 +63,12 @@ Create the external package structure for `pyqt-formgen` with proper Python pack
    - Link to documentation
 
 7. **Add to OpenHCS editable install**:
-   - Update openhcs pyproject.toml to include pyqt-formgen as editable dep
-   - Or document manual `pip install -e external/pyqt-formgen`
+   - Update openhcs pyproject.toml to include pyqt-reactor as editable dep
+   - Or document manual `pip install -e external/pyqt-reactor`
 
 ### Findings
 
-**Package naming**: Using `pyqt-formgen` (hyphenated) for PyPI name, `pyqt_formgen` (underscored) for import name. This matches Python packaging conventions.
+**Package naming**: Using `pyqt-reactor` (hyphenated) for PyPI name, `pyqt_formgen` (underscored) for import name. This matches Python packaging conventions.
 
 **Build system**: Using hatchling to match ObjectState. This is a modern, standards-compliant build backend.
 

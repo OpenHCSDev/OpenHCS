@@ -14,8 +14,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 
-from pyqt_formgen.theming import ColorScheme
-from pyqt_formgen.theming import StyleSheetGenerator
+from pyqt_reactor.theming import ColorScheme
+from pyqt_reactor.theming import StyleSheetGenerator
 from openhcs.pyqt_gui.windows.base_form_dialog import BaseFormDialog
 
 logger = logging.getLogger(__name__)
@@ -281,7 +281,7 @@ class PlateViewerWindow(BaseFormDialog):
     
     def _create_single_metadata_form(self, layout, metadata_instance):
         """Create a single metadata form."""
-        from pyqt_formgen.forms import ParameterFormManager, FormManagerConfig
+        from pyqt_reactor.forms import ParameterFormManager, FormManagerConfig
         from openhcs.config_framework.object_state import ObjectState
 
         # Create local ObjectState for metadata viewer
@@ -303,7 +303,7 @@ class PlateViewerWindow(BaseFormDialog):
     def _create_multi_subdirectory_forms(self, layout, subdirs_instances):
         """Create forms for multiple subdirectories."""
         from PyQt6.QtWidgets import QGroupBox
-        from pyqt_formgen.forms import ParameterFormManager, FormManagerConfig
+        from pyqt_reactor.forms import ParameterFormManager, FormManagerConfig
         from openhcs.config_framework.object_state import ObjectState
 
         for subdir_name, metadata_instance in subdirs_instances.items():

@@ -15,8 +15,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 
-from pyqt_formgen.theming import StyleSheetGenerator
-from pyqt_formgen.theming import ColorScheme
+from pyqt_reactor.theming import StyleSheetGenerator
+from pyqt_reactor.theming import ColorScheme
 
 logger = logging.getLogger(__name__)
 

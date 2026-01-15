@@ -2,11 +2,11 @@
 ## Component: Test Migration
 
 ### Objective
-Create a comprehensive test suite for `pyqt-formgen` and ensure existing OpenHCS tests continue to pass through the compatibility shims.
+Create a comprehensive test suite for `pyqt-reactor` and ensure existing OpenHCS tests continue to pass through the compatibility shims.
 
 ### Plan
 
-1. **Setup pytest-qt** in pyqt-formgen:
+1. **Setup pytest-qt** in pyqt-reactor:
    - Add `pytest-qt` to dev dependencies
    - Create `conftest.py` with QApplication fixture:
    ```python
@@ -115,7 +115,7 @@ Create a comprehensive test suite for `pyqt-formgen` and ensure existing OpenHCS
    - Document any behavioral changes
 
 10. **Add CI configuration**:
-    - Create `.github/workflows/test.yml` for pyqt-formgen
+    - Create `.github/workflows/test.yml` for pyqt-reactor
     - Run tests on Python 3.11, 3.12, 3.13
     - Include coverage reporting
 
@@ -126,8 +126,8 @@ Create a comprehensive test suite for `pyqt-formgen` and ensure existing OpenHCS
 - These will need import updates (done in plan 11)
 - May need `pytest-qt` in OpenHCS dev deps
 
-**Test isolation**: pyqt-formgen tests must be runnable independently:
-- NO openhcs imports in pyqt-formgen tests
+**Test isolation**: pyqt-reactor tests must be runnable independently:
+- NO openhcs imports in pyqt-reactor tests
 - Use simple test dataclasses defined in test files
 - Import only from: pyqt_formgen, objectstate, python_introspect, PyQt6
 

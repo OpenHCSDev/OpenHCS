@@ -71,7 +71,7 @@ dependencies = [
     "metaclass-registry @ git+https://github.com/OpenHCSDev/metaclass-registry.git",
     "arraybridge @ git+https://github.com/OpenHCSDev/arraybridge.git",
     "polystore @ git+https://github.com/OpenHCSDev/PolyStore.git",
-    "pyqt-formgen @ git+https://github.com/OpenHCSDev/pyqt-formgen.git",
+    "pyqt-reactor @ git+https://github.com/OpenHCSDev/PyQT-reactor.git",
 ]
 
 [project.optional-dependencies]

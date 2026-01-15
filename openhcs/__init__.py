@@ -33,10 +33,10 @@ _polystore_src = _repo_root / "external" / "PolyStore" / "src"
 if _polystore_src.exists() and str(_polystore_src) not in sys.path:
     sys.path.insert(0, str(_polystore_src))
 
-# Prefer local pyqt-formgen checkout when running from source
-_pyqt_formgen_src = _repo_root / "external" / "pyqt-formgen" / "src"
-if _pyqt_formgen_src.exists() and str(_pyqt_formgen_src) not in sys.path:
-    sys.path.insert(0, str(_pyqt_formgen_src))
+# Prefer local pyqt-reactor checkout when running from source
+_pyqt_reactor_src = _repo_root / "external" / "pyqt-reactor" / "src"
+if _pyqt_reactor_src.exists() and str(_pyqt_reactor_src) not in sys.path:
+    sys.path.insert(0, str(_pyqt_reactor_src))
 
 # Force UTF-8 encoding for stdout/stderr on Windows
 # This ensures emoji and Unicode characters work in console output

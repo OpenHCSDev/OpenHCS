@@ -10,8 +10,8 @@ from PyQt6.QtCore import Qt
 
 # REUSE the actual working Textual TUI help components
 from openhcs.introspection import DocstringExtractor
-from pyqt_formgen.theming import ColorScheme
-from pyqt_formgen.theming import StyleSheetGenerator
+from pyqt_reactor.theming import ColorScheme
+from pyqt_reactor.theming import StyleSheetGenerator
 
 logger = logging.getLogger(__name__)
 

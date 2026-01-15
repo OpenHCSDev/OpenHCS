@@ -2,14 +2,14 @@
 ## Master Plan: PyQt UI Framework Extraction
 
 ### Objective
-Extract a reusable, generic PyQt6 UI framework from OpenHCS into an external package (`pyqt-formgen` or similar). This framework will include ParameterFormManager and all supporting components, with ObjectState as an optional or required dependency.
+Extract a reusable, generic PyQt6 UI framework from OpenHCS into an external package (`pyqt-reactor` or similar). This framework will include ParameterFormManager and all supporting components, with ObjectState as an optional or required dependency.
 
-### Package Name: `pyqt-formgen`
+### Package Name: `pyqt-reactor`
 A React-quality reactive form generation framework for PyQt6.
 
 ### Key Design Decisions
 
-1. **ObjectState as Required Dependency**: Since ObjectState is already external and provides the state management layer that ParameterFormManager depends on, it will be a required dependency of pyqt-formgen.
+1. **ObjectState as Required Dependency**: Since ObjectState is already external and provides the state management layer that ParameterFormManager depends on, it will be a required dependency of pyqt-reactor.
 
 2. **python_introspect as Required Dependency**: The introspection layer is already external and provides parameter extraction.
 
@@ -21,7 +21,7 @@ A React-quality reactive form generation framework for PyQt6.
 
 ### Package Structure
 ```
-pyqt-formgen/
+pyqt-reactor/
 ├── src/
 │   └── pyqt_formgen/
 │       ├── __init__.py
@@ -75,7 +75,7 @@ pyqt-formgen/
 
 | Plan | Component | Description | Dependencies |
 |------|-----------|-------------|--------------|
-| 01 | Package Scaffold | Create external/pyqt-formgen with pyproject.toml | None |
+| 01 | Package Scaffold | Create external/pyqt-reactor with pyproject.toml | None |
 | 02 | Core Utilities | Extract debounce_timer, reorderable_list_widget | Plan 01 |
 | 03 | Theming Layer | Extract color_scheme, palette_manager, style_generator | Plan 01 |
 | 04 | Widget Protocols | Extract widget_protocols.py, widget_adapters.py | Plan 01 |
@@ -89,7 +89,7 @@ pyqt-formgen/
 | 12 | Test Migration | Migrate/create tests for extracted package | Plan 11 |
 | 13 | Documentation | API docs and examples | Plan 12 |
 
-### Dependencies for pyqt-formgen
+### Dependencies for pyqt-reactor
 ```toml
 [project]
 dependencies = [
@@ -103,7 +103,7 @@ dependencies = [
 1. **Clean Break**: All OpenHCS imports updated to use pyqt_formgen directly
 2. **File Deletion**: Original extracted files deleted from OpenHCS (no shims)
 3. **All Tests Pass**: Existing tests must pass after import updates
-4. **Independent Testability**: pyqt-formgen has its own test suite
+4. **Independent Testability**: pyqt-reactor has its own test suite
 5. **Documentation**: API docs with usage examples
 6. **Minimal Coupling**: Clear dependency boundaries between tiers
 

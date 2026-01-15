@@ -21,10 +21,10 @@ from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot
 from openhcs.constants.constants import Backend
 from polystore.filemanager import FileManager
 from polystore.base import storage_registry
-from pyqt_formgen.theming import ColorScheme
-from pyqt_formgen.theming import StyleSheetGenerator
-from pyqt_formgen.widgets.shared.column_filter_widget import MultiColumnFilterPanel
-from pyqt_formgen.widgets.shared.image_table_browser import ImageTableBrowser
+from pyqt_reactor.theming import ColorScheme
+from pyqt_reactor.theming import StyleSheetGenerator
+from pyqt_reactor.widgets.shared.column_filter_widget import MultiColumnFilterPanel
+from pyqt_reactor.widgets.shared.image_table_browser import ImageTableBrowser
 from openhcs.config_framework.object_state import ObjectState, ObjectStateRegistry
 from openhcs.core.config import LazyNapariStreamingConfig, LazyFijiStreamingConfig
 logger = logging.getLogger(__name__)
@@ -353,7 +353,7 @@ class ImageBrowserWidget(QWidget):
         layout.addWidget(self.napari_enable_checkbox)
 
         # Create PFM scoped to napari_config using field_prefix
-        from pyqt_formgen.forms import ParameterFormManager, FormManagerConfig
+        from pyqt_reactor.forms import ParameterFormManager, FormManagerConfig
 
         config = FormManagerConfig(
             parent=panel,
@@ -391,7 +391,7 @@ class ImageBrowserWidget(QWidget):
         layout.addWidget(self.fiji_enable_checkbox)
 
         # Create PFM scoped to fiji_config using field_prefix
-        from pyqt_formgen.forms import ParameterFormManager, FormManagerConfig
+        from pyqt_reactor.forms import ParameterFormManager, FormManagerConfig
 
         config = FormManagerConfig(
             parent=panel,

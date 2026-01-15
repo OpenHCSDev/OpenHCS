@@ -10,7 +10,7 @@ Update ALL imports throughout OpenHCS to use `pyqt_formgen` directly, then delet
    ```toml
    [project.optional-dependencies]
    gui = [
-       "pyqt-formgen>=0.1.0",
+       "pyqt-reactor>=0.1.0",
        # ... other gui deps
    ]
    ```

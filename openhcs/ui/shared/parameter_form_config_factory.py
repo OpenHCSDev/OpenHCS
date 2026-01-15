@@ -7,7 +7,7 @@ parameter form configurations with common patterns and presets.
 
 from typing import Dict, Any, Type, Optional, Set
 
-from pyqt_formgen.forms.parameter_form_base import ParameterFormConfig
+from pyqt_reactor.forms.parameter_form_base import ParameterFormConfig
 from openhcs.ui.shared.parameter_form_constants import CONSTANTS
 
 

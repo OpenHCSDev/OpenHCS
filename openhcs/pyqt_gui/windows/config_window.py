@@ -20,15 +20,15 @@ from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont
 
 # Infrastructure classes removed - functionality migrated to ParameterFormManager service layer
-from pyqt_formgen.forms import ParameterFormManager, FormManagerConfig
-from pyqt_formgen.widgets.shared.config_hierarchy_tree import ConfigHierarchyTreeHelper
-from pyqt_formgen.widgets.shared.scrollable_form_mixin import ScrollableFormMixin
-from pyqt_formgen.core.collapsible_splitter_helper import CollapsibleSplitterHelper
-from pyqt_formgen.widgets.shared.clickable_help_components import HelpButton
-from pyqt_formgen.services.parameter_ops_service import ParameterOpsService
-from pyqt_formgen.widgets.editors.simple_code_editor import SimpleCodeEditorService
-from pyqt_formgen.theming import StyleSheetGenerator
-from pyqt_formgen.theming import ColorScheme
+from pyqt_reactor.forms import ParameterFormManager, FormManagerConfig
+from pyqt_reactor.widgets.shared.config_hierarchy_tree import ConfigHierarchyTreeHelper
+from pyqt_reactor.widgets.shared.scrollable_form_mixin import ScrollableFormMixin
+from pyqt_reactor.core.collapsible_splitter_helper import CollapsibleSplitterHelper
+from pyqt_reactor.widgets.shared.clickable_help_components import HelpButton
+from pyqt_reactor.services.parameter_ops_service import ParameterOpsService
+from pyqt_reactor.widgets.editors.simple_code_editor import SimpleCodeEditorService
+from pyqt_reactor.theming import StyleSheetGenerator
+from pyqt_reactor.theming import ColorScheme
 from openhcs.pyqt_gui.windows.base_form_dialog import BaseFormDialog
 from openhcs.core.config import GlobalPipelineConfig, PipelineConfig
 from openhcs.config_framework import is_global_config_type

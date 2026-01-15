@@ -15,8 +15,8 @@ from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtCore import QUrl
 
 from openhcs.core.path_cache import PathCacheKey, get_cached_dialog_path, cache_dialog_path
-from pyqt_formgen.theming import ThemeManager
-from pyqt_formgen.theming import ColorScheme
+from pyqt_reactor.theming import ThemeManager
+from pyqt_reactor.theming import ColorScheme
 
 logger = logging.getLogger(__name__)
 

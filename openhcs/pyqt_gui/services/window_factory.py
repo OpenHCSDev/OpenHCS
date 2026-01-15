@@ -9,7 +9,7 @@ from typing import Optional, Any
 
 from PyQt6.QtWidgets import QWidget, QApplication
 
-from pyqt_formgen.protocols import WindowFactoryABC
+from pyqt_reactor.protocols import WindowFactoryABC
 from objectstate import ObjectStateRegistry
 
 logger = logging.getLogger(__name__)

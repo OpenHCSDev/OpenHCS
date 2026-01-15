@@ -22,18 +22,18 @@ from openhcs.core.steps.abstract import AbstractStep
 from openhcs.introspection import SignatureAnalyzer
 from openhcs.core.config import PipelineConfig
 from openhcs.core.path_cache import PathCacheKey
-from pyqt_formgen.forms import ParameterFormManager, FormManagerConfig
-from pyqt_formgen.widgets.shared.config_hierarchy_tree import ConfigHierarchyTreeHelper
-from pyqt_formgen.core.collapsible_splitter_helper import CollapsibleSplitterHelper
-from pyqt_formgen.widgets.shared.scrollable_form_mixin import ScrollableFormMixin
-from pyqt_formgen.services.parameter_ops_service import ParameterOpsService
-from pyqt_formgen.widgets.editors.simple_code_editor import SimpleCodeEditorService
-from pyqt_formgen.theming import ColorScheme
-from pyqt_formgen.theming import StyleSheetGenerator
+from pyqt_reactor.forms import ParameterFormManager, FormManagerConfig
+from pyqt_reactor.widgets.shared.config_hierarchy_tree import ConfigHierarchyTreeHelper
+from pyqt_reactor.core.collapsible_splitter_helper import CollapsibleSplitterHelper
+from pyqt_reactor.widgets.shared.scrollable_form_mixin import ScrollableFormMixin
+from pyqt_reactor.services.parameter_ops_service import ParameterOpsService
+from pyqt_reactor.widgets.editors.simple_code_editor import SimpleCodeEditorService
+from pyqt_reactor.theming import ColorScheme
+from pyqt_reactor.theming import StyleSheetGenerator
 from openhcs.pyqt_gui.config import PyQtGUIConfig, get_default_pyqt_gui_config
 # REMOVED: LazyDataclassFactory import - no longer needed since step editor
 # uses existing lazy dataclass instances from the step
-from pyqt_formgen.forms import ParameterTypeUtils
+from pyqt_reactor.forms import ParameterTypeUtils
 from openhcs.ui.shared.code_editor_form_updater import CodeEditorFormUpdater
 import openhcs.serialization.uneval_formatters  # noqa: F401
 from uneval import Assignment, generate_python_source
