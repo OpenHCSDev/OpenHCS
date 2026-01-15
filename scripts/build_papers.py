@@ -480,6 +480,7 @@ class PaperBuilder:
         # Phase 3: Copy artifacts
         self._copy_pdf(pdf_file, package_dir)
         self._copy_markdown(md_file, package_dir)
+        self._copy_latex_sources(paper_id, package_dir)
         self._copy_lean_proofs(paper_id, package_dir)
 
         if self.arxiv_config.include_build_log:
@@ -531,6 +532,41 @@ class PaperBuilder:
         md_dest = package_dir / md_file.name
         shutil.copy2(md_file, md_dest)
         print(f"[arxiv]   Markdown: {md_file.name}")
+
+    def _copy_latex_sources(self, paper_id: str, package_dir: Path) -> None:
+        """Copy LaTeX source files for arXiv submission.
+
+        Copies all .tex, .bib, .bbl, .cls, .sty files from the latex directory.
+        Also copies content/ subdirectory if present.
+        """
+        meta = self._get_paper_meta(paper_id)
+        paper_dir = self._get_paper_dir(paper_id)
+        latex_dir = paper_dir / meta.latex_dir
+
+        if not latex_dir.exists():
+            print(f"[arxiv]   No LaTeX directory for {paper_id}, skipping...")
+            return
+
+        # Extensions to copy
+        extensions = [".tex", ".bib", ".bbl", ".cls", ".sty"]
+        copied_count = 0
+
+        # Copy top-level LaTeX files
+        for ext in extensions:
+            for src_file in latex_dir.glob(f"*{ext}"):
+                shutil.copy2(src_file, package_dir / src_file.name)
+                copied_count += 1
+
+        # Copy content/ subdirectory if present
+        content_dir = latex_dir / "content"
+        if content_dir.exists():
+            content_dest = package_dir / "content"
+            content_dest.mkdir(parents=True, exist_ok=True)
+            for src_file in content_dir.glob("*.tex"):
+                shutil.copy2(src_file, content_dest / src_file.name)
+                copied_count += 1
+
+        print(f"[arxiv]   LaTeX sources: {copied_count} files")
 
     def _copy_lean_proofs(self, paper_id: str, package_dir: Path) -> None:
         """Copy Lean proofs for specific paper to package directory.

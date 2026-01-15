@@ -1,0 +1,52 @@
+This paper presents an information-theoretic analysis of classification under observational constraints. We prove three main results:
+
+\begin{enumerate}
+\item \textbf{Information Barrier}: Observers limited to attribute-membership queries cannot compute properties that vary within indistinguishability classes. This is universal: it applies to biological taxonomy, database systems, library classification, and programming language runtimes alike.
+
+\item \textbf{Witness Optimality}: Nominal-tag observers achieve $W(\text{identity}) = O(1)$, the minimum witness cost. The gap from attribute-only observation ($\Omega(n)$) is unbounded.
+
+\item \textbf{Matroid Structure}: Minimal distinguishing query sets form the bases of a matroid. The distinguishing dimension of a classification problem is well-defined and computable.
+\end{enumerate}
+
+\subsection{The Universal Pattern}
+
+Across domains, the same structure recurs:
+
+\begin{itemize}
+\item \textbf{Biology}: Phenotypic observation cannot distinguish cryptic species. DNA barcoding (nominal tag) resolves them in $O(1)$.
+
+\item \textbf{Databases}: Column-value queries cannot distinguish rows with identical attributes. Primary keys (nominal tag) provide $O(1)$ identity.
+
+\item \textbf{Type systems}: Interface observation cannot distinguish structurally identical types. Type tags provide $O(1)$ identity.
+\end{itemize}
+
+The information barrier is not a quirk of any particular domain; it is a mathematical necessity arising from the quotient structure induced by limited observations.
+
+\subsection{Implications}
+
+\begin{itemize}
+\item \textbf{Nominal tags are not optional} when identity queries are required. They are the unique mechanism achieving $O(1)$ witness cost with zero distortion.
+
+\item \textbf{The barrier is informational, not computational}: even with unbounded resources, attribute-only observers cannot overcome it.
+
+\item \textbf{Classification system design is constrained}: the choice of observation family determines which properties are computable.
+\end{itemize}
+
+\subsection{Future Work}
+
+\begin{enumerate}
+\item \textbf{Other classification domains}: What is the matroid structure of observation spaces in chemistry (molecular fingerprints), linguistics (phonetic features), or machine learning (feature embeddings)?
+
+\item \textbf{Witness complexity of other properties}: Beyond identity, what are the witness costs for provenance, equivalence, or subsumption?
+
+\item \textbf{Hybrid observers}: Can observer strategies that combine tags and attributes achieve better $(L, W, D)$ tradeoffs for specific query distributions?
+\end{enumerate}
+
+\subsection{Conclusion}
+
+Classification under observational constraints admits a clean information-theoretic analysis. Nominal tags are not a design preference; they are the provably optimal strategy for identity verification under the $(L, W, D)$ tradeoff. The results are universal, and all proofs are machine-verified in Lean 4.
+
+\subsection*{AI Disclosure}
+
+This work was developed with AI assistance (Claude, Anthropic). The AI contributed to exposition, code generation, and proof exploration. All mathematical claims were verified by the authors and machine-checked in Lean 4. The Lean proofs are the authoritative source; no theorem depends solely on AI-generated reasoning.
+

@@ -1,0 +1,63 @@
+\section{Core Theorems}\label{core-theorems}
+
+\subsection{The Error Localization Theorem}\label{the-error-localization-theorem}
+
+\begin{definition}[Error location count]
+Let $E(\mathcal{O})$ be the number of locations that must be inspected to find all potential violations of a constraint under observation family $\mathcal{O}$.
+\end{definition}
+
+\begin{theorem}[Nominal-tag localization]\label{thm:nominal-localization}
+$E(\text{nominal-tag}) = O(1)$.
+\end{theorem}
+
+\begin{proof}
+Under nominal-tag observation, the constraint ``$v$ must be of class $A$'' is satisfied iff $\tau(v) \in \text{subtypes}(A)$. This is determined at a single location: the definition of $\tau(v)$'s class. One location.
+\end{proof}
+
+\begin{theorem}[Declared interface localization]\label{thm:declared-localization}
+$E(\text{interface-only, declared}) = O(k)$ where $k$ = number of entity classes.
+\end{theorem}
+
+\begin{proof}
+With declared interfaces, the constraint ``$v$ must satisfy interface $I$'' requires verifying that each class implements all attributes in $I$. For $k$ classes, $O(k)$ locations.
+\end{proof}
+
+\begin{theorem}[Attribute-only localization]\label{thm:attribute-localization}
+$E(\text{attribute-only}) = \Omega(n)$ where $n$ = number of query sites.
+\end{theorem}
+
+\begin{proof}
+Under attribute-only observation, each query site independently checks ``does $v$ have attribute $a$?'' with no centralized declaration. For $n$ query sites, each must be inspected. Lower bound is $\Omega(n)$.
+\end{proof}
+
+\begin{corollary}[Strict dominance]\label{cor:strict-dominance}
+Nominal-tag observation strictly dominates attribute-only: $E(\text{nominal-tag}) = O(1) < \Omega(n) = E(\text{attribute-only})$ for all $n > 1$.
+\end{corollary}
+
+\subsection{The Information Scattering Theorem}\label{the-information-scattering-theorem}
+
+\begin{definition}[Constraint encoding locations]
+Let $I(\mathcal{O}, c)$ be the set of locations where constraint $c$ is encoded under observation family $\mathcal{O}$.
+\end{definition}
+
+\begin{theorem}[Attribute-only scattering]\label{thm:attribute-scattering}
+For attribute-only observation, $|I(\text{attribute-only}, c)| = O(n)$ where $n$ = query sites using constraint $c$.
+\end{theorem}
+
+\begin{proof}
+Each attribute query independently encodes the constraint. No shared reference exists. Constraint encodings scale with query sites.
+\end{proof}
+
+\begin{theorem}[Nominal-tag centralization]\label{thm:nominal-centralization}
+For nominal-tag observation, $|I(\text{nominal-tag}, c)| = O(1)$.
+\end{theorem}
+
+\begin{proof}
+The constraint ``must be of class $A$'' is encoded once in the definition of $A$. All tag checks reference this single definition.
+\end{proof}
+
+\begin{corollary}[Maintenance entropy]\label{cor:maintenance-entropy}
+Attribute-only observation maximizes maintenance entropy; nominal-tag observation minimizes it.
+\end{corollary}
+
+

@@ -1,0 +1,18 @@
+\begin{abstract}
+We extend classical rate-distortion theory to a discrete classification setting with three resources: \emph{tag rate} $L$ (bits of storage per entity), \emph{identification cost} $W$ (queries to determine class membership), and \emph{distortion} $D$ (misidentification probability). The fundamental question is: how do these resources trade off when an observer must identify an entity's class from limited observations?
+
+\textbf{Information barrier (zero-error capacity).} When distinct classes share identical attribute profiles, no algorithm, regardless of computational power, can identify the class from attribute queries alone. Formally, the zero-error identification capacity is zero when the attribute mapping $\pi$ is not injective on classes. This is a channel capacity result: $I(C; \pi(V)) < H(C)$.
+
+\textbf{Rate-identification tradeoff.} We characterize the Pareto frontier of the $(L, W, D)$ tradeoff space. A nominal tag of $L = \lceil \log_2 k \rceil$ bits for $k$ classes yields $W = O(1)$ with $D = 0$. Without tags ($L = 0$), identification requires $W = \Omega(n)$ queries and may incur $D > 0$.
+
+\textbf{Converse.} Any scheme achieving $D = 0$ requires $L \geq \log_2 k$ bits. This is tight: nominal tagging achieves the bound with $W = O(1)$.
+
+\textbf{Matroid structure.} Minimal sufficient query sets form the bases of a matroid. The \emph{identification dimension} (the common cardinality of all minimal query sets) is well-defined and computable, connecting to zero-error source coding via graph entropy.
+
+\textbf{Applications.} The theory instantiates to type systems (duck vs.\ nominal typing), databases (attribute vs.\ key lookup), and biological taxonomy (phenotype vs.\ species identifier). The unbounded gap $\Omega(n)$ vs.\ $O(1)$ explains convergence toward hybrid systems combining structural observation with nominal tagging.
+
+All results are machine-checked in Lean 4 (6,000+ lines, 0 \texttt{sorry}).
+
+\textbf{Keywords:} rate-distortion theory, identification capacity, zero-error source coding, query complexity, matroid structure, classification systems
+\end{abstract}
+

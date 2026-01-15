@@ -1,0 +1,268 @@
+\subsection{Semantic Compression: The Problem}
+
+The fundamental problem of \emph{semantic compression} is: given a value $v$ from a large space $\mathcal{V}$, how can we represent $v$ compactly while preserving the ability to answer semantic queries about $v$? This differs from classical source coding in that the goal is not reconstruction but \emph{identification}: determining which equivalence class $v$ belongs to.
+
+Classical rate-distortion theory \cite{shannon1959coding} studies the tradeoff between representation size and reconstruction fidelity. We extend this to a discrete classification setting with three dimensions: \emph{tag length} $L$ (bits of storage), \emph{witness cost} $W$ (queries or bits of communication required to determine class membership), and \emph{distortion} $D$ (semantic fidelity).
+
+\subsection{Universe of Discourse}
+
+\begin{definition}[Classification scheme]
+A \emph{classification scheme} is any procedure (deterministic or randomized), with arbitrary time and memory, whose only access to a value $v \in \mathcal{V}$ is via:
+\begin{enumerate}
+\item The \emph{observation family} $\Phi = \{q_I : I \in \mathcal{I}\}$, where $q_I(v) = 1$ iff $v$ satisfies attribute $I$; and optionally
+\item A \emph{nominal-tag primitive} $\tau: \mathcal{V} \to \mathcal{T}$ returning an opaque type identifier.
+\end{enumerate}
+All theorems in this paper quantify over all such schemes.
+\end{definition}
+
+This definition is intentionally broad: schemes may be adaptive, randomized, or computationally unbounded. The constraint is \emph{observational}, not computational.
+
+\begin{theorem}[Information barrier]\label{thm:info-barrier}
+For all classification schemes with access only to $\Phi$ (no nominal tag), the output is constant on $\sim_\Phi$-equivalence classes. Therefore, no such scheme can compute any property that varies within a $\sim_\Phi$-class.
+\end{theorem}
+
+\begin{proof}
+Let $v \sim_\Phi w$, meaning $q_I(v) = q_I(w)$ for all $I \in \mathcal{I}$. Any scheme's execution trace depends only on query responses. Since all queries return identical values for $v$ and $w$, the scheme cannot distinguish them. Any output must therefore be identical.
+\end{proof}
+
+\begin{proposition}[Model capture]\label{prop:model-capture}
+Any real-world classification protocol whose evidence consists solely of attribute-membership queries is representable as a scheme in the above model. Conversely, any additional capability corresponds to adding new observations to $\Phi$.
+\end{proposition}
+
+This proposition forces any objection into a precise form: to claim the theorem does not apply, one must name the additional observation capability not in $\Phi$. ``Different universe'' is not a coherent objection; it must reduce to ``I have access to oracle $X \notin \Phi$.''
+
+\subsection{The Two-Axis Model}
+
+We adopt a two-axis model of semantic structure, where each value is characterized by:
+\begin{itemize}
+\item \textbf{Lineage axis ($B$)}: The provenance chain of the value's class (which classes it derives from, in what order)\footnote{In the Lean formalization (Appendix~\ref{formalization-and-verification}), the lineage axis is denoted \texttt{Bases}, reflecting its instantiation as the inheritance chain in object-oriented languages.}
+\item \textbf{Profile axis ($S$)}: The observable interface (which attributes/methods the value provides)
+\end{itemize}
+
+\begin{definition}[Two-axis representation]
+A value $v \in \mathcal{V}$ has representation $(B(v), S(v))$ where:
+\begin{align}
+B(v) &= \text{lineage}(\text{class}(v)) \quad \text{(class derivation chain)} \\
+S(v) &= \pi(v) = (q_I(v))_{I \in \mathcal{I}} \quad \text{(interface profile)}
+\end{align}
+The lineage axis captures \emph{nominal} identity: where the class comes from. The profile axis captures \emph{structural} identity: what the value can do.
+\end{definition}
+
+\begin{theorem}[Model completeness]\label{thm:model-completeness}
+In classification systems with explicit class derivation, the pair $(B, S)$ is complete: every semantic property of a value is a function of $(B(v), S(v))$.
+\end{theorem}
+
+\begin{proof}
+Any property not determined by $(B, S)$ would require information beyond class identity and interface. In hierarchical classification systems (type systems, biological taxonomy, library classification), the class and its observable attributes jointly determine all semantically relevant properties.
+\end{proof}
+
+\subsection{Interface Equivalence and Observational Limits}
+
+Recall from Section 1 the interface equivalence relation:
+
+\begin{definition}[Interface equivalence (restated)]
+Values $v, w \in \mathcal{V}$ are interface-equivalent, written $v \sim w$, iff $\pi(v) = \pi(w)$, i.e., they satisfy exactly the same interfaces.
+\end{definition}
+
+\begin{proposition}[Equivalence class structure]
+The relation $\sim$ partitions $\mathcal{V}$ into equivalence classes. Let $\mathcal{V}/{\sim}$ denote the quotient space. An interface-only observer effectively operates on $\mathcal{V}/{\sim}$, not $\mathcal{V}$.
+\end{proposition}
+
+\begin{corollary}[Information loss quantification]
+The information lost by interface-only observation is:
+\[
+H(\mathcal{V}) - H(\mathcal{V}/{\sim}) = H(\mathcal{V} | \pi)
+\]
+where $H$ denotes entropy. This quantity is positive whenever multiple types share the same interface profile.
+\end{corollary}
+
+\subsection{Identification Capacity}\label{sec:identification-capacity}
+
+We now formalize the identification problem in channel-theoretic terms. Let $C: \mathcal{V} \to \{1, \ldots, k\}$ denote the class assignment function, and let $\pi: \mathcal{V} \to \{0,1\}^n$ denote the attribute profile.
+
+\begin{definition}[Identification channel]
+The \emph{identification channel} induced by observation family $\Phi$ is the mapping $C \to \pi(V)$ for a random entity $V$ drawn from distribution $P_V$ over $\mathcal{V}$. The channel output is the attribute profile; the channel input is implicitly the class $C(V)$.
+\end{definition}
+
+\begin{theorem}[Identification capacity]\label{thm:identification-capacity}
+Let $\mathcal{C} = \{1, \ldots, k\}$ be the class space. The \emph{zero-error identification capacity} of the observation channel is:
+\[
+C_{\text{id}} = \begin{cases}
+\log_2 k & \text{if } \pi \text{ is injective on classes} \\
+0 & \text{otherwise}
+\end{cases}
+\]
+That is, zero-error identification of all $k$ classes is achievable if and only if every class has a distinct attribute profile. When $\pi$ is not class-injective, no rate of identification is achievable with zero error.
+\end{theorem}
+
+\begin{proof}
+\emph{Achievability}: If $\pi$ is injective on classes, then observing $\pi(v)$ determines $C(v)$ uniquely. The decoder simply inverts the class-to-profile mapping.
+
+\emph{Converse}: Suppose classes $c_1 \neq c_2$ share a profile: $\exists v_1 \in c_1, v_2 \in c_2$ with $\pi(v_1) = \pi(v_2)$. Then $I(C; \pi(V)) < H(C)$ since the channel conflates $c_1$ and $c_2$. Zero-error identification requires $I(C; \pi(V)) = H(C)$, which fails.
+\end{proof}
+
+\begin{remark}[Relation to Ahlswede-Dueck]
+In the identification paradigm of \cite{ahlswede1989identification}, the decoder asks ``is the message $m$?'' rather than ``what is the message?'' This yields double-exponential codebook sizes. Our setting is different: we require zero-error identification of the \emph{class}, not hypothesis testing. The capacity threshold ($\pi$ must be class-injective) is thus binary rather than a rate.
+\end{remark}
+
+The key insight is that tagging provides a \emph{side channel} that restores identifiability when the attribute channel fails:
+
+\begin{theorem}[Tag-restored capacity]\label{thm:tag-restored}
+A tag of length $L \geq \lceil \log_2 k \rceil$ bits restores zero-error identification capacity, regardless of whether $\pi$ is class-injective. The tag provides a noiseless side channel with capacity $L$ bits.
+\end{theorem}
+
+\begin{proof}
+A nominal tag $\tau: \mathcal{V} \to \{1, \ldots, k\}$ assigns a unique identifier to each class. Reading $\tau(v)$ determines $C(v)$ in $O(1)$ queries, independent of the attribute channel.
+\end{proof}
+
+\subsection{Witness Cost: Query Complexity for Semantic Properties}
+
+\begin{definition}[Witness procedure]
+A \emph{witness procedure} for property $P: \mathcal{V} \to Y$ is an algorithm $A$ that:
+\begin{enumerate}
+\item Takes as input a value $v \in \mathcal{V}$ (via query access only)
+\item Makes queries to the primitive set $\Phi_{\mathcal{I}}^+$
+\item Outputs $P(v)$
+\end{enumerate}
+\end{definition}
+
+\begin{definition}[Witness cost]
+The \emph{witness cost} of property $P$ is:
+\[
+W(P) = \min_{A \text{ computes } P} c(A)
+\]
+where $c(A)$ is the worst-case number of primitive queries made by $A$.
+\end{definition}
+
+\begin{remark}[Relationship to query complexity]
+Witness cost is a form of query complexity \cite{buhrman2002complexity} specialized to semantic properties. Unlike Kolmogorov complexity, $W$ is computable and depends on the primitive set, not a universal machine.
+\end{remark}
+
+\begin{lemma}[Witness cost lower bounds]
+For any property $P$:
+\begin{enumerate}
+\item If $P$ is interface-computable: $W(P) \leq |\mathcal{I}|$
+\item If $P$ varies within some $\sim$-class: $W(P) = \infty$ for interface-only observers
+\item With nominal-tag access: $W(\text{type-identity}) = O(1)$
+\end{enumerate}
+\end{lemma}
+
+\subsection{The $(L, W, D)$ Tradeoff}
+
+We now define the three-dimensional tradeoff space that characterizes observation strategies, using information-theoretic units.
+
+\begin{definition}[Tag length (Rate)]
+Let $\mathcal{T}$ be the set of type identifiers (tags) with $|\mathcal{T}| = k$. The \emph{tag length} $L$ is the number of bits required to encode a type identifier:
+\[
+L \geq \log_2 k \quad \text{bits per value}
+\]
+For nominal-tag observers, $L = \lceil \log_2 k \rceil$ (optimal prefix-free encoding). For interface-only observers, $L = 0$ (no explicit tag stored). Under a distribution $P$ over types, the expected tag length is $\mathbb{E}[L] \geq H(P)$ by Shannon's source coding theorem \cite{shannon1959coding}.
+\end{definition}
+
+\begin{definition}[Witness cost (Query/Communication complexity)]
+The \emph{witness cost} $W$ is the minimum number of primitive queries (or bits of interactive communication) required for type identity checking:
+\[
+W = \min_{A \text{ decides type-identity}} c(A)
+\]
+where $c(A)$ is the worst-case query count. This is a form of query complexity \cite{buhrman2002complexity} or interactive identification cost.
+\end{definition}
+
+\begin{definition}[Behavioral equivalence]
+Let $\text{behavior}: \mathcal{V} \to \mathcal{B}$ be a function mapping each entity to its observable behavior (the set of responses to all possible operations). Two entities $v, w$ are \emph{behaviorally equivalent}, written $v \equiv w$, iff $\text{behavior}(v) = \text{behavior}(w)$.
+
+In type systems, $\text{behavior}(v)$ is the denotational semantics: the function computed by $v$. In databases, it is the set of query results. In taxonomy, it is the phenotype. The formalism is parametric in this choice.
+\end{definition}
+
+\begin{definition}[Distortion function]
+Let $d: \mathcal{V} \times \mathcal{V} \to \{0, 1\}$ be the misclassification indicator:
+\[
+d(v, \hat{v}) = \begin{cases}
+0 & \text{if } \text{type}(v) = \text{type}(\hat{v}) \Rightarrow v \equiv \hat{v} \\
+1 & \text{otherwise (semantic error)}
+\end{cases}
+\]
+That is, $d = 0$ when type equality implies behavioral equivalence (soundness), and $d = 1$ when the observer conflates behaviorally distinct entities.
+\end{definition}
+
+\begin{definition}[Expected and worst-case distortion]
+Given a distribution $P$ over values, the \emph{expected distortion} is:
+\[
+D = \mathbb{E}_{v \sim P}[d(v, \hat{v})]
+\]
+The \emph{zero-error regime} requires $D = 0$ (no semantic errors for any $v$). All theorems in this paper are proved in the zero-error regime, the strongest case where the separation is sharpest.
+\end{definition}
+
+\begin{remark}[Distortion interpretation]
+$D = 0$ means the observation strategy is \emph{sound}: type equality (as computed by the observer) implies behavioral equivalence. $D > 0$ means the strategy may conflate behaviorally distinct values with positive probability.
+\end{remark}
+
+\subsection{The $(L, W, D)$ Tradeoff Space}
+
+\textbf{Admissible schemes.} To make the Pareto-optimality claim precise, we specify the class of admissible observation strategies:
+\begin{itemize}
+\item \textbf{Deterministic or randomized}: Schemes may use randomness; $W$ is worst-case query count.
+\item \textbf{Computationally unbounded}: No time/space restrictions; the constraint is observational.
+\item \textbf{No preprocessing over type universe}: The scheme cannot precompute a global lookup table indexed by all possible types.
+\item \textbf{Tags are injective on classes}: A nominal tag $\tau(v)$ uniquely identifies the type of $v$. Variable-length or compressed tags are permitted; $L$ counts bits.
+\item \textbf{No amortization across queries}: $W$ is per-identification cost, not amortized over a sequence.
+\end{itemize}
+
+\textbf{Justification.} The ``no preprocessing'' and ``no amortization'' constraints exclude trivializations:
+\begin{itemize}
+\item \emph{Preprocessing}: With unbounded preprocessing over the type universe $\mathcal{T}$, one could build a lookup table mapping attribute profiles to types. This reduces identification to $O(1)$ table lookup, but the table has size $O(|\mathcal{T}|)$, hiding the complexity in space rather than eliminating it. The constraint models systems that cannot afford $O(|\mathcal{T}|)$ storage per observer.
+\item \emph{Amortization}: If $W$ were amortized over $n$ identifications, one could cache earlier results. This again hides complexity in state. The per-identification model captures stateless observers (typical in type checking, database queries, and biological identification).
+\end{itemize}
+Dropping these constraints changes the achievable region but not the qualitative separation: nominal tags still dominate for $D = 0$ because they provide $O(1)$ worst-case identification without requiring $O(|\mathcal{T}|)$ preprocessing.
+
+Under these rules, ``dominance'' means strict improvement on at least one of $(L, W, D)$ with no regression on others.
+
+\begin{definition}[Achievable region]
+A point $(L, W, D)$ is \emph{achievable} if there exists an admissible observation strategy realizing those values. Let $\mathcal{R} \subseteq \mathbb{R}_{\geq 0} \times \mathbb{R}_{\geq 0} \times [0,1]$ denote the achievable region.
+\end{definition}
+
+\begin{definition}[Pareto optimality]
+A point $(L^*, W^*, D^*)$ is \emph{Pareto-optimal} if there is no achievable $(L, W, D)$ with $L \leq L^*$, $W \leq W^*$, $D \leq D^*$, and at least one strict inequality.
+\end{definition}
+
+The main result of Section~\ref{sec:lwd} is that nominal-tag observation achieves the unique Pareto-optimal point with $D = 0$.
+
+\subsection{Converse: Tag Rate Lower Bound}
+
+\begin{theorem}[Converse]\label{thm:converse}
+Any scheme achieving $D = 0$ (zero-error identification) requires tag length $L \geq \log_2 k$, where $k$ is the number of distinct classes.
+\end{theorem}
+
+\begin{proof}
+Zero error requires that distinct classes map to distinct decoder outputs. With $k$ classes, at least $\log_2 k$ bits are needed to encode $k$ distinct values. Without tags ($L = 0$), the decoder sees only query responses $\pi(v) \in \{0,1\}^{|\mathcal{I}|}$. If $\pi$ is not injective on classes (i.e., $\exists$ classes $c_1 \neq c_2$ with identical profiles), zero error is impossible. The converse is tight: $L = \lceil \log_2 k \rceil$ suffices.
+\end{proof}
+
+\subsection{Rate-Distortion Tradeoff}
+
+When $D > 0$ is permitted, we obtain a classic rate-distortion tradeoff:
+
+\begin{proposition}[Lossy identification]
+For any $\epsilon \in (0, 1)$, there exist schemes with $L = 0$ (no tags) achieving $D \leq \epsilon$ with query cost $W = O(\log(1/\epsilon) \cdot d)$, where $d$ is the identification dimension. The tradeoff: smaller $D$ requires larger $W$.
+\end{proposition}
+
+The zero-error corner ($D = 0$) is special: nominal tagging is the unique Pareto optimum. Relaxing to $D > 0$ enables tag-free schemes at the cost of increased query complexity. This mirrors the classical distinction between zero-error and $\epsilon$-error capacity in channel coding.
+
+\subsection{Concrete Example}
+
+Consider a type system with $k = 1000$ classes, each characterized by a subset of $n = 50$ interface methods. Table~\ref{tab:strategies} compares the strategies.
+
+\begin{table}[t]
+\centering
+\caption{Identification strategies for 1000 classes with 50 methods.}
+\label{tab:strategies}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Strategy} & \textbf{Tag $L$} & \textbf{Witness $W$} \\
+\midrule
+Nominal (class ID) & $\lceil \log_2 1000 \rceil = 10$ bits & $O(1)$ \\
+Duck typing (query all) & $0$ & $\leq 50$ queries \\
+Adaptive duck typing & $0$ & $\geq d$ queries \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Here $d$ is the identification dimension, the size of any minimal distinguishing query set. For typical hierarchies, $d \approx 5$--$15$. The gap between 10 bits of storage vs.\ 5--50 queries per identification is the cost of forgoing nominal tagging.

@@ -1,0 +1,74 @@
+\subsection{Query Families and Distinguishing Sets}
+
+The classification problem is: given a set of queries, which subsets suffice to distinguish all entities?
+
+\begin{definition}[Query family]
+Let $\mathcal{Q}$ be the set of all primitive queries available to an observer. For a classification system with interface set $\mathcal{I}$, we have $\mathcal{Q} = \{q_I : I \in \mathcal{I}\}$ where $q_I(v) = 1$ iff $v$ satisfies interface $I$.
+\end{definition}
+
+\begin{definition}[Distinguishing set]
+A subset $S \subseteq \mathcal{Q}$ is \emph{distinguishing} if, for all values $v, w$ with $\text{type}(v) \neq \text{type}(w)$, there exists $q \in S$ such that $q(v) \neq q(w)$.
+\end{definition}
+
+\begin{definition}[Minimal distinguishing set]
+A distinguishing set $S$ is \emph{minimal} if no proper subset of $S$ is distinguishing.
+\end{definition}
+
+\subsection{Matroid Structure of Query Families}
+
+\textbf{Structural assumptions.} The matroid theorem below is \emph{unconditional} given the definitions above. It depends only on:
+\begin{enumerate}
+\item Queries are binary-valued functions $q: \mathcal{V} \to \{0, 1\}$.
+\item ``Distinguishing'' is defined by: $\exists q \in S$ such that $q(v) \neq q(w)$.
+\item ``Minimal'' means no proper subset suffices.
+\end{enumerate}
+No further assumptions on the query family, value space, or type structure are required. The proof constructs a closure operator satisfying extensivity, monotonicity, and idempotence, from which basis exchange follows (see Lean formalization).
+
+\begin{definition}[Bases family]
+Let $E = \mathcal{Q}$ be the ground set of all queries. Let $\mathcal{B} \subseteq 2^E$ be the family of minimal distinguishing sets.
+\end{definition}
+
+\begin{lemma}[Basis exchange]
+For any $B_1, B_2 \in \mathcal{B}$ and any $q \in B_1 \setminus B_2$, there exists $q' \in B_2 \setminus B_1$ such that $(B_1 \setminus \{q\}) \cup \{q'\} \in \mathcal{B}$.
+\end{lemma}
+
+\begin{proof}[Proof sketch]
+Define the closure operator $\text{cl}(X) = \{q : X\text{-equivalence implies }q\text{-equivalence}\}$. This satisfies:
+\begin{enumerate}
+\item \emph{Extensive}: $X \subseteq \text{cl}(X)$ (if $q \in X$, then $X$-equivalence trivially implies $q$-equivalence).
+\item \emph{Monotone}: $X \subseteq Y \Rightarrow \text{cl}(X) \subseteq \text{cl}(Y)$ (more queries give finer equivalence).
+\item \emph{Idempotent}: $\text{cl}(\text{cl}(X)) = \text{cl}(X)$ (closure is transitive).
+\end{enumerate}
+A closure operator satisfying these axioms plus the \emph{exchange property} (if $q \notin \text{cl}(X)$ and $q \in \text{cl}(X \cup \{q'\})$, then $q' \in \text{cl}(X \cup \{q\})$) defines a matroid. The exchange property follows from symmetry of indistinguishability: if adding $q'$ to $X$ newly determines $q$, there exist witnesses $v, w$ with $X$-equivalence, $q'$-inequivalence, and $q$-inequivalence; the same witnesses show adding $q$ newly determines $q'$.
+
+Minimal distinguishing sets are exactly the bases of this matroid. Full machine-checked proof: \texttt{proofs/abstract\_class\_system.lean}, namespace \texttt{AxisClosure}.
+\end{proof}
+
+\begin{theorem}[Matroid bases]
+$\mathcal{B}$ is the set of bases of a matroid on ground set $E$.
+\end{theorem}
+
+\begin{proof}
+By the basis-exchange lemma and the standard characterization of matroid bases \cite{Welsh1976}.
+\end{proof}
+
+\begin{definition}[Distinguishing dimension]\label{def:distinguishing-dimension}
+The \emph{distinguishing dimension} of a classification system is the common cardinality of all minimal distinguishing sets.
+\end{definition}
+
+\begin{corollary}[Well-defined distinguishing dimension]
+All minimal distinguishing sets have equal cardinality. Thus the distinguishing dimension (Definition~\ref{def:distinguishing-dimension}) is well-defined.
+\end{corollary}
+
+\subsection{Implications for Witness Cost}
+
+\begin{corollary}[Lower bound on interface-only witness cost]
+For any interface-only observer, $W(\text{type-identity}) \geq d$ where $d$ is the distinguishing dimension.
+\end{corollary}
+
+\begin{proof}
+Any witness procedure must query at least one minimal distinguishing set.
+\end{proof}
+
+The key insight: the distinguishing dimension is invariant across all minimal query strategies. The difference between nominal-tag and interface-only observers lies in \emph{witness cost}: a nominal tag achieves $W = O(1)$ by storing the identity directly, bypassing query enumeration.
+

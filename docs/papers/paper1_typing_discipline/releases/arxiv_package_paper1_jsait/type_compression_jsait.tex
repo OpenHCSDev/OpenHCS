@@ -1,0 +1,98 @@
+\documentclass[journal]{IEEEtran}
+
+% IEEE JSAIT Format - IEEEtran class
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{fancyvrb}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{cite}
+\usepackage{listings}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+
+% Allow URLs to break at any character
+\makeatletter
+\g@addto@macro{\UrlBreaks}{\UrlOrds}
+\makeatother
+
+% Prevent overfull hboxes
+\sloppy
+
+% Load preamble
+\input{preamble}
+
+% Hyperref setup
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue,
+  citecolor=blue,
+  urlcolor=blue
+}
+
+% Title
+\title{Identification Capacity and Rate-Query Tradeoffs\\ in Classification Systems}
+
+% Author block - IEEE format
+\author{Tristan~Simas%
+\thanks{T. Simas is with McGill University, Montreal, QC, Canada (e-mail: tristan.simas@mail.mcgill.ca).}%
+\thanks{Manuscript received January 15, 2026.}}
+
+\begin{document}
+
+\maketitle
+
+% Copyright notice
+\renewcommand{\thefootnote}{}
+\footnotetext{
+  \textcopyright\ 2026 Tristan Simas.
+  This work is licensed under CC BY 4.0.
+  License: \url{https://creativecommons.org/licenses/by/4.0/}
+}
+\renewcommand{\thefootnote}{\arabic{footnote}}
+
+% Include abstract
+\input{content/abstract.tex}
+
+% Main content sections
+\section{Introduction}
+\input{content/01_introduction.tex}
+
+\section{Compression Framework}\label{sec:framework}
+\input{content/02_compression_framework.tex}
+
+\section{Complexity Bounds}\label{sec:complexity}
+\input{content/04a_complexity_bounds.tex}
+
+\section{Matroid Structure}\label{sec:matroid}
+\input{content/03_matroid_structure.tex}
+
+\section{Witness Cost Analysis}\label{sec:witness}
+\input{content/04_kolmogorov_witness.tex}
+
+\section{$(L, W, D)$ Optimality}\label{sec:lwd}
+\input{content/05_rate_distortion.tex}
+
+\section{Instantiations in Real Runtimes}\label{sec:applications}
+\input{content/06_applications.tex}
+
+\section{Extensions}\label{sec:extensions}
+\input{content/06b_extensions.tex}
+
+\section{Conclusion}\label{sec:conclusion}
+\input{content/07_conclusion.tex}
+
+% References
+\bibliographystyle{IEEEtran}
+\bibliography{references}
+
+% Appendix
+\appendix
+\section{Lean 4 Formalization}\label{sec:lean}
+\input{content/appendix_lean.tex}
+
+\end{document}
+

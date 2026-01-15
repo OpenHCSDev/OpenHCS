@@ -210,7 +210,7 @@ This proposition forces any objection into a precise form: to claim the theorem 
 
 We adopt a two-axis model of semantic structure, where each value is characterized by:
 
--   **Lineage axis ($B$)**: The provenance chain of the value's class (which classes it derives from, in what order)
+-   **Lineage axis ($B$)**: The provenance chain of the value's class (which classes it derives from, in what order)[^1]
 
 -   **Profile axis ($S$)**: The observable interface (which attributes/methods the value provides)
 
@@ -412,6 +412,8 @@ Consider a type system with $k = 1000$ classes, each characterized by a subset o
 :::
 
 Here $d$ is the identification dimension, the size of any minimal distinguishing query set. For typical hierarchies, $d \approx 5$--$15$. The gap between 10 bits of storage vs. 5--50 queries per identification is the cost of forgoing nominal tagging.
+
+[^1]: In the Lean formalization (Appendix [\[formalization-and-verification\]](#formalization-and-verification){reference-type="ref" reference="formalization-and-verification"}), the lineage axis is denoted `Bases`, reflecting its instantiation as the inheritance chain in object-oriented languages.
 
 
 ## Query Families and Distinguishing Sets
@@ -844,7 +846,7 @@ This work was developed with AI assistance (Claude, Anthropic). The AI contribut
 
 # Formalization and Verification
 
-We provide machine-checked proofs of our core theorems in Lean 4. The complete development (6300+ lines across eleven modules, 0 `sorry` placeholders) is organized as follows:
+We provide machine-checked proofs of our core theorems in Lean 4. The complete development (6,100+ lines across nine modules, 0 `sorry` placeholders) is organized as follows:
 
 ::: table*
   Module                            Lines       Theorems   Purpose
