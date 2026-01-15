@@ -12,7 +12,7 @@ Classification systems---type systems, database schemas, biological taxonomies, 
 
 **Optimality.** A single additional primitive---a nominal tag identifying each entity's class---reduces witness cost from $\Omega(n)$ to $O(1)$. We prove this is Pareto-optimal in the $(L, W, D)$ tradeoff space (tag length, witness cost, semantic distortion).
 
-**Structure.** Minimal complete observation sets form the bases of a matroid. All such sets have equal cardinality; the "semantic dimension" of a classification problem is well-defined.
+**Structure.** Minimal distinguishing query sets form the bases of a matroid. All such sets have equal cardinality; the "distinguishing dimension" of a classification problem is well-defined.
 
 **Universality.** The results apply to any classification system: programming language runtimes (type identity), databases (primary keys), biological taxonomy (species identity), library classification (ISBN). Type systems are one instantiation; the theorems are general.
 
@@ -31,7 +31,7 @@ This paper proves that the choice has unavoidable information-theoretic conseque
 
 2.  **Nominal tags are optimal.** Adding a single primitive---a tag identifying each entity's class---reduces witness cost from $\Omega(n)$ to $O(1)$. This is Pareto-optimal: no observer achieves lower cost without increasing tag length or semantic distortion.
 
-3.  **Minimal observation sets have matroid structure.** All minimal complete observation sets for a domain have equal cardinality. The "semantic dimension" of a classification problem is well-defined.
+3.  **Minimal observation sets have matroid structure.** All minimal distinguishing query sets for a domain have equal cardinality. The "distinguishing dimension" of a classification problem is well-defined.
 
 The results apply universally. Programming language runtimes, database systems, biological taxonomies, and knowledge graphs all instantiate the same abstract structure. We develop the theory in full generality, then show how specific systems realize it.
 
@@ -135,7 +135,7 @@ This paper establishes the following results:
 
 3.  **Complexity Separation** (Section [\[sec:complexity\]](#sec:complexity){reference-type="ref" reference="sec:complexity"}): We establish O(1) vs O(k) vs $\Omega(n)$ complexity bounds for error localization under different observation regimes.
 
-4.  **Matroid Structure** (Section [\[sec:matroid\]](#sec:matroid){reference-type="ref" reference="sec:matroid"}): Minimal complete axis sets form the bases of a matroid. All such sets have equal cardinality, establishing a well-defined "semantic dimension."
+4.  **Matroid Structure** (Section [\[sec:matroid\]](#sec:matroid){reference-type="ref" reference="sec:matroid"}): Minimal distinguishing query sets form the bases of a matroid. All such sets have equal cardinality, establishing a well-defined "distinguishing dimension."
 
 5.  **Rate--Witness--Distortion Optimality** (Section [\[sec:rate-distortion\]](#sec:rate-distortion){reference-type="ref" reference="sec:rate-distortion"}): Nominal-tag observers achieve the unique Pareto-optimal point in the $(L, W, D)$ tradeoff space.
 
@@ -270,34 +270,34 @@ A point $(L^*, W^*, D^*)$ is *Pareto-optimal* if there is no achievable $(L, W, 
 The main result of Section [\[sec:rate-distortion\]](#sec:rate-distortion){reference-type="ref" reference="sec:rate-distortion"} is that nominal-tag observation achieves the unique Pareto-optimal point with $D = 0$.
 
 
-## Type Axes
+## Query Families and Distinguishing Sets
 
-A *type axis* is a semantic dimension along which types can vary. Examples:
-
--   **Identity**: Explicit type name or object ID
-
--   **Structure**: Field names and types
-
--   **Behavior**: Available methods and their signatures
-
--   **Scope**: Where the type is defined (module, package)
-
--   **Mutability**: Whether instances can be modified
-
-A *complete* axis set distinguishes all semantically distinct types. A *minimal complete* axis set is complete with no proper complete subset.
-
-## Matroid Structure of Type Axes
+The classification problem is: given a set of queries, which subsets suffice to distinguish all entities?
 
 ::: definition
-Let $E$ be the set of all type axes. Let $\mathcal{B} \subseteq 2^E$ be the family of minimal complete axis sets.
+Let $\mathcal{Q}$ be the set of all primitive queries available to an observer. For a classification system with interface set $\mathcal{I}$, we have $\mathcal{Q} = \{q_I : I \in \mathcal{I}\}$ where $q_I(v) = 1$ iff $v$ satisfies interface $I$.
+:::
+
+::: definition
+A subset $S \subseteq \mathcal{Q}$ is *distinguishing* if, for all values $v, w$ with $\text{type}(v) \neq \text{type}(w)$, there exists $q \in S$ such that $q(v) \neq q(w)$.
+:::
+
+::: definition
+A distinguishing set $S$ is *minimal* if no proper subset of $S$ is distinguishing.
+:::
+
+## Matroid Structure of Query Families
+
+::: definition
+Let $E = \mathcal{Q}$ be the ground set of all queries. Let $\mathcal{B} \subseteq 2^E$ be the family of minimal distinguishing sets.
 :::
 
 ::: lemma
-For any $B_1, B_2 \in \mathcal{B}$ and any $e \in B_1 \setminus B_2$, there exists $f \in B_2 \setminus B_1$ such that $(B_1 \setminus \{e\}) \cup \{f\} \in \mathcal{B}$.
+For any $B_1, B_2 \in \mathcal{B}$ and any $q \in B_1 \setminus B_2$, there exists $q' \in B_2 \setminus B_1$ such that $(B_1 \setminus \{q\}) \cup \{q'\} \in \mathcal{B}$.
 :::
 
 ::: proof
-*Proof.* See Lean formalization: `proofs/axis_framework.lean`, lemma `basis_exchange`. ◻
+*Proof.* See Lean formalization: `proofs/matroid.lean`, lemma `basis_exchange`. ◻
 :::
 
 ::: theorem
@@ -305,20 +305,24 @@ $\mathcal{B}$ is the set of bases of a matroid on ground set $E$.
 :::
 
 ::: proof
-*Proof.* By the basis-exchange lemma and the standard characterization of matroid bases. ◻
+*Proof.* By the basis-exchange lemma and the standard characterization of matroid bases [@Welsh1976]. ◻
 :::
 
 ::: corollary
-All minimal complete axis sets have equal cardinality. Hence the "semantic dimension" of a type system is well-defined.
+All minimal distinguishing sets have equal cardinality. We call this the *distinguishing dimension* of the classification system.
 :::
 
-## Compression Optimality
+## Implications for Witness Cost
 
 ::: corollary
-All minimal complete type systems achieve the same compression ratio. No type system can be strictly more efficient than another while remaining complete.
+For any interface-only observer, $W(\text{type-identity}) \geq d$ where $d$ is the distinguishing dimension.
 :::
 
-This means: all observer strategies achieve the same compression ratio when using minimal complete axis sets. The difference between nominal-tag and interface-only observers lies in *witness cost*, not compression efficiency.
+::: proof
+*Proof.* Any witness procedure must query at least one minimal distinguishing set. ◻
+:::
+
+The key insight: the distinguishing dimension is invariant across all minimal query strategies. The difference between nominal-tag and interface-only observers lies in *witness cost*: a nominal tag achieves $W = O(1)$ by storing the identity directly, bypassing query enumeration.
 
 
 ## Witness Cost for Type Identity
@@ -561,7 +565,7 @@ This paper presents an information-theoretic analysis of classification under ob
 
 2.  **Witness Optimality**: Nominal-tag observers achieve $W(\text{identity}) = O(1)$, the minimum witness cost. The gap from attribute-only observation ($\Omega(n)$) is unbounded.
 
-3.  **Matroid Structure**: Minimal complete observation sets form the bases of a matroid. The semantic dimension of a classification problem is well-defined and computable.
+3.  **Matroid Structure**: Minimal distinguishing query sets form the bases of a matroid. The distinguishing dimension of a classification problem is well-defined and computable.
 
 ## The Universal Pattern
 

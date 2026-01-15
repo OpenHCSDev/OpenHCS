@@ -1,28 +1,31 @@
-\subsection{Type Axes}
+\subsection{Query Families and Distinguishing Sets}
 
-A \emph{type axis} is a semantic dimension along which types can vary. Examples:
-\begin{itemize}
-\item \textbf{Identity}: Explicit type name or object ID
-\item \textbf{Structure}: Field names and types
-\item \textbf{Behavior}: Available methods and their signatures
-\item \textbf{Scope}: Where the type is defined (module, package)
-\item \textbf{Mutability}: Whether instances can be modified
-\end{itemize}
+The classification problem is: given a set of queries, which subsets suffice to distinguish all entities?
 
-A \emph{complete} axis set distinguishes all semantically distinct types. A \emph{minimal complete} axis set is complete with no proper complete subset.
+\begin{definition}[Query family]
+Let $\mathcal{Q}$ be the set of all primitive queries available to an observer. For a classification system with interface set $\mathcal{I}$, we have $\mathcal{Q} = \{q_I : I \in \mathcal{I}\}$ where $q_I(v) = 1$ iff $v$ satisfies interface $I$.
+\end{definition}
 
-\subsection{Matroid Structure of Type Axes}
+\begin{definition}[Distinguishing set]
+A subset $S \subseteq \mathcal{Q}$ is \emph{distinguishing} if, for all values $v, w$ with $\text{type}(v) \neq \text{type}(w)$, there exists $q \in S$ such that $q(v) \neq q(w)$.
+\end{definition}
 
-\begin{definition}[Axis bases family]
-Let $E$ be the set of all type axes. Let $\mathcal{B} \subseteq 2^E$ be the family of minimal complete axis sets.
+\begin{definition}[Minimal distinguishing set]
+A distinguishing set $S$ is \emph{minimal} if no proper subset of $S$ is distinguishing.
+\end{definition}
+
+\subsection{Matroid Structure of Query Families}
+
+\begin{definition}[Bases family]
+Let $E = \mathcal{Q}$ be the ground set of all queries. Let $\mathcal{B} \subseteq 2^E$ be the family of minimal distinguishing sets.
 \end{definition}
 
 \begin{lemma}[Basis exchange]
-For any $B_1, B_2 \in \mathcal{B}$ and any $e \in B_1 \setminus B_2$, there exists $f \in B_2 \setminus B_1$ such that $(B_1 \setminus \{e\}) \cup \{f\} \in \mathcal{B}$.
+For any $B_1, B_2 \in \mathcal{B}$ and any $q \in B_1 \setminus B_2$, there exists $q' \in B_2 \setminus B_1$ such that $(B_1 \setminus \{q\}) \cup \{q'\} \in \mathcal{B}$.
 \end{lemma}
 
 \begin{proof}
-See Lean formalization: \texttt{proofs/axis\_framework.lean}, lemma \texttt{basis\_exchange}.
+See Lean formalization: \texttt{proofs/matroid.lean}, lemma \texttt{basis\_exchange}.
 \end{proof}
 
 \begin{theorem}[Matroid bases]
@@ -30,18 +33,22 @@ $\mathcal{B}$ is the set of bases of a matroid on ground set $E$.
 \end{theorem}
 
 \begin{proof}
-By the basis-exchange lemma and the standard characterization of matroid bases.
+By the basis-exchange lemma and the standard characterization of matroid bases \cite{Welsh1976}.
 \end{proof}
 
-\begin{corollary}[Well-defined semantic dimension]
-All minimal complete axis sets have equal cardinality. Hence the ``semantic dimension'' of a type system is well-defined.
+\begin{corollary}[Well-defined distinguishing dimension]
+All minimal distinguishing sets have equal cardinality. We call this the \emph{distinguishing dimension} of the classification system.
 \end{corollary}
 
-\subsection{Compression Optimality}
+\subsection{Implications for Witness Cost}
 
-\begin{corollary}[Compression Optimality]
-All minimal complete type systems achieve the same compression ratio. No type system can be strictly more efficient than another while remaining complete.
+\begin{corollary}[Lower bound on interface-only witness cost]
+For any interface-only observer, $W(\text{type-identity}) \geq d$ where $d$ is the distinguishing dimension.
 \end{corollary}
 
-This means: all observer strategies achieve the same compression ratio when using minimal complete axis sets. The difference between nominal-tag and interface-only observers lies in \emph{witness cost}, not compression efficiency.
+\begin{proof}
+Any witness procedure must query at least one minimal distinguishing set.
+\end{proof}
+
+The key insight: the distinguishing dimension is invariant across all minimal query strategies. The difference between nominal-tag and interface-only observers lies in \emph{witness cost}: a nominal tag achieves $W = O(1)$ by storing the identity directly, bypassing query enumeration.
 

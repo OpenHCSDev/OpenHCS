@@ -6,7 +6,7 @@ This paper proves that the choice has unavoidable information-theoretic conseque
 \begin{enumerate}
 \item \textbf{Information barriers exist.} Observers limited to a fixed attribute family cannot compute properties that vary within equivalence classes induced by those attributes. This is not a computational limitation---it is an impossibility rooted in the observations themselves.
 \item \textbf{Nominal tags are optimal.} Adding a single primitive---a tag identifying each entity's class---reduces witness cost from $\Omega(n)$ to $O(1)$. This is Pareto-optimal: no observer achieves lower cost without increasing tag length or semantic distortion.
-\item \textbf{Minimal observation sets have matroid structure.} All minimal complete observation sets for a domain have equal cardinality. The ``semantic dimension'' of a classification problem is well-defined.
+\item \textbf{Minimal observation sets have matroid structure.} All minimal distinguishing query sets for a domain have equal cardinality. The ``distinguishing dimension'' of a classification problem is well-defined.
 \end{enumerate}
 
 The results apply universally. Programming language runtimes, database systems, biological taxonomies, and knowledge graphs all instantiate the same abstract structure. We develop the theory in full generality, then show how specific systems realize it.
@@ -138,7 +138,7 @@ This paper establishes the following results:
 
 \item \textbf{Complexity Separation} (Section~\ref{sec:complexity}): We establish O(1) vs O(k) vs $\Omega(n)$ complexity bounds for error localization under different observation regimes.
 
-\item \textbf{Matroid Structure} (Section~\ref{sec:matroid}): Minimal complete axis sets form the bases of a matroid. All such sets have equal cardinality, establishing a well-defined ``semantic dimension.''
+\item \textbf{Matroid Structure} (Section~\ref{sec:matroid}): Minimal distinguishing query sets form the bases of a matroid. All such sets have equal cardinality, establishing a well-defined ``distinguishing dimension.''
 
 \item \textbf{Rate--Witness--Distortion Optimality} (Section~\ref{sec:rate-distortion}): Nominal-tag observers achieve the unique Pareto-optimal point in the $(L, W, D)$ tradeoff space.
 
