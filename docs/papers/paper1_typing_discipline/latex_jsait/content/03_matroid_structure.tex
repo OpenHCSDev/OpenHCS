@@ -32,8 +32,16 @@ Let $E = \mathcal{Q}$ be the ground set of all queries. Let $\mathcal{B} \subset
 For any $B_1, B_2 \in \mathcal{B}$ and any $q \in B_1 \setminus B_2$, there exists $q' \in B_2 \setminus B_1$ such that $(B_1 \setminus \{q\}) \cup \{q'\} \in \mathcal{B}$.
 \end{lemma}
 
-\begin{proof}
-See Lean formalization: \texttt{proofs/abstract\_class\_system.lean}, namespace \texttt{AxisClosure}. The closure operator $\text{cl}(X) = \{a : X\text{-equality forces }a\text{-equality}\}$ satisfies the matroid closure axioms; basis exchange follows.
+\begin{proof}[Proof sketch]
+Define the closure operator $\text{cl}(X) = \{q : X\text{-equivalence implies }q\text{-equivalence}\}$. This satisfies:
+\begin{enumerate}
+\item \emph{Extensive}: $X \subseteq \text{cl}(X)$ (if $q \in X$, then $X$-equivalence trivially implies $q$-equivalence).
+\item \emph{Monotone}: $X \subseteq Y \Rightarrow \text{cl}(X) \subseteq \text{cl}(Y)$ (more queries give finer equivalence).
+\item \emph{Idempotent}: $\text{cl}(\text{cl}(X)) = \text{cl}(X)$ (closure is transitive).
+\end{enumerate}
+A closure operator satisfying these axioms plus the \emph{exchange property}---if $q \notin \text{cl}(X)$ and $q \in \text{cl}(X \cup \{q'\})$, then $q' \in \text{cl}(X \cup \{q\})$---defines a matroid. The exchange property follows from symmetry of indistinguishability: if adding $q'$ to $X$ newly determines $q$, there exist witnesses $v, w$ with $X$-equivalence, $q'$-inequivalence, and $q$-inequivalence; the same witnesses show adding $q$ newly determines $q'$.
+
+Minimal distinguishing sets are exactly the bases of this matroid. Full machine-checked proof: \texttt{proofs/abstract\_class\_system.lean}, namespace \texttt{AxisClosure}.
 \end{proof}
 
 \begin{theorem}[Matroid bases]

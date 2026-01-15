@@ -127,15 +127,21 @@ W = \min_{A \text{ decides type-identity}} c(A)
 where $c(A)$ is the worst-case query count. This is a form of query complexity \cite{buhrman2002complexity} or interactive identification cost.
 \end{definition}
 
+\begin{definition}[Behavioral equivalence]
+Let $\text{behavior}: \mathcal{V} \to \mathcal{B}$ be a function mapping each entity to its observable behavior---the set of responses to all possible operations. Two entities $v, w$ are \emph{behaviorally equivalent}, written $v \equiv w$, iff $\text{behavior}(v) = \text{behavior}(w)$.
+
+In type systems, $\text{behavior}(v)$ is the denotational semantics: the function computed by $v$. In databases, it is the set of query results. In taxonomy, it is the phenotype. The formalism is parametric in this choice.
+\end{definition}
+
 \begin{definition}[Distortion function]
 Let $d: \mathcal{V} \times \mathcal{V} \to \{0, 1\}$ be the misclassification indicator:
 \[
 d(v, \hat{v}) = \begin{cases}
-0 & \text{if } \text{type}(v) = \text{type}(\hat{v}) \Rightarrow \text{behavior}(v) \equiv \text{behavior}(\hat{v}) \\
+0 & \text{if } \text{type}(v) = \text{type}(\hat{v}) \Rightarrow v \equiv \hat{v} \\
 1 & \text{otherwise (semantic error)}
 \end{cases}
 \]
-Here $\text{behavior}(v)$ denotes the observable behavior of $v$ under program execution.
+That is, $d = 0$ when type equality implies behavioral equivalence (soundness), and $d = 1$ when the observer conflates behaviorally distinct entities.
 \end{definition}
 
 \begin{definition}[Expected and worst-case distortion]
@@ -156,10 +162,18 @@ $D = 0$ means the observation strategy is \emph{sound}: type equality (as comput
 \begin{itemize}
 \item \textbf{Deterministic or randomized}: Schemes may use randomness; $W$ is worst-case query count.
 \item \textbf{Computationally unbounded}: No time/space restrictions; the constraint is observational.
-\item \textbf{No preprocessing over type universe}: The scheme cannot precompute a global lookup table indexed by all possible types. (With such preprocessing, any problem reduces to $O(1)$ lookups.)
+\item \textbf{No preprocessing over type universe}: The scheme cannot precompute a global lookup table indexed by all possible types.
 \item \textbf{Tags are injective on classes}: A nominal tag $\tau(v)$ uniquely identifies the type of $v$. Variable-length or compressed tags are permitted; $L$ counts bits.
 \item \textbf{No amortization across queries}: $W$ is per-identification cost, not amortized over a sequence.
 \end{itemize}
+
+\textbf{Justification.} The ``no preprocessing'' and ``no amortization'' constraints exclude trivializations:
+\begin{itemize}
+\item \emph{Preprocessing}: With unbounded preprocessing over the type universe $\mathcal{T}$, one could build a lookup table mapping attribute profiles to types. This reduces identification to $O(1)$ table lookup---but the table has size $O(|\mathcal{T}|)$, hiding the complexity in space rather than eliminating it. The constraint models systems that cannot afford $O(|\mathcal{T}|)$ storage per observer.
+\item \emph{Amortization}: If $W$ were amortized over $n$ identifications, one could cache earlier results. This again hides complexity in state. The per-identification model captures stateless observers (typical in type checking, database queries, and biological identification).
+\end{itemize}
+Dropping these constraints changes the achievable region but not the qualitative separation: nominal tags still dominate for $D = 0$ because they provide $O(1)$ worst-case identification without requiring $O(|\mathcal{T}|)$ preprocessing.
+
 Under these rules, ``dominance'' means strict improvement on at least one of $(L, W, D)$ with no regression on others.
 
 \begin{definition}[Achievable region]

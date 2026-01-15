@@ -155,13 +155,13 @@ The information barrier (Theorem [\[thm:information-barrier\]](#thm:information
 
 The $(L, W, D)$ analysis extends classical rate-distortion theory [@shannon1959coding; @berger1971rate] to a discrete classification setting with three dimensions: tag length $L$, witness cost $W$ (query complexity), and semantic distortion $D$ (fidelity).
 
-**Historical context.** In programming language theory, the question of whether "duck typing" (attribute-only observation) is equivalent to nominal typing has been debated since Smalltalk (1980) and formalized in discussions of structural vs. nominal subtyping [@Cardelli1985]. Proponents argue that if two entities "walk like a duck and quack like a duck," they should be treated identically. Critics argue that provenance matters.
+**Historical context.** In programming language theory, the relationship between "duck typing" (attribute-only observation) and nominal typing has been discussed since Smalltalk (1980) and formalized in work on structural vs. nominal subtyping [@Cardelli1985]. Proponents of structural typing argue that if two entities "walk like a duck and quack like a duck," they should be treated identically. Proponents of nominal typing argue that provenance matters.
 
-We prove that the witness-cost gap between duck typing and nominal typing is unbounded: duck typing incurs $\Omega(n)$ witness cost where nominal tagging achieves $O(1)$. This is not an approximation or heuristic---it is a machine-checked theorem (Lean 4, 0 `sorry`).
+Within our observation model, we prove a quantitative separation: duck typing incurs $\Omega(n)$ witness cost where nominal tagging achieves $O(1)$. This is a machine-checked theorem (Lean 4, 0 `sorry`). The result does not "resolve" the debate---which involves usability, expressiveness, and tooling concerns beyond this model---but it does establish that the tradeoff has a precise information-theoretic component.
 
-**Prescriptive implications.** Programming languages have independently converged on hybrid classification: Python added Abstract Base Classes (PEP 3119), TypeScript introduced branded types, Rust's trait system combines structural interfaces with nominal identity. This convergence reflects the information-theoretic optimality of nominal tags proved in this paper. The same principles apply to database schema design (primary keys as nominal tags), biological taxonomy (species identifiers), and knowledge representation (entity URIs).
+**Practical implications.** Programming languages have independently converged on hybrid classification: Python added Abstract Base Classes (PEP 3119), TypeScript introduced branded types, Rust's trait system combines structural interfaces with nominal identity. This convergence is consistent with the information-theoretic analysis: nominal tags provide $O(1)$ identification at the cost of $O(\log k)$ bits of storage. The same tradeoff appears in database schema design (primary keys), biological taxonomy (species identifiers), and knowledge representation (entity URIs).
 
-The contribution is not advocacy for a particular language feature, but identification of a universal tradeoff that any classification system must navigate.
+The contribution is not advocacy for a particular language feature, but a formal framework for analyzing the identification-cost tradeoff in any classification system.
 
 ## Paper Organization
 
@@ -284,10 +284,16 @@ The *witness cost* $W$ is the minimum number of primitive queries (or bits of in
 :::
 
 ::: definition
+Let $\text{behavior}: \mathcal{V} \to \mathcal{B}$ be a function mapping each entity to its observable behavior---the set of responses to all possible operations. Two entities $v, w$ are *behaviorally equivalent*, written $v \equiv w$, iff $\text{behavior}(v) = \text{behavior}(w)$.
+
+In type systems, $\text{behavior}(v)$ is the denotational semantics: the function computed by $v$. In databases, it is the set of query results. In taxonomy, it is the phenotype. The formalism is parametric in this choice.
+:::
+
+::: definition
 Let $d: \mathcal{V} \times \mathcal{V} \to \{0, 1\}$ be the misclassification indicator: $$d(v, \hat{v}) = \begin{cases}
-0 & \text{if } \text{type}(v) = \text{type}(\hat{v}) \Rightarrow \text{behavior}(v) \equiv \text{behavior}(\hat{v}) \\
+0 & \text{if } \text{type}(v) = \text{type}(\hat{v}) \Rightarrow v \equiv \hat{v} \\
 1 & \text{otherwise (semantic error)}
-\end{cases}$$ Here $\text{behavior}(v)$ denotes the observable behavior of $v$ under program execution.
+\end{cases}$$ That is, $d = 0$ when type equality implies behavioral equivalence (soundness), and $d = 1$ when the observer conflates behaviorally distinct entities.
 :::
 
 ::: definition
@@ -306,11 +312,19 @@ $D = 0$ means the observation strategy is *sound*: type equality (as computed by
 
 -   **Computationally unbounded**: No time/space restrictions; the constraint is observational.
 
--   **No preprocessing over type universe**: The scheme cannot precompute a global lookup table indexed by all possible types. (With such preprocessing, any problem reduces to $O(1)$ lookups.)
+-   **No preprocessing over type universe**: The scheme cannot precompute a global lookup table indexed by all possible types.
 
 -   **Tags are injective on classes**: A nominal tag $\tau(v)$ uniquely identifies the type of $v$. Variable-length or compressed tags are permitted; $L$ counts bits.
 
 -   **No amortization across queries**: $W$ is per-identification cost, not amortized over a sequence.
+
+**Justification.** The "no preprocessing" and "no amortization" constraints exclude trivializations:
+
+-   *Preprocessing*: With unbounded preprocessing over the type universe $\mathcal{T}$, one could build a lookup table mapping attribute profiles to types. This reduces identification to $O(1)$ table lookup---but the table has size $O(|\mathcal{T}|)$, hiding the complexity in space rather than eliminating it. The constraint models systems that cannot afford $O(|\mathcal{T}|)$ storage per observer.
+
+-   *Amortization*: If $W$ were amortized over $n$ identifications, one could cache earlier results. This again hides complexity in state. The per-identification model captures stateless observers (typical in type checking, database queries, and biological identification).
+
+Dropping these constraints changes the achievable region but not the qualitative separation: nominal tags still dominate for $D = 0$ because they provide $O(1)$ worst-case identification without requiring $O(|\mathcal{T}|)$ preprocessing.
 
 Under these rules, "dominance" means strict improvement on at least one of $(L, W, D)$ with no regression on others.
 
@@ -396,7 +410,17 @@ For any $B_1, B_2 \in \mathcal{B}$ and any $q \in B_1 \setminus B_2$, there exis
 :::
 
 ::: proof
-*Proof.* See Lean formalization: `proofs/abstract_class_system.lean`, namespace `AxisClosure`. The closure operator $\text{cl}(X) = \{a : X\text{-equality forces }a\text{-equality}\}$ satisfies the matroid closure axioms; basis exchange follows. ◻
+*Proof sketch.* Define the closure operator $\text{cl}(X) = \{q : X\text{-equivalence implies }q\text{-equivalence}\}$. This satisfies:
+
+1.  *Extensive*: $X \subseteq \text{cl}(X)$ (if $q \in X$, then $X$-equivalence trivially implies $q$-equivalence).
+
+2.  *Monotone*: $X \subseteq Y \Rightarrow \text{cl}(X) \subseteq \text{cl}(Y)$ (more queries give finer equivalence).
+
+3.  *Idempotent*: $\text{cl}(\text{cl}(X)) = \text{cl}(X)$ (closure is transitive).
+
+A closure operator satisfying these axioms plus the *exchange property*---if $q \notin \text{cl}(X)$ and $q \in \text{cl}(X \cup \{q'\})$, then $q' \in \text{cl}(X \cup \{q\})$---defines a matroid. The exchange property follows from symmetry of indistinguishability: if adding $q'$ to $X$ newly determines $q$, there exist witnesses $v, w$ with $X$-equivalence, $q'$-inequivalence, and $q$-inequivalence; the same witnesses show adding $q$ newly determines $q'$.
+
+Minimal distinguishing sets are exactly the bases of this matroid. Full machine-checked proof: `proofs/abstract_class_system.lean`, namespace `AxisClosure`. ◻
 :::
 
 ::: theorem
