@@ -8,12 +8,9 @@ from __future__ import annotations
 
 import argparse
 import logging
-import signal
-import sys
-import time
-
 from zmqruntime.config import TransportMode
 from zmqruntime.transport import get_default_transport_mode
+from zmqruntime.runner import serve_forever
 
 from openhcs.runtime.zmq_execution_server import OpenHCSExecutionServer
 
@@ -72,28 +69,9 @@ def main():
         transport_mode=transport_mode,
     )
 
-    def signal_handler(sig, frame):
-        logger.info("\nShutting down server...")
-        server.stop()
-        sys.exit(0)
-
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-
-    server.start()
-    server.start_time = time.time()
-
     logger.info("Server ready - waiting for requests...")
-
-    try:
-        while server.is_running():
-            server.process_messages()
-            time.sleep(0.01)
-    except KeyboardInterrupt:
-        logger.info("\nReceived interrupt signal")
-    finally:
-        server.stop()
-        logger.info("Server stopped")
+    serve_forever(server, poll_interval=0.01, handle_signals=True)
+    logger.info("Server stopped")
 
 
 if __name__ == "__main__":
