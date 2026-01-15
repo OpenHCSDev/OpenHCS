@@ -407,19 +407,6 @@ The Lean 4 formalization (Appendix [\[sec:lean\]](#sec:lean){reference-type="re
 
 **Corollary 4.7 (Maintenance Entropy).** interface-only typing maximizes maintenance entropy; nominal-tag observation minimizes it.
 
-**Remark:** Traditional terms: interface-only observation vs nominal-tag observation.
-
-## Empirical Demonstration
-
-The theoretical complexity bounds in Theorems 4.1-4.3 are demonstrated empirically in Section 5, Case Study 1 (WellFilterConfig hierarchy). Two classes with identical structure but different nominal identities require O(1) disambiguation under nominal-tag observation but $\Omega$(n) call-site inspection under interface-only typing. Case Study 5 illustrates this: migrating from incoherent to nominal-tag observation replaced scattered `hasattr()` checks across 47 call sites with centralized ABC contract validation at a single definition point.
-
-**Remark:** In type system terminology, nominal-tag is nominal-tag observation; interface-only is interface-only observation.
-
-::: center
-
-----------------------------------------------------------------------------------------------------
-:::
-
 
 ## Three-Dimensional Tradeoff: Tag Length, Witness Cost, Distortion
 

@@ -72,20 +72,4 @@ reference this single definition. \qed
 \textbf{Corollary 4.7 (Maintenance Entropy).} interface-only typing maximizes
 maintenance entropy; nominal-tag observation minimizes it.
 
-\textbf{Remark:} Traditional terms: interface-only observation vs nominal-tag observation.
 
-\subsection{Empirical
-Demonstration}\label{empirical-demonstration}
-
-The theoretical complexity bounds in Theorems 4.1-4.3 are demonstrated
-empirically in Section 5, Case Study 1 (WellFilterConfig hierarchy). Two
-classes with identical structure but different nominal identities
-require O(1) disambiguation under nominal-tag observation but \(\Omega\)(n)
-call-site inspection under interface-only typing. Case Study 5 illustrates this:
-migrating from incoherent to nominal-tag observation replaced scattered
-\texttt{hasattr()} checks across 47 call sites with centralized ABC
-contract validation at a single definition point.
-
-\textbf{Remark:} In type system terminology, nominal-tag is nominal-tag observation; interface-only is interface-only observation.
-
-\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
