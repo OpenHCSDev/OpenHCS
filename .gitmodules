@@ -6,9 +6,9 @@
 	path = external/python-introspect
 	url = https://github.com/OpenHCSDev/python-introspect.git
 	branch = master
-[submodule "external/pyqt-formgen"]
+[submodule "external/pyqt-reactor"]
 	path = external/pyqt-reactor
-	url = https://github.com/OpenHCSDev/pyqt-formgen.git
+	url = https://github.com/OpenHCSDev/PyQT-reactor.git
 	branch = main
 [submodule "external/arraybridge"]
 	path = external/arraybridge
