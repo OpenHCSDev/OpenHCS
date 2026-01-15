@@ -4,7 +4,7 @@
 
 The fundamental problem of semantic compression is: given a value $v$ from a large space $\mathcal{V}$, how can we represent $v$ compactly while preserving the ability to answer semantic queries about $v$?
 
-Classical rate-distortion theory \cite{shannon1959coding} studies the tradeoff between representation size (rate) and reconstruction fidelity (distortion). We extend this framework to include a third dimension: \emph{witness cost}---the number of queries required to compute a semantic property.
+Classical rate-distortion theory \cite{shannon1959coding} studies the tradeoff between representation size and reconstruction fidelity. We extend this framework to a discrete classification setting with three dimensions: \emph{tag length} $L$ (storage cost), \emph{witness cost} $W$ (query complexity), and \emph{distortion} $D$ (semantic fidelity).
 
 \subsection{Universe of Discourse}
 
@@ -109,7 +109,7 @@ For any property $P$:
 \end{enumerate}
 \end{lemma}
 
-\subsection{Rate--Witness--Distortion Tradeoff}
+\subsection{The $(L, W, D)$ Tradeoff}
 
 We now define the three-dimensional tradeoff space that characterizes observation strategies.
 
@@ -156,5 +156,5 @@ A point $(L, W, D)$ is \emph{achievable} if there exists an observation strategy
 A point $(L^*, W^*, D^*)$ is \emph{Pareto-optimal} if there is no achievable $(L, W, D)$ with $L \leq L^*$, $W \leq W^*$, $D \leq D^*$, and at least one strict inequality.
 \end{definition}
 
-The main result of Section~\ref{sec:rate-distortion} is that nominal-tag observation achieves the unique Pareto-optimal point with $D = 0$.
+The main result of Section~\ref{sec:lwd} is that nominal-tag observation achieves the unique Pareto-optimal point with $D = 0$.
 

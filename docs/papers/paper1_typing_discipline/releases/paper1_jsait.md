@@ -137,7 +137,7 @@ This paper establishes the following results:
 
 4.  **Matroid Structure** (Section [\[sec:matroid\]](#sec:matroid){reference-type="ref" reference="sec:matroid"}): Minimal distinguishing query sets form the bases of a matroid. All such sets have equal cardinality, establishing a well-defined "distinguishing dimension."
 
-5.  **Rate--Witness--Distortion Optimality** (Section [\[sec:rate-distortion\]](#sec:rate-distortion){reference-type="ref" reference="sec:rate-distortion"}): Nominal-tag observers achieve the unique Pareto-optimal point in the $(L, W, D)$ tradeoff space.
+5.  **$(L, W, D)$ Optimality** (Section [\[sec:lwd\]](#sec:lwd){reference-type="ref" reference="sec:lwd"}): Nominal-tag observers achieve the unique Pareto-optimal point in the $(L, W, D)$ tradeoff space (tag length, witness cost, distortion).
 
 6.  **Machine-Checked Proofs**: All results formalized in Lean 4 (6,086 lines, 265 theorems, 0 `sorry` placeholders).
 
@@ -145,7 +145,7 @@ This paper establishes the following results:
 
 The information barrier (Theorem [\[thm:information-barrier\]](#thm:information-barrier){reference-type="ref" reference="thm:information-barrier"}) is related to results in query complexity and communication complexity, where limited observations constrain computable functions. The matroid structure connects to lattice-theoretic approaches in abstract interpretation [@cousot1977abstract].
 
-The rate-distortion analysis extends classical rate-distortion theory [@shannon1959coding; @berger1971rate] to a discrete setting with three dimensions: tag length (analogous to rate), witness cost (query complexity), and semantic distortion (fidelity).
+The $(L, W, D)$ analysis extends classical rate-distortion theory [@shannon1959coding; @berger1971rate] to a discrete setting with three dimensions: tag length $L$, witness cost $W$ (query complexity), and semantic distortion $D$ (fidelity).
 
 **Historical context.** In programming language theory, the question of whether "duck typing" (attribute-only observation) is equivalent to nominal typing has been debated since Smalltalk (1980) and formalized in discussions of structural vs. nominal subtyping [@cardelli1985understanding]. Proponents argue that if two entities "walk like a duck and quack like a duck," they should be treated identically. Critics argue that provenance matters.
 
@@ -166,7 +166,7 @@ Section [\[sec:framework\]](#sec:framework){reference-type="ref" reference="sec
 
 The fundamental problem of semantic compression is: given a value $v$ from a large space $\mathcal{V}$, how can we represent $v$ compactly while preserving the ability to answer semantic queries about $v$?
 
-Classical rate-distortion theory [@shannon1959coding] studies the tradeoff between representation size (rate) and reconstruction fidelity (distortion). We extend this framework to include a third dimension: *witness cost*---the number of queries required to compute a semantic property.
+Classical rate-distortion theory [@shannon1959coding] studies the tradeoff between representation size and reconstruction fidelity. We extend this framework to a discrete classification setting with three dimensions: *tag length* $L$ (storage cost), *witness cost* $W$ (query complexity), and *distortion* $D$ (semantic fidelity).
 
 ## Universe of Discourse
 
@@ -265,7 +265,7 @@ For any property $P$:
 3.  With nominal-tag access: $W(\text{type-identity}) = O(1)$
 :::
 
-## Rate--Witness--Distortion Tradeoff
+## The $(L, W, D)$ Tradeoff
 
 We now define the three-dimensional tradeoff space that characterizes observation strategies.
 
@@ -301,7 +301,7 @@ A point $(L, W, D)$ is *achievable* if there exists an observation strategy real
 A point $(L^*, W^*, D^*)$ is *Pareto-optimal* if there is no achievable $(L, W, D)$ with $L \leq L^*$, $W \leq W^*$, $D \leq D^*$, and at least one strict inequality.
 :::
 
-The main result of Section [\[sec:rate-distortion\]](#sec:rate-distortion){reference-type="ref" reference="sec:rate-distortion"} is that nominal-tag observation achieves the unique Pareto-optimal point with $D = 0$.
+The main result of Section [\[sec:lwd\]](#sec:lwd){reference-type="ref" reference="sec:lwd"} is that nominal-tag observation achieves the unique Pareto-optimal point with $D = 0$.
 
 
 ## Query Families and Distinguishing Sets

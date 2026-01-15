@@ -140,7 +140,7 @@ This paper establishes the following results:
 
 \item \textbf{Matroid Structure} (Section~\ref{sec:matroid}): Minimal distinguishing query sets form the bases of a matroid. All such sets have equal cardinality, establishing a well-defined ``distinguishing dimension.''
 
-\item \textbf{Rate--Witness--Distortion Optimality} (Section~\ref{sec:rate-distortion}): Nominal-tag observers achieve the unique Pareto-optimal point in the $(L, W, D)$ tradeoff space.
+\item \textbf{$(L, W, D)$ Optimality} (Section~\ref{sec:lwd}): Nominal-tag observers achieve the unique Pareto-optimal point in the $(L, W, D)$ tradeoff space (tag length, witness cost, distortion).
 
 \item \textbf{Machine-Checked Proofs}: All results formalized in Lean 4 (6,086 lines, 265 theorems, 0 \texttt{sorry} placeholders).
 \end{enumerate}
@@ -149,7 +149,7 @@ This paper establishes the following results:
 
 The information barrier (Theorem~\ref{thm:information-barrier}) is related to results in query complexity and communication complexity, where limited observations constrain computable functions. The matroid structure connects to lattice-theoretic approaches in abstract interpretation \cite{cousot1977abstract}.
 
-The rate-distortion analysis extends classical rate-distortion theory \cite{shannon1959coding, berger1971rate} to a discrete setting with three dimensions: tag length (analogous to rate), witness cost (query complexity), and semantic distortion (fidelity).
+The $(L, W, D)$ analysis extends classical rate-distortion theory \cite{shannon1959coding, berger1971rate} to a discrete classification setting with three dimensions: tag length $L$, witness cost $W$ (query complexity), and semantic distortion $D$ (fidelity).
 
 \textbf{Historical context.} In programming language theory, the question of whether ``duck typing'' (attribute-only observation) is equivalent to nominal typing has been debated since Smalltalk (1980) and formalized in discussions of structural vs.\ nominal subtyping \cite{cardelli1985understanding}. Proponents argue that if two entities ``walk like a duck and quack like a duck,'' they should be treated identically. Critics argue that provenance matters.
 
@@ -161,5 +161,5 @@ The contribution is not advocacy for a particular language feature, but identifi
 
 \subsection{Paper Organization}
 
-Section~\ref{sec:framework} formalizes the compression framework and defines the $(L, W, D)$ tradeoff. Section~\ref{sec:complexity} establishes complexity bounds for error localization. Section~\ref{sec:matroid} proves the matroid structure of type axes. Section~\ref{sec:witness} analyzes witness cost in detail. Section~\ref{sec:rate-distortion} proves Pareto optimality. Section~\ref{sec:applications} instantiates the theory in real runtimes. Section~\ref{sec:conclusion} concludes. Appendix~\ref{sec:lean} describes the Lean 4 formalization.
+Section~\ref{sec:framework} formalizes the compression framework and defines the $(L, W, D)$ tradeoff. Section~\ref{sec:complexity} establishes complexity bounds for error localization. Section~\ref{sec:matroid} proves the matroid structure of type axes. Section~\ref{sec:witness} analyzes witness cost in detail. Section~\ref{sec:lwd} proves Pareto optimality. Section~\ref{sec:applications} instantiates the theory in real runtimes. Section~\ref{sec:conclusion} concludes. Appendix~\ref{sec:lean} describes the Lean 4 formalization.
 
