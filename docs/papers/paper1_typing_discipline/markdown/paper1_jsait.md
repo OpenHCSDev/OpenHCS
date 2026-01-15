@@ -162,6 +162,34 @@ The fundamental problem of semantic compression is: given a value $v$ from a lar
 
 Classical rate-distortion theory [@shannon1959coding] studies the tradeoff between representation size (rate) and reconstruction fidelity (distortion). We extend this framework to include a third dimension: *witness cost*---the number of queries required to compute a semantic property.
 
+## Universe of Discourse
+
+::: definition
+A *classification scheme* is any procedure (deterministic or randomized), with arbitrary time and memory, whose only access to a value $v \in \mathcal{V}$ is via:
+
+1.  The *observation family* $\Phi = \{q_I : I \in \mathcal{I}\}$, where $q_I(v) = 1$ iff $v$ satisfies attribute $I$; and optionally
+
+2.  A *nominal-tag primitive* $\tau: \mathcal{V} \to \mathcal{T}$ returning an opaque type identifier.
+
+All theorems in this paper quantify over all such schemes.
+:::
+
+This definition is intentionally broad: schemes may be adaptive, randomized, or computationally unbounded. The constraint is *observational*, not computational.
+
+::: theorem
+[]{#thm:info-barrier label="thm:info-barrier"} For all classification schemes with access only to $\Phi$ (no nominal tag), the output is constant on $\sim_\Phi$-equivalence classes. Therefore, no such scheme can compute any property that varies within a $\sim_\Phi$-class.
+:::
+
+::: proof
+*Proof.* Let $v \sim_\Phi w$, meaning $q_I(v) = q_I(w)$ for all $I \in \mathcal{I}$. Any scheme's execution trace depends only on query responses. Since all queries return identical values for $v$ and $w$, the scheme cannot distinguish them. Any output must therefore be identical. ◻
+:::
+
+::: proposition
+[]{#prop:model-capture label="prop:model-capture"} Any real-world classification protocol whose evidence consists solely of attribute-membership queries is representable as a scheme in the above model. Conversely, any additional capability corresponds to adding new observations to $\Phi$.
+:::
+
+This proposition forces any objection into a precise form: to claim the theorem does not apply, one must name the additional observation capability not in $\Phi$. "Different universe" is not a coherent objection---it must reduce to "I have access to oracle $X \notin \Phi$."
+
 ## The Two-Axis Model
 
 We adopt a two-axis model of semantic structure, where each value is characterized by:
