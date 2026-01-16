@@ -245,7 +245,7 @@ Zero error requires that distinct classes map to distinct decoder outputs. With 
 When $D > 0$ is permitted, we obtain a classic rate-distortion tradeoff:
 
 \begin{proposition}[Lossy identification]
-For any $\epsilon \in (0, 1)$, there exist schemes with $L = 0$ (no tags) achieving $D \leq \epsilon$ with query cost $W = O(\log(1/\epsilon) \cdot d)$, where $d$ is the identification dimension. The tradeoff: smaller $D$ requires larger $W$.
+For any $\epsilon \in (0, 1)$, there exist schemes with $L = 0$ (no tags) achieving $D \leq \epsilon$ with query cost $W = O(\log(1/\epsilon) \cdot d)$, where $d$ is the distinguishing dimension. The tradeoff: smaller $D$ requires larger $W$.
 \end{proposition}
 
 The zero-error corner ($D = 0$) is special: nominal tagging is the unique Pareto optimum. Relaxing to $D > 0$ enables tag-free schemes at the cost of increased query complexity. This mirrors the classical distinction between zero-error and $\epsilon$-error capacity in channel coding.
@@ -269,4 +269,4 @@ Adaptive duck typing & $0$ & $\geq d$ queries \\
 \end{tabular}
 \end{table}
 
-Here $d$ is the identification dimension, the size of any minimal distinguishing query set. For typical hierarchies, $d \approx 5$--$15$. The gap between 10 bits of storage vs.\ 5--50 queries per identification is the cost of forgoing nominal tagging.
+Here $d$ is the distinguishing dimension, the size of any minimal distinguishing query set. For typical hierarchies, $d \approx 5$--$15$. The gap between 10 bits of storage vs.\ 5--50 queries per identification is the cost of forgoing nominal tagging.
