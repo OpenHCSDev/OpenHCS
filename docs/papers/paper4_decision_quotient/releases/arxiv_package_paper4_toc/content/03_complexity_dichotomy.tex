@@ -1,0 +1,31 @@
+\section{Complexity Dichotomy}\label{sec:dichotomy}
+
+The hardness results of Section~\ref{sec:hardness} apply to worst-case instances. This section develops a more nuanced picture: a \emph{dichotomy theorem} showing that problem difficulty depends on the size of the minimal sufficient set.
+
+\begin{theorem}[Complexity Dichotomy]\label{thm:dichotomy}
+Let $\mathcal{D} = (A, X_1, \ldots, X_n, U)$ be a decision problem with $|S| = N$ states. Let $k^*$ be the size of the minimal sufficient set.
+
+\begin{enumerate}
+\item \textbf{Logarithmic case:} If $k^* = O(\log N)$, then SUFFICIENCY-CHECK is solvable in polynomial time.
+
+\item \textbf{Linear case:} If $k^* = \Omega(n)$, then SUFFICIENCY-CHECK requires time $\Omega(2^{n/c})$ for some constant $c > 0$ (assuming ETH).
+\end{enumerate}
+\end{theorem}
+
+\begin{proof}
+\textbf{Part 1 (Logarithmic case):} If $k^* = O(\log N)$, then the number of distinct projections $|S_{I^*}|$ is at most $2^{k^*} = O(N^c)$ for some constant $c$. We can enumerate all projections and verify sufficiency in polynomial time.
+
+\textbf{Part 2 (Linear case):} The reduction from TAUTOLOGY in Theorem~\ref{thm:sufficiency-conp} produces instances where the minimal sufficient set has size $\Omega(n)$ (all coordinates are relevant when the formula is not a tautology). Under the Exponential Time Hypothesis (ETH) \cite{impagliazzo2001complexity}, TAUTOLOGY requires time $2^{\Omega(n)}$, so SUFFICIENCY-CHECK inherits this lower bound.
+\end{proof}
+
+\begin{corollary}[Phase Transition]
+There exists a threshold $\tau \in (0, 1)$ such that:
+\begin{itemize}
+\item If $k^*/n < \tau$, SUFFICIENCY-CHECK is ``easy'' (polynomial in $N$)
+\item If $k^*/n > \tau$, SUFFICIENCY-CHECK is ``hard'' (exponential in $n$)
+\end{itemize}
+\end{corollary}
+
+This dichotomy explains why some domains admit tractable model selection (few relevant variables) while others require heuristics (many relevant variables).
+
+

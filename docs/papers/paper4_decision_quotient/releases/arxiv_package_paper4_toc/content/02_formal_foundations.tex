@@ -1,0 +1,89 @@
+\section{Formal Foundations}\label{sec:foundations}
+
+We formalize decision problems with coordinate structure, sufficiency of coordinate sets, and the decision quotient, drawing on classical decision theory \cite{savage1954foundations, raiffa1961applied}.
+
+\subsection{Decision Problems with Coordinate Structure}
+
+\begin{definition}[Decision Problem]\label{def:decision-problem}
+A \emph{decision problem with coordinate structure} is a tuple $\mathcal{D} = (A, X_1, \ldots, X_n, U)$ where:
+\begin{itemize}
+\item $A$ is a finite set of \emph{actions} (alternatives)
+\item $X_1, \ldots, X_n$ are finite \emph{coordinate spaces}
+\item $S = X_1 \times \cdots \times X_n$ is the \emph{state space}
+\item $U : A \times S \to \mathbb{Q}$ is the \emph{utility function}
+\end{itemize}
+\end{definition}
+
+\begin{definition}[Projection]\label{def:projection}
+For state $s = (s_1, \ldots, s_n) \in S$ and coordinate set $I \subseteq \{1, \ldots, n\}$:
+\[
+s_I := (s_i)_{i \in I}
+\]
+is the \emph{projection} of $s$ onto coordinates in $I$.
+\end{definition}
+
+\begin{definition}[Optimizer Map]\label{def:optimizer}
+For state $s \in S$, the \emph{optimal action set} is:
+\[
+\Opt(s) := \arg\max_{a \in A} U(a, s) = \{a \in A : U(a,s) = \max_{a' \in A} U(a', s)\}
+\]
+\end{definition}
+
+\subsection{Sufficiency and Relevance}
+
+\begin{definition}[Sufficient Coordinate Set]\label{def:sufficient}
+A coordinate set $I \subseteq \{1, \ldots, n\}$ is \emph{sufficient} for decision problem $\mathcal{D}$ if:
+\[
+\forall s, s' \in S: \quad s_I = s'_I \implies \Opt(s) = \Opt(s')
+\]
+Equivalently, the optimal action depends only on coordinates in $I$.
+\end{definition}
+
+\begin{definition}[Minimal Sufficient Set]\label{def:minimal-sufficient}
+A sufficient set $I$ is \emph{minimal} if no proper subset $I' \subsetneq I$ is sufficient.
+\end{definition}
+
+\begin{definition}[Relevant Coordinate]\label{def:relevant}
+Coordinate $i$ is \emph{relevant} if it belongs to some minimal sufficient set.
+\end{definition}
+
+\begin{example}[Weather Decision]
+Consider deciding whether to carry an umbrella:
+\begin{itemize}
+\item Actions: $A = \{\text{carry}, \text{don't carry}\}$
+\item Coordinates: $X_1 = \{\text{rain}, \text{no rain}\}$, $X_2 = \{\text{hot}, \text{cold}\}$, $X_3 = \{\text{Monday}, \ldots, \text{Sunday}\}$
+\item Utility: $U(\text{carry}, s) = -1 + 3 \cdot \mathbf{1}[s_1 = \text{rain}]$, $U(\text{don't carry}, s) = -2 \cdot \mathbf{1}[s_1 = \text{rain}]$
+\end{itemize}
+
+The minimal sufficient set is $I = \{1\}$ (only rain forecast matters). Coordinates 2 and 3 (temperature, day of week) are irrelevant.
+\end{example}
+
+\subsection{The Decision Quotient}
+
+\begin{definition}[Decision Equivalence]\label{def:decision-equiv}
+For coordinate set $I$, states $s, s'$ are \emph{$I$-equivalent} (written $s \sim_I s'$) if $s_I = s'_I$.
+\end{definition}
+
+\begin{definition}[Decision Quotient]\label{def:decision-quotient}
+The \emph{decision quotient} for state $s$ under coordinate set $I$ is:
+\[
+\text{DQ}_I(s) = \frac{|\{a \in A : a \in \Opt(s') \text{ for some } s' \sim_I s\}|}{|A|}
+\]
+This measures the fraction of actions that \emph{could} be optimal given only the information in $I$.
+\end{definition}
+
+\begin{proposition}[Sufficiency Characterization]\label{prop:sufficiency-char}
+Coordinate set $I$ is sufficient if and only if $\text{DQ}_I(s) = |\Opt(s)|/|A|$ for all $s \in S$.
+\end{proposition}
+
+\begin{proof}
+If $I$ is sufficient, then $s \sim_I s' \implies \Opt(s) = \Opt(s')$, so the set of actions optimal for some $s' \sim_I s$ is exactly $\Opt(s)$.
+
+Conversely, if the condition holds, then for any $s \sim_I s'$, the optimal actions form the same set (since $\text{DQ}_I(s) = \text{DQ}_I(s')$ and both equal the relative size of the common optimal set).
+\end{proof}
+
+
+% Include the hardness proofs (already developed)
+\input{hardness_proofs.tex}
+
+

@@ -2,7 +2,7 @@ OpenHCS Paper Build Log
 ========================
 
 Paper: paper1 - A Universal Typing Discipline for Polymorphic Abstraction
-Package Date: 2026-01-15T13:46:15.198664
+Package Date: 2026-01-15T23:47:51.898323
 Lean Toolchain: leanprover/lean4:v4.27.0-rc1
 
 Proof Statistics:

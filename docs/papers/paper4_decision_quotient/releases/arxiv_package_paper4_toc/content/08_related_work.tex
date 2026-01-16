@@ -1,0 +1,19 @@
+\section{Related Work}\label{sec:related}
+
+\subsection{Computational Decision Theory}
+
+The complexity of decision-making has been studied extensively. Papadimitriou~\cite{papadimitriou1994complexity} established foundational results on the complexity of game-theoretic solution concepts. Our work extends this to the meta-question of identifying relevant information. For a modern treatment of complexity classes, see Arora and Barak \cite{arora2009computational}.
+
+\subsection{Feature Selection}
+
+In machine learning, feature selection asks which input features are relevant for prediction. This is known to be NP-hard in general~\cite{blum1997selection}. Our results show the decision-theoretic analog is \coNP-complete for both checking and minimization.
+
+\subsection{Value of Information}
+
+The value of information (VOI) framework~\cite{howard1966information} quantifies how much a decision-maker should pay for information. Our work addresses a different question: not the \emph{value} of information, but the \emph{complexity} of identifying which information has value.
+
+\subsection{Model Selection}
+
+Statistical model selection (AIC \cite{akaike1974new}, BIC \cite{schwarz1978estimating}, cross-validation \cite{stone1974cross}) provides practical heuristics for choosing among models. Our results provide theoretical justification: optimal model selection is intractable, so heuristics are necessary.
+
+

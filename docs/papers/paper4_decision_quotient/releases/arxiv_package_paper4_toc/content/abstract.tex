@@ -1,0 +1,20 @@
+We study the computational complexity of determining which coordinates of a decision problem are sufficient to identify optimal actions. Given a decision problem with action set $A$, state space $S = X_1 \times \cdots \times X_n$, and utility function $u: A \times S \to \mathbb{R}$, a coordinate set $I \subseteq \{1,\ldots,n\}$ is \emph{sufficient} if knowing only coordinates in $I$ determines the optimal action: $s_I = s'_I \implies \Opt(s) = \Opt(s')$.
+
+We prove:
+\begin{enumerate}
+\item \textbf{Sufficiency-Check is \coNP-complete:} Given a decision problem and coordinate set $I$, determining whether $I$ is sufficient is \coNP-complete via reduction from TAUTOLOGY.
+
+\item \textbf{Minimum-Sufficient-Set is \coNP-complete:} Finding the minimum sufficient coordinate set is \coNP-complete.
+
+\item \textbf{Anchor-Sufficiency is $\SigmaP{2}$-complete:} Given coordinate set $I$, determining whether there exists an assignment to $I$ that makes the optimal action constant on the induced subcube is $\SigmaP{2}$-complete via reduction from $\exists\forall$-SAT.
+
+\item \textbf{Complexity Dichotomy:} Sufficiency checking is polynomial when the minimal sufficient set has size $O(\log |S|)$, but requires $2^{\Omega(n)}$ time when it has size $\Omega(n)$ (assuming ETH).
+
+\item \textbf{Tractable Subcases:} Polynomial-time algorithms exist for bounded action sets, separable utilities, and tree-structured dependencies.
+\end{enumerate}
+
+As an application, we prove a \emph{conservation law for complexity}: when a decision problem requires $n$ dimensions but an analysis method handles only $k < n$ natively, the remaining $n - k$ dimensions must be handled externally at each use site. This quantifies the cost of using simplified models.
+
+All results are machine-checked in Lean 4 ($\sim$5,000 lines, 200+ theorems). The formalization proves reduction correctness and the combinatorial lemmas; complexity class membership follows by composition with the known complexity of TAUTOLOGY and $\exists\forall$-SAT.
+
+\textbf{Keywords:} computational complexity, decision theory, coNP-completeness, polynomial hierarchy, Lean 4

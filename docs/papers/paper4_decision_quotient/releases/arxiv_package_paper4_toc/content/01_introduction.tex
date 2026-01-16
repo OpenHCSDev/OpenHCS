@@ -1,0 +1,74 @@
+\section{Introduction}\label{sec:introduction}
+
+Consider a decision problem with actions $A$ and states $S = X_1 \times \cdots \times X_n$, where each $X_i$ is a coordinate space. For each state $s \in S$, some subset $\Opt(s) \subseteq A$ of actions are optimal. A natural question arises:
+
+\begin{quote}
+\emph{Which coordinates are sufficient to determine the optimal action?}
+\end{quote}
+
+A coordinate set $I \subseteq \{1, \ldots, n\}$ is \emph{sufficient} if knowing only the coordinates in $I$ determines the optimal action set:
+\[
+s_I = s'_I \implies \Opt(s) = \Opt(s')
+\]
+where $s_I$ denotes the projection of state $s$ onto coordinates in $I$.
+
+This paper establishes the computational complexity of sufficiency-related problems:
+
+\begin{enumerate}
+\item \textbf{Sufficiency-Check} (given $I$, is it sufficient?) is \coNP-complete.
+\item \textbf{Minimum-Sufficient-Set} (find the smallest sufficient $I$) is \coNP-complete.
+\item \textbf{Anchor-Sufficiency} (does there exist an assignment to $I$ making $\Opt$ constant?) is $\SigmaP{2}$-complete.
+\end{enumerate}
+
+These results place the problem of identifying ``decision-relevant'' coordinates at the first and second levels of the polynomial hierarchy \cite{stockmeyer1976polynomial}.
+
+\subsection{Main Results}
+
+\begin{enumerate}
+\item \textbf{Theorem~\ref{thm:sufficiency-conp} (Sufficiency Checking is \coNP-complete):} Given a decision problem and coordinate set $I$, determining whether $I$ is sufficient is \coNP-complete via reduction from TAUTOLOGY \cite{cook1971complexity}.
+
+\item \textbf{Theorem~\ref{thm:minsuff-conp} (Minimum Sufficiency is \coNP-complete):} Finding the minimum sufficient coordinate set is \coNP-complete.
+
+\item \textbf{Theorem~\ref{thm:anchor-sigma2p} (Anchor-Sufficiency is $\SigmaP{2}$-complete):} Given coordinate set $I$, determining whether there exists an assignment to $I$ such that $\Opt$ is constant on the induced subcube is $\SigmaP{2}$-complete via reduction from $\exists\forall$-SAT.
+
+\item \textbf{Theorem~\ref{thm:dichotomy} (Complexity Dichotomy):} Sufficiency checking exhibits a dichotomy:
+\begin{itemize}
+\item If the minimal sufficient set has size $O(\log |S|)$, checking is polynomial.
+\item If the minimal sufficient set has size $\Omega(n)$, checking requires $2^{\Omega(n)}$ time under ETH \cite{impagliazzo2001complexity}.
+\end{itemize}
+
+\item \textbf{Theorem~\ref{thm:tractable} (Tractable Subcases):} Sufficiency checking is polynomial-time for:
+\begin{itemize}
+\item Bounded action sets ($|A| \leq k$ for constant $k$)
+\item Separable utility functions ($u(a,s) = f(a) + g(s)$)
+\item Tree-structured coordinate dependencies
+\end{itemize}
+\end{enumerate}
+
+\subsection{Applications}
+
+The complexity results have implications for model selection across domains:
+\begin{itemize}
+\item \textbf{Machine learning:} Feature selection is intractable in general.
+\item \textbf{Economics:} Identifying relevant market factors is intractable.
+\item \textbf{Scientific modeling:} Determining which variables matter is intractable.
+\item \textbf{Software engineering:} Configuration minimization is intractable.
+\end{itemize}
+
+We also develop a quantitative consequence: the \emph{complexity conservation law}. When a decision problem requires $n$ dimensions but an analysis uses only $k < n$ coordinates, the remaining $n - k$ dimensions must be handled externally at each decision site. Section~\ref{sec:simplicity-tax} formalizes this as the ``Simplicity Tax Theorem'' and proves that the total work is minimized when the analysis matches the problem's intrinsic dimensionality.
+
+\subsection{Machine-Checked Proofs}
+
+All results are formalized in Lean 4 \cite{moura2021lean4} ($\sim$5,000 lines, 200+ theorems). The formalization proves:
+\begin{itemize}
+\item Polynomial-time reduction composition
+\item Correctness of the TAUTOLOGY and $\exists\forall$-SAT reduction mappings
+\item The combinatorial lemmas underlying the dichotomy
+\item The Simplicity Tax conservation and dominance theorems
+\end{itemize}
+Complexity class membership follows by composing these verified reductions with the known complexity of TAUTOLOGY and $\exists\forall$-SAT.
+
+\subsection{Paper Structure}
+
+Section~\ref{sec:foundations} establishes formal foundations. Section~\ref{sec:hardness} proves the main hardness results. Section~\ref{sec:dichotomy} develops the complexity dichotomy. Section~\ref{sec:tractable} presents tractable special cases. Section~\ref{sec:implications} discusses implications. Section~\ref{sec:simplicity-tax} develops the Simplicity Tax Theorem. Section~\ref{sec:related} surveys related work. Appendix~\ref{app:lean} contains Lean proof listings.
+

@@ -79,6 +79,18 @@ papers:
     lean_theorems: 106
     lean_sorry: 0
 
+  paper4_toc:
+    name: "Decision Quotient (ToC)"
+    full_name: "Computational Complexity of Sufficiency in Decision Problems"
+    dir: "paper4_decision_quotient"
+    latex_dir: "latex_toc"
+    latex_file: "decision_quotient_toc.tex"
+    venue: "Theory of Computing"
+    # Same proofs as paper4, different framing
+    lean_lines: 2760
+    lean_theorems: 106
+    lean_sorry: 0
+
   paper5:
     name: "Credibility"
     full_name: "Credibility: Formal Verification of Architectural Claims"

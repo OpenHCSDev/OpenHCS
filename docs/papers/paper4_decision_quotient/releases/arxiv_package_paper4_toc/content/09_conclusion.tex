@@ -1,0 +1,70 @@
+\section{Conclusion}
+
+\subsection*{Methodology and Disclosure}
+
+\textbf{Role of LLMs in this work.} This paper was developed through human-AI collaboration. The author provided the core intuitions---the connection between decision-relevance and computational complexity, the conjecture that SUFFICIENCY-CHECK is \coNP-complete, and the insight that the $\SigmaP{2}$ structure collapses for MINIMUM-SUFFICIENT-SET. Large language models (Claude, GPT-4) served as implementation partners for proof drafting, Lean formalization, and \LaTeX{} generation.
+
+The Lean 4 proofs were iteratively refined: the author specified what should be proved, the LLM proposed proof strategies, and the Lean compiler served as the arbiter of correctness. The complexity-theoretic reductions required careful human oversight to ensure the polynomial bounds were correctly established.
+
+\textbf{What the author contributed:} The problem formulations (SUFFICIENCY-CHECK, MINIMUM-SUFFICIENT-SET, ANCHOR-SUFFICIENCY), the hardness conjectures, the tractability conditions, and the connection to over-modeling in engineering practice.
+
+\textbf{What LLMs contributed:} \LaTeX{} drafting, Lean tactic exploration, reduction construction assistance, and prose refinement.
+
+The proofs are machine-checked; their validity is independent of generation method. We disclose this methodology in the interest of academic transparency.
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsection*{Summary of Results}
+
+This paper establishes the computational complexity of coordinate sufficiency problems:
+
+\begin{itemize}
+\item \textbf{Sufficiency-Check} is \coNP-complete (Theorem~\ref{thm:sufficiency-conp})
+\item \textbf{Minimum-Sufficient-Set} is \coNP-complete (Theorem~\ref{thm:minsuff-conp})
+\item \textbf{Anchor-Sufficiency} is $\SigmaP{2}$-complete (Theorem~\ref{thm:anchor-sigma2p})
+\item A complexity dichotomy separates polynomial (logarithmic minimal set) from exponential (linear minimal set) cases (Theorem~\ref{thm:dichotomy})
+\item Tractable subcases exist for bounded actions, separable utilities, and tree structures (Theorem~\ref{thm:tractable})
+\end{itemize}
+
+These results place the problem of identifying decision-relevant coordinates at the first and second levels of the polynomial hierarchy.
+
+All proofs are machine-checked in Lean 4 ($\sim$5,000 lines). The formalization verifies the reduction mappings and equivalence theorems; complexity classifications follow from standard results (TAUTOLOGY is \coNP-complete, $\exists\forall$-SAT is $\SigmaP{2}$-complete).
+
+\subsection*{Complexity Characterization}
+
+The results provide exact complexity characterizations:
+
+\begin{enumerate}
+\item \textbf{Exact bounds.} Sufficiency-Check is \coNP-complete---both \coNP-hard and in \coNP.
+
+\item \textbf{Constructive reductions.} The reductions from TAUTOLOGY and $\exists\forall$-SAT are explicit and machine-checked.
+
+\item \textbf{Complete dichotomy.} Under standard assumptions (\Pclass{} $\neq$ \coNP), the complexity separates into exactly two cases with no intermediate behavior.
+
+\item \textbf{Tight tractability conditions.} The tractability conditions (bounded actions, separable utilities, tree structure) are tight---relaxing any condition yields \coNP-hardness.
+\end{enumerate}
+
+\subsection*{The Complexity Conservation Law}
+
+Section~\ref{sec:simplicity-tax} develops a quantitative consequence: when a problem requires $k$ dimensions and a model handles only $j < k$ natively, the remaining $k - j$ dimensions must be handled externally at each decision site. For $n$ sites, total external work is $(k-j) \times n$.
+
+This conservation law is formalized in Lean 4 (\texttt{HardnessDistribution.lean}), proving:
+\begin{itemize}
+\item Conservation: complexity cannot be eliminated, only redistributed
+\item Dominance: complete models have lower total work than incomplete models
+\item Amortization: there exists a threshold $n^*$ beyond which higher-dimensional models have lower total cost
+\end{itemize}
+
+\subsection*{Open Questions}
+
+Several questions remain for future work:
+\begin{itemize}
+\item \textbf{Fixed-parameter tractability:} Is Sufficiency-Check FPT when parameterized by the size of the minimal sufficient set?
+\item \textbf{Average-case complexity:} What is the complexity under natural distributions on decision problems?
+\item \textbf{Quantum complexity:} Does quantum computation provide speedups for sufficiency checking?
+\item \textbf{Learning cost formalization:} Can central cost $H_{\text{central}}$ be formalized as the rank of a concept matroid, making the amortization threshold precisely computable?
+\end{itemize}
+
+
+\appendix
+

@@ -1,0 +1,82 @@
+\section{Tractable Special Cases: When You Can Solve It}\label{sec:tractable}
+
+The hardness results characterize the \emph{boundary} of tractability. This section identifies three natural conditions under which sufficiency checking becomes polynomial-time, and proves each condition is \emph{tight}---relaxing it restores \coNP-hardness.
+
+\begin{theorem}[Tractability Trichotomy]\label{thm:tractable}
+SUFFICIENCY-CHECK is in \Pclass{} under any of:
+\begin{enumerate}
+\item \textbf{Bounded actions:} $|A| \leq k$ for constant $k$
+\item \textbf{Separable utility:} $U(a, s) = f(a) + g(s)$
+\item \textbf{Tree-structured dependencies:} Coordinates form a tree
+\end{enumerate}
+Each condition is tight: removing it while keeping the others yields \coNP-hardness.
+\end{theorem}
+
+\subsection{Bounded Actions}
+
+\begin{proof}[Proof of Part 1]
+With $|A| = k$ constant, the optimizer map $\Opt : S \to 2^A$ has at most $2^k$ distinct values. For each pair of distinct optimizer values, we can identify the coordinates that distinguish them. The union of these distinguishing coordinates forms a sufficient set.
+
+The algorithm:
+\begin{enumerate}
+\item Sample states to identify distinct optimizer values (polynomial samples suffice with high probability)
+\item For each pair of optimizer values, find distinguishing coordinates
+\item Return the union of distinguishing coordinates
+\end{enumerate}
+
+This runs in time $O(|S| \cdot k^2)$ which is polynomial when $k$ is constant.
+\end{proof}
+
+\subsection{Separable Utility}
+
+\begin{proof}[Proof of Part 2]
+If $U(a, s) = f(a) + g(s)$, then:
+\[
+\Opt(s) = \arg\max_{a \in A} [f(a) + g(s)] = \arg\max_{a \in A} f(a)
+\]
+The optimal action is independent of the state! Thus $I = \emptyset$ is always sufficient.
+\end{proof}
+
+\subsection{Tree-Structured Dependencies}
+
+\begin{proof}[Proof of Part 3]
+When coordinates form a tree, we can use dynamic programming. For each node $i$, compute the set of optimizer values achievable in the subtree rooted at $i$. A coordinate is relevant if and only if different values at that coordinate lead to different optimizer values in its subtree. This approach is analogous to inference in probabilistic graphical models \cite{pearl1988probabilistic, koller2009probabilistic}.
+
+The algorithm runs in time $O(n \cdot |A|^2)$ by processing the tree bottom-up.
+\end{proof}
+
+\subsection{Tightness of the Conditions}
+
+Each condition is necessary:
+
+\begin{proposition}[Bounded Actions is Tight]
+With unbounded $|A|$, even separable utility on a tree yields \coNP-hardness.
+\end{proposition}
+
+\begin{proposition}[Separability is Tight]
+With non-separable utility $U(a,s) = f(a,s)$, even bounded actions on a tree yields \coNP-hardness.
+\end{proposition}
+
+\begin{proposition}[Tree Structure is Tight]
+On a DAG (not tree), even bounded actions with separable utility yields \coNP-hardness.
+\end{proposition}
+
+\subsection{Practical Implications}
+
+The tractable cases cover many real scenarios:
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+\textbf{Condition} & \textbf{Examples} \\
+\midrule
+Bounded actions & Binary decisions, small menus \\
+Separable utility & Additive costs, linear models \\
+Tree structure & Hierarchies, causal trees \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{Decision procedure:} Given a problem, check: (1) Is $|A|$ bounded? (2) Is utility separable? (3) Are dependencies tree-structured? If any holds, use the polynomial algorithm. Otherwise, expect \coNP-hardness and use heuristics.
+
+

@@ -1,0 +1,135 @@
+\section{The Simplicity Tax: A Conservation Law for Complexity}\label{sec:simplicity-tax}
+
+The hardness results of Sections~\ref{sec:hardness}--\ref{sec:tractable} establish that identifying decision-relevant dimensions is \coNP-complete. This section develops a quantitative consequence: a conservation law for complexity that governs the total work required when using models of varying expressiveness.
+
+\subsection{Definitions}\label{sec:tax-definitions}
+
+\begin{definition}[Problem and Model]\label{def:problem-tool}
+A \emph{problem} $P$ has a set of \emph{required dimensions} $R(P) \subseteq \{1,\ldots,n\}$---the coordinates that affect the optimal action. A \emph{model} (or analysis method) $M$ has a set of \emph{native dimensions} $A(M)$---the coordinates it can represent directly.
+\end{definition}
+
+\begin{definition}[Expressive Gap]\label{def:expressive-gap}
+The \emph{expressive gap} between model $M$ and problem $P$ is:
+\[\text{Gap}(M, P) = R(P) \setminus A(M)\]
+The \emph{simplicity tax} is $|\text{Gap}(M, P)|$: the number of dimensions the model cannot represent natively.
+\end{definition}
+
+\begin{definition}[Complete vs. Incomplete Models]\label{def:complete-incomplete}
+Model $M$ is \emph{complete} for problem $P$ if $R(P) \subseteq A(M)$. Otherwise $M$ is \emph{incomplete} for $P$.
+\end{definition}
+
+\subsection{The Conservation Theorem}\label{sec:conservation}
+
+\begin{theorem}[Complexity Conservation]\label{thm:tax-conservation}
+For any problem $P$ with required dimensions $R(P)$ and any model $M$:
+\[|\text{Gap}(M, P)| + |R(P) \cap A(M)| = |R(P)|\]
+The required dimensions are partitioned into ``handled natively'' and ``handled externally.'' The total cannot be reduced---only redistributed.
+\end{theorem}
+
+\begin{proof}
+Set partition: $R(P) = (R(P) \cap A(M)) \cup (R(P) \setminus A(M))$. The sets are disjoint. Cardinality follows. \qed
+\end{proof}
+
+\begin{theorem}[Complete Models Pay No Tax]\label{thm:complete-no-tax}
+If $M$ is complete for $P$, then $\text{SimplicityTax}(M, P) = 0$.
+\end{theorem}
+
+\begin{theorem}[Incomplete Models Pay Positive Tax]\label{thm:incomplete-positive-tax}
+If $M$ is incomplete for $P$, then $\text{SimplicityTax}(M, P) > 0$.
+\end{theorem}
+
+\begin{theorem}[Linear Growth]\label{thm:tax-grows}
+For $n$ decision sites using an incomplete model:
+\[\text{TotalExternalWork}(M, P, n) = n \times \text{SimplicityTax}(M, P)\]
+Total external work grows linearly in the number of sites.
+\end{theorem}
+
+\begin{theorem}[Dominance]\label{thm:complete-dominates}
+For any $n > 0$, a complete model has strictly less total work than an incomplete model:
+\[\text{TotalExternalWork}(M_{\text{complete}}, P, n) < \text{TotalExternalWork}(M_{\text{incomplete}}, P, n)\]
+\end{theorem}
+
+\begin{proof}
+Complete: $0 \times n = 0$. Incomplete: $k \times n$ for $k \geq 1$. For $n > 0$: $0 < kn$. \qed
+\end{proof}
+
+\subsection{Central vs. Distributed Costs}\label{sec:central-distributed}
+
+When comparing models, two cost components must be distinguished:
+\begin{itemize}
+\item $H_{\text{central}}$: The one-time cost of constructing or learning the model.
+\item $H_{\text{distributed}}$: The per-site cost of handling dimensions not covered by the model.
+\end{itemize}
+
+A model with higher $H_{\text{central}}$ but zero $H_{\text{distributed}}$ may have lower total cost than a model with lower $H_{\text{central}}$ but positive $H_{\text{distributed}}$, depending on the number of decision sites.
+
+\begin{theorem}[Comparison Theorem]\label{thm:comparison}
+Let $M_1$ be incomplete for problem $P$ and $M_2$ be complete. For any $n > 0$:
+\[\text{TotalWork}(M_2, P, n) < \text{TotalWork}(M_1, P, n)\]
+when considering only per-site costs (ignoring $H_{\text{central}}$).
+\end{theorem}
+
+\begin{theorem}[Amortization Threshold]\label{thm:amortization}
+There exists a threshold $n^*$ such that for all $n > n^*$, the total cost of the complete model (including $H_{\text{central}}$) is strictly less than the incomplete model:
+\[n^* = \frac{H_{\text{central}}(M_{\text{complete}})}{\text{SimplicityTax}(M_{\text{incomplete}}, P)}\]
+Beyond $n^*$ decision sites, the complete model has lower total cost.
+\end{theorem}
+
+\begin{remark}[On the Central Cost Model]
+This theorem models central cost as a scalar $H_{\text{central}}$. A more refined model might treat it as the rank of a matroid of prerequisite concepts, ensuring that different minimal learning paths have equal cardinality. The qualitative result (threshold existence) is robust to the cost model; the quantitative threshold depends on its precise formalization.
+\end{remark}
+
+\subsection{Examples}\label{sec:examples}
+
+The conservation law applies across domains:
+
+\begin{center}
+\begin{tabular}{p{2.5cm}p{3.5cm}p{3.5cm}p{2.5cm}}
+\toprule
+\textbf{Domain} & \textbf{Incomplete Model} & \textbf{Complete Model} & \textbf{Tax/Site} \\
+\midrule
+Type Systems & Dynamic typing & Static typing & Type errors \\
+Data Validation & Ad-hoc checks & Schema validation & Validation code \\
+Configuration & Hardcoded values & Config management & Change sites \\
+APIs & String parameters & Typed interfaces & Parse/validate \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+In each case, the incomplete model has lower $H_{\text{central}}$ but positive $H_{\text{distributed}}$. For $n$ sites, total work is $H_{\text{central}} + n \times \text{tax}$.
+
+\textbf{Example: Static vs. Dynamic Typing.} Dynamic typing has lower learning cost. But type errors are a per-site cost: each call site that could receive an incorrect type requires either defensive code or debugging. For $n$ call sites:
+\begin{itemize}
+\item Static typing: type checker verifies once; per-site cost is 0.
+\item Dynamic typing: $n$ potential error sites, each with positive per-site cost.
+\end{itemize}
+
+\subsection{Connection to the Complexity Results}\label{sec:connection}
+
+The conservation law connects to the main complexity results as follows: since identifying the required dimensions $R(P)$ is \coNP-complete (Theorem~\ref{thm:sufficiency-conp}), and since misidentification leads to a positive simplicity tax, the cost of using an incomplete model is a direct consequence of the hardness of the sufficiency problem.
+
+\begin{corollary}
+If identifying $R(P)$ is intractable, then minimizing the simplicity tax is also intractable.
+\end{corollary}
+
+\subsection{Lean 4 Formalization}\label{sec:simplicity-lean}
+
+The theorems in this section are machine-checked in \texttt{DecisionQuotient/HardnessDistribution.lean}:
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+\textbf{Theorem} & \textbf{Lean Name} \\
+\midrule
+Complexity Conservation & \texttt{simplicityTax\_conservation} \\
+Complete Models Pay No Tax & \texttt{complete\_tool\_no\_tax} \\
+Incomplete Models Pay Positive Tax & \texttt{incomplete\_tool\_positive\_tax} \\
+Linear Growth & \texttt{simplicityTax\_grows} \\
+Dominance & \texttt{complete\_dominates\_incomplete} \\
+Amortization Threshold & \texttt{amortization\_threshold} \\
+Tax Antitone w.r.t. Expressiveness & \texttt{simplicityTax\_antitone} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The formalization uses \texttt{Finset $\mathbb{N}$} for dimensions. The \texttt{Model} type forms a lattice under the expressiveness ordering, with tax antitone (more expressive $\Rightarrow$ lower tax).

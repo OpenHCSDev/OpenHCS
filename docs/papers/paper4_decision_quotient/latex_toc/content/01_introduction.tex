@@ -1,0 +1,67 @@
+\section{Introduction}\label{sec:introduction}
+
+Consider a decision problem with actions $A$ and states $S = X_1 \times \cdots \times X_n$. A coordinate set $I \subseteq \{1, \ldots, n\}$ is \emph{sufficient} if knowing only coordinates in $I$ determines the optimal action:
+\[
+s_I = s'_I \implies \Opt(s) = \Opt(s')
+\]
+
+This paper completely characterizes when coordinate sufficiency can be decided efficiently:
+
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+\textbf{Problem} & \textbf{Complexity} & \textbf{When Tractable} \\
+\midrule
+Sufficiency-Check & \coNP-complete & Bounded actions, separable utility, trees \\
+Minimum-Sufficient-Set & \coNP-complete & Same conditions \\
+Anchor-Sufficiency & $\SigmaP{2}$-complete & Open \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The tractable cases are \emph{tight}: relaxing any condition restores hardness. A sharp dichotomy separates polynomial ($O(\log n)$ minimal set) from exponential ($\Omega(n)$ minimal set) cases.
+
+\subsection{The Complete Landscape}
+
+\textbf{When is sufficiency checking tractable?} We identify three sufficient conditions:
+
+\begin{enumerate}
+\item \textbf{Bounded actions} ($|A| \leq k$): With constantly many actions, we can enumerate action pairs and check each for distinguishing states.
+
+\item \textbf{Separable utility} ($u(a,s) = f(a) + g(s)$): The optimal action depends only on $f$, making all coordinates irrelevant to the decision.
+
+\item \textbf{Tree-structured dependencies}: When coordinates form a tree (each coordinate depends on at most one other), dynamic programming yields polynomial algorithms.
+\end{enumerate}
+
+Each condition is tight. Unbounded actions with non-separable utility on a DAG (not tree) is \coNP-hard.
+
+\textbf{When is it intractable?} The general problem is \coNP-complete (Theorem~\ref{thm:sufficiency-conp}), with a sharp dichotomy:
+\begin{itemize}
+\item If the minimal sufficient set has size $O(\log |S|)$: polynomial (brute-force over $2^{O(\log |S|)} = \text{poly}(|S|)$ subsets).
+\item If the minimal sufficient set has size $\Omega(n)$: requires $2^{\Omega(n)}$ time under ETH.
+\end{itemize}
+
+There is no intermediate regime---the complexity jumps discontinuously at the $O(\log n)$ threshold.
+
+\subsection{Main Theorems}
+
+\begin{enumerate}
+\item \textbf{Theorem~\ref{thm:sufficiency-conp}:} Sufficiency-Check is \coNP-complete via reduction from TAUTOLOGY.
+
+\item \textbf{Theorem~\ref{thm:minsuff-conp}:} Minimum-Sufficient-Set is \coNP-complete (the $\SigmaP{2}$ structure collapses).
+
+\item \textbf{Theorem~\ref{thm:anchor-sigma2p}:} Anchor-Sufficiency is $\SigmaP{2}$-complete via reduction from $\exists\forall$-SAT.
+
+\item \textbf{Theorem~\ref{thm:dichotomy}:} Sharp dichotomy at $O(\log n)$ vs $\Omega(n)$.
+
+\item \textbf{Theorem~\ref{thm:tractable}:} Polynomial algorithms for bounded actions, separable utility, tree structure.
+\end{enumerate}
+
+\subsection{Machine-Checked Proofs}
+
+All results are formalized in Lean 4 \cite{moura2021lean4} ($\sim$5,000 lines, 200+ theorems). The formalization verifies the reduction mappings and combinatorial lemmas; complexity class membership follows by composition with TAUTOLOGY and $\exists\forall$-SAT.
+
+\subsection{Paper Structure}
+
+Section~\ref{sec:foundations}: foundations. Section~\ref{sec:hardness}: hardness proofs. Section~\ref{sec:dichotomy}: dichotomy. Section~\ref{sec:tractable}: tractable cases. Section~\ref{sec:implications}: implications. Section~\ref{sec:simplicity-tax}: complexity conservation corollary. Section~\ref{sec:related}: related work. Appendix~\ref{app:lean}: Lean listings.
+

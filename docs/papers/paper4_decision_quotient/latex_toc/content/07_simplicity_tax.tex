@@ -1,0 +1,25 @@
+\section{Corollary: Complexity Conservation}\label{sec:simplicity-tax}
+
+A quantitative consequence of the hardness results: when a model handles fewer dimensions than required, the gap must be paid at each use site.
+
+\begin{definition}
+Let $R(P)$ be the required dimensions (those affecting $\Opt$) and $A(M)$ the dimensions model $M$ handles natively. The \emph{expressive gap} is $\text{Gap}(M,P) = R(P) \setminus A(M)$.
+\end{definition}
+
+\begin{theorem}[Conservation]\label{thm:tax-conservation}
+$|\text{Gap}(M, P)| + |R(P) \cap A(M)| = |R(P)|$. The total cannot be reduced---only redistributed between ``handled natively'' and ``handled externally.''
+\end{theorem}
+
+\begin{theorem}[Linear Growth]\label{thm:tax-grows}
+For $n$ decision sites: $\text{TotalExternalWork} = n \times |\text{Gap}(M, P)|$.
+\end{theorem}
+
+\begin{theorem}[Amortization]\label{thm:amortization}
+Let $H_{\text{central}}$ be the one-time cost of using a complete model. There exists $n^* = H_{\text{central}} / |\text{Gap}|$ such that for $n > n^*$, the complete model has lower total cost.
+\end{theorem}
+
+\begin{corollary}
+Since identifying $R(P)$ is \coNP-complete (Theorem~\ref{thm:sufficiency-conp}), minimizing the expressive gap is also intractable.
+\end{corollary}
+
+These results are machine-checked in Lean 4 (\texttt{HardnessDistribution.lean}).
