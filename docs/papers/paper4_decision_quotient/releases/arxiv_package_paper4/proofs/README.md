@@ -29,11 +29,6 @@ lake build
 | `Complexity.lean` | Complexity |
 | `ComplexityMain.lean` | ComplexityMain |
 | `Computation.lean` | Computation |
-| `AlgorithmComplexity.lean` | AlgorithmComplexity |
-| `Basic.lean` | Basic |
-| `Complexity.lean` | Complexity |
-| `ComplexityMain.lean` | ComplexityMain |
-| `Computation.lean` | Computation |
 | `Dichotomy.lean` | Dichotomy |
 | `Approximation.lean` | Approximation |
 | `Elicitation.lean` | Elicitation |
@@ -66,17 +61,6 @@ lake build
 | `TreeStructure.lean` | TreeStructure |
 | `Tractable.lean` | Tractable |
 | `DecisionQuotient.lean` | DecisionQuotient |
-| `Dichotomy.lean` | Dichotomy |
-| `Finite.lean` | Finite |
-| `Hardness.lean` | Hardness |
-| `Information.lean` | Information |
-| `Instances.lean` | Instances |
-| `PolynomialReduction.lean` | PolynomialReduction |
-| `QueryComplexity.lean` | QueryComplexity |
-| `Quotient.lean` | Quotient |
-| `Reduction.lean` | Reduction |
-| `Sufficiency.lean` | Sufficiency |
-| `Tractable.lean` | Tractable |
 | `lakefile.lean` | lakefile |
 
 ## Verification

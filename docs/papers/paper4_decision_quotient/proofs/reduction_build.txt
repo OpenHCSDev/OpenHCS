@@ -1,2 +1,0 @@
-✔ [781/781] Built DecisionQuotient.Reduction
-Build completed successfully.

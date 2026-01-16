@@ -1,6 +1,0 @@
-DecisionQuotient/
-DecisionQuotient.lean
-lakefile.lean
-lake-manifest.json
-lean-toolchain
-output.txt

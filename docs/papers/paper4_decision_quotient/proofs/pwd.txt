@@ -1,1 +1,0 @@
-/home/ts/code/projects/openhcs-sequential/docs/papers/paper4_decision_quotient/proofs
