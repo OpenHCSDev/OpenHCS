@@ -11,8 +11,8 @@ This is not reconstruction (the decoder need not recover $v$), but \emph{identif
 We prove three results:
 \begin{enumerate}
 \item \textbf{Information barrier (identifiability limit).} When the attribute profile $\pi: \mathcal{V} \to \{0,1\}^n$ is not injective on classes, zero-error identification via queries alone is impossible: any decoder produces identical output on colliding classes, so cannot be correct for both.
-\item \textbf{Optimal tagging (achievability).} A tag of $L = \lceil \log_2 k \rceil$ bits achieves zero-error identification with $W = O(1)$ query cost. This is Pareto-optimal in the $(L, W, D)$ tradeoff space.
-\item \textbf{Matroid structure (query complexity).} Minimal sufficient query sets form the bases of a matroid. The \emph{distinguishing dimension} (the common cardinality of all minimal sets) lower-bounds the query cost $W$ for any tag-free scheme.
+\item \textbf{Optimal tagging (achievability).} A tag of $L = \lceil \log_2 k \rceil$ bits achieves zero-error identification with $W = O(1)$ query cost. This is the unique Pareto-optimal point in the $(L, W, D)$ tradeoff space for $D=0$ when attributes are not class-injective.
+\item \textbf{Matroid structure (query complexity).} Minimal sufficient query sets form the bases of a matroid. The \emph{distinguishing dimension} (the common cardinality of all minimal sets) is well-defined and lower-bounds the query cost $W$ for any tag-free scheme.
 \end{enumerate}
 
 These results are universal: the theory applies to type systems, databases, biological taxonomy, and knowledge graphs. We develop the mathematics in full generality, then exhibit concrete instantiations.
@@ -102,11 +102,12 @@ The extended primitive query set is $\Phi_{\mathcal{I}}^+ = \Phi_{\mathcal{I}} \
 \end{definition}
 
 \begin{definition}[Witness cost]
-Let $W(P)$ denote the minimum number of primitive queries from $\Phi_{\mathcal{I}}^+$ required to compute property $P$:
-\[
-W(P) = \min \{ c(A) : A \text{ is a procedure computing } P \}
-\]
-where $c(A)$ counts the number of queries to $\Phi_{\mathcal{I}}^+$ made by $A$.
+Let $W(P)$ denote the minimum number of primitive queries from $\Phi_{\mathcal{I}}^+$ required to compute property $P$. We distinguish two tasks:
+\begin{itemize}
+\item $W_{\text{id}}$: Cost to identify the class of a single entity.
+\item $W_{\text{eq}}$: Cost to determine if two entities have the same class (type identity).
+\end{itemize}
+Unless specified, $W$ refers to $W_{\text{eq}}$ (type identity checking).
 \end{definition}
 
 \begin{theorem}[Constant witness for type identity]\label{thm:constant-witness}
