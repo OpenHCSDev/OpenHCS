@@ -94,4 +94,13 @@ The quasipolynomial regime at the threshold is measure-zero; almost all instance
 
 This dichotomy explains why some domains admit tractable model selection (few relevant variables) while others require heuristics (many relevant variables). The ETH reduction chain makes precise what ``hard'' means: not merely coNP-complete, but requiring $2^{\Omega(n)}$ time under widely-believed complexity assumptions.
 
+\begin{remark}[Circuit Model Formalization]
+The ETH lower bound is most naturally stated in the \emph{circuit model}, where the utility function $U: A \times S \to \mathbb{R}$ is represented by a Boolean circuit computing $\mathbf{1}[U(a,s) > \theta]$ for threshold comparisons. In this model:
+\begin{itemize}
+\item The input size is the circuit size $m$, not the state space size $|S| = 2^n$
+\item A 3-SAT formula with $n$ variables and $c$ clauses yields a circuit of size $O(n + c)$
+\item The reduction preserves instance size up to constant factors: $m_{\text{out}} \leq 3 \cdot m_{\text{in}}$
+\end{itemize}
+This linear size preservation is essential for ETH transfer. In the explicit enumeration model (where $S$ is given as a list), the reduction would blow up the instance size exponentially, precluding ETH-based lower bounds. The circuit model is standard in fine-grained complexity and matches practical representations of decision problems.
+\end{remark}
 
