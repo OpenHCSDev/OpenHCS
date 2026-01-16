@@ -3,44 +3,44 @@ Capacity: max_strings=200000, hash_size=200000, hash_prime=170003
 The top-level auxiliary file: decision_quotient_arxiv.aux
 The style file: plain.bst
 Database file #1: references.bib
-You've used 31 entries,
+You've used 37 entries,
             2118 wiz_defined-function locations,
-            679 strings with 8188 characters,
-and the built_in function-call counts, 9302 in all, are:
-= -- 943
-> -- 317
-< -- 5
-+ -- 136
-- -- 96
-* -- 568
-:= -- 1523
-add.period$ -- 96
-call.type$ -- 31
-change.case$ -- 133
+            711 strings with 9080 characters,
+and the built_in function-call counts, 11555 in all, are:
+= -- 1182
+> -- 392
+< -- 9
++ -- 168
+- -- 120
+* -- 709
+:= -- 1865
+add.period$ -- 116
+call.type$ -- 37
+change.case$ -- 162
 chr.to.int$ -- 0
-cite$ -- 31
-duplicate$ -- 395
-empty$ -- 822
-format.name$ -- 96
-if$ -- 1979
+cite$ -- 37
+duplicate$ -- 495
+empty$ -- 1010
+format.name$ -- 120
+if$ -- 2479
 int.to.chr$ -- 0
-int.to.str$ -- 31
-missing$ -- 41
-newline$ -- 158
-num.names$ -- 62
-pop$ -- 168
+int.to.str$ -- 37
+missing$ -- 48
+newline$ -- 188
+num.names$ -- 74
+pop$ -- 202
 preamble$ -- 1
-purify$ -- 110
+purify$ -- 134
 quote$ -- 0
-skip$ -- 267
+skip$ -- 344
 stack$ -- 0
-substring$ -- 642
-swap$ -- 72
-text.length$ -- 5
+substring$ -- 814
+swap$ -- 108
+text.length$ -- 9
 text.prefix$ -- 0
 top$ -- 0
-type$ -- 102
+type$ -- 124
 warning$ -- 0
-while$ -- 102
-width$ -- 33
-write$ -- 337
+while$ -- 127
+width$ -- 39
+write$ -- 405

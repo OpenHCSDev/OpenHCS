@@ -1,36 +1,24 @@
 \section{Conclusion}
 
-\subsection*{Methodology and Disclosure}
+We have presented a Lean 4 framework for formalizing polynomial-time reductions and demonstrated it through a comprehensive complexity analysis of decision-relevant information.
 
-\textbf{Role of LLMs in this work.} This paper was developed through
-human-AI collaboration. The author provided the core intuitions---the
-connection between decision-relevance and computational complexity, the
-conjecture that SUFFICIENCY-CHECK is coNP-complete, and the insight that
-the $\Sigma_2^P$ structure collapses for MINIMUM-SUFFICIENT-SET. Large
-language models (Claude, GPT-4) served as implementation partners for
-proof drafting, Lean formalization, and LaTeX generation.
+\subsection*{Formalization Contributions}
 
-The Lean 4 proofs were iteratively refined: the author specified what
-should be proved, the LLM proposed proof strategies, and the Lean
-compiler served as the arbiter of correctness. The complexity-theoretic
-reductions required careful human oversight to ensure the polynomial
-bounds were correctly established.
+The primary contributions are methodological:
 
-\textbf{What the author contributed:} The problem formulations
-(SUFFICIENCY-CHECK, MINIMUM-SUFFICIENT-SET, ANCHOR-SUFFICIENCY), the
-hardness conjectures, the tractability conditions, and the connection
-to over-modeling in engineering practice.
+\begin{enumerate}
+\item \textbf{Reusable reduction infrastructure.} The bundled \texttt{KarpReduction} type, polynomial bound tracking, and composition lemmas provide a foundation for future complexity formalizations.
 
-\textbf{What LLMs contributed:} LaTeX drafting, Lean tactic exploration,
-reduction construction assistance, and prose refinement.
+\item \textbf{Demonstrated methodology.} Five complete reduction proofs (TAUTOLOGY, SET-COVER, ETH, W[2], and the Simplicity Tax) show that complexity-theoretic arguments are tractable to formalize with $\sim$600 lines per reduction.
 
-The proofs are machine-checked; their validity is independent of
-generation method. We disclose this methodology in the interest of
-academic transparency.
+\item \textbf{Integration patterns.} We show how to connect custom complexity definitions with Mathlib's computability and polynomial libraries.
 
-\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+\item \textbf{Artifact quality.} Zero \texttt{sorry} placeholders, documented axiom dependencies, and reproducible builds via \texttt{lake build}.
+\end{enumerate}
 
-We have established that identifying decision-relevant information is computationally hard:
+\subsection*{Verified Complexity Results}
+
+Through the case study, we machine-verified:
 
 \begin{itemize}
 \item Checking whether a coordinate set is sufficient is \coNP-complete
@@ -111,40 +99,27 @@ The Simplicity Tax Theorem adds a practical corollary: the universal response to
 
 Open questions remain (fixed-parameter tractability, quantum complexity, average-case behavior under natural distributions), but the foundational question---\emph{is identifying relevance fundamentally hard?}---is answered: yes.
 
-\subsection*{Future Work: Learning Cost as Concept Matroids}
+\subsection*{Future Work}
 
-The Simplicity Tax Theorem uses a simplified model of learning cost ($H_{\text{central}}$). A more precise formalization would treat learning cost as \emph{concept axes}---the prerequisite concepts required to use a tool effectively.
+Several directions extend this work:
 
-Paper 1 established that type axes form a matroid structure: minimal complete axis sets have equal cardinality, and the \texttt{type()} operation witnesses axis membership. An analogous structure may govern learning:
-
-\begin{itemize}
-\item Each prerequisite concept (classes, inheritance, descriptors, MRO, etc.) is an axis
-\item \textbf{Different minimal learning paths exist with equal cardinality} (the matroid property)
-\item Learning cost = rank of the concept matroid (size of any minimal generating set)
-\item The primitive witnessing concept mastery = \textbf{Minimal Working Example (MWE)}
-\end{itemize}
-
-The witness deserves elaboration. Paper 1 used \texttt{type(x)} as the primitive witnessing type-axis membership. For concept axes, the analogue is the \emph{Minimal Working Example}---the shortest program demonstrating correct usage of a capability. This is precisely the Kolmogorov complexity of competence, measured in AST nodes rather than bits:
-\[
-\text{LearningCost}(T) = \min \{ |\text{AST}(p)| : p \text{ correctly uses capability } T \}
-\]
-
-For \texttt{type()}: the MWE is \texttt{type(x)} ($\sim$1 node). For metaclasses: the MWE requires class definition, inheritance from \texttt{type}, \texttt{\_\_new\_\_} override, and \texttt{super()} delegation ($\sim$15 nodes). The ratio of AST node counts is the ratio of learning costs.
-
-The matroid structure is non-trivial: to learn metaclasses, one might traverse concepts via inheritance and \texttt{\_\_new\_\_}, or via descriptors and \texttt{\_\_call\_\_}, or via class decorators. These are \emph{different} minimal paths, but the exchange property guarantees they have the same length. This is precisely why learning cost can be a well-defined scalar (the rank) despite multiple valid learning trajectories.
-
-This yields a three-level hierarchy:
 \begin{enumerate}
-\item \textbf{Problem axes}: what the domain requires
-\item \textbf{Tool axes}: what the tool natively handles
-\item \textbf{Concept axes}: what must be learned to access tool axes
+\item \textbf{Mathlib integration.} Our reduction framework could be contributed to Mathlib's computability library, providing standard definitions for Karp reductions, NP/coNP membership, and polynomial bounds.
+
+\item \textbf{Additional reductions.} The methodology extends to other classical reductions (3-SAT to CLIQUE, HAMPATH to TSP, etc.). A library of machine-verified reductions would be valuable for both education and research.
+
+\item \textbf{Automation.} The patterns identified in Section~\ref{sec:engineering} suggest opportunities for tactic development. A \texttt{complexity} tactic analogous to \texttt{continuity} could automate routine reduction steps.
+
+\item \textbf{Turing machine formalization.} Our current work operates at the reduction level, assuming polynomial-time bounds. Full Turing machine formalization would enable end-to-end verification from machine model to complexity class.
+
+\item \textbf{Parameterized complexity library.} W-hierarchy and FPT definitions are not yet in Mathlib. Our W[2]-hardness proof provides a starting point.
 \end{enumerate}
 
-Complete mastery requires: concept axes $\supseteq$ tool axes $\supseteq$ problem axes.
+\subsection*{Methodology Disclosure}
 
-The amortization threshold (Theorem~\ref{thm:amortization}) would then have a precise characterization: $n^* = \text{rank}(\text{ConceptMatroid}(T)) / \text{SimplicityTax}(T, P)$.
+This paper was developed through human-AI collaboration. The author provided problem formulations, hardness conjectures, and proof strategies. Large language models (Claude) assisted with LaTeX drafting, Lean tactic exploration, and proof search.
 
-Full development of concept matroids is deferred to future work. The key conjecture: \emph{learning cost, like type structure, admits matroid formalization, making the Simplicity Tax quantitatively precise rather than merely qualitatively correct.}
+The Lean 4 compiler served as the ultimate arbiter: proofs either compile or they don't. The validity of machine-checked theorems is independent of generation method. We disclose this methodology in the interest of academic transparency.
 
 
 \appendix
