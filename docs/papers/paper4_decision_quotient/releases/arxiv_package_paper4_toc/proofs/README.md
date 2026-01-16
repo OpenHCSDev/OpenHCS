@@ -42,6 +42,7 @@ lake build
 | `ApproximationHardness.lean` | ApproximationHardness |
 | `CountingComplexity.lean` | CountingComplexity |
 | `CoveringLowerBound.lean` | CoveringLowerBound |
+| `ETH.lean` | ETH |
 | `QBF.lean` | QBF |
 | `SAT.lean` | SAT |
 | `AnchorSufficiency.lean` | AnchorSufficiency |
@@ -57,9 +58,11 @@ lake build
 | `Quotient.lean` | Quotient |
 | `Reduction.lean` | Reduction |
 | `Sufficiency.lean` | Sufficiency |
+| `Summary.lean` | Summary |
 | `BoundedActions.lean` | BoundedActions |
 | `FPT.lean` | FPT |
 | `SeparableUtility.lean` | SeparableUtility |
+| `Tightness.lean` | Tightness |
 | `TreeStructure.lean` | TreeStructure |
 | `Tractable.lean` | Tractable |
 | `DecisionQuotient.lean` | DecisionQuotient |

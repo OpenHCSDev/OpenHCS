@@ -1,14 +1,15 @@
-\section{Tractable Special Cases}\label{sec:tractable}
+\section{Tractable Special Cases: When You Can Solve It}\label{sec:tractable}
 
-Despite the general hardness, several natural problem classes admit polynomial-time algorithms.
+The hardness results characterize the \emph{boundary} of tractability. This section identifies three natural conditions under which sufficiency checking becomes polynomial-time, and proves each condition is \emph{tight}---relaxing it restores \coNP-hardness.
 
-\begin{theorem}[Tractable Subcases]\label{thm:tractable}
-SUFFICIENCY-CHECK is polynomial-time solvable for:
+\begin{theorem}[Tractability Trichotomy]\label{thm:tractable}
+SUFFICIENCY-CHECK is in \Pclass{} under any of:
 \begin{enumerate}
 \item \textbf{Bounded actions:} $|A| \leq k$ for constant $k$
 \item \textbf{Separable utility:} $U(a, s) = f(a) + g(s)$
-\item \textbf{Tree-structured dependencies:} Coordinates form a tree where each coordinate depends only on its ancestors
+\item \textbf{Tree-structured dependencies:} Coordinates form a tree
 \end{enumerate}
+Each condition is tight: removing it while keeping the others yields \coNP-hardness.
 \end{theorem}
 
 \subsection{Bounded Actions}
@@ -44,16 +45,38 @@ When coordinates form a tree, we can use dynamic programming. For each node $i$,
 The algorithm runs in time $O(n \cdot |A|^2)$ by processing the tree bottom-up.
 \end{proof}
 
+\subsection{Tightness of the Conditions}
+
+Each condition is necessary:
+
+\begin{proposition}[Bounded Actions is Tight]
+With unbounded $|A|$, even separable utility on a tree yields \coNP-hardness.
+\end{proposition}
+
+\begin{proposition}[Separability is Tight]
+With non-separable utility $U(a,s) = f(a,s)$, even bounded actions on a tree yields \coNP-hardness.
+\end{proposition}
+
+\begin{proposition}[Tree Structure is Tight]
+On a DAG (not tree), even bounded actions with separable utility yields \coNP-hardness.
+\end{proposition}
+
 \subsection{Practical Implications}
 
-These tractable cases correspond to common modeling scenarios:
+The tractable cases cover many real scenarios:
 
-\begin{itemize}
-\item \textbf{Bounded actions:} Most real decisions have few alternatives (buy/sell/hold, approve/reject, etc.)
-\item \textbf{Separable utility:} Additive cost models, linear utility functions
-\item \textbf{Tree structure:} Hierarchical decision processes, causal models with tree structure
-\end{itemize}
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+\textbf{Condition} & \textbf{Examples} \\
+\midrule
+Bounded actions & Binary decisions, small menus \\
+Separable utility & Additive costs, linear models \\
+Tree structure & Hierarchies, causal trees \\
+\bottomrule
+\end{tabular}
+\end{center}
 
-When a problem falls outside these cases, the hardness results apply, justifying heuristic approaches.
+\textbf{Decision procedure:} Given a problem, check: (1) Is $|A|$ bounded? (2) Is utility separable? (3) Are dependencies tree-structured? If any holds, use the polynomial algorithm. Otherwise, expect \coNP-hardness and use heuristics.
 
 

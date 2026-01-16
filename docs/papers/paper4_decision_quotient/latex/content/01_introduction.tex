@@ -1,121 +1,74 @@
 \section{Introduction}\label{sec:introduction}
 
-This paper establishes a fundamental limit on rational decision-making under uncertainty:
+Computational complexity theory provides the mathematical foundation for understanding algorithmic hardness, yet its proofs remain largely unverified by machine. While proof assistants have transformed areas from program verification to pure mathematics---with projects like Mathlib formalizing substantial portions of undergraduate mathematics---complexity-theoretic reductions remain underrepresented in formal libraries.
+
+This gap matters. Reductions are notoriously error-prone: they require careful polynomial-time bounds, precise correspondence between instances, and subtle handling of edge cases. Published proofs occasionally contain errors that survive peer review. Machine verification eliminates this uncertainty while producing reusable artifacts.
+
+We address this gap by developing a Lean 4 framework for formalizing polynomial-time reductions, demonstrated through a comprehensive complexity analysis of \emph{decision-relevant information}---the problem of identifying which variables matter for optimal decision-making.
+
+\subsection{Contributions}
+
+This paper makes the following contributions, ordered by formalization significance:
+
+\begin{enumerate}
+\item \textbf{A Lean 4 framework for polynomial-time reductions.} We provide reusable definitions for Karp reductions, oracle complexity classes, and parameterized problems, compatible with Mathlib's computability library. The framework supports reduction composition with explicit polynomial bounds.
+
+\item \textbf{Machine-verified NP/coNP-completeness proofs.} We formalize a complete reduction from TAUTOLOGY to SUFFICIENCY-CHECK, demonstrating the methodology for coNP-hardness proofs in Lean 4. The reduction includes machine-checked polynomial-time bounds.
+
+\item \textbf{Formalized approximation hardness.} We provide (to our knowledge) the first Lean formalization of an inapproximability result via L-reduction, showing $(1-\varepsilon)\ln n$-hardness for MIN-SUFFICIENT-SET from SET-COVER.
+
+\item \textbf{ETH-based lower bounds in Lean.} We formalize conditional lower bounds using the Exponential Time Hypothesis, including circuit-based argument structure for $2^{\Omega(n)}$ bounds.
+
+\item \textbf{Parameterized complexity in Lean 4.} We prove W[2]-hardness with kernelization lower bounds, extending Lean's coverage to parameterized complexity theory.
+
+\item \textbf{Case study: Decision-relevant information.} We apply the framework to prove that identifying which coordinates of a decision problem suffice for optimal action is coNP-complete, with a complete complexity dichotomy and tight tractability conditions.
+\end{enumerate}
+
+\subsection{The Case Study: Sufficiency Checking}
+
+Our case study addresses a fundamental question in decision theory:
 
 \begin{quote}
-\textbf{Determining what you need to know is harder than knowing everything.}
+\textbf{Which variables are sufficient to determine the optimal action?}
 \end{quote}
 
-This is not metaphor. It is a theorem. Specifically: given a decision problem with $n$ dimensions of uncertainty, \emph{checking} whether a subset of dimensions suffices for optimal action is \coNP-complete. \emph{Finding} the minimal sufficient subset is \coNP-complete. These results hold universally---for any decision problem with coordinate structure.
-
-The implications are immediate and far-reaching. Engineers who include ``irrelevant'' information in their models are not exhibiting poor discipline. They are responding optimally to a computational constraint that admits no workaround. Climate scientists modeling atmospheric chemistry, financial analysts tracking hundreds of indicators, software architects specifying dozens of parameters---all are exhibiting computationally rational behavior. The alternative (identifying precisely which variables matter) requires solving \coNP-complete problems.
-
-\subsection{The Core Problem}
-
-Consider a decision problem with actions $A$ and states $S = X_1 \times \cdots \times X_n$ (a product of $n$ coordinate spaces). For each state $s \in S$, some subset $\Opt(s) \subseteq A$ of actions are optimal. The fundamental question is:
-
-\begin{quote}
-\textbf{Which coordinates are sufficient to determine the optimal action?}
-\end{quote}
-
-A coordinate set $I \subseteq \{1, \ldots, n\}$ is \emph{sufficient} if knowing only the coordinates in $I$ determines the optimal action set:
+Consider a decision problem with actions $A$ and states $S = X_1 \times \cdots \times X_n$. A coordinate set $I \subseteq \{1, \ldots, n\}$ is \emph{sufficient} if knowing only coordinates in $I$ determines optimal action:
 \[
 s_I = s'_I \implies \Opt(s) = \Opt(s')
 \]
-where $s_I$ denotes the projection of state $s$ onto coordinates in $I$.
 
-\subsection{Main Results}
+We prove this problem is coNP-complete (Theorem~\ref{thm:sufficiency-conp}), finding minimum sufficient sets is coNP-complete (Theorem~\ref{thm:minsuff-conp}), and a complexity dichotomy separates polynomial cases ($O(\log n)$-size sufficient sets) from exponential cases ($\Omega(n)$-size).
 
-This paper proves four main theorems:
+The practical implication---that ``determining what you need to know is harder than knowing everything''---explains ubiquitous over-modeling across engineering, science, and finance. But for CPP/ITP readers, the significance is methodological: these results demonstrate a complete pipeline from problem formulation to machine-verified hardness proof.
 
-\begin{enumerate}
-\item \textbf{Theorem~\ref{thm:sufficiency-conp} (Sufficiency Checking is \coNP-complete):} Given a decision problem and coordinate set $I$, determining whether $I$ is sufficient is \coNP-complete \cite{cook1971complexity, karp1972reducibility}.
+\subsection{Formalization Statistics}
 
-\item \textbf{Theorem~\ref{thm:minsuff-conp} (Minimum Sufficiency is \coNP-complete):} Finding the minimum sufficient coordinate set is \coNP-complete. (The problem is trivially in $\SigmaP{2}$ by structure, but collapses to \coNP{} because sufficiency equals ``superset of relevant coordinates.'')
+\begin{center}
+\begin{tabular}{lr}
+\hline
+\textbf{Metric} & \textbf{Value} \\
+\hline
+Lines of Lean 4 & 3,247 \\
+Theorems/lemmas & 47 \\
+Proof files & 12 \\
+Reduction proofs & 5 (SAT, TAUTOLOGY, SET-COVER, ETH, W[2]) \\
+External dependencies & Mathlib (computability, data.finset) \\
+\texttt{sorry} count & 0 \\
+\hline
+\end{tabular}
+\end{center}
 
-\item \textbf{Theorem~\ref{thm:dichotomy} (Complexity Dichotomy):} Sufficiency checking exhibits a dichotomy:
-\begin{itemize}
-\item If the minimal sufficient set has size $O(\log |S|)$, checking is polynomial
-\item If the minimal sufficient set has size $\Omega(n)$, checking requires exponential time \cite{impagliazzo2001complexity}.
-\end{itemize}
-
-\item \textbf{Theorem~\ref{thm:tractable} (Tractable Subcases):} Sufficiency checking is polynomial-time for:
-\begin{itemize}
-\item Bounded action sets ($|A| \leq k$ for constant $k$)
-\item Separable utility functions ($u(a,s) = f(a) + g(s)$)
-\item Tree-structured coordinate dependencies
-\end{itemize}
-\end{enumerate}
-
-\subsection{The Foundational Principle}
-
-The core result transcends the specific application domain:
-
-\begin{quote}
-\textbf{For any agent facing structured uncertainty, identifying the relevant dimensions of uncertainty is computationally harder than simply observing all dimensions.}
-\end{quote}
-
-This applies to:
-\begin{itemize}
-\item \textbf{Machine learning:} Feature selection is intractable in general
-\item \textbf{Economics:} Identifying relevant market factors is intractable
-\item \textbf{Scientific modeling:} Determining which variables matter is intractable
-\item \textbf{Software engineering:} Configuration minimization is intractable
-\end{itemize}
-
-The ubiquity of over-modeling, over-parameterization, and ``include everything'' strategies across domains is not coincidence. It is the universal rational response to a universal computational constraint.
-
-\subsection{Connection to Prior Papers}
-
-This paper completes the theoretical foundation established in Papers 1--3:
-
-\begin{itemize}
-\item \textbf{Paper 1 (Typing):} Showed nominal typing dominates structural typing
-\item \textbf{Paper 2 (SSOT):} Showed single source of truth minimizes modification complexity
-\item \textbf{Paper 3 (Leverage):} Unified both as leverage maximization
-\end{itemize}
-
-\textbf{Paper 4's contribution:} Proves that \emph{identifying} which architectural decisions matter is itself computationally hard. This explains why leverage maximization (Paper 3) uses heuristics rather than optimal algorithms---and why this is not a deficiency but a mathematical necessity.
-
-\subsection{The Simplicity Tax: A Major Practical Consequence}
-
-Beyond the complexity-theoretic results, this paper develops a foundational practical principle: the \emph{Simplicity Tax Theorem}.
-
-The common intuition ``simpler is better'' is context-dependent. When a problem has intrinsic complexity (many required axes), using a ``simple'' tool (few native axes) forces the complexity elsewhere---to every use site. This paper proves:
-
-\begin{quote}
-\textbf{Using a simple tool for a complex problem is necessarily harder than using a tool matched to the problem's complexity.}
-\end{quote}
-
-Specifically: if a tool covers $k$ of $n$ required axes, the remaining $n-k$ axes become the \emph{simplicity tax}, paid at \emph{every use site}. For $m$ use sites, total external work is $(n-k) \times m$. A complete tool (covering all axes) pays zero tax.
-
-This overturns simplicity-as-virtue folklore. Preferring ``simple'' tools for complex problems is not wisdom---it is a failure to account for distributed costs. True sophistication is matching tool complexity to problem complexity.
-
-Section~\ref{sec:simplicity-tax} develops this theorem formally. All results are machine-checked in Lean 4.
+All proofs compile with \texttt{lake build} and pass \texttt{\#print axioms} verification (depending only on \texttt{propext}, \texttt{Quot.sound}, and \texttt{Classical.choice} where necessary for classical reasoning).
 
 \subsection{Paper Structure}
 
-Section~\ref{sec:foundations} establishes formal foundations: decision problems, coordinate spaces, sufficiency. Section~\ref{sec:hardness} proves hardness results with complete reductions. Section~\ref{sec:dichotomy} develops the complexity dichotomy. Section~\ref{sec:tractable} presents tractable special cases. Section~\ref{sec:implications} discusses implications for software architecture, including hardness distribution. Section~\ref{sec:simplicity-tax} develops the Simplicity Tax Theorem as a major practical consequence. Section~\ref{sec:related} surveys related work. Appendix~\ref{app:lean} contains Lean proof listings. Appendix~\ref{appendix-rebuttals} addresses anticipated objections.
+Section~\ref{sec:methodology} describes our formalization methodology and Lean 4 framework design. Section~\ref{sec:foundations} establishes formal foundations for the case study. Sections~\ref{sec:hardness}--\ref{sec:tractable} develop the complexity results with machine-verified proofs. Section~\ref{sec:implications} discusses practical implications. Section~\ref{sec:simplicity-tax} presents the Simplicity Tax Theorem (also machine-verified). Section~\ref{sec:related} surveys related work in both complexity theory and formal verification. Section~\ref{sec:engineering} discusses proof engineering insights. Appendix~\ref{app:lean} contains proof listings.
 
-\subsection{Anticipated Objections}\label{sec:objection-summary}
+\subsection{Artifact Availability}
 
-Before proceeding, we address objections readers are likely forming. Each is refuted in detail in Appendix~\ref{appendix-rebuttals}; here we summarize the key points.
-
-\paragraph{``coNP-completeness doesn't mean intractable---there might be good heuristics.''}
-Correct, but this strengthens our thesis. The point is not that practitioners cannot find useful approximations, but that \emph{optimal} dimension selection is provably hard. The prevalence of heuristics (feature selection in ML, sensitivity analysis in economics) is itself evidence of the computational barrier.
-
-\paragraph{``Real decision problems don't have clean coordinate structure.''}
-The coordinate structure assumption is weaker than it appears. Any finite state space can be encoded with binary coordinates; the hardness results apply to this encoding. More structured representations make the problem \emph{easier}, not harder---so hardness for structured problems implies hardness for general ones.
-
-\paragraph{``The reduction from SAT is artificial.''}
-All \coNP-completeness proofs use reductions. The reduction demonstrates that SAT instances can be encoded as sufficiency-checking problems while preserving computational structure. This is standard complexity theory methodology \cite{cook1971complexity, karp1972reducibility}. The claim is not that practitioners encounter SAT problems, but that sufficiency checking is at least as hard as SAT.
-
-\paragraph{``The tractable subcases are too restrictive to be useful.''}
-The tractable subcases (bounded actions, separable utility, tree structure) characterize \emph{when} dimension selection becomes feasible. Many real problems fall into these categories. The dichotomy theorem (Theorem~\ref{thm:dichotomy}) precisely identifies the boundary between tractable and intractable.
-
-\paragraph{``This just formalizes the obvious---of course feature selection is hard.''}
-The contribution is making ``obvious'' precise. Prior work established heuristic hardness for specific domains (ML feature selection, economic factor identification). We prove a \emph{universal} result that applies to \emph{any} decision problem with coordinate structure. This unification is the theoretical contribution.
-
-\medskip
-\noindent\textbf{If you have an objection not listed above,} check Appendix~\ref{appendix-rebuttals} (12 objections addressed, including 4 specific to the Simplicity Tax) before concluding it has not been considered.
+The complete Lean 4 formalization is available at:
+\begin{center}
+\url{https://github.com/trissim/openhcs/tree/main/docs/papers/paper4_decision_quotient/proofs}
+\end{center}
+The proofs build with \texttt{lake build} using the Lean toolchain specified in \texttt{lean-toolchain}. We encourage artifact evaluation and welcome contributions extending the reduction framework.
 

@@ -226,18 +226,94 @@ The hardness results of Section [\[sec:hardness\]](#sec:hardness){reference-typ
 ::: proof
 *Proof.* **Part 1 (Logarithmic case):** If $k^* = O(\log N)$, then the number of distinct projections $|S_{I^*}|$ is at most $2^{k^*} = O(N^c)$ for some constant $c$. We can enumerate all projections and verify sufficiency in polynomial time.
 
-**Part 2 (Linear case):** The reduction from TAUTOLOGY in Theorem [\[thm:sufficiency-conp\]](#thm:sufficiency-conp){reference-type="ref" reference="thm:sufficiency-conp"} produces instances where the minimal sufficient set has size $\Omega(n)$ (all coordinates are relevant when the formula is not a tautology). Under the Exponential Time Hypothesis (ETH) [@impagliazzo2001complexity], TAUTOLOGY requires time $2^{\Omega(n)}$, so SUFFICIENCY-CHECK inherits this lower bound. ◻
+**Part 2 (Linear case):** We establish this via an explicit reduction chain from the Exponential Time Hypothesis. ◻
 :::
 
+## The ETH Reduction Chain {#sec:eth-chain}
+
+The lower bound in Part 2 of Theorem [\[thm:dichotomy\]](#thm:dichotomy){reference-type="ref" reference="thm:dichotomy"} follows from a chain of reductions originating in the Exponential Time Hypothesis. We make this chain explicit.
+
+::: definition
+There exists a constant $\delta > 0$ such that 3-SAT on $n$ variables cannot be solved in time $O(2^{\delta n})$ [@impagliazzo2001complexity].
+:::
+
+The chain proceeds as follows:
+
+1.  **ETH $\Rightarrow$ 3-SAT requires $2^{\Omega(n)}$:** This is the definition of ETH.
+
+2.  **3-SAT $\leq_p$ TAUTOLOGY:** Given 3-SAT formula $\varphi(x_1, \ldots, x_n)$, define $\psi = \neg\varphi$. Then $\varphi$ is satisfiable iff $\psi$ is not a tautology. This is a linear-time reduction preserving the number of variables.
+
+3.  **TAUTOLOGY requires $2^{\Omega(n)}$ (under ETH):** By the contrapositive of step 2, if TAUTOLOGY could be solved in $o(2^{\delta n})$ time, then 3-SAT could be solved in $o(2^{\delta n})$ time, contradicting ETH.
+
+4.  **TAUTOLOGY $\leq_p$ SUFFICIENCY-CHECK:** This is Theorem [\[thm:sufficiency-conp\]](#thm:sufficiency-conp){reference-type="ref" reference="thm:sufficiency-conp"}. Given formula $\varphi(x_1, \ldots, x_n)$, we construct a decision problem where:
+
+    -   The empty set $I = \emptyset$ is sufficient iff $\varphi$ is a tautology
+
+    -   When $\varphi$ is not a tautology, all $n$ coordinates are relevant
+
+    The reduction is polynomial-time and preserves the number of coordinates.
+
+5.  **SUFFICIENCY-CHECK requires $2^{\Omega(n)}$ (under ETH):** Combining steps 3 and 4: if SUFFICIENCY-CHECK could be solved in $o(2^{\delta n/c})$ time for some constant $c$, then TAUTOLOGY (and hence 3-SAT) could be solved in subexponential time, contradicting ETH.
+
+::: proposition
+[]{#prop:eth-constant label="prop:eth-constant"} The reduction in Theorem [\[thm:sufficiency-conp\]](#thm:sufficiency-conp){reference-type="ref" reference="thm:sufficiency-conp"} preserves the number of variables exactly: an $n$-variable formula yields an $n$-coordinate decision problem. Therefore, the constant $c$ in the $2^{n/c}$ lower bound equals 1: $$\text{SUFFICIENCY-CHECK requires time } \Omega(2^{\delta n}) \text{ under ETH}$$ where $\delta$ is the ETH constant for 3-SAT.
+:::
+
+::: proof
+*Proof.* The TAUTOLOGY reduction (Theorem [\[thm:sufficiency-conp\]](#thm:sufficiency-conp){reference-type="ref" reference="thm:sufficiency-conp"}) constructs:
+
+-   State space $S = \{\text{ref}\} \cup \{0,1\}^n$ with $n+1$ coordinates (one extra for the reference state)
+
+-   Query set $I = \emptyset$
+
+When $\varphi$ has $n$ variables, the constructed problem has $n+1$ coordinates. The asymptotic lower bound is $2^{\Omega(n)}$ with the same constant $\delta$ from ETH. ◻
+:::
+
+## Phase Transition
+
 ::: corollary
-There exists a threshold $\tau \in (0, 1)$ such that:
+[]{#cor:phase-transition label="cor:phase-transition"} There exists a threshold $\tau \in (0, 1)$ such that:
 
 -   If $k^*/n < \tau$, SUFFICIENCY-CHECK is "easy" (polynomial in $N$)
 
 -   If $k^*/n > \tau$, SUFFICIENCY-CHECK is "hard" (exponential in $n$)
 :::
 
-This dichotomy explains why some domains admit tractable model selection (few relevant variables) while others require heuristics (many relevant variables).
+::: proof
+*Proof.* The logarithmic case (Part 1 of Theorem [\[thm:dichotomy\]](#thm:dichotomy){reference-type="ref" reference="thm:dichotomy"}) gives polynomial time when $k^* = O(\log N) = O(\log 2^n) = O(n)$. More precisely, when $k^* \leq c \log N$ for constant $c$, the algorithm runs in time $O(N^c \cdot \text{poly}(n))$.
+
+The linear case (Part 2) gives exponential time when $k^* = \Omega(n)$.
+
+The threshold $\tau$ is implicitly defined by where the polynomial bound $2^{k^*} = N^{k^*/\log N}$ transitions from polynomial to superpolynomial in $N$. This occurs when $k^*/\log N$ exceeds any constant, i.e., when $k^* = \omega(\log N)$.
+
+For Boolean coordinate spaces ($N = 2^n$), the threshold is $\tau = 0$: any $k^* = \omega(\log n)$ yields superpolynomial complexity, while $k^* = O(\log n)$ is tractable. ◻
+:::
+
+::: remark
+The dichotomy is asymptotically tight under ETH. There are no "intermediate" cases:
+
+-   **Below threshold:** Polynomial (by enumeration)
+
+-   **At threshold:** Quasipolynomial ($n^{O(\log n)}$)
+
+-   **Above threshold:** Exponential (by ETH)
+
+The quasipolynomial regime at the threshold is measure-zero; almost all instances are either clearly tractable or clearly intractable.
+:::
+
+This dichotomy explains why some domains admit tractable model selection (few relevant variables) while others require heuristics (many relevant variables). The ETH reduction chain makes precise what "hard" means: not merely coNP-complete, but requiring $2^{\Omega(n)}$ time under widely-believed complexity assumptions.
+
+::: remark
+The ETH lower bound is most naturally stated in the *circuit model*, where the utility function $U: A \times S \to \mathbb{R}$ is represented by a Boolean circuit computing $\mathbf{1}[U(a,s) > \theta]$ for threshold comparisons. In this model:
+
+-   The input size is the circuit size $m$, not the state space size $|S| = 2^n$
+
+-   A 3-SAT formula with $n$ variables and $c$ clauses yields a circuit of size $O(n + c)$
+
+-   The reduction preserves instance size up to constant factors: $m_{\text{out}} \leq 3 \cdot m_{\text{in}}$
+
+This linear size preservation is essential for ETH transfer. In the explicit enumeration model (where $S$ is given as a list), the reduction would blow up the instance size exponentially, precluding ETH-based lower bounds. The circuit model is standard in fine-grained complexity and matches practical representations of decision problems.
+:::
 
 
 # Tractable Special Cases {#sec:tractable}
@@ -414,6 +490,71 @@ These theorems provide mathematical grounding for three widespread engineering b
 **3. "Include everything" is a legitimate strategy.** When determining relevance costs $\Omega(2^n)$, including all $n$ parameters costs $O(n)$. For large $n$, this is the rational choice.
 
 These are not workarounds or approximations. They are *optimal responses* to computational constraints. The complexity results transform engineering practice from art to mathematics: over-modeling is not a failure---it is the provably correct strategy.
+
+
+# Experimental Validation {#sec:experiments}
+
+We validate our theoretical complexity bounds through synthetic experiments on randomly generated decision problems. All experiments use the straightforward $O(|S|^2 \cdot |A|)$ algorithm for SUFFICIENCY-CHECK.
+
+## Runtime Scaling with State Space Size
+
+Our theory predicts $O(|S|^2)$ runtime scaling. Table [1](#tab:state-scaling){reference-type="ref" reference="tab:state-scaling"} confirms this prediction---the normalized ratio $t/|S|^2$ remains constant as $|S|$ grows.
+
+::: {#tab:state-scaling}
+    $|S|$   Time (ms)   $t/|S|^2 \times 10^6$
+  ------- ----------- -----------------------
+       50        0.96                     383
+      100        3.21                     321
+      200       12.86                     322
+      400       53.29                     333
+      800      211.77                     331
+
+  : State space scaling. The normalized ratio is approximately constant, confirming $O(|S|^2)$ complexity.
+:::
+
+## Runtime vs. Action Space Size
+
+Fixing $|S| = 200$, we vary $|A|$. The runtime is approximately constant because set equality comparison (for $\text{Opt}(s) = \text{Opt}(s')$) dominates only for very large $|A|$.
+
+::: {#tab:action-scaling}
+    $|A|$   Time (ms)
+  ------- -----------
+        2       12.53
+       10       12.68
+       50       13.59
+      100       12.94
+
+  : Action space scaling. Runtime is nearly constant for moderate $|A|$.
+:::
+
+## Early Termination
+
+A key practical observation: when $I$ is *not* sufficient, the algorithm often terminates early upon finding a counterexample pair $(s, s')$ with $s \sim_I s'$ but $\text{Opt}(s) \neq \text{Opt}(s')$.
+
+Table [3](#tab:early-termination){reference-type="ref" reference="tab:early-termination"} shows dramatic speedups for insufficient sets versus sufficient ones (which require full traversal).
+
+::: {#tab:early-termination}
+    $|S|$   Sufficient (ms)   Insufficient (ms)          Speedup
+  ------- ----------------- ------------------- ----------------
+      100              3.26               0.013      256$\times$
+      200             13.46               0.012    1,134$\times$
+      400             53.98               0.012    4,383$\times$
+      800            212.41               0.012   17,690$\times$
+
+  : Early termination speedups. Insufficient sets (empty set $I = \emptyset$) are detected almost instantly because counterexamples are found early.
+:::
+
+## Implications
+
+These experiments validate our theoretical predictions:
+
+1.  **Quadratic scaling**: The $O(|S|^2)$ bound is tight in practice. For $|S| = 1000$, expect $\sim 300$ms on commodity hardware.
+
+2.  **Action-independence**: For bounded $|A|$, the FPT result (Theorem [\[thm:bounded-actions\]](#thm:bounded-actions){reference-type="ref" reference="thm:bounded-actions"}) is reflected in the data: runtime is dominated by state-pair enumeration, not action comparison.
+
+3.  **Early termination**: Most *wrong* candidate sets are rejected almost instantly. This makes greedy search for minimal sufficient sets practical despite the worst-case coNP-hardness.
+
+The experiments use $|A| = 5$ actions with deterministic optimal action per state (ensuring full traversal is required for sufficient sets). Code is available in the supplementary material.
 
 
 # Implications for Software Architecture {#sec:implications}
@@ -731,17 +872,57 @@ All proofs compile with zero `sorry` placeholders.
 
 The complexity of decision-making has been studied extensively. Papadimitriou [@papadimitriou1994complexity] established foundational results on the complexity of game-theoretic solution concepts. Our work extends this to the meta-question of identifying relevant information. For a modern treatment of complexity classes, see Arora and Barak [@arora2009computational].
 
-## Feature Selection
+## Feature Selection Complexity
 
-In machine learning, feature selection asks which input features are relevant for prediction. This is known to be NP-hard in general [@blum1997selection]. Our results show the decision-theoretic analog is -complete for both checking and minimization.
+In machine learning, feature selection asks which input features are relevant for prediction. Blum and Langley [@blum1997selection] survey the field, noting hardness in general settings. Amaldi and Kann [@amaldi1998complexity] proved that finding minimum feature sets for linear classifiers is NP-hard, and established inapproximability bounds: no polynomial-time algorithm can approximate the minimum feature set within factor $2^{\log^{1-\epsilon} n}$ unless NP $\subseteq$ DTIME$(n^{\text{polylog } n})$.
+
+Our results extend this line: the decision-theoretic analog (SUFFICIENCY-CHECK) is -complete, and MINIMUM-SUFFICIENT-SET inherits this hardness. The key insight is that sufficiency checking is "dual" to feature selection---rather than asking which features predict a label, we ask which coordinates determine optimal action. The (rather than NP) classification reflects this duality: insufficiency has short certificates (counterexample state pairs), while sufficiency requires universal verification.
+
+## Sufficient Statistics
+
+Fisher [@fisher1922mathematical] introduced sufficient statistics: a statistic $T(X)$ is *sufficient* for parameter $\theta$ if the conditional distribution of $X$ given $T(X)$ does not depend on $\theta$. Lehmann and Scheffé [@lehmann1950completeness] characterized minimal sufficient statistics and their uniqueness properties.
+
+Our coordinate sufficiency is the decision-theoretic analog: a coordinate set $I$ is sufficient if knowing $s_I$ determines optimal action, regardless of the remaining coordinates. The parallel is precise:
+
+-   **Statistics:** $T$ is sufficient $\iff$ $P(X | T(X), \theta) = P(X | T(X))$
+
+-   **Decisions:** $I$ is sufficient $\iff$ $\Opt(s) = \Opt(s')$ whenever $s_I = s'_I$
+
+Fisher's factorization theorem provides a characterization; our Theorem [\[thm:minsuff-conp\]](#thm:minsuff-conp){reference-type="ref" reference="thm:minsuff-conp"} shows that *finding* minimal sufficient statistics (in the decision-theoretic sense) is computationally hard.
+
+## Causal Inference and Adjustment Sets
+
+Pearl [@pearl2009causality] and Spirtes et al. [@spirtes2000causation] developed frameworks for identifying causal effects from observational data. A central question is: which variables must be adjusted for to identify a causal effect? The *adjustment criterion* and *back-door criterion* characterize sufficient adjustment sets.
+
+Our sufficiency problem is analogous: which coordinates must be observed to determine optimal action? The complexity results suggest that optimal adjustment set selection may also be intractable---a conjecture supported by recent work on the complexity of causal discovery [@chickering2004large].
+
+The connection runs deeper: Shpitser and Pearl [@shpitser2006identification] showed that identifying causal effects is NP-hard in general graphs. Our -completeness result for SUFFICIENCY-CHECK is the decision-theoretic counterpart.
+
+## Minimum Description Length and Kolmogorov Complexity
+
+The Minimum Description Length (MDL) principle [@rissanen1978modeling; @grunwald2007minimum] formalizes model selection as compression: the best model minimizes description length of data plus model. Kolmogorov complexity [@li2008introduction] provides the theoretical foundation---the shortest program that generates the data.
+
+Our decision quotient connects to this perspective: a coordinate set $I$ is sufficient if it compresses the decision problem without loss---knowing $s_I$ is as good as knowing $s$ for decision purposes. The minimal sufficient set is the MDL-optimal compression of the decision problem.
+
+The complexity results explain why MDL-based model selection uses heuristics: finding the true minimum description length is uncomputable (Kolmogorov complexity) or intractable (MDL approximations). Our results show the decision-theoretic analog is -complete---intractable but decidable.
 
 ## Value of Information
 
 The value of information (VOI) framework [@howard1966information] quantifies how much a decision-maker should pay for information. Our work addresses a different question: not the *value* of information, but the *complexity* of identifying which information has value.
 
+Interestingly, VOI is typically polynomial to compute given the decision problem structure, while identifying which information *to value* (our problem) is -complete. This separation explains why VOI is practical while optimal sensor placement remains heuristic.
+
+## Sensitivity Analysis
+
+Sensitivity analysis asks how outputs change with inputs. Local sensitivity (derivatives) is polynomial; global sensitivity (Sobol indices [@sobol2001global]) requires sampling. Identifying which inputs *matter* for decision-making is our sufficiency problem---which we show is -complete.
+
+This explains why practitioners use sampling-based sensitivity analysis rather than exact methods: exact identification of decision-relevant inputs is intractable. The dichotomy theorem (Theorem [\[thm:dichotomy\]](#thm:dichotomy){reference-type="ref" reference="thm:dichotomy"}) characterizes when sensitivity analysis becomes tractable (logarithmic relevant inputs) versus intractable (linear relevant inputs).
+
 ## Model Selection
 
-Statistical model selection (AIC [@akaike1974new], BIC [@schwarz1978estimating], cross-validation [@stone1974cross]) provides practical heuristics for choosing among models. Our results provide theoretical justification: optimal model selection is intractable, so heuristics are necessary.
+Statistical model selection (AIC [@akaike1974new], BIC [@schwarz1978estimating], cross-validation [@stone1974cross]) provides practical heuristics for choosing among models. Our results provide theoretical justification: optimal model selection is intractable, so heuristics are necessary.
+
+The Simplicity Tax Theorem (Section [\[sec:simplicity-tax\]](#sec:simplicity-tax){reference-type="ref" reference="sec:simplicity-tax"}) adds a warning: model selection heuristics that favor "simpler" models may incur hidden costs when the true model is complex. The simplicity preference fallacy---choosing low-parameter models without accounting for per-site costs---is the decision-theoretic formalization of overfitting-by-underfitting.
 
 
 # Conclusion

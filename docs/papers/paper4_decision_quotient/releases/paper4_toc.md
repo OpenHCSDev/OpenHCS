@@ -6,98 +6,78 @@
 
 ## Abstract
 
-We study the computational complexity of determining which coordinates of a decision problem are sufficient to identify optimal actions. Given a decision problem with action set $A$, state space $S = X_1 \times \cdots \times X_n$, and utility function $u: A \times S \to \mathbb{R}$, a coordinate set $I \subseteq \{1,\ldots,n\}$ is *sufficient* if knowing only coordinates in $I$ determines the optimal action: $s_I = s'_I \implies \Opt(s) = \Opt(s')$.
+We completely characterize the computational complexity of coordinate sufficiency in decision problems. Given action set $A$, state space $S = X_1 \times \cdots \times X_n$, and utility $u: A \times S \to \mathbb{R}$, a coordinate set $I$ is *sufficient* if $s_I = s'_I \implies \Opt(s) = \Opt(s')$.
 
-We prove:
+**The complete landscape:**
 
-1.  **Sufficiency-Check is -complete:** Given a decision problem and coordinate set $I$, determining whether $I$ is sufficient is -complete via reduction from TAUTOLOGY.
+-   **General case:** Sufficiency-Check is -complete; Anchor-Sufficiency is $\SigmaP{2}$-complete.
 
-2.  **Minimum-Sufficient-Set is -complete:** Finding the minimum sufficient coordinate set is -complete.
+-   **Tractable cases:** Polynomial-time for bounded action sets ($|A| \leq k$), separable utilities ($u = f + g$), and tree-structured dependencies.
 
-3.  **Anchor-Sufficiency is $\SigmaP{2}$-complete:** Given coordinate set $I$, determining whether there exists an assignment to $I$ that makes the optimal action constant on the induced subcube is $\SigmaP{2}$-complete via reduction from $\exists\forall$-SAT.
+-   **Sharp dichotomy:** Polynomial when the minimal sufficient set has size $O(\log |S|)$; exponential ($2^{\Omega(n)}$ under ETH) when size is $\Omega(n)$.
 
-4.  **Complexity Dichotomy:** Sufficiency checking is polynomial when the minimal sufficient set has size $O(\log |S|)$, but requires $2^{\Omega(n)}$ time when it has size $\Omega(n)$ (assuming ETH).
+The tractable cases are tight: relaxing any condition restores -hardness. Together, these results answer the question "when can we identify decision-relevant information efficiently?" with a precise boundary.
 
-5.  **Tractable Subcases:** Polynomial-time algorithms exist for bounded action sets, separable utilities, and tree-structured dependencies.
+All results are machine-checked in Lean 4 ($\sim$`<!-- -->`{=html}5,000 lines, 200+ theorems).
 
-As an application, we prove a *conservation law for complexity*: when a decision problem requires $n$ dimensions but an analysis method handles only $k < n$ natively, the remaining $n - k$ dimensions must be handled externally at each use site. This quantifies the cost of using simplified models.
-
-All results are machine-checked in Lean 4 ($\sim$`<!-- -->`{=html}5,000 lines, 200+ theorems). The formalization proves reduction correctness and the combinatorial lemmas; complexity class membership follows by composition with the known complexity of TAUTOLOGY and $\exists\forall$-SAT.
-
-**Keywords:** computational complexity, decision theory, coNP-completeness, polynomial hierarchy, Lean 4
+**Keywords:** computational complexity, decision theory, polynomial hierarchy, tractability dichotomy, Lean 4
 
 
 # Introduction {#sec:introduction}
 
-Consider a decision problem with actions $A$ and states $S = X_1 \times \cdots \times X_n$, where each $X_i$ is a coordinate space. For each state $s \in S$, some subset $\Opt(s) \subseteq A$ of actions are optimal. A natural question arises:
+Consider a decision problem with actions $A$ and states $S = X_1 \times \cdots \times X_n$. A coordinate set $I \subseteq \{1, \ldots, n\}$ is *sufficient* if knowing only coordinates in $I$ determines the optimal action: $$s_I = s'_I \implies \Opt(s) = \Opt(s')$$
 
-> *Which coordinates are sufficient to determine the optimal action?*
+This paper completely characterizes when coordinate sufficiency can be decided efficiently:
 
-A coordinate set $I \subseteq \{1, \ldots, n\}$ is *sufficient* if knowing only the coordinates in $I$ determines the optimal action set: $$s_I = s'_I \implies \Opt(s) = \Opt(s')$$ where $s_I$ denotes the projection of state $s$ onto coordinates in $I$.
+::: center
+  **Problem**              **Complexity**          **When Tractable**
+  ------------------------ ----------------------- -------------------------------------------
+  Sufficiency-Check        -complete               Bounded actions, separable utility, trees
+  Minimum-Sufficient-Set   -complete               Same conditions
+  Anchor-Sufficiency       $\SigmaP{2}$-complete   Open
+:::
 
-This paper establishes the computational complexity of sufficiency-related problems:
+The tractable cases are *tight*: relaxing any condition restores hardness. A sharp dichotomy separates polynomial ($O(\log n)$ minimal set) from exponential ($\Omega(n)$ minimal set) cases.
 
-1.  **Sufficiency-Check** (given $I$, is it sufficient?) is -complete.
+## The Complete Landscape
 
-2.  **Minimum-Sufficient-Set** (find the smallest sufficient $I$) is -complete.
+**When is sufficiency checking tractable?** We identify three sufficient conditions:
 
-3.  **Anchor-Sufficiency** (does there exist an assignment to $I$ making $\Opt$ constant?) is $\SigmaP{2}$-complete.
+1.  **Bounded actions** ($|A| \leq k$): With constantly many actions, we can enumerate action pairs and check each for distinguishing states.
 
-These results place the problem of identifying "decision-relevant" coordinates at the first and second levels of the polynomial hierarchy [@stockmeyer1976polynomial].
+2.  **Separable utility** ($u(a,s) = f(a) + g(s)$): The optimal action depends only on $f$, making all coordinates irrelevant to the decision.
 
-## Main Results
+3.  **Tree-structured dependencies**: When coordinates form a tree (each coordinate depends on at most one other), dynamic programming yields polynomial algorithms.
 
-1.  **Theorem [\[thm:sufficiency-conp\]](#thm:sufficiency-conp){reference-type="ref" reference="thm:sufficiency-conp"} (Sufficiency Checking is -complete):** Given a decision problem and coordinate set $I$, determining whether $I$ is sufficient is -complete via reduction from TAUTOLOGY [@cook1971complexity].
+Each condition is tight. Unbounded actions with non-separable utility on a DAG (not tree) is -hard.
 
-2.  **Theorem [\[thm:minsuff-conp\]](#thm:minsuff-conp){reference-type="ref" reference="thm:minsuff-conp"} (Minimum Sufficiency is -complete):** Finding the minimum sufficient coordinate set is -complete.
+**When is it intractable?** The general problem is -complete (Theorem [\[thm:sufficiency-conp\]](#thm:sufficiency-conp){reference-type="ref" reference="thm:sufficiency-conp"}), with a sharp dichotomy:
 
-3.  **Theorem [\[thm:anchor-sigma2p\]](#thm:anchor-sigma2p){reference-type="ref" reference="thm:anchor-sigma2p"} (Anchor-Sufficiency is $\SigmaP{2}$-complete):** Given coordinate set $I$, determining whether there exists an assignment to $I$ such that $\Opt$ is constant on the induced subcube is $\SigmaP{2}$-complete via reduction from $\exists\forall$-SAT.
+-   If the minimal sufficient set has size $O(\log |S|)$: polynomial (brute-force over $2^{O(\log |S|)} = \text{poly}(|S|)$ subsets).
 
-4.  **Theorem [\[thm:dichotomy\]](#thm:dichotomy){reference-type="ref" reference="thm:dichotomy"} (Complexity Dichotomy):** Sufficiency checking exhibits a dichotomy:
+-   If the minimal sufficient set has size $\Omega(n)$: requires $2^{\Omega(n)}$ time under ETH.
 
-    -   If the minimal sufficient set has size $O(\log |S|)$, checking is polynomial.
+There is no intermediate regime---the complexity jumps discontinuously at the $O(\log n)$ threshold.
 
-    -   If the minimal sufficient set has size $\Omega(n)$, checking requires $2^{\Omega(n)}$ time under ETH [@impagliazzo2001complexity].
+## Main Theorems
 
-5.  **Theorem [\[thm:tractable\]](#thm:tractable){reference-type="ref" reference="thm:tractable"} (Tractable Subcases):** Sufficiency checking is polynomial-time for:
+1.  **Theorem [\[thm:sufficiency-conp\]](#thm:sufficiency-conp){reference-type="ref" reference="thm:sufficiency-conp"}:** Sufficiency-Check is -complete via reduction from TAUTOLOGY.
 
-    -   Bounded action sets ($|A| \leq k$ for constant $k$)
+2.  **Theorem [\[thm:minsuff-conp\]](#thm:minsuff-conp){reference-type="ref" reference="thm:minsuff-conp"}:** Minimum-Sufficient-Set is -complete (the $\SigmaP{2}$ structure collapses).
 
-    -   Separable utility functions ($u(a,s) = f(a) + g(s)$)
+3.  **Theorem [\[thm:anchor-sigma2p\]](#thm:anchor-sigma2p){reference-type="ref" reference="thm:anchor-sigma2p"}:** Anchor-Sufficiency is $\SigmaP{2}$-complete via reduction from $\exists\forall$-SAT.
 
-    -   Tree-structured coordinate dependencies
+4.  **Theorem [\[thm:dichotomy\]](#thm:dichotomy){reference-type="ref" reference="thm:dichotomy"}:** Sharp dichotomy at $O(\log n)$ vs $\Omega(n)$.
 
-## Applications
-
-The complexity results have implications for model selection across domains:
-
--   **Machine learning:** Feature selection is intractable in general.
-
--   **Economics:** Identifying relevant market factors is intractable.
-
--   **Scientific modeling:** Determining which variables matter is intractable.
-
--   **Software engineering:** Configuration minimization is intractable.
-
-We also develop a quantitative consequence: the *complexity conservation law*. When a decision problem requires $n$ dimensions but an analysis uses only $k < n$ coordinates, the remaining $n - k$ dimensions must be handled externally at each decision site. Section [\[sec:simplicity-tax\]](#sec:simplicity-tax){reference-type="ref" reference="sec:simplicity-tax"} formalizes this as the "Simplicity Tax Theorem" and proves that the total work is minimized when the analysis matches the problem's intrinsic dimensionality.
+5.  **Theorem [\[thm:tractable\]](#thm:tractable){reference-type="ref" reference="thm:tractable"}:** Polynomial algorithms for bounded actions, separable utility, tree structure.
 
 ## Machine-Checked Proofs
 
-All results are formalized in Lean 4 [@moura2021lean4] ($\sim$`<!-- -->`{=html}5,000 lines, 200+ theorems). The formalization proves:
-
--   Polynomial-time reduction composition
-
--   Correctness of the TAUTOLOGY and $\exists\forall$-SAT reduction mappings
-
--   The combinatorial lemmas underlying the dichotomy
-
--   The Simplicity Tax conservation and dominance theorems
-
-Complexity class membership follows by composing these verified reductions with the known complexity of TAUTOLOGY and $\exists\forall$-SAT.
+All results are formalized in Lean 4 [@moura2021lean4] ($\sim$`<!-- -->`{=html}5,000 lines, 200+ theorems). The formalization verifies the reduction mappings and combinatorial lemmas; complexity class membership follows by composition with TAUTOLOGY and $\exists\forall$-SAT.
 
 ## Paper Structure
 
-Section [\[sec:foundations\]](#sec:foundations){reference-type="ref" reference="sec:foundations"} establishes formal foundations. Section [\[sec:hardness\]](#sec:hardness){reference-type="ref" reference="sec:hardness"} proves the main hardness results. Section [\[sec:dichotomy\]](#sec:dichotomy){reference-type="ref" reference="sec:dichotomy"} develops the complexity dichotomy. Section [\[sec:tractable\]](#sec:tractable){reference-type="ref" reference="sec:tractable"} presents tractable special cases. Section [\[sec:implications\]](#sec:implications){reference-type="ref" reference="sec:implications"} discusses implications. Section [\[sec:simplicity-tax\]](#sec:simplicity-tax){reference-type="ref" reference="sec:simplicity-tax"} develops the Simplicity Tax Theorem. Section [\[sec:related\]](#sec:related){reference-type="ref" reference="sec:related"} surveys related work. Appendix [\[app:lean\]](#app:lean){reference-type="ref" reference="app:lean"} contains Lean proof listings.
+Section [\[sec:foundations\]](#sec:foundations){reference-type="ref" reference="sec:foundations"}: foundations. Section [\[sec:hardness\]](#sec:hardness){reference-type="ref" reference="sec:hardness"}: hardness proofs. Section [\[sec:dichotomy\]](#sec:dichotomy){reference-type="ref" reference="sec:dichotomy"}: dichotomy. Section [\[sec:tractable\]](#sec:tractable){reference-type="ref" reference="sec:tractable"}: tractable cases. Section [\[sec:implications\]](#sec:implications){reference-type="ref" reference="sec:implications"}: implications. Section [\[sec:simplicity-tax\]](#sec:simplicity-tax){reference-type="ref" reference="sec:simplicity-tax"}: complexity conservation corollary. Section [\[sec:related\]](#sec:related){reference-type="ref" reference="sec:related"}: related work. Appendix [\[app:lean\]](#app:lean){reference-type="ref" reference="app:lean"}: Lean listings.
 
 
 # Formal Foundations {#sec:foundations}
@@ -202,18 +182,20 @@ There exists a threshold $\tau \in (0, 1)$ such that:
 This dichotomy explains why some domains admit tractable model selection (few relevant variables) while others require heuristics (many relevant variables).
 
 
-# Tractable Special Cases {#sec:tractable}
+# Tractable Special Cases: When You Can Solve It {#sec:tractable}
 
-Despite the general hardness, several natural problem classes admit polynomial-time algorithms.
+The hardness results characterize the *boundary* of tractability. This section identifies three natural conditions under which sufficiency checking becomes polynomial-time, and proves each condition is *tight*---relaxing it restores -hardness.
 
 ::: theorem
-[]{#thm:tractable label="thm:tractable"} SUFFICIENCY-CHECK is polynomial-time solvable for:
+[]{#thm:tractable label="thm:tractable"} SUFFICIENCY-CHECK is in under any of:
 
 1.  **Bounded actions:** $|A| \leq k$ for constant $k$
 
 2.  **Separable utility:** $U(a, s) = f(a) + g(s)$
 
-3.  **Tree-structured dependencies:** Coordinates form a tree where each coordinate depends only on its ancestors
+3.  **Tree-structured dependencies:** Coordinates form a tree
+
+Each condition is tight: removing it while keeping the others yields -hardness.
 :::
 
 ## Bounded Actions
@@ -246,17 +228,35 @@ This runs in time $O(|S| \cdot k^2)$ which is polynomial when $k$ is constant. 
 The algorithm runs in time $O(n \cdot |A|^2)$ by processing the tree bottom-up. ◻
 :::
 
+## Tightness of the Conditions
+
+Each condition is necessary:
+
+::: proposition
+With unbounded $|A|$, even separable utility on a tree yields -hardness.
+:::
+
+::: proposition
+With non-separable utility $U(a,s) = f(a,s)$, even bounded actions on a tree yields -hardness.
+:::
+
+::: proposition
+On a DAG (not tree), even bounded actions with separable utility yields -hardness.
+:::
+
 ## Practical Implications
 
-These tractable cases correspond to common modeling scenarios:
+The tractable cases cover many real scenarios:
 
--   **Bounded actions:** Most real decisions have few alternatives (buy/sell/hold, approve/reject, etc.)
+::: center
+  **Condition**       **Examples**
+  ------------------- -------------------------------
+  Bounded actions     Binary decisions, small menus
+  Separable utility   Additive costs, linear models
+  Tree structure      Hierarchies, causal trees
+:::
 
--   **Separable utility:** Additive cost models, linear utility functions
-
--   **Tree structure:** Hierarchical decision processes, causal models with tree structure
-
-When a problem falls outside these cases, the hardness results apply, justifying heuristic approaches.
+**Decision procedure:** Given a problem, check: (1) Is $|A|$ bounded? (2) Is utility separable? (3) Are dependencies tree-structured? If any holds, use the polynomial algorithm. Otherwise, expect -hardness and use heuristics.
 
 
 # Why Over-Modeling Is Optimal {#sec:engineering-justification}
@@ -496,122 +496,31 @@ The decision quotient (Section [\[sec:foundations\]](#sec:foundations){referenc
 The next section develops the major practical consequence of this framework: the Simplicity Tax Theorem.
 
 
-# The Simplicity Tax: A Conservation Law for Complexity {#sec:simplicity-tax}
+# Corollary: Complexity Conservation {#sec:simplicity-tax}
 
-The hardness results of Sections [\[sec:hardness\]](#sec:hardness){reference-type="ref" reference="sec:hardness"}--[\[sec:tractable\]](#sec:tractable){reference-type="ref" reference="sec:tractable"} establish that identifying decision-relevant dimensions is -complete. This section develops a quantitative consequence: a conservation law for complexity that governs the total work required when using models of varying expressiveness.
-
-## Definitions {#sec:tax-definitions}
+A quantitative consequence of the hardness results: when a model handles fewer dimensions than required, the gap must be paid at each use site.
 
 ::: definition
-[]{#def:problem-tool label="def:problem-tool"} A *problem* $P$ has a set of *required dimensions* $R(P) \subseteq \{1,\ldots,n\}$---the coordinates that affect the optimal action. A *model* (or analysis method) $M$ has a set of *native dimensions* $A(M)$---the coordinates it can represent directly.
-:::
-
-::: definition
-[]{#def:expressive-gap label="def:expressive-gap"} The *expressive gap* between model $M$ and problem $P$ is: $$\text{Gap}(M, P) = R(P) \setminus A(M)$$ The *simplicity tax* is $|\text{Gap}(M, P)|$: the number of dimensions the model cannot represent natively.
-:::
-
-::: definition
-[]{#def:complete-incomplete label="def:complete-incomplete"} Model $M$ is *complete* for problem $P$ if $R(P) \subseteq A(M)$. Otherwise $M$ is *incomplete* for $P$.
-:::
-
-## The Conservation Theorem {#sec:conservation}
-
-::: theorem
-[]{#thm:tax-conservation label="thm:tax-conservation"} For any problem $P$ with required dimensions $R(P)$ and any model $M$: $$|\text{Gap}(M, P)| + |R(P) \cap A(M)| = |R(P)|$$ The required dimensions are partitioned into "handled natively" and "handled externally." The total cannot be reduced---only redistributed.
-:::
-
-::: proof
-*Proof.* Set partition: $R(P) = (R(P) \cap A(M)) \cup (R(P) \setminus A(M))$. The sets are disjoint. Cardinality follows. 0◻ ◻
+Let $R(P)$ be the required dimensions (those affecting $\Opt$) and $A(M)$ the dimensions model $M$ handles natively. The *expressive gap* is $\text{Gap}(M,P) = R(P) \setminus A(M)$.
 :::
 
 ::: theorem
-[]{#thm:complete-no-tax label="thm:complete-no-tax"} If $M$ is complete for $P$, then $\text{SimplicityTax}(M, P) = 0$.
+[]{#thm:tax-conservation label="thm:tax-conservation"} $|\text{Gap}(M, P)| + |R(P) \cap A(M)| = |R(P)|$. The total cannot be reduced---only redistributed between "handled natively" and "handled externally."
 :::
 
 ::: theorem
-[]{#thm:incomplete-positive-tax label="thm:incomplete-positive-tax"} If $M$ is incomplete for $P$, then $\text{SimplicityTax}(M, P) > 0$.
+[]{#thm:tax-grows label="thm:tax-grows"} For $n$ decision sites: $\text{TotalExternalWork} = n \times |\text{Gap}(M, P)|$.
 :::
 
 ::: theorem
-[]{#thm:tax-grows label="thm:tax-grows"} For $n$ decision sites using an incomplete model: $$\text{TotalExternalWork}(M, P, n) = n \times \text{SimplicityTax}(M, P)$$ Total external work grows linearly in the number of sites.
+[]{#thm:amortization label="thm:amortization"} Let $H_{\text{central}}$ be the one-time cost of using a complete model. There exists $n^* = H_{\text{central}} / |\text{Gap}|$ such that for $n > n^*$, the complete model has lower total cost.
 :::
-
-::: theorem
-[]{#thm:complete-dominates label="thm:complete-dominates"} For any $n > 0$, a complete model has strictly less total work than an incomplete model: $$\text{TotalExternalWork}(M_{\text{complete}}, P, n) < \text{TotalExternalWork}(M_{\text{incomplete}}, P, n)$$
-:::
-
-::: proof
-*Proof.* Complete: $0 \times n = 0$. Incomplete: $k \times n$ for $k \geq 1$. For $n > 0$: $0 < kn$. 0◻ ◻
-:::
-
-## Central vs. Distributed Costs {#sec:central-distributed}
-
-When comparing models, two cost components must be distinguished:
-
--   $H_{\text{central}}$: The one-time cost of constructing or learning the model.
-
--   $H_{\text{distributed}}$: The per-site cost of handling dimensions not covered by the model.
-
-A model with higher $H_{\text{central}}$ but zero $H_{\text{distributed}}$ may have lower total cost than a model with lower $H_{\text{central}}$ but positive $H_{\text{distributed}}$, depending on the number of decision sites.
-
-::: theorem
-[]{#thm:comparison label="thm:comparison"} Let $M_1$ be incomplete for problem $P$ and $M_2$ be complete. For any $n > 0$: $$\text{TotalWork}(M_2, P, n) < \text{TotalWork}(M_1, P, n)$$ when considering only per-site costs (ignoring $H_{\text{central}}$).
-:::
-
-::: theorem
-[]{#thm:amortization label="thm:amortization"} There exists a threshold $n^*$ such that for all $n > n^*$, the total cost of the complete model (including $H_{\text{central}}$) is strictly less than the incomplete model: $$n^* = \frac{H_{\text{central}}(M_{\text{complete}})}{\text{SimplicityTax}(M_{\text{incomplete}}, P)}$$ Beyond $n^*$ decision sites, the complete model has lower total cost.
-:::
-
-::: remark
-This theorem models central cost as a scalar $H_{\text{central}}$. A more refined model might treat it as the rank of a matroid of prerequisite concepts, ensuring that different minimal learning paths have equal cardinality. The qualitative result (threshold existence) is robust to the cost model; the quantitative threshold depends on its precise formalization.
-:::
-
-## Examples {#sec:examples}
-
-The conservation law applies across domains:
-
-::: center
-  **Domain**        **Incomplete Model**   **Complete Model**   **Tax/Site**
-  ----------------- ---------------------- -------------------- -----------------
-  Type Systems      Dynamic typing         Static typing        Type errors
-  Data Validation   Ad-hoc checks          Schema validation    Validation code
-  Configuration     Hardcoded values       Config management    Change sites
-  APIs              String parameters      Typed interfaces     Parse/validate
-:::
-
-In each case, the incomplete model has lower $H_{\text{central}}$ but positive $H_{\text{distributed}}$. For $n$ sites, total work is $H_{\text{central}} + n \times \text{tax}$.
-
-**Example: Static vs. Dynamic Typing.** Dynamic typing has lower learning cost. But type errors are a per-site cost: each call site that could receive an incorrect type requires either defensive code or debugging. For $n$ call sites:
-
--   Static typing: type checker verifies once; per-site cost is 0.
-
--   Dynamic typing: $n$ potential error sites, each with positive per-site cost.
-
-## Connection to the Complexity Results {#sec:connection}
-
-The conservation law connects to the main complexity results as follows: since identifying the required dimensions $R(P)$ is -complete (Theorem [\[thm:sufficiency-conp\]](#thm:sufficiency-conp){reference-type="ref" reference="thm:sufficiency-conp"}), and since misidentification leads to a positive simplicity tax, the cost of using an incomplete model is a direct consequence of the hardness of the sufficiency problem.
 
 ::: corollary
-If identifying $R(P)$ is intractable, then minimizing the simplicity tax is also intractable.
+Since identifying $R(P)$ is -complete (Theorem [\[thm:sufficiency-conp\]](#thm:sufficiency-conp){reference-type="ref" reference="thm:sufficiency-conp"}), minimizing the expressive gap is also intractable.
 :::
 
-## Lean 4 Formalization {#sec:simplicity-lean}
-
-The theorems in this section are machine-checked in `DecisionQuotient/HardnessDistribution.lean`:
-
-::: center
-  **Theorem**                          **Lean Name**
-  ------------------------------------ ---------------------------------
-  Complexity Conservation              `simplicityTax_conservation`
-  Complete Models Pay No Tax           `complete_tool_no_tax`
-  Incomplete Models Pay Positive Tax   `incomplete_tool_positive_tax`
-  Linear Growth                        `simplicityTax_grows`
-  Dominance                            `complete_dominates_incomplete`
-  Amortization Threshold               `amortization_threshold`
-  Tax Antitone w.r.t. Expressiveness   `simplicityTax_antitone`
-:::
-
-The formalization uses `Finset `$\mathbb{N}$ for dimensions. The `Model` type forms a lattice under the expressiveness ordering, with tax antitone (more expressive $\Rightarrow$ lower tax).
+These results are machine-checked in Lean 4 (`HardnessDistribution.lean`).
 
 
 # Related Work {#sec:related}

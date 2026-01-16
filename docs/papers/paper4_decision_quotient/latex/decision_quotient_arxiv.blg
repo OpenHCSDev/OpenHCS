@@ -3,46 +3,44 @@ Capacity: max_strings=200000, hash_size=200000, hash_prime=170003
 The top-level auxiliary file: decision_quotient_arxiv.aux
 The style file: plain.bst
 Database file #1: references.bib
-Warning--I didn't find a database entry for "guyon2003introduction"
-You've used 20 entries,
+You've used 31 entries,
             2118 wiz_defined-function locations,
-            616 strings with 6663 characters,
-and the built_in function-call counts, 6060 in all, are:
-= -- 613
-> -- 199
+            679 strings with 8188 characters,
+and the built_in function-call counts, 9302 in all, are:
+= -- 943
+> -- 317
 < -- 5
-+ -- 86
-- -- 60
-* -- 349
-:= -- 979
-add.period$ -- 63
-call.type$ -- 20
-change.case$ -- 83
++ -- 136
+- -- 96
+* -- 568
+:= -- 1523
+add.period$ -- 96
+call.type$ -- 31
+change.case$ -- 133
 chr.to.int$ -- 0
-cite$ -- 20
-duplicate$ -- 270
-empty$ -- 543
-format.name$ -- 60
-if$ -- 1309
+cite$ -- 31
+duplicate$ -- 395
+empty$ -- 822
+format.name$ -- 96
+if$ -- 1979
 int.to.chr$ -- 0
-int.to.str$ -- 20
-missing$ -- 26
-newline$ -- 103
-num.names$ -- 40
-pop$ -- 118
+int.to.str$ -- 31
+missing$ -- 41
+newline$ -- 158
+num.names$ -- 62
+pop$ -- 168
 preamble$ -- 1
-purify$ -- 70
+purify$ -- 110
 quote$ -- 0
-skip$ -- 189
+skip$ -- 267
 stack$ -- 0
-substring$ -- 397
-swap$ -- 61
+substring$ -- 642
+swap$ -- 72
 text.length$ -- 5
 text.prefix$ -- 0
 top$ -- 0
-type$ -- 66
+type$ -- 102
 warning$ -- 0
-while$ -- 66
-width$ -- 22
-write$ -- 217
-(There was 1 warning)
+while$ -- 102
+width$ -- 33
+write$ -- 337
