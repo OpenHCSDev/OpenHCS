@@ -482,6 +482,7 @@ class PaperBuilder:
         self._copy_markdown(md_file, package_dir)
         self._copy_latex_sources(paper_id, package_dir)
         self._copy_lean_proofs(paper_id, package_dir)
+        self._copy_experiments(paper_id, package_dir)
 
         if self.arxiv_config.include_build_log:
             self._create_build_log(paper_id, package_dir)
@@ -608,6 +609,31 @@ class PaperBuilder:
         self._generate_proofs_readme(paper_id, paper_files, lean_dest)
 
         print(f"[arxiv]   Lean proofs: {len(paper_files)} files")
+
+    def _copy_experiments(self, paper_id: str, package_dir: Path) -> None:
+        """Copy experiments directory if present.
+
+        Copies Python scripts, data files, and results from the experiments/ subdirectory.
+        """
+        paper_dir = self._get_paper_dir(paper_id)
+        experiments_dir = paper_dir / "experiments"
+
+        if not experiments_dir.exists():
+            return  # No experiments directory, skip silently
+
+        experiments_dest = package_dir / "experiments"
+        experiments_dest.mkdir(parents=True, exist_ok=True)
+
+        # Copy all relevant files
+        copied_count = 0
+        extensions = [".py", ".json", ".csv", ".txt", ".sh", ".md"]
+        for ext in extensions:
+            for src_file in experiments_dir.glob(f"*{ext}"):
+                shutil.copy2(src_file, experiments_dest / src_file.name)
+                copied_count += 1
+
+        if copied_count > 0:
+            print(f"[arxiv]   Experiments: {copied_count} files")
 
     def _generate_paper_lakefile(self, paper_id: str, paper_files: list, lean_dest: Path) -> None:
         """Generate paper-specific lakefile from actual proof files."""
