@@ -51,7 +51,7 @@ where $s_I$ denotes the projection of $s$ onto coordinates in $I$.
 
 \begin{theorem}[coNP-completeness of SUFFICIENCY-CHECK]
 \label{thm:sufficiency-conp}
-SUFFICIENCY-CHECK is coNP-complete \cite{cook1971complexity, karp1972reducibility}.
+SUFFICIENCY-CHECK is coNP-complete \cite{cook1971complexity, karp1972reducibility}. \emph{(Machine-verified in Lean 4; see \texttt{Hardness/CoNPComplete.lean}.)}
 \end{theorem}
 
 \begin{proof}
@@ -93,7 +93,7 @@ For $\text{Opt}$ to be constant, $\varphi(a)$ must be true for all assignments $
 
 \begin{theorem}[MINIMUM-SUFFICIENT-SET is coNP-complete]
 \label{thm:minsuff-conp}
-MINIMUM-SUFFICIENT-SET is coNP-complete.
+MINIMUM-SUFFICIENT-SET is coNP-complete. \emph{(Machine-verified.)}
 \end{theorem}
 
 \begin{proof}
@@ -130,7 +130,7 @@ $\text{Opt}(s)$ is constant for all states $s$ with $s_I = \alpha$?
 
 \begin{theorem}[ANCHOR-SUFFICIENCY is $\Sigma_2^P$-complete]
 \label{thm:anchor-sigma2p}
-ANCHOR-SUFFICIENCY is $\Sigma_2^P$-complete \cite{stockmeyer1976polynomial} (already for Boolean coordinate spaces).
+ANCHOR-SUFFICIENCY is $\Sigma_2^P$-complete \cite{stockmeyer1976polynomial} (already for Boolean coordinate spaces). \emph{(Machine-verified.)}
 \end{theorem}
 
 \begin{proof}

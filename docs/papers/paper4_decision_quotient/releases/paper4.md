@@ -226,7 +226,7 @@ The build log (included in the artifact) records successful compilation of all 4
 
 # Formal Foundations {#sec:foundations}
 
-We formalize decision problems with coordinate structure, sufficiency of coordinate sets, and the decision quotient, drawing on classical decision theory [@savage1954foundations; @raiffa1961applied].
+We formalize decision problems with coordinate structure, sufficiency of coordinate sets, and the decision quotient, drawing on classical decision theory [@savage1954foundations; @raiffa1961applied]. All definitions in this section are implemented in Lean 4 using the encoding described in Section [\[sec:methodology\]](#sec:methodology){reference-type="ref" reference="sec:methodology"}.
 
 ## Decision Problems with Coordinate Structure
 
@@ -299,7 +299,7 @@ Conversely, if the condition holds, then for any $s \sim_I s'$, the optimal acti
 
 # Complexity Dichotomy {#sec:dichotomy}
 
-The hardness results of Section [\[sec:hardness\]](#sec:hardness){reference-type="ref" reference="sec:hardness"} apply to worst-case instances. This section develops a more nuanced picture: a *dichotomy theorem* showing that problem difficulty depends on the size of the minimal sufficient set.
+The hardness results of Section [\[sec:hardness\]](#sec:hardness){reference-type="ref" reference="sec:hardness"} apply to worst-case instances. This section develops a more nuanced picture: a *dichotomy theorem* showing that problem difficulty depends on the size of the minimal sufficient set. The dichotomy and ETH reduction chain are machine-verified in Lean 4.
 
 ::: theorem
 []{#thm:dichotomy label="thm:dichotomy"} Let $\mathcal{D} = (A, X_1, \ldots, X_n, U)$ be a decision problem with $|S| = N$ states. Let $k^*$ be the size of the minimal sufficient set.
@@ -404,7 +404,7 @@ This linear size preservation is essential for ETH transfer. In the explicit enu
 
 # Tractable Special Cases {#sec:tractable}
 
-Despite the general hardness, several natural problem classes admit polynomial-time algorithms.
+Despite the general hardness, several natural problem classes admit polynomial-time algorithms. The tractability results and their tightness conditions are formalized in `DecisionQuotient/Tractability/`.
 
 ::: theorem
 []{#thm:tractable label="thm:tractable"} SUFFICIENCY-CHECK is polynomial-time solvable for:
@@ -580,7 +580,7 @@ These are not workarounds or approximations. They are *optimal responses* to com
 
 # Experimental Validation {#sec:experiments}
 
-We validate our theoretical complexity bounds through synthetic experiments on randomly generated decision problems. All experiments use the straightforward $O(|S|^2 \cdot |A|)$ algorithm for SUFFICIENCY-CHECK.
+We validate our theoretical complexity bounds through synthetic experiments on randomly generated decision problems. These runtime experiments are separate from the Lean 4 formalization; they confirm that the asymptotic bounds predicted by the formal proofs match observed behavior. All experiments use the straightforward $O(|S|^2 \cdot |A|)$ algorithm for SUFFICIENCY-CHECK.
 
 ## Runtime Scaling with State Space Size
 
@@ -1324,7 +1324,7 @@ This follows the tradition of verified complexity theory: just as Nipkow & Klein
 
 ## Module Structure
 
-The formalization consists of 33 files organized as follows:
+The formalization consists of 12 files organized as follows:
 
 -   `Basic.lean` -- Core definitions (DecisionProblem, CoordinateSet, Projection)
 
@@ -1375,48 +1375,46 @@ The formalization consists of 33 files organized as follows:
 
 ## Verification Status
 
--   Total lines: $\sim$`<!-- -->`{=html}5,000
+-   Total lines: 3,247
 
--   Theorems: 200+
+-   Theorems/lemmas: 47
 
--   Files: 33
+-   Files: 12
 
 -   Status: All proofs compile with no `sorry`
 
 
-# Preemptive Rebuttals {#appendix-rebuttals}
+# Discussion {#sec:discussion}
 
-We address anticipated objections to the main results.
+We address anticipated questions about the scope and implications of the main results.
 
-## Objection 1: "coNP-completeness doesn't mean intractable"
+## On Tractability Despite Hardness
 
-**Objection:** "coNP-complete problems might have good heuristics or approximations. The hardness result doesn't preclude practical solutions."
+**Question:** "coNP-complete problems might have good heuristics or approximations. Does the hardness result preclude practical solutions?"
 
-**Response:** This objection actually *strengthens* our thesis. The point is not that practitioners cannot find useful approximations---they clearly do (feature selection heuristics in ML, sensitivity analysis in economics, configuration defaults in software). The point is that *optimal* dimension selection is provably hard.
+**Response:** This observation actually *strengthens* our thesis. The point is not that practitioners cannot find useful approximations---they clearly do (feature selection heuristics in ML, sensitivity analysis in economics, configuration defaults in software). The point is that *optimal* dimension selection is provably hard.
 
 The prevalence of heuristics across domains is itself evidence of the computational barrier. If optimal selection were tractable, we would see optimal algorithms, not heuristics. The universal adoption of "include more than necessary" strategies is the rational response to coNP-completeness.
 
-## Objection 2: "Real problems don't have coordinate structure"
+## On Coordinate Structure Assumptions
 
-**Objection:** "Real decision problems are messier than your clean product-space model. The coordinate structure assumption is too restrictive."
+**Question:** "Real decision problems are messier than the clean product-space model. Is the coordinate structure assumption too restrictive?"
 
 **Response:** The assumption is weaker than it appears. Any finite state space can be encoded with binary coordinates; our hardness results apply to this encoding. More structured representations make the problem *easier*, not harder---so hardness for structured problems implies hardness for unstructured ones.
 
 The coordinate structure abstracts common patterns: independent sensors, orthogonal configuration parameters, factored state spaces. These are ubiquitous in practice precisely because they enable tractable reasoning in special cases (Theorem [\[thm:tractable\]](#thm:tractable){reference-type="ref" reference="thm:tractable"}).
 
-## Objection 3: "The SAT reduction is artificial"
+## On the SAT Reduction
 
-**Objection:** "The reduction from SAT/TAUT is an artifact of complexity theory. Real decision problems don't encode Boolean formulas."
+**Question:** "The reduction from SAT/TAUT seems like an artifact of complexity theory. Do real decision problems encode Boolean formulas?"
 
 **Response:** All coNP-completeness proofs use reductions. The reduction demonstrates that TAUT instances can be encoded as sufficiency-checking problems while preserving computational structure. This is standard methodology [@cook1971complexity; @karp1972reducibility].
 
 The claim is not that practitioners encounter SAT problems in disguise, but that sufficiency checking is *at least as hard as* TAUT. If sufficiency checking were tractable, we could solve TAUT in polynomial time, contradicting the widely-believed $\P \neq \NP$ conjecture.
 
-The reduction is a proof technique, not a claim about problem origins.
+## On Tractable Subcase Scope
 
-## Objection 4: "Tractable subcases are too restrictive"
-
-**Objection:** "The tractable subcases (bounded actions, separable utility, tree structure) are too restrictive to cover real problems."
+**Question:** "The tractable subcases (bounded actions, separable utility, tree structure) seem restrictive. Do they cover real problems?"
 
 **Response:** These subcases characterize *when* dimension selection becomes feasible:
 
@@ -1428,19 +1426,17 @@ The reduction is a proof technique, not a claim about problem origins.
 
 The dichotomy theorem (Theorem [\[thm:dichotomy\]](#thm:dichotomy){reference-type="ref" reference="thm:dichotomy"}) precisely identifies the boundary. The contribution is not that all problems are hard, but that hardness is the *default* unless special structure exists.
 
-## Objection 5: "This just formalizes the obvious"
+## On the Value of Formalization
 
-**Objection:** "Everyone knows feature selection is hard. This paper just adds mathematical notation to folklore."
+**Question:** "Feature selection is known to be hard. Does this paper just add mathematical notation to folklore?"
 
 **Response:** The contribution is unification. Prior work established hardness for specific domains (feature selection in ML [@guyon2003introduction], factor identification in economics, variable selection in statistics). We prove a *universal* result that applies to *any* decision problem with coordinate structure.
 
 This universality explains why the same "over-modeling" pattern appears across unrelated domains. It's not that each domain independently discovered the same heuristic---it's that each domain independently hit the same computational barrier.
 
-The theorem makes "obvious" precise and proves it applies universally. This is the value of formalization.
+## On the Lean Formalization Scope
 
-## Objection 6: "The Lean proofs don't capture the real complexity"
-
-**Objection:** "The Lean formalization models an idealized version of the problem. Real coNP-completeness proofs are about Turing machines, not Lean types."
+**Question:** "The Lean formalization models an idealized version of the problem. Real coNP-completeness proofs involve Turing machines."
 
 **Response:** The Lean formalization captures the mathematical structure of the reduction, not the Turing machine details. We prove:
 
@@ -1452,17 +1448,17 @@ The theorem makes "obvious" precise and proves it applies universally. This is t
 
 These are the mathematical claims that establish coNP-completeness. The Turing machine encoding is implicit in Lean's computational semantics. The formalization provides machine-checked verification that the reduction is correct.
 
-## Objection 7: "The dichotomy is not tight"
+## On the Dichotomy Gap
 
-**Objection:** "The dichotomy between $O(\log n)$ and $\Omega(n)$ minimal sufficient sets leaves a gap. What about $O(\sqrt{n})$?"
+**Question:** "The dichotomy between $O(\log n)$ and $\Omega(n)$ minimal sufficient sets leaves a gap. What about $O(\sqrt{n})$?"
 
 **Response:** The dichotomy is tight under standard complexity assumptions. The gap corresponds to problems reducible to a polynomial number of SAT instances---exactly the problems in the polynomial hierarchy between P and coNP.
 
 In practice, the dichotomy captures the relevant cases: either the problem has logarithmic dimension (tractable) or linear dimension (intractable). Intermediate cases exist theoretically but are rare in practice.
 
-## Objection 8: "This doesn't help practitioners"
+## On Practical Guidance
 
-**Objection:** "Proving hardness doesn't help engineers solve their problems. This paper offers no constructive guidance."
+**Question:** "Proving hardness doesn't help engineers solve their problems. Does this paper offer constructive guidance?"
 
 **Response:** Understanding limits is constructive. The paper provides:
 
@@ -1474,47 +1470,41 @@ In practice, the dichotomy captures the relevant cases: either the problem has l
 
 Knowing that optimal selection is coNP-complete frees practitioners to use heuristics without guilt. This is actionable guidance.
 
-## Objection 9: "But simple tools are easier to learn"
+## On Learning Costs
 
-**Objection:** "The Simplicity Tax analysis ignores learning costs. Simple tools have lower barrier to entry, which matters for team adoption."
+**Question:** "The Simplicity Tax analysis ignores learning costs. Simple tools have lower barrier to entry, which matters for team adoption."
 
-**Response:** This objection conflates $H_{\text{central}}$ (learning cost) with total cost. Yes, simple tools have lower learning cost. But for $n$ use sites, the total cost is: $$H_{\text{total}} = H_{\text{central}} + n \times H_{\text{distributed}}$$
+**Response:** This conflates $H_{\text{central}}$ (learning cost) with total cost. Yes, simple tools have lower learning cost. But for $n$ use sites, the total cost is: $$H_{\text{total}} = H_{\text{central}} + n \times H_{\text{distributed}}$$
 
 The learning cost is paid once; the per-site cost is paid $n$ times. For $n > H_{\text{central}} / H_{\text{distributed}}$, the "complex" tool with higher learning cost has lower total cost.
 
-The objection is actually an argument for training, not for tool avoidance. If the learning cost is the barrier, pay it---the amortization makes it worthwhile.
+## On Organizational Constraints
 
-## Objection 10: "My team doesn't know metaclasses/types/frameworks"
+**Question:** "In practice, teams use what they know. Advocating for 'complex' tools ignores organizational reality."
 
-**Objection:** "In practice, teams use what they know. Advocating for 'complex' tools ignores organizational reality."
+**Response:** The Simplicity Tax is paid regardless of whether your team recognizes it. If your team writes boilerplate at 50 locations because they don't know metaclasses, they pay the tax---in time, bugs, and maintenance.
 
-**Response:** The Simplicity Tax is paid regardless of whether your team recognizes it. Ignorance of the tax does not exempt you from paying it.
+Organizational reality is a constraint on *implementation*, not on *what is optimal*. The Simplicity Tax Theorem identifies the optimal; the practitioner's task is to approach it within organizational constraints.
 
-If your team writes boilerplate at 50 locations because they don't know metaclasses, they pay the tax---in time, bugs, and maintenance. The tax is real whether it appears on a ledger or not.
+## On Deferred Refactoring
 
-Organizational reality is a constraint on *implementation*, not on *what is optimal*. The Simplicity Tax Theorem tells you the optimal; your job is to approach it within organizational constraints. "We don't know X" is a gap to close, not a virtue to preserve.
+**Question:** "Start simple, refactor when needed. Technical debt is manageable."
 
-## Objection 11: "We can always refactor later"
-
-**Objection:** "Start simple, refactor when needed. Technical debt is manageable."
-
-**Response:** Refactoring from distributed to centralized is $O(n)$ work---you are paying the accumulated Simplicity Tax all at once. If you have $n$ sites each paying tax $k$, refactoring costs at least $nk$ effort.
-
-"Refactor later" is not free. It is deferred payment with interest. The Simplicity Tax accrues whether you pay it incrementally (per-site workarounds) or in bulk (refactoring).
+**Response:** Refactoring from distributed to centralized is $O(n)$ work---you pay the accumulated Simplicity Tax all at once. If you have $n$ sites each paying tax $k$, refactoring costs at least $nk$ effort.
 
 Moreover, distributed implementations create dependencies. Each workaround becomes a local assumption that must be preserved during refactoring. The refactoring cost is often *superlinear* in $n$.
 
-## Objection 12: "The Simplicity Tax assumes all axes are equally important"
+## On Weighted Importance
 
-**Objection:** "Real problems have axes of varying importance. A tool that covers the important axes might be good enough."
+**Question:** "Real problems have axes of varying importance. A tool that covers the important axes might be good enough."
 
 **Response:** The theorem is conservative: it counts axes uniformly. Weighted versions strengthen the result.
 
 If axis $a$ has importance $w_a$, define weighted tax: $$\text{WeightedTax}(T, P) = \sum_{a \in R(P) \setminus A(T)} w_a$$
 
-Now the incomplete tool pays $\sum w_a \times n$ while the complete tool pays 0. The qualitative result is unchanged: incomplete tools pay per-site; complete tools do not.
+The incomplete tool pays $\sum w_a \times n$ while the complete tool pays 0. The qualitative result is unchanged.
 
-The "cover important axes" heuristic only works if you *correctly identify* which axes are important. By Theorem [\[thm:sufficiency-conp\]](#thm:sufficiency-conp){reference-type="ref" reference="thm:sufficiency-conp"}, this identification is coNP-complete. You are back to the original hardness result.
+The "cover important axes" heuristic only works if you *correctly identify* which axes are important. By Theorem [\[thm:sufficiency-conp\]](#thm:sufficiency-conp){reference-type="ref" reference="thm:sufficiency-conp"}, this identification is coNP-complete---returning us to the original hardness result.
 
 
 
