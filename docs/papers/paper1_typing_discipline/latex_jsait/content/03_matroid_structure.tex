@@ -1,3 +1,16 @@
+\subsection{Model Contract (Fixed-Axis Domains)}
+
+Model contract (fixed-axis domain). A domain is specified by a fixed observation interface $\Phi$ derived from a fixed axis map $\alpha: \mathcal{V} \to \mathcal{A}$ (e.g., $\alpha(v) = (B(v), S(v))$). An observer is permitted to interact with $v$ only through primitive queries in $\Phi$, and each primitive query factors through $\alpha$: for every $q \in \Phi$, there exists $\tilde{q}$ such that $q(v) = \tilde{q}(\alpha(v))$.
+A property is in-scope semantic iff it is computable by an admissible strategy that uses only responses to queries in $\Phi$ (under our admissibility constraints: no global preprocessing tables, no amortized caching, etc.).
+
+\begin{proposition}[Observational Quotient]
+For any admissible strategy using only $\Phi$, the entire interaction transcript (and hence the output) depends only on $\alpha(v)$. Equivalently, any in-scope semantic property $P$ factors through $\alpha$: there exists $\tilde{P}$ with $P(v) = \tilde{P}(\alpha(v))$ for all $v$.
+\end{proposition}
+
+\begin{corollary}[Why ``ad hoc'' = adding an axis/tag]
+If two values $v, w$ satisfy $\alpha(v) = \alpha(w)$, then no admissible $\Phi$-only strategy can distinguish them with zero error. Any mechanism that does distinguish such pairs must introduce additional information not present in $\alpha$ (equivalently, refine the axis map by adding a new axis/tag).
+\end{corollary}
+
 \subsection{Query Families and Distinguishing Sets}
 
 The classification problem is: given a set of queries, which subsets suffice to distinguish all entities?
