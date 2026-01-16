@@ -99,20 +99,20 @@ We implemented (1) as a macro; (2)--(4) remain manual. A \texttt{complexity} tac
 \hline
 \textbf{Component} & \textbf{Lines} \\
 \hline
-Core definitions (problems, reductions) & 412 \\
-SAT/TAUTOLOGY encoding & 287 \\
-Sufficiency problem & 456 \\
-coNP-completeness proof & 634 \\
-Approximation hardness & 389 \\
-ETH lower bounds & 298 \\
-Parameterized (W[2]) & 341 \\
-Simplicity Tax formalization & 287 \\
-Utilities and tactics & 143 \\
+Core definitions (Basic, Finite, Quotient) & 285 \\
+Sufficiency \& Computation & 493 \\
+Polynomial reductions & 530 \\
+Hardness proofs (SAT, QBF, $\Sigma_2^P$, ETH) & 1,471 \\
+Tractability (bounded, separable, tree, FPT) & 471 \\
+Dichotomy \& complexity main & 275 \\
+Query complexity \& information & 418 \\
+Algorithm complexity & 170 \\
+Instances \& summary & 250 \\
 \hline
-\textbf{Total} & \textbf{3,247} \\
+\textbf{Total} & \textbf{$\sim$5,600} \\
 \hline
 \end{tabular}
 \end{center}
 
-The reduction proofs (coNP-completeness, approximation, ETH, W[2]) constitute 51\% of the codebase. Core infrastructure is 17\%, suggesting reasonable reuse potential.
+The hardness proofs constitute 26\% of the codebase, with tractability results at 8\%. Core infrastructure (definitions, reductions, computation) accounts for 23\%, suggesting good reuse potential for other complexity formalizations.
 

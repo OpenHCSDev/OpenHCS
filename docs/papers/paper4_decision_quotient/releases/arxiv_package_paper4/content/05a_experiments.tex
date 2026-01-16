@@ -72,7 +72,7 @@ These experiments validate our theoretical predictions:
 \begin{enumerate}
 \item \textbf{Quadratic scaling}: The $O(|S|^2)$ bound is tight in practice. For $|S| = 1000$, expect $\sim 300$ms on commodity hardware.
 
-\item \textbf{Action-independence}: For bounded $|A|$, the FPT result (Theorem~\ref{thm:bounded-actions}) is reflected in the data: runtime is dominated by state-pair enumeration, not action comparison.
+\item \textbf{Action-independence}: For bounded $|A|$, the FPT result (Theorem~\ref{thm:tractable}) is reflected in the data: runtime is dominated by state-pair enumeration, not action comparison.
 
 \item \textbf{Early termination}: Most \emph{wrong} candidate sets are rejected almost instantly. This makes greedy search for minimal sufficient sets practical despite the worst-case coNP-hardness.
 \end{enumerate}

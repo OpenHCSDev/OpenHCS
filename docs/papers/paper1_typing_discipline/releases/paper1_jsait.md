@@ -6,15 +6,15 @@
 
 ## Abstract
 
-We extend classical rate-distortion theory to a discrete classification setting with three resources: *tag rate* $L$ (bits of storage per entity), *identification cost* $W$ (queries to determine class membership), and *distortion* $D$ (misidentification probability). The fundamental question is: how do these resources trade off when an observer must identify an entity's class from limited observations?
+We extend classical rate-distortion theory to a discrete classification setting with three resources: *tag rate* $L$ (bits of storage per entity), *identification cost* $W$ (queries to determine class membership, measured per identification under constraints excluding global preprocessing and amortized caching), and *distortion* $D$ (misidentification probability). The fundamental question is: how do these resources trade off when an observer must identify an entity's class from limited observations?
 
-**Information barrier (zero-error capacity).** When distinct classes share identical attribute profiles, no algorithm, regardless of computational power, can identify the class from attribute queries alone. Formally, the zero-error identification capacity is zero when the attribute mapping $\pi$ is not injective on classes. This is a channel capacity result: $I(C; \pi(V)) < H(C)$.
+**Information barrier (zero-error identifiability).** When distinct classes share identical attribute profiles, no algorithm, regardless of computational power, can identify the class from attribute queries alone. Formally: if $\pi$ is not injective on classes, then zero-error identification from attribute queries alone is impossible (equivalently, the induced observation channel cannot support zero-error class recovery).
 
-**Rate-identification tradeoff.** We characterize the Pareto frontier of the $(L, W, D)$ tradeoff space. A nominal tag of $L = \lceil \log_2 k \rceil$ bits for $k$ classes yields $W = O(1)$ with $D = 0$. Without tags ($L = 0$), identification requires $W = \Omega(n)$ queries and may incur $D > 0$.
+**Rate-identification tradeoff.** We identify the unique Pareto-optimal zero-error point in the $(L, W, D)$ tradeoff space and describe the induced tradeoff geometry. A nominal tag of $L = \lceil \log_2 k \rceil$ bits for $k$ classes yields $W = O(1)$ with $D = 0$. Without tags ($L = 0$), identification requires $W = \Omega(n)$ queries and may incur $D > 0$.
 
 **Converse.** Any scheme achieving $D = 0$ requires $L \geq \log_2 k$ bits. This is tight: nominal tagging achieves the bound with $W = O(1)$.
 
-**Matroid structure.** Minimal sufficient query sets form the bases of a matroid. The *identification dimension* (the common cardinality of all minimal query sets) is well-defined and computable, connecting to zero-error source coding via graph entropy.
+**Matroid structure.** Minimal sufficient query sets form the bases of a matroid. The *distinguishing dimension* (the common cardinality of all minimal query sets) is well-defined and computable, connecting to zero-error source coding via graph entropy.
 
 **Applications.** The theory instantiates to type systems (duck vs. nominal typing), databases (attribute vs. key lookup), and biological taxonomy (phenotype vs. species identifier). The unbounded gap $\Omega(n)$ vs. $O(1)$ explains convergence toward hybrid systems combining structural observation with nominal tagging.
 
@@ -35,11 +35,11 @@ This is not reconstruction (the decoder need not recover $v$), but *identificati
 
 We prove three results:
 
-1.  **Information barrier (capacity limit).** When the attribute profile $\pi: \mathcal{V} \to \{0,1\}^n$ is not injective on classes, the channel $C \to \pi(V)$ has $I(C; \pi(V)) < H(C)$. Zero-error identification via queries alone is impossible.
+1.  **Information barrier (identifiability limit).** When the attribute profile $\pi: \mathcal{V} \to \{0,1\}^n$ is not injective on classes, zero-error identification via queries alone is impossible: any decoder produces identical output on colliding classes, so cannot be correct for both.
 
 2.  **Optimal tagging (achievability).** A tag of $L = \lceil \log_2 k \rceil$ bits achieves zero-error identification with $W = O(1)$ query cost. This is Pareto-optimal in the $(L, W, D)$ tradeoff space.
 
-3.  **Matroid structure (query complexity).** Minimal sufficient query sets form the bases of a matroid. The *identification dimension* (the common cardinality of all minimal sets) lower-bounds the query cost $W$ for any tag-free scheme.
+3.  **Matroid structure (query complexity).** Minimal sufficient query sets form the bases of a matroid. The *distinguishing dimension* (the common cardinality of all minimal sets) lower-bounds the query cost $W$ for any tag-free scheme.
 
 These results are universal: the theory applies to type systems, databases, biological taxonomy, and knowledge graphs. We develop the mathematics in full generality, then exhibit concrete instantiations.
 
@@ -153,7 +153,7 @@ This paper establishes the following results:
 
 **Identification via channels.** Our work extends the identification paradigm introduced by Ahlswede and Dueck [@ahlswede1989identification; @ahlswede1989identification2]. In their framework, a decoder need not reconstruct a message but only answer "is the message $m$?" for a given hypothesis. This yields dramatically different capacity: double-exponential codebook sizes become achievable. Our setting differs in three ways: (1) we consider zero-error identification rather than vanishing error, (2) queries are adaptive rather than block codes, and (3) we allow auxiliary tagging (rate $L$) to reduce query cost. The $(L, W, D)$ tradeoff generalizes Ahlswede-Dueck to a multi-dimensional operating regime.
 
-**Rate-distortion theory.** The $(L, W, D)$ framework connects to Shannon's rate-distortion theory [@shannon1959coding; @berger1971rate] with an important twist: the "distortion" $D$ is semantic (class misidentification), and there is a second resource $W$ (query cost) alongside rate $L$. Classical rate-distortion asks: what is the minimum rate to achieve distortion $D$? We ask: given rate $L$, what is the minimum query cost $W$ to achieve distortion $D = 0$? The Pareto frontier (Theorem [\[thm:lwd-optimal\]](#thm:lwd-optimal){reference-type="ref" reference="thm:lwd-optimal"}) characterizes this three-dimensional tradeoff.
+**Rate-distortion theory.** The $(L, W, D)$ framework connects to Shannon's rate-distortion theory [@shannon1959coding; @berger1971rate] with an important twist: the "distortion" $D$ is semantic (class misidentification), and there is a second resource $W$ (query cost) alongside rate $L$. Classical rate-distortion asks: what is the minimum rate to achieve distortion $D$? We ask: given rate $L$, what is the minimum query cost $W$ to achieve distortion $D = 0$? Theorem [\[thm:lwd-optimal\]](#thm:lwd-optimal){reference-type="ref" reference="thm:lwd-optimal"} identifies the unique Pareto-optimal point in this three-dimensional tradeoff at $D = 0$.
 
 **Rate-distortion-perception tradeoffs.** Blau and Michaeli [@blau2019rethinking] extended rate-distortion theory by adding a perception constraint, creating a three-way tradeoff. Our query cost $W$ plays an analogous role: it measures the interactive cost of achieving low distortion rather than a distributional constraint. This parallel suggests that $(L, W, D)$ tradeoffs may admit similar geometric characterizations. Section [\[sec:extensions\]](#sec:extensions){reference-type="ref" reference="sec:extensions"} develops this connection further.
 
@@ -263,11 +263,15 @@ The *identification channel* induced by observation family $\Phi$ is the mapping
 ::: proof
 *Proof.* *Achievability*: If $\pi$ is injective on classes, then observing $\pi(v)$ determines $C(v)$ uniquely. The decoder simply inverts the class-to-profile mapping.
 
-*Converse*: Suppose classes $c_1 \neq c_2$ share a profile: $\exists v_1 \in c_1, v_2 \in c_2$ with $\pi(v_1) = \pi(v_2)$. Then $I(C; \pi(V)) < H(C)$ since the channel conflates $c_1$ and $c_2$. Zero-error identification requires $I(C; \pi(V)) = H(C)$, which fails. ◻
+*Converse* (deterministic): Suppose two distinct classes $c_1 \neq c_2$ share a profile: $\exists v_1 \in c_1, v_2 \in c_2$ with $\pi(v_1) = \pi(v_2)$. Then any decoder $g(\pi(v))$ outputs the same class label on both $v_1$ and $v_2$, so it cannot be correct for both. Hence zero-error identification of all classes is impossible. ◻
 :::
 
 ::: remark
-In the identification paradigm of [@ahlswede1989identification], the decoder asks "is the message $m$?" rather than "what is the message?" This yields double-exponential codebook sizes. Our setting is different: we require zero-error identification of the *class*, not hypothesis testing. The capacity threshold ($\pi$ must be class-injective) is thus binary rather than a rate.
+Under any distribution with positive mass on both colliding classes, $I(C; \pi(V)) < H(C)$. This is an average-case consequence of the deterministic barrier above.
+:::
+
+::: remark
+In the identification paradigm of [@ahlswede1989identification], the decoder asks "is the message $m$?" rather than "what is the message?" This yields double-exponential codebook sizes. Our setting is different: we require zero-error identification of the *class*, not hypothesis testing. The one-shot zero-error identification feasibility threshold ($\pi$ must be class-injective) is binary rather than a rate.
 :::
 
 The key insight is that tagging provides a *side channel* that restores identifiability when the attribute channel fails:
@@ -340,7 +344,7 @@ Given a distribution $P$ over values, the *expected distortion* is: $$D = \mathb
 :::
 
 ::: remark
-$D = 0$ means the observation strategy is *sound*: type equality (as computed by the observer) implies behavioral equivalence. $D > 0$ means the strategy may conflate behaviorally distinct values with positive probability.
+$D = 0$ means the observation strategy is *sound*: type equality (as computed by the observer) implies behavioral equivalence. $D > 0$ means the strategy may conflate behaviorally distinct values with positive probability. We use $D$ as expected misclassification rate, and in the core theorems we focus on the zero-error regime $D=0$ vs $D>0$; richer distortion structures are discussed in Section [\[sec:extensions\]](#sec:extensions){reference-type="ref" reference="sec:extensions"}.
 :::
 
 ## The $(L, W, D)$ Tradeoff Space
@@ -392,7 +396,7 @@ The main result of Section [\[sec:lwd\]](#sec:lwd){reference-type="ref" referen
 When $D > 0$ is permitted, we obtain a classic rate-distortion tradeoff:
 
 ::: proposition
-For any $\epsilon \in (0, 1)$, there exist schemes with $L = 0$ (no tags) achieving $D \leq \epsilon$ with query cost $W = O(\log(1/\epsilon) \cdot d)$, where $d$ is the identification dimension. The tradeoff: smaller $D$ requires larger $W$.
+For any $\epsilon \in (0, 1)$, there exist schemes with $L = 0$ (no tags) achieving $D \leq \epsilon$ with query cost $W = O(\log(1/\epsilon) \cdot d)$, where $d$ is the distinguishing dimension. The tradeoff: smaller $D$ requires larger $W$.
 :::
 
 The zero-error corner ($D = 0$) is special: nominal tagging is the unique Pareto optimum. Relaxing to $D > 0$ enables tag-free schemes at the cost of increased query complexity. This mirrors the classical distinction between zero-error and $\epsilon$-error capacity in channel coding.
@@ -411,7 +415,7 @@ Consider a type system with $k = 1000$ classes, each characterized by a subset o
   : Identification strategies for 1000 classes with 50 methods.
 :::
 
-Here $d$ is the identification dimension, the size of any minimal distinguishing query set. For typical hierarchies, $d \approx 5$--$15$. The gap between 10 bits of storage vs. 5--50 queries per identification is the cost of forgoing nominal tagging.
+Here $d$ is the distinguishing dimension, the size of any minimal distinguishing query set. For typical hierarchies, $d \approx 5$--$15$. The gap between 10 bits of storage vs. 5--50 queries per identification is the cost of forgoing nominal tagging.
 
 [^1]: In the Lean formalization (Appendix [\[formalization-and-verification\]](#formalization-and-verification){reference-type="ref" reference="formalization-and-verification"}), the lineage axis is denoted `Bases`, reflecting its instantiation as the inheritance chain in object-oriented languages.
 
@@ -764,7 +768,7 @@ The third point is the key insight: *nominal tags provide a noise-free side chan
 
 ## Rate-Distortion-Query Tradeoff Surface
 
-The $(L, W, D)$ tradeoff admits a natural geometric interpretation. We have characterized the Pareto frontier (Theorem [\[thm:lwd-optimal\]](#thm:lwd-optimal){reference-type="ref" reference="thm:lwd-optimal"}), but the full tradeoff surface contains additional structure.
+The $(L, W, D)$ tradeoff admits a natural geometric interpretation. We have identified the unique Pareto-optimal point at $D = 0$ (Theorem [\[thm:lwd-optimal\]](#thm:lwd-optimal){reference-type="ref" reference="thm:lwd-optimal"}), but the full tradeoff surface contains additional structure.
 
 **Fixed-$W$ slices.** For fixed query budget $W$, what is the minimum tag rate $L$ to achieve distortion $D$? When $W \geq d$ (the distinguishing dimension), zero distortion is achievable with $L = 0$ via exhaustive querying. When $W < d$, the observer cannot distinguish all classes, and either:
 

@@ -22,7 +22,7 @@ We present a Lean 4 formalization of polynomial-time reductions and computationa
 
 -   **A complexity dichotomy**: polynomial for $O(\log n)$-size sufficient sets, exponential for $\Omega(n)$-size
 
-The formalization comprises 3,200+ lines of Lean 4 with 47 machine-verified theorems. All reductions include explicit polynomial bounds. We identify proof engineering patterns for complexity theory in dependent type systems and discuss challenges of formalizing computational hardness constructively.
+The formalization comprises $\sim$`<!-- -->`{=html}5,600 lines of Lean 4 with 230+ machine-verified theorems across 36 files. All reductions include explicit polynomial bounds. We identify proof engineering patterns for complexity theory in dependent type systems and discuss challenges of formalizing computational hardness constructively.
 
 **Practical implications.** The case study formalizes a fundamental principle: *determining what you need to know is harder than knowing everything*. This explains why over-modeling is rational and why "simpler" tools often create more work (the Simplicity Tax Theorem, also machine-verified).
 
@@ -70,9 +70,9 @@ The practical implication---that "determining what you need to know is harder th
 ::: center
   **Metric**                                                 **Value**
   ----------------------- --------------------------------------------
-  Lines of Lean 4                                                3,247
-  Theorems/lemmas                                                   47
-  Proof files                                                       12
+  Lines of Lean 4                         $\sim$`<!-- -->`{=html}5,600
+  Theorems/lemmas                                                 230+
+  Proof files                                                       36
   Reduction proofs          5 (SAT, TAUTOLOGY, SET-COVER, ETH, W\[2\])
   External dependencies           Mathlib (computability, data.finset)
   `sorry` count                                                      0
@@ -221,7 +221,7 @@ Each theorem includes verification metadata:
     #print axioms sufficiency_coNP_complete  -- axiom dependencies
     #eval Nat.repr (countSorry `sufficiency_coNP_complete)  -- 0
 
-The build log (included in the artifact) records successful compilation of all 47 theorems with 0 `sorry` placeholders.
+The build log (included in the artifact) records successful compilation of all 230+ theorems with 0 `sorry` placeholders.
 
 
 # Formal Foundations {#sec:foundations}
@@ -636,7 +636,7 @@ These experiments validate our theoretical predictions:
 
 1.  **Quadratic scaling**: The $O(|S|^2)$ bound is tight in practice. For $|S| = 1000$, expect $\sim 300$ms on commodity hardware.
 
-2.  **Action-independence**: For bounded $|A|$, the FPT result (Theorem [\[thm:bounded-actions\]](#thm:bounded-actions){reference-type="ref" reference="thm:bounded-actions"}) is reflected in the data: runtime is dominated by state-pair enumeration, not action comparison.
+2.  **Action-independence**: For bounded $|A|$, the FPT result (Theorem [\[thm:tractable\]](#thm:tractable){reference-type="ref" reference="thm:tractable"}) is reflected in the data: runtime is dominated by state-pair enumeration, not action comparison.
 
 3.  **Early termination**: Most *wrong* candidate sets are rejected almost instantly. This makes greedy search for minimal sufficient sets practical despite the worst-case coNP-hardness.
 
@@ -702,7 +702,7 @@ For $n$ use sites, total realized hardness is: $$H_{\text{total}}(S) = H_{\text{
 :::
 
 ::: proof
-*Proof.* By definition of intrinsic hardness: any correct solution must perform at least $H(P)$ units of work (computational, cognitive, or error-handling). This work is either centralized or distributed. 0◻ ◻
+*Proof.* By definition of intrinsic hardness: any correct solution must perform at least $H(P)$ units of work (computational, cognitive, or error-handling). This work is either centralized or distributed. ◻
 :::
 
 ::: definition
@@ -722,7 +722,7 @@ High $\eta$ indicates centralized hardness (paid once); low $\eta$ indicates dis
 :::
 
 ::: proof
-*Proof.* (1) follows from the total hardness formula. (2) follows from error site counting. (3) follows from Paper 3's leverage definition $L = \Delta\text{Effect}/\Delta\text{Effort}$. 0◻ ◻
+*Proof.* (1) follows from the total hardness formula. (2) follows from error site counting. (3) follows from Paper 3's leverage definition $L = \Delta\text{Effect}/\Delta\text{Effort}$. ◻
 :::
 
 ::: corollary
@@ -788,7 +788,7 @@ This terminology is grounded in Papers 1--2: "axes" correspond to Paper 1's axis
 :::
 
 ::: proof
-*Proof.* Set partition: $R(P) = (R(P) \cap A(T)) \cup (R(P) \setminus A(T))$. The sets are disjoint. Cardinality follows. 0◻ ◻
+*Proof.* Set partition: $R(P) = (R(P) \cap A(T)) \cup (R(P) \setminus A(T))$. The sets are disjoint. Cardinality follows. ◻
 :::
 
 This is analogous to conservation laws in physics: energy is conserved, only transformed. Complexity is conserved, only distributed.
@@ -810,7 +810,7 @@ This is analogous to conservation laws in physics: energy is conserved, only tra
 :::
 
 ::: proof
-*Proof.* Complete: $0 \times n = 0$. Incomplete: $k \times n$ for $k \geq 1$. For $n > 0$: $0 < kn$. 0◻ ◻
+*Proof.* Complete: $0 \times n = 0$. Incomplete: $k \times n$ for $k \geq 1$. For $n > 0$: $0 < kn$. ◻
 :::
 
 ## The Simplicity Preference Fallacy {#sec:fallacy}
@@ -972,7 +972,7 @@ Mathlib's computability library [@mathlib2020] provides primitive recursive fun
 
 #### The verification gap.
 
-Published complexity proofs occasionally contain errors [@lipton2009np]. Machine verification eliminates this uncertainty. Our contribution demonstrates that complexity reductions are amenable to formalization with reasonable effort ($\sim$`<!-- -->`{=html}3,200 lines for five reduction proofs).
+Published complexity proofs occasionally contain errors [@lipton2009np]. Machine verification eliminates this uncertainty. Our contribution demonstrates that complexity reductions are amenable to formalization with reasonable effort ($\sim$`<!-- -->`{=html}5,600 lines for the full reduction suite).
 
 ## Computational Decision Theory
 
@@ -1152,21 +1152,21 @@ The mathematical content ("sufficiency is the same as tautology under this encod
 ## Lines of Code by Component
 
 ::: center
-  **Component**                               **Lines**
-  ----------------------------------------- -----------
-  Core definitions (problems, reductions)           412
-  SAT/TAUTOLOGY encoding                            287
-  Sufficiency problem                               456
-  coNP-completeness proof                           634
-  Approximation hardness                            389
-  ETH lower bounds                                  298
-  Parameterized (W\[2\])                            341
-  Simplicity Tax formalization                      287
-  Utilities and tactics                             143
-  **Total**                                   **3,247**
+  **Component**                                                            **Lines**
+  ----------------------------------------------- ----------------------------------
+  Core definitions (Basic, Finite, Quotient)                                     285
+  Sufficiency & Computation                                                      493
+  Polynomial reductions                                                          530
+  Hardness proofs (SAT, QBF, $\Sigma_2^P$, ETH)                                1,471
+  Tractability (bounded, separable, tree, FPT)                                   471
+  Dichotomy & complexity main                                                    275
+  Query complexity & information                                                 418
+  Algorithm complexity                                                           170
+  Instances & summary                                                            250
+  **Total**                                         **$\sim$`<!-- -->`{=html}5,600**
 :::
 
-The reduction proofs (coNP-completeness, approximation, ETH, W\[2\]) constitute 51% of the codebase. Core infrastructure is 17%, suggesting reasonable reuse potential.
+The hardness proofs constitute 26% of the codebase, with tractability results at 8%. Core infrastructure (definitions, reductions, computation) accounts for 23%, suggesting good reuse potential for other complexity formalizations.
 
 
 # Conclusion
@@ -1324,7 +1324,7 @@ This follows the tradition of verified complexity theory: just as Nipkow & Klein
 
 ## Module Structure
 
-The formalization consists of 12 files organized as follows:
+The formalization consists of 36 files organized as follows:
 
 -   `Basic.lean` -- Core definitions (DecisionProblem, CoordinateSet, Projection)
 
@@ -1375,11 +1375,11 @@ The formalization consists of 12 files organized as follows:
 
 ## Verification Status
 
--   Total lines: 3,247
+-   Total lines: $\sim$`<!-- -->`{=html}5,600
 
--   Theorems/lemmas: 47
+-   Theorems/lemmas: 230+
 
--   Files: 12
+-   Files: 36
 
 -   Status: All proofs compile with no `sorry`
 

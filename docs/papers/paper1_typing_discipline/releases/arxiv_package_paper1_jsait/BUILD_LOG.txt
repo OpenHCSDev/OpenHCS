@@ -2,7 +2,7 @@ OpenHCS Paper Build Log
 ========================
 
 Paper: paper1_jsait - Information Barriers in Classification Systems: Matroid Structure and Witness Complexity
-Package Date: 2026-01-16T03:39:42.745508
+Package Date: 2026-01-16T04:52:35.235259
 Lean Toolchain: leanprover/lean4:v4.27.0-rc1
 
 Proof Statistics:

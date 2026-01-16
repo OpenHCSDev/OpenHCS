@@ -98,11 +98,15 @@ That is, zero-error identification of all $k$ classes is achievable if and only 
 \begin{proof}
 \emph{Achievability}: If $\pi$ is injective on classes, then observing $\pi(v)$ determines $C(v)$ uniquely. The decoder simply inverts the class-to-profile mapping.
 
-\emph{Converse}: Suppose classes $c_1 \neq c_2$ share a profile: $\exists v_1 \in c_1, v_2 \in c_2$ with $\pi(v_1) = \pi(v_2)$. Then $I(C; \pi(V)) < H(C)$ since the channel conflates $c_1$ and $c_2$. Zero-error identification requires $I(C; \pi(V)) = H(C)$, which fails.
+\emph{Converse} (deterministic): Suppose two distinct classes $c_1 \neq c_2$ share a profile: $\exists v_1 \in c_1, v_2 \in c_2$ with $\pi(v_1) = \pi(v_2)$. Then any decoder $g(\pi(v))$ outputs the same class label on both $v_1$ and $v_2$, so it cannot be correct for both. Hence zero-error identification of all classes is impossible.
 \end{proof}
 
+\begin{remark}[Information-theoretic corollary]
+Under any distribution with positive mass on both colliding classes, $I(C; \pi(V)) < H(C)$. This is an average-case consequence of the deterministic barrier above.
+\end{remark}
+
 \begin{remark}[Relation to Ahlswede-Dueck]
-In the identification paradigm of \cite{ahlswede1989identification}, the decoder asks ``is the message $m$?'' rather than ``what is the message?'' This yields double-exponential codebook sizes. Our setting is different: we require zero-error identification of the \emph{class}, not hypothesis testing. The capacity threshold ($\pi$ must be class-injective) is thus binary rather than a rate.
+In the identification paradigm of \cite{ahlswede1989identification}, the decoder asks ``is the message $m$?'' rather than ``what is the message?'' This yields double-exponential codebook sizes. Our setting is different: we require zero-error identification of the \emph{class}, not hypothesis testing. The one-shot zero-error identification feasibility threshold ($\pi$ must be class-injective) is binary rather than a rate.
 \end{remark}
 
 The key insight is that tagging provides a \emph{side channel} that restores identifiability when the attribute channel fails:
@@ -193,7 +197,7 @@ The \emph{zero-error regime} requires $D = 0$ (no semantic errors for any $v$). 
 \end{definition}
 
 \begin{remark}[Distortion interpretation]
-$D = 0$ means the observation strategy is \emph{sound}: type equality (as computed by the observer) implies behavioral equivalence. $D > 0$ means the strategy may conflate behaviorally distinct values with positive probability.
+$D = 0$ means the observation strategy is \emph{sound}: type equality (as computed by the observer) implies behavioral equivalence. $D > 0$ means the strategy may conflate behaviorally distinct values with positive probability. We use $D$ as expected misclassification rate, and in the core theorems we focus on the zero-error regime $D=0$ vs $D>0$; richer distortion structures are discussed in Section~\ref{sec:extensions}.
 \end{remark}
 
 \subsection{The $(L, W, D)$ Tradeoff Space}
@@ -241,7 +245,7 @@ Zero error requires that distinct classes map to distinct decoder outputs. With 
 When $D > 0$ is permitted, we obtain a classic rate-distortion tradeoff:
 
 \begin{proposition}[Lossy identification]
-For any $\epsilon \in (0, 1)$, there exist schemes with $L = 0$ (no tags) achieving $D \leq \epsilon$ with query cost $W = O(\log(1/\epsilon) \cdot d)$, where $d$ is the identification dimension. The tradeoff: smaller $D$ requires larger $W$.
+For any $\epsilon \in (0, 1)$, there exist schemes with $L = 0$ (no tags) achieving $D \leq \epsilon$ with query cost $W = O(\log(1/\epsilon) \cdot d)$, where $d$ is the distinguishing dimension. The tradeoff: smaller $D$ requires larger $W$.
 \end{proposition}
 
 The zero-error corner ($D = 0$) is special: nominal tagging is the unique Pareto optimum. Relaxing to $D > 0$ enables tag-free schemes at the cost of increased query complexity. This mirrors the classical distinction between zero-error and $\epsilon$-error capacity in channel coding.
@@ -265,4 +269,4 @@ Adaptive duck typing & $0$ & $\geq d$ queries \\
 \end{tabular}
 \end{table}
 
-Here $d$ is the identification dimension, the size of any minimal distinguishing query set. For typical hierarchies, $d \approx 5$--$15$. The gap between 10 bits of storage vs.\ 5--50 queries per identification is the cost of forgoing nominal tagging.
+Here $d$ is the distinguishing dimension, the size of any minimal distinguishing query set. For typical hierarchies, $d \approx 5$--$15$. The gap between 10 bits of storage vs.\ 5--50 queries per identification is the cost of forgoing nominal tagging.
