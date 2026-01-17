@@ -1,0 +1,33 @@
+\begin{abstract}
+Consider an information system encoding a fact $F$ at multiple locations. When can such a system guarantee coherence---the impossibility of disagreement among encoding locations? We prove that exactly one independent encoding (DOF = 1, where DOF counts independent storage locations) is the unique rate achieving guaranteed coherence. This optimal point generalizes Rissanen's Minimum Description Length principle to interactive encoding systems with modification constraints.
+
+\textbf{Main Results.}
+\begin{enumerate}
+\item \textbf{Optimal Rate (Theorem~\ref{thm:dof-optimal}):} DOF = 1 is the unique rate guaranteeing coherence. DOF = 0 means $F$ is not encoded; DOF $> 1$ permits incoherent configurations where locations disagree on $F$'s value.
+
+\item \textbf{Resolution Impossibility (Theorem~\ref{thm:oracle-arbitrary}):} Under incoherence (DOF $> 1$), no resolution procedure is information-theoretically justified---any oracle selecting a value leaves another value disagreeing. This parallels zero-error capacity constraints: without sufficient side information, error-free decoding is impossible.
+
+\item \textbf{Rate-Complexity Tradeoff (Theorem~\ref{thm:unbounded-gap}):} Achieving coherence via manual synchronization requires $\Omega(n)$ update operations; DOF = 1 systems achieve $O(1)$. The gap grows without bound as $n \to \infty$.
+
+\item \textbf{Realization Requirements (Theorem~\ref{thm:ssot-iff}):} Computational systems achieving DOF = 1 via derivation require: (a) definition-time computation hooks, and (b) introspectable derivation results. These are information-theoretic necessities, not implementation preferences.
+\end{enumerate}
+
+\textbf{Instantiations.} The abstract encoding model applies across domains:
+\begin{itemize}
+\tightlist
+\item \textbf{Distributed databases:} Replica consistency under update constraints
+\item \textbf{Configuration systems:} Multi-file settings with coherence requirements
+\item \textbf{Software systems:} Type definitions, class registries, interface contracts
+\item \textbf{Version control:} Merge resolution under conflicting branches
+\end{itemize}
+
+We evaluate computational realizations (programming languages) against formal criteria derived from the encoding model. Among mainstream systems, Python uniquely satisfies both requirements; most (Java, C++, Rust, Go, TypeScript) cannot achieve DOF = 1 within their design constraints.
+
+\textbf{Theoretical Foundation.} The derivation framework (axes, observational quotients, provenance) is established in the companion paper on classification systems. This work proves the coherence optimality theorem and derives realizability requirements from first principles.
+
+All theorems machine-checked in Lean 4 (9,351 lines, 541 theorems, 0 \texttt{sorry} placeholders). Realizability claims grounded in formalized operational semantics for computational systems.
+
+\textbf{Index Terms---}Encoding theory, coherence constraints, minimum description length, distributed source coding, rate-complexity tradeoffs, zero-error capacity
+\end{abstract}
+
+

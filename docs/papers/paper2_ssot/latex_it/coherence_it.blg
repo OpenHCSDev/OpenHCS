@@ -1,0 +1,67 @@
+This is BibTeX, Version 0.99d (TeX Live 2026/dev/Arch Linux)
+Capacity: max_strings=200000, hash_size=200000, hash_prime=170003
+The top-level auxiliary file: coherence_it.aux
+The style file: IEEEtran.bst
+Reallocated singl_function (elt_size=8) to 100 items from 50.
+Reallocated singl_function (elt_size=8) to 100 items from 50.
+Reallocated singl_function (elt_size=8) to 100 items from 50.
+Reallocated wiz_functions (elt_size=8) to 6000 items from 3000.
+Reallocated singl_function (elt_size=8) to 100 items from 50.
+Database file #1: references.bib
+Warning--entry type for "openhcs2025" isn't style-file defined
+--line 351 of file references.bib
+Warning--I didn't find a database entry for "korner1973graphs"
+Warning--I didn't find a database entry for "lovasz1979shannon"
+Warning--I didn't find a database entry for "brewer2000cap"
+Warning--I didn't find a database entry for "hunt2002vcdiff"
+Warning--I didn't find a database entry for "delaet2010survey"
+Warning--I didn't find a database entry for "shannon1948mathematical"
+Warning--I didn't find a database entry for "slepian1973noiseless"
+Warning--I didn't find a database entry for "cover2006elements"
+-- IEEEtran.bst version 1.14 (2015/08/26) by Michael Shell.
+-- http://www.michaelshell.org/tex/ieeetran/bibtex/
+-- See the "IEEEtran_bst_HOWTO.pdf" manual for usage information.
+
+Done.
+You've used 35 entries,
+            4087 wiz_defined-function locations,
+            1034 strings with 12731 characters,
+and the built_in function-call counts, 21525 in all, are:
+= -- 1773
+> -- 373
+< -- 160
++ -- 207
+- -- 59
+* -- 928
+:= -- 3406
+add.period$ -- 74
+call.type$ -- 35
+change.case$ -- 37
+chr.to.int$ -- 372
+cite$ -- 35
+duplicate$ -- 1572
+empty$ -- 1900
+format.name$ -- 72
+if$ -- 5019
+int.to.chr$ -- 0
+int.to.str$ -- 35
+missing$ -- 273
+newline$ -- 132
+num.names$ -- 35
+pop$ -- 643
+preamble$ -- 1
+purify$ -- 0
+quote$ -- 2
+skip$ -- 1731
+stack$ -- 0
+substring$ -- 903
+swap$ -- 1190
+text.length$ -- 36
+text.prefix$ -- 0
+top$ -- 5
+type$ -- 35
+warning$ -- 0
+while$ -- 100
+width$ -- 37
+write$ -- 345
+(There were 9 warnings)

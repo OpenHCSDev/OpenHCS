@@ -1,0 +1,101 @@
+\documentclass[journal]{IEEEtran}
+
+% IEEE Transactions on Information Theory Format - IEEEtran class
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{fancyvrb}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{cite}
+\usepackage{listings}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+
+% Allow URLs to break at any character
+\makeatletter
+\g@addto@macro{\UrlBreaks}{\UrlOrds}
+\makeatother
+
+% Prevent overfull hboxes
+\sloppy
+
+% Load preamble
+\input{preamble}
+
+% Hyperref setup
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue,
+  citecolor=blue,
+  urlcolor=blue
+}
+
+% Title - Information Theory Framing
+\title{Optimal Encoding Under Coherence Constraints:\\
+Rate-Complexity Tradeoffs in Multi-Location Representation Systems}
+
+% Author block - IEEE format
+\author{Tristan~Simas%
+\thanks{T. Simas is with McGill University, Montreal, QC, Canada (e-mail: tristan.simas@mail.mcgill.ca).}%
+\thanks{Manuscript received January 16, 2026.}}
+
+\begin{document}
+
+\maketitle
+
+% Copyright notice
+\renewcommand{\thefootnote}{}
+\footnotetext{
+  \textcopyright\ 2026 Tristan Simas.
+  This work is licensed under CC BY 4.0.
+  License: \url{https://creativecommons.org/licenses/by/4.0/}
+}
+\renewcommand{\thefootnote}{\arabic{footnote}}
+
+% Include abstract
+\input{content/abstract.tex}
+
+% Main content sections
+\section{Introduction}
+\input{content/01_introduction.tex}
+
+\section{Encoding Systems and Coherence}\label{sec:foundations}
+\input{content/02_foundations.tex}
+
+\section{Optimal Representation: DOF = 1}\label{sec:ssot}
+\input{content/03_ssot.tex}
+
+\section{Information-Theoretic Requirements}\label{sec:requirements}
+\input{content/04_requirements.tex}
+
+\section{Realization in Computational Systems}\label{sec:evaluation}
+\input{content/05_evaluation.tex}
+
+\section{Complexity Bounds}\label{sec:bounds}
+\input{content/06_bounds.tex}
+
+\section{Empirical Validation}\label{sec:empirical}
+\input{content/07_empirical.tex}
+
+\section{Related Work}\label{sec:related}
+\input{content/08_related.tex}
+
+\section{Conclusion}\label{sec:conclusion}
+\input{content/09_conclusion.tex}
+
+% References
+\bibliographystyle{IEEEtran}
+\bibliography{references}
+
+% Appendix
+\appendix
+\section{Machine-Checked Proofs}\label{sec:lean}
+\input{content/11_lean_proofs.tex}
+
+\section{Additional Objections Addressed}\label{sec:rebuttals}
+\input{content/10_rebuttals.tex}
+
+\end{document}

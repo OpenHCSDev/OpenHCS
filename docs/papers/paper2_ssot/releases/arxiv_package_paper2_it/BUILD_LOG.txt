@@ -1,0 +1,58 @@
+OpenHCS Paper Build Log
+========================
+
+Paper: paper2_it - Optimal Encoding Under Coherence Constraints: Rate-Complexity Tradeoffs in Multi-Location Representation Systems
+Package Date: 2026-01-17T18:01:23.809979
+Lean Toolchain: leanprover/lean4:v4.27.0-rc1
+
+Proof Statistics:
+-----------------
+Lean Files: 29
+Lines of Code: 1811
+Theorems: 96
+
+
+Proof Files:
+------------
+  - AbstractClassSystem.lean
+  - AxisFramework.lean
+  - Basic.lean
+  - Bounds.lean
+  - CaseStudies.lean
+  - Coherence.lean
+  - Completeness.lean
+  - ContextFormalization.lean
+  - Derivation.lean
+  - DisciplineMigration.lean
+  - Dof.lean
+  - EditDynamics.lean
+  - Foundations.lean
+  - Inconsistency.lean
+  - JavaInstantiation.lean
+  - LangEvaluation.lean
+  - LangPython.lean
+  - LangRust.lean
+  - LangStatic.lean
+  - Languages.lean
+  - NominalResolution.lean
+  - ObserverModel.lean
+  - PythonInstantiation.lean
+  - Requirements.lean
+  - RustInstantiation.lean
+  - SSOT.lean
+  - SSOTGrounded.lean
+  - TypeScriptInstantiation.lean
+  - lakefile.lean
+
+Note: Run 'python3 scripts/build_papers.py release' to include compilation output.
+
+Build Instructions:
+-------------------
+To verify the proofs compile:
+
+  cd proofs/
+  lake build
+
+All theorems will be machine-verified if compilation succeeds.
+
+Repository: https://github.com/trissim/openhcs

@@ -57,6 +57,18 @@ papers:
     lean_theorems: 96
     lean_sorry: 0
 
+  paper2_it:
+    name: "Coherence Theory (IT)"
+    full_name: "Optimal Encoding Under Coherence Constraints: Rate-Complexity Tradeoffs in Multi-Location Representation Systems"
+    dir: "paper2_ssot"
+    latex_dir: "latex_it"
+    latex_file: "coherence_it.tex"
+    venue: "IEEE Transactions on Information Theory"
+    # Same proofs as paper2, IT framing
+    lean_lines: 1811
+    lean_theorems: 96
+    lean_sorry: 0
+
   paper3:
     name: "Leverage Framework"
     full_name: "Leverage-Driven Software Architecture"

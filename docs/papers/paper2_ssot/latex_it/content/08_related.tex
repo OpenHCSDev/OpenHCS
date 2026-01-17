@@ -1,0 +1,89 @@
+\section{Related Work}\label{sec:related}
+%==============================================================================
+
+This section surveys related work across four areas: information-theoretic foundations, formal methods, computational reflection, and software engineering principles.
+
+\subsection{Information-Theoretic Foundations}\label{sec:related-info-theory}
+
+\textbf{Source Coding and Distributed Coding:} Shannon~\cite{shannon1948mathematical} established source coding theory. Slepian \& Wolf~\cite{slepian1973noiseless} extended this to distributed sources with side information. Our work extends to \emph{interactive encoding systems} where encodings must remain coherent across modifications.
+
+\textbf{Minimum Description Length:} Rissanen~\cite{rissanen1978mdl} established the MDL principle: the best model minimizes total description length (model + data given model). Our DOF = 1 criterion generalizes MDL to mutable encoding systems: the single source is the model; derived locations have zero marginal description length. Grünwald~\cite{gruenwald2007mdl} proves MDL-optimal representations are unique under mild conditions---our Theorem~\ref{thm:dof-optimal} establishes analogous uniqueness for encoding systems under modification constraints.
+
+\textbf{Zero-Error Capacity:} Körner~\cite{korner1973graphs} and Lovász~\cite{lovasz1979shannon} characterized zero-error capacity using graph theory. Our resolution impossibility theorem (Theorem~\ref{thm:oracle-arbitrary}) is a storage analog: without coherence, no resolution procedure is information-theoretically justified, just as insufficient side information makes error-free decoding impossible.
+
+\textbf{Rate-Distortion Theory:} Cover \& Thomas~\cite{cover2006elements} formalized rate-distortion tradeoffs. Our rate-complexity tradeoff (Theorem~\ref{thm:unbounded-gap}) is analogous: higher encoding rate (DOF $>$ 1) incurs higher modification complexity.
+
+\textbf{Generative Complexity:} Heering~\cite{heering2015generative,heering2003software} formalized \emph{generative complexity} as the Kolmogorov complexity of the shortest generator for a program family. DOF = 1 systems achieve minimal generative complexity: the single source is the shortest generator, derived structures are its output. Our contribution is the \emph{constructive realization}: specific computational capabilities (definition-time computation, introspection) that achieve the theoretical minimum in practice.
+
+\textbf{Comparison:} Prior information theory focuses on static encoding or communication. We extend to \emph{mutable} encoding systems with coherence constraints under modification.
+
+\subsection{Metaprogramming and Reflection}\label{sec:related-meta}
+
+\textbf{Metaobject Protocols:} Kiczales et al.~\cite{kiczales1991art} established theoretical foundations for metaobject protocols (MOPs) in \textit{The Art of the Metaobject Protocol} (1991). MOPs allow programs to inspect and modify their own structure at runtime.
+
+Our analysis explains \emph{why} computational systems with MOPs (CLOS, Smalltalk, Python) can achieve DOF = 1: MOPs provide both definition-time computation and introspection, the two requirements we prove necessary (Theorem~\ref{thm:ssot-iff}).
+
+\textbf{Reflection:} Smith~\cite{smith1984reflection} introduced computational reflection in Lisp. Reflection enables programs to reason about themselves, which is essential for introspectable derivation (Requirement 2, Section~\ref{sec:introspection}).
+
+\textbf{Computational Realizations:} Van Rossum~\cite{vanrossum2003unifying} unified types and classes in Python 2.2, enabling the metaclass system. The \texttt{\_\_init\_subclass\_\_} hook~\cite{pep487} (Python 3.6) simplified definition-time computation, making DOF = 1 patterns accessible without metaclass complexity.
+
+\subsection{Formal Methods}\label{sec:related-formal}
+
+\textbf{Type Theory:} Pierce~\cite{pierce2002types} formalized type systems with machine-checked proofs. Our work applies similar rigor to encoding theory and realizability requirements.
+
+\textbf{Program Semantics:} Winskel~\cite{winskel1993semantics} formalized programming language semantics. Our formalization of DOF = 1 realizability requirements is in the same tradition: making informal concepts precise and provable.
+
+\textbf{Verified Software:} The CompCert project~\cite{leroy2009compcert} demonstrated that production software can be formally verified. Our Lean 4~\cite{demoura2021lean4} proofs (9,351 lines, 541 theorems, 0 \texttt{sorry}) are in this tradition.
+
+\textbf{Generative Programming:} Czarnecki \& Eisenecker~\cite{czarnecki2000generative} established generative programming as automatic program generation. Our DOF = 1 patterns are a specific application: generating derived structures from single sources at definition time.
+
+\subsection{Software Engineering Principles}\label{sec:related-software}
+
+\textbf{DRY Principle:} Hunt \& Thomas~\cite{hunt1999pragmatic} articulated DRY (Don't Repeat Yourself) in \textit{The Pragmatic Programmer} (1999):
+\begin{quote}
+``Every piece of knowledge must have a single, unambiguous, authoritative representation within a system.''
+\end{quote}
+
+Our contribution: formal definition (DOF = 1), proof of realizability requirements, machine-checked verification. Hunt \& Thomas provide guidance; we provide an information-theoretic foundation and decision procedure.
+
+\textbf{Software Complexity Metrics:} McCabe~\cite{mccabe1976complexity} introduced cyclomatic complexity (execution complexity). Our DOF metric measures \emph{modification} complexity, orthogonal to execution complexity.
+
+Stevens et al.~\cite{stevens1974structured} introduced coupling and cohesion. High DOF indicates high coupling (many locations must change together) and low cohesion (related information is scattered).
+
+\textbf{Code Duplication:} Fowler~\cite{fowler1999refactoring} identified duplication as a code smell. Our DOF metric formalizes this: DOF $>$ 1 is duplication for a fact. Roy \& Cordy~\cite{roy2007survey} survey clone detection; Juergens et al.~\cite{juergens2009clones} showed clones cause maintenance problems---our DOF metric provides the theoretical foundation.
+
+\textbf{Information Hiding:} Parnas~\cite{parnas1972criteria} established information hiding: modules should hide design decisions likely to change. DOF = 1 and information hiding are complementary:
+\begin{itemize}
+\tightlist
+\item Information hiding determines \emph{what} to encapsulate
+\item DOF = 1 determines \emph{how} to avoid duplicating what is exposed
+\item The single source may be encapsulated; derivation propagates changes automatically
+\end{itemize}
+
+\subsection{Language Comparison Studies}\label{sec:related-comparison}
+
+\textbf{Programming Language Pragmatics:} Scott~\cite{scott2015programming} surveys programming language features systematically. Our evaluation criteria (DEF, INTRO, STRUCT, HIER) could be added to such surveys.
+
+\textbf{Empirical Studies:} Prechelt~\cite{prechelt2000empirical} compared programming languages empirically. Our case studies follow a similar methodology but focus on a specific metric (DOF).
+
+\subsection{Novelty of This Work}\label{sec:novelty}
+
+To our knowledge, this is the first work to:
+\begin{enumerate}
+\tightlist
+\item Extend source coding theory to \emph{interactive encoding systems} with coherence constraints under modification
+\item Prove DOF = 1 is the unique optimal encoding rate guaranteeing coherence (Theorem~\ref{thm:ssot-unique})
+\item Establish rate-complexity tradeoffs: DOF = 1 achieves $O(1)$ update complexity vs. $\Omega(n)$ for DOF $> 1$
+\item Prove realizability requirements (definition-time computation, introspectable derivation) are necessary and sufficient for DOF = 1 in computational systems (Theorem~\ref{thm:ssot-iff})
+\item Provide machine-checked formalization and proofs (1,811 lines Lean 4, 96 theorems, 0 \texttt{sorry})
+\item Exhaustively evaluate computational systems (programming languages, databases, configuration systems) against realizability criteria
+\item Demonstrate empirical validation with 39--95\% DOF reduction in production software
+\end{enumerate}
+
+\textbf{Information-theoretic contribution:} We extend classical IT (source coding, MDL, zero-error capacity) to \emph{mutable} encoding systems. The resolution impossibility theorem (Theorem~\ref{thm:oracle-arbitrary}) shows that without DOF = 1, no coherence-restoration procedure is information-theoretically justified---analogous to how zero-error capacity characterizes when error-free communication is impossible.
+
+\textbf{Computational realization contribution:} We prove that definition-time computation and introspection are \emph{necessary} for DOF = 1 realizability in computational systems, explaining why only Python, CLOS, and Smalltalk among evaluated systems satisfy all requirements.
+
+The insight that metaprogramming helps with DRY is not new. What is new is the \emph{information-theoretic foundation}, the \emph{proof of necessity}, and the \emph{machine-checked verification} of these results.
+
+%==============================================================================

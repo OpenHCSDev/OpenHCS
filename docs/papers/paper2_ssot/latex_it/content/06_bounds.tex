@@ -1,0 +1,154 @@
+\section{Rate-Complexity Bounds}\label{sec:bounds}
+%==============================================================================
+
+We now prove the rate-complexity bounds that make DOF = 1 optimal. The key result: the gap between DOF-1-complete and DOF-1-incomplete architectures is \emph{unbounded}---it grows without limit as encoding systems scale.
+
+\subsection{Cost Model}\label{sec:cost-model}
+
+\begin{definition}[Modification Cost Model]\label{def:cost-model}
+Let $\delta_F$ be a modification to fact $F$ in encoding system $C$. The \emph{effective modification complexity} $M_{\text{effective}}(C, \delta_F)$ is the number of syntactically distinct edit operations that must be performed manually. Formally:
+\[
+M_{\text{effective}}(C, \delta_F) = |\{L \in \text{Locations}(C) : \text{requires\_manual\_edit}(L, \delta_F)\}|
+\]
+where $\text{requires\_manual\_edit}(L, \delta_F)$ holds iff location $L$ must be updated manually (not by automatic derivation) to maintain coherence after $\delta_F$.
+\end{definition}
+
+\textbf{Unit of cost:} One edit = one syntactic modification to one location. We count locations, not keystrokes or characters. This abstracts over edit complexity to focus on the scaling behavior.
+
+\textbf{What we measure:} Manual edits only. Derived locations that update automatically have zero cost. This distinguishes DOF = 1 systems (where derivation handles propagation) from DOF $>$ 1 systems (where all updates are manual).
+
+\subsection{Upper Bound: DOF = 1 Achieves O(1)}\label{sec:upper-bound}
+
+\begin{theorem}[DOF = 1 Upper Bound]\label{thm:upper-bound}
+For an encoding system with DOF = 1 for fact $F$:
+\[
+M_{\text{effective}}(C, \delta_F) = O(1)
+\]
+Effective modification complexity is constant regardless of system size.
+\end{theorem}
+
+\begin{proof}
+Let $\text{DOF}(C, F) = 1$. By Definition~\ref{def:ssot}, $C$ has exactly one independent encoding location. Let $L_s$ be this single independent location.
+
+When $F$ changes:
+\begin{enumerate}
+\tightlist
+\item Update $L_s$ (1 manual edit)
+\item All derived locations $L_1, \ldots, L_k$ are automatically updated by the derivation mechanism
+\item Total manual edits: 1
+\end{enumerate}
+
+The number of derived locations $k$ may grow with system size, but the number of \emph{manual} edits remains 1. Therefore, $M_{\text{effective}}(C, \delta_F) = O(1)$.
+\end{proof}
+
+\textbf{Note on ``effective'' vs. ``total'' complexity:} Total modification complexity $M(C, \delta_F)$ counts all locations that change. Effective modification complexity counts only manual edits. With DOF = 1, total complexity may be $O(n)$ (many derived locations change), but effective complexity is $O(1)$ (one manual edit).
+
+\subsection{Lower Bound: DOF $>$ 1 Requires \texorpdfstring{$\Omega(n)$}{Omega(n)}}\label{sec:lower-bound}
+
+\begin{theorem}[DOF $>$ 1 Lower Bound]\label{thm:lower-bound}
+For an encoding system with DOF $>$ 1 for fact $F$, if $F$ is encoded at $n$ independent locations:
+\[
+M_{\text{effective}}(C, \delta_F) = \Omega(n)
+\]
+\end{theorem}
+
+\begin{proof}
+Let $\text{DOF}(C, F) = n$ where $n > 1$.
+
+By Definition~\ref{def:independent}, the $n$ encoding locations are independent---updating one does not automatically update the others. When $F$ changes:
+\begin{enumerate}
+\tightlist
+\item Each of the $n$ independent locations must be updated manually
+\item No automatic propagation exists between independent locations
+\item Total manual edits: $n$
+\end{enumerate}
+
+Therefore, $M_{\text{effective}}(C, \delta_F) = \Omega(n)$.
+\end{proof}
+
+\subsection{The Unbounded Gap}\label{sec:gap}
+
+\begin{theorem}[Unbounded Gap]\label{thm:unbounded-gap}
+The ratio of modification complexity between DOF-1-incomplete and DOF-1-complete architectures grows without bound:
+\[
+\lim_{n \to \infty} \frac{M_{\text{DOF}>1}(n)}{M_{\text{DOF}=1}} = \lim_{n \to \infty} \frac{n}{1} = \infty
+\]
+\end{theorem}
+
+\begin{proof}
+By Theorem~\ref{thm:upper-bound}, $M_{\text{DOF}=1} = O(1)$. Specifically, $M_{\text{DOF}=1} = 1$ for any system size.
+
+By Theorem~\ref{thm:lower-bound}, $M_{\text{DOF}>1}(n) = \Omega(n)$ where $n$ is the number of independent encoding locations.
+
+The ratio is:
+\[
+\frac{M_{\text{DOF}>1}(n)}{M_{\text{DOF}=1}} = \frac{n}{1} = n
+\]
+
+As $n \to \infty$, the ratio $\to \infty$. The gap is unbounded.
+\end{proof}
+
+\begin{corollary}[Arbitrary Reduction Factor]\label{cor:arbitrary-reduction}
+For any constant $k$, there exists a system size $n$ such that DOF = 1 provides at least $k\times$ reduction in modification complexity.
+\end{corollary}
+
+\begin{proof}
+Choose $n = k$. Then $M_{\text{DOF}>1}(n) = n = k$ and $M_{\text{DOF}=1} = 1$. The reduction factor is $k/1 = k$.
+\end{proof}
+
+\subsection{Practical Implications}\label{sec:practical-implications}
+
+The unbounded gap has practical implications:
+
+\textbf{1. DOF = 1 matters more at scale.} For small systems ($n = 3$), the difference between 3 edits and 1 edit is minor. For large systems ($n = 50$), the difference between 50 edits and 1 edit is significant.
+
+\textbf{2. The gap compounds over time.} Each modification to fact $F$ incurs the complexity cost. If $F$ changes $m$ times over the system lifetime, total cost is $O(mn)$ with DOF $>$ 1 vs. $O(m)$ with DOF = 1.
+
+\textbf{3. The gap affects error rates.} Each manual edit is an opportunity for error. With $n$ edits, the probability of at least one error is $1 - (1-p)^n$ where $p$ is the per-edit error probability. As $n$ grows, this approaches 1.
+
+\begin{example}[Error Rate Calculation]\label{ex:error-rate}
+Assume a 1\% error rate per edit ($p = 0.01$).
+
+\begin{center}
+\begin{tabular}{ccc}
+\toprule
+\textbf{Edits ($n$)} & \textbf{P(at least one error)} & \textbf{Architecture} \\
+\midrule
+1 & 1.0\% & DOF = 1 \\
+10 & 9.6\% & DOF = 10 \\
+50 & 39.5\% & DOF = 50 \\
+100 & 63.4\% & DOF = 100 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+With 50 independent encoding locations (DOF = 50), there is a 39.5\% chance of introducing an error when modifying fact $F$. With DOF = 1, the chance is 1\%.
+\end{example}
+
+\subsection{Amortized Analysis}\label{sec:amortized}
+
+The complexity bounds assume a single modification. Over the lifetime of an encoding system, facts are modified many times.
+
+\begin{theorem}[Amortized Complexity]\label{thm:amortized}
+Let fact $F$ be modified $m$ times over the system lifetime. Let $n$ be the number of independent encoding locations. Total modification cost is:
+\begin{itemize}
+\tightlist
+\item DOF = 1: $O(m)$
+\item DOF = $n > 1$: $O(mn)$
+\end{itemize}
+\end{theorem}
+
+\begin{proof}
+Each modification costs $O(1)$ with DOF = 1 and $O(n)$ with DOF = $n$. Over $m$ modifications, total cost is $m \cdot O(1) = O(m)$ with DOF = 1 and $m \cdot O(n) = O(mn)$ with DOF = $n$.
+\end{proof}
+
+For a fact modified 100 times with 50 independent encoding locations:
+\begin{itemize}
+\tightlist
+\item DOF = 1: 100 edits total
+\item DOF = 50: 5,000 edits total
+\end{itemize}
+
+The 50$\times$ reduction factor applies to every modification, compounding over the system lifetime.
+
+%==============================================================================
