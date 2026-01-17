@@ -11,7 +11,8 @@ This is not reconstruction (the decoder need not recover $v$), but \emph{identif
 We prove three results:
 \begin{enumerate}
 \item \textbf{Information barrier (identifiability limit).} When the attribute profile $\pi: \mathcal{V} \to \{0,1\}^n$ is not injective on classes, zero-error identification via queries alone is impossible: any decoder produces identical output on colliding classes, so cannot be correct for both.
-\item \textbf{Optimal tagging (achievability).} A tag of $L = \lceil \log_2 k \rceil$ bits achieves zero-error identification with $W = O(1)$ query cost. This is the unique Pareto-optimal point in the $(L, W, D)$ tradeoff space for $D=0$ when attributes are not class-injective.
+\item \textbf{Optimal tagging (achievability).} A tag of $L = \lceil \log_2 k \rceil$ bits achieves zero-error identification with $W = O(1)$ query cost. This is the unique Pareto-optimal point in the $(L, W, D)$ tradeoff space for $D=0$ in the information-barrier regime.
+Classical rate-distortion asks: what is the minimum rate to achieve distortion $D$? We ask: given rate $L$, what is the minimum query cost $W$ to achieve distortion $D = 0$? Theorem~\ref{thm:lwd-optimal} identifies the unique Pareto-optimal point in this three-dimensional tradeoff at $D = 0$ in the information-barrier regime.
 \item \textbf{Matroid structure (query complexity).} Minimal sufficient query sets form the bases of a matroid. The \emph{distinguishing dimension} (the common cardinality of all minimal sets) is well-defined and lower-bounds the query cost $W$ for any tag-free scheme.
 \end{enumerate}
 
@@ -51,7 +52,7 @@ Values $v, w \in \mathcal{V}$ are \emph{interface-indistinguishable}, written $v
 The relation $\sim$ is an equivalence relation. We write $[v]_\sim$ for the equivalence class of $v$.
 
 \begin{definition}[Interface-only observer]
-An \emph{interface-only observer} is any procedure whose interaction with a value $v \in \mathcal{V}$ is limited to queries in $\Phi_{\mathcal{I}}$. Formally, the observer receives only $\pi(v)$, not $v$ itself.
+An \emph{interface-only observer} is any procedure whose interaction with a value $v \in \mathcal{V}$ is limited to queries in $\Phi_{\mathcal{I}}$. Formally, the observer interacts with $v$ only via primitive interface queries $q_I \in \Phi_{\mathcal{I}}$; hence any transcript (and output) factors through $\pi(v)$.
 \end{definition}
 
 \subsection{The Central Question}
@@ -125,13 +126,13 @@ The procedure makes exactly 2 primitive queries (one $\tau$ access per value) an
 \begin{theorem}[Interface-only lower bound]\label{thm:interface-lower-bound}
 For interface-only observers, type identity checking requires:
 \[
-W(\text{type-identity}) = \Omega(|\mathcal{I}|)
+W(\text{type-identity}) = \Omega(d)
 \]
-in the worst case.
+in the worst case, where $d$ is the distinguishing dimension (Definition~\ref{def:distinguishing-dimension}).
 \end{theorem}
 
 \begin{proof}
-Construct a family of $|\mathcal{I}|$ types where each type $T_i$ satisfies exactly the interfaces $\{I_1, \ldots, I_i\}$. Distinguishing $T_{i}$ from $T_{i+1}$ requires querying $I_{i+1}$. Thus, distinguishing all pairs requires querying all $|\mathcal{I}|$ interfaces.
+By definition of the distinguishing dimension, any witness procedure must query at least one minimal distinguishing set of size $d$. Therefore the worst-case query cost is $\Omega(d)$.
 \end{proof}
 
 \subsection{Main Contributions}
@@ -141,9 +142,9 @@ This paper establishes the following results:
 \begin{enumerate}
 \item \textbf{Information Barrier Theorem} (Theorem~\ref{thm:information-barrier}): Interface-only observers cannot compute any property that varies within $\sim$-equivalence classes. This is an information-theoretic impossibility, not a computational limitation.
 
-\item \textbf{Constant-Witness Theorem} (Theorem~\ref{thm:constant-witness}): Nominal-tag access achieves $W(\text{type-identity}) = O(1)$, with matching lower bound $\Omega(|\mathcal{I}|)$ for interface-only observers (Theorem~\ref{thm:interface-lower-bound}).
+\item \textbf{Constant-Witness Theorem} (Theorem~\ref{thm:constant-witness}): Nominal-tag access achieves $W(\text{type-identity}) = O(1)$, with matching lower bound $\Omega(d)$ for interface-only observers (Theorem~\ref{thm:interface-lower-bound}), where $d$ is the distinguishing dimension (Definition~\ref{def:distinguishing-dimension}).
 
-\item \textbf{Complexity Separation} (Section~\ref{sec:complexity}): We establish O(1) vs O(k) vs $\Omega(n)$ complexity bounds for error localization under different observation regimes.
+\item \textbf{Complexity Separation} (Section~\ref{sec:complexity}): We establish O(1) vs O(k) vs $\Omega(d)$ complexity bounds for error localization under different observation regimes (where $d$ is the distinguishing dimension).
 
 \item \textbf{Matroid Structure} (Section~\ref{sec:matroid}): Minimal distinguishing query sets form the bases of a matroid. All such sets have equal cardinality, establishing a well-defined ``distinguishing dimension.''
 
@@ -162,11 +163,11 @@ This paper establishes the following results:
 
 \textbf{Zero-error information theory.} The matroid structure (Section~\ref{sec:matroid}) connects to zero-error capacity and graph entropy. K\"orner \cite{korner1973coding} and Witsenhausen \cite{witsenhausen1976zero} studied zero-error source coding where confusable symbols must be distinguished. Our distinguishing dimension (Definition~\ref{def:distinguishing-dimension}) is the minimum number of binary queries to separate all classes, which is precisely the zero-error identification cost when $L = 0$.
 
-\textbf{Query complexity and communication complexity.} The $\Omega(n)$ lower bound for interface-only identification relates to decision tree complexity \cite{buhrman2002complexity} and interactive communication \cite{orlitsky1991worst}. The key distinction is that our queries are constrained to a fixed attribute family $\mathcal{I}$, not arbitrary predicates. This constraint models practical systems where the observer's interface to entities is architecturally fixed.
+	extbf{Query complexity and communication complexity.} The $\Omega(d)$ lower bound for interface-only identification relates to decision tree complexity \cite{buhrman2002complexity} and interactive communication \cite{orlitsky1991worst}. The key distinction is that our queries are constrained to a fixed attribute family $\mathcal{I}$, not arbitrary predicates. This constraint models practical systems where the observer's interface to entities is architecturally fixed.
 
 \textbf{Compression in classification systems.} Our framework instantiates to type systems, where the compression question becomes: how many bits must be stored per object to enable $O(1)$ type identification? The answer ($\lceil \log_2 k \rceil$ bits for $k$ classes) matches the converse bound (Theorem~\ref{thm:converse}). This provides an information-theoretic foundation for the nominal-vs-structural typing debate in programming language theory \cite{Cardelli1985, cook1990inheritance}.
 
-\textbf{Historical context.} The ``duck typing'' philosophy (``if it walks like a duck and quacks like a duck, it's a duck'') advocates structural observation over nominal tagging. Within our model, we prove this incurs $\Omega(n)$ witness cost where tagging achieves $O(1)$. The result does not ``resolve'' the broader debate (which involves usability and tooling concerns beyond this model) but establishes that the tradeoff has a precise information-theoretic component.
+	extbf{Historical context.} The ``duck typing'' philosophy (``if it walks like a duck and quacks like a duck, it's a duck'') advocates structural observation over nominal tagging. Within our model, we prove this incurs $\Omega(d)$ witness cost where tagging achieves $O(1)$ (see Definition~\ref{def:distinguishing-dimension}). The result does not ``resolve'' the broader debate (which involves usability and tooling concerns beyond this model) but establishes that the tradeoff has a precise information-theoretic component.
 
 \textbf{Practical convergence.} Modern systems have converged on hybrid classification: Python's Abstract Base Classes, TypeScript's branded types, Rust's trait system, DNA barcoding in taxonomy \cite{DNABarcoding}. This convergence is consistent with the rate-query tradeoff: nominal tags provide $O(1)$ identification at cost $O(\log k)$ bits. The contribution is not advocacy for any design, but a formal framework for analyzing identification cost in classification systems.
 
