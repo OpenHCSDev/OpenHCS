@@ -1,11 +1,11 @@
-\section{Lean 4 Proof Listings}\label{sec:lean}
+\section*{Lean 4 Proof Listings}\label{sec:lean}
 %==============================================================================
 
 All theorems are machine-checked in Lean 4 (9,351 lines across 26 files, 0 \texttt{sorry} placeholders, 541 theorems/lemmas). Complete source available at: \texttt{proofs/}.
 
 This appendix presents the actual Lean 4 source code from the repository. Every theorem compiles without \texttt{sorry}. The proofs can be verified by running \texttt{lake build} in the \texttt{proofs/} directory.
 
-\subsection{Model Correspondence}\label{sec:model-correspondence}
+\subsection*{Model Correspondence}\label{sec:model-correspondence}
 
 \textbf{What the formalization models:} The Lean proofs operate at the level of \emph{abstract encoding system capabilities}, not concrete system implementation semantics. We do not model Python's specific execution semantics or database query optimizers. Instead, we model:
 
@@ -23,7 +23,7 @@ This appendix presents the actual Lean 4 source code from the repository. Every 
 
 \textbf{What we do NOT model:} Performance characteristics, security properties, concurrency semantics, or any property orthogonal to encoding rate optimality. The model is intentionally narrow: it captures exactly what is needed to prove DOF = 1 realizability requirements and optimality theorems, and nothing more.
 
-\subsection{On the Nature of Foundational Proofs}\label{sec:foundational-nature}
+\subsection*{On the Nature of Foundational Proofs}\label{sec:foundational-nature}
 
 Before presenting the proof listings, we address a potential misreading: a reader examining the Lean source code will notice that many proofs are remarkably short, sometimes a single tactic like \texttt{omega} or \texttt{exact h}. This brevity is not a sign of triviality. It is characteristic of \emph{foundational} work, where the insight lies in the formalization, not the derivation.
 
@@ -55,7 +55,7 @@ Before presenting the proof listings, we address a potential misreading: a reade
 
 This follows the tradition of foundational theory: Shannon~\cite{shannon1948mathematical} formalized channel capacity, Slepian-Wolf~\cite{slepian1973noiseless} formalized distributed source coding, Rissanen~\cite{rissanen1978mdl} formalized minimal description length. In each case, the contribution was not complex derivations, but \emph{precise formalization} that made previously-informal concepts information-theoretically rigorous. Simple proofs from precise definitions are the goal, not a limitation.
 
-\subsection{Basic.lean: Core Definitions (48 lines)}\label{sec:lean-basic}
+\subsection*{Basic.lean: Core Definitions (48 lines)}\label{sec:lean-basic}
 
 This file establishes the core abstractions. We model DOF as a natural number whose properties we prove directly, avoiding complex type machinery.
 
@@ -98,7 +98,7 @@ theorem dof_gt_one_inconsistent (dof : Nat) (h : dof > 1) :
   omega
 \end{verbatim}
 
-\subsection{SSOT.lean: Optimal Encoding Definition (38 lines)}\label{sec:lean-ssot}
+\subsection*{SSOT.lean: Optimal Encoding Definition (38 lines)}\label{sec:lean-ssot}
 
 This file defines the optimal encoding rate (DOF = 1) and proves its uniqueness using a simple Nat-based formulation.
 

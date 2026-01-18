@@ -96,6 +96,98 @@ For any constant $k$, there exists a system size $n$ such that DOF = 1 provides 
 Choose $n = k$. Then $M_{\text{DOF}>1}(n) = n = k$ and $M_{\text{DOF}=1} = 1$. The reduction factor is $k/1 = k$.
 \end{proof}
 
+\subsection{The (R, C, P) Tradeoff Space}\label{sec:rcp-tradeoff}
+
+We now formalize the complete tradeoff space, analogous to rate-distortion theory in classical information theory.
+
+\begin{definition}[(R, C, P) Tradeoff]\label{def:rcp-tradeoff}
+For an encoding system, define:
+\begin{itemize}
+\tightlist
+\item $R$ = \emph{Rate} (DOF): Number of independent encoding locations
+\item $C$ = \emph{Complexity}: Expected modification cost per change
+\item $P$ = \emph{Coherence probability}: $1 - \Pr[\text{incoherent state reachable}]$
+\end{itemize}
+The \emph{(R, C, P) tradeoff space} is the set of achievable $(R, C, P)$ tuples.
+\end{definition}
+
+\begin{theorem}[Operating Regimes]\label{thm:operating-regimes}
+The (R, C, P) space has three distinct operating regimes:
+\begin{center}
+\begin{tabular}{cccc}
+\toprule
+\textbf{Rate} & \textbf{Complexity} & \textbf{Coherence} & \textbf{Interpretation} \\
+\midrule
+$R = 0$ & $C = 0$ & $P = $ undefined & Fact not encoded \\
+$R = 1$ & $C = O(1)$ & $P = 1$ & \textbf{Optimal (capacity-achieving)} \\
+$R > 1$ & $C = \Omega(R)$ & $P < 1$ & Above capacity \\
+\bottomrule
+\end{tabular}
+\end{center}
+\end{theorem}
+
+\begin{proof}
+\textbf{$R = 0$:} No encoding exists. Complexity is zero (nothing to modify), but coherence is undefined (nothing to be coherent about).
+
+\textbf{$R = 1$:} By Theorem~\ref{thm:upper-bound}, $C = O(1)$. By Theorem~\ref{thm:coherence-capacity}, $P = 1$ (coherence guaranteed). This is the capacity-achieving regime.
+
+\textbf{$R > 1$:} By Theorem~\ref{thm:lower-bound}, $C = \Omega(R)$. By Theorem~\ref{thm:dof-gt-one-incoherence}, incoherent states are reachable, so $P < 1$.
+\end{proof}
+
+\begin{definition}[Pareto Frontier]\label{def:pareto-frontier}
+A point $(R, C, P)$ is \emph{Pareto optimal} if no other achievable point dominates it (lower $R$, lower $C$, or higher $P$ without worsening another dimension).
+
+The \emph{Pareto frontier} is the set of all Pareto optimal points.
+\end{definition}
+
+\begin{theorem}[Pareto Optimality of DOF = 1]\label{thm:pareto-optimal}
+$(R=1, C=1, P=1)$ is the unique Pareto optimal point for encoding systems requiring coherence ($P = 1$).
+\end{theorem}
+
+\begin{proof}
+We show $(1, 1, 1)$ is Pareto optimal and unique:
+
+\textbf{Existence:} By Theorems~\ref{thm:upper-bound} and \ref{thm:coherence-capacity}, the point $(1, 1, 1)$ is achievable.
+
+\textbf{Optimality:} Consider any other achievable point $(R', C', P')$ with $P' = 1$:
+\begin{itemize}
+\tightlist
+\item If $R' = 0$: Fact is not encoded (excluded by requirement)
+\item If $R' = 1$: Same as $(1, 1, 1)$ (by uniqueness of $C$ at $R=1$)
+\item If $R' > 1$: By Theorem~\ref{thm:dof-gt-one-incoherence}, $P' < 1$, contradicting $P' = 1$
+\end{itemize}
+
+\textbf{Uniqueness:} No other point achieves $P = 1$ except $R = 1$.
+\end{proof}
+
+\textbf{Information-theoretic interpretation.} The Pareto frontier in rate-distortion theory is the curve $R(D)$ of minimum rate achieving distortion $D$. Here, the ``distortion'' is $1 - P$ (probability of incoherence), and the Pareto frontier collapses to a single point: $R = 1$ is the unique rate achieving $D = 0$.
+
+\begin{corollary}[No Tradeoff at $P = 1$]\label{cor:no-tradeoff}
+Unlike rate-distortion where you can trade rate for distortion, there is no tradeoff at $P = 1$ (perfect coherence). The only option is $R = 1$.
+\end{corollary}
+
+\begin{proof}
+Direct consequence of Theorem~\ref{thm:coherence-capacity}.
+\end{proof}
+
+\textbf{Comparison to rate-distortion.} In rate-distortion theory:
+\begin{itemize}
+\tightlist
+\item You can achieve lower distortion with higher rate (more bits)
+\item The rate-distortion function $R(D)$ is monotonically decreasing
+\item $D = 0$ (lossless) requires $R = H(X)$ (source entropy)
+\end{itemize}
+
+In our framework:
+\begin{itemize}
+\tightlist
+\item You \emph{cannot} achieve higher coherence ($P$) with more independent locations
+\item Higher rate ($R > 1$) \emph{decreases} coherence probability
+\item $P = 1$ (perfect coherence) requires $R = 1$ exactly
+\end{itemize}
+
+The key difference: redundancy (higher $R$) \emph{hurts} rather than helps coherence (without coordination). This inverts the intuition from error-correcting codes, where redundancy enables error detection/correction. Here, redundancy without derivation enables errors (incoherence).
+
 \subsection{Practical Implications}\label{sec:practical-implications}
 
 The unbounded gap has practical implications:

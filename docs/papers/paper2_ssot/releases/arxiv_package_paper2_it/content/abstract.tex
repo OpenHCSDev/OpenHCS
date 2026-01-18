@@ -1,16 +1,20 @@
 \begin{abstract}
-Consider an information system encoding a fact $F$ at multiple locations. When can such a system guarantee coherence---the impossibility of disagreement among encoding locations? We prove that exactly one independent encoding (DOF = 1, where DOF counts independent storage locations) is the unique rate achieving guaranteed coherence. This optimal point generalizes Rissanen's Minimum Description Length principle to interactive encoding systems with modification constraints.
+We extend classical source coding to \emph{interactive encoding systems}---systems where a fact $F$ is encoded at multiple locations and the encoding can be modified over time. When can such a system guarantee coherence (the impossibility of disagreement among locations)?
+
+We prove that exactly one independent encoding (DOF = 1, where DOF counts independent storage locations) is the unique rate achieving guaranteed coherence. This result connects to multi-version coding~\cite{rashmi2015multiversion}, which establishes an ``inevitable storage cost for consistency'' in distributed systems; we establish an analogous \emph{encoding rate} cost for coherence under modification.
 
 \textbf{Main Results.}
 \begin{enumerate}
-\item \textbf{Optimal Rate (Theorem~\ref{thm:dof-optimal}):} DOF = 1 is the unique rate guaranteeing coherence. DOF = 0 means $F$ is not encoded; DOF $> 1$ permits incoherent configurations where locations disagree on $F$'s value.
+\item \textbf{Coherence Capacity (Theorem~\ref{thm:dof-optimal}):} DOF = 1 is the unique encoding rate guaranteeing coherence. DOF = 0 fails to encode $F$; DOF $> 1$ permits incoherent configurations where locations disagree.
 
-\item \textbf{Resolution Impossibility (Theorem~\ref{thm:oracle-arbitrary}):} Under incoherence (DOF $> 1$), no resolution procedure is information-theoretically justified---any oracle selecting a value leaves another value disagreeing. This parallels zero-error capacity constraints: without sufficient side information, error-free decoding is impossible.
+\item \textbf{Resolution Impossibility (Theorem~\ref{thm:oracle-arbitrary}):} Under incoherence (DOF $> 1$ with divergent values), no resolution procedure is information-theoretically justified---any selection leaves another value disagreeing. This is a static analog of the FLP impossibility~\cite{flp1985impossibility} for distributed consensus.
 
-\item \textbf{Rate-Complexity Tradeoff (Theorem~\ref{thm:unbounded-gap}):} Achieving coherence via manual synchronization requires $\Omega(n)$ update operations; DOF = 1 systems achieve $O(1)$. The gap grows without bound as $n \to \infty$.
+\item \textbf{Rate-Complexity Tradeoff (Theorem~\ref{thm:unbounded-gap}):} DOF = 1 achieves $O(1)$ modification complexity; DOF $> 1$ requires $\Omega(n)$. The gap grows without bound as $n \to \infty$.
 
-\item \textbf{Realization Requirements (Theorem~\ref{thm:ssot-iff}):} Computational systems achieving DOF = 1 via derivation require: (a) definition-time computation hooks, and (b) introspectable derivation results. These are information-theoretic necessities, not implementation preferences.
+\item \textbf{Realizability Requirements (Theorem~\ref{thm:ssot-iff}):} Encoding systems achieving DOF = 1 via derivation require two information-theoretic properties: (a) \emph{causal update propagation}---source changes automatically trigger derived location updates, and (b) \emph{provenance observability}---the derivation structure is queryable. These abstract to arbitrary encoding systems; programming language features (definition-time hooks, introspection) are one instantiation.
 \end{enumerate}
+
+\textbf{Connections to Established IT.} The DOF = 1 optimum generalizes Rissanen's Minimum Description Length principle~\cite{rissanen1978mdl} to interactive encoding systems. The realizability requirements connect to: channel coding with feedback (causal propagation), Slepian-Wolf side information~\cite{slepian1973noiseless} (provenance observability), and write-once memory codes~\cite{rivest1982wom} (irreversible structural encoding). The coherence requirement instantiates the CAP theorem~\cite{brewer2000cap}: DOF = 1 sidesteps the consistency-availability tradeoff by eliminating the partition dimension.
 
 \textbf{Instantiations.} The abstract encoding model applies across domains:
 \begin{itemize}
@@ -21,13 +25,11 @@ Consider an information system encoding a fact $F$ at multiple locations. When c
 \item \textbf{Version control:} Merge resolution under conflicting branches
 \end{itemize}
 
-We evaluate computational realizations (programming languages) against formal criteria derived from the encoding model. Among mainstream systems, Python uniquely satisfies both requirements; most (Java, C++, Rust, Go, TypeScript) cannot achieve DOF = 1 within their design constraints.
+We evaluate computational realizations against the formal realizability criteria. Among mainstream programming languages, Python uniquely satisfies both requirements (causal propagation via \texttt{\_\_init\_subclass\_\_}, provenance observability via \texttt{\_\_subclasses\_\_()}). Most (Java, C++, Rust, Go, TypeScript) lack one or both and cannot achieve DOF = 1 within their design constraints.
 
-\textbf{Theoretical Foundation.} The derivation framework (axes, observational quotients, provenance) is established in the companion paper on classification systems. This work proves the coherence optimality theorem and derives realizability requirements from first principles.
+All theorems machine-checked in Lean 4 (9,351 lines, 541 theorems, 0 \texttt{sorry} placeholders).
 
-All theorems machine-checked in Lean 4 (9,351 lines, 541 theorems, 0 \texttt{sorry} placeholders). Realizability claims grounded in formalized operational semantics for computational systems.
-
-\textbf{Index Terms---}Encoding theory, coherence constraints, minimum description length, distributed source coding, rate-complexity tradeoffs, zero-error capacity
+\textbf{Index Terms---}Interactive encoding systems, coherence constraints, multi-version coding, minimum description length, distributed source coding, rate-complexity tradeoffs, write-once memory, CAP theorem
 \end{abstract}
 
 

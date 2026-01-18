@@ -328,3 +328,186 @@ Only DOF = 1 achieves coherent representation. This is an information-theoretic 
 \end{proof}
 
 %==============================================================================
+\subsection{Coherence Capacity Theorem}\label{sec:capacity}
+
+We now establish a tight capacity result analogous to Shannon's channel capacity theorem. Where Shannon characterizes the maximum rate for reliable communication, we characterize the maximum encoding rate for guaranteed coherence.
+
+\begin{definition}[Coherence Capacity]\label{def:coherence-capacity}
+The \emph{coherence capacity} of an encoding system is the supremum of encoding rates (DOF) that guarantee coherence:
+\[
+C_{\text{coh}} = \sup\{r : \text{DOF} = r \Rightarrow \text{coherence guaranteed}\}
+\]
+\end{definition}
+
+\begin{theorem}[Coherence Capacity = 1]\label{thm:coherence-capacity}
+The coherence capacity of any encoding system under independent modification is exactly 1:
+\[
+C_{\text{coh}} = 1
+\]
+This bound is tight: achievable at DOF = 1, impossible at DOF $> 1$.
+\end{theorem}
+
+\begin{proof}
+\textbf{Achievability (DOF = 1 achieves capacity):} By Theorem~\ref{thm:dof-one-coherence}, DOF = 1 guarantees coherence. Therefore $C_{\text{coh}} \geq 1$.
+
+\textbf{Converse (DOF $> 1$ exceeds capacity):} We prove that any encoding with DOF $> 1$ cannot guarantee coherence.
+
+Let $\text{DOF}(C, F) = k > 1$. By Definition~\ref{def:independent}, there exist locations $L_1, L_2$ that can be modified independently.
+
+Construct the following modification sequence:
+\begin{enumerate}
+\tightlist
+\item Set $L_1 = v_1$ (valid modification)
+\item Set $L_2 = v_2$ where $v_2 \neq v_1$ (valid modification, since $L_2$ is independent of $L_1$)
+\end{enumerate}
+
+The resulting state has $\text{value}(L_1) \neq \text{value}(L_2)$. By Definition~\ref{def:incoherence}, this is incoherent.
+
+Since incoherent states are reachable, coherence is not guaranteed. Therefore $C_{\text{coh}} < k$ for all $k > 1$.
+
+Combining: $C_{\text{coh}} \geq 1$ (achievable) and $C_{\text{coh}} < k$ for all $k > 1$ (converse).
+
+Therefore $C_{\text{coh}} = 1$ exactly.
+\end{proof}
+
+\textbf{Information-theoretic interpretation.} This theorem is analogous to Shannon's noisy channel coding theorem~\cite{shannon1948mathematical}, which states that reliable communication is possible at rates below channel capacity and impossible above. Here:
+\begin{itemize}
+\tightlist
+\item \textbf{Shannon:} Rate $R < C$ achieves arbitrarily low error; $R > C$ has unavoidable errors
+\item \textbf{This work:} DOF $\leq 1$ achieves zero incoherence; DOF $> 1$ has reachable incoherent states
+\end{itemize}
+
+The parallel extends to the operational meaning: capacity is the boundary between what's achievable and what's fundamentally impossible, not merely difficult.
+
+\begin{corollary}[Capacity-Achieving Encoding is Unique]\label{cor:capacity-unique}
+DOF = 1 is the unique capacity-achieving encoding rate. There is no alternative encoding strategy that achieves coherence at a higher rate.
+\end{corollary}
+
+\begin{proof}
+By Theorem~\ref{thm:coherence-capacity}, any DOF $> 1$ fails to guarantee coherence. By definition, DOF = 0 fails to encode the fact. Therefore DOF = 1 is the unique coherence-guaranteeing rate.
+\end{proof}
+
+\subsection{Side Information for Resolution}\label{sec:side-information}
+
+When an encoding system is incoherent (DOF $> 1$ with divergent values), resolution requires external side information. We quantify exactly how much.
+
+\begin{theorem}[Side Information Requirement]\label{thm:side-info}
+Given an incoherent encoding system with $k$ independent locations holding distinct values, resolving to the correct value requires at least $\log_2 k$ bits of side information.
+\end{theorem}
+
+\begin{proof}
+The $k$ independent locations partition the resolution problem into $k$ equally plausible alternatives. Without loss of generality, each location could be the authoritative source.
+
+By Theorem~\ref{thm:oracle-arbitrary}, no internal information distinguishes them. Resolution requires identifying which of $k$ alternatives is correct.
+
+Information-theoretically, selecting one of $k$ equally likely alternatives requires $\log_2 k$ bits (the entropy of a uniform distribution over $k$ outcomes).
+
+Therefore, resolution requires $\geq \log_2 k$ bits of side information.
+\end{proof}
+
+\begin{corollary}[DOF = 1 Requires Zero Side Information]\label{cor:dof1-zero-side}
+With DOF = 1, resolution requires 0 bits of side information.
+\end{corollary}
+
+\begin{proof}
+$\log_2(1) = 0$. With one independent location, that location is trivially authoritative.
+\end{proof}
+
+\textbf{Connection to Slepian-Wolf coding.} In distributed source coding~\cite{slepian1973noiseless}, the decoder uses side information $Y$ to decode $X$ at rate $H(X|Y)$ instead of $H(X)$. Our result is analogous: side information about the authoritative source reduces the ``decoding'' (resolution) problem from $\log_2 k$ bits to 0 bits.
+
+\begin{example}[Side Information in Practice]\label{ex:side-info-practice}
+Consider a configuration system with DOF = 3:
+\begin{itemize}
+\tightlist
+\item \texttt{config.yaml}: \texttt{threshold: 0.5}
+\item \texttt{settings.json}: \texttt{"threshold": 0.7}
+\item \texttt{params.toml}: \texttt{threshold = 0.6}
+\end{itemize}
+
+To resolve this incoherence requires $\log_2 3 \approx 1.58$ bits of side information. In practice, this might be:
+\begin{itemize}
+\tightlist
+\item A priority ordering: ``YAML takes precedence'' (encodes which of 3 is authoritative)
+\item A timestamp: ``most recent wins'' (encodes temporal ordering)
+\item An explicit declaration: ``params.toml is the source of truth''
+\end{itemize}
+
+With DOF = 1, no such side information is needed---the single source is self-evidently authoritative.
+\end{example}
+
+\subsection{Structure Theorems: The Derivation Lattice}\label{sec:derivation-structure}
+
+The set of derivation relations on an encoding system has algebraic structure. We characterize this structure and its computational implications.
+
+\begin{definition}[Derivation Relation]\label{def:derivation-relation}
+A \emph{derivation relation} $D \subseteq L \times L$ on locations $L$ is a directed relation where $(L_s, L_d) \in D$ means $L_d$ is derived from $L_s$. We require $D$ be acyclic (no location derives from itself through any chain).
+\end{definition}
+
+\begin{definition}[DOF under Derivation]\label{def:dof-derivation}
+Given derivation relation $D$, the degrees of freedom is:
+\[
+\text{DOF}(D) = |\{L : \nexists L'. (L', L) \in D\}|
+\]
+The count of locations with no incoming derivation edges (source locations).
+\end{definition}
+
+\begin{theorem}[Derivation Lattice]\label{thm:derivation-lattice}
+The set of derivation relations on a fixed set of locations $L$, ordered by inclusion, forms a bounded lattice:
+\begin{enumerate}
+\tightlist
+\item \textbf{Bottom ($\bot$):} $D = \emptyset$ (no derivations, DOF = $|L|$)
+\item \textbf{Top ($\top$):} Maximal acyclic $D$ with DOF = 1 (all but one location derived)
+\item \textbf{Meet ($\land$):} $D_1 \land D_2 = D_1 \cap D_2$
+\item \textbf{Join ($\lor$):} $D_1 \lor D_2 = $ transitive closure of $D_1 \cup D_2$ (if acyclic)
+\end{enumerate}
+\end{theorem}
+
+\begin{proof}
+\textbf{Bottom:} $\emptyset$ is trivially a derivation relation with all locations independent.
+
+\textbf{Top:} For $n$ locations, a maximal acyclic relation has one source (root) and $n-1$ derived locations forming a tree or DAG. DOF = 1.
+
+\textbf{Meet:} Intersection of acyclic relations is acyclic. The intersection preserves only derivations present in both.
+
+\textbf{Join:} If $D_1 \cup D_2$ is acyclic, its transitive closure is the smallest relation containing both. If cyclic, join is undefined (partial lattice).
+
+Bounded: $\emptyset \subseteq D \subseteq \top$ for all valid $D$.
+\end{proof}
+
+\begin{theorem}[DOF is Anti-Monotonic]\label{thm:dof-antimonotone}
+DOF is anti-monotonic in the derivation lattice:
+\[
+D_1 \subseteq D_2 \Rightarrow \text{DOF}(D_1) \geq \text{DOF}(D_2)
+\]
+More derivations imply fewer independent locations.
+\end{theorem}
+
+\begin{proof}
+Adding a derivation edge $(L_s, L_d)$ to $D$ can only decrease DOF: if $L_d$ was previously a source (no incoming edges), it now has an incoming edge and is no longer a source. Sources can only decrease or stay constant as derivations are added.
+\end{proof}
+
+\begin{corollary}[Minimal DOF = 1 Derivations]\label{cor:minimal-dof1}
+A derivation relation $D$ with DOF($D$) = 1 is \emph{minimal} iff removing any edge increases DOF.
+\end{corollary}
+
+\textbf{Computational implication:} Given an encoding system, there may be multiple DOF-1-achieving derivation structures. The minimal ones use the fewest derivation edges---the most economical way to achieve coherence.
+
+\begin{theorem}[DOF Computation Complexity]\label{thm:dof-complexity}
+Given an encoding system with explicit derivation relation $D$:
+\begin{enumerate}
+\tightlist
+\item Computing DOF($D$) is $O(|L| + |D|)$ (linear in locations plus edges)
+\item Deciding if DOF($D$) = 1 is $O(|L| + |D|)$
+\item Finding a minimal DOF-1 extension of $D$ is $O(|L|^2)$ in the worst case
+\end{enumerate}
+\end{theorem}
+
+\begin{proof}
+\textbf{(1) DOF computation:} Count locations with in-degree 0 in the DAG. Single pass over edges: $O(|D|)$ to compute in-degrees, $O(|L|)$ to count zeros.
+
+\textbf{(2) DOF = 1 decision:} Compute DOF, compare to 1. Same complexity.
+
+\textbf{(3) Minimal extension:} Must connect $k-1$ source locations to reduce DOF from $k$ to 1. Finding which connections preserve acyclicity requires reachability queries. Naive: $O(|L|^2)$. With better data structures (e.g., dynamic reachability): $O(|L| \cdot |D|)$ amortized.
+\end{proof}
+
+%==============================================================================

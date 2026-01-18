@@ -1,33 +1,33 @@
-\section{Lean 4 Proof Listings}\label{sec:lean}
+\section*{Lean 4 Proof Listings}\label{sec:lean}
 %==============================================================================
 
 All theorems are machine-checked in Lean 4 (9,351 lines across 26 files, 0 \texttt{sorry} placeholders, 541 theorems/lemmas). Complete source available at: \texttt{proofs/}.
 
 This appendix presents the actual Lean 4 source code from the repository. Every theorem compiles without \texttt{sorry}. The proofs can be verified by running \texttt{lake build} in the \texttt{proofs/} directory.
 
-\subsection{Model Correspondence}\label{sec:model-correspondence}
+\subsection*{Model Correspondence}\label{sec:model-correspondence}
 
-\textbf{What the formalization models:} The Lean proofs operate at the level of \emph{abstract language capabilities}, not concrete language semantics. We do not model Python's specific execution semantics or Java's bytecode. Instead, we model:
+\textbf{What the formalization models:} The Lean proofs operate at the level of \emph{abstract encoding system capabilities}, not concrete system implementation semantics. We do not model Python's specific execution semantics or database query optimizers. Instead, we model:
 
 \begin{enumerate}
-\item \textbf{DOF as a natural number:} $\text{DOF}(C, F) \in \mathbb{N}$ counts independent encoding locations
-\item \textbf{Language capabilities as propositions:} \texttt{HasDefinitionHooks} and \texttt{HasIntrospection} are \emph{propositions derived from operational semantics}, not boolean flags. For example, \texttt{Python.HasDefinitionHooks} is proved by showing \texttt{init\_subclass\_in\_class\_definition}, which derives from the modeled \texttt{execute\_class\_statement}.
-\item \textbf{Derivation as a relation:} $\text{derives}(L_s, L_d)$ holds when $L_d$'s value is determined by $L_s$
+\item \textbf{DOF as a natural number:} $\text{DOF}(C, F) \in \mathbb{N}$ counts independent encoding locations for fact $F$ in system $C$
+\item \textbf{Computational system capabilities as propositions:} \texttt{HasDefinitionHooks} and \texttt{HasIntrospection} are \emph{propositions derived from operational semantics}, not boolean flags. For programming languages, \texttt{Python.HasDefinitionHooks} is proved by showing \texttt{init\_subclass\_in\_class\_definition}, which derives from the modeled \texttt{execute\_class\_statement}. For databases, materialized views provide automatic derivation.
+\item \textbf{Derivation as a relation:} $\text{derives}(L_s, L_d)$ holds when $L_d$'s value is automatically determined by $L_s$ through the system's native mechanisms
 \end{enumerate}
 
 \textbf{Soundness argument:} The formalization is sound if:
 \begin{itemize}
-\item The abstract predicates correspond to actual language features (verified by the evaluation in Section~\ref{sec:evaluation})
+\item The abstract predicates correspond to actual encoding system features (verified by the evaluation in Section~\ref{sec:evaluation})
 \item The derivation relation correctly captures automatic propagation (verified by concrete examples in Section~\ref{sec:empirical})
 \end{itemize}
 
-\textbf{What we do NOT model:} Performance characteristics, type safety properties, concurrency semantics, or any property orthogonal to SSOT. The model is intentionally narrow: it captures exactly what is needed to prove SSOT requirements, and nothing more.
+\textbf{What we do NOT model:} Performance characteristics, security properties, concurrency semantics, or any property orthogonal to encoding rate optimality. The model is intentionally narrow: it captures exactly what is needed to prove DOF = 1 realizability requirements and optimality theorems, and nothing more.
 
-\subsection{On the Nature of Foundational Proofs}\label{sec:foundational-nature}
+\subsection*{On the Nature of Foundational Proofs}\label{sec:foundational-nature}
 
 Before presenting the proof listings, we address a potential misreading: a reader examining the Lean source code will notice that many proofs are remarkably short, sometimes a single tactic like \texttt{omega} or \texttt{exact h}. This brevity is not a sign of triviality. It is characteristic of \emph{foundational} work, where the insight lies in the formalization, not the derivation.
 
-\textbf{Definitional vs. derivational proofs.} Our core theorems establish \emph{definitional} properties and impossibilities, not complex derivations. For example, Theorem~\ref{thm:hooks-necessary} (definition-time hooks are necessary for SSOT) is proved by showing that without hooks, updates to derived locations cannot be triggered at definition time. The proof is short because it follows directly from the definition of ``definition-time.'' If no code executes when a type is defined, then no derivation can occur at that moment. This is not a complex chain of reasoning; it is an unfolding of what ``definition-time'' means.
+\textbf{Definitional vs. derivational proofs.} Our core theorems establish \emph{definitional} properties and information-theoretic impossibilities, not complex derivations. For example, Theorem~\ref{thm:hooks-necessary} (definition-time computation is necessary for DOF = 1 in computational systems) is proved by showing that without definition-time computation, updates to derived locations cannot be triggered when facts become fixed. The proof is short because it follows directly from the definition of ``definition-time.'' If no computation executes when a structure is defined, then no derivation can occur at that moment. This is not a complex chain of reasoning; it is an unfolding of what ``definition-time'' means.
 
 \textbf{Precedent in foundational CS.} This pattern appears throughout foundational computer science:
 
@@ -37,32 +37,32 @@ Before presenting the proof listings, we address a potential misreading: a reade
 \item \textbf{Rice's Theorem (1953):} Most non-trivial semantic properties of programs are undecidable. The proof follows from the Halting problem via reduction, a few lines. The profundity is in the \emph{generality}, not the derivation.
 \end{itemize}
 
-\textbf{Why simplicity indicates strength.} A definitional requirement is \emph{stronger} than an empirical observation. When we prove that definition-time hooks are necessary for SSOT (Theorem~\ref{thm:hooks-necessary}), we are not saying ``all languages we examined need hooks.'' We are saying something universal: \emph{any} language achieving SSOT for structural facts must have hooks, because the logical structure of the problem forces this requirement. The proof is simple because the requirement is forced by the definitions. There is no wiggle room.
+\textbf{Why simplicity indicates strength.} A definitional requirement is \emph{stronger} than an empirical observation. When we prove that definition-time computation is necessary for DOF = 1 (Theorem~\ref{thm:hooks-necessary}), we are not saying ``all systems we examined need this capability.'' We are saying something universal: \emph{any} computational system achieving DOF = 1 for definition-time facts must have definition-time computation, because the information-theoretic structure of the problem forces this requirement. The proof is simple because the requirement is forced by the definitions. There is no wiggle room.
 
 \textbf{Where the insight lies.} The semantic contribution of our formalization is:
 
 \begin{enumerate}
-\item \textbf{Precision forcing.} Formalizing ``degrees of freedom'' and ``independent locations'' in Lean requires stating exactly what it means for two locations to be independent (Definition~\ref{def:independent}). This precision eliminates ambiguity that plagues informal DRY discussions.
+\item \textbf{Precision forcing.} Formalizing ``degrees of freedom'' and ``independent encoding locations'' in Lean requires stating exactly what it means for two locations to be independent (Definition~\ref{def:independent}). This precision eliminates ambiguity that plagues informal discussions of redundancy and coherence.
 
-\item \textbf{Completeness of requirements.} Theorem~\ref{thm:ssot-iff} is an if-and-only-if theorem: hooks AND introspection are both necessary and sufficient. This is not ``we found two helpful features.'' This is ``these are the \emph{only} two requirements.'' The formalization proves completeness.
+\item \textbf{Completeness of requirements.} Theorem~\ref{thm:ssot-iff} is an if-and-only-if theorem: definition-time computation AND introspectable derivation are both necessary and sufficient for DOF = 1 realizability in computational systems. This is not ``we found two helpful features.'' This is ``these are the \emph{only} two requirements.'' The formalization proves completeness.
 
-\item \textbf{Universal applicability.} The SSOT requirements apply to \emph{any} language, not just those we evaluated. A future language designer can check their language against these requirements. If it lacks hooks or introspection, SSOT for structural facts is impossible. Not hard, not inconvenient, but \emph{impossible}.
+\item \textbf{Universal applicability.} The realizability requirements apply to \emph{any} computational system, not just those we evaluated. A future system designer can check their system against these requirements. If it lacks definition-time computation or introspectable derivation, DOF = 1 for definition-time facts is impossible. Not hard, not inconvenient, but \emph{information-theoretically impossible}.
 \end{enumerate}
 
-\textbf{What machine-checking guarantees.} The Lean compiler verifies that every proof step is valid, every definition is consistent, and no axioms are added beyond Lean's foundations. Zero \texttt{sorry} placeholders means zero unproven claims. The 8,916 lines across 25 files (519 theorems/lemmas) establish a verified chain from basic definitions (edit space, facts, encoding) through grounded operational semantics (AbstractClassSystem, AxisFramework, NominalResolution, SSOTGrounded) to the final theorems (SSOT requirements, complexity bounds, language evaluation). Reviewers need not trust our informal explanations. They can run \texttt{lake build} and verify the proofs themselves.
+\textbf{What machine-checking guarantees.} The Lean compiler verifies that every proof step is valid, every definition is consistent, and no axioms are added beyond Lean's foundations. Zero \texttt{sorry} placeholders means zero unproven claims. The 9,351 lines across 26 files (541 theorems/lemmas) establish a verified chain from basic definitions (encoding locations, facts, independence) through grounded operational semantics (AbstractClassSystem, AxisFramework, NominalResolution, SSOTGrounded) to the final theorems (optimal encoding rate, realizability requirements, complexity bounds, computational system evaluation). Reviewers need not trust our informal explanations. They can run \texttt{lake build} and verify the proofs themselves.
 
-\textbf{Comparison to informal DRY guidance.} Hunt \& Thomas's \textit{Pragmatic Programmer}~\cite{hunt1999pragmatic} introduced DRY as a principle 25 years ago, but without formalization. Prior work treats DRY as a guideline, not a mathematical property. Our contribution is making DRY \emph{formal}: defining what it means (DOF = 1), deriving what it requires (hooks + introspection), and proving the claims machine-checkable. The proofs are simple because the formalization makes the structure clear.
+\textbf{Comparison to informal coherence principles.} Hunt \& Thomas's \textit{Pragmatic Programmer}~\cite{hunt1999pragmatic} introduced DRY (Don't Repeat Yourself) as a principle 25 years ago, but without information-theoretic foundations. Rissanen's MDL principle~\cite{rissanen1978mdl} established minimal description length for static models but did not address interactive encoding systems with modification constraints. Our contribution is \emph{formalizing optimal encoding under coherence constraints}: defining what it means (DOF = 1), proving uniqueness (Theorem~\ref{thm:ssot-unique}), deriving realizability requirements (definition-time computation + introspection), and providing machine-checkable proofs. The proofs are simple because the formalization makes the information-theoretic structure explicit.
 
-This follows the tradition of metatheory: Liskov \& Wing~\cite{liskov1994behavioral} formalized behavioral subtyping, Cook et al.~\cite{cook1989inheritance} formalized inheritance semantics, Reynolds~\cite{reynolds1983types} formalized parametricity. In each case, the contribution was not complex proofs, but \emph{precise formalization} that made previously-informal ideas mechanically verifiable. Simple proofs from precise definitions are the goal, not a limitation.
+This follows the tradition of foundational theory: Shannon~\cite{shannon1948mathematical} formalized channel capacity, Slepian-Wolf~\cite{slepian1973noiseless} formalized distributed source coding, Rissanen~\cite{rissanen1978mdl} formalized minimal description length. In each case, the contribution was not complex derivations, but \emph{precise formalization} that made previously-informal concepts information-theoretically rigorous. Simple proofs from precise definitions are the goal, not a limitation.
 
-\subsection{Basic.lean: Core Definitions (48 lines)}\label{sec:lean-basic}
+\subsection*{Basic.lean: Core Definitions (48 lines)}\label{sec:lean-basic}
 
 This file establishes the core abstractions. We model DOF as a natural number whose properties we prove directly, avoiding complex type machinery.
 
 \begin{verbatim}
 /-
-  SSOT Formalization - Basic Definitions
-  Paper 2: Formal Foundations for the Single Source of Truth Principle
+  Encoding Theory Formalization - Basic Definitions
+  Paper 2: Optimal Encoding Under Coherence Constraints
 
   Design principle: Keep definitions simple for clean proofs.
   DOF and modification complexity are modeled as Nat values
@@ -98,52 +98,52 @@ theorem dof_gt_one_inconsistent (dof : Nat) (h : dof > 1) :
   omega
 \end{verbatim}
 
-\subsection{SSOT.lean: SSOT Definition (38 lines)}\label{sec:lean-ssot}
+\subsection*{SSOT.lean: Optimal Encoding Definition (38 lines)}\label{sec:lean-ssot}
 
-This file defines SSOT and proves its optimality using a simple Nat-based formulation.
+This file defines the optimal encoding rate (DOF = 1) and proves its uniqueness using a simple Nat-based formulation.
 
 \begin{verbatim}
 /-
-  SSOT Formalization - Single Source of Truth Definition and Optimality
-  Paper 2: Formal Foundations for the Single Source of Truth Principle
+  Encoding Theory Formalization - Optimal Rate Definition
+  Paper 2: Optimal Encoding Under Coherence Constraints
 -/
 
--- Definition 2.1: Single Source of Truth
--- SSOT holds for fact F iff DOF(C, F) = 1
+-- Definition 2.1: Optimal Encoding Rate
+-- Optimal encoding holds for fact F iff DOF(C, F) = 1
 def satisfies_SSOT (dof : Nat) : Prop := dof = 1
 
--- Theorem 2.2: SSOT Optimality
+-- Theorem 2.2: Optimal Rate Uniqueness
 theorem ssot_optimality (dof : Nat) (h : satisfies_SSOT dof) :
     dof = 1 := by
   exact h
 
--- Corollary 2.3: SSOT implies O(1) modification complexity
+-- Corollary 2.3: DOF = 1 implies O(1) modification complexity
 theorem ssot_implies_constant_complexity (dof : Nat) (h : satisfies_SSOT dof) :
     dof <= 1 := by  -- Lean 4: <= is notation for \leq
   unfold satisfies_SSOT at h
   omega
 
--- Theorem: Non-SSOT implies potential inconsistency
+-- Theorem: DOF != 1 implies potential incoherence
 theorem non_ssot_inconsistency (dof : Nat) (h : Not (satisfies_SSOT dof)) :
     dof = 0 \/ dof > 1 := by  -- Lean 4: \/ is notation for Or
   unfold satisfies_SSOT at h
   omega
 
--- Key insight: SSOT is the unique sweet spot
--- DOF = 0: fact not encoded (missing)
--- DOF = 1: SSOT (optimal)
--- DOF > 1: inconsistency potential (suboptimal)
+-- Key insight: DOF = 1 is the unique optimal encoding rate
+-- DOF = 0: fact not encoded (underspecification)
+-- DOF = 1: optimal (guaranteed coherence)
+-- DOF > 1: incoherence reachable (suboptimal)
 \end{verbatim}
 
-\subsection{Requirements.lean: Necessity Proofs (113 lines)}\label{sec:lean-requirements}
+\subsection{Requirements.lean: Realizability Necessity Proofs (113 lines)}\label{sec:lean-requirements}
 
-This file proves that definition-time hooks and introspection are necessary. These requirements are \emph{derived}, not chosen.
+This file proves that definition-time computation and introspection are necessary for DOF = 1 realizability in computational systems. These requirements are \emph{derived}, not chosen.
 
 \begin{verbatim}
 /-
-  SSOT Formalization - Language Requirements (Necessity Proofs)
+  Encoding Theory Formalization - Realizability Requirements (Necessity Proofs)
   KEY INSIGHT: These requirements are DERIVED, not chosen.
-  The logical structure forces them from the definition of SSOT.
+  The information-theoretic structure forces them from DOF = 1 optimality.
 -/
 
 import Ssot.Basic
@@ -214,14 +214,14 @@ theorem both_requirements_independent' :
   simp [can_derive_at, h_no_hooks]
 \end{verbatim}
 
-\subsection{Bounds.lean: Complexity Bounds (56 lines)}\label{sec:lean-bounds}
+\subsection{Bounds.lean: Rate-Complexity Bounds (56 lines)}\label{sec:lean-bounds}
 
-This file proves the $O(1)$ upper bound and $\Omega(n)$ lower bound.
+This file proves the rate-complexity tradeoff: DOF = 1 achieves $O(1)$ modification complexity, DOF $> 1$ requires $\Omega(n)$.
 
 \begin{verbatim}
 /-
-  SSOT Formalization - Complexity Bounds
-  Paper 2: Formal Foundations for the Single Source of Truth Principle
+  Encoding Theory Formalization - Rate-Complexity Bounds
+  Paper 2: Optimal Encoding Under Coherence Constraints
 -/
 
 import Ssot.SSOT
@@ -259,13 +259,13 @@ theorem language_choice_asymptotic :
 -- It's about constant vs linear complexity - fundamentally different scaling
 \end{verbatim}
 
-\subsection{Language Evaluation: Semantics-Grounded Proofs}\label{sec:lean-languages}
+\subsection{Computational System Evaluation: Semantics-Grounded Proofs}\label{sec:lean-languages}
 
-The language capability claims are \emph{derived from formalized operational semantics}, not declared as boolean flags. This is the key innovation that forecloses the ``trivial proofs'' critique.
+The computational system capability claims are \emph{derived from formalized operational semantics}, not declared as boolean flags. This is the key innovation that forecloses the ``trivial proofs'' critique.
 
 \subsubsection{The Proof Chain (Non-Triviality Argument)}
 
-Consider the claim ``Python can achieve SSOT.'' In the formalization, this is not a tautology. It is the conclusion of a multi-step proof chain:
+Consider the claim ``Python can achieve DOF = 1.'' In the formalization, this is not a tautology. It is the conclusion of a multi-step proof chain:
 
 \begin{verbatim}
 theorem python_can_achieve_ssot :
@@ -543,7 +543,7 @@ Formalizes the distinction between discipline optimality (abstract capability co
 \toprule
 \textbf{File} & \textbf{Lines} & \textbf{Key Theorems} \\
 \midrule
-\multicolumn{3}{l}{\textit{Core SSOT Framework}} \\
+\multicolumn{3}{l}{\textit{Core Encoding Theory Framework}} \\
 Basic.lean & 47 & 3 \\
 SSOT.lean & 37 & 3 \\
 Derivation.lean & 66 & 2 \\
@@ -551,21 +551,21 @@ Requirements.lean & 112 & 5 \\
 Completeness.lean & 167 & 11 \\
 Bounds.lean & 80 & 5 \\
 \midrule
-\multicolumn{3}{l}{\textit{Grounded Semantics (from Paper 1)}} \\
+\multicolumn{3}{l}{\textit{Grounded Operational Semantics (from Paper 1)}} \\
 \textbf{AbstractClassSystem.lean} & \textbf{3,276} & \textbf{45} \\
 \textbf{AxisFramework.lean} & \textbf{1,721} & \textbf{89} \\
 \textbf{NominalResolution.lean} & \textbf{609} & \textbf{31} \\
 \textbf{ContextFormalization.lean} & \textbf{215} & \textbf{8} \\
 \textbf{DisciplineMigration.lean} & \textbf{142} & \textbf{7} \\
 \midrule
-\multicolumn{3}{l}{\textit{SSOT Bridge}} \\
+\multicolumn{3}{l}{\textit{Encoding Theory Bridge}} \\
 SSOTGrounded.lean & 184 & 6 \\
 Foundations.lean & 364 & 15 \\
 Inconsistency.lean & 224 & 12 \\
 Coherence.lean & 264 & 8 \\
 CaseStudies.lean & 148 & 4 \\
 \midrule
-\multicolumn{3}{l}{\textit{Language Instantiations}} \\
+\multicolumn{3}{l}{\textit{Computational System Instantiations}} \\
 Languages.lean & 108 & 6 \\
 LangPython.lean & 234 & 10 \\
 LangRust.lean & 254 & 8 \\
@@ -584,17 +584,17 @@ TypeScriptInstantiation.lean & 65 & 2 \\
 
 \textbf{All 541 theorems/lemmas compile without \texttt{sorry} placeholders.} The proofs can be verified by running \texttt{lake build} in the \texttt{proofs/} directory. Every theorem in the paper corresponds to a machine-checked proof.
 
-\textbf{Grounding note:} The formalization includes five major proof files from Paper 1 (AbstractClassSystem, AxisFramework, NominalResolution, ContextFormalization, DisciplineMigration) that provide the grounded operational semantics. This ensures that SSOT claims are not ``trivially true by definition'' but rather derive from a substantial formal model of type system capabilities.
+\textbf{Grounding note:} The formalization includes five major proof files from Paper 1 (AbstractClassSystem, AxisFramework, NominalResolution, ContextFormalization, DisciplineMigration) that provide the grounded operational semantics. This ensures that encoding optimality claims are not ``trivially true by definition'' but rather derive from a substantial formal model of computational system capabilities.
 
 Key grounded results:
 \begin{enumerate}
-\item \textbf{Capability gap theorem} (AbstractClassSystem): Shape-based observers cannot distinguish types with different bases.
-\item \textbf{Axis impossibility theorems} (AxisFramework): Missing axes guarantee incompleteness for some domains.
-\item \textbf{Resolution completeness} (NominalResolution): Dual-axis resolution is complete and provenance-preserving.
-\item \textbf{Consistency is non-trivial:} DOF $\geq 2$ admits inconsistent configurations (constructive witness in Inconsistency.lean).
-\item \textbf{SSOT is uniquely optimal:} No other DOF value is both complete and guaranteed-consistent.
-\item \textbf{Language claims derive from semantics:} \texttt{python\_can\_achieve\_ssot} chains through \texttt{python\_has\_hooks} to \texttt{init\_subclass\_in\_class\_definition} to \texttt{execute\_class\_statement}---not boolean flags.
+\item \textbf{Capability gap theorem} (AbstractClassSystem): Shape-based observers cannot distinguish types with different bases---information loss that causes encoding redundancy.
+\item \textbf{Axis impossibility theorems} (AxisFramework): Missing axes guarantee incompleteness for some domains---information-theoretic impossibility, not implementation difficulty.
+\item \textbf{Resolution completeness} (NominalResolution): Dual-axis resolution is complete and provenance-preserving---optimal encoding for type identity facts.
+\item \textbf{Coherence is non-trivial:} DOF $\geq 2$ admits incoherent configurations (constructive witness in Inconsistency.lean).
+\item \textbf{DOF = 1 is uniquely optimal:} No other encoding rate is both complete (fact is encoded) and guarantees coherence.
+\item \textbf{Computational system claims derive from semantics:} \texttt{python\_can\_achieve\_ssot} chains through \texttt{python\_has\_hooks} to \texttt{init\_subclass\_in\_class\_definition} to \texttt{execute\_class\_statement}---not boolean flags.
 \item \textbf{Rust impossibility is substantive:} \texttt{rust\_lacks\_introspection} is a 40-line proof by contradiction, not definitional unfolding.
 \end{enumerate}
 
-These grounded proofs connect the abstract DOF formalization to concrete operational semantics, ensuring the SSOT theorems have substantial content that cannot be dismissed as definitional tautologies.
+These grounded proofs connect the abstract encoding theory formalization to concrete operational semantics, ensuring the theorems have substantial information-theoretic content that cannot be dismissed as definitional tautologies.

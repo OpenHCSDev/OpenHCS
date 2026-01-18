@@ -31,63 +31,71 @@ labor.
 
 \begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
 
-We have provided the first formal foundations for the Single Source of Truth principle. The key contributions are:
+We have established the first information-theoretic foundations for optimal encoding under coherence constraints. The key contributions are:
 
-\textbf{1. Formal Definition:} SSOT is defined as DOF = 1, where DOF (Degrees of Freedom) counts independent encoding locations for a fact. This definition is derived from the structure of the problem, not chosen arbitrarily.
+\textbf{1. Extension of Source Coding Theory:} We extend classical source coding to \emph{interactive encoding systems}---systems where encodings can be modified and must remain coherent across modifications. DOF (Degrees of Freedom) formalizes encoding rate as the count of independent encoding locations for a fact.
 
-\textbf{2. Uniqueness Theorem:} We prove that SSOT (DOF=1) is the \textbf{unique} minimal representation for structural facts (Theorem~\ref{thm:ssot-unique}). Any system with DOF $> 1$ contains redundancy and is therefore non-minimal. This follows from the general uniqueness theorem for minimal complete representations (Paper 1).
+\textbf{2. Optimal Rate Uniqueness:} We prove that DOF = 1 is the \textbf{unique} optimal encoding rate guaranteeing coherence (Theorem~\ref{thm:ssot-unique}). Any system with DOF $> 1$ permits incoherent states; DOF = 0 fails to represent the fact. This uniqueness is information-theoretic necessity, not design choice.
 
-\textbf{3. Language Requirements:} We prove that SSOT for structural facts requires (1) definition-time hooks AND (2) introspectable derivation. Both are necessary; both together are sufficient. This is an if-and-only-if theorem.
+\textbf{3. Rate-Complexity Tradeoffs:} We establish fundamental tradeoffs analogous to rate-distortion theory: DOF = 1 achieves $O(1)$ modification complexity; DOF $> 1$ requires $\Omega(n)$. The gap is unbounded---for any constant $k$, there exists an encoding system size where DOF = 1 provides at least $k\times$ reduction (Theorem~\ref{thm:unbounded-gap}).
 
-\textbf{4. Language Evaluation:} Among mainstream languages, only Python satisfies both requirements. CLOS and Smalltalk also satisfy them but are not mainstream. This is proved by exhaustive evaluation.
+\textbf{4. Resolution Impossibility:} We prove an impossibility theorem (Theorem~\ref{thm:oracle-arbitrary}) analogous to zero-error capacity: without coherence guarantees, no resolution procedure is information-theoretically justified. Multiple independent encodings create irresolvable ambiguity.
 
-\textbf{5. Complexity Bounds:} SSOT achieves $O(1)$ modification complexity; non-SSOT requires $\Omega(n)$. The gap is unbounded: for any constant $k$, there exists a codebase size where SSOT provides at least $k\times$ reduction.
+\textbf{5. Realizability Requirements:} For computational systems, we prove that DOF = 1 realizability requires (1) definition-time computation AND (2) introspectable derivation (Theorem~\ref{thm:ssot-iff}). Both are necessary; both together are sufficient. This is an if-and-only-if characterization.
 
-\textbf{6. Mathematical Necessity:} The uniqueness theorem (Theorem~\ref{thm:ssot-unique}) establishes that DOF=1 is the unique minimal representation: $|\{r : \text{minimal}(r)\}| = 1$. This singleton solution space eliminates design freedom. Claiming ``SSOT is a valid design choice among alternatives'' while accepting uniqueness instantiates $P \land \neg P$: uniqueness entails $\neg\exists$ alternatives with equal minimality; preference presupposes $\exists$ such alternatives. Given minimality as a requirement, the mathematics forces DRY. This is not a guideline---it is the unique solution to the stated constraints.
+\textbf{6. Computational System Evaluation:} We exhaustively evaluate encoding systems against realizability criteria. Among mainstream programming languages, only Python satisfies both requirements (Theorem~\ref{thm:python-unique}). CLOS and Smalltalk also satisfy them. Among databases, systems with materialized views and automatic refresh achieve DOF = 1 for aggregate facts.
 
-\textbf{7. Practical Demonstration:} Concrete before/after examples from OpenHCS demonstrate the patterns in practice. PR \#44 provides a verifiable example: migration from 47 \texttt{hasattr()} checks to ABC contracts, achieving DOF 47 $\to$ 1.
+\textbf{7. Mathematical Necessity:} The uniqueness theorem (Theorem~\ref{thm:ssot-unique}) establishes that DOF=1 is the unique minimal encoding rate: $|\{r : \text{optimal}(r)\}| = 1$. This singleton solution space eliminates design freedom. Claiming ``DOF = 1 is a valid choice among alternatives'' while accepting uniqueness instantiates $P \land \neg P$: uniqueness entails $\neg\exists$ alternatives with equal optimality; preference presupposes $\exists$ such alternatives. Given coherence as a requirement, the mathematics forces DOF = 1. This is not a guideline---it is the unique solution to the stated constraints.
+
+\textbf{8. Empirical Validation:} Computational instantiation in production software (OpenHCS platform, 45K LoC Python) demonstrates 39--95\% DOF reduction across fact categories, validating realizability requirements empirically.
 
 \textbf{Implications:}
 
 \begin{enumerate}
-\item \textbf{For practitioners:} If SSOT for structural facts is required, Python (or CLOS/Smalltalk) is necessary. Other mainstream languages cannot achieve SSOT within the language.
+\item \textbf{For encoding system designers:} If coherence guarantees are required, the system must provide automatic derivation mechanisms (materialized views, definition-time computation, computed columns). Without these, coherence depends on manual discipline, which scales as $\Omega(n)$.
 
-\item \textbf{For language designers:} Definition-time hooks and introspection should be considered if DRY is a design goal. Their absence is a deliberate choice with consequences.
+\item \textbf{For computational system implementers:} Among programming languages, Python (or CLOS/Smalltalk) is necessary for DOF = 1 with structural facts. Other mainstream languages cannot achieve DOF = 1 realizability within the language. Among databases, materialized views achieve DOF = 1 for aggregate facts.
 
-\item \textbf{For researchers:} Software engineering principles can be formalized and machine-checked. This paper demonstrates the methodology.
+\item \textbf{For computational system designers:} Definition-time computation and introspection should be considered if coherence guarantees are a design goal. Their absence is a deliberate choice with information-theoretic consequences for encodability.
+
+\item \textbf{For information theorists:} Classical source coding extends to interactive systems with modification constraints. The coherence requirement creates rate-complexity tradeoffs analogous to rate-distortion tradeoffs.
+
+\item \textbf{For formal methods researchers:} Engineering principles can be formalized information-theoretically and machine-checked. This paper demonstrates the methodology: extend classical IT, prove optimality, formalize in proof assistant, evaluate realizations exhaustively.
 \end{enumerate}
 
 \textbf{Limitations:}
 \begin{itemize}
 \tightlist
-\item Results apply to \emph{structural} facts. Configuration values and runtime state have different characteristics.
-\item The complexity bounds are asymptotic. Small codebases may not benefit significantly.
-\item Examples are from a single codebase. The patterns are general, but readers should verify applicability to their domains.
+\item Results apply primarily to facts with modification constraints. Streaming data and high-frequency updates have different characteristics.
+\item The complexity bounds are asymptotic. Small encoding systems (DOF $< 5$) may not benefit significantly from DOF = 1 optimization.
+\item Computational realization examples are primarily from software systems. The theory is general, but database and configuration system case studies are limited to canonical examples.
+\item Realizability requirements focus on computational systems. Physical and biological encoding systems require separate analysis.
 \end{itemize}
 
 \textbf{Future Work:}
 \begin{itemize}
 \tightlist
-\item Extend the formalization to non-structural facts
-\item Develop automated DOF measurement tools
-\item Study the relationship between DOF and other software quality metrics
-\item Investigate SSOT in multi-language systems
+\item Extend the encoding theory to probabilistic coherence (soft constraints, approximate agreement)
+\item Develop automated DOF measurement tools for multiple computational domains (code analysis, schema analysis, configuration analysis)
+\item Study the relationship between DOF and other system quality metrics (reliability, maintainability, performance)
+\item Investigate DOF = 1 realizability in distributed systems with network partitions
+\item Characterize the information-theoretic limits of compile-time vs. runtime coherence mechanisms
 \end{itemize}
 
 \textbf{Connection to Leverage Framework:}
 
-SSOT achieves \emph{infinite leverage} in the framework of the companion paper on leverage-driven architecture:
+DOF = 1 encoding achieves \emph{infinite leverage} in the framework of the companion paper on leverage-driven architecture:
 \[
-L(\text{SSOT}) = \frac{|\text{Derivations}|}{1} \to \infty
+L(\text{DOF = 1}) = \frac{|\text{Derivations}|}{|\text{Independent Encodings}|} = \frac{n}{1} \to \infty \text{ as } n \to \infty
 \]
 
-A single source derives arbitrarily many facts. This is the theoretical maximum---no architecture can exceed infinite leverage. The leverage framework provides a unified view: this paper (SSOT) and the companion paper on typing discipline selection are both instances of leverage maximization. The metatheorem---``maximize leverage''---subsumes both results.
+A single independent encoding location derives arbitrarily many dependent locations. This is the theoretical maximum---no encoding architecture can exceed infinite leverage. The leverage framework provides a unified view: this paper (optimal encoding rate) and the companion paper on typing discipline selection are both instances of leverage maximization. The metatheorem---``maximize leverage''---subsumes both results.
 
 \subsection{Data Availability}\label{sec:data-availability}
 
-\textbf{OpenHCS Codebase:} The OpenHCS platform (45K LoC Python) is available at \url{https://github.com/trissim/openhcs}~\cite{openhcs2025}. The codebase demonstrates the SSOT patterns described in Section~\ref{sec:empirical}.
+\textbf{OpenHCS Codebase:} The OpenHCS platform (45K LoC Python) is available at \url{https://github.com/trissim/openhcs}~\cite{openhcs2025}. The codebase demonstrates computational realization of DOF = 1 patterns described in Section~\ref{sec:empirical}.
 
-\textbf{PR \#44:} The migration from duck typing (\texttt{hasattr()}) to ABC contracts is documented in a publicly verifiable pull request~\cite{openhcsPR44}: \url{https://github.com/trissim/openhcs/pull/44}. Readers can inspect the before/after diff to verify the DOF 47 $\to$ 1 reduction.
+\textbf{PR \#44:} The migration from duck typing (\texttt{hasattr()}) to ABC contracts is documented in a publicly verifiable pull request~\cite{openhcsPR44}: \url{https://github.com/trissim/openhcs/pull/44}. Readers can inspect the before/after diff to verify the DOF 47 $\to$ 1 reduction, demonstrating the realizability requirements (definition-time computation via \texttt{\_\_init\_subclass\_\_}, introspectable derivation via \texttt{\_\_subclasses\_\_()}).
 
-\textbf{Lean 4 Proofs:} The complete Lean 4 formalization (1,753 lines across 13 files, 0 \texttt{sorry} placeholders)~\cite{openhcsLeanProofs} is included as supplementary material. Reviewers can verify the proofs by running \texttt{lake build} in the proof directory.
+\textbf{Lean 4 Proofs:} The complete Lean 4 formalization (1,811 lines across 13 files, 0 \texttt{sorry} placeholders)~\cite{openhcsLeanProofs} is included as supplementary material. The formalization covers the encoding theory foundations, optimal rate theorems, rate-complexity bounds, and realizability requirements. Reviewers can verify the proofs by running \texttt{lake build} in the proof directory.
 

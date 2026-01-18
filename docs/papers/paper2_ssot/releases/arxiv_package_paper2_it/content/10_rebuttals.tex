@@ -68,11 +68,11 @@ The model is empirically vulnerable. No counterexample has been produced.
 % PART II: DEFINITION AND CIRCULARITY
 %==============================================================================
 
-\subsection{Objection: The SSOT Definition is Too Narrow}
+\subsection{Objection: The DOF = 1 Optimality Claim is Too Restrictive}
 
-\textbf{Objection:} ``Your definition of SSOT as DOF = 1 is too restrictive. Real-world systems have acceptable levels of duplication.''
+\textbf{Objection:} ``Your claim that DOF = 1 is optimal is too restrictive. Real-world encoding systems have acceptable levels of redundancy.''
 
-\textbf{Response:} The definition is \textbf{derived}, not chosen. DOF = 1 is the unique optimal point:
+\textbf{Response:} The optimality is \textbf{derived}, not chosen. DOF = 1 is the unique optimal encoding rate under coherence constraints:
 
 \begin{center}
 \begin{tabular}{cl}
@@ -80,27 +80,27 @@ The model is empirically vulnerable. No counterexample has been produced.
 \textbf{DOF} & \textbf{Meaning} \\
 \midrule
 0 & Fact is not encoded (underspecification) \\
-1 & Single source of truth (optimal) \\
-$>$1 & Multiple sources can diverge (inconsistency risk) \\
+1 & Optimal encoding rate (guaranteed coherence) \\
+$>$1 & Multiple sources can diverge (incoherence reachable) \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-DOF = 2 means two locations can hold different values for the same fact. The \emph{possibility} of inconsistency exists. The definition is mathematical: SSOT requires DOF = 1. Systems with DOF $>$ 1 may be pragmatically acceptable but do not satisfy SSOT.
+DOF = 2 means two independent encoding locations can hold different values for the same fact. The \emph{possibility} of incoherence exists. The definition is information-theoretic: optimal encoding requires DOF = 1. Systems with DOF $>$ 1 may be pragmatically acceptable but do not achieve the optimal encoding rate.
 
-\subsection{External Tools vs Language-Level SSOT}
+\subsection{External Tools vs System-Native DOF = 1}
 
-External tools (annotation processors, code generators, build systems) can approximate SSOT behavior. These differ from language-level SSOT in three dimensions:
+External tools (annotation processors, code generators, build systems, schema migration tools) can approximate DOF = 1 behavior. These differ from system-native DOF = 1 in three dimensions:
 
 \begin{enumerate}
-\item \textbf{External to language semantics:} Build tools can fail, be misconfigured, or be bypassed. They operate outside the language model.
+\item \textbf{External to system semantics:} Build tools can fail, be misconfigured, or be bypassed. They operate outside the encoding system's operational model.
 
-\item \textbf{No runtime verification:} The program cannot confirm that derivation occurred correctly. Python's \texttt{\_\_subclasses\_\_()} verifies registration completeness at runtime. External tools provide no runtime guarantee.
+\item \textbf{No runtime verification:} The system cannot confirm that derivation occurred correctly. Python's \texttt{\_\_subclasses\_\_()} verifies registration completeness at runtime. Database materialized views maintain consistency guarantees. External tools provide no such runtime guarantee.
 
-\item \textbf{Configuration-dependent:} External tools require project-specific setup. Python's \texttt{\_\_init\_subclass\_\_} works in any environment without configuration.
+\item \textbf{Configuration-dependent:} External tools require environment-specific setup. System-native mechanisms (Python's \texttt{\_\_init\_subclass\_\_}, database triggers) work in any environment without configuration.
 \end{enumerate}
 
-The analysis characterizes SSOT \emph{within language semantics}, where DOF = 1 holds at runtime.
+The analysis characterizes DOF = 1 \emph{within system semantics}, where coherence guarantees hold at runtime.
 
 \subsection{Objection: The Requirements Are Circular}
 
@@ -129,16 +129,16 @@ Neither objection has been sustained.
 
 \subsection{Derivation Order}
 
-The analysis proceeds from definition to language evaluation:
+The analysis proceeds from encoding theory to computational system evaluation:
 
 \begin{enumerate}
-\item Define SSOT mathematically (DOF = 1)
-\item Prove necessary language features (definition-time hooks + introspection)
-\item Evaluate languages against derived criteria
-\item Result: Python, CLOS, and Smalltalk satisfy both requirements
+\item Define optimal encoding rate information-theoretically (DOF = 1)
+\item Prove necessary realizability requirements for computational systems (definition-time computation + introspectable derivation)
+\item Evaluate computational systems against derived criteria
+\item Result: Among programming languages, Python, CLOS, and Smalltalk satisfy both requirements. Among databases, systems with materialized views achieve DOF = 1 for aggregate facts.
 \end{enumerate}
 
-Three languages satisfy the criteria. Two (CLOS, Smalltalk) are not mainstream. This validates that the requirements characterize a genuine language capability class. The requirements are derived from SSOT's definition, independent of any particular language's feature set.
+Among programming languages, three satisfy the criteria. Two (CLOS, Smalltalk) are not mainstream. This validates that the requirements characterize a genuine computational capability class. The requirements are derived from encoding theory, independent of any particular system's feature set.
 
 %==============================================================================
 % PART III: RUST AND EXTERNAL TOOLING
@@ -159,27 +159,27 @@ The theoretical contribution is the formal proof. The examples demonstrate appli
 
 \subsection{Asymptotic Analysis}
 
-The complexity bounds are derived from the mechanism:
+The complexity bounds are derived from the encoding structure:
 
 \begin{itemize}
 \tightlist
-\item SSOT: changing a fact requires 1 edit (the single source)
-\item Non-SSOT: changing a fact requires $n$ edits (one per encoding location)
+\item DOF = 1: changing a fact requires 1 edit (the single independent encoding location)
+\item DOF = $n > 1$: changing a fact requires $n$ edits (one per independent encoding location)
 \item The ratio $n/1$ grows unbounded as $n$ increases
 \end{itemize}
 
-PR \#44 demonstrates the mechanism at $n = 47$: 47 \texttt{hasattr()} checks → 1 ABC definition. The 47$\times$ reduction is observable via GitHub diff. The gap widens as codebases grow.
+PR \#44 demonstrates the mechanism at $n = 47$: 47 \texttt{hasattr()} checks (DOF = 47) → 1 ABC definition (DOF = 1). The 47$\times$ reduction is observable via GitHub diff. The gap widens as encoding systems scale.
 
 \subsection{Cost-Benefit Analysis}
 
-SSOT involves trade-offs:
+DOF = 1 involves trade-offs:
 \begin{itemize}
 \tightlist
-\item \textbf{Benefit:} Modification complexity $O(1)$ vs $\Omega(n)$
-\item \textbf{Cost:} Metaprogramming complexity, potential performance overhead
+\item \textbf{Benefit:} Modification complexity $O(1)$ vs $\Omega(n)$, guaranteed coherence
+\item \textbf{Cost:} System complexity (metaprogramming, triggers, materialized views), potential performance overhead
 \end{itemize}
 
-The analysis characterizes what SSOT requires. The decision to use SSOT depends on codebase scale and change frequency.
+The analysis characterizes what DOF = 1 requires. The decision to optimize for DOF = 1 depends on encoding system scale, change frequency, and coherence requirements.
 
 \subsection{Machine-Checked Formalization}
 
@@ -195,21 +195,21 @@ The contribution is formalization itself: converting informal principles into ma
 
 \subsection{Build Tool Analysis}
 
-External build tools shift the SSOT problem:
+External build tools shift the DOF problem but do not eliminate it:
 
 \begin{enumerate}
-\item \textbf{DOF $\geq$ 2:} Build tool configuration becomes a second source. Let $C$ be codebase, $T$ be tool. Then $\text{DOF}(C \cup T, F) \geq 2$ because both source and config encode $F$.
+\item \textbf{DOF $\geq$ 2:} Build tool configuration becomes an additional independent encoding location. Let $S$ be the primary system, $T$ be the tool configuration. Then $\text{DOF}(S \cup T, F) \geq 2$ because both source and config encode $F$ independently.
 
-\item \textbf{No runtime verification:} Generated code lacks derivation provenance. Cannot query ``was this method generated or hand-written?''
+\item \textbf{No runtime verification:} Generated artifacts lack derivation provenance. Cannot query ``was this derived or manually specified?'' at runtime.
 
-\item \textbf{Cache invalidation:} Build tools must track dependencies. Stale caches cause bugs absent from language-native derivation.
+\item \textbf{Cache invalidation:} Build tools must track dependencies. Stale caches cause incoherence absent from system-native derivation.
 
-\item \textbf{Build latency:} Every edit requires build step. Language-native SSOT (Python metaclasses) executes during \texttt{import}.
+\item \textbf{Build latency:} Every modification requires build step. System-native mechanisms (Python metaclasses execute during \texttt{import}, database views refresh on query) have lower latency.
 \end{enumerate}
 
-External tools reduce DOF from $n$ to $k$ where $k$ is the number of tool configurations. Since $k > 1$, SSOT (DOF = 1) is not satisfied.
+External tools reduce DOF from $n$ to $k$ where $k$ is the number of tool configurations. Since $k > 1$, optimal encoding (DOF = 1) is not satisfied.
 
-Cross-language code generation (e.g., protobuf) requires external tools. The analysis characterizes single-language SSOT.
+Cross-system encoding (e.g., protobuf generating code for multiple languages) requires external tools. The analysis characterizes DOF = 1 \emph{within system boundaries}.
 
 %==============================================================================
 % PART V: FORMALIZATION OBJECTIONS
@@ -374,26 +374,27 @@ That said, not all proofs are \texttt{rfl}. The \texttt{rust\_lacks\_introspecti
 
 The proof structure (assumption → lemma application → contradiction) is genuine mathematical reasoning, not tautology. The \texttt{rfl} proofs establish the scaffolding; the substantive proofs build on that scaffolding.
 
-\subsection{Objection: Real Codebases Don't Need Formal DOF}
+\subsection{Objection: Real Systems Don't Need Formal DOF Guarantees}
 
-\textbf{Objection:} ``Nobody actually needs Lean-enforced DOF guarantees. Conventions work fine in practice.''
+\textbf{Objection:} ``Nobody actually needs Lean-enforced DOF guarantees. Conventions and manual synchronization work fine in practice.''
 
-\textbf{Response:} This is an interpretation gap, not a flaw in the proof. We prove:
+\textbf{Response:} This is an interpretation gap, not a flaw in the information-theoretic analysis. We prove:
 
 \begin{quote}
-IF you encode a fact in multiple locations AND require guaranteed consistency, THEN you need either DOF = 1 or an external oracle.
+IF you encode a fact at multiple independent locations AND require guaranteed coherence, THEN you need either DOF = 1 or an external oracle (manual discipline, code review, synchronization procedures).
 \end{quote}
 
-Whether real codebases ``need'' guaranteed consistency is an engineering judgment outside the scope of formal verification. The same gap exists for:
+Whether real encoding systems ``need'' guaranteed coherence is an engineering judgment outside the scope of information theory. The same gap exists for:
 
 \begin{itemize}
 \tightlist
-\item \textbf{CAP theorem:} Proves partition tolerance forces trade-off. Whether your system needs strong consistency is judgment.
+\item \textbf{CAP theorem:} Proves partition tolerance forces consistency/availability trade-off. Whether your distributed system needs strong consistency is judgment.
+\item \textbf{Shannon's channel capacity:} Proves maximum reliable transmission rate. Whether you need error-free communication is judgment.
 \item \textbf{Rice's theorem:} Proves semantic properties are undecidable. Whether you need decidable analysis is judgment.
 \item \textbf{Halting problem:} Proves general termination is undecidable. Whether your programs need termination guarantees is judgment.
 \end{itemize}
 
-The theorem characterizes what is \emph{logically required}. Application to specific codebases requires human interpretation. This is philosophy, not mathematics, and lies outside the proof's scope.
+The theorem characterizes what is \emph{information-theoretically required}. Application to specific encoding systems requires domain-specific judgment. This is engineering, not mathematics, and lies outside the proof's scope.
 
 %==============================================================================
  

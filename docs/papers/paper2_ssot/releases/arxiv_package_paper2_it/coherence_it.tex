@@ -58,32 +58,15 @@ Rate-Complexity Tradeoffs in Multi-Location Representation Systems}
 % Include abstract
 \input{content/abstract.tex}
 
-% Main content sections
-\section{Introduction}
+% Main content sections (section commands are in the content files)
 \input{content/01_introduction.tex}
-
-\section{Encoding Systems and Coherence}\label{sec:foundations}
 \input{content/02_foundations.tex}
-
-\section{Optimal Representation: DOF = 1}\label{sec:ssot}
 \input{content/03_ssot.tex}
-
-\section{Information-Theoretic Requirements}\label{sec:requirements}
 \input{content/04_requirements.tex}
-
-\section{Realization in Computational Systems}\label{sec:evaluation}
 \input{content/05_evaluation.tex}
-
-\section{Complexity Bounds}\label{sec:bounds}
 \input{content/06_bounds.tex}
-
-\section{Empirical Validation}\label{sec:empirical}
 \input{content/07_empirical.tex}
-
-\section{Related Work}\label{sec:related}
 \input{content/08_related.tex}
-
-\section{Conclusion}\label{sec:conclusion}
 \input{content/09_conclusion.tex}
 
 % References
@@ -92,10 +75,11 @@ Rate-Complexity Tradeoffs in Multi-Location Representation Systems}
 
 % Appendix
 \appendix
-\section{Machine-Checked Proofs}\label{sec:lean}
+% Disable hyperref bookmarks for large appendices (prevents counter/bookmark overflow)
+\hypersetup{bookmarks=false}
 \input{content/11_lean_proofs.tex}
-
-\section{Additional Objections Addressed}\label{sec:rebuttals}
+% Re-enable bookmarks for any following material (if needed)
+\hypersetup{bookmarks=true}
 \input{content/10_rebuttals.tex}
 
 \end{document}

@@ -2,7 +2,7 @@ OpenHCS Paper Build Log
 ========================
 
 Paper: paper2 - Formal Foundations for the Single Source of Truth Principle
-Package Date: 2026-01-16T04:52:40.953487
+Package Date: 2026-01-18T16:46:36.422304
 Lean Toolchain: leanprover/lean4:v4.27.0-rc1
 
 Proof Statistics:

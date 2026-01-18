@@ -53,17 +53,19 @@ Our results extend classical encoding theory in three ways:
 
 \subsection{Realizability in Computational Systems}\label{sec:realizability}
 
-A key question: can the abstract optimality (DOF = 1) be \textbf{realized} in computational systems? We prove realizability requires two capabilities:
+A key question: can the abstract optimality (DOF = 1) be \textbf{realized} in computational systems? We prove realizability requires two information-theoretic encoder properties:
 
 \begin{enumerate}
-\item \textbf{Definition-time derivation:} Derived encodings must be computed when the source is established, not lazily on demand.
+\item \textbf{Causal update propagation:} Changes to the source must automatically trigger updates to derived locations. This is analogous to channel coding with feedback---the encoder (source) and decoder (derived locations) are coupled in real-time. Without causal propagation, a temporal window exists where source and derived locations diverge (temporary incoherence).
 
-\item \textbf{Introspectable results:} The system must support queries about what was derived and from what source.
+\item \textbf{Provenance observability:} The system must support queries about derivation structure (what is derived from what). This is the encoding-system analog of Slepian-Wolf side information~\cite{slepian1973noiseless}---the decoder has access to structural information enabling verification.
 \end{enumerate}
 
-These are information-theoretic requirements: systems lacking either cannot achieve DOF = 1 via derivation mechanisms. The proof constructs explicit incoherent configurations reachable in systems missing either capability.
+These abstract to arbitrary encoding systems; programming language features (definition-time hooks, introspection) are one instantiation. Distributed databases use triggers and system catalogs; configuration systems use dependency graphs and state queries.
 
-\textbf{Evaluation across computational systems.} We evaluate programming languages, distributed databases, and configuration systems against these criteria. Among mainstream programming languages (TIOBE top-10, 5+ year consistency), Python uniquely satisfies both requirements. Most (Java, C++, Rust, Go, TypeScript) satisfy neither and cannot achieve DOF = 1 for structural facts.
+\textbf{Connection to multi-version coding.} Rashmi et al.~\cite{rashmi2015multiversion} prove an ``inevitable storage cost for consistency'' in distributed storage. Our realizability theorem is analogous: systems lacking causal propagation or provenance observability \emph{cannot} achieve DOF = 1---the cost is fundamental, not implementation-specific.
+
+\textbf{Evaluation across computational systems.} We evaluate programming languages, distributed databases, and configuration systems against these criteria. Among mainstream programming languages (TIOBE top-10, 5+ year consistency), Python uniquely satisfies both requirements (causal propagation via \texttt{\_\_init\_subclass\_\_}, provenance observability via \texttt{\_\_subclasses\_\_()}). Most (Java, C++, Rust, Go, TypeScript) lack one or both and cannot achieve DOF = 1 for structural facts.
 
 \subsection{Paper Organization and Main Results}\label{overview}
 
@@ -73,7 +75,7 @@ This paper establishes four theorems characterizing optimal encoding under coher
 
 \textbf{Section~\ref{sec:ssot}---Optimal Rate.} We prove DOF = 1 is the unique rate guaranteeing coherence (Theorem~\ref{thm:dof-optimal}). The proof constructs incoherent configurations for all DOF $> 1$ and shows DOF = 1 makes disagreement impossible.
 
-\textbf{Section~\ref{sec:requirements}---Realizability.} We derive necessary and sufficient conditions for computational systems to achieve DOF = 1 via derivation (Theorem~\ref{thm:ssot-iff}). Both definition-time computation and introspectable results are required.
+\textbf{Section~\ref{sec:requirements}---Realizability.} We derive necessary and sufficient conditions for encoding systems to achieve DOF = 1 via derivation (Theorem~\ref{thm:ssot-iff}). Both causal update propagation and provenance observability are required---these are information-theoretic encoder properties that abstract across domains.
 
 \textbf{Section~\ref{sec:evaluation}---System Evaluation.} We evaluate computational realizations (programming languages, distributed databases) against formal criteria. Python, CLOS, and Smalltalk satisfy requirements; Java, C++, Rust, Go, TypeScript do not.
 
@@ -100,9 +102,9 @@ We establish four theorems characterizing optimal encoding under coherence const
   \emph{Proof:} All other locations are derived from the single source. Derivation enforces agreement. Single source determines all values.
 
 \item
-  \textbf{Theorem~\ref{thm:ssot-iff} (Realizability Requirements):} A computational system achieves DOF = 1 via derivation if and only if it provides: (a) definition-time computation, and (b) introspectable derivation results.
+  \textbf{Theorem~\ref{thm:ssot-iff} (Realizability Requirements):} An encoding system achieves DOF = 1 via derivation if and only if it provides: (a) causal update propagation (source changes automatically trigger derived location updates), and (b) provenance observability (derivation structure is queryable).
 
-  \emph{Proof:} Necessity by constructing incoherent configurations when either is missing. Sufficiency by exhibiting derivation mechanisms achieving DOF = 1.
+  \emph{Proof:} Necessity by constructing incoherent configurations when either is missing. Sufficiency by exhibiting derivation mechanisms achieving DOF = 1. The requirements are information-theoretic encoder properties, not implementation details.
 
 \item
   \textbf{Theorem~\ref{thm:unbounded-gap} (Rate-Complexity Tradeoff):} Modification complexity scales as: DOF = 1 achieves $O(1)$; DOF = $n > 1$ requires $\Omega(n)$. The ratio grows without bound: $\lim_{n \to \infty} \frac{n}{1} = \infty$.
@@ -140,13 +142,14 @@ This paper makes six contributions:
 \item Theorem~\ref{thm:ssot-determinate}: SSOT eliminates indeterminacy
 \end{itemize}
 
-\textbf{3. Language requirements (Section~\ref{sec:requirements}):}
+\textbf{3. Realizability requirements (Section~\ref{sec:requirements}):}
 \begin{itemize}
 \tightlist
-\item Theorem~\ref{thm:hooks-necessary}: Definition-time hooks are necessary
-\item Theorem~\ref{thm:introspection-necessary}: Introspection is necessary
+\item Theorem~\ref{thm:causal-necessary}: Causal update propagation is necessary
+\item Theorem~\ref{thm:provenance-necessary}: Provenance observability is necessary
 \item Theorem~\ref{thm:ssot-iff}: Both together are sufficient
-\item Proof that these requirements are forced by the structure of the problem
+\item Connection to IT: causal propagation $\approx$ channel with feedback; provenance observability $\approx$ Slepian-Wolf side information
+\item Connection to WOM codes: structural irreversibility constraint analogous to write-once constraint
 \end{itemize}
 
 \textbf{4. Language evaluation (Section~\ref{sec:evaluation}):}

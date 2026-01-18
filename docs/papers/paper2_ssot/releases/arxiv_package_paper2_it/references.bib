@@ -488,3 +488,215 @@
   publisher={MIT Press},
   note={Comprehensive treatment of MDL; DOF=1 (SSOT) can be framed as the MDL-optimal representation for redundant facts}
 }
+
+% === Information Theory: Interactive Encoding and Distributed Storage ===
+
+@article{rashmi2015multiversion,
+  title={Multi-Version Coding---An Information-Theoretic Perspective of Consistent Distributed Storage},
+  author={Rashmi, K. V. and Shah, Nihar B. and Ramchandran, Kannan and Gu, Dikang},
+  journal={IEEE Transactions on Information Theory},
+  volume={63},
+  number={6},
+  pages={4111--4128},
+  year={2017},
+  publisher={IEEE},
+  doi={10.1109/TIT.2017.2695219},
+  note={Information-theoretic framework for consistent distributed storage; proves inevitable storage cost for consistency guarantees}
+}
+
+@inproceedings{rivest1982wom,
+  title={How to Reuse a ``Write-Once'' Memory},
+  author={Rivest, Ronald L. and Shamir, Adi},
+  booktitle={Proceedings of the 14th Annual ACM Symposium on Theory of Computing},
+  pages={105--113},
+  year={1982},
+  organization={ACM},
+  doi={10.1145/800070.802182},
+  note={Foundational paper on write-once memory codes; capacity for $t$ writes is $\log_2(t+1)$ bits per cell}
+}
+
+@article{wolf1984wom,
+  title={Coding for a Write-Once Memory},
+  author={Wolf, Jack K. and others},
+  journal={AT\&T Bell Laboratories Technical Journal},
+  volume={63},
+  number={6},
+  pages={1089--1112},
+  year={1984},
+  publisher={Wiley},
+  doi={10.1002/j.1538-7305.1984.tb00115.x},
+  note={Extends WOM codes; establishes capacity results for irreversible storage}
+}
+
+@article{slepian1973noiseless,
+  title={Noiseless Coding of Correlated Information Sources},
+  author={Slepian, David and Wolf, Jack K.},
+  journal={IEEE Transactions on Information Theory},
+  volume={19},
+  number={4},
+  pages={471--480},
+  year={1973},
+  publisher={IEEE},
+  doi={10.1109/TIT.1973.1055037},
+  note={Distributed source coding with side information; decoder uses correlated information to reduce required rate}
+}
+
+@article{shannon1948mathematical,
+  title={A Mathematical Theory of Communication},
+  author={Shannon, Claude E.},
+  journal={Bell System Technical Journal},
+  volume={27},
+  number={3},
+  pages={379--423},
+  year={1948},
+  publisher={Wiley},
+  doi={10.1002/j.1538-7305.1948.tb01338.x},
+  note={Foundational paper establishing information theory; source coding and channel capacity}
+}
+
+@book{cover2006elements,
+  title={Elements of Information Theory},
+  author={Cover, Thomas M. and Thomas, Joy A.},
+  edition={2nd},
+  year={2006},
+  publisher={Wiley-Interscience},
+  doi={10.1002/047174882X},
+  note={Comprehensive textbook covering rate-distortion theory, source coding, channel coding}
+}
+
+@article{korner1973graphs,
+  title={Coding of an Information Source Having Ambiguous Alphabet and the Entropy of Graphs},
+  author={K{\"o}rner, J{\'a}nos},
+  journal={Transactions of the 6th Prague Conference on Information Theory},
+  pages={411--425},
+  year={1973},
+  note={Zero-error source coding; graph entropy characterizes zero-error capacity}
+}
+
+@article{lovasz1979shannon,
+  title={On the Shannon Capacity of a Graph},
+  author={Lov{\'a}sz, L{\'a}szl{\'o}},
+  journal={IEEE Transactions on Information Theory},
+  volume={25},
+  number={1},
+  pages={1--7},
+  year={1979},
+  publisher={IEEE},
+  doi={10.1109/TIT.1979.1055985},
+  note={Theta function bounds Shannon capacity; foundational for zero-error information theory}
+}
+
+% === Distributed Systems: Consistency and Consensus ===
+
+@inproceedings{brewer2000cap,
+  title={Towards Robust Distributed Systems},
+  author={Brewer, Eric A.},
+  booktitle={Proceedings of the 19th Annual ACM Symposium on Principles of Distributed Computing},
+  year={2000},
+  organization={ACM},
+  note={Keynote introducing CAP conjecture: Consistency, Availability, Partition tolerance---pick two}
+}
+
+@article{gilbert2002cap,
+  title={Brewer's Conjecture and the Feasibility of Consistent, Available, Partition-Tolerant Web Services},
+  author={Gilbert, Seth and Lynch, Nancy},
+  journal={ACM SIGACT News},
+  volume={33},
+  number={2},
+  pages={51--59},
+  year={2002},
+  publisher={ACM},
+  doi={10.1145/564585.564601},
+  note={Formal proof of CAP theorem}
+}
+
+@article{flp1985impossibility,
+  title={Impossibility of Distributed Consensus with One Faulty Process},
+  author={Fischer, Michael J. and Lynch, Nancy A. and Paterson, Michael S.},
+  journal={Journal of the ACM},
+  volume={32},
+  number={2},
+  pages={374--382},
+  year={1985},
+  publisher={ACM},
+  doi={10.1145/3149.214121},
+  note={FLP impossibility: deterministic consensus impossible in async systems with one failure}
+}
+
+@article{lamport1998paxos,
+  title={The Part-Time Parliament},
+  author={Lamport, Leslie},
+  journal={ACM Transactions on Computer Systems},
+  volume={16},
+  number={2},
+  pages={133--169},
+  year={1998},
+  publisher={ACM},
+  doi={10.1145/279227.279229},
+  note={Paxos consensus algorithm; achieves consistency under partial failure}
+}
+
+@inproceedings{ongaro2014raft,
+  title={In Search of an Understandable Consensus Algorithm},
+  author={Ongaro, Diego and Ousterhout, John},
+  booktitle={Proceedings of the 2014 USENIX Annual Technical Conference},
+  pages={305--319},
+  year={2014},
+  organization={USENIX},
+  note={Raft consensus algorithm; designed for understandability}
+}
+
+% === Interactive Information Theory ===
+
+@misc{birs2012interactive,
+  title={Interactive Information Theory (12w5119)},
+  author={{Banff International Research Station}},
+  howpublished={Workshop Report},
+  year={2012},
+  note={Workshop on interactive IT: source coding, channel coding, directed information; \url{https://www.birs.ca/events/2012/5-day-workshops/12w5119}}
+}
+
+@article{ma2011distributed,
+  title={Some Results on Distributed Source Coding for Interactive Function Computation},
+  author={Ma, Nan and Ishwar, Prakash},
+  journal={IEEE Transactions on Information Theory},
+  volume={57},
+  number={9},
+  pages={6180--6195},
+  year={2011},
+  publisher={IEEE},
+  doi={10.1109/TIT.2011.2161916},
+  note={Interactive distributed source coding; shows interaction can reduce rate for function computation}
+}
+
+@phdthesis{xiang2013interactive,
+  title={Interactive Schemes in Information Theory and Statistics},
+  author={Xiang, Yu},
+  year={2013},
+  school={University of California, Berkeley},
+  note={Interactive information theory; feedback channels, distributed inference}
+}
+
+% === Delaet and Hunt references for applications ===
+
+@article{delaet2010survey,
+  title={A Survey of System Configuration Tools},
+  author={Delaet, Thomas and Joosen, Wouter and Van de Craen, Jan},
+  journal={Proceedings of the 24th Large Installation System Administration Conference (LISA)},
+  year={2010},
+  organization={USENIX},
+  note={Survey of configuration management systems; coherence challenges in multi-file configurations}
+}
+
+@article{hunt2002vcdiff,
+  title={Delta Algorithms: An Empirical Analysis},
+  author={Hunt, James J. and Vo, Kiem-Phong and Tichy, Walter F.},
+  journal={ACM Transactions on Software Engineering and Methodology},
+  volume={7},
+  number={2},
+  pages={192--214},
+  year={1998},
+  publisher={ACM},
+  doi={10.1145/279310.279321},
+  note={Delta compression for version control; coherence under branch divergence}
+}

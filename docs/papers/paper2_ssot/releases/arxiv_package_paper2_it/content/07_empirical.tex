@@ -1,15 +1,15 @@
-\section{Practical Demonstration}\label{sec:empirical}
+\section{Computational Realization: Empirical Validation}\label{sec:empirical}
 %==============================================================================
 
-We demonstrate the theoretical results with concrete before/after examples from OpenHCS~\cite{openhcs2025}, a production bioimage analysis platform. These examples show how Python's definition-time hooks achieve SSOT for structural facts.
+We validate the theoretical results with concrete before/after examples from OpenHCS~\cite{openhcs2025}, a production bioimage analysis platform implemented in Python. These examples demonstrate how definition-time computation and introspection achieve DOF = 1 for structural facts in a DOF-1-complete programming language.
 
-\textbf{Methodology:} This case study follows established guidelines for software engineering case studies~\cite{runeson2009guidelines}. We use a single-case embedded design with multiple units of analysis (DOF measurements, code changes, maintenance metrics).
+\textbf{Methodology:} This case study follows established guidelines for software engineering case studies~\cite{runeson2009guidelines}. We use a single-case embedded design with multiple units of analysis (DOF measurements, code changes, maintenance complexity).
 
-The value of these examples is \emph{qualitative}: they show the pattern, not aggregate statistics. Each example demonstrates a specific SSOT mechanism. Readers can verify the pattern applies to their own codebases.
+The value of these examples is \emph{qualitative demonstration of realizability}: they show the realization patterns, not aggregate statistics. Each example demonstrates a specific mechanism for achieving DOF = 1. Readers can verify these patterns apply to their own computational systems.
 
-\subsection{SSOT Patterns}\label{sec:ssot-patterns-practical}
+\subsection{DOF = 1 Realization Patterns}\label{sec:ssot-patterns-practical}
 
-Three patterns recur in SSOT architectures:
+Three patterns recur in DOF-1-complete architectures:
 
 \begin{enumerate}
 \item \textbf{Contract enforcement via ABC:} Replace scattered \texttt{hasattr()} checks with a single abstract base class. The ABC is the single source; \texttt{isinstance()} checks are derived.
@@ -285,16 +285,21 @@ The pattern is simple: traverse an object graph, query definition-time metadata 
 
 \subsection{Summary}\label{sec:practical-summary}
 
-These four patterns (contract enforcement, automatic registration, automatic discovery, and introspection-driven generation) demonstrate how Python's definition-time hooks achieve SSOT for structural facts:
+These four patterns (contract enforcement, automatic registration, automatic discovery, and introspection-driven generation) demonstrate how DOF-1-complete computational systems realize optimal encoding rate for structural facts:
 
 \begin{itemize}
-\item \textbf{PR \#44 is verifiable:} The 47 $\to$ 1 reduction can be confirmed by inspecting the public pull request.
+\item \textbf{PR \#44 is verifiable:} The 47 $\to$ 1 DOF reduction can be confirmed by inspecting the public pull request.
 
-\item \textbf{The patterns are general:} Each pattern applies whenever the corresponding structural relationship exists (capability checking, type registration, subclass enumeration, code generation from metadata).
+\item \textbf{The patterns are general:} Each pattern applies whenever the corresponding structural relationship exists (capability checking, type registration, subclass enumeration, code generation from metadata). These patterns are not Python-specific; any DOF-1-complete language (CLOS, Smalltalk) can implement them.
 
-\item \textbf{The mechanism is the same:} In all cases, the class definition becomes the single source, and secondary representations (registry entries, plugin lists, capability checks, generated code) become derived via Python's definition-time hooks and introspection.
+\item \textbf{The realizability requirements are necessary:} In all cases, achieving DOF = 1 required:
+  \begin{enumerate}
+  \item \textbf{Definition-time computation:} Class decorators, metaclasses, \texttt{\_\_init\_subclass\_\_} execute at definition time
+  \item \textbf{Introspection:} \texttt{\_\_subclasses\_\_()}, \texttt{isinstance()}, \texttt{fields()}, \texttt{inspect.signature()} query derived structures
+  \end{enumerate}
+  Remove either capability, and the patterns break (as demonstrated by impossibility in Java, Rust, Go).
 \end{itemize}
 
-The theoretical prediction (that SSOT requires definition-time hooks and introspection) is confirmed by these examples. The patterns shown here are instances of the general mechanism proved in Section~\ref{sec:requirements}.
+The theoretical prediction (Theorem~\ref{thm:ssot-iff}: DOF = 1 requires definition-time computation and introspection) is empirically validated by these examples. The patterns shown are instances of the general realizability framework proved in Section~\ref{sec:requirements}.
 
 %==============================================================================

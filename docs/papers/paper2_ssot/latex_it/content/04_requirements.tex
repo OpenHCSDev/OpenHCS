@@ -1,311 +1,232 @@
-\section{Realizability Requirements for Computational Systems}\label{sec:requirements}
+\section{Information-Theoretic Realizability Requirements}\label{sec:requirements}
 %==============================================================================
 
-We now derive the capabilities necessary and sufficient for computational systems to achieve DOF = 1 (optimal encoding rate). This section answers: \emph{What must a computational system provide for DOF = 1 to be realizable?}
+We now derive the capabilities necessary and sufficient for encoding systems to achieve DOF = 1 (optimal encoding rate). These requirements are \emph{information-theoretic necessities}---properties that any encoding system must have to guarantee coherence under modification, regardless of implementation domain.
 
-The requirements are information-theoretic necessities, not implementation preferences. Programming languages are one domain where these requirements apply; distributed databases and configuration systems are others.
+The requirements emerge from the structure of the encoding problem itself. Programming languages, distributed databases, and configuration systems are specific realizations; the requirements apply universally.
 
-The requirements are derived from the DOF = 1 optimality condition (Theorem~\ref{thm:dof-optimal}). The proofs establish logical necessity.
+\subsection{The Realizability Question}\label{sec:realizability-question}
 
-\subsection{The Foundational Axiom}\label{sec:axiom}
+Given that DOF = 1 is the unique optimal encoding rate (Theorem~\ref{thm:dof-optimal}), a natural question arises: \emph{What must an encoding system provide for DOF = 1 to be realizable?}
 
-The derivation rests on one axiom, which follows from how computational systems with declarative structures work:
-
-\begin{axiom}[Structural Fixation]\label{axiom:fixation}
-Structural facts are fixed at definition time. After a declarative structure (class, schema, resource) is defined, its structural properties cannot be retroactively changed.
-\end{axiom}
-
-This axiom applies across computational domains:
-
-\textbf{Programming languages:}
+An encoding system consists of:
 \begin{itemize}
 \tightlist
-\item Once \texttt{class Foo extends Bar} is defined, \texttt{Foo}'s parent cannot become \texttt{Baz}
-\item Once \texttt{def process(self, x: int)} is defined, the signature cannot retroactively become \texttt{(self, x: str)}
-\item Once \texttt{trait Handler} is implemented for \texttt{PNGDecoder}, that relationship is permanent
+\item \textbf{Locations}: Sites where facts can be encoded
+\item \textbf{Encodings}: Values stored at locations
+\item \textbf{Modifications}: Operations that change encodings
+\item \textbf{Derivation mechanism}: Rules determining how some locations are computed from others
 \end{itemize}
 
-\textbf{Databases:}
-\begin{itemize}
-\tightlist
-\item Once \texttt{CREATE TABLE users (id INT, name TEXT)} executes, the table structure is fixed
-\item Altering the schema requires explicit \texttt{ALTER TABLE} (not retroactive modification)
-\item Foreign key constraints are fixed at creation time
-\end{itemize}
+For DOF = 1 to hold, exactly one location must be independent (the \emph{source}), and all others must be \emph{derived}---automatically computed from the source such that divergence is impossible.
 
-\textbf{Configuration systems:}
-\begin{itemize}
-\tightlist
-\item Once \texttt{resource "aws\_instance" "app"} is declared, the resource type is fixed
-\item The dependency graph is determined at declaration time
-\end{itemize}
-
-Systems that allow modification (Python's \texttt{\_\_bases\_\_}, \texttt{ALTER TABLE}) are modifying \emph{future} behavior, not \emph{past} structure. The fact that ``table X was created with schema S at time T'' is fixed at the moment of creation.
-
-\textbf{All subsequent theorems are logical consequences of this axiom.} Rejecting the axiom requires demonstrating a computational system where structural facts can be retroactively modified---which does not exist.
-
-\subsection{The Timing Constraint}\label{sec:timing}
-
-The key insight is that structural facts have a \emph{timing constraint}. Unlike configuration values (which can be changed at any time), structural facts are fixed at specific moments:
-
-\begin{definition}[Structural Timing]\label{def:structural-timing}
-A structural fact $F$ (class existence, inheritance relationship, method signature) is \emph{fixed} when its defining construct is executed. After that point, the structure cannot be retroactively modified.
-\end{definition}
-
-In Python, classes are defined when the \texttt{class} statement executes:
-
-\begin{verbatim}
-class Detector(Processor):  # Structure fixed HERE
-    def detect(self, img): ...
-
-# After this point, Detector's inheritance cannot be changed
-\end{verbatim}
-
-In Java, classes are defined at compile time:
-
-\begin{verbatim}
-public class Detector extends Processor {  // Structure fixed at COMPILE TIME
-    public void detect(Image img) { ... }
-}
-\end{verbatim}
-
-\textbf{Critical Distinction: Compile-Time vs. Definition-Time}
-
-These terms are often confused. We define them precisely:
-
-\begin{definition}[Compile-Time]\label{def:compile-time}
-\emph{Compile-time} is when source code is translated to an executable form (bytecode, machine code). Compile-time occurs \emph{before the program runs}.
-\end{definition}
-
-\begin{definition}[Definition-Time]\label{def:definition-time}
-\emph{Definition-time} is when a class/type definition is \emph{executed}. In Python, this is \emph{at runtime} when the \texttt{class} statement runs. In Java, this is \emph{at compile-time} when \texttt{javac} processes the file.
-\end{definition}
-
-The key insight: \textbf{Python's \texttt{class} statement is executable code.} When Python encounters:
-
-\begin{verbatim}
-class Foo(Bar):
-    x = 1
-\end{verbatim}
-
-It \emph{executes} code that:
+We prove that two properties are necessary and sufficient for DOF = 1 realizability:
 \begin{enumerate}
-\tightlist
-\item Creates a new namespace
-\item Executes the class body in that namespace
-\item Calls the metaclass to create the class object
-\item Calls \texttt{\_\_init\_subclass\_\_} on parent classes
-\item Binds the name \texttt{Foo} to the new class
+\item \textbf{Causal update propagation}: Changes to the source automatically trigger updates to derived locations
+\item \textbf{Provenance observability}: The system supports queries about derivation structure (what is derived from what)
 \end{enumerate}
 
-This is why Python has ``definition-time hooks''---they execute when the definition runs.
+These are \textbf{encoder properties}, not implementation details. They determine whether an encoding system can achieve the optimal rate.
 
-Java's \texttt{class} declaration is \emph{not} executable---it is a static declaration processed by the compiler. No user code can hook into this process.
+\subsection{The Structural Timing Constraint}\label{sec:timing}
 
-The timing constraint has profound implications for derivation:
+For certain classes of facts---\emph{structural facts}---there is a fundamental timing constraint that shapes realizability.
 
-\begin{theorem}[Timing Forces Definition-Time Derivation]\label{thm:timing-forces}
-Derivation for structural facts must occur at or before the moment the structure is fixed.
-\end{theorem}
-
-\begin{proof}
-Let $F$ be a structural fact. Let $t_{\text{fix}}$ be the moment $F$ is fixed. Any derivation $D$ that depends on $F$ must execute at some time $t_D$.
-
-Case 1: $t_D < t_{\text{fix}}$. Then $D$ executes before $F$ is fixed. $D$ cannot derive from $F$ because $F$ does not yet exist.
-
-Case 2: $t_D > t_{\text{fix}}$. Then $D$ executes after $F$ is fixed. $D$ can read $F$ but cannot modify structure derived from $F$---the structure is already fixed.
-
-Case 3: $t_D = t_{\text{fix}}$. Then $D$ executes at the moment $F$ is fixed. $D$ can both read $F$ and modify derived structures before they are fixed.
-
-Therefore, derivation for structural facts must occur at definition time ($t_D = t_{\text{fix}}$).
-\end{proof}
-
-\subsection{Requirement 1: Definition-Time Computation}\label{sec:hooks}
-
-\begin{definition}[Definition-Time Computation Capability]\label{def:hook}
-A computational system has \emph{definition-time computation capability} iff it can execute arbitrary computation when a declarative structure is \emph{created}, not when it is \emph{used}.
+\begin{definition}[Structural Fact]\label{def:structural-fact-req}
+A fact $F$ is \emph{structural} if its encoding locations are fixed at the moment of definition. After definition, the structure cannot be retroactively modified---only new structures can be created.
 \end{definition}
-
-This requirement has theoretical foundations in metaobject protocols~\cite{kiczales1991art} and computational reflection~\cite{smith1984reflection}. Programming language realizations include Python's metaclasses, CLOS initialization hooks, and Smalltalk's class creation protocol.
 
 \textbf{Examples across domains:}
+\begin{itemize}
+\tightlist
+\item \textbf{Programming languages}: Class definitions, method signatures, inheritance relationships
+\item \textbf{Databases}: Schema definitions, table structures, foreign key constraints
+\item \textbf{Configuration systems}: Resource declarations, dependency specifications
+\item \textbf{Version control}: Branch structures, commit ancestry
+\end{itemize}
 
-\textbf{Programming languages (Python):}
+The key property: structural facts have a \emph{definition moment} after which their encoding is immutable. This creates a timing constraint for derivation.
 
-\begin{center}
-\begin{tabular}{lp{8cm}}
-\toprule
-\textbf{Hook} & \textbf{When it executes} \\
-\midrule
-\texttt{\_\_init\_subclass\_\_} & When a subclass is defined \\
-Metaclass \texttt{\_\_new\_\_}/\texttt{\_\_init\_\_} & When a class using that metaclass is defined \\
-Class decorator & Immediately after class body executes \\
-\texttt{\_\_set\_name\_\_} & When a descriptor is assigned to a class attribute \\
-\bottomrule
-\end{tabular}
-\end{center}
-
-\textbf{Example: \texttt{\_\_init\_subclass\_\_} registration}
-
-\begin{verbatim}
-class Registry:
-    _handlers = {}
-
-    def __init_subclass__(cls, format=None, **kwargs):
-        super().__init_subclass__(**kwargs)
-        if format:
-            Registry._handlers[format] = cls
-
-class PNGHandler(Registry, format="png"):
-    pass  # Automatically registered when class is defined
-
-class JPGHandler(Registry, format="jpg"):
-    pass  # Automatically registered when class is defined
-
-# Registry._handlers == {"png": PNGHandler, "jpg": JPGHandler}
-\end{verbatim}
-
-The registration happens at definition time, not at first use. When the \texttt{class PNGHandler} statement executes, \texttt{\_\_init\_subclass\_\_} runs and adds the handler to the registry.
-
-\begin{theorem}[Definition-Time Computation is Necessary]\label{thm:hooks-necessary}
-Achieving DOF = 1 for structural facts requires definition-time computation capability.
+\begin{theorem}[Timing Constraint for Structural Derivation]\label{thm:timing-forces}
+For structural facts, derivation must occur at or before the moment the structure is fixed.
 \end{theorem}
 
 \begin{proof}
-By Theorem~\ref{thm:timing-forces}, derivation for structural facts must occur at definition time. Without definition-time computation, no computation can execute at that moment. Therefore, derivation is impossible. Without derivation, secondary encodings cannot be automatically updated. DOF $>$ 1 is unavoidable.
+Let $F$ be a structural fact. Let $t_{\text{fix}}$ be the moment $F$'s encoding is fixed. Any derivation $D$ that depends on $F$ must execute at some time $t_D$.
 
-Contrapositive: If a computational system lacks definition-time computation, DOF = 1 for structural facts is unrealizable.
+\textbf{Case 1}: $t_D < t_{\text{fix}}$. Derivation executes before $F$ is fixed. $D$ cannot derive from $F$ because $F$ does not yet exist.
+
+\textbf{Case 2}: $t_D > t_{\text{fix}}$. Derivation executes after $F$ is fixed. $D$ can read $F$ but cannot modify structures derived from $F$---they are already fixed.
+
+\textbf{Case 3}: $t_D = t_{\text{fix}}$. Derivation executes at the moment $F$ is fixed. $D$ can both read $F$ and create derived structures before they are fixed.
+
+Therefore, structural derivation requires $t_D = t_{\text{fix}}$.
 \end{proof}
 
-\textbf{Computational systems lacking this capability:}
+This timing constraint is the information-theoretic reason why derivation must be \emph{causal}---triggered by the act of defining the source, not by later access.
 
-\textbf{Programming languages:}
-\begin{itemize}
-\tightlist
-\item \textbf{Java}: Annotations are metadata, not executable computation. They are processed by external tools (annotation processors), not by the runtime at class definition.
-\item \textbf{C++}: Templates expand at compile time but do not execute arbitrary code. SFINAE and \texttt{constexpr if} select branches, not execute computation.
-\item \textbf{Go}: No hook mechanism. Interfaces are implicit. No code runs at type definition.
-\item \textbf{Rust}: Procedural macros run at compile time but are opaque at runtime (see Theorem~\ref{thm:opaque-expansion}).
-\end{itemize}
+%==============================================================================
+\subsection{Requirement 1: Causal Update Propagation}\label{sec:causal-propagation}
+%==============================================================================
 
-\textbf{Databases (most systems):}
-\begin{itemize}
-\tightlist
-\item Traditional SQL databases do not execute arbitrary user code at schema definition time
-\item Triggers execute on \emph{data} operations, not schema operations
-\item PostgreSQL event triggers are a partial exception but limited in scope
-\end{itemize}
+\begin{definition}[Causal Update Propagation]\label{def:causal-propagation}
+An encoding system has \emph{causal update propagation} if changes to a source location automatically trigger updates to all derived locations, without requiring explicit synchronization commands.
 
-\subsection{Requirement 2: Introspectable Derivation Results}\label{sec:introspection}
-
-Definition-time computation enables derivation. But achieving verifiable DOF = 1 also requires \emph{verification}---the ability to confirm that exactly one independent encoding exists. This requires \emph{computational reflection}---the ability of a system to reason about its own structure~\cite{smith1984reflection}.
-
-\begin{definition}[Introspectable Derivation]\label{def:introspection}
-Derivation is \emph{introspectable} iff the program can query:
-\begin{enumerate}
-\tightlist
-\item What structures were derived
-\item From which source each derived structure came
-\item What the current state of derived structures is
-\end{enumerate}
+Formally: let $L_s$ be a source location and $L_d$ a derived location. The system has causal propagation iff:
+\[
+\text{update}(L_s, v) \Rightarrow \text{automatically\_updated}(L_d, f(v))
+\]
+where $f$ is the derivation function. No separate ``propagate'' or ``sync'' operation is required.
 \end{definition}
 
-\textbf{Python's introspection capabilities:}
+\textbf{Information-theoretic interpretation:} Causal propagation is analogous to \emph{channel coding with feedback}. In classical channel coding, the encoder sends a message and waits for acknowledgment. With feedback, the encoder can immediately react to channel state. Causal propagation provides ``feedback'' from the definition event to the derivation mechanism---the encoder (source) and decoder (derived locations) are coupled in real-time.
+
+\textbf{Connection to multi-version coding:} Rashmi et al.~\cite{rashmi2015multiversion} formalize consistent distributed storage where updates to a source must propagate to replicas while maintaining consistency. Their ``multi-version code'' requires that any $c$ servers can decode the latest common version---a consistency guarantee analogous to our coherence requirement. Causal propagation is the mechanism by which this consistency is maintained under updates.
+
+\textbf{Why causal propagation is necessary:}
+
+Without causal propagation, there exists a temporal window between source modification and derived location update. During this window, the system is incoherent---the source and derived locations encode different values.
+
+\begin{theorem}[Causal Propagation is Necessary for DOF = 1]\label{thm:causal-necessary}
+Achieving DOF = 1 for structural facts requires causal update propagation.
+\end{theorem}
+
+\begin{proof}
+By Theorem~\ref{thm:timing-forces}, structural derivation must occur at definition time. Without causal propagation, derived locations are not updated when the source is defined. This means:
+\begin{enumerate}
+\tightlist
+\item The source exists with value $v$
+\item Derived locations have not been updated (they may not exist, or hold stale values)
+\item The system is temporarily incoherent
+\end{enumerate}
+
+For DOF = 1, incoherence must be \emph{impossible}, not merely transient. Causal propagation eliminates the temporal window: derived locations are updated \emph{as part of} the source definition, not after.
+
+Contrapositive: If an encoding system lacks causal propagation, DOF = 1 for structural facts is unrealizable.
+\end{proof}
+
+\textbf{Realizations across domains:}
 
 \begin{center}
 \begin{tabular}{lp{7cm}}
 \toprule
-\textbf{Query} & \textbf{Python Mechanism} \\
+\textbf{Domain} & \textbf{Causal Propagation Mechanism} \\
 \midrule
-What subclasses exist? & \texttt{cls.\_\_subclasses\_\_()} \\
-What is the inheritance chain? & \texttt{cls.\_\_mro\_\_} \\
-What attributes does a class have? & \texttt{dir(cls)}, \texttt{vars(cls)} \\
-What type is this object? & \texttt{type(obj)}, \texttt{isinstance(obj, cls)} \\
-What methods are abstract? & \texttt{cls.\_\_abstractmethods\_\_} \\
+Python & \texttt{\_\_init\_subclass\_\_}, metaclass \texttt{\_\_new\_\_} \\
+CLOS & \texttt{:after} methods on class initialization \\
+Smalltalk & Class creation protocol, \texttt{subclass:} method \\
+Databases & Triggers on schema operations (PostgreSQL event triggers) \\
+Distributed systems & Consensus protocols (Paxos, Raft) \\
+Configuration & Terraform dependency graph, reactive bindings \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-\textbf{Example: Verifying registration completeness}
+\textbf{Systems lacking causal propagation:}
+\begin{itemize}
+\tightlist
+\item \textbf{Java}: Annotations are metadata, not executable. No code runs at class definition.
+\item \textbf{C++}: Templates expand at compile time but don't execute arbitrary user code.
+\item \textbf{Go}: No hook mechanism. Interface satisfaction is implicit.
+\item \textbf{Rust}: Proc macros run at compile time but generate static code, not runtime derivation.
+\end{itemize}
 
-\begin{verbatim}
-def verify_registration():
-    """Verify all subclasses are registered."""
-    all_subclasses = set(ImageLoader.__subclasses__())
-    registered = set(LOADER_REGISTRY.values())
+%==============================================================================
+\subsection{Requirement 2: Provenance Observability}\label{sec:provenance-observability}
+%==============================================================================
 
-    unregistered = all_subclasses - registered
-    if unregistered:
-        raise RuntimeError(f"Unregistered loaders: {unregistered}")
-\end{verbatim}
+\begin{definition}[Provenance Observability]\label{def:provenance-observability}
+An encoding system has \emph{provenance observability} if the system supports queries about derivation structure:
+\begin{enumerate}
+\tightlist
+\item What locations exist encoding a given fact?
+\item Which locations are sources vs. derived?
+\item What is the derivation relationship (which derived from which)?
+\end{enumerate}
+\end{definition}
 
-This verification is only possible because Python provides \texttt{\_\_subclasses\_\_()}. In systems without this capability, operators cannot enumerate what structures exist.
+\textbf{Information-theoretic interpretation:} Provenance observability is the encoding-system analog of \emph{side information at the decoder}. In Slepian-Wolf coding~\cite{slepian1973noiseless}, the decoder has access to correlated side information that enables decoding at rates below the source entropy. Provenance observability provides ``side information'' about the encoding structure itself---enabling verification that DOF = 1 holds.
 
-\begin{theorem}[Introspection is Necessary for Verifiable DOF = 1]\label{thm:introspection-necessary}
-Verifying that DOF = 1 holds requires introspection capability.
+Without provenance observability, the encoding system is a ``black box''---you can read locations but cannot determine which are sources and which are derived. This makes DOF uncomputable from within the system.
+
+\begin{theorem}[Provenance Observability is Necessary for Verifiable DOF = 1]\label{thm:provenance-necessary}
+Verifying that DOF = 1 holds requires provenance observability.
 \end{theorem}
 
 \begin{proof}
-Verification of DOF = 1 requires confirming exactly one independent encoding exists. This requires:
+Verification of DOF = 1 requires confirming:
 \begin{enumerate}
 \tightlist
-\item Enumerating all locations encoding fact $F$
-\item Determining which are independent vs. derived
-\item Confirming exactly one is independent
+\item All locations encoding fact $F$ are enumerable
+\item Exactly one location is independent (the source)
+\item All other locations are derived from that source
 \end{enumerate}
 
-Step (1) requires introspection: the system must query what structures exist and what they encode. Without introspection, the system cannot enumerate encodings. Verification is impossible.
+Step (1) requires querying what structures exist. Step (2) requires distinguishing sources from derived locations. Step (3) requires querying the derivation relationship.
 
-Without verifiable DOF = 1, system operators cannot confirm optimal encoding holds. They must trust implementation correctness without runtime confirmation. Bugs in derivation logic go undetected until coherence violations occur.
+Without provenance observability, none of these queries are answerable from within the system. DOF = 1 may hold but cannot be verified. Bugs in derivation logic go undetected until coherence violations manifest.
 \end{proof}
 
-\textbf{Computational systems lacking introspection:}
+\textbf{Connection to coding theory:} In coding theory, a code's structure (generator matrix, parity-check matrix) must be known to the decoder. Provenance observability is analogous: the derivation structure must be queryable for verification.
 
-\textbf{Programming languages:}
+\textbf{Realizations across domains:}
 
+\begin{center}
+\begin{tabular}{lp{7cm}}
+\toprule
+\textbf{Domain} & \textbf{Provenance Observability Mechanism} \\
+\midrule
+Python & \texttt{\_\_subclasses\_\_()}, \texttt{\_\_mro\_\_}, \texttt{dir()}, \texttt{vars()} \\
+CLOS & \texttt{class-direct-subclasses}, MOP introspection \\
+Smalltalk & \texttt{subclasses}, \texttt{allSubclasses} \\
+Databases & System catalogs (\texttt{pg\_depend}), query plan introspection \\
+Distributed systems & Vector clocks, provenance tracking, \texttt{etcd} watch \\
+Configuration & Terraform \texttt{graph}, Kubernetes API server \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{Systems lacking provenance observability:}
 \begin{itemize}
 \tightlist
 \item \textbf{C++}: Cannot query ``what types instantiated template \texttt{Foo<T>}?''
-\item \textbf{Rust}: Procedural macro expansion is opaque at runtime. Cannot query what was generated.
-\item \textbf{TypeScript}: Types are erased at runtime. Cannot query type relationships.
-\item \textbf{Go}: No type registry. Cannot enumerate types implementing an interface.
+\item \textbf{Rust}: Proc macro expansion is opaque at runtime.
+\item \textbf{TypeScript}: Types are erased. Runtime cannot query type relationships.
+\item \textbf{Go}: No type registry. Cannot enumerate interface implementations.
 \end{itemize}
 
-\textbf{Configuration systems:}
-\begin{itemize}
-\tightlist
-\item Many infrastructure-as-code systems lack introspection: cannot query ``what resources derive from this template?''
-\item Kubernetes Operators can query derived resources via API server (introspection present)
-\end{itemize}
-
+%==============================================================================
 \subsection{Independence of Requirements}\label{sec:independence}
+%==============================================================================
 
-The two requirements---definition-time hooks and introspection---are independent. Neither implies the other.
+The two requirements---causal propagation and provenance observability---are independent. Neither implies the other.
 
 \begin{theorem}[Requirements are Independent]\label{thm:independence}
 \begin{enumerate}
 \tightlist
-\item A language can have definition-time hooks without introspection
-\item A language can have introspection without definition-time hooks
+\item An encoding system can have causal propagation without provenance observability
+\item An encoding system can have provenance observability without causal propagation
 \end{enumerate}
 \end{theorem}
 
 \begin{proof}
-\textbf{(1) Hooks without introspection:} Rust procedural macros execute at compile time (a form of definition-time hook) but the generated code is opaque at runtime. The program cannot query what the macro generated.
+\textbf{(1) Causal without provenance:} Rust proc macros execute at compile time (causal propagation: definition triggers code generation). But the generated code is opaque at runtime---the program cannot query what was generated (no provenance observability).
 
-\textbf{(2) Introspection without hooks:} Java provides \texttt{Class.getMethods()}, \texttt{Class.getInterfaces()}, etc. (introspection) but no code executes when a class is defined. Annotations are metadata, not executable hooks.
-
-Therefore, the requirements are independent.
+\textbf{(2) Provenance without causal:} Java provides reflection (\texttt{Class.getMethods()}, \texttt{Class.getInterfaces()})---provenance observability. But no code executes when a class is defined---no causal propagation.
 \end{proof}
 
-\subsection{The Realizability Theorem}\label{sec:completeness}
+This independence means both requirements must be satisfied for DOF = 1 realizability.
+
+%==============================================================================
+\subsection{The Realizability Theorem}\label{sec:realizability-theorem}
+%==============================================================================
 
 \begin{theorem}[Necessary and Sufficient Realizability Conditions]\label{thm:ssot-iff}
-A computational system $S$ can achieve verifiable DOF = 1 for structural facts if and only if:
+An encoding system $S$ can achieve verifiable DOF = 1 for structural facts if and only if:
 \begin{enumerate}
 \tightlist
-\item $S$ provides definition-time computation capability, AND
-\item $S$ provides introspectable derivation results
+\item $S$ provides causal update propagation, AND
+\item $S$ provides provenance observability
 \end{enumerate}
 \end{theorem}
 
@@ -313,69 +234,90 @@ A computational system $S$ can achieve verifiable DOF = 1 for structural facts i
 $(\Rightarrow)$ \textbf{Necessity:} Suppose $S$ achieves verifiable DOF = 1 for structural facts.
 \begin{itemize}
 \tightlist
-\item By Theorem~\ref{thm:hooks-necessary}, $S$ must provide definition-time computation
-\item By Theorem~\ref{thm:introspection-necessary}, $S$ must provide introspection
+\item By Theorem~\ref{thm:causal-necessary}, $S$ must provide causal propagation
+\item By Theorem~\ref{thm:provenance-necessary}, $S$ must provide provenance observability
 \end{itemize}
 
 $(\Leftarrow)$ \textbf{Sufficiency:} Suppose $S$ provides both capabilities.
 \begin{itemize}
 \tightlist
-\item Definition-time computation enables derivation at the right moment (when structure is fixed)
-\item Introspection enables verification that all secondary encodings are derived
-\item Therefore, DOF = 1 is achievable: create one source, derive all others, verify completeness
+\item Causal propagation enables derivation at the right moment (when structure is fixed)
+\item Provenance observability enables verification that all secondary encodings are derived
+\item Therefore, DOF = 1 is achievable: create one source, derive all others causally, verify completeness via provenance queries
 \end{itemize}
-
-The if-and-only-if follows.
 \end{proof}
 
-\begin{corollary}[DOF-1-Complete Systems]\label{cor:ssot-complete}
-A computational system is \emph{DOF-1-complete} (can achieve optimal encoding rate for structural facts) iff it satisfies both requirements. Otherwise it is \emph{DOF-1-incomplete}.
-\end{corollary}
+\begin{definition}[DOF-1-Complete Encoding System]\label{def:dof-complete}
+An encoding system is \emph{DOF-1-complete} if it satisfies both causal propagation and provenance observability. Otherwise it is \emph{DOF-1-incomplete}.
+\end{definition}
 
+\textbf{Information-theoretic interpretation:} DOF-1-completeness is analogous to \emph{channel capacity achievability}. A channel achieves capacity if there exist codes that approach the Shannon limit. An encoding system is DOF-1-complete if there exist derivation mechanisms that achieve the coherence-optimal rate (DOF = 1). The two requirements (causal propagation, provenance observability) are the ``channel properties'' that enable capacity achievement.
+
+%==============================================================================
+\subsection{Connection to Write-Once Memory Codes}\label{sec:wom-connection}
+%==============================================================================
+
+Our realizability requirements connect to \emph{write-once memory (WOM) codes}~\cite{rivest1982wom,wolf1984wom}, an established area of coding theory.
+
+A WOM is a storage medium where bits can only transition in one direction (typically $0 \to 1$). Rivest and Shamir~\cite{rivest1982wom} showed that WOMs can store more information than their apparent capacity by encoding multiple ``writes'' cleverly---the capacity for $t$ writes is $\log_2(t+1)$ bits per cell.
+
+The connection to our framework:
+\begin{itemize}
+\tightlist
+\item \textbf{WOM constraint}: Bits can only increase (irreversible state change)
+\item \textbf{Structural fact constraint}: Structure is fixed at definition (irreversible encoding)
+\item \textbf{WOM coding}: Clever encoding enables multiple logical writes despite physical constraints
+\item \textbf{DOF = 1 derivation}: Clever derivation enables multiple logical locations from one physical source
+\end{itemize}
+
+Both settings involve achieving optimal encoding under irreversibility constraints. WOM codes achieve capacity via coding schemes; DOF-1-complete systems achieve coherence via derivation mechanisms.
+
+%==============================================================================
 \subsection{The Logical Chain (Summary)}\label{sec:chain}
-
-For clarity, we summarize the complete derivation from axiom to realizability theorem:
+%==============================================================================
 
 \begin{center}
 \fbox{\parbox{0.9\textwidth}{
-\textbf{Axiom~\ref{axiom:fixation}:} Structural facts are fixed at definition time.
+\textbf{Observation:} Structural facts are fixed at definition time (irreversible encoding).
 
-$\downarrow$ (definitional)
+$\downarrow$ (timing analysis)
 
 \textbf{Theorem~\ref{thm:timing-forces}:} Derivation for structural facts must occur at definition time.
 
-$\downarrow$ (logical necessity)
+$\downarrow$ (requirement derivation)
 
-\textbf{Theorem~\ref{thm:hooks-necessary}:} Definition-time computation is necessary for DOF = 1.
+\textbf{Theorem~\ref{thm:causal-necessary}:} Causal update propagation is necessary for DOF = 1.
 
-\textbf{Theorem~\ref{thm:introspection-necessary}:} Introspection is necessary for verifiable DOF = 1.
+\textbf{Theorem~\ref{thm:provenance-necessary}:} Provenance observability is necessary for verifiable DOF = 1.
 
 $\downarrow$ (conjunction)
 
-\textbf{Theorem~\ref{thm:ssot-iff}:} A computational system can achieve DOF = 1 iff it has both capabilities.
+\textbf{Theorem~\ref{thm:ssot-iff}:} An encoding system achieves DOF = 1 iff it has both properties.
 
 $\downarrow$ (evaluation)
 
-\textbf{Corollary:} Among programming languages, Python, CLOS, Smalltalk are DOF-1-complete. Java, C++, Rust, Go, TypeScript are not.
+\textbf{Classification:} Python, CLOS, Smalltalk are DOF-1-complete. Java, C++, Rust, Go are DOF-1-incomplete.
 }}
 \end{center}
 
-\textbf{Every step is machine-checked in Lean 4.} The proofs compile with zero \texttt{sorry} placeholders. Rejecting this chain requires identifying a specific flaw in the axiom, the logic, or the Lean formalization.
+\textbf{Every step is machine-checked in Lean 4.} The proofs compile with zero \texttt{sorry} placeholders.
 
+%==============================================================================
 \subsection{Concrete Impossibility Demonstration}\label{sec:impossibility}
+%==============================================================================
 
-We now demonstrate \emph{exactly why} DOF-1-incomplete systems cannot achieve DOF = 1 for structural facts. This is not about system quality---it is about fundamental capabilities that certain systems \emph{cannot provide} within their design constraints.
+We demonstrate exactly why DOF-1-incomplete systems cannot achieve DOF = 1 for structural facts.
 
-\textbf{The Structural Fact:} ``\texttt{PNGHandler} handles \texttt{.png} files.''
+\textbf{The structural fact:} ``\texttt{PNGHandler} handles \texttt{.png} files.''
 
 This fact must be encoded in two places:
 \begin{enumerate}
 \tightlist
-\item The class definition (where the handler is defined)
-\item The registry/dispatcher (where format→handler mapping lives)
+\item The handler definition (where the handler is defined)
+\item The registry/dispatcher (where format$\to$handler mapping lives)
 \end{enumerate}
 
-\textbf{Python achieves DOF = 1:}
+\textbf{Python (DOF-1-complete) achieves DOF = 1:}
 
 \begin{verbatim}
 class ImageHandler:
@@ -384,94 +326,74 @@ class ImageHandler:
     def __init_subclass__(cls, format=None, **kwargs):
         super().__init_subclass__(**kwargs)
         if format:
-            ImageHandler._registry[format] = cls  # DERIVED
+            ImageHandler._registry[format] = cls  # DERIVED (causal)
 
 class PNGHandler(ImageHandler, format="png"):  # SOURCE
     def load(self, path): ...
 \end{verbatim}
 
-DOF = 1. The \texttt{format="png"} in the class definition is the \emph{single source}. The registry entry is \emph{derived} automatically by \texttt{\_\_init\_subclass\_\_}. Adding a new handler requires changing exactly one location.
+\textbf{Causal propagation:} When \texttt{class PNGHandler} executes, \texttt{\_\_init\_subclass\_\_} fires immediately, adding the registry entry. No temporal gap.
 
-\textbf{Java cannot achieve DOF = 1:}
+\textbf{Provenance observability:} \texttt{ImageHandler.\_\_subclasses\_\_()} returns all handlers. The derivation structure is queryable.
+
+\textbf{DOF = 1}: The \texttt{format="png"} in the class definition is the single source. The registry entry is derived causally. Adding a new handler requires changing exactly one location.
+
+\textbf{Java (DOF-1-incomplete) cannot achieve DOF = 1:}
 
 \begin{verbatim}
 // File 1: PNGHandler.java
-@Handler(format = "png")  // Annotation is METADATA, not executable
-public class PNGHandler implements ImageHandler {
-    public BufferedImage load(String path) { ... }
-}
+@Handler(format = "png")  // Metadata, not executable
+public class PNGHandler implements ImageHandler { ... }
 
-// File 2: HandlerRegistry.java (SEPARATE SOURCE!)
+// File 2: HandlerRegistry.java (SEPARATE SOURCE)
 public class HandlerRegistry {
-    static {
-        register("png", PNGHandler.class);  // Must be maintained manually
-        register("jpg", JPGHandler.class);
-        // Forgot to add TIFFHandler? Runtime error.
-    }
+    static { register("png", PNGHandler.class); }  // Manual
 }
 \end{verbatim}
 
-DOF = 2. The \texttt{@Handler(format = "png")} annotation is \emph{data}, not code. It does not execute when the class is defined. The registry must be maintained separately.
+\textbf{No causal propagation:} The \texttt{@Handler} annotation is data, not code. Nothing executes when the class is defined.
 
-\begin{theorem}[Generated Files Are Independent Encodings]\label{thm:generated-second}
-A generated source file constitutes an independent encoding, not a derivation. Therefore, code generation does not achieve DOF = 1.
+\textbf{Provenance partially present:} Java has reflection, but cannot enumerate ``all classes with \texttt{@Handler}'' without classpath scanning.
+
+\textbf{DOF = 2}: The annotation and the registry are independent encodings. Either can be modified without the other. Incoherence is reachable.
+
+\begin{theorem}[Generated Files Are Independent Sources]\label{thm:generated-second}
+A generated source file constitutes an independent encoding, not a derivation. Code generation does not achieve DOF = 1.
 \end{theorem}
 
 \begin{proof}
-Let $F$ be a structural fact (e.g., ``PNGHandler handles .png files'').
+Let $E_1$ be the annotation on \texttt{PNGHandler.java}. Let $E_2$ be the generated \texttt{HandlerRegistry.java}.
 
-Let $E_1$ be the annotation: \texttt{@Handler(format="png")} on \texttt{PNGHandler.java}.
+Test: If $E_2$ is deleted or modified, does system behavior change? \textbf{Yes}---the handler is not registered.
 
-Let $E_2$ be the generated file: \texttt{HandlerRegistry.java} containing \texttt{register("png", PNGHandler.class)}.
+Test: Can $E_2$ diverge from $E_1$? \textbf{Yes}---$E_2$ is a separate file that can be edited, fail to generate, or be stale.
 
-By Definition~\ref{def:dof}, $E_1$ and $E_2$ are both encodings of $F$ iff modifying either can change the system's behavior regarding $F$.
-
-Test: If we delete or modify \texttt{HandlerRegistry.java}, does the system's behavior change? \textbf{Yes}---the handler will not be registered.
-
-Test: If we modify the annotation, does the system's behavior change? \textbf{Yes}---the generated file will have different content.
-
-Therefore, $E_1$ and $E_2$ are independent encodings. DOF $= 2$.
-
-Formally: if an artifact $r$ is absent from the system's runtime state (cannot be queried or mutated in-process), then $\text{encodes}(r,F)$ introduces an independent degree of freedom.
-
-The fact that $E_2$ was \emph{generated from} $E_1$ does not make it a derivation, because:
+Therefore, $E_1$ and $E_2$ are independent encodings. The fact that $E_2$ was \emph{generated from} $E_1$ does not make it derived in the DOF sense, because:
 \begin{enumerate}
 \tightlist
-\item $E_2$ exists as a separate artifact that can be edited, deleted, or fail to generate
-\item $E_2$ must be separately compiled/processed
+\item $E_2$ exists as a separate artifact that can diverge
 \item The generation process is external to the runtime and can be bypassed
+\item There is no causal coupling---modification of $E_1$ does not automatically update $E_2$
 \end{enumerate}
 
-Contrast with Python, where the registry entry exists only in memory, created by the class statement itself. There is no second file. DOF $= 1$.
+Contrast with Python: the registry entry exists only in memory, created causally by the class statement. There is no second file. DOF = 1.
 \end{proof}
 
-\textbf{Why Rust proc macros don't help:}
+%==============================================================================
+\subsection{Summary: The Information-Theoretic Requirements}\label{sec:req-summary}
+%==============================================================================
 
-\begin{theorem}[Opaque Expansion Prevents Verification]\label{thm:opaque-expansion}
-If macro/template expansion is opaque at runtime, DOF = 1 cannot be verified.
-\end{theorem}
+\begin{center}
+\begin{tabular}{lp{5cm}p{5cm}}
+\toprule
+\textbf{Requirement} & \textbf{IT Interpretation} & \textbf{Why Necessary} \\
+\midrule
+Causal propagation & Channel with feedback; encoder-decoder coupling & Eliminates temporal incoherence window \\
+Provenance observability & Side information at decoder; codebook visibility & Enables DOF verification \\
+\bottomrule
+\end{tabular}
+\end{center}
 
-\begin{proof}
-Verification of DOF = 1 requires answering: ``Is every encoding of $F$ derived from the single source?''
-
-This requires enumerating all encodings. If expansion is opaque, the system cannot query what was generated.
-
-In Rust, after \texttt{\#[derive(Handler)]} expands, the program cannot ask ``what did this macro generate?'' The expansion is compiled into the binary but not introspectable.
-
-Without introspection, the system cannot verify DOF $= 1$. Optimal encoding may hold but cannot be confirmed.
-\end{proof}
-
-\textbf{The Gap is Fundamental:}
-
-The distinction is not about syntax quality or language preference. The distinction is about fundamental capabilities:
-
-\begin{itemize}
-\tightlist
-\item \textbf{Python:} Class definition \emph{executes code} that creates derived structures \emph{in runtime state}
-\item \textbf{Java:} Class definition \emph{produces metadata} that external tools process into \emph{separate files}
-\item \textbf{Rust:} Macro expansion \emph{is invisible at runtime}---verification impossible
-\end{itemize}
-
-This is a design choice with permanent consequences for realizability. No amount of engineering in Java can make the registry \emph{derived from} the class definition in the DOF = 1 sense, because Java's execution model provides no mechanism for arbitrary code execution at class definition time.
+Both requirements are necessary. Neither is sufficient alone. Together they enable DOF-1-complete encoding systems that achieve the coherence-optimal rate.
 
 %==============================================================================
