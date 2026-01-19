@@ -882,8 +882,8 @@ The FileManager provides comprehensive file and directory operations beyond basi
 .. code:: python
 
    # Backends are automatically registered when their classes are defined
-   from openhcs.io.backend_registry import StorageBackendMeta, STORAGE_BACKENDS, create_storage_registry
-   from openhcs.io.base import DataSink
+   from polystore.backend_registry import StorageBackendMeta, STORAGE_BACKENDS, create_storage_registry
+   from polystore.base import DataSink
 
    # Example backend with automatic registration
    class DiskStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
@@ -917,7 +917,7 @@ The FileManager provides comprehensive file and directory operations beyond basi
        return registry
 
    # Global singleton storage registry
-   from openhcs.io.base import storage_registry  # Created at module import
+   from polystore.base import storage_registry  # Created at module import
 
 **Lazy Backend Discovery**: The backend discovery system uses lazy imports to avoid loading GPU-heavy backends during startup:
 
@@ -941,13 +941,13 @@ The FileManager provides comprehensive file and directory operations beyond basi
        """
        # Import GPU-heavy backends directly from their modules (not via __getattr__)
        # This ensures the module is imported and metaclass registration happens
-       importlib.import_module('openhcs.io.zarr')
-       importlib.import_module('openhcs.io.napari_stream')
-       importlib.import_module('openhcs.io.fiji_stream')
+       importlib.import_module('polystore.zarr')
+       importlib.import_module('polystore.napari_stream')
+       importlib.import_module('polystore.fiji_stream')
 
 **Key Design Points**:
 
-- **Lazy Loading**: GPU-heavy backends (zarr, napari_stream, fiji_stream) are not imported during ``openhcs.io`` module load
+- **Lazy Loading**: GPU-heavy backends (zarr, napari_stream, fiji_stream) are not imported during ``polystore`` module load
 - **Explicit Discovery**: ``discover_all_backends()`` uses ``importlib.import_module()`` to trigger module imports
 - **Metaclass Registration**: Backend classes register themselves via ``StorageBackendMeta`` during module import
 - **Startup Performance**: Defers GPU library imports (ome-zarr, napari, fiji) until first use
@@ -961,11 +961,11 @@ The FileManager provides comprehensive file and directory operations beyond basi
    # Check if we're in subprocess runner mode
    if os.getenv('OPENHCS_SUBPROCESS_NO_GPU') == '1':
        # Subprocess runner mode - only import essential backends
-       from openhcs.io import disk, memory
+       from polystore import disk, memory
        # Skips: zarr, napari_stream, fiji_stream (avoid GPU library imports)
    else:
        # Normal mode - discover all backends (including GPU-heavy ones)
-       from openhcs.io.backend_registry import discover_all_backends
+       from polystore.backend_registry import discover_all_backends
        discover_all_backends()
 
 This prevents GPU library imports in subprocess workers, which is critical for multiprocessing execution where worker processes don't need GPU access.

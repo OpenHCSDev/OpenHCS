@@ -413,8 +413,8 @@ Complete Workflow
 
 .. code-block:: python
 
-   from openhcs.io.omero_local import OMEROLocalBackend
-   from openhcs.io.base import storage_registry
+   from polystore.omero_local import OMEROLocalBackend
+   from polystore.base import storage_registry
    from openhcs.microscopes.omero import OMEROHandler
    from openhcs.runtime.omero_instance_manager import OMEROInstanceManager
    from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator

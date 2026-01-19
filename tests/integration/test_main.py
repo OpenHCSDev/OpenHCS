@@ -375,7 +375,7 @@ def _create_pipeline_config(test_config: TestConfig) -> GlobalPipelineConfig:
 
 def _initialize_orchestrator(test_config: TestConfig, sequential_config=None) -> PipelineOrchestrator:
     """Initialize and configure the pipeline orchestrator."""
-    from openhcs.io.base import reset_memory_backend
+    from polystore.base import reset_memory_backend
     reset_memory_backend()
 
     setup_global_gpu_registry()
@@ -388,8 +388,8 @@ def _initialize_orchestrator(test_config: TestConfig, sequential_config=None) ->
     omero_manager = None
     if test_config.is_omero:
         from openhcs.runtime.omero_instance_manager import OMEROInstanceManager
-        from openhcs.io.omero_local import OMEROLocalBackend
-        from openhcs.io.base import storage_registry
+        from polystore.omero_local import OMEROLocalBackend
+        from polystore.base import storage_registry
 
         # Connect to OMERO
         omero_manager = OMEROInstanceManager()
@@ -733,7 +733,7 @@ def _test_main_with_code_serialization(plate_dir: Union[Path, str, int], backend
     print(f"{CONSTANTS.START_INDICATOR} [CODE SERIALIZATION TEST] with plate: {plate_dir}, backend: {backend_config}, mode: {execution_mode}, zmq: {zmq_execution_mode}")
 
     # Step 1: Create objects normally
-    from openhcs.io.base import reset_memory_backend
+    from polystore.base import reset_memory_backend
     reset_memory_backend()
     setup_global_gpu_registry()
 

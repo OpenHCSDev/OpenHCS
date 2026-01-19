@@ -57,7 +57,7 @@ Basic Usage
 .. code-block:: python
 
    from openhcs.runtime.omero_instance_manager import OMEROInstanceManager
-   from openhcs.io.omero_local import OMEROLocalBackend
+   from polystore.omero_local import OMEROLocalBackend
    from openhcs.core.orchestrator import PipelineOrchestrator
    
    # Connect to OMERO

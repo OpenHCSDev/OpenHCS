@@ -253,7 +253,7 @@ def cleanup_backend_connections():
 
     # Clean up connections after test completes
     try:
-        from openhcs.io import cleanup_backend_connections
+        from polystore import cleanup_backend_connections
         cleanup_backend_connections()
     except Exception as e:
         # Don't fail tests due to cleanup issues
