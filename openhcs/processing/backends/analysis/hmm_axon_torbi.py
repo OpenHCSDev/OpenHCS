@@ -155,13 +155,27 @@ def materialize_trace_visualizations(data: List[np.ndarray], path: str, filemana
 
     return summary_path
 
-# Import alvahmm - use torbi version from GitHub dependency
+# Import alvahmm - use torbi version from GitHub dependency.
+#
+# IMPORTANT: This module registers materializers at import time. If an optional
+# dependency is partially installed (e.g., alva_machinery imports but its
+# submodules are missing), we must NOT raise during import, otherwise:
+#   1) the materializer may be registered,
+#   2) the module import fails and is removed from sys.modules,
+#   3) a later import retries and attempts to register again -> ValueError,
+#      which can break registry discovery globally.
 alva_machinery = optional_import("alva_machinery")
 if alva_machinery:
-    from alva_machinery.markov import aChain_torbi as alva_MCMC_torbi
-    from alva_machinery.markov import aChain as alva_MCMC
-    from alva_machinery.branching import aWay as alva_branch
-    ALVA_AVAILABLE = True
+    try:
+        from alva_machinery.markov import aChain_torbi as alva_MCMC_torbi
+        from alva_machinery.markov import aChain as alva_MCMC
+        from alva_machinery.branching import aWay as alva_branch
+        ALVA_AVAILABLE = True
+    except Exception:
+        ALVA_AVAILABLE = False
+        alva_MCMC_torbi = None
+        alva_MCMC = None
+        alva_branch = None
 else:
     ALVA_AVAILABLE = False
     alva_MCMC_torbi = None
@@ -477,7 +491,7 @@ def create_visualization_array(
 )
 @torch_func
 def trace_neurites_rrs_alva_torbi(
-    image_stack: torch.Tensor,
+    image_stack: "torch.Tensor",
     seeding_method: SeedingMethod = SeedingMethod.BLOB_DETECTION,
     return_trace_visualizations: bool = False,
     trace_visualization_mode: VisualizationMode = VisualizationMode.TRACE_ONLY,
@@ -491,7 +505,7 @@ def trace_neurites_rrs_alva_torbi(
     threshold: float = 0.02,
     normalize_image: bool = False,
     percentile: float = 99.9
-) -> Tuple[torch.Tensor, Dict[str, Any], List[np.ndarray]]:
+) -> "Tuple[torch.Tensor, Dict[str, Any], List[np.ndarray]]":
     """
     Trace neurites using the alvahmm RRS algorithm with torbi GPU acceleration.
 
