@@ -27,21 +27,22 @@ os.environ.setdefault("POLYSTORE_ZMQ_ACK_PORT", "7555")
 if os.getenv("OPENHCS_SUBPROCESS_NO_GPU") == "1":
     os.environ.setdefault("POLYSTORE_SUBPROCESS_NO_GPU", "1")
 
-# Prefer local polystore checkout when running from source
+# Prefer local external package checkouts when running from source
 _repo_root = Path(__file__).resolve().parent.parent
-_polystore_src = _repo_root / "external" / "PolyStore" / "src"
-if _polystore_src.exists() and str(_polystore_src) not in sys.path:
-    sys.path.insert(0, str(_polystore_src))
-
-# Prefer local ObjectState checkout when running from source
-_objectstate_src = _repo_root / "external" / "ObjectState" / "src"
-if _objectstate_src.exists() and str(_objectstate_src) not in sys.path:
-    sys.path.insert(0, str(_objectstate_src))
-
-# Prefer local pyqt-reactor checkout when running from source
-_pyqt_reactor_src = _repo_root / "external" / "pyqt-reactor" / "src"
-if _pyqt_reactor_src.exists() and str(_pyqt_reactor_src) not in sys.path:
-    sys.path.insert(0, str(_pyqt_reactor_src))
+_external_root = _repo_root / "external"
+if _external_root.exists():
+    for _pkg_dir in sorted(_external_root.iterdir()):
+        if not _pkg_dir.is_dir():
+            continue
+        _src_dir = _pkg_dir / "src"
+        if not _src_dir.is_dir():
+            continue
+        # Only add src dirs that look like packages (contain at least one __init__.py)
+        if not any((p / "__init__.py").is_file() for p in _src_dir.iterdir() if p.is_dir()):
+            continue
+        _src_str = str(_src_dir)
+        if _src_str not in sys.path:
+            sys.path.insert(0, _src_str)
 
 # Force UTF-8 encoding for stdout/stderr on Windows
 # This ensures emoji and Unicode characters work in console output
