@@ -55,9 +55,14 @@ class OpenHCSExecutionServer(ExecutionServer):
         logger.info("[%s] Starting plate %s", execution_id, plate_id)
 
         import openhcs.processing.func_registry as func_registry_module
+        logger.info("[%s] Registry initialized status BEFORE check: %s", execution_id, func_registry_module._registry_initialized)
         with func_registry_module._registry_lock:
             if not func_registry_module._registry_initialized:
+                logger.info("[%s] Initializing registry...", execution_id)
                 func_registry_module._auto_initialize_registry()
+                logger.info("[%s] Registry initialized status AFTER init: %s", execution_id, func_registry_module._registry_initialized)
+            else:
+                logger.info("[%s] Registry already initialized, skipping", execution_id)
 
         namespace = {}
         exec(pipeline_code, namespace)

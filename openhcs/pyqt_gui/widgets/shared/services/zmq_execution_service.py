@@ -228,9 +228,17 @@ class ZMQExecutionService:
                                 self._check_all_completed()
                                 break
                             elif exec_status == 'failed':
-                                logger.info(f"❌ Execution failed: {plate_path}")
+                                error_msg = execution.get('error', 'Unknown error')
+                                traceback_str = execution.get('traceback', '')
+
+                                # Log full traceback if available
+                                if traceback_str:
+                                    logger.error(f"❌ Execution failed: {plate_path}\n{traceback_str}")
+                                else:
+                                    logger.error(f"❌ Execution failed: {plate_path}: {error_msg}")
+
                                 result = {'status': 'error', 'execution_id': execution_id,
-                                          'message': execution.get('error')}
+                                          'message': error_msg, 'traceback': traceback_str}
                                 self.host.on_plate_completed(plate_path, 'failed', result)
                                 self._check_all_completed()
                                 break

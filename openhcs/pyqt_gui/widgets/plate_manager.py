@@ -720,7 +720,16 @@ class PlateManagerWidget(AbstractManagerWidget):
                 new_state = OrchestratorState.READY
             else:
                 self.plate_execution_states[plate_path] = "failed"
-                self.execution_error.emit(f"Execution failed for {plate_path}: {result.get('message', 'Unknown error')}")
+                error_msg = result.get('message', 'Unknown error')
+                traceback_str = result.get('traceback', '')
+
+                # Include traceback in error message if available
+                if traceback_str:
+                    full_error = f"Execution failed for {plate_path}:\n\n{traceback_str}"
+                else:
+                    full_error = f"Execution failed for {plate_path}: {error_msg}"
+
+                self.execution_error.emit(full_error)
                 new_state = OrchestratorState.EXEC_FAILED
 
             orchestrator = ObjectStateRegistry.get_object(plate_path)

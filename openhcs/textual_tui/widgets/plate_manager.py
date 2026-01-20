@@ -798,8 +798,15 @@ class PlateManagerWidget(ButtonListWidget):
 
                 if response.get('status') != 'complete':
                     error_msg = response.get('message', 'Unknown error')
-                    logger.error(f"Plate {plate_path} execution failed: {error_msg}")
-                    self.app.show_error(f"Execution failed for {plate_path}: {error_msg}")
+                    traceback_str = response.get('traceback', '')
+
+                    # Log full traceback if available
+                    if traceback_str:
+                        logger.error(f"Plate {plate_path} execution failed:\n{traceback_str}")
+                        self.app.show_error(f"Execution failed for {plate_path}:\n\n{traceback_str}")
+                    else:
+                        logger.error(f"Plate {plate_path} execution failed: {error_msg}")
+                        self.app.show_error(f"Execution failed for {plate_path}: {error_msg}")
 
             # Execution complete
             self.current_execution_id = None

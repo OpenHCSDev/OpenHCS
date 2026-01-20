@@ -225,12 +225,10 @@ def get_all_streaming_ports(
             else:
                 port = None
 
-            # Fail-loud if we couldn't determine the port
+            # Skip streaming configs that aren't configured
+            # (None = not configured, don't scan this port)
             if port is None:
-                raise ValueError(
-                    f"Streaming config field '{field.name}' (type {field_type.__name__}) has no port. "
-                    f"Could not find port in config instance or global config."
-                )
+                continue
 
             # Generate port range for this streaming type
             ports.extend([port + i for i in range(num_ports_per_type)])
