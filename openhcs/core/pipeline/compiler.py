@@ -184,7 +184,7 @@ def _get_function_reference(func):
                 # Note: __special_* use double underscores which violates Python convention (should be single
                 # underscore for private attributes). This is technical debt to be fixed later.
                 preserved_attrs = {}
-                for attr in ['__special_inputs__', '__special_outputs__', '__materialization_functions__',
+                for attr in ['__special_inputs__', '__special_outputs__', '__materialization_specs__',
                              'input_memory_type', 'output_memory_type', '__name__', '__module__']:
                     if hasattr(func, attr):
                         try:

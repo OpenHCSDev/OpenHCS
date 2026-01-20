@@ -17,6 +17,9 @@ from skimage.filters import median, threshold_li
 from skimage.morphology import skeletonize
 from openhcs.core.memory import torch as torch_func
 from openhcs.core.pipeline.function_contracts import special_outputs
+from openhcs.processing.materialization import register_materializer, materializer_spec, tiff_stack_materializer
+from openhcs.processing.materialization.core import _generate_output_path
+from openhcs.constants.constants import Backend
 
 # Import torch using the established optional import pattern
 from openhcs.core.utils import optional_import
@@ -26,11 +29,15 @@ from openhcs.core.lazy_gpu_imports import torch
 torbi = optional_import("torbi")
 
 
+@register_materializer("hmm_analysis_torbi")
 def materialize_hmm_analysis(
     hmm_analysis_data: Dict[str, Any],
     path: str,
     filemanager,
-    **kwargs
+    backends,
+    backend_kwargs: dict = None,
+    spec=None,
+    context=None
 ) -> str:
     """
     Materialize HMM neurite tracing analysis results to disk.
@@ -52,10 +59,16 @@ def materialize_hmm_analysis(
     import json
     import networkx as nx
     from pathlib import Path
-    from openhcs.constants.constants import Backend
+    # Backends are required to be disk-only for GraphML output
+    if isinstance(backends, str):
+        backends = [backends]
+    backend_kwargs = backend_kwargs or {}
+    for backend in backends:
+        if backend != Backend.DISK.value:
+            raise ValueError("hmm_analysis requires disk backend for GraphML output")
 
     # Generate output file paths
-    base_path = path.replace('.pkl', '')
+    base_path = _generate_output_path(path, "", "", strip_roi=False)
     json_path = f"{base_path}.json"
     graphml_path = f"{base_path}_graph.graphml"
     csv_path = f"{base_path}_edges.csv"
@@ -454,7 +467,13 @@ def create_visualization_array(
     else:
         raise ValueError(f"Unknown visualization mode: {mode}")
 
-@special_outputs(("hmm_analysis", materialize_hmm_analysis), ("trace_visualizations", materialize_trace_visualizations))
+@special_outputs(
+    ("hmm_analysis", materializer_spec("hmm_analysis_torbi", allowed_backends=[Backend.DISK.value])),
+    ("trace_visualizations", tiff_stack_materializer(
+        normalize_uint8=True,
+        summary_suffix="_trace_summary.txt"
+    ))
+)
 @torch_func
 def trace_neurites_rrs_alva_torbi(
     image_stack: torch.Tensor,
@@ -638,4 +657,3 @@ def process_file_legacy(filename, input_folder, output_folder, **kwargs):
         "Legacy file-based processing not supported in OpenHCS. "
         "Use trace_neurites_rrs_alva() for array-in/array-out processing."
     )
-

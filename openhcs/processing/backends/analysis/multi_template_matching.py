@@ -22,6 +22,7 @@ except ImportError:
 
 from openhcs.core.memory import numpy as numpy_func
 from openhcs.core.pipeline.function_contracts import special_outputs
+from openhcs.processing.materialization import register_materializer, materializer_spec
 
 @dataclass
 class TemplateMatchResult:
@@ -35,7 +36,16 @@ class TemplateMatchResult:
     best_rotation_angle: float  # Angle of best matching template
     error_message: Optional[str] = None
 
-def materialize_mtm_match_results(data: List[TemplateMatchResult], path: str, filemanager, backends: Union[str, List[str]], backend_kwargs: dict = None) -> str:
+@register_materializer("mtm_match_results")
+def materialize_mtm_match_results(
+    data: List[TemplateMatchResult],
+    path: str,
+    filemanager,
+    backends: Union[str, List[str]],
+    backend_kwargs: dict = None,
+    spec=None,
+    context=None
+) -> str:
     """Materialize MTM match results as analysis-ready CSV with confidence analysis.
 
     Args:
@@ -148,7 +158,7 @@ def materialize_mtm_match_results(data: List[TemplateMatchResult], path: str, fi
 
 
 @numpy_func
-@special_outputs(("match_results", materialize_mtm_match_results))
+@special_outputs(("match_results", materializer_spec("mtm_match_results")))
 def multi_template_crop_reference_channel(
     image_stack: np.ndarray,
     template_path: str,
@@ -318,7 +328,7 @@ def multi_template_crop_reference_channel(
 
 
 @numpy_func
-@special_outputs("match_results")
+@special_outputs(("match_results", materializer_spec("mtm_match_results")))
 def multi_template_crop_subset(
     image_stack: np.ndarray,
     template_path: str,
@@ -467,7 +477,7 @@ def multi_template_crop_subset(
 
 
 @numpy_func
-@special_outputs("match_results")
+@special_outputs(("match_results", materializer_spec("mtm_match_results")))
 def multi_template_crop(
     image_stack: np.ndarray,
     template_path: str,

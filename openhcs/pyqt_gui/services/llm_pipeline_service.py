@@ -339,10 +339,10 @@ import numpy as np
 from skimage.measure import label
 from openhcs.core.memory import numpy
 from openhcs.core.pipeline.function_contracts import special_outputs
-from openhcs.processing.backends.analysis.cell_counting_cpu import materialize_segmentation_masks
+from openhcs.processing.materialization import roi_zip_materializer
 
 @numpy
-@special_outputs(("segmentation_masks", materialize_segmentation_masks))
+@special_outputs(("segmentation_masks", roi_zip_materializer()))
 def segment_cells_with_rois(
     image,
     threshold: float = 0.5
@@ -366,7 +366,7 @@ from skimage.measure import label, regionprops
 from openhcs.core.memory import numpy
 from openhcs.core.pipeline.function_contracts import special_outputs
 from openhcs.processing.materialization import csv_materializer
-from openhcs.processing.backends.analysis.cell_counting_cpu import materialize_segmentation_masks
+from openhcs.processing.materialization import roi_zip_materializer
 
 @dataclass
 class CellStats:
@@ -377,7 +377,7 @@ class CellStats:
 @numpy
 @special_outputs(
     ("cell_stats", csv_materializer(fields=["slice_index", "cell_count", "avg_area"], analysis_type="cell_stats")),
-    ("segmentation_masks", materialize_segmentation_masks)
+    ("segmentation_masks", roi_zip_materializer())
 )
 def analyze_cells_full(
     image,
@@ -417,7 +417,7 @@ import pyclesperanto as cle
 from openhcs.core.memory import pyclesperanto
 from openhcs.core.pipeline.function_contracts import special_outputs
 from openhcs.processing.materialization import csv_materializer
-from openhcs.processing.backends.analysis.cell_counting_cpu import materialize_segmentation_masks
+from openhcs.processing.materialization import roi_zip_materializer
 
 @dataclass
 class CellStats:
@@ -429,7 +429,7 @@ class CellStats:
 @pyclesperanto
 @special_outputs(
     ("cell_stats", csv_materializer(fields=["slice_index", "cell_count", "total_area", "mean_intensity"], analysis_type="cell_stats")),
-    ("segmentation_masks", materialize_segmentation_masks)
+    ("segmentation_masks", roi_zip_materializer())
 )
 def count_cells_gpu(
     image,
@@ -490,7 +490,7 @@ from cucim.skimage.measure import label, regionprops_table
 from openhcs.core.memory import cupy
 from openhcs.core.pipeline.function_contracts import special_outputs
 from openhcs.processing.materialization import csv_materializer
-from openhcs.processing.backends.analysis.cell_counting_cpu import materialize_segmentation_masks
+from openhcs.processing.materialization import roi_zip_materializer
 
 @dataclass
 class CellStats:
@@ -502,7 +502,7 @@ class CellStats:
 @cupy
 @special_outputs(
     ("cell_stats", csv_materializer(fields=["slice_index", "cell_count", "total_area", "mean_intensity"], analysis_type="cell_stats")),
-    ("segmentation_masks", materialize_segmentation_masks)
+    ("segmentation_masks", roi_zip_materializer())
 )
 def count_cells_cupy(
     image,
@@ -572,11 +572,13 @@ from openhcs.core.memory import numpy, pyclesperanto, cupy
 # Special outputs/inputs (for analysis functions)
 from openhcs.core.pipeline.function_contracts import special_outputs, special_inputs
 
-# Materializers for CSV/JSON
-from openhcs.processing.materialization import csv_materializer, json_materializer, dual_materializer
-
-# ROI materializer (for segmentation masks -> ImageJ ROIs)
-from openhcs.processing.backends.analysis.cell_counting_cpu import materialize_segmentation_masks
+# Materializers for CSV/JSON and ROI outputs
+from openhcs.processing.materialization import (
+    csv_materializer,
+    json_materializer,
+    dual_materializer,
+    roi_zip_materializer
+)
 
 # Standard library (include as needed)
 from dataclasses import dataclass
@@ -586,22 +588,25 @@ import numpy as np'''
     def _get_dynamic_materializers_section(self) -> str:
         """Generate materializers section with signatures from actual code."""
         try:
-            from openhcs.processing.materialization import csv_materializer, json_materializer, dual_materializer
+            from openhcs.processing.materialization import csv_materializer, json_materializer, dual_materializer, roi_zip_materializer
             import inspect
 
             csv_sig = str(inspect.signature(csv_materializer))
             json_sig = str(inspect.signature(json_materializer))
             dual_sig = str(inspect.signature(dual_materializer))
+            roi_sig = str(inspect.signature(roi_zip_materializer))
 
             return f'''=== MATERIALIZER SIGNATURES ===
 csv_materializer{csv_sig}
 json_materializer{json_sig}
-dual_materializer{dual_sig}'''
+dual_materializer{dual_sig}
+roi_zip_materializer{roi_sig}'''
         except Exception:
             return '''=== MATERIALIZERS ===
-csv_materializer(fields: List[str], analysis_type: str, filename_suffix: str = ".csv")
-json_materializer(fields: List[str], analysis_type: str, filename_suffix: str = ".json")
-dual_materializer(fields: List[str], summary_fields: List[str], analysis_type: str)'''
+csv_materializer(fields: List[str], analysis_type: str, filename_suffix: str = ".csv", strip_roi_suffix: bool = False)
+json_materializer(fields: List[str], analysis_type: str, filename_suffix: str = ".json", strip_roi_suffix: bool = False)
+dual_materializer(fields: List[str], summary_fields: List[str], analysis_type: str, strip_roi_suffix: bool = False)
+roi_zip_materializer(min_area: int = 10, extract_contours: bool = True, strip_roi_suffix: bool = False)'''
 
     def _get_pyclesperanto_function_docs(self) -> str:
         """Get pyclesperanto functions dynamically if available."""

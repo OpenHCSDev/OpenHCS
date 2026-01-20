@@ -17,6 +17,7 @@ import logging
 # OpenHCS imports
 from openhcs.core.memory import numpy as numpy_func
 from openhcs.core.pipeline.function_contracts import special_outputs
+from openhcs.processing.materialization import register_materializer, materializer_spec, tiff_stack_materializer
 from polystore.roi import ROI
 
 logger = logging.getLogger(__name__)
@@ -43,12 +44,15 @@ class AnalysisDimension(Enum):
     THREE_D = "3d"
 
 
+@register_materializer("axon_analysis_skan")
 def materialize_axon_analysis(
     axon_analysis_data: Dict[str, Any],
     path: str,
     filemanager,
     backends,
-    backend_kwargs: dict = None
+    backend_kwargs: dict = None,
+    spec=None,
+    context=None
 ) -> str:
     """
     Materialize axon analysis results to disk using filemanager.
@@ -152,7 +156,7 @@ def materialize_axon_analysis(
 
 
 def materialize_skeleton_visualizations(data: List[np.ndarray], path: str, filemanager, backends, backend_kwargs: dict = None) -> str:
-    """Materialize skeleton visualizations as individual TIFF files."""
+    """Materialize skeleton visualizations as individual TIFF files (legacy)."""
 
     # Normalize backends to list
     if isinstance(backends, str):
@@ -210,7 +214,16 @@ def materialize_skeleton_visualizations(data: List[np.ndarray], path: str, filem
     return summary_path
 
 
-def materialize_skeleton_rois(skeleton_mask, path: str, filemanager, backends, backend_kwargs: dict = None) -> str:
+@register_materializer("skeleton_rois_skan")
+def materialize_skeleton_rois(
+    skeleton_mask,
+    path: str,
+    filemanager,
+    backends,
+    backend_kwargs: dict = None,
+    spec=None,
+    context=None
+) -> str:
     """
     Materialize skeleton mask as label image AND ROI ZIP files.
 
@@ -301,9 +314,12 @@ def materialize_skeleton_rois(skeleton_mask, path: str, filemanager, backends, b
 
 
 @special_outputs(
-    ("axon_analysis", materialize_axon_analysis),
-    ("skeleton_visualizations", materialize_skeleton_visualizations),
-    ("skeleton_masks", materialize_skeleton_rois)  # Mask output gets converted to ROIs
+    ("axon_analysis", materializer_spec("axon_analysis_skan")),
+    ("skeleton_visualizations", tiff_stack_materializer(
+        normalize_uint8=True,
+        summary_suffix="_skeleton_summary.txt"
+    )),
+    ("skeleton_masks", materializer_spec("skeleton_rois_skan"))  # Mask output gets converted to ROIs
 )
 @numpy_func
 def skan_axon_skeletonize_and_analyze(

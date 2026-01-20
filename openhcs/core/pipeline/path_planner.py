@@ -53,7 +53,7 @@ def extract_attributes(pattern: Any) -> Dict[str, Any]:
     """Extract special I/O metadata and track per-group ownership."""
     output_names: Set[str] = set()
     output_groups: Dict[str, Set[Optional[str]]] = defaultdict(set)
-    inputs, mat_funcs = {}, {}
+    inputs, mat_specs = {}, {}
 
     for func, group_key, _ in normalize_pattern(pattern):
         normalized_key = None if group_key == "default" else group_key
@@ -64,7 +64,7 @@ def extract_attributes(pattern: Any) -> Dict[str, Any]:
             output_groups[output].add(normalized_key)
 
         inputs.update(getattr(func, '__special_inputs__', {}))
-        mat_funcs.update(getattr(func, '__materialization_functions__', {}))
+        mat_specs.update(getattr(func, '__materialization_specs__', {}))
 
     return {
         'outputs': {
@@ -72,7 +72,7 @@ def extract_attributes(pattern: Any) -> Dict[str, Any]:
             'groups': output_groups
         },
         'inputs': inputs,
-        'mat_funcs': mat_funcs
+        'mat_specs': mat_specs
     }
 
 
@@ -253,13 +253,13 @@ class PathPlanner:
                     'groups': default_groups
                 },
                 'inputs': self._normalize_attr(getattr(step, 'special_inputs', {}), dict),
-                'mat_funcs': {}
+                'mat_specs': {}
             }
 
         # Process special I/O with unified logic
         special_outputs = self._process_special(
             attrs['outputs']['names'],
-            attrs['mat_funcs'],
+            attrs['mat_specs'],
             'output',
             sid,
             attrs['outputs'].get('groups'),
@@ -493,7 +493,7 @@ class PathPlanner:
                 paths_by_group = self._build_paths_by_group(str(path), normalized_groups)
                 result[key] = {
                     'path': str(path),
-                    'materialization_function': extra.get(key),  # extra is mat_funcs
+                    'materialization_spec': extra.get(key),  # extra is mat_specs
                     'group_keys': normalized_groups,
                     'paths_by_group': paths_by_group
                 }

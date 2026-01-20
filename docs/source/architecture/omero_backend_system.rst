@@ -335,7 +335,7 @@ This pattern eliminates data transfer bottlenecks by processing data where it li
 Backend Parameter Propagation
 ------------------------------
 
-All analysis materialization functions accept a ``backend`` parameter to enable saving to any backend:
+All analysis materialization handlers accept a ``backend``/``backends`` parameter to enable saving to any backend:
 
 .. code-block:: python
 

@@ -1375,13 +1375,6 @@ class FunctionStep(AbstractStep):
         """Materialize special outputs (ROIs, cell counts) to disk and streaming backends."""
         # Collect backends: main + streaming
         from openhcs.core.config import StreamingConfig
-        from polystore.backend_registry import STORAGE_BACKENDS
-        
-        # Special outputs (ROIs, CSVs, visualizations) are arbitrary file formats
-        # Check if the backend class supports them using capability checking
-        backend_class = STORAGE_BACKENDS.get(backend.lower())
-        if backend_class and not backend_class.supports_arbitrary_files:
-            backend = Backend.DISK.value
         
         backends = [backend]
         backend_kwargs = {backend: {}}
@@ -1407,8 +1400,8 @@ class FunctionStep(AbstractStep):
         # Get dict pattern info
         # Materialize each special output
         for output_key, output_info in special_outputs.items():
-            mat_func = output_info.get('materialization_function')
-            if not mat_func:
+            mat_spec = output_info.get('materialization_spec')
+            if not mat_spec:
                 continue
 
             memory_path = output_info['path']
@@ -1444,7 +1437,16 @@ class FunctionStep(AbstractStep):
                 analysis_path = analysis_output_dir / filename
 
                 # Materialize to all backends
-                mat_func(data, str(analysis_path), filemanager, backends, backend_kwargs)
+                from openhcs.processing.materialization import materialize
+                materialize(
+                    mat_spec,
+                    data,
+                    str(analysis_path),
+                    filemanager,
+                    backends,
+                    backend_kwargs,
+                    context=context
+                )
 
 
 def _update_metadata_for_zarr_conversion(

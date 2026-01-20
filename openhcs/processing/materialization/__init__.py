@@ -7,8 +7,8 @@ analysis results (dataclasses, dicts, arrays) into serialized formats
 
 Architecture:
     - MaterializationSpec: Declarative spec for how to serialize a type
-    - create_materializer(): Factory that creates mat funcs from specs
-    - Built-in specs for common patterns (csv_rows, json_summary, roi_archive)
+    - MaterializationRegistry + materialize(): Registry + dispatcher for specs
+    - Built-in spec builders for common patterns (csv/json/dual/roi/tiff)
 
 Usage:
     from openhcs.processing.materialization import csv_materializer, json_materializer
@@ -23,16 +23,26 @@ Usage:
 
 from openhcs.processing.materialization.core import (
     MaterializationSpec,
-    create_materializer,
+    MaterializationRegistry,
+    register_materializer,
+    materialize,
     csv_materializer,
     json_materializer,
     dual_materializer,
+    roi_zip_materializer,
+    tiff_stack_materializer,
+    materializer_spec,
 )
 
 __all__ = [
     "MaterializationSpec",
-    "create_materializer", 
+    "MaterializationRegistry",
+    "register_materializer",
+    "materialize",
     "csv_materializer",
     "json_materializer",
     "dual_materializer",
+    "roi_zip_materializer",
+    "tiff_stack_materializer",
+    "materializer_spec",
 ]
