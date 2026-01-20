@@ -53,7 +53,8 @@ def materialize_consolidated_summary(
     backends,
     backend_kwargs: dict = None,
     spec=None,
-    context=None
+    context=None,
+    extra_inputs: dict | None = None,
 ) -> str:
     """
     Materialize consolidated summary data to CSV file.
@@ -109,7 +110,8 @@ def materialize_detailed_report(
     backends,
     backend_kwargs: dict = None,
     spec=None,
-    context=None
+    context=None,
+    extra_inputs: dict | None = None,
 ) -> str:
     """
     Materialize detailed analysis report to text file.

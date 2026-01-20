@@ -37,7 +37,8 @@ def materialize_hmm_analysis(
     backends,
     backend_kwargs: dict = None,
     spec=None,
-    context=None
+    context=None,
+    extra_inputs: dict | None = None,
 ) -> str:
     """
     Materialize HMM neurite tracing analysis results to disk.

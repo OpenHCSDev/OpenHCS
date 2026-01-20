@@ -1398,6 +1398,88 @@ class FunctionStep(AbstractStep):
         filemanager._materialization_context = {'images_dir': images_dir}
 
         # Get dict pattern info
+        def _resolve_materializer_inputs(mat_spec, *, dict_key):
+            options = getattr(mat_spec, "options", {}) or {}
+            inputs_spec = options.get("inputs") or {}
+            if not inputs_spec:
+                return {}
+            if not isinstance(inputs_spec, dict):
+                raise ValueError(
+                    f"MaterializationSpec.options['inputs'] must be a dict, got {type(inputs_spec)}"
+                )
+
+            resolved: Dict[str, Any] = {}
+
+            for input_name, input_desc in inputs_spec.items():
+                if not isinstance(input_desc, dict):
+                    raise ValueError(
+                        f"Materialization input '{input_name}' must be a dict, got {type(input_desc)}"
+                    )
+
+                kind = input_desc.get("kind")
+                if kind != "image_slices":
+                    raise ValueError(
+                        f"Unsupported materialization input kind for '{input_name}': {kind}. "
+                        "Supported kinds: 'image_slices'."
+                    )
+
+                source = input_desc.get("source")
+                if source == "step_input":
+                    source_dir = step_plan["input_dir"]
+                    source_backend = step_plan.get("read_backend", Backend.MEMORY.value)
+                elif source == "step_output":
+                    source_dir = step_plan["output_dir"]
+                    source_backend = Backend.MEMORY.value
+                else:
+                    raise ValueError(
+                        f"Unsupported materialization input source for '{input_name}': {source}. "
+                        "Supported sources: 'step_input', 'step_output'."
+                    )
+
+                get_paths_for_axis = step_plan.get("get_paths_for_axis")
+                if get_paths_for_axis is None:
+                    raise ValueError("Step plan missing get_paths_for_axis (cannot resolve materializer inputs)")
+
+                paths = get_paths_for_axis(source_dir, source_backend)
+
+                # Optional grouping filter (only when this materialization invocation is group-specific)
+                if dict_key is not None:
+                    group_by_key = input_desc.get("group_by")
+                    if group_by_key is None:
+                        group_by = step_plan.get("group_by")
+                        if group_by is not None and getattr(group_by, "value", None) is not None:
+                            group_by_key = str(group_by.value)
+
+                    if group_by_key is None:
+                        raise ValueError(
+                            f"Cannot resolve materialization input '{input_name}' for group '{dict_key}': "
+                            "no group_by specified in the input spec and step_plan['group_by'] is NONE."
+                        )
+                    if context is None:
+                        raise ValueError(
+                            f"Cannot resolve materialization input '{input_name}' for group '{dict_key}': "
+                            "context is required for filename parsing."
+                        )
+
+                    parser = context.microscope_handler.parser
+                    filtered_paths = []
+                    for p in paths:
+                        filename = Path(p).name
+                        metadata = parser.parse_filename(filename)
+                        if metadata and str(metadata.get(group_by_key)) == str(dict_key):
+                            filtered_paths.append(p)
+                    paths = filtered_paths
+
+                if not paths:
+                    raise ValueError(
+                        f"Materialization input '{input_name}' resolved to 0 paths "
+                        f"(source={source}, dir={source_dir}, backend={source_backend}, group={dict_key})."
+                    )
+
+                resolved[input_name] = filemanager.load_batch(paths, source_backend)
+
+            return resolved
+
         # Materialize each special output
         for output_key, output_info in special_outputs.items():
             mat_spec = output_info.get('materialization_spec')
@@ -1438,6 +1520,7 @@ class FunctionStep(AbstractStep):
 
                 # Materialize to all backends
                 from openhcs.processing.materialization import materialize
+                extra_inputs = _resolve_materializer_inputs(mat_spec, dict_key=dict_key)
                 materialize(
                     mat_spec,
                     data,
@@ -1445,7 +1528,8 @@ class FunctionStep(AbstractStep):
                     filemanager,
                     backends,
                     backend_kwargs,
-                    context=context
+                    context=context,
+                    extra_inputs=extra_inputs,
                 )
 
 

@@ -359,49 +359,40 @@ def segment_cells_with_rois(
 
 === FUNCTION WITH BOTH CSV AND ROI OUTPUT ===
 ```python
-from dataclasses import dataclass
 from typing import List, Tuple
 import numpy as np
-from skimage.measure import label, regionprops
+from skimage.measure import label
 from openhcs.core.memory import numpy
 from openhcs.core.pipeline.function_contracts import special_outputs
-from openhcs.processing.materialization import csv_materializer
-from openhcs.processing.materialization import roi_zip_materializer
-
-@dataclass
-class CellStats:
-    slice_index: int
-    cell_count: int
-    avg_area: float
+from openhcs.processing.materialization import regionprops_materializer
 
 @numpy
 @special_outputs(
-    ("cell_stats", csv_materializer(fields=["slice_index", "cell_count", "avg_area"], analysis_type="cell_stats")),
-    ("segmentation_masks", roi_zip_materializer())
+    # One special output can materialize multiple artifacts:
+    # - ROI zip for Fiji + shapes for Napari
+    # - CSV details table
+    # - JSON summary
+    ("segmentation_masks", regionprops_materializer(
+        analysis_type="segmentation_regionprops",
+        min_area=50,
+        require_intensity=True,
+        intensity_source="step_output",
+    ))
 )
 def analyze_cells_full(
     image,
-    threshold: float = 0.5,
-    min_area: int = 50
-) -> Tuple[np.ndarray, List[CellStats], List[np.ndarray]]:
-    """Full cell analysis with CSV stats and ROI output."""
-    stats = []
-    masks = []
+    threshold: float = 0.5
+) -> Tuple[np.ndarray, List[np.ndarray]]:
+    """Segmentation + rich materialization (ROIs + metrics) from labeled masks."""
+    masks: List[np.ndarray] = []
 
     for i, slice_2d in enumerate(image):
         binary = slice_2d > (np.max(slice_2d) * threshold)
         labeled = label(binary)
-        props = [p for p in regionprops(labeled) if p.area >= min_area]
-
-        stats.append(CellStats(
-            slice_index=i,
-            cell_count=len(props),
-            avg_area=float(np.mean([p.area for p in props])) if props else 0.0
-        ))
         masks.append(labeled)
 
-    # 2 special_outputs -> return (image, output1, output2)
-    return image, stats, masks
+    # 1 special_output -> return (image, masks)
+    return image, masks
 ```
 
 {materializers_section}

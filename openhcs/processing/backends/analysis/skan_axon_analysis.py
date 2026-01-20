@@ -18,6 +18,7 @@ import logging
 from openhcs.core.memory import numpy as numpy_func
 from openhcs.core.pipeline.function_contracts import special_outputs
 from openhcs.processing.materialization import register_materializer, materializer_spec, tiff_stack_materializer
+from openhcs.processing.materialization.core import _generate_output_path
 from polystore.roi import ROI
 
 logger = logging.getLogger(__name__)
@@ -52,7 +53,8 @@ def materialize_axon_analysis(
     backends,
     backend_kwargs: dict = None,
     spec=None,
-    context=None
+    context=None,
+    extra_inputs: dict | None = None,
 ) -> str:
     """
     Materialize axon analysis results to disk using filemanager.
@@ -85,10 +87,10 @@ def materialize_axon_analysis(
 
     # Generate output file paths based on the input path
     # Replace extension properly (handles .pkl, .roi.zip, or any extension)
-    base_path = Path(path).stem
-    parent_dir = Path(path).parent
-    json_path = str(parent_dir / f"{base_path}.json")
-    csv_path = str(parent_dir / f"{base_path}_branches.csv")
+    base_path = _generate_output_path(path, "", "")
+    json_path = f"{base_path}.json"
+    csv_path = f"{base_path}_branches.csv"
+    parent_dir = Path(base_path).parent
 
     # 1. Prepare summary and metadata as JSON (primary output)
     summary_data = {
@@ -166,13 +168,13 @@ def materialize_skeleton_visualizations(data: List[np.ndarray], path: str, filem
         backend_kwargs = {}
 
     # Generate output file paths based on the input path
-    base_path = Path(path).stem
-    parent_dir = Path(path).parent
+    base_path = _generate_output_path(path, "", "")
+    parent_dir = Path(base_path).parent
 
     # Check if data is None or empty (handle both None and empty arrays)
     if data is None or (isinstance(data, np.ndarray) and data.size == 0):
         # Create empty summary file to indicate no visualizations were generated
-        summary_path = str(parent_dir / f"{base_path}_skeleton_summary.txt")
+        summary_path = f"{base_path}_skeleton_summary.txt"
         summary_content = "No skeleton visualizations generated (return_skeleton_visualizations=False)\n"
         for backend in backends:
             kwargs = backend_kwargs.get(backend, {})
@@ -181,7 +183,7 @@ def materialize_skeleton_visualizations(data: List[np.ndarray], path: str, filem
 
     # Save each visualization as a separate TIFF file
     for i, visualization in enumerate(data):
-        viz_filename = str(parent_dir / f"{base_path}_slice_{i:03d}.tif")
+        viz_filename = f"{base_path}_slice_{i:03d}.tif"
 
         # Convert visualization to uint8 for tracing visualizations (standard format)
         if visualization.dtype != np.uint8:
@@ -199,9 +201,9 @@ def materialize_skeleton_visualizations(data: List[np.ndarray], path: str, filem
             filemanager.save(viz_uint8, viz_filename, backend, **kwargs)
 
     # Return summary path
-    summary_path = str(parent_dir / f"{base_path}_skeleton_summary.txt")
+    summary_path = f"{base_path}_skeleton_summary.txt"
     summary_content = f"Skeleton visualizations saved: {len(data)} files\n"
-    summary_content += f"Base filename pattern: {base_path}_slice_XXX.tif\n"
+    summary_content += f"Base filename pattern: {Path(base_path).name}_slice_XXX.tif\n"
     summary_content += f"Visualization dtype: {data[0].dtype}\n"
     summary_content += f"Visualization shape: {data[0].shape}\n"
 
@@ -222,7 +224,8 @@ def materialize_skeleton_rois(
     backends,
     backend_kwargs: dict = None,
     spec=None,
-    context=None
+    context=None,
+    extra_inputs: dict | None = None,
 ) -> str:
     """
     Materialize skeleton mask as label image AND ROI ZIP files.

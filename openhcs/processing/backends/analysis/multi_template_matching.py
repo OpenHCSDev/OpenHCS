@@ -23,6 +23,7 @@ except ImportError:
 from openhcs.core.memory import numpy as numpy_func
 from openhcs.core.pipeline.function_contracts import special_outputs
 from openhcs.processing.materialization import register_materializer, materializer_spec
+from openhcs.processing.materialization.core import _generate_output_path
 
 @dataclass
 class TemplateMatchResult:
@@ -44,7 +45,8 @@ def materialize_mtm_match_results(
     backends: Union[str, List[str]],
     backend_kwargs: dict = None,
     spec=None,
-    context=None
+    context=None,
+    extra_inputs: dict | None = None,
 ) -> str:
     """Materialize MTM match results as analysis-ready CSV with confidence analysis.
 
@@ -65,11 +67,7 @@ def materialize_mtm_match_results(
     if backend_kwargs is None:
         backend_kwargs = {}
 
-    # Replace extension with _mtm_matches.csv (handles .pkl, .roi.zip, or any extension)
-    from pathlib import Path as PathLib
-    base_path = PathLib(path).stem  # Remove extension
-    parent_dir = PathLib(path).parent
-    csv_path = str(parent_dir / f"{base_path}_mtm_matches.csv")
+    csv_path = _generate_output_path(path, "_mtm_matches.csv", ".csv")
 
     rows = []
     for result in data:

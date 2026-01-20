@@ -30,6 +30,7 @@ from openhcs.processing.materialization.core import (
     json_materializer,
     dual_materializer,
     roi_zip_materializer,
+    regionprops_materializer,
     tiff_stack_materializer,
     materializer_spec,
 )
@@ -43,6 +44,7 @@ __all__ = [
     "json_materializer",
     "dual_materializer",
     "roi_zip_materializer",
+    "regionprops_materializer",
     "tiff_stack_materializer",
     "materializer_spec",
 ]

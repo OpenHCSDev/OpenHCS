@@ -435,7 +435,8 @@ def materialize_consolidated_results(
     backends,
     backend_kwargs: dict = None,
     spec=None,
-    context=None
+    context=None,
+    extra_inputs: dict | None = None,
 ) -> str:
     """Materialize consolidated results DataFrame to CSV using OpenHCS FileManager."""
     try:

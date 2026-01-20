@@ -102,13 +102,27 @@ def _extract_fields(item: Any, field_names: Optional[List[str]] = None) -> Dict[
 
 
 def _strip_known_suffixes(path: str, *, strip_roi: bool = False, strip_pkl: bool = True) -> Path:
+    """
+    Strip known suffixes from a path while preserving compound suffix semantics.
+
+    Note: Path.stem only strips the last suffix (e.g., ".zip"), which breaks compound
+    suffixes like ".roi.zip" (it leaves a dangling ".roi"). We treat ".roi.zip" as a
+    single compound suffix and remove it atomically.
+    """
     p = Path(path)
-    stem = p.stem
-    if strip_pkl and stem.endswith(".pkl"):
-        stem = stem[:-4]
-    if strip_roi and stem.endswith(".roi"):
-        stem = stem[:-4]
-    return p.with_name(stem)
+    name = p.name
+
+    # Strip compound suffixes first
+    if name.endswith(".roi.zip"):
+        name = name[: -len(".roi.zip")]
+
+    # Strip common single suffixes
+    if strip_pkl and name.endswith(".pkl"):
+        name = name[: -len(".pkl")]
+    if strip_roi and name.endswith(".roi"):
+        name = name[: -len(".roi")]
+
+    return p.with_name(name)
 
 
 def _generate_output_path(
@@ -166,7 +180,8 @@ def materialize(
     filemanager,
     backends: Sequence[str] | str,
     backend_kwargs: Optional[Dict[str, Dict[str, Any]]] = None,
-    context: Any = None
+    context: Any = None,
+    extra_inputs: Optional[Dict[str, Any]] = None,
 ) -> str:
     handler = MaterializationRegistry.get(spec.handler)
     normalized_backends = _normalize_backends(backends)
@@ -178,7 +193,8 @@ def materialize(
         normalized_backends,
         backend_kwargs or {},
         spec,
-        context
+        context,
+        extra_inputs or {},
     )
 
 
@@ -192,7 +208,8 @@ def _materialize_csv(
     backends: List[str],
     backend_kwargs: Dict[str, Dict[str, Any]],
     spec: MaterializationSpec,
-    context: Any
+    context: Any,
+    extra_inputs: Dict[str, Any],
 ) -> str:
     options = spec.options
     fields_opt = options.get("fields")
@@ -227,7 +244,8 @@ def _materialize_json(
     backends: List[str],
     backend_kwargs: Dict[str, Dict[str, Any]],
     spec: MaterializationSpec,
-    context: Any
+    context: Any,
+    extra_inputs: Dict[str, Any],
 ) -> str:
     options = spec.options
     fields_opt = options.get("fields")
@@ -269,7 +287,8 @@ def _materialize_dual(
     backends: List[str],
     backend_kwargs: Dict[str, Dict[str, Any]],
     spec: MaterializationSpec,
-    context: Any
+    context: Any,
+    extra_inputs: Dict[str, Any],
 ) -> str:
     options = spec.options
     fields_opt = options.get("fields")
@@ -322,7 +341,8 @@ def _materialize_tiff_stack(
     backends: List[str],
     backend_kwargs: Dict[str, Dict[str, Any]],
     spec: MaterializationSpec,
-    context: Any
+    context: Any,
+    extra_inputs: Dict[str, Any],
 ) -> str:
     options = spec.options
     normalize_uint8 = options.get("normalize_uint8", False)
@@ -380,7 +400,8 @@ def _materialize_roi_zip(
     backends: List[str],
     backend_kwargs: Dict[str, Dict[str, Any]],
     spec: MaterializationSpec,
-    context: Any
+    context: Any,
+    extra_inputs: Dict[str, Any],
 ) -> str:
     options = spec.options
     min_area = options.get("min_area", 10)
@@ -437,6 +458,220 @@ def _materialize_roi_zip(
     return summary_path
 
 
+def _coerce_jsonable(value: Any) -> Any:
+    try:
+        import numpy as np
+
+        if isinstance(value, np.generic):
+            return value.item()
+        if isinstance(value, np.ndarray):
+            return value.tolist()
+    except Exception:
+        pass
+    return value
+
+
+@register_materializer("regionprops", requires_arbitrary_files=True)
+def _materialize_regionprops(
+    data: Any,
+    path: str,
+    filemanager,
+    backends: List[str],
+    backend_kwargs: Dict[str, Dict[str, Any]],
+    spec: MaterializationSpec,
+    context: Any,
+    extra_inputs: Dict[str, Any],
+) -> str:
+    """
+    Materialize region properties from labeled masks.
+
+    Input:
+      - data: labeled mask(s) as list[2D] or 3D ndarray (Z, Y, X)
+      - extra_inputs["intensity"]: optional aligned intensity slices to compute intensity metrics
+
+    Output:
+      - ROI zip archive (for Fiji/Napari) + CSV details + JSON summary
+    """
+    import numpy as np
+    from skimage.measure import regionprops_table
+    from polystore.roi import ROI, extract_rois_from_labeled_mask
+
+    options = spec.options
+    analysis_type = options.get("analysis_type", "regionprops")
+    min_area = int(options.get("min_area", 10))
+    extract_contours = bool(options.get("extract_contours", True))
+    roi_suffix = options.get("roi_suffix", "_rois.roi.zip")
+    details_suffix = options.get("details_suffix", "_details.csv")
+    json_suffix = options.get("json_suffix", ".json")
+    require_intensity = bool(options.get("require_intensity", False))
+
+    base_properties = list(options.get("properties") or ["label", "area", "perimeter", "centroid", "bbox"])
+    intensity_properties = list(options.get("intensity_properties") or ["mean_intensity"])
+
+    # Ensure required properties for filtering + stable schema
+    for required in ("label", "area", "centroid", "bbox"):
+        if required not in base_properties:
+            base_properties.append(required)
+
+    intensity = extra_inputs.get("intensity")
+    if intensity is None:
+        intensity = extra_inputs.get("intensity_slices")
+
+    def _normalize_slices(obj: Any, *, name: str) -> List[np.ndarray]:
+        if obj is None:
+            return []
+        if isinstance(obj, list):
+            return [np.asarray(x) for x in obj]
+        arr = np.asarray(obj)
+        if arr.ndim == 2:
+            return [arr]
+        if arr.ndim == 3:
+            return [arr[i] for i in range(arr.shape[0])]
+        raise ValueError(f"{name} must be a 2D/3D array or list of 2D arrays, got shape {arr.shape}")
+
+    label_slices = _normalize_slices(data, name="labeled_mask")
+    intensity_slices = _normalize_slices(intensity, name="intensity") if intensity is not None else []
+
+    if require_intensity and not intensity_slices:
+        raise ValueError(
+            "regionprops materializer requires intensity input, but none was provided. "
+            "Pass extra_inputs['intensity'] (aligned to label slices) or set require_intensity=False."
+        )
+    if intensity_slices and len(intensity_slices) != len(label_slices):
+        raise ValueError(
+            f"Intensity/label slice mismatch: intensity={len(intensity_slices)} slices, "
+            f"labels={len(label_slices)} slices."
+        )
+
+    base_path = _generate_output_path(path, "", "")
+    json_path = f"{base_path}{json_suffix}"
+    csv_path = f"{base_path}{details_suffix}"
+    roi_path = f"{base_path}{roi_suffix}"
+
+    all_rois: List[ROI] = []
+    rows: List[Dict[str, Any]] = []
+    per_slice: List[Dict[str, Any]] = []
+
+    for z_idx, labels in enumerate(label_slices):
+        if labels.ndim != 2:
+            raise ValueError(f"Label slice {z_idx} must be 2D, got shape {labels.shape}")
+        if not np.issubdtype(labels.dtype, np.integer):
+            labels = labels.astype(np.int32)
+
+        intensity_img = None
+        if intensity_slices:
+            intensity_img = intensity_slices[z_idx]
+            if intensity_img.ndim != 2:
+                raise ValueError(f"Intensity slice {z_idx} must be 2D, got shape {intensity_img.shape}")
+            if intensity_img.shape != labels.shape:
+                raise ValueError(
+                    f"Intensity slice {z_idx} shape {intensity_img.shape} does not match "
+                    f"label slice shape {labels.shape}."
+                )
+
+        props = list(dict.fromkeys(base_properties + (intensity_properties if intensity_img is not None else [])))
+        table = regionprops_table(
+            labels,
+            intensity_image=intensity_img,
+            properties=props
+        )
+
+        # Filter out tiny regions (match ROI extraction behavior)
+        areas = table.get("area")
+        keep_idx: List[int] = []
+        if areas is not None:
+            keep_idx = [i for i, a in enumerate(areas) if float(a) >= min_area]
+        else:
+            keep_idx = list(range(len(table.get("label", []))))
+
+        labels_col = table.get("label", [])
+        kept_labels: List[int] = [int(labels_col[i]) for i in keep_idx]
+
+        # Build rows from regionprops_table output
+        for i in keep_idx:
+            row: Dict[str, Any] = {"slice_index": z_idx}
+            for key, values in table.items():
+                if values is None:
+                    continue
+                norm_key = key.replace("-", "_")
+                row[norm_key] = _coerce_jsonable(values[i])
+            rows.append(row)
+
+        # Per-slice summary
+        slice_summary: Dict[str, Any] = {"slice_index": z_idx, "region_count": len(keep_idx)}
+        if areas is not None and keep_idx:
+            kept_areas = [float(areas[i]) for i in keep_idx]
+            slice_summary["total_area"] = float(sum(kept_areas))
+            slice_summary["mean_area"] = float(sum(kept_areas) / len(kept_areas))
+        if intensity_img is not None:
+            mean_int = table.get("mean_intensity")
+            if mean_int is not None and keep_idx:
+                kept_mean_int = [float(mean_int[i]) for i in keep_idx]
+                slice_summary["mean_mean_intensity"] = float(sum(kept_mean_int) / len(kept_mean_int))
+        per_slice.append(slice_summary)
+
+        # Extract ROIs and attach slice/intensity metadata
+        rois = extract_rois_from_labeled_mask(
+            labels,
+            min_area=min_area,
+            extract_contours=extract_contours,
+        )
+
+        intensity_by_label: Dict[int, Dict[str, Any]] = {}
+        if intensity_img is not None and kept_labels:
+            for i in keep_idx:
+                label_id = int(labels_col[i])
+                intensity_by_label[label_id] = {
+                    k: _coerce_jsonable(table[k][i])
+                    for k in intensity_properties
+                    if k in table
+                }
+
+        for roi in rois:
+            label_id = int(roi.metadata.get("label", 0))
+            metadata = dict(roi.metadata)
+            metadata["slice_index"] = z_idx
+            if label_id in intensity_by_label:
+                metadata.update(intensity_by_label[label_id])
+            all_rois.append(ROI(shapes=roi.shapes, metadata=metadata))
+
+    summary = {
+        "analysis_type": analysis_type,
+        "total_slices": len(label_slices),
+        "total_regions": len(rows),
+        "regions_per_slice": per_slice,
+        "details_csv": csv_path,
+        "roi_zip": roi_path,
+        "properties": base_properties,
+        "intensity_properties": intensity_properties if intensity_slices else [],
+    }
+
+    # JSON summary always (even if empty)
+    json_content = json.dumps(summary, indent=2, default=str)
+    for backend in backends:
+        _prepare_output_path(filemanager, backend, json_path)
+        kwargs = backend_kwargs.get(backend, {})
+        filemanager.save(json_content, json_path, backend, **kwargs)
+
+    # CSV details if any rows
+    if rows:
+        df = pd.DataFrame(rows)
+        csv_content = df.to_csv(index=False)
+        for backend in backends:
+            _prepare_output_path(filemanager, backend, csv_path)
+            kwargs = backend_kwargs.get(backend, {})
+            filemanager.save(csv_content, csv_path, backend, **kwargs)
+
+    # ROI zip if any ROIs
+    if all_rois:
+        for backend in backends:
+            _prepare_output_path(filemanager, backend, roi_path)
+            kwargs = backend_kwargs.get(backend, {})
+            filemanager.save(all_rois, roi_path, backend, **kwargs)
+
+    return json_path
+
+
 def _get_result_attr(obj: Any, name: str, default: Any = None) -> Any:
     if isinstance(obj, dict):
         return obj.get(name, default)
@@ -451,7 +686,8 @@ def _materialize_cell_counts(
     backends: List[str],
     backend_kwargs: Dict[str, Dict[str, Any]],
     spec: MaterializationSpec,
-    context: Any
+    context: Any,
+    extra_inputs: Dict[str, Any],
 ) -> str:
     if not data:
         logger.warning("CELL_COUNT materializer called with empty data")
@@ -680,6 +916,44 @@ def roi_zip_materializer(
             "summary_suffix": summary_suffix,
             "strip_roi_suffix": strip_roi_suffix
         }
+    )
+
+
+def regionprops_materializer(
+    *,
+    min_area: int = 10,
+    extract_contours: bool = True,
+    roi_suffix: str = "_rois.roi.zip",
+    details_suffix: str = "_details.csv",
+    json_suffix: str = ".json",
+    analysis_type: str = "regionprops",
+    properties: Optional[List[str]] = None,
+    intensity_properties: Optional[List[str]] = None,
+    require_intensity: bool = False,
+    intensity_source: str | None = "step_output",
+    intensity_group_by: str | None = None,
+) -> MaterializationSpec:
+    inputs: Dict[str, Any] = {}
+    if intensity_source is not None:
+        inputs["intensity"] = {
+            "kind": "image_slices",
+            "source": intensity_source,
+            "group_by": intensity_group_by,
+        }
+    return MaterializationSpec(
+        handler="regionprops",
+        options={
+            "min_area": min_area,
+            "extract_contours": extract_contours,
+            "roi_suffix": roi_suffix,
+            "details_suffix": details_suffix,
+            "json_suffix": json_suffix,
+            "analysis_type": analysis_type,
+            "properties": properties,
+            "intensity_properties": intensity_properties,
+            "require_intensity": require_intensity,
+            "inputs": inputs,
+        },
     )
 
 
