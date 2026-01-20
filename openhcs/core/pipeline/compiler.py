@@ -343,7 +343,8 @@ class PipelineCompiler:
         PipelinePathPlanner.prepare_pipeline_paths(
             context,
             steps_definition,
-            context.global_config  # Use merged config from context instead of raw pipeline_config
+            context.global_config,  # Use merged config from context instead of raw pipeline_config
+            orchestrator=orchestrator
         )
 
         # === FUNCTION OBJECT REFRESH ===
