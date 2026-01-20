@@ -33,6 +33,11 @@ _polystore_src = _repo_root / "external" / "PolyStore" / "src"
 if _polystore_src.exists() and str(_polystore_src) not in sys.path:
     sys.path.insert(0, str(_polystore_src))
 
+# Prefer local ObjectState checkout when running from source
+_objectstate_src = _repo_root / "external" / "ObjectState" / "src"
+if _objectstate_src.exists() and str(_objectstate_src) not in sys.path:
+    sys.path.insert(0, str(_objectstate_src))
+
 # Prefer local pyqt-reactor checkout when running from source
 _pyqt_reactor_src = _repo_root / "external" / "pyqt-reactor" / "src"
 if _pyqt_reactor_src.exists() and str(_pyqt_reactor_src) not in sys.path:
