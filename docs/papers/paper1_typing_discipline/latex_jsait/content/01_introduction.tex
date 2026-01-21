@@ -6,13 +6,12 @@ Consider an encoder-decoder pair communicating about entities from a large unive
 \item \emph{Queries} to a binary oracle: ``does entity $v$ satisfy attribute $I$?''
 \end{itemize}
 
-This is not reconstruction (the decoder need not recover $v$), but \emph{identification} in the sense of Ahlswede and Dueck \cite{ahlswede1989identification}: the decoder must answer ``which class?'' with zero or bounded error.
+This is not reconstruction (the decoder need not recover $v$), but \emph{identification} in the sense of Ahlswede and Dueck \cite{ahlswede1989identification}: the decoder must answer ``which class?'' with zero or bounded error. Our work extends this framework to consider the tradeoff between tag storage, query complexity, and identification accuracy.
 
 We prove three results:
 \begin{enumerate}
 \item \textbf{Information barrier (identifiability limit).} When the attribute profile $\pi: \mathcal{V} \to \{0,1\}^n$ is not injective on classes, zero-error identification via queries alone is impossible: any decoder produces identical output on colliding classes, so cannot be correct for both.
 \item \textbf{Optimal tagging (achievability).} A tag of $L = \lceil \log_2 k \rceil$ bits achieves zero-error identification with $W = O(1)$ query cost. This is the unique Pareto-optimal point in the $(L, W, D)$ tradeoff space for $D=0$ in the information-barrier regime.
-Classical rate-distortion asks: what is the minimum rate to achieve distortion $D$? We ask: given rate $L$, what is the minimum query cost $W$ to achieve distortion $D = 0$? Theorem~\ref{thm:lwd-optimal} identifies the unique Pareto-optimal point in this three-dimensional tradeoff at $D = 0$ in the information-barrier regime.
 \item \textbf{Matroid structure (query complexity).} Minimal sufficient query sets form the bases of a matroid. The \emph{distinguishing dimension} (the common cardinality of all minimal sets) is well-defined and lower-bounds the query cost $W$ for any tag-free scheme.
 \end{enumerate}
 

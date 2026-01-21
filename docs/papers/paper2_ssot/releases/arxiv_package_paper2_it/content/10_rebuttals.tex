@@ -6,11 +6,11 @@ This appendix addresses anticipated objections, organized thematically. Each obj
 % PART I: MODEL VALIDITY
 %==============================================================================
 
-\subsection{Objection: The Model Doesn't Capture Real Semantics}
+\subsubsection{Objection: The Model Doesn't Capture Real Semantics}
 
 \textbf{Objection:} ``You've formalized a toy model and proved properties about it. But the model doesn't capture real Python/Rust semantics. The proofs are valid but vacuously true about artificial constructs.''
 
-\textbf{Response:} The model is validated through \emph{instantiation proofs} that bridge abstract theorems to concrete language semantics. This is the standard methodology for programming language formalization~\cite{pierce2002types}.
+\textbf{Response:} The model is established through \emph{instantiation proofs} that bridge abstract theorems to concrete language semantics. This is the standard methodology for programming language formalization~\cite{pierce2002types}.
 
 \paragraph{The Two-Layer Architecture.} Paper 1 establishes this methodology:
 
@@ -68,7 +68,7 @@ The model is empirically vulnerable. No counterexample has been produced.
 % PART II: DEFINITION AND CIRCULARITY
 %==============================================================================
 
-\subsection{Objection: The DOF = 1 Optimality Claim is Too Restrictive}
+\subsubsection{Objection: The DOF = 1 Optimality Claim is Too Restrictive}
 
 \textbf{Objection:} ``Your claim that DOF = 1 is optimal is too restrictive. Real-world encoding systems have acceptable levels of redundancy.''
 
@@ -86,9 +86,9 @@ $>$1 & Multiple sources can diverge (incoherence reachable) \\
 \end{tabular}
 \end{center}
 
-DOF = 2 means two independent encoding locations can hold different values for the same fact. The \emph{possibility} of incoherence exists. The definition is information-theoretic: optimal encoding requires DOF = 1. Systems with DOF $>$ 1 may be pragmatically acceptable but do not achieve the optimal encoding rate.
+DOF = 2 means two independent encoding locations can hold different values for the same fact. The \emph{possibility} of incoherence exists. The definition is information-theoretic: optimal encoding requires DOF = 1. Systems with DOF $>$ 1 can be pragmatically acceptable but do not achieve the optimal encoding rate.
 
-\subsection{External Tools vs System-Native DOF = 1}
+\subsubsection{External Tools vs System-Native DOF = 1}
 
 External tools (annotation processors, code generators, build systems, schema migration tools) can approximate DOF = 1 behavior. These differ from system-native DOF = 1 in three dimensions:
 
@@ -102,7 +102,7 @@ External tools (annotation processors, code generators, build systems, schema mi
 
 The analysis characterizes DOF = 1 \emph{within system semantics}, where coherence guarantees hold at runtime.
 
-\subsection{Objection: The Requirements Are Circular}
+\subsubsection{Objection: The Requirements Are Circular}
 
 \textbf{Objection:} ``You define `structural fact' as `fixed at definition time,' then prove you need definition-time hooks. The conclusion is embedded in the definition---this is circular.''
 
@@ -127,7 +127,7 @@ To reject this, you would need to show either:
 
 Neither objection has been sustained.
 
-\subsection{Derivation Order}
+\subsubsection{Derivation Order}
 
 The analysis proceeds from encoding theory to computational system evaluation:
 
@@ -144,7 +144,7 @@ Among programming languages, three satisfy the criteria. Two (CLOS, Smalltalk) a
 % PART III: RUST AND EXTERNAL TOOLING
 %==============================================================================
 
-\subsection{Empirical Validation}
+\subsubsection{Concrete Instantiation}
 
 The case studies demonstrate patterns, with publicly verifiable instances:
 
@@ -157,7 +157,7 @@ The case studies demonstrate patterns, with publicly verifiable instances:
 
 The theoretical contribution is the formal proof. The examples demonstrate applicability.
 
-\subsection{Asymptotic Analysis}
+\subsubsection{Asymptotic Analysis}
 
 The complexity bounds are derived from the encoding structure:
 
@@ -170,7 +170,7 @@ The complexity bounds are derived from the encoding structure:
 
 PR \#44 demonstrates the mechanism at $n = 47$: 47 \texttt{hasattr()} checks (DOF = 47) → 1 ABC definition (DOF = 1). The 47$\times$ reduction is observable via GitHub diff. The gap widens as encoding systems scale.
 
-\subsection{Cost-Benefit Analysis}
+\subsubsection{Cost-Benefit Analysis}
 
 DOF = 1 involves trade-offs:
 \begin{itemize}
@@ -181,7 +181,7 @@ DOF = 1 involves trade-offs:
 
 The analysis characterizes what DOF = 1 requires. The decision to optimize for DOF = 1 depends on encoding system scale, change frequency, and coherence requirements.
 
-\subsection{Machine-Checked Formalization}
+\subsubsection{Machine-Checked Formalization}
 
 The proofs formalize definitions precisely. Machine-checked proofs provide:
 
@@ -193,7 +193,7 @@ The proofs formalize definitions precisely. Machine-checked proofs provide:
 
 The contribution is formalization itself: converting informal principles into machine-verifiable theorems. Simple proofs from precise definitions are the goal.
 
-\subsection{Build Tool Analysis}
+\subsubsection{Build Tool Analysis}
 
 External build tools shift the DOF problem but do not eliminate it:
 
@@ -215,7 +215,7 @@ Cross-system encoding (e.g., protobuf generating code for multiple languages) re
 % PART V: FORMALIZATION OBJECTIONS
 %==============================================================================
 
-\subsection{Objection: Inconsistency Is Only in Comments}
+\subsubsection{Objection: Inconsistency Is Only in Comments}
 
 \textbf{Objection:} ``The proofs don't formalize `inconsistency'---it only appears in comments. The heavy lifting is done by the comments, not by the formal system.''
 
@@ -247,7 +247,7 @@ The file proves:
 
 This addresses the critique directly: inconsistency is now a formal property that Lean knows about, not a comment. The interpretation ``this models real configuration systems'' still requires mapping to reality, but every formalization eventually bottoms out in interpretation. The contribution is making assumptions \emph{explicit and attackable}, not eliminating interpretation entirely.
 
-\subsection{Objection: What About the Type's Name?}
+\subsubsection{Objection: What About the Type's Name?}
 
 \textbf{Objection:} ``Your two-axis model (B, S) ignores the type's name. Isn't N (the name) a third independent axis?''
 
@@ -273,7 +273,7 @@ The operational test: given two classes with identical \texttt{\_\_bases\_\_} (B
 
 This is why the model is (B, S) and not (B, S, N). N is a fixed label assigned at definition, not an independent axis that can vary.
 
-\subsection{Objection: Model Doesn't Mirror Compiler Internals}
+\subsubsection{Objection: Model Doesn't Mirror Compiler Internals}
 
 \textbf{Objection:} ``Your Rust model (RuntimeItem, erasure) doesn't mirror rustc's actual HIR→MIR phases. You haven't modeled proc-macro hygiene, \texttt{\#[link\_section]} retention, or the actual expander traces.''
 
@@ -289,7 +289,7 @@ The model's \texttt{RuntimeItem} having no source field is \emph{observationally
 
 If the model is wrong, show the Rust code that falsifies it. The burden is on the critic to produce the counterexample.
 
-\subsection{Objection: Rust Proc Macros + Static Registries Achieve DOF = 1}
+\subsubsection{Objection: Rust Proc Macros + Static Registries Achieve DOF = 1}
 
 \textbf{Objection:} ``Rust can achieve DOF = 1 using proc macros and static registries. Example:
 \begin{verbatim}
@@ -334,7 +334,7 @@ The objection confuses ``can create a registry'' with ``can guarantee all items 
 % PART IV: PRAGMATIC OBJECTIONS
 %==============================================================================
 
-\subsection{Objection: You Just Need Discipline}
+\subsubsection{Objection: You Just Need Discipline}
 
 \textbf{Objection:} ``Real teams maintain consistency through code review, documentation, and discipline. You don't need language features.''
 
@@ -355,13 +355,13 @@ The question is whether the oracle is:
 
 Language-level SSOT provides an internal oracle. Discipline provides an external one. Both satisfy consistency when they work. The difference is failure mode: language enforcement cannot be forgotten; human discipline can.
 
-\subsection{Objection: The Proofs Are Trivial}
+\subsubsection{Objection: The Proofs Are Trivial}
 
 \textbf{Objection:} ``Most of your proofs are just \texttt{rfl} (reflexivity). That means they're trivial tautologies, not real theorems.''
 
 \textbf{Response:} When you model correctly, theorems become definitional. This is a feature, not a bug.
 
-Consider: ``The sum of two even numbers is even.'' In a well-designed formalization, this might be \texttt{rfl}---not because it's trivial, but because the definition of ``even'' was chosen to make the property structural.
+Consider: ``The sum of two even numbers is even.'' In a well-designed formalization, this can be \texttt{rfl}---not because it's trivial, but because the definition of ``even'' was chosen to make the property structural.
 
 That said, not all proofs are \texttt{rfl}. The \texttt{rust\_lacks\_introspection} theorem is 40 lines of actual reasoning:
 
@@ -374,7 +374,7 @@ That said, not all proofs are \texttt{rfl}. The \texttt{rust\_lacks\_introspecti
 
 The proof structure (assumption → lemma application → contradiction) is genuine mathematical reasoning, not tautology. The \texttt{rfl} proofs establish the scaffolding; the substantive proofs build on that scaffolding.
 
-\subsection{Objection: Real Systems Don't Need Formal DOF Guarantees}
+\subsubsection{Objection: Real Systems Don't Need Formal DOF Guarantees}
 
 \textbf{Objection:} ``Nobody actually needs Lean-enforced DOF guarantees. Conventions and manual synchronization work fine in practice.''
 

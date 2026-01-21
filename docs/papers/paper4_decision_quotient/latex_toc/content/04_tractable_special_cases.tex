@@ -1,30 +1,24 @@
 \section{Tractable Special Cases: When You Can Solve It}\label{sec:tractable}
 
-The hardness results characterize the \emph{boundary} of tractability. This section identifies three natural conditions under which sufficiency checking becomes polynomial-time, and proves each condition is \emph{tight}---relaxing it restores \coNP-hardness.
+We distinguish the encodings of Section~\ref{sec:encoding}. The tractability results below state the model assumption explicitly.
 
-\begin{theorem}[Tractability Trichotomy]\label{thm:tractable}
-SUFFICIENCY-CHECK is in \Pclass{} under any of:
+\begin{theorem}[Tractable Subcases]\label{thm:tractable}
+SUFFICIENCY-CHECK is polynomial-time solvable in the following cases:
 \begin{enumerate}
-\item \textbf{Bounded actions:} $|A| \leq k$ for constant $k$
-\item \textbf{Separable utility:} $U(a, s) = f(a) + g(s)$
-\item \textbf{Tree-structured dependencies:} Coordinates form a tree
+\item \textbf{Explicit-state encoding:} The input contains the full utility table over $A \times S$. SUFFICIENCY-CHECK runs in $O(|S|^2|A|)$ time; if $|A|$ is constant, $O(|S|^2)$.
+\item \textbf{Separable utility (any encoding):} $U(a, s) = f(a) + g(s)$.
+\item \textbf{Tree-structured utility with explicit local factors (succinct structured encoding):} There exists a rooted tree on coordinates and local functions $u_i$ such that
+\[
+U(a,s) = \sum_i u_i\bigl(a, s_i, s_{\mathrm{parent}(i)}\bigr),
+\]
+with the root term depending only on $(a, s_{\mathrm{root}})$ and all $u_i$ given explicitly as part of the input.
 \end{enumerate}
-Each condition is tight: removing it while keeping the others yields \coNP-hardness.
 \end{theorem}
 
-\subsection{Bounded Actions}
+\subsection{Explicit-State Encoding}
 
 \begin{proof}[Proof of Part 1]
-With $|A| = k$ constant, the optimizer map $\Opt : S \to 2^A$ has at most $2^k$ distinct values. For each pair of distinct optimizer values, we can identify the coordinates that distinguish them. The union of these distinguishing coordinates forms a sufficient set.
-
-The algorithm:
-\begin{enumerate}
-\item Sample states to identify distinct optimizer values (polynomial samples suffice with high probability)
-\item For each pair of optimizer values, find distinguishing coordinates
-\item Return the union of distinguishing coordinates
-\end{enumerate}
-
-This runs in time $O(|S| \cdot k^2)$ which is polynomial when $k$ is constant.
+Given the full table of $U(a,s)$, compute $\Opt(s)$ for all $s \in S$ in $O(|S||A|)$ time. For SUFFICIENCY-CHECK on a given $I$, verify that for all pairs $(s,s')$ with $s_I = s'_I$, we have $\Opt(s) = \Opt(s')$. This takes $O(|S|^2|A|)$ time by direct enumeration and is polynomial in the explicit input length. If $|A|$ is constant, the runtime is $O(|S|^2)$.
 \end{proof}
 
 \subsection{Separable Utility}
@@ -34,49 +28,25 @@ If $U(a, s) = f(a) + g(s)$, then:
 \[
 \Opt(s) = \arg\max_{a \in A} [f(a) + g(s)] = \arg\max_{a \in A} f(a)
 \]
-The optimal action is independent of the state! Thus $I = \emptyset$ is always sufficient.
+The optimal action is independent of the state. Thus $I = \emptyset$ is always sufficient.
 \end{proof}
 
-\subsection{Tree-Structured Dependencies}
+\subsection{Tree-Structured Utility}
 
 \begin{proof}[Proof of Part 3]
-When coordinates form a tree, we can use dynamic programming. For each node $i$, compute the set of optimizer values achievable in the subtree rooted at $i$. A coordinate is relevant if and only if different values at that coordinate lead to different optimizer values in its subtree. This approach is analogous to inference in probabilistic graphical models \cite{pearl1988probabilistic, koller2009probabilistic}.
-
-The algorithm runs in time $O(n \cdot |A|^2)$ by processing the tree bottom-up.
+Assume the tree decomposition and explicit local tables as stated. For each node $i$ and each value of its parent coordinate, compute the set of actions that are optimal for some assignment of the subtree rooted at $i$. This is a bottom-up dynamic program that combines local tables with child summaries; each table lookup is explicit in the input. A coordinate is relevant if and only if varying its value changes the resulting optimal action set. The total runtime is polynomial in $n$, $|A|$, and the size of the local tables.
 \end{proof}
 
-\subsection{Tightness of the Conditions}
-
-Each condition is necessary:
-
-\begin{proposition}[Bounded Actions is Tight]
-With unbounded $|A|$, even separable utility on a tree yields \coNP-hardness.
-\end{proposition}
-
-\begin{proposition}[Separability is Tight]
-With non-separable utility $U(a,s) = f(a,s)$, even bounded actions on a tree yields \coNP-hardness.
-\end{proposition}
-
-\begin{proposition}[Tree Structure is Tight]
-On a DAG (not tree), even bounded actions with separable utility yields \coNP-hardness.
-\end{proposition}
-
 \subsection{Practical Implications}
-
-The tractable cases cover many real scenarios:
 
 \begin{center}
 \begin{tabular}{ll}
 \toprule
 \textbf{Condition} & \textbf{Examples} \\
 \midrule
-Bounded actions & Binary decisions, small menus \\
+Explicit-state encoding & Small or fully enumerated state spaces \\
 Separable utility & Additive costs, linear models \\
-Tree structure & Hierarchies, causal trees \\
+Tree-structured utility & Hierarchies, causal trees \\
 \bottomrule
 \end{tabular}
 \end{center}
-
-\textbf{Decision procedure:} Given a problem, check: (1) Is $|A|$ bounded? (2) Is utility separable? (3) Are dependencies tree-structured? If any holds, use the polynomial algorithm. Otherwise, expect \coNP-hardness and use heuristics.
-
-

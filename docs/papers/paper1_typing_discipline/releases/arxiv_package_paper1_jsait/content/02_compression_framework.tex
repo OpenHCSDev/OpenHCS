@@ -48,12 +48,17 @@ S(v) &= \pi(v) = (q_I(v))_{I \in \mathcal{I}} \quad \text{(interface profile)}
 The lineage axis captures \emph{nominal} identity: where the class comes from. The profile axis captures \emph{structural} identity: what the value can do.
 \end{definition}
 
-\begin{theorem}[Model completeness]\label{thm:model-completeness}
-In classification systems with explicit class derivation, the pair $(B, S)$ is complete: every semantic property of a value is a function of $(B(v), S(v))$.
+\begin{theorem}[Fixed-axis completeness]\label{thm:model-completeness}
+Let a fixed-axis domain be specified by an axis map $\alpha: \mathcal{V} \to \mathcal{A}$ and an observation interface $\Phi$ such that each primitive query $q \in \Phi$ factors through $\alpha$. Then every in-scope semantic property (i.e., any property computable by an admissible $\Phi$-only strategy) factors through $\alpha$: there exists $\tilde{P}$ with
+\[
+P(v) = \tilde{P}(\alpha(v)) \quad \text{for all } v \in \mathcal{V}.
+\]
 \end{theorem}
 
+In the PL instantiation, $\alpha(v) = (B(v), S(v))$, so in-scope semantic properties are functions of $(B,S)$.
+
 \begin{proof}
-Any property not determined by $(B, S)$ would require information beyond class identity and interface. In hierarchical classification systems (type systems, biological taxonomy, library classification), the class and its observable attributes jointly determine all semantically relevant properties.
+An admissible $\Phi$-only strategy observes $v$ solely through responses to primitive queries $q_I \in \Phi$. By hypothesis each such response is a function of $\alpha(v)$. Therefore every query transcript — and hence any strategy's output — depends only on $\alpha(v)$, so the computed property factors through $\alpha$.
 \end{proof}
 
 \subsection{Interface Equivalence and Observational Limits}
@@ -155,8 +160,8 @@ For any property $P$:
 
 We now define the three-dimensional tradeoff space that characterizes observation strategies, using information-theoretic units.
 
-\begin{definition}[Tag length (Rate)]
-Let $\mathcal{T}$ be the set of type identifiers (tags) with $|\mathcal{T}| = k$. The \emph{tag length} $L$ is the number of bits required to encode a type identifier:
+\begin{definition}[Tag rate]
+For a set of type identifiers (tags) $\mathcal{T}$ with $|\mathcal{T}| = k$, the \emph{tag rate} $L$ is the minimum number of bits required to encode a type identifier:
 \[
 L \geq \log_2 k \quad \text{bits per value}
 \]
@@ -228,16 +233,21 @@ A point $(L, W, D)$ is \emph{achievable} if there exists an admissible observati
 A point $(L^*, W^*, D^*)$ is \emph{Pareto-optimal} if there is no achievable $(L, W, D)$ with $L \leq L^*$, $W \leq W^*$, $D \leq D^*$, and at least one strict inequality.
 \end{definition}
 
-The main result of Section~\ref{sec:lwd} is that nominal-tag observation achieves the unique Pareto-optimal point with $D = 0$.
+The main result of Section~\ref{sec:lwd} is that nominal-tag observation achieves the unique Pareto-optimal point with $D = 0$ in the information-barrier regime.
+
+\begin{definition}[Information-barrier domain]
+\label{def:info-barrier-domain}
+A classification domain has an \emph{information barrier} (relative to $\Phi$) if there exist distinct classes $c_1 \neq c_2$ with identical $\Phi$-profiles. Equivalently, $\pi$ is not injective on classes.
+\end{definition}
 
 \subsection{Converse: Tag Rate Lower Bound}
 
 \begin{theorem}[Converse]\label{thm:converse}
-Any scheme achieving $D = 0$ (zero-error identification) requires tag length $L \geq \log_2 k$, where $k$ is the number of distinct classes.
+In any information-barrier domain, any scheme achieving $D = 0$ (zero-error identification) requires tag length $L \geq \log_2 k$, where $k$ is the number of distinct classes.
 \end{theorem}
 
 \begin{proof}
-Zero error requires that distinct classes map to distinct decoder outputs. With $k$ classes, at least $\log_2 k$ bits are needed to encode $k$ distinct values. Without tags ($L = 0$), the decoder sees only query responses $\pi(v) \in \{0,1\}^{|\mathcal{I}|}$. If $\pi$ is not injective on classes (i.e., $\exists$ classes $c_1 \neq c_2$ with identical profiles), zero error is impossible. The converse is tight: $L = \lceil \log_2 k \rceil$ suffices.
+Zero error requires that distinct classes map to distinct decoder outputs. With $k$ classes, at least $\log_2 k$ bits are needed to encode $k$ distinct values. The converse is tight: $L = \lceil \log_2 k \rceil$ suffices.
 \end{proof}
 
 \subsection{Rate-Distortion Tradeoff}
@@ -248,7 +258,7 @@ When $D > 0$ is permitted, we obtain a classic rate-distortion tradeoff:
 For any $\epsilon \in (0, 1)$, there exist schemes with $L = 0$ (no tags) achieving $D \leq \epsilon$ with query cost $W = O(\log(1/\epsilon) \cdot d)$, where $d$ is the distinguishing dimension. The tradeoff: smaller $D$ requires larger $W$.
 \end{proposition}
 
-The zero-error corner ($D = 0$) is special: nominal tagging is the unique Pareto optimum. Relaxing to $D > 0$ enables tag-free schemes at the cost of increased query complexity. This mirrors the classical distinction between zero-error and $\epsilon$-error capacity in channel coding.
+The zero-error corner ($D = 0$) is special: nominal tagging is the unique Pareto optimum in the information-barrier regime. Relaxing to $D > 0$ enables tag-free schemes at the cost of increased query complexity. This mirrors the classical distinction between zero-error and $\epsilon$-error capacity in channel coding.
 
 \subsection{Concrete Example}
 

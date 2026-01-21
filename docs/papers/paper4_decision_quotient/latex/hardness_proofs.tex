@@ -1,7 +1,7 @@
 \section{Computational Complexity of Decision-Relevant Uncertainty}
 \label{sec:hardness}
 
-This section establishes the computational complexity of determining which state coordinates are decision-relevant. We prove three main results:
+This section establishes the computational complexity of determining which state coordinates are decision-relevant, under the succinct encoding of Section~\ref{sec:encoding}. We prove three main results:
 
 \begin{enumerate}
     \item \textbf{SUFFICIENCY-CHECK} is coNP-complete
@@ -9,7 +9,7 @@ This section establishes the computational complexity of determining which state
     \item \textbf{ANCHOR-SUFFICIENCY} (fixed coordinates) is $\Sigma_2^P$-complete
 \end{enumerate}
 
-These results sit beyond NP-completeness and formally explain why engineers default to over-modeling: finding the minimal set of decision-relevant factors is computationally intractable.
+These results sit beyond NP-completeness and explain why engineers default to over-modeling: finding the minimal set of decision-relevant factors is computationally intractable.
 
 \subsection{Problem Definitions}
 
@@ -53,6 +53,18 @@ where $s_I$ denotes the projection of $s$ onto coordinates in $I$.
 \label{thm:sufficiency-conp}
 SUFFICIENCY-CHECK is coNP-complete \cite{cook1971complexity, karp1972reducibility}. \emph{(Machine-verified in Lean 4; see \texttt{Hardness/CoNPComplete.lean}.)}
 \end{theorem}
+
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+Source & Target & Key property preserved \\
+\midrule
+TAUTOLOGY & SUFFICIENCY-CHECK & Tautology iff $\emptyset$ sufficient \\
+$\exists\forall$-SAT & ANCHOR-SUFFICIENCY & Witness anchors iff formula true \\
+SET-COVER & MINIMUM-SUFFICIENT-SET & Set size maps to coordinate size \\
+\bottomrule
+\end{tabular}
+\end{center}
 
 \begin{proof}
 \textbf{Membership in coNP:} The complementary problem INSUFFICIENCY is in NP. Given $(A, n, U, I)$, a witness for insufficiency is a pair $(s, s')$ such that:

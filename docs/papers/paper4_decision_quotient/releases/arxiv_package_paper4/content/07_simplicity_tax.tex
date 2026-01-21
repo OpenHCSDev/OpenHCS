@@ -1,13 +1,13 @@
 \section{The Simplicity Tax Theorem}\label{sec:simplicity-tax}
 
-The complexity results of Sections~\ref{sec:hardness}--\ref{sec:tractable} establish that identifying decision-relevant dimensions is coNP-complete. This section develops the practical consequence: what happens when engineers \emph{ignore} this hardness and attempt to use ``simple'' tools for complex problems.
+This section states a practical corollary of the complexity results. Sections~\ref{sec:hardness}--\ref{sec:tractable} establish that identifying decision-relevant dimensions is coNP-complete. This section develops the consequence: what happens when engineers \emph{ignore} this hardness and attempt to use ``simple'' tools for complex problems.
 
-The answer is the \emph{Simplicity Tax}: a per-site cost that cannot be avoided, only redistributed. This result overturns the common intuition that ``simpler is always better'' and establishes a foundational principle: \textbf{No Free Simplicity}.
+The answer is the \emph{Simplicity Tax}: a per-site cost that cannot be avoided, only redistributed. This result refutes the intuition that ``simpler is always better'' whenever the tool is incomplete for the problem, and establishes the principle: \textbf{No Free Simplicity}.
 
 \subsection{The Conservation Law: No Free Simplicity}\label{sec:conservation}
 
 \begin{definition}[Problem and Tool]\label{def:problem-tool}
-A \emph{problem} $P$ has a set of \emph{required axes} $R(P)$---the dimensions of variation that must be represented. A \emph{tool} $T$ has a set of \emph{native axes} $A(T)$---what it can represent directly.
+A \emph{problem} $P$ has a set of \emph{required axes} $R(P)$ (the dimensions of variation that must be represented). A \emph{tool} $T$ has a set of \emph{native axes} $A(T)$ (what it represents directly).
 \end{definition}
 
 This terminology is grounded in Papers 1--2: ``axes'' correspond to Paper 1's axis framework (\texttt{requiredAxesOf}) and Paper 2's degrees of freedom.
@@ -15,7 +15,7 @@ This terminology is grounded in Papers 1--2: ``axes'' correspond to Paper 1's ax
 \begin{definition}[Expressive Gap and Simplicity Tax]\label{def:expressive-gap}
 The \emph{expressive gap} between tool $T$ and problem $P$ is:
 \[\text{Gap}(T, P) = R(P) \setminus A(T)\]
-The \emph{simplicity tax} is $|\text{Gap}(T, P)|$: the number of axes the tool cannot handle natively. This tax is paid at \emph{every use site}.
+The \emph{simplicity tax} is $|\text{Gap}(T, P)|$: the number of axes the tool does not handle natively. This tax is paid at \emph{every use site}.
 \end{definition}
 
 \begin{definition}[Complete vs. Incomplete Tools]\label{def:complete-incomplete}
@@ -25,7 +25,7 @@ Tool $T$ is \emph{complete} for problem $P$ if $R(P) \subseteq A(T)$. Otherwise 
 \begin{theorem}[Simplicity Tax Conservation]\label{thm:tax-conservation}
 For any problem $P$ with required axes $R(P)$ and any tool $T$:
 \[|\text{Gap}(T, P)| + |R(P) \cap A(T)| = |R(P)|\]
-The required axes are partitioned into ``covered natively'' and ``tax.'' You cannot reduce the total---only shift where it is paid.
+The required axes are partitioned into ``covered natively'' and ``tax.'' You cannot reduce the total; only shift where it is paid.
 \end{theorem}
 
 \begin{proof}
@@ -86,12 +86,12 @@ Beyond $n^*$ uses, the complex tool is cheaper even accounting for learning cost
 \end{theorem}
 
 \begin{remark}[On the Learning Cost Model]
-This theorem models learning cost as $H_{\text{central}}$, a scalar. A more precise formalization would treat learning cost as the rank of a \emph{concept matroid}---the prerequisite concepts required to master the tool (see Conclusion, Future Work). Paper 1 established that type axes form matroids; concept axes may admit similar structure. Critically, the matroid property ensures that \emph{different minimal learning paths have equal cardinality}, making the scalar well-defined despite multiple valid trajectories. The qualitative result (amortization threshold exists) is robust to the learning cost model; the quantitative threshold depends on its precise formalization.
+This theorem models learning cost as $H_{\text{central}}$, a scalar. A more precise formalization treats learning cost as the rank of a \emph{concept matroid} (the prerequisite concepts required to master the tool; see Conclusion, Future Work). Paper 1 established that type axes form matroids; we conjecture that concept axes admit similar structure. Critically, the matroid property ensures that \emph{different minimal learning paths have equal cardinality}, making the scalar well-defined despite multiple valid trajectories. The qualitative result (amortization threshold exists) is robust to the learning cost model; the quantitative threshold depends on its precise formalization.
 \end{remark}
 
 \subsection{Cross-Domain Examples}\label{sec:examples}
 
-The Simplicity Tax applies universally. Consider these domains:
+The Simplicity Tax applies to the following domains:
 
 \begin{center}
 \begin{tabular}{p{2.2cm}p{3.5cm}p{3.5cm}p{3cm}}
@@ -111,7 +111,7 @@ In each case, the ``simple'' choice has lower learning cost ($H_{\text{central}}
 
 
 
-\textbf{Example: Python Metaclasses.} Python's community often resists metaclasses as ``too complex.'' But consider a problem requiring automatic subclass registration, attribute validation, and interface enforcement---three axes of variation.
+\textbf{Example: Python Metaclasses.} Python's community resists metaclasses as ``too complex.'' But consider a problem requiring automatic subclass registration, attribute validation, and interface enforcement (three axes of variation).
 
 \begin{center}
 \begin{tabular}{lccc}
@@ -127,11 +127,11 @@ Fully manual & $\emptyset$ & 3 & 150 \\
 
 The ``simplest'' approach (fully manual) creates the most work. The community's resistance to metaclasses is the Simplicity Preference Fallacy in action.
 
-\textbf{Example: Static vs. Dynamic Typing.} Dynamic typing has lower learning cost. But type errors are a per-site tax: each call site that could receive a wrong type is an error site. For $n$ call sites:
+\textbf{Example: Static vs. Dynamic Typing.} Dynamic typing has lower learning cost. But type errors are a per-site tax: each call site that admits a wrong type in some execution is an error site. For $n$ call sites:
 
 \begin{itemize}
 \item Static typing: type checker verifies once, 0 runtime type errors
-\item Dynamic typing: $n$ potential runtime type errors, each requiring defensive code or debugging
+\item Dynamic typing: $n$ error sites, each requiring defensive code or debugging when a wrong type arrives
 \end{itemize}
 
 The ``simplicity'' of dynamic typing distributes type-checking to every call site.
@@ -146,7 +146,7 @@ The Simplicity Tax Theorem unifies results across the pentalogy:
 
 \textbf{Paper 3 (Leverage).} High-leverage solutions have high $H_{\text{central}}$ and low $H_{\text{distributed}}$. Leverage $= \text{impact}/\text{effort} = n / H_{\text{central}}$ when $H_{\text{distributed}} = 0$. Low-leverage solutions pay per-site.
 
-\textbf{Paper 4 (This Paper).} Identifying which axes matter is coNP-complete. If you guess wrong and use an incomplete tool, you pay the Simplicity Tax. The tax is the cost of the coNP-hard problem you failed to solve.
+\textbf{Paper 4 (This Paper).} Identifying which axes matter is coNP-complete. If you guess wrong and use an incomplete tool, you pay the Simplicity Tax. The tax is the cost of the coNP-hard problem you did not solve.
 
 \begin{theorem}[Unified Dominance]
 Across Papers 1--4, solutions with higher $H_{\text{central}}$ and zero $H_{\text{distributed}}$ strictly dominate solutions with lower $H_{\text{central}}$ and positive $H_{\text{distributed}}$, for $n > n^*$.
@@ -169,16 +169,16 @@ An engineer is \emph{formally competent} with respect to complexity distribution
 \item Compare tools by total cost, not $H_{\text{central}}$ alone
 \end{enumerate}
 
-Failing step 4---evaluating tools by learning cost alone---is formal incompetence.
+Failing step 4 (evaluating tools by learning cost alone) is a formal mistake.
 
 \begin{remark}[The Zen of Python, Correctly Read]
-Python's Zen states: ``Simple is better than complex. Complex is better than complicated.'' This is often misread as endorsing simplicity unconditionally. The correct reading:
+Python's Zen states: ``Simple is better than complex. Complex is better than complicated.'' This is misread as endorsing simplicity unconditionally. The correct reading:
 \begin{itemize}
 \item \textbf{Simple}: Low intrinsic complexity (both $H_{\text{central}}$ and $H_{\text{distributed}}$ low)
 \item \textbf{Complex}: High intrinsic complexity, \emph{structured} (high $H_{\text{central}}$, low $H_{\text{distributed}}$)
 \item \textbf{Complicated}: High intrinsic complexity, \emph{tangled} (low $H_{\text{central}}$, high $H_{\text{distributed}}$)
 \end{itemize}
-The Zen says: when the problem has intrinsic complexity, \emph{complex} (centralized) beats \emph{complicated} (distributed). The community often conflates complex with complicated.
+The Zen says: when the problem has intrinsic complexity, \emph{complex} (centralized) beats \emph{complicated} (distributed). The community conflates complex with complicated.
 \end{remark}
 
 \subsection{Lean 4 Formalization}\label{sec:simplicity-lean}

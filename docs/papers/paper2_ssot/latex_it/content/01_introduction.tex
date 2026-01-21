@@ -65,29 +65,28 @@ These abstract to arbitrary encoding systems; programming language features (def
 
 \textbf{Connection to multi-version coding.} Rashmi et al.~\cite{rashmi2015multiversion} prove an ``inevitable storage cost for consistency'' in distributed storage. Our realizability theorem is analogous: systems lacking causal propagation or provenance observability \emph{cannot} achieve DOF = 1---the cost is fundamental, not implementation-specific.
 
-\textbf{Evaluation across computational systems.} We evaluate programming languages, distributed databases, and configuration systems against these criteria. Among mainstream programming languages (TIOBE top-10, 5+ year consistency), Python uniquely satisfies both requirements (causal propagation via \texttt{\_\_init\_subclass\_\_}, provenance observability via \texttt{\_\_subclasses\_\_()}). Most (Java, C++, Rust, Go, TypeScript) lack one or both and cannot achieve DOF = 1 for structural facts.
+\textbf{Applications across computational systems.} We include a programming-language instantiation and a worked case study as \emph{corollaries} of the abstract theory. These sections exemplify the realizability theorem; the core theorems and their proofs are independent of any specific language or system.
 
 \subsection{Paper Organization and Main Results}\label{overview}
 
-This paper establishes four theorems characterizing optimal encoding under coherence constraints. All results are machine-checked in Lean 4~\cite{demoura2021lean4} (9,351 lines, 541 theorems, 0 \texttt{sorry} placeholders).
+This paper establishes four \emph{core} theorems characterizing optimal encoding under coherence constraints. All results are machine-checked in Lean 4~\cite{demoura2021lean4} (9,351 lines, 541 theorems, 0 \texttt{sorry} placeholders).
 
-\textbf{Section~\ref{sec:foundations}---Encoding Model.} We formalize multi-location encoding systems: facts stored at multiple locations with independence and derivability relations. DOF (Degrees of Freedom) counts independent locations. Coherence means all locations agree.
+\textbf{Section~\ref{sec:foundations}---Encoding Model.} We formalize multi-location encoding systems: facts stored at multiple locations with independence and derivability relations. DOF (Degrees of Freedom) counts independent locations. Coherence means all locations agree. Section~\ref{sec:cap-flp} formalizes encoding-theoretic CAP/FLP analogs inside this model.
 
 \textbf{Section~\ref{sec:ssot}---Optimal Rate.} We prove DOF = 1 is the unique rate guaranteeing coherence (Theorem~\ref{thm:dof-optimal}). The proof constructs incoherent configurations for all DOF $> 1$ and shows DOF = 1 makes disagreement impossible.
 
 \textbf{Section~\ref{sec:requirements}---Realizability.} We derive necessary and sufficient conditions for encoding systems to achieve DOF = 1 via derivation (Theorem~\ref{thm:ssot-iff}). Both causal update propagation and provenance observability are required---these are information-theoretic encoder properties that abstract across domains.
 
-\textbf{Section~\ref{sec:evaluation}---System Evaluation.} We evaluate computational realizations (programming languages, distributed databases) against formal criteria. Python, CLOS, and Smalltalk satisfy requirements; Java, C++, Rust, Go, TypeScript do not.
+\textbf{Section~\ref{sec:evaluation}---Corollary Instantiation.} We provide a programming-language instantiation of the realizability criteria as a corollary of Theorem~\ref{thm:ssot-iff}; the core proofs remain abstract.
 
 \textbf{Section~\ref{sec:bounds}---Complexity Bounds.} We prove the rate-complexity tradeoff: DOF = 1 achieves $O(1)$ modification cost; DOF $> 1$ requires $\Omega(n)$ (Theorem~\ref{thm:unbounded-gap}). The gap grows without bound.
 
-\textbf{Section~\ref{sec:empirical}---Empirical Validation.} Case studies from production systems (OpenHCS~\cite{openhcs2025}) demonstrate DOF reduction (47 $\to$ 1) via Python's definition-time hooks.
+\textbf{Section~\ref{sec:empirical}---Worked Instantiation.} A case study from a production system (OpenHCS~\cite{openhcs2025}) instantiates the realizability requirements.
 
-\textbf{Connection to software engineering.} The ``Don't Repeat Yourself'' (DRY) principle~\cite{hunt1999pragmatic} in software engineering is the practitioner recognition of encoding optimality. We prove DRY = DOF = 1, formalizing an informal principle with information-theoretic foundations.
 
 \subsection{Core Theorems}\label{sec:core-theorems}
 
-We establish four theorems characterizing optimal encoding under coherence constraints:
+We establish four \emph{core} theorems characterizing optimal encoding under coherence constraints:
 
 \begin{enumerate}
 \def\labelenumi{\arabic{enumi}.}
@@ -152,12 +151,12 @@ This paper makes six contributions:
 \item Connection to WOM codes: structural irreversibility constraint analogous to write-once constraint
 \end{itemize}
 
-\textbf{4. Language evaluation (Section~\ref{sec:evaluation}):}
+\textbf{4. Language instantiation (Section~\ref{sec:evaluation}):}
 \begin{itemize}
 \tightlist
-\item Exhaustive evaluation of 10 mainstream languages
-\item Extended evaluation of 3 non-mainstream languages (CLOS, Smalltalk, Ruby)
-\item Theorem~\ref{thm:three-lang}: Exactly three languages satisfy requirements
+\item Representative instantiation over a mainstream language class
+\item Extended instantiation of three MOP-equipped languages (CLOS, Smalltalk, Ruby)
+\item Theorem~\ref{thm:three-lang}: Exactly three languages satisfy requirements within the evaluated class
 \end{itemize}
 
 \textbf{5. Complexity bounds (Section~\ref{sec:bounds}):}
@@ -168,77 +167,15 @@ This paper makes six contributions:
 \item Theorem~\ref{thm:unbounded-gap}: The gap is unbounded
 \end{itemize}
 
-\textbf{6. Practical demonstration (Section~\ref{sec:empirical}):}
+\textbf{6. Worked instantiation (Section~\ref{sec:empirical}):}
 \begin{itemize}
 \tightlist
 \item Before/after examples from OpenHCS (production Python codebase)
 \item PR \#44~\cite{openhcsPR44}: Migration from 47 scattered checks to 1 ABC (DOF 47 $\to$ 1)
-\item Empirical validation that coherence is achievable in practice
+\item Concrete instantiation of realizability mechanisms in a production system
 \end{itemize}
 
-\subsection{Empirical Context: OpenHCS}\label{sec:openhcs-context}
-
-\textbf{What it does:} OpenHCS~\cite{openhcs2025} is an open-source bioimage analysis platform for high-content screening (45K LoC Python). It processes microscopy images through configurable pipelines, with GUI-based design and Python code export. The system requires:
-
-\begin{itemize}
-\tightlist
-\item Automatic registration of analysis components
-\item Type-safe configuration with inheritance
-\item Runtime enumeration of available processors
-\item Provenance tracking for reproducibility
-\end{itemize}
-
-\textbf{Why it matters for this paper:} OpenHCS requires SSOT for structural facts. When a new image processor is added (by subclassing \texttt{BaseProcessor}), it must automatically appear in:
-
-\begin{itemize}
-\tightlist
-\item The GUI component palette
-\item The configuration schema
-\item The serialization registry
-\item The documentation generator
-\end{itemize}
-
-Without SSOT, adding a processor requires updating 4+ locations. With SSOT, only the class definition is needed. Python's \texttt{\_\_init\_subclass\_\_} and \texttt{\_\_subclasses\_\_()} handle the rest.
-
-\textbf{Key finding:} PR \#44~\cite{openhcsPR44} migrated from duck typing (\texttt{hasattr()} checks) to nominal typing (ABC contracts). This eliminated 47 scattered checks, reducing DOF from 47 to 1. The migration validates both:
-\begin{enumerate}
-\def\labelenumi{\arabic{enumi}.}
-\tightlist
-\item The theoretical prediction: DOF reduction is achievable
-\item The practical benefit: Maintenance cost decreased measurably
-\end{enumerate}
-
-\subsection{Decision Procedure, Not Preference}\label{sec:decision}
-
-The contribution of this paper is not the theorems alone, but their consequence: \emph{language selection for coherent representation becomes a decision procedure}.
-
-Given coherence as a requirement:
-\begin{enumerate}
-\def\labelenumi{\arabic{enumi}.}
-\tightlist
-\item DOF = 1 is necessary (Corollary~\ref{cor:coherence-forces-ssot})
-\item DOF = 1 for structural facts requires definition-time hooks AND introspection (Theorem~\ref{thm:ssot-iff})
-\item Languages lacking these features cannot achieve coherence for structural facts
-\end{enumerate}
-
-\textbf{Implications:}
-
-\begin{enumerate}
-\def\labelenumi{\arabic{enumi}.}
-\item
-  \textbf{Language design.} Future languages should include definition-time hooks and introspection if coherent structural representation is a design goal.
-\item
-  \textbf{Architecture.} When coherence is required, language selection is constrained. ``I prefer Go'' is not valid when structural coherence is required.
-\item
-  \textbf{Tooling.} External tools can work around language limitations but operate outside language semantics.
-\item
-  \textbf{Pedagogy.} DRY should be taught as epistemic necessity with language requirements, not as a vague guideline.
-\end{enumerate}
-
-\subsection{Paper Structure}\label{sec:structure}
-
-Section~\ref{sec:foundations} establishes epistemic foundations (coherence, oracle arbitrariness) and instantiates them to software. Section~\ref{sec:ssot} defines SSOT as the coherent representation and proves its properties. Section~\ref{sec:requirements} derives language requirements with necessity proofs. Section~\ref{sec:evaluation} evaluates mainstream languages exhaustively. Section~\ref{sec:bounds} proves complexity bounds. Section~\ref{sec:empirical} demonstrates practical application. Section~\ref{sec:related} surveys related work. Appendix~\ref{sec:rebuttals} addresses anticipated objections. Appendix~\ref{sec:lean} contains complete Lean 4 proof listings.
-
+\textbf{Note on scope.} The programming-language instantiation and worked case study (Sections~\ref{sec:evaluation} and~\ref{sec:empirical}) are corollaries of the realizability theorem. The core information-theoretic results are contained in Sections~\ref{sec:foundations}--\ref{sec:bounds}.
 
 
 %==============================================================================

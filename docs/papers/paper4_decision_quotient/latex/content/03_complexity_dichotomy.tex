@@ -1,21 +1,23 @@
 \section{Complexity Dichotomy}\label{sec:dichotomy}
 
-The hardness results of Section~\ref{sec:hardness} apply to worst-case instances. This section develops a more nuanced picture: a \emph{dichotomy theorem} showing that problem difficulty depends on the size of the minimal sufficient set. The dichotomy and ETH reduction chain are machine-verified in Lean 4.
+The hardness results of Section~\ref{sec:hardness} apply to worst-case instances under the succinct encoding. This section states a dichotomy that separates an explicit-state upper bound from a succinct-encoding lower bound. The dichotomy and ETH reduction chain are machine-verified in Lean 4.
+
+\paragraph{Model note.} Part~1 is an explicit-state upper bound (time polynomial in $|S|$). Part~2 is a succinct-encoding lower bound under ETH (time exponential in $n$). The encodings are defined in Section~\ref{sec:encoding}.
 
 \begin{theorem}[Complexity Dichotomy]\label{thm:dichotomy}
 Let $\mathcal{D} = (A, X_1, \ldots, X_n, U)$ be a decision problem with $|S| = N$ states. Let $k^*$ be the size of the minimal sufficient set.
 
 \begin{enumerate}
-\item \textbf{Logarithmic case:} If $k^* = O(\log N)$, then SUFFICIENCY-CHECK is solvable in polynomial time.
+\item \textbf{Logarithmic case (explicit-state upper bound):} If $k^* = O(\log N)$, then SUFFICIENCY-CHECK is solvable in polynomial time in $N$ under the explicit-state encoding.
 
-\item \textbf{Linear case:} If $k^* = \Omega(n)$, then SUFFICIENCY-CHECK requires time $\Omega(2^{n/c})$ for some constant $c > 0$ (assuming ETH).
+\item \textbf{Linear case (succinct lower bound under ETH):} If $k^* = \Omega(n)$, then SUFFICIENCY-CHECK requires time $\Omega(2^{n/c})$ for some constant $c > 0$ under the succinct encoding (assuming ETH).
 \end{enumerate}
 \end{theorem}
 
 \begin{proof}
-\textbf{Part 1 (Logarithmic case):} If $k^* = O(\log N)$, then the number of distinct projections $|S_{I^*}|$ is at most $2^{k^*} = O(N^c)$ for some constant $c$. We can enumerate all projections and verify sufficiency in polynomial time.
+\textbf{Part 1 (Logarithmic case):} If $k^* = O(\log N)$, then the number of distinct projections $|S_{I^*}|$ is at most $2^{k^*} = O(N^c)$ for some constant $c$. Under the explicit-state encoding, we enumerate all projections and verify sufficiency in polynomial time.
 
-\textbf{Part 2 (Linear case):} We establish this via an explicit reduction chain from the Exponential Time Hypothesis.
+\textbf{Part 2 (Linear case):} We establish this via an explicit reduction chain from the Exponential Time Hypothesis under the succinct encoding.
 \end{proof}
 
 \subsection{The ETH Reduction Chain}\label{sec:eth-chain}
@@ -33,7 +35,7 @@ The chain proceeds as follows:
 
 \item \textbf{3-SAT $\leq_p$ TAUTOLOGY:} Given 3-SAT formula $\varphi(x_1, \ldots, x_n)$, define $\psi = \neg\varphi$. Then $\varphi$ is satisfiable iff $\psi$ is not a tautology. This is a linear-time reduction preserving the number of variables.
 
-\item \textbf{TAUTOLOGY requires $2^{\Omega(n)}$ (under ETH):} By the contrapositive of step 2, if TAUTOLOGY could be solved in $o(2^{\delta n})$ time, then 3-SAT could be solved in $o(2^{\delta n})$ time, contradicting ETH.
+\item \textbf{TAUTOLOGY requires $2^{\Omega(n)}$ (under ETH):} By the contrapositive of step 2, if TAUTOLOGY is solvable in $o(2^{\delta n})$ time, then 3-SAT is solvable in $o(2^{\delta n})$ time, contradicting ETH.
 
 \item \textbf{TAUTOLOGY $\leq_p$ SUFFICIENCY-CHECK:} This is Theorem~\ref{thm:sufficiency-conp}. Given formula $\varphi(x_1, \ldots, x_n)$, we construct a decision problem where:
 \begin{itemize}
@@ -42,13 +44,13 @@ The chain proceeds as follows:
 \end{itemize}
 The reduction is polynomial-time and preserves the number of coordinates.
 
-\item \textbf{SUFFICIENCY-CHECK requires $2^{\Omega(n)}$ (under ETH):} Combining steps 3 and 4: if SUFFICIENCY-CHECK could be solved in $o(2^{\delta n/c})$ time for some constant $c$, then TAUTOLOGY (and hence 3-SAT) could be solved in subexponential time, contradicting ETH.
+\item \textbf{SUFFICIENCY-CHECK requires $2^{\Omega(n)}$ (under ETH):} Combining steps 3 and 4: if SUFFICIENCY-CHECK is solvable in $o(2^{\delta n/c})$ time for some constant $c$, then TAUTOLOGY (and hence 3-SAT) is solvable in subexponential time, contradicting ETH.
 \end{enumerate}
 
 \begin{proposition}[Tight Constant]\label{prop:eth-constant}
-The reduction in Theorem~\ref{thm:sufficiency-conp} preserves the number of variables exactly: an $n$-variable formula yields an $n$-coordinate decision problem. Therefore, the constant $c$ in the $2^{n/c}$ lower bound equals 1:
+The reduction in Theorem~\ref{thm:sufficiency-conp} preserves the number of variables up to an additive constant: an $n$-variable formula yields an $(n+1)$-coordinate decision problem. Therefore, the constant $c$ in the $2^{n/c}$ lower bound is asymptotically 1:
 \[
-\text{SUFFICIENCY-CHECK requires time } \Omega(2^{\delta n}) \text{ under ETH}
+\text{SUFFICIENCY-CHECK requires time } \Omega(2^{\delta (n-1)}) = 2^{\Omega(n)} \text{ under ETH}
 \]
 where $\delta$ is the ETH constant for 3-SAT.
 \end{proposition}
@@ -65,37 +67,30 @@ When $\varphi$ has $n$ variables, the constructed problem has $n+1$ coordinates.
 \subsection{Phase Transition}
 
 \begin{corollary}[Phase Transition]\label{cor:phase-transition}
-There exists a threshold $\tau \in (0, 1)$ such that:
+There is a sharp transition between tractable and intractable regimes at the logarithmic scale (with respect to the encodings in Section~\ref{sec:encoding}):
 \begin{itemize}
-\item If $k^*/n < \tau$, SUFFICIENCY-CHECK is ``easy'' (polynomial in $N$)
-\item If $k^*/n > \tau$, SUFFICIENCY-CHECK is ``hard'' (exponential in $n$)
+\item If $k^* = O(\log N)$, SUFFICIENCY-CHECK is polynomial in $N$ under the explicit-state encoding
+\item If $k^* = \Omega(n)$, SUFFICIENCY-CHECK is exponential in $n$ under ETH in the succinct encoding
 \end{itemize}
+For Boolean coordinate spaces ($N = 2^n$), the transition is between $k^* = O(\log n)$ (explicit-state tractable) and $k^* = \Omega(n)$ (succinct-encoding intractable).
 \end{corollary}
 
 \begin{proof}
-The logarithmic case (Part 1 of Theorem~\ref{thm:dichotomy}) gives polynomial time when $k^* = O(\log N) = O(\log 2^n) = O(n)$. More precisely, when $k^* \leq c \log N$ for constant $c$, the algorithm runs in time $O(N^c \cdot \text{poly}(n))$.
+The logarithmic case (Part 1 of Theorem~\ref{thm:dichotomy}) gives polynomial time when $k^* = O(\log N)$. More precisely, when $k^* \leq c \log N$ for constant $c$, the algorithm runs in time $O(N^c \cdot \text{poly}(n))$.
 
 The linear case (Part 2) gives exponential time when $k^* = \Omega(n)$.
 
-The threshold $\tau$ is implicitly defined by where the polynomial bound $2^{k^*} = N^{k^*/\log N}$ transitions from polynomial to superpolynomial in $N$. This occurs when $k^*/\log N$ exceeds any constant, i.e., when $k^* = \omega(\log N)$.
-
-For Boolean coordinate spaces ($N = 2^n$), the threshold is $\tau = 0$: any $k^* = \omega(\log n)$ yields superpolynomial complexity, while $k^* = O(\log n)$ is tractable.
+The transition point is where $2^{k^*} = N^{k^*/\log N}$ stops being polynomial in $N$, i.e., when $k^* = \omega(\log N)$. For Boolean coordinate spaces ($N = 2^n$), this corresponds to the gap between $k^* = O(\log n)$ and $k^* = \Omega(n)$.
 \end{proof}
 
 \begin{remark}[Sharpness of Dichotomy]
-The dichotomy is asymptotically tight under ETH. There are no ``intermediate'' cases:
-\begin{itemize}
-\item \textbf{Below threshold:} Polynomial (by enumeration)
-\item \textbf{At threshold:} Quasipolynomial ($n^{O(\log n)}$)
-\item \textbf{Above threshold:} Exponential (by ETH)
-\end{itemize}
-The quasipolynomial regime at the threshold is measure-zero; almost all instances are either clearly tractable or clearly intractable.
+Under ETH, the lower bound is asymptotically tight in the succinct encoding. The explicit-state upper bound is tight in the sense that it matches enumeration complexity in $N$.
 \end{remark}
 
 This dichotomy explains why some domains admit tractable model selection (few relevant variables) while others require heuristics (many relevant variables). The ETH reduction chain makes precise what ``hard'' means: not merely coNP-complete, but requiring $2^{\Omega(n)}$ time under widely-believed complexity assumptions.
 
 \begin{remark}[Circuit Model Formalization]
-The ETH lower bound is most naturally stated in the \emph{circuit model}, where the utility function $U: A \times S \to \mathbb{R}$ is represented by a Boolean circuit computing $\mathbf{1}[U(a,s) > \theta]$ for threshold comparisons. In this model:
+The ETH lower bound is stated in the succinct circuit encoding of Section~\ref{sec:encoding}, where the utility function $U: A \times S \to \mathbb{R}$ is represented by a Boolean circuit computing $\mathbf{1}[U(a,s) > \theta]$ for threshold comparisons. In this model:
 \begin{itemize}
 \item The input size is the circuit size $m$, not the state space size $|S| = 2^n$
 \item A 3-SAT formula with $n$ variables and $c$ clauses yields a circuit of size $O(n + c)$
@@ -103,4 +98,3 @@ The ETH lower bound is most naturally stated in the \emph{circuit model}, where 
 \end{itemize}
 This linear size preservation is essential for ETH transfer. In the explicit enumeration model (where $S$ is given as a list), the reduction would blow up the instance size exponentially, precluding ETH-based lower bounds. The circuit model is standard in fine-grained complexity and matches practical representations of decision problems.
 \end{remark}
-

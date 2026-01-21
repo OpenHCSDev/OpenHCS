@@ -96,7 +96,7 @@ By Theorem~\ref{thm:timing-forces}, structural derivation must occur at definiti
 \begin{enumerate}
 \tightlist
 \item The source exists with value $v$
-\item Derived locations have not been updated (they may not exist, or hold stale values)
+\item Derived locations have not been updated; they either do not exist yet or hold stale values
 \item The system is temporarily incoherent
 \end{enumerate}
 
@@ -164,7 +164,7 @@ Verification of DOF = 1 requires confirming:
 
 Step (1) requires querying what structures exist. Step (2) requires distinguishing sources from derived locations. Step (3) requires querying the derivation relationship.
 
-Without provenance observability, none of these queries are answerable from within the system. DOF = 1 may hold but cannot be verified. Bugs in derivation logic go undetected until coherence violations manifest.
+Without provenance observability, none of these queries are answerable from within the system. DOF = 1 can hold but cannot be verified. Bugs in derivation logic go undetected until coherence violations manifest.
 \end{proof}
 
 \textbf{Connection to coding theory:} In coding theory, a code's structure (generator matrix, parity-check matrix) must be known to the decoder. Provenance observability is analogous: the derivation structure must be queryable for verification.

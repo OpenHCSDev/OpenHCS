@@ -97,7 +97,7 @@ The DOF metric creates a fundamental tradeoff between encoding rate and modifica
 
 This is a \emph{rate-distortion} analog: higher encoding rate (DOF $> 1$) incurs higher modification complexity. DOF = 1 achieves minimal complexity under the coherence constraint.
 
-\textbf{Key insight:} Many locations may encode $F$ (high total encoding locations), but if DOF = 1, coherence restoration requires only 1 manual update. The derivation mechanism handles propagation automatically.
+\textbf{Key insight:} Many locations can encode $F$ (high total encoding locations), but if DOF = 1, coherence restoration requires only 1 manual update. The derivation mechanism handles propagation automatically.
 
 \begin{example}[Encoding Rate vs. Modification Complexity]\label{ex:ssot-large-m}
 Consider an encoding system where a fact $F$ = ``all processors must implement operation $P$'' is encoded at 51 locations:
@@ -154,7 +154,7 @@ Query/Access time & Database views, computed columns, lazy evaluation \\
 \end{tabular}
 \end{center}
 
-\textbf{Structural facts require definition-time derivation.} Structural facts (class existence, schema structure, service topology) are fixed when defined. Compile-time may be too early (declarative source not yet parsed). Runtime is too late (structure already immutable). Definition-time is the unique opportunity for structural derivation.
+\textbf{Structural facts require definition-time derivation.} Structural facts (class existence, schema structure, service topology) are fixed when defined. Compile-time derivation that runs before the definition is fixed is too early (the declarative source is not yet fixed). Runtime is too late (structure already immutable). Definition-time is the unique opportunity for structural derivation.
 
 \begin{theorem}[Derivation Preserves Coherence]\label{thm:derivation-excludes}
 If $L_{\text{derived}}$ is derived from $L_{\text{source}}$, then $L_{\text{derived}}$ cannot diverge from $L_{\text{source}}$ and does not contribute to DOF.

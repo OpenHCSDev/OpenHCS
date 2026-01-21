@@ -18,17 +18,17 @@ An observer that may read a single type identifier (nominal tag) per value, in a
 \end{definition}
 
 \begin{theorem}[Pareto Optimality of Nominal-Tag Observers]\label{thm:lwd-optimal}
-Assuming the attribute profile is not class-injective (i.e., collisions exist), nominal-tag observers achieve the unique Pareto-optimal point in the $(L, W, D)$ space with $D = 0$:
+In any information-barrier domain, nominal-tag observers achieve the unique Pareto-optimal point in the $(L, W, D)$ space with $D = 0$:
 \begin{itemize}
 \item \textbf{Tag length}: $L = \lceil \log_2 k \rceil$ bits for $k$ types
 \item \textbf{Witness cost}: $W = O(1)$ queries (one tag read)
 \item \textbf{Distortion}: $D = 0$ (zero misclassification probability)
 \end{itemize}
 
-Under the same assumption, interface-only observers achieve:
+In such domains, interface-only observers achieve:
 \begin{itemize}
 \item \textbf{Tag length}: $L = 0$ bits (no explicit tag)
-\item \textbf{Witness cost}: $W = \Omega(n)$ queries (must query $n$ interfaces)
+\item \textbf{Witness cost}: $W = \Omega(d)$ queries (must query at least one minimal distinguishing set of size $d$, see Definition~\ref{def:distinguishing-dimension})
 \item \textbf{Distortion}: $D > 0$ (probability of misclassification is strictly positive due to collisions)
 \end{itemize}
 \end{theorem}
@@ -48,7 +48,7 @@ See Lean formalization: \texttt{proofs/python\_instantiation.lean}. The proof ve
 The three-dimensional frontier shows:
 \begin{itemize}
 \item Nominal-tag observers dominate interface-only observers on all three dimensions
-\item Interface-only observers trade tag length for distortion (zero $L$, but $D = 1$)
+\item Interface-only observers trade tag length for distortion (zero $L$, but $D > 0$)
 \end{itemize}
 
 Figure~\ref{fig:lwd-tradeoff} visualizes the $(L, W, D)$ tradeoff space. The key observation: \emph{nominal tags trade storage for query cost}, achieving the optimal $(L, W, D) = (\log_2 k, O(1), 0)$ point.
@@ -88,7 +88,7 @@ Figure~\ref{fig:lwd-tradeoff} visualizes the $(L, W, D)$ tradeoff space. The key
   \node[red, left] at (-0.1,1.8) {\footnotesize Duck ($D{>}0$)};
 
 \end{tikzpicture}
-\caption{Schematic illustration of the $(L, W, D)$ tradeoff. The $D=0$ frontier is the Pareto boundary for zero-error type identification: Structural typing (no tags, high query cost) and Nominal typing (full tags, minimal queries) lie on this frontier. Duck typing operates below the frontier by accepting $D > 0$; it uses fewer queries but cannot distinguish interface-equivalent types. Exact frontier shape depends on the type system; the qualitative relationships are general.}
+\caption{Schematic illustration of the $(L, W, D)$ tradeoff. For a concrete example with $k = 1000$ classes and distinguishing dimension $d = 10$, the nominal-tag strategy achieves $L = 10$ bits, $W = O(1)$, $D = 0$, while the interface-only strategy requires $W = 10$ queries and incurs $D > 0$ due to attribute collisions.}
 \label{fig:lwd-tradeoff}
 \end{figure}
 

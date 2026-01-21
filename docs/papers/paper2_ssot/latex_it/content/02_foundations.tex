@@ -98,7 +98,7 @@ The abstract encoding model (Definitions~\ref{def:encoding-system}--\ref{def:dof
 \item \textbf{Version control:} Merge resolution under concurrent modifications
 \end{itemize}
 
-We focus on \emph{computational realizations}---systems where locations are syntactic constructs manipulated by tools or humans. Software codebases are the primary example, but the encoding model is not software-specific.
+We focus on \emph{computational realizations}---systems where locations are syntactic constructs manipulated by tools or humans. Software codebases are the primary example, but the encoding model is not software-specific. This subsection is illustrative; the core information-theoretic results do not depend on any particular computational domain.
 
 \begin{definition}[Codebase (Software Realization)]
 A \emph{codebase} $C$ is a finite collection of source files, each containing syntactic constructs (classes, functions, statements, expressions). This is the canonical computational encoding system.
@@ -276,7 +276,7 @@ Here $L_2$ is derived from $L_1$. Updating the class definition automatically up
 The number of \emph{independent} locations encoding fact $F$.
 \end{definition}
 
-DOF is the key metric. Modification complexity $M$ counts all encoding locations. DOF counts only the independent ones. If all but one encoding location is derived, DOF = 1 even though $M$ may be large.
+DOF is the key metric. Modification complexity $M$ counts all encoding locations. DOF counts only the independent ones. If all but one encoding location is derived, DOF = 1 even though $M$ can be large.
 
 \begin{theorem}[DOF = Incoherence Potential]\label{thm:dof-inconsistency}
 $\text{DOF}(C, F) = k$ implies $k$ different values for $F$ can coexist in $C$ simultaneously. With $k > 1$, incoherent states are reachable.
@@ -326,6 +326,45 @@ This is a direct instantiation of Corollary~\ref{cor:coherence-forces-ssot} to c
 
 Only DOF = 1 achieves coherent representation. This is an information-theoretic optimality condition, not a design preference.
 \end{proof}
+
+%==============================================================================
+\subsection{Encoding-Theoretic CAP and FLP}\label{sec:cap-flp}
+
+We now formalize CAP and FLP inside the encoding model.
+
+\begin{definition}[Local Availability]\label{def:local-availability}
+An encoding system for fact $F$ is \emph{locally available} iff for every encoding location $L$ of $F$ and every value $v$, there exists a valid edit $\delta \in E(C)$ such that $\text{updated}(L, \delta)$ and for every other encoding location $L'$, $\neg \text{updated}(L', \delta)$. Informally: each encoding location can be updated without coordinating with others.
+\end{definition}
+
+\begin{definition}[Partition Tolerance]\label{def:partition-tolerance}
+An encoding system for fact $F$ is \emph{partition-tolerant} iff $F$ is encoded at two or more locations:
+\[
+|\{L \in C : \text{encodes}(L, F)\}| \ge 2.
+\]
+This is the minimal formal notion of ``replication'' in our model; without it, partitions are vacuous.
+\end{definition}
+
+\begin{theorem}[CAP in the Encoding Model]\label{thm:cap-encoding}
+No encoding system can simultaneously guarantee coherence (Definition~\ref{def:coherence}), local availability (Definition~\ref{def:local-availability}), and partition tolerance (Definition~\ref{def:partition-tolerance}) for the same fact $F$.
+\end{theorem}
+
+\begin{proof}
+Partition tolerance gives at least two encoding locations. Local availability allows each to be updated without updating any other encoding location, so by Definition~\ref{def:independent} there exist two independent locations and thus $\text{DOF}(C, F) > 1$. By Theorem~\ref{thm:dof-gt-one-incoherence}, incoherent states are reachable, contradicting coherence.
+\end{proof}
+
+\begin{definition}[Resolution Procedure]\label{def:resolution-procedure}
+A \emph{resolution procedure} is a deterministic function $R$ that maps an encoding system state to a value present in that state.
+\end{definition}
+
+\begin{theorem}[Static FLP in the Encoding Model]\label{thm:static-flp}
+For any incoherent encoding system state and any resolution procedure $R$, the returned value is arbitrary relative to the other values present; no deterministic $R$ can be justified by internal information alone.
+\end{theorem}
+
+\begin{proof}
+Immediate from Theorem~\ref{thm:oracle-arbitrary}: in an incoherent state, at least two distinct values are present, and any choice leaves another value disagreeing.
+\end{proof}
+
+These theorems are the encoding-theoretic counterparts of CAP~\cite{brewer2000cap,gilbert2002cap} and FLP~\cite{flp1985impossibility}: CAP corresponds to the impossibility of coherence when replicated encodings remain independently updatable; FLP corresponds to the impossibility of truth-preserving resolution in an incoherent state without side information.
 
 %==============================================================================
 \subsection{Coherence Capacity Theorem}\label{sec:capacity}
@@ -396,7 +435,7 @@ Given an incoherent encoding system with $k$ independent locations holding disti
 \end{theorem}
 
 \begin{proof}
-The $k$ independent locations partition the resolution problem into $k$ equally plausible alternatives. Without loss of generality, each location could be the authoritative source.
+The $k$ independent locations partition the resolution problem into $k$ equally plausible alternatives. Without loss of generality, each location is an equally plausible authoritative source.
 
 By Theorem~\ref{thm:oracle-arbitrary}, no internal information distinguishes them. Resolution requires identifying which of $k$ alternatives is correct.
 
@@ -424,7 +463,7 @@ Consider a configuration system with DOF = 3:
 \item \texttt{params.toml}: \texttt{threshold = 0.6}
 \end{itemize}
 
-To resolve this incoherence requires $\log_2 3 \approx 1.58$ bits of side information. In practice, this might be:
+To resolve this incoherence requires $\log_2 3 \approx 1.58$ bits of side information. In practice, side information takes forms such as:
 \begin{itemize}
 \tightlist
 \item A priority ordering: ``YAML takes precedence'' (encodes which of 3 is authoritative)
@@ -490,7 +529,9 @@ Adding a derivation edge $(L_s, L_d)$ to $D$ can only decrease DOF: if $L_d$ was
 A derivation relation $D$ with DOF($D$) = 1 is \emph{minimal} iff removing any edge increases DOF.
 \end{corollary}
 
-\textbf{Computational implication:} Given an encoding system, there may be multiple DOF-1-achieving derivation structures. The minimal ones use the fewest derivation edges---the most economical way to achieve coherence.
+\textbf{Computational implication:} Given an encoding system, there can be multiple DOF-1-achieving derivation structures. The minimal ones use the fewest derivation edges---the most economical way to achieve coherence.
+
+\textbf{Representation model for complexity.} For the algorithmic results below, we assume the derivation relation $D$ is given explicitly as a DAG over the location set $L$. The input size is $|L| + |D|$, and all complexity bounds are measured in this explicit representation.
 
 \begin{theorem}[DOF Computation Complexity]\label{thm:dof-complexity}
 Given an encoding system with explicit derivation relation $D$:

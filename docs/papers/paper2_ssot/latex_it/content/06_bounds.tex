@@ -17,6 +17,8 @@ where $\text{requires\_manual\_edit}(L, \delta_F)$ holds iff location $L$ must b
 
 \textbf{What we measure:} Manual edits only. Derived locations that update automatically have zero cost. This distinguishes DOF = 1 systems (where derivation handles propagation) from DOF $>$ 1 systems (where all updates are manual).
 
+\textbf{Asymptotic parameter:} We measure scaling in the number of encoding locations for fact $F$. Let $n = |\{L \in C : \text{encodes}(L, F)\}|$ and $k = \text{DOF}(C, F)$. Bounds of $O(1)$ and $\Omega(n)$ are in this parameter; in particular, the lower bound uses $n = k$ independent locations.
+
 \subsection{Upper Bound: DOF = 1 Achieves O(1)}\label{sec:upper-bound}
 
 \begin{theorem}[DOF = 1 Upper Bound]\label{thm:upper-bound}
@@ -38,10 +40,10 @@ When $F$ changes:
 \item Total manual edits: 1
 \end{enumerate}
 
-The number of derived locations $k$ may grow with system size, but the number of \emph{manual} edits remains 1. Therefore, $M_{\text{effective}}(C, \delta_F) = O(1)$.
+The number of derived locations $k$ can grow with system size, but the number of \emph{manual} edits remains 1. Therefore, $M_{\text{effective}}(C, \delta_F) = O(1)$.
 \end{proof}
 
-\textbf{Note on ``effective'' vs. ``total'' complexity:} Total modification complexity $M(C, \delta_F)$ counts all locations that change. Effective modification complexity counts only manual edits. With DOF = 1, total complexity may be $O(n)$ (many derived locations change), but effective complexity is $O(1)$ (one manual edit).
+\textbf{Note on ``effective'' vs. ``total'' complexity:} Total modification complexity $M(C, \delta_F)$ counts all locations that change. Effective modification complexity counts only manual edits. With DOF = 1, total complexity can be $O(n)$ (many derived locations change), but effective complexity is $O(1)$ (one manual edit).
 
 \subsection{Lower Bound: DOF $>$ 1 Requires \texorpdfstring{$\Omega(n)$}{Omega(n)}}\label{sec:lower-bound}
 
@@ -65,6 +67,8 @@ By Definition~\ref{def:independent}, the $n$ encoding locations are independent-
 
 Therefore, $M_{\text{effective}}(C, \delta_F) = \Omega(n)$.
 \end{proof}
+
+\textbf{Tightness (Achievability + Converse).} Theorems~\ref{thm:upper-bound} and~\ref{thm:lower-bound} form a tight information-theoretic bound: DOF = 1 achieves constant modification cost (achievability), while any encoding with more than one independent location incurs linear cost in the number of independent encodings (converse). There is no intermediate regime with sublinear manual edits when $k > 1$ independent encodings are permitted.
 
 \subsection{The Unbounded Gap}\label{sec:gap}
 
@@ -105,8 +109,8 @@ For an encoding system, define:
 \begin{itemize}
 \tightlist
 \item $R$ = \emph{Rate} (DOF): Number of independent encoding locations
-\item $C$ = \emph{Complexity}: Expected modification cost per change
-\item $P$ = \emph{Coherence probability}: $1 - \Pr[\text{incoherent state reachable}]$
+\item $C$ = \emph{Complexity}: Manual modification cost per change
+\item $P$ = \emph{Coherence indicator}: $P = 1$ iff no incoherent state is reachable; otherwise $P = 0$
 \end{itemize}
 The \emph{(R, C, P) tradeoff space} is the set of achievable $(R, C, P)$ tuples.
 \end{definition}
@@ -120,7 +124,7 @@ The (R, C, P) space has three distinct operating regimes:
 \midrule
 $R = 0$ & $C = 0$ & $P = $ undefined & Fact not encoded \\
 $R = 1$ & $C = O(1)$ & $P = 1$ & \textbf{Optimal (capacity-achieving)} \\
-$R > 1$ & $C = \Omega(R)$ & $P < 1$ & Above capacity \\
+$R > 1$ & $C = \Omega(R)$ & $P = 0$ & Above capacity \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -131,7 +135,7 @@ $R > 1$ & $C = \Omega(R)$ & $P < 1$ & Above capacity \\
 
 \textbf{$R = 1$:} By Theorem~\ref{thm:upper-bound}, $C = O(1)$. By Theorem~\ref{thm:coherence-capacity}, $P = 1$ (coherence guaranteed). This is the capacity-achieving regime.
 
-\textbf{$R > 1$:} By Theorem~\ref{thm:lower-bound}, $C = \Omega(R)$. By Theorem~\ref{thm:dof-gt-one-incoherence}, incoherent states are reachable, so $P < 1$.
+\textbf{$R > 1$:} By Theorem~\ref{thm:lower-bound}, $C = \Omega(R)$. By Theorem~\ref{thm:dof-gt-one-incoherence}, incoherent states are reachable, so $P = 0$.
 \end{proof}
 
 \begin{definition}[Pareto Frontier]\label{def:pareto-frontier}
@@ -160,7 +164,7 @@ We show $(1, 1, 1)$ is Pareto optimal and unique:
 \textbf{Uniqueness:} No other point achieves $P = 1$ except $R = 1$.
 \end{proof}
 
-\textbf{Information-theoretic interpretation.} The Pareto frontier in rate-distortion theory is the curve $R(D)$ of minimum rate achieving distortion $D$. Here, the ``distortion'' is $1 - P$ (probability of incoherence), and the Pareto frontier collapses to a single point: $R = 1$ is the unique rate achieving $D = 0$.
+\textbf{Information-theoretic interpretation.} The Pareto frontier in rate-distortion theory is the curve $R(D)$ of minimum rate achieving distortion $D$. Here, the ``distortion'' is $1 - P$ (indicator of incoherence reachability), and the Pareto frontier collapses to a single point: $R = 1$ is the unique rate achieving $D = 0$.
 
 \begin{corollary}[No Tradeoff at $P = 1$]\label{cor:no-tradeoff}
 Unlike rate-distortion where you can trade rate for distortion, there is no tradeoff at $P = 1$ (perfect coherence). The only option is $R = 1$.
@@ -182,7 +186,7 @@ In our framework:
 \begin{itemize}
 \tightlist
 \item You \emph{cannot} achieve higher coherence ($P$) with more independent locations
-\item Higher rate ($R > 1$) \emph{decreases} coherence probability
+\item Higher rate ($R > 1$) \emph{eliminates} coherence guarantees ($P = 0$)
 \item $P = 1$ (perfect coherence) requires $R = 1$ exactly
 \end{itemize}
 

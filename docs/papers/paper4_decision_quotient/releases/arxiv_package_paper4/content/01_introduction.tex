@@ -1,10 +1,12 @@
 \section{Introduction}\label{sec:introduction}
 
-Computational complexity theory provides the mathematical foundation for understanding algorithmic hardness, yet its proofs remain largely unverified by machine. While proof assistants have transformed areas from program verification to pure mathematics---with projects like Mathlib formalizing substantial portions of undergraduate mathematics---complexity-theoretic reductions remain underrepresented in formal libraries.
+Computational complexity theory provides the mathematical foundation for understanding algorithmic hardness, yet its proofs remain largely unverified by machine. While proof assistants have transformed areas from program verification to pure mathematics (with projects like Mathlib formalizing substantial portions of undergraduate mathematics), complexity-theoretic reductions remain underrepresented in formal libraries.
 
 This gap matters. Reductions are notoriously error-prone: they require careful polynomial-time bounds, precise correspondence between instances, and subtle handling of edge cases. Published proofs occasionally contain errors that survive peer review. Machine verification eliminates this uncertainty while producing reusable artifacts.
 
-We address this gap by developing a Lean 4 framework for formalizing polynomial-time reductions, demonstrated through a comprehensive complexity analysis of \emph{decision-relevant information}---the problem of identifying which variables matter for optimal decision-making.
+We address this gap by developing a Lean 4 framework for formalizing polynomial-time reductions, demonstrated through a comprehensive complexity analysis of \emph{decision-relevant information}: the problem of identifying which variables matter for optimal decision-making.
+
+Section~\ref{sec:encoding} fixes the computational model and input encodings used for all complexity claims.
 
 \subsection{Contributions}
 
@@ -15,18 +17,21 @@ This paper makes the following contributions, ordered by formalization significa
 
 \item \textbf{Machine-verified NP/coNP-completeness proofs.} We formalize a complete reduction from TAUTOLOGY to SUFFICIENCY-CHECK, demonstrating the methodology for coNP-hardness proofs in Lean 4. The reduction includes machine-checked polynomial-time bounds.
 
-\item \textbf{Formalized approximation hardness.} We provide (to our knowledge) the first Lean formalization of an inapproximability result via L-reduction, showing $(1-\varepsilon)\ln n$-hardness for MIN-SUFFICIENT-SET from SET-COVER.
+\item \textbf{Formalized approximation hardness.} We provide (to our knowledge) the first Lean formalization of an inapproximability result via L-reduction, showing $(1-\varepsilon)\ln n$-hardness for MINIMUM-SUFFICIENT-SET from SET-COVER.
 
 \item \textbf{ETH-based lower bounds in Lean.} We formalize conditional lower bounds using the Exponential Time Hypothesis, including circuit-based argument structure for $2^{\Omega(n)}$ bounds.
 
 \item \textbf{Parameterized complexity in Lean 4.} We prove W[2]-hardness with kernelization lower bounds, extending Lean's coverage to parameterized complexity theory.
 
-\item \textbf{Case study: Decision-relevant information.} We apply the framework to prove that identifying which coordinates of a decision problem suffice for optimal action is coNP-complete, with a complete complexity dichotomy and tight tractability conditions.
+\item \textbf{Case study: Decision-relevant information.} We apply the framework to prove that identifying which coordinates of a decision problem suffice for optimal action is coNP-complete, with a sharp complexity dichotomy and tractability conditions.
 \end{enumerate}
+
+\paragraph{What is new.}
+We contribute (i) a reusable Lean 4 framework for polynomial-time reductions with explicit polynomial bounds; (ii) the first machine-checked coNP-completeness proof for a decision-theoretic sufficiency problem; and (iii) a complete complexity landscape for coordinate sufficiency under explicit encoding assumptions. Prior work studies decision complexity in general or feature selection hardness, but does not formalize these reductions or establish this landscape in Lean.
 
 \subsection{The Case Study: Sufficiency Checking}
 
-Our case study addresses a fundamental question in decision theory:
+Our case study addresses a core question in decision theory:
 
 \begin{quote}
 \textbf{Which variables are sufficient to determine the optimal action?}
@@ -37,9 +42,9 @@ Consider a decision problem with actions $A$ and states $S = X_1 \times \cdots \
 s_I = s'_I \implies \Opt(s) = \Opt(s')
 \]
 
-We prove this problem is coNP-complete (Theorem~\ref{thm:sufficiency-conp}), finding minimum sufficient sets is coNP-complete (Theorem~\ref{thm:minsuff-conp}), and a complexity dichotomy separates polynomial cases ($O(\log n)$-size sufficient sets) from exponential cases ($\Omega(n)$-size).
+We prove this problem is coNP-complete (Theorem~\ref{thm:sufficiency-conp}), finding minimum sufficient sets is coNP-complete (Theorem~\ref{thm:minsuff-conp}), and a complexity dichotomy separates polynomial time in the explicit-state model for $O(\log |S|)$-size sufficient sets from $2^{\Omega(n)}$ lower bounds under ETH in the succinct model for $\Omega(n)$-size sets.
 
-The practical implication---that ``determining what you need to know is harder than knowing everything''---explains ubiquitous over-modeling across engineering, science, and finance. But for CPP/ITP readers, the significance is methodological: these results demonstrate a complete pipeline from problem formulation to machine-verified hardness proof.
+The primary contribution is theoretical: a formalized reduction framework and a complete characterization of the core decision-relevant problems in the formal model (coNP/\(\Sigma_2^P\) completeness and tractable cases under explicit encoding assumptions). The practical corollary (that ``determining what you need to know is harder than knowing everything'') explains ubiquitous over-modeling across engineering, science, and finance. For CPP/ITP readers, the significance is methodological: these results demonstrate an end-to-end pipeline from problem formulation to machine-verified hardness proof.
 
 \subsection{Formalization Statistics}
 
@@ -62,13 +67,12 @@ All proofs compile with \texttt{lake build} and pass \texttt{\#print axioms} ver
 
 \subsection{Paper Structure}
 
-Section~\ref{sec:methodology} describes our formalization methodology and Lean 4 framework design. Section~\ref{sec:foundations} establishes formal foundations for the case study. Sections~\ref{sec:hardness}--\ref{sec:tractable} develop the complexity results with machine-verified proofs. Section~\ref{sec:implications} discusses practical implications. Section~\ref{sec:simplicity-tax} presents the Simplicity Tax Theorem (also machine-verified). Section~\ref{sec:related} surveys related work in both complexity theory and formal verification. Section~\ref{sec:engineering} discusses proof engineering insights. Appendix~\ref{app:lean} contains proof listings.
+Section~\ref{sec:methodology} describes our formalization methodology and Lean 4 framework design. Section~\ref{sec:foundations} establishes formal foundations for the case study. Sections~\ref{sec:hardness}--\ref{sec:tractable} develop the core complexity results with machine-verified proofs. Sections~\ref{sec:implications} and~\ref{sec:simplicity-tax} present corollaries and implications for practice (also machine-verified). Section~\ref{sec:related} surveys related work in both complexity theory and formal verification. Section~\ref{sec:engineering} discusses proof engineering insights. Appendix~\ref{app:lean} contains proof listings.
 
 \subsection{Artifact Availability}
 
 The complete Lean 4 formalization is available at:
 \begin{center}
-\url{https://github.com/trissim/openhcs/tree/main/docs/papers/paper4_decision_quotient/proofs}
+\url{https://doi.org/10.5281/zenodo.18140965}
 \end{center}
 The proofs build with \texttt{lake build} using the Lean toolchain specified in \texttt{lean-toolchain}. We encourage artifact evaluation and welcome contributions extending the reduction framework.
-

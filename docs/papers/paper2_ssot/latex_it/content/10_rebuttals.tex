@@ -10,7 +10,7 @@ This appendix addresses anticipated objections, organized thematically. Each obj
 
 \textbf{Objection:} ``You've formalized a toy model and proved properties about it. But the model doesn't capture real Python/Rust semantics. The proofs are valid but vacuously true about artificial constructs.''
 
-\textbf{Response:} The model is validated through \emph{instantiation proofs} that bridge abstract theorems to concrete language semantics. This is the standard methodology for programming language formalization~\cite{pierce2002types}.
+\textbf{Response:} The model is established through \emph{instantiation proofs} that bridge abstract theorems to concrete language semantics. This is the standard methodology for programming language formalization~\cite{pierce2002types}.
 
 \paragraph{The Two-Layer Architecture.} Paper 1 establishes this methodology:
 
@@ -86,7 +86,7 @@ $>$1 & Multiple sources can diverge (incoherence reachable) \\
 \end{tabular}
 \end{center}
 
-DOF = 2 means two independent encoding locations can hold different values for the same fact. The \emph{possibility} of incoherence exists. The definition is information-theoretic: optimal encoding requires DOF = 1. Systems with DOF $>$ 1 may be pragmatically acceptable but do not achieve the optimal encoding rate.
+DOF = 2 means two independent encoding locations can hold different values for the same fact. The \emph{possibility} of incoherence exists. The definition is information-theoretic: optimal encoding requires DOF = 1. Systems with DOF $>$ 1 can be pragmatically acceptable but do not achieve the optimal encoding rate.
 
 \subsubsection{External Tools vs System-Native DOF = 1}
 
@@ -144,7 +144,7 @@ Among programming languages, three satisfy the criteria. Two (CLOS, Smalltalk) a
 % PART III: RUST AND EXTERNAL TOOLING
 %==============================================================================
 
-\subsubsection{Empirical Validation}
+\subsubsection{Concrete Instantiation}
 
 The case studies demonstrate patterns, with publicly verifiable instances:
 
@@ -361,7 +361,7 @@ Language-level SSOT provides an internal oracle. Discipline provides an external
 
 \textbf{Response:} When you model correctly, theorems become definitional. This is a feature, not a bug.
 
-Consider: ``The sum of two even numbers is even.'' In a well-designed formalization, this might be \texttt{rfl}---not because it's trivial, but because the definition of ``even'' was chosen to make the property structural.
+Consider: ``The sum of two even numbers is even.'' In a well-designed formalization, this can be \texttt{rfl}---not because it's trivial, but because the definition of ``even'' was chosen to make the property structural.
 
 That said, not all proofs are \texttt{rfl}. The \texttt{rust\_lacks\_introspection} theorem is 40 lines of actual reasoning:
 

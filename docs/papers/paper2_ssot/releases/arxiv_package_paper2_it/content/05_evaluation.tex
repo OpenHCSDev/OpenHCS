@@ -1,9 +1,15 @@
-\section{Realization Evaluation: Computational Systems}\label{sec:evaluation}
+\section{Corollary: Programming-Language Instantiation}\label{sec:evaluation}
 %==============================================================================
 
-We now evaluate computational systems against the DOF = 1 realizability requirements established in Section~\ref{sec:requirements}. We focus on programming languages as the primary computational domain with detailed evaluation. The criteria apply to any computational system with declarative structures.
+We instantiate Theorem~\ref{thm:ssot-iff} in the domain of programming languages. This section is a formal corollary of the realizability theorem: once a language's definition-time hooks and introspection capabilities are fixed, DOF = 1 realizability for structural facts is determined.
 
-This evaluation is exhaustive for mainstream programming languages: we check every mainstream language against formally-defined criteria derived from Theorem~\ref{thm:ssot-iff}.
+\begin{corollary}[Language Realizability Criterion]\label{cor:lang-realizability}
+A programming language can realize DOF = 1 for structural facts iff it provides both (i) definition-time hooks and (ii) introspectable derivations. This is the direct instantiation of Theorem~\ref{thm:ssot-iff}.
+\end{corollary}
+
+\textbf{Instantiation map.} In the abstract model, an independent encoding is a location that can diverge under edits. In programming languages, structural facts are encoded at definition sites; \emph{definition-time hooks} implement derivation (automatic propagation), and \emph{introspection} implements provenance observability. Thus DEF corresponds to causal propagation and INTRO corresponds to queryable derivations; DOF = 1 is achievable exactly when both are present.
+
+We instantiate this corollary over a representative language class (Definition~\ref{def:mainstream}).
 
 \subsection{Evaluation Criteria}\label{sec:criteria}
 
@@ -32,26 +38,12 @@ Hierarchy queries & HIER & Can the program enumerate subclasses/implementers? \\
 \item $\triangle$ = Partial/insufficient: Feature exists but fails a realizability requirement (e.g., needs external tooling or lacks runtime reach)
 \end{itemize}
 
-\textbf{Methodology note (tooling exclusions):} We exclude capabilities
-that require external build tools or libraries (annotation processors,
-Lombok, \texttt{reflect-metadata}+\texttt{ts-transformer},
-\texttt{ts-json-schema-generator}, etc.). Only language-native,
-runtime-verifiable features count toward realizability.
+\textbf{Tooling exclusions:} We exclude capabilities that require external build tools or libraries (annotation processors, Lombok, \texttt{reflect-metadata}+\texttt{ts-transformer}, \texttt{ts-json-schema-generator}, etc.). Only language-native, runtime-verifiable features count toward realizability. We use $\triangle$ only when a built-in mechanism exists but fails a requirement; for non-mainstream languages we note partial support where relevant. For INTRO, we require runtime subclass enumeration; Java's \texttt{getMethods()} does not qualify because it cannot enumerate subclasses without classpath scanning.
 
-\textbf{Note:} We use $\triangle$ sparingly for mainstream languages
-only when a built-in mechanism exists but fails realizability requirements (e.g., requires
-compile-time tooling or lacks runtime reach). For non-mainstream
-languages in Section~\ref{sec:non-mainstream}, we note partial support
-where relevant since these languages are not our primary focus. For
-INTRO, we require \emph{subclass enumeration}: the ability to answer
-``what classes inherit from X?'' at runtime. Java's
-\texttt{getMethods()} does not satisfy this because it cannot enumerate
-subclasses without classpath scanning via external libraries.
+\subsection{Language Class for Instantiation}\label{sec:mainstream-def}
 
-\subsection{Mainstream Language Definition}\label{sec:mainstream-def}
-
-\begin{definition}[Mainstream Language]\label{def:mainstream}
-A language is \emph{mainstream} iff it appears in the top 20 of at least two of the following indices consistently over 5+ years:
+\begin{definition}[Representative Language Class]\label{def:mainstream}
+A language is in the \emph{representative class} iff it appears in the top 20 of at least two of the following indices consistently over 5+ years:
 \begin{enumerate}
 \tightlist
 \item TIOBE Index~\cite{tiobe2024} (monthly language popularity)
@@ -61,9 +53,9 @@ A language is \emph{mainstream} iff it appears in the top 20 of at least two of 
 \end{enumerate}
 \end{definition}
 
-This definition excludes niche languages (Haskell, Erlang, Clojure) while including all languages a typical software organization might consider. The 5-year consistency requirement excludes flash-in-the-pan languages.
+This definition excludes niche languages (e.g., Haskell, Erlang, Clojure) while including languages a typical software organization would consider. The 5-year consistency requirement excludes short-lived spikes.
 
-\subsection{Mainstream Language Evaluation}\label{sec:mainstream-eval}
+\subsection{Instantiation Over the Representative Class}\label{sec:mainstream-eval}
 
 \begin{center}
 \begin{tabular}{lccccc}
@@ -84,139 +76,47 @@ Swift & $\times$ & $\times$ & $\times$ & $\times$ & NO \\
 \end{tabular}
 \end{center}
 
-TypeScript earns $\triangle$ for DEF/INTRO because decorators (aligned with ES decorators since TypeScript 5.0, 2023) plus
+\textbf{Corollary interpretation.} The table instantiates Corollary~\ref{cor:lang-realizability}: DOF = 1 realizability holds exactly when DEF and INTRO are both satisfied. The remaining columns (STRUCT, HIER) identify partial mechanisms but do not alter the DOF = 1 verdict.
+
+Verification method: for each language we check (i) existence of definition-time hooks that execute during class/type definition and (ii) runtime-introspectable derivations (e.g., subclass enumeration). Failure of either condition implies non-realizability by Corollary~\ref{cor:lang-realizability}.
+
+TypeScript earns $\triangle$ for DEF/INTRO because decorators (aligned with ES decorators) plus
 \texttt{reflect-metadata} can run at class decoration time and expose
-limited metadata, but (a) they require \texttt{experimentalDecorators} or specific tsconfig flags
-instead of being always-on language features, (b) they cannot enumerate
-implementers at runtime (no \texttt{\_\_subclasses\_\_()} equivalent), and (c) type information is erased at compile time.
+limited metadata, but (a) they require opt-in configuration,
+(b) they cannot enumerate implementers at runtime (no \texttt{\_\_subclasses\_\_()} equivalent), and (c) type information is erased at compile time.
 Consequently DOF = 1 remains unrealizable without external
-tooling, so the overall verdict stays NO. \textbf{Note (as of 2026):} While ES decorators are now standard in JavaScript, they still lack subclass enumeration---the fundamental barrier to DOF = 1 remains.
+tooling, so the overall verdict stays NO.
 
-\subsubsection{Python: Full DOF-1 Support}
+\subsubsection{Python: Instantiation of Both Requirements}
 
-Python provides all four capabilities:
+Python satisfies both requirements. \textbf{DEF:} \checkmark via \texttt{\_\_init\_subclass\_\_}, metaclass \texttt{\_\_new\_\_}/\texttt{\_\_init\_\_}, and class decorators executing at definition time. \textbf{INTRO:} \checkmark via \texttt{\_\_subclasses\_\_()} and MRO queries. \textbf{STRUCT/HIER:} \checkmark via metaclass modification and subclass enumeration.
 
-\textbf{DEF (Definition-time hooks):}
-\begin{itemize}
-\tightlist
-\item \texttt{\_\_init\_subclass\_\_}: Executes when a subclass is defined
-\item Metaclasses: \texttt{\_\_new\_\_} and \texttt{\_\_init\_\_} execute at class creation
-\item Class decorators: Execute immediately after class body
-\end{itemize}
+\subsubsection{JavaScript: Missing Both Requirements}
 
-\textbf{INTRO (Introspection):}
-\begin{itemize}
-\tightlist
-\item \texttt{\_\_subclasses\_\_()}: Returns list of direct subclasses
-\item \texttt{\_\_mro\_\_}: Returns method resolution order
-\item \texttt{type()}, \texttt{isinstance()}, \texttt{issubclass()}: Type queries
-\item \texttt{dir()}, \texttt{vars()}, \texttt{getattr()}: Attribute introspection
-\end{itemize}
+\textbf{DEF:} $\times$ (no definition-time execution in class syntax). \textbf{INTRO:} $\times$ (no subclass enumeration at runtime; \texttt{instanceof} is not enumeration). Therefore DOF = 1 fails by Corollary~\ref{cor:lang-realizability}.
 
-\textbf{STRUCT (Structural modification):}
-\begin{itemize}
-\tightlist
-\item Metaclasses can add/remove/modify class attributes
-\item \texttt{\_\_init\_subclass\_\_} can modify the subclass being defined
-\item Decorators can return a different class entirely
-\end{itemize}
+\subsubsection{Java: Missing Both Requirements}
 
-\textbf{HIER (Hierarchy queries):}
-\begin{itemize}
-\tightlist
-\item \texttt{\_\_subclasses\_\_()}: Enumerate subclasses
-\item \texttt{\_\_bases\_\_}: Query parent classes
-\item \texttt{\_\_mro\_\_}: Full inheritance chain
-\end{itemize}
+\textbf{DEF:} $\times$ (annotations are external tooling; class definitions are fixed before processing). \textbf{INTRO:} $\times$ (no runtime subclass enumeration; external classpath scanning is tooling, not a language feature). Thus DOF = 1 fails by Corollary~\ref{cor:lang-realizability}.
 
-\subsubsection{JavaScript: No DOF-1 Support}
+\subsubsection{C++: Missing Both Requirements}
 
-JavaScript lacks definition-time hooks:
+\textbf{DEF:} $\times$ (templates are compile-time expansion, not definition-time hooks). \textbf{INTRO:} $\times$ (no runtime subclass enumeration). Therefore DOF = 1 fails by Corollary~\ref{cor:lang-realizability}.
 
-\textbf{DEF:} $\times$. No code executes when a class is defined. The \texttt{class} syntax is declarative. Decorators (TC39 Stage 3, finalized 2024) exist but cannot access or enumerate subclasses at runtime.
+\subsubsection{Go: Missing Both Requirements}
 
-\textbf{INTRO:} $\times$. \texttt{Object.getPrototypeOf()}, \texttt{instanceof} exist but \emph{cannot enumerate subclasses}. No equivalent to \texttt{\_\_subclasses\_\_()}.
+\textbf{DEF:} $\times$ (no definition-time hooks). \textbf{INTRO:} $\times$ (no enumeration of interface implementers). Therefore DOF = 1 fails by Corollary~\ref{cor:lang-realizability}.
 
-\textbf{STRUCT:} $\times$. Cannot modify class structure at definition time.
+\subsubsection{Rust: Missing Both Requirements}
 
-\textbf{HIER:} $\times$. Cannot enumerate subclasses. No equivalent to \texttt{\_\_subclasses\_\_()}.
+\textbf{DEF:} $\times$ (procedural macros are compile-time; no definition-time hooks). \textbf{INTRO:} $\times$ (no runtime trait implementer enumeration). Thus DOF = 1 fails by Corollary~\ref{cor:lang-realizability}.
 
-\subsubsection{Java: No DOF-1 Support}
-
-Java's annotations are metadata, not executable hooks~\cite{gosling2021java}:
-
-\textbf{DEF:} $\times$. Annotations are processed by external tools (annotation processors), not by the JVM at class loading. The class is already fully defined when annotation processing occurs.
-
-\textbf{INTRO:} $\times$. \texttt{Class.getMethods()}, \texttt{Class.getInterfaces()}, \texttt{Class.getSuperclass()} exist but \emph{cannot enumerate subclasses}. The JVM does not track subclass relationships. External libraries (Reflections, ClassGraph) provide this via classpath scanning, but that is external tooling, not a language feature.
-
-\textbf{STRUCT:} $\times$. Cannot modify class structure at runtime. Bytecode manipulation (ASM, ByteBuddy) is external tooling, not language-level support.
-
-\textbf{HIER:} $\times$. Cannot enumerate subclasses without external libraries (Reflections, ClassGraph).
-
-\textbf{Why annotation processors don't count:}
-\begin{enumerate}
-\tightlist
-\item They run at compile time, not definition time. The class being processed is already fixed
-\item They cannot modify the class being defined; they generate \emph{new} classes
-\item Generated classes are separate compilation units, not derived facts within the source
-\item Results are not introspectable at runtime. You cannot query ``was this method generated?''
-\end{enumerate}
-
-\textbf{Why Lombok doesn't count:} Lombok approximates SSOT but violates it: the Lombok configuration becomes a second source of truth. Changes require updating both source and Lombok annotations. The tool can fail, be misconfigured, or be bypassed.
-
-\subsubsection{C++: No DOF-1 Support}
-
-C++ templates are compile-time, not definition-time~\cite{stroustrup2013cpp}:
-
-\textbf{DEF:} $\times$. Templates expand at compile time but do not execute arbitrary code. \texttt{constexpr} functions are evaluated at compile time but cannot hook into class definition.
-
-\textbf{INTRO:} $\times$. No runtime type introspection. RTTI (\texttt{typeid}, \texttt{dynamic\_cast}) provides minimal information. Cannot enumerate template instantiations.
-
-\textbf{STRUCT:} $\times$. Cannot modify class structure after definition.
-
-\textbf{HIER:} $\times$. Cannot enumerate subclasses. No runtime class registry.
-
-\subsubsection{Go: No DOF-1 Support}
-
-Go's design philosophy explicitly rejects metaprogramming~\cite{gospec2024}:
-
-\textbf{DEF:} $\times$. No hook mechanism. Types are defined declaratively. No code executes at type definition.
-
-\textbf{INTRO:} $\times$. \texttt{reflect} package provides limited introspection but cannot enumerate types implementing an interface.
-
-\textbf{STRUCT:} $\times$. Cannot modify type structure.
-
-\textbf{HIER:} $\times$. Interfaces are implicit (structural typing). Cannot enumerate implementers.
-
-\subsubsection{Rust: No DOF-1 Support}
-
-Rust's procedural macros are compile-time and opaque~\cite{rustref2024}:
-
-\textbf{DEF:} $\times$. Procedural macros execute at compile time, not definition time. The generated code is not introspectable at runtime.
-
-\textbf{INTRO:} $\times$. No runtime type introspection. \texttt{std::any::TypeId} provides minimal information.
-
-\textbf{STRUCT:} $\times$. Cannot modify type structure at runtime.
-
-\textbf{HIER:} $\times$. Cannot enumerate trait implementers.
-
-\textbf{Why procedural macros don't count:}
-\begin{enumerate}
-\tightlist
-\item They execute at compile time, not definition time. The generated code is baked into the binary
-\item \texttt{\#[derive(Debug)]} generates code, but you cannot query ``does this type derive Debug?'' at runtime
-\item Verification requires source inspection or documentation, not runtime query
-\item No equivalent to Python's \texttt{\_\_subclasses\_\_()}. You cannot enumerate trait implementers
-\end{enumerate}
-
-\textbf{Consequence:} Rust achieves \emph{compile-time} DOF = 1 but not \emph{runtime} DOF = 1. For applications requiring runtime reflection (ORMs, serialization frameworks, dependency injection), Rust requires manual synchronization or external codegen tools.
-
-\begin{theorem}[Python Uniqueness in Mainstream]\label{thm:python-unique}
-Among mainstream programming languages, Python is the only language satisfying all DOF-1 realizability requirements.
+\begin{theorem}[Python Uniqueness in the Representative Class]\label{thm:python-unique}
+Within the representative language class (Definition~\ref{def:mainstream}), Python is the only language satisfying all DOF-1 realizability requirements.
 \end{theorem}
 
 \begin{proof}
-By exhaustive evaluation. We checked all 10 mainstream languages against the four criteria derived from Theorem~\ref{thm:ssot-iff}. Only Python satisfies all four. The evaluation is complete. No mainstream language is omitted.
+By inspection of DEF and INTRO in the representative class and application of Corollary~\ref{cor:lang-realizability}. Only Python satisfies both requirements.
 \end{proof}
 
 \subsection{Non-Mainstream Languages}\label{sec:non-mainstream}
@@ -237,80 +137,36 @@ Ruby & \checkmark & \checkmark & Partial & \checkmark & Partial \\
 
 \subsubsection{Common Lisp (CLOS)}
 
-CLOS (Common Lisp Object System) provides the most powerful metaobject protocol:
-
-\textbf{DEF:} \checkmark. The MOP (Metaobject Protocol) allows arbitrary code execution at class definition via \texttt{:metaclass} and method combinations.
-
-\textbf{INTRO:} \checkmark. \texttt{class-direct-subclasses}, \texttt{class-precedence-list}, \texttt{class-slots} provide complete introspection.
-
-\textbf{STRUCT:} \checkmark. MOP allows complete structural modification.
-
-\textbf{HIER:} \checkmark. \texttt{class-direct-subclasses} enumerates subclasses.
-
-CLOS is arguably more powerful than Python for metaprogramming. However, it is not mainstream by our definition.
+CLOS provides a full MOP: definition-time execution via \texttt{:metaclass} and method combinations, complete introspection (\texttt{class-direct-subclasses}, \texttt{class-precedence-list}, \texttt{class-slots}), and structural modification. Thus DOF = 1 is realizable, though CLOS is not mainstream by Definition~\ref{def:mainstream}.
 
 \subsubsection{Smalltalk}
 
-Smalltalk pioneered many of these concepts:
-
-\textbf{DEF:} \checkmark. Classes are objects. Creating a class sends messages that can be intercepted.
-
-\textbf{INTRO:} \checkmark. \texttt{subclasses}, \texttt{allSubclasses}, \texttt{superclass} provide complete introspection.
-
-\textbf{STRUCT:} \checkmark. Classes can be modified at any time.
-
-\textbf{HIER:} \checkmark. \texttt{subclasses} enumerates subclasses.
+Classes are objects; class creation is message-based and interceptable, and runtime introspection (\texttt{subclasses}, \texttt{allSubclasses}) is built in. Structural modification is supported, so DOF = 1 is realizable.
 
 \subsubsection{Ruby}
 
-Ruby provides hooks but with limitations~\cite{flanagan2020ruby}:
-
-\textbf{DEF:} \checkmark. \texttt{inherited}, \texttt{included}, \texttt{extended} hooks execute at definition time.
-
-\textbf{INTRO:} \checkmark. \texttt{subclasses}, \texttt{ancestors}, \texttt{instance\_methods} provide introspection.
-
-\textbf{STRUCT:} Partial. Ruby's \texttt{inherited} hook receives the subclass \emph{after} its body has been parsed, meaning the hook cannot intercept or transform the class definition as it is being constructed. Contrast with Python's \texttt{\_\_init\_subclass\_\_}, which executes \emph{during} class creation with access to keyword arguments passed in the class definition (e.g., \texttt{class Foo(Base, key=val)}). Ruby can add methods post-hoc via \texttt{define\_method}, but cannot parameterize class creation or inject attributes before the class body executes.
-
-\textbf{HIER:} \checkmark. \texttt{subclasses} enumerates subclasses (added in Ruby 3.1).
-
-Ruby is close to full DOF-1 support but the structural modification limitations (no parameterized class creation, no pre-body hook) prevent complete realizability for use cases requiring definition-time configuration.
+Ruby provides definition-time hooks (\texttt{inherited}/\texttt{included}/\texttt{extended}) and introspection (\texttt{subclasses}, \texttt{ancestors})~\cite{flanagan2020ruby}, but hooks run after the class body and cannot parameterize class creation. Structural modification is therefore partial, so DOF = 1 is not fully realizable for structural facts requiring definition-time configuration.
 
 \begin{theorem}[Three-Language Theorem]\label{thm:three-lang}
-Exactly three programming languages in common use satisfy complete DOF-1 realizability requirements: Python, Common Lisp (CLOS), and Smalltalk.
+Within the evaluated language set (mainstream representative class plus notable MOP-equipped languages), exactly three languages satisfy complete DOF-1 realizability requirements: Python, Common Lisp (CLOS), and Smalltalk.
 \end{theorem}
 
 \begin{proof}
-By exhaustive evaluation of mainstream and notable non-mainstream languages. Python, CLOS, and Smalltalk satisfy all four criteria. Ruby satisfies three of four (partial STRUCT). All other evaluated languages fail at least two criteria.
+By inspection of DEF and INTRO in the stated set and application of Corollary~\ref{cor:lang-realizability}. Python, CLOS, and Smalltalk satisfy both requirements; Ruby fails STRUCT and thus lacks full realizability; all other evaluated languages fail at least one of DEF or INTRO.
 \end{proof}
 
-\subsection{Implications for System Selection}\label{sec:implications}
+\subsection{Corollaries for System Selection}\label{sec:implications}
 
-The evaluation has practical implications for computational system selection:
+\begin{corollary}[Selection Constraints]\label{cor:selection-constraints}
+If DOF = 1 is required for structural facts, then any language lacking DEF or INTRO is excluded. Within the representative class, only Python satisfies both requirements; outside it, CLOS and Smalltalk also satisfy them, while Ruby is partial.
+\end{corollary}
 
-\textbf{1. If DOF = 1 for structural facts is required:}
-\begin{itemize}
-\tightlist
-\item Among programming languages, Python is the only mainstream option
-\item CLOS and Smalltalk are alternatives if mainstream status is not required
-\item Ruby is a partial option with workarounds needed
-\item Consider whether the domain truly requires runtime DOF = 1 or whether compile-time guarantees (Rust, Haskell) suffice
-\end{itemize}
+\begin{corollary}[Tooling Limits]\label{cor:tooling-limits}
+External tooling that operates outside the language semantics does not satisfy provenance observability at runtime; therefore it does not realize DOF = 1 under Definition~\ref{def:encodes} unless it provides introspectable derivations within the running system.
+\end{corollary}
 
-\textbf{2. If using a DOF-1-incomplete system:}
-\begin{itemize}
-\tightlist
-\item External tooling (code generators, linters) can help maintain coherence
-\item But tooling is not equivalent to native realizability
-\item Tooling-based coherence cannot be verified at runtime
-\item Tooling adds build complexity and introduces failure modes
-\end{itemize}
-
-\textbf{3. For system designers:}
-\begin{itemize}
-\tightlist
-\item Definition-time computation and introspection should be considered if coherence guarantees are a design goal
-\item These capabilities have costs (implementation complexity, runtime overhead, security surface) that must be weighed
-\item The absence of these capabilities is a deliberate design choice with information-theoretic consequences for encodability
-\end{itemize}
+\begin{corollary}[Design Implication]\label{cor:design-implication}
+If coherence guarantees are a design goal for structural facts, then definition-time computation and introspection are necessary architectural features; their absence has information-theoretic consequences for encodability.
+\end{corollary}
 
 %==============================================================================

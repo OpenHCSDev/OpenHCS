@@ -54,6 +54,18 @@ where $s_I$ denotes the projection of $s$ onto coordinates in $I$.
 SUFFICIENCY-CHECK is coNP-complete \cite{cook1971complexity, karp1972reducibility}.
 \end{theorem}
 
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+Source & Target & Key property preserved \\
+\midrule
+TAUTOLOGY & SUFFICIENCY-CHECK & Tautology iff $\emptyset$ sufficient \\
+$\exists\forall$-SAT & ANCHOR-SUFFICIENCY & Witness anchors iff formula true \\
+SET-COVER & MINIMUM-SUFFICIENT-SET & Set size maps to coordinate size \\
+\bottomrule
+\end{tabular}
+\end{center}
+
 \begin{proof}
 \textbf{Membership in coNP:} The complementary problem INSUFFICIENCY is in NP. Given $(A, n, U, I)$, a witness for insufficiency is a pair $(s, s')$ such that:
 \begin{enumerate}

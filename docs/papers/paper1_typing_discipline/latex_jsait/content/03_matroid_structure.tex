@@ -3,6 +3,8 @@
 Model contract (fixed-axis domain). A domain is specified by a fixed observation interface $\Phi$ derived from a fixed axis map $\alpha: \mathcal{V} \to \mathcal{A}$ (e.g., $\alpha(v) = (B(v), S(v))$). An observer is permitted to interact with $v$ only through primitive queries in $\Phi$, and each primitive query factors through $\alpha$: for every $q \in \Phi$, there exists $\tilde{q}$ such that $q(v) = \tilde{q}(\alpha(v))$.
 A property is in-scope semantic iff it is computable by an admissible strategy that uses only responses to queries in $\Phi$ (under our admissibility constraints: no global preprocessing tables, no amortized caching, etc.).
 
+We adopt $\Phi$ as the complete observation universe for this paper: to claim applicability to a concrete runtime one must either (i) exhibit mappings from each runtime observable into $\Phi$, or (ii) enforce the admissibility constraints (no external registries, no reflection, no preprocessing/amortization). Under either condition the theorems apply without qualification.
+
 \begin{proposition}[Observational Quotient]
 For any admissible strategy using only $\Phi$, the entire interaction transcript (and hence the output) depends only on $\alpha(v)$. Equivalently, any in-scope semantic property $P$ factors through $\alpha$: there exists $\tilde{P}$ with $P(v) = \tilde{P}(\alpha(v))$ for all $v$.
 \end{proposition}
@@ -19,6 +21,11 @@ The classification problem is: given a set of queries, which subsets suffice to 
 Let $\mathcal{Q}$ be the set of all primitive queries available to an observer. For a classification system with interface set $\mathcal{I}$, we have $\mathcal{Q} = \{q_I : I \in \mathcal{I}\}$ where $q_I(v) = 1$ iff $v$ satisfies interface $I$.
 \end{definition}
 
+% Syntactic scope binding: make it explicit that queries range over the declared primitive set
+\noindent In this section, ``queries'' are the primitive interface predicates $q \in \Phi$ (equivalently, each $q$ factors through the axis map: $q = \tilde{q} \circ \alpha$). See the Convention above where $\Phi := \mathcal{Q}$.
+
+\noindent\textbf{Convention:} $\Phi := \mathcal{Q}$. All universal quantification over ``queries'' ranges over $q \in \Phi$ only.
+
 \begin{definition}[Distinguishing set]
 A subset $S \subseteq \mathcal{Q}$ is \emph{distinguishing} if, for all values $v, w$ with $\text{type}(v) \neq \text{type}(w)$, there exists $q \in S$ such that $q(v) \neq q(w)$.
 \end{definition}
@@ -29,16 +36,18 @@ A distinguishing set $S$ is \emph{minimal} if no proper subset of $S$ is disting
 
 \subsection{Matroid Structure of Query Families}
 
-\textbf{Structural assumptions.} The matroid theorem below is \emph{unconditional} given the definitions above. It depends only on:
-\begin{enumerate}
-\item Queries are binary-valued functions $q: \mathcal{V} \to \{0, 1\}$.
-\item ``Distinguishing'' is defined by: $\exists q \in S$ such that $q(v) \neq q(w)$.
-\item ``Minimal'' means no proper subset suffices.
-\end{enumerate}
-No further assumptions on the query family, value space, or type structure are required. The proof constructs a closure operator satisfying extensivity, monotonicity, and idempotence, from which basis exchange follows (see Lean formalization).
+		extbf{Scope and assumptions.} The matroid theorem below is unconditional within the fixed-axis observational theory defined above. In this section, ``query'' always means a primitive predicate $q \in \Phi$ (equivalently, $q$ factors through $\alpha$ as in the Model Contract). It depends only on:
+
+\begin{itemize}
+\item $E = \Phi$ is the ground set of primitive queries (interface predicates).
+\item ``Distinguishing'': for all values $v,w$ with $\text{type}(v) \neq \text{type}(w)$, there exists $q \in S$ such that $q(v) \neq q(w)$ (Def. above).
+\item ``Minimal'' means inclusion-minimal: no proper subset suffices.
+\end{itemize}
+
+No further assumptions are required within this theory (i.e., beyond the fixed interface $\Phi$ already specified). The proof constructs a closure operator satisfying extensivity, monotonicity, and idempotence, from which basis exchange follows (see Lean formalization).
 
 \begin{definition}[Bases family]
-Let $E = \mathcal{Q}$ be the ground set of all queries. Let $\mathcal{B} \subseteq 2^E$ be the family of minimal distinguishing sets.
+Let $E = \Phi\;(=\mathcal{Q})$ be the ground set of primitive queries (interface predicates). Let $\mathcal{B} \subseteq 2^E$ be the family of minimal distinguishing sets.
 \end{definition}
 
 \begin{lemma}[Basis exchange]

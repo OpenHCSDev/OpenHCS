@@ -2,7 +2,7 @@ OpenHCS Paper Build Log
 ========================
 
 Paper: paper2_it - Optimal Encoding Under Coherence Constraints: Rate-Complexity Tradeoffs in Multi-Location Representation Systems
-Package Date: 2026-01-18T16:56:41.288819
+Package Date: 2026-01-20T20:59:36.828231
 Lean Toolchain: leanprover/lean4:v4.27.0-rc1
 
 Proof Statistics:

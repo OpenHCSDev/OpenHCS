@@ -5,54 +5,56 @@ Consider a decision problem with actions $A$ and states $S = X_1 \times \cdots \
 s_I = s'_I \implies \Opt(s) = \Opt(s')
 \]
 
-This paper completely characterizes when coordinate sufficiency can be decided efficiently:
+This paper characterizes the efficient cases of coordinate sufficiency within the formal model:
+
+Section~\ref{sec:encoding} fixes the computational model and input encodings used for all complexity claims.
 
 \begin{center}
 \begin{tabular}{lll}
 \toprule
 \textbf{Problem} & \textbf{Complexity} & \textbf{When Tractable} \\
 \midrule
-Sufficiency-Check & \coNP-complete & Bounded actions, separable utility, trees \\
-Minimum-Sufficient-Set & \coNP-complete & Same conditions \\
-Anchor-Sufficiency & $\SigmaP{2}$-complete & Open \\
+SUFFICIENCY-CHECK & \coNP-complete & Bounded actions (explicit-state), separable utility, tree-structured utility \\
+MINIMUM-SUFFICIENT-SET & \coNP-complete & Same conditions \\
+ANCHOR-SUFFICIENCY & $\SigmaP{2}$-complete & Open \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-The tractable cases are \emph{tight}: relaxing any condition restores hardness. A sharp dichotomy separates polynomial ($O(\log n)$ minimal set) from exponential ($\Omega(n)$ minimal set) cases.
+The tractable cases are stated with explicit encoding assumptions (Section~\ref{sec:encoding}). Outside those regimes, the succinct model yields hardness. The dichotomy statement uses the same input measures: polynomial time in the explicit-state model for $O(\log |S|)$-size minimal sufficient sets and $2^{\Omega(n)}$ lower bounds under ETH in the succinct model when the minimal sufficient set is $\Omega(n)$.
 
-\subsection{The Complete Landscape}
+\subsection{Landscape Summary}
 
 \textbf{When is sufficiency checking tractable?} We identify three sufficient conditions:
 
 \begin{enumerate}
-\item \textbf{Bounded actions} ($|A| \leq k$): With constantly many actions, we can enumerate action pairs and check each for distinguishing states.
+\item \textbf{Bounded actions} ($|A| \leq k$) under explicit-state encoding: with constantly many actions, we enumerate action pairs over the explicit utility table.
 
 \item \textbf{Separable utility} ($u(a,s) = f(a) + g(s)$): The optimal action depends only on $f$, making all coordinates irrelevant to the decision.
 
-\item \textbf{Tree-structured dependencies}: When coordinates form a tree (each coordinate depends on at most one other), dynamic programming yields polynomial algorithms.
+\item \textbf{Tree-structured utility}: With explicit local factors over a tree, dynamic programming yields polynomial algorithms in the input length.
 \end{enumerate}
 
-Each condition is tight. Unbounded actions with non-separable utility on a DAG (not tree) is \coNP-hard.
+Each condition is stated with its encoding assumption. Outside these regimes, the general problem remains \coNP-hard (Theorem~\ref{thm:sufficiency-conp}).
 
-\textbf{When is it intractable?} The general problem is \coNP-complete (Theorem~\ref{thm:sufficiency-conp}), with a sharp dichotomy:
+\textbf{When is it intractable?} The general problem is \coNP-complete (Theorem~\ref{thm:sufficiency-conp}), with a dichotomy between logarithmic and linear regimes:
 \begin{itemize}
-\item If the minimal sufficient set has size $O(\log |S|)$: polynomial (brute-force over $2^{O(\log |S|)} = \text{poly}(|S|)$ subsets).
-\item If the minimal sufficient set has size $\Omega(n)$: requires $2^{\Omega(n)}$ time under ETH.
+\item In the explicit-state model: if the minimal sufficient set has size $O(\log |S|)$, brute-force over $2^{O(\log |S|)}$ subsets runs in polynomial time in $|S|$.
+\item In the succinct model: if the minimal sufficient set has size $\Omega(n)$, SUFFICIENCY-CHECK requires $2^{\Omega(n)}$ time under ETH.
 \end{itemize}
 
-There is no intermediate regime---the complexity jumps discontinuously at the $O(\log n)$ threshold.
+The lower-bound statement does not address intermediate regimes.
 
 \subsection{Main Theorems}
 
 \begin{enumerate}
-\item \textbf{Theorem~\ref{thm:sufficiency-conp}:} Sufficiency-Check is \coNP-complete via reduction from TAUTOLOGY.
+\item \textbf{Theorem~\ref{thm:sufficiency-conp}:} SUFFICIENCY-CHECK is \coNP-complete via reduction from TAUTOLOGY.
 
-\item \textbf{Theorem~\ref{thm:minsuff-conp}:} Minimum-Sufficient-Set is \coNP-complete (the $\SigmaP{2}$ structure collapses).
+\item \textbf{Theorem~\ref{thm:minsuff-conp}:} MINIMUM-SUFFICIENT-SET is \coNP-complete (the $\SigmaP{2}$ structure collapses).
 
-\item \textbf{Theorem~\ref{thm:anchor-sigma2p}:} Anchor-Sufficiency is $\SigmaP{2}$-complete via reduction from $\exists\forall$-SAT.
+\item \textbf{Theorem~\ref{thm:anchor-sigma2p}:} ANCHOR-SUFFICIENCY is $\SigmaP{2}$-complete via reduction from $\exists\forall$-SAT.
 
-\item \textbf{Theorem~\ref{thm:dichotomy}:} Sharp dichotomy at $O(\log n)$ vs $\Omega(n)$.
+\item \textbf{Theorem~\ref{thm:dichotomy}:} Dichotomy between $O(\log n)$ and $\Omega(n)$ regimes (under ETH for the lower bound).
 
 \item \textbf{Theorem~\ref{thm:tractable}:} Polynomial algorithms for bounded actions, separable utility, tree structure.
 \end{enumerate}
@@ -61,7 +63,11 @@ There is no intermediate regime---the complexity jumps discontinuously at the $O
 
 All results are formalized in Lean 4 \cite{moura2021lean4} ($\sim$5,000 lines, 200+ theorems). The formalization verifies the reduction mappings and combinatorial lemmas; complexity class membership follows by composition with TAUTOLOGY and $\exists\forall$-SAT.
 
+\paragraph{What is new.}
+We contribute (i) a reusable Lean 4 framework for polynomial-time reductions with explicit polynomial bounds; (ii) the first machine-checked coNP-completeness proof for a decision-theoretic sufficiency problem; and (iii) a complete complexity landscape for coordinate sufficiency under explicit encoding assumptions. Prior work studies decision complexity in general or feature selection hardness, but does not formalize these reductions or establish this landscape in Lean.
+
 \subsection{Paper Structure}
 
-Section~\ref{sec:foundations}: foundations. Section~\ref{sec:hardness}: hardness proofs. Section~\ref{sec:dichotomy}: dichotomy. Section~\ref{sec:tractable}: tractable cases. Section~\ref{sec:implications}: implications. Section~\ref{sec:simplicity-tax}: complexity conservation corollary. Section~\ref{sec:related}: related work. Appendix~\ref{app:lean}: Lean listings.
+The primary contribution is theoretical: a formalized reduction framework and a complete characterization of the core decision-relevant problems in the formal model (coNP/\(\Sigma_2^P\) completeness and tractable cases stated under explicit encoding assumptions). Sections~\ref{sec:hardness}--\ref{sec:tractable} contain the core theorems.
 
+Section~\ref{sec:foundations}: foundations. Section~\ref{sec:hardness}: hardness proofs. Section~\ref{sec:dichotomy}: dichotomy. Section~\ref{sec:tractable}: tractable cases. Sections~\ref{sec:implications} and~\ref{sec:simplicity-tax}: corollaries and implications for practice. Section~\ref{sec:related}: related work. Appendix~\ref{app:lean}: Lean listings.

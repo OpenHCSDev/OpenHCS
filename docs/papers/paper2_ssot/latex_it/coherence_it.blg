@@ -15,45 +15,45 @@ Warning--entry type for "openhcs2025" isn't style-file defined
 -- See the "IEEEtran_bst_HOWTO.pdf" manual for usage information.
 
 Done.
-You've used 45 entries,
+You've used 38 entries,
             4087 wiz_defined-function locations,
-            1106 strings with 15693 characters,
-and the built_in function-call counts, 30894 in all, are:
-= -- 2645
-> -- 534
-< -- 259
-+ -- 301
-- -- 79
-* -- 1394
-:= -- 4872
-add.period$ -- 96
-call.type$ -- 45
-change.case$ -- 66
-chr.to.int$ -- 597
-cite$ -- 45
-duplicate$ -- 2228
-empty$ -- 2535
-format.name$ -- 99
-if$ -- 7195
+            1067 strings with 14716 characters,
+and the built_in function-call counts, 26325 in all, are:
+= -- 2279
+> -- 432
+< -- 225
++ -- 247
+- -- 61
+* -- 1195
+:= -- 4176
+add.period$ -- 81
+call.type$ -- 38
+change.case$ -- 57
+chr.to.int$ -- 516
+cite$ -- 38
+duplicate$ -- 1890
+empty$ -- 2140
+format.name$ -- 78
+if$ -- 6123
 int.to.chr$ -- 0
-int.to.str$ -- 45
-missing$ -- 377
-newline$ -- 162
-num.names$ -- 45
-pop$ -- 798
+int.to.str$ -- 38
+missing$ -- 315
+newline$ -- 141
+num.names$ -- 38
+pop$ -- 646
 preamble$ -- 1
 purify$ -- 0
 quote$ -- 2
-skip$ -- 2467
+skip$ -- 2109
 stack$ -- 0
-substring$ -- 1460
-swap$ -- 1775
-text.length$ -- 60
+substring$ -- 1272
+swap$ -- 1520
+text.length$ -- 53
 text.prefix$ -- 0
 top$ -- 5
-type$ -- 45
+type$ -- 38
 warning$ -- 0
-while$ -- 147
-width$ -- 47
-write$ -- 468
+while$ -- 127
+width$ -- 40
+write$ -- 404
 (There was 1 warning)

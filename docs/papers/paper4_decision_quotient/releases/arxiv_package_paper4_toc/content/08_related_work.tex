@@ -4,16 +4,17 @@
 
 The complexity of decision-making has been studied extensively. Papadimitriou~\cite{papadimitriou1994complexity} established foundational results on the complexity of game-theoretic solution concepts. Our work extends this to the meta-question of identifying relevant information. For a modern treatment of complexity classes, see Arora and Barak \cite{arora2009computational}.
 
+\paragraph{Closest prior work and novelty.}
+Closest to our contribution is the literature on feature selection and model selection hardness, which proves NP-hardness of selecting informative feature subsets and inapproximability for minimum feature sets~\cite{blum1997selection, amaldi1998complexity}. Those results analyze predictive relevance or compression objectives. We study decision relevance and show coNP-completeness for sufficiency checking, a different quantifier structure with distinct proof techniques and a full hardness/tractability landscape under explicit encoding assumptions, mechanized in Lean 4. The formalization aspect is also novel: prior work establishes hardness on paper, while we provide machine-checked reductions with explicit polynomial bounds.
+
 \subsection{Feature Selection}
 
 In machine learning, feature selection asks which input features are relevant for prediction. This is known to be NP-hard in general~\cite{blum1997selection}. Our results show the decision-theoretic analog is \coNP-complete for both checking and minimization.
 
 \subsection{Value of Information}
 
-The value of information (VOI) framework~\cite{howard1966information} quantifies how much a decision-maker should pay for information. Our work addresses a different question: not the \emph{value} of information, but the \emph{complexity} of identifying which information has value.
+The value of information (VOI) framework~\cite{howard1966information} quantifies the maximum rational payment for information. Our work addresses a different question: not the \emph{value} of information, but the \emph{complexity} of identifying which information has value.
 
 \subsection{Model Selection}
 
 Statistical model selection (AIC \cite{akaike1974new}, BIC \cite{schwarz1978estimating}, cross-validation \cite{stone1974cross}) provides practical heuristics for choosing among models. Our results provide theoretical justification: optimal model selection is intractable, so heuristics are necessary.
-
-

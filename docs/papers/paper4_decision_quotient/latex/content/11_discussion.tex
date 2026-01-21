@@ -4,27 +4,27 @@ We address anticipated questions about the scope and implications of the main re
 
 \subsection{On Tractability Despite Hardness}
 
-\textbf{Question:} ``coNP-complete problems might have good heuristics or approximations. Does the hardness result preclude practical solutions?''
+\textbf{Question:} ``coNP-complete problems have good heuristics or approximations in practice. Does the hardness result preclude practical solutions?''
 
-\textbf{Response:} This observation actually \emph{strengthens} our thesis. The point is not that practitioners cannot find useful approximations---they clearly do (feature selection heuristics in ML, sensitivity analysis in economics, configuration defaults in software). The point is that \emph{optimal} dimension selection is provably hard.
+\textbf{Response:} This observation actually \emph{strengthens} our thesis. The point is not that practitioners cannot find useful approximations; they clearly do (feature selection heuristics in ML, sensitivity analysis in economics, configuration defaults in software). The point is that \emph{optimal} dimension selection is provably hard.
 
-The prevalence of heuristics across domains is itself evidence of the computational barrier. If optimal selection were tractable, we would see optimal algorithms, not heuristics. The universal adoption of ``include more than necessary'' strategies is the rational response to coNP-completeness.
+The prevalence of heuristics across domains is itself evidence of the computational barrier. If optimal selection were tractable, we would see optimal algorithms, not heuristics. The widespread adoption of ``include more than necessary'' strategies is a rational response to coNP-completeness.
 
 \subsection{On Coordinate Structure Assumptions}
 
 \textbf{Question:} ``Real decision problems are messier than the clean product-space model. Is the coordinate structure assumption too restrictive?''
 
-\textbf{Response:} The assumption is weaker than it appears. Any finite state space can be encoded with binary coordinates; our hardness results apply to this encoding. More structured representations make the problem \emph{easier}, not harder---so hardness for structured problems implies hardness for unstructured ones.
+\textbf{Response:} The assumption is weak. Any finite state space admits a binary-coordinate encoding; our hardness results apply to this encoding. More structured representations make the problem \emph{easier}, not harder; so hardness for structured problems implies hardness for unstructured ones.
 
 The coordinate structure abstracts common patterns: independent sensors, orthogonal configuration parameters, factored state spaces. These are ubiquitous in practice precisely because they enable tractable reasoning in special cases (Theorem~\ref{thm:tractable}).
 
 \subsection{On the SAT Reduction}
 
-\textbf{Question:} ``The reduction from SAT/TAUT seems like an artifact of complexity theory. Do real decision problems encode Boolean formulas?''
+\textbf{Question:} ``The reduction from SAT/TAUT is an artifact of complexity theory. Do real decision problems encode Boolean formulas?''
 
-\textbf{Response:} All coNP-completeness proofs use reductions. The reduction demonstrates that TAUT instances can be encoded as sufficiency-checking problems while preserving computational structure. This is standard methodology \cite{cook1971complexity, karp1972reducibility}.
+\textbf{Response:} All coNP-completeness proofs use reductions. The reduction demonstrates that TAUT instances admit an encoding as sufficiency-checking problems while preserving computational structure. This is standard methodology \cite{cook1971complexity, karp1972reducibility}.
 
-The claim is not that practitioners encounter SAT problems in disguise, but that sufficiency checking is \emph{at least as hard as} TAUT. If sufficiency checking were tractable, we could solve TAUT in polynomial time, contradicting the widely-believed $\P \neq \NP$ conjecture.
+The claim is not that practitioners encounter SAT problems in disguise, but that sufficiency checking is \emph{at least as hard as} TAUT. If sufficiency checking is tractable, then TAUT is solvable in polynomial time, contradicting the widely-believed $\P \neq \NP$ conjecture.
 
 \subsection{On Tractable Subcase Scope}
 
@@ -38,15 +38,15 @@ The claim is not that practitioners encounter SAT problems in disguise, but that
 \item \textbf{Tree structure:} Hierarchical dependencies appear in configuration, organizational decisions, and causal models
 \end{itemize}
 
-The dichotomy theorem (Theorem~\ref{thm:dichotomy}) precisely identifies the boundary. The contribution is not that all problems are hard, but that hardness is the \emph{default} unless special structure exists.
+The dichotomy theorem (Theorem~\ref{thm:dichotomy}) precisely identifies the boundary in the stated encoding regimes. The contribution is not that all problems are hard, but that hardness is the \emph{default} unless special structure exists.
 
 \subsection{On the Value of Formalization}
 
 \textbf{Question:} ``Feature selection is known to be hard. Does this paper just add mathematical notation to folklore?''
 
-\textbf{Response:} The contribution is unification. Prior work established hardness for specific domains (feature selection in ML \cite{guyon2003introduction}, factor identification in economics, variable selection in statistics). We prove a \emph{universal} result that applies to \emph{any} decision problem with coordinate structure.
+\textbf{Response:} The contribution is unification. Prior work established hardness for specific domains (feature selection in ML \cite{guyon2003introduction}, factor identification in economics, variable selection in statistics). We prove a general result that applies to decision problems with coordinate structure within the formal model.
 
-This universality explains why the same ``over-modeling'' pattern appears across unrelated domains. It's not that each domain independently discovered the same heuristic---it's that each domain independently hit the same computational barrier.
+This generality explains why the same ``over-modeling'' pattern recurs across unrelated domains. It's not that each domain independently discovered the same heuristic; it's that each domain independently hit the same computational barrier.
 
 \subsection{On the Lean Formalization Scope}
 
@@ -66,9 +66,9 @@ These are the mathematical claims that establish coNP-completeness. The Turing m
 
 \textbf{Question:} ``The dichotomy between $O(\log n)$ and $\Omega(n)$ minimal sufficient sets leaves a gap. What about $O(\sqrt{n})$?''
 
-\textbf{Response:} The dichotomy is tight under standard complexity assumptions. The gap corresponds to problems reducible to a polynomial number of SAT instances---exactly the problems in the polynomial hierarchy between P and coNP.
+\textbf{Response:} The dichotomy is tight in the stated regimes under ETH. The gap corresponds to problems reducible to a polynomial number of SAT instances; these sit in the polynomial hierarchy between P and coNP.
 
-In practice, the dichotomy captures the relevant cases: either the problem has logarithmic dimension (tractable) or linear dimension (intractable). Intermediate cases exist theoretically but are rare in practice.
+In practice, the dichotomy captures the relevant cases: either the problem has logarithmic dimension (tractable) or linear dimension (intractable). Intermediate cases exist theoretically; we do not rule them out.
 
 \subsection{On Practical Guidance}
 
@@ -97,7 +97,7 @@ The learning cost is paid once; the per-site cost is paid $n$ times. For $n > H_
 
 \textbf{Question:} ``In practice, teams use what they know. Advocating for 'complex' tools ignores organizational reality.''
 
-\textbf{Response:} The Simplicity Tax is paid regardless of whether your team recognizes it. If your team writes boilerplate at 50 locations because they don't know metaclasses, they pay the tax---in time, bugs, and maintenance.
+\textbf{Response:} The Simplicity Tax is paid regardless of whether your team recognizes it. If your team writes boilerplate at 50 locations because they don't know metaclasses, they pay the tax; in time, bugs, and maintenance.
 
 Organizational reality is a constraint on \emph{implementation}, not on \emph{what is optimal}. The Simplicity Tax Theorem identifies the optimal; the practitioner's task is to approach it within organizational constraints.
 
@@ -105,13 +105,13 @@ Organizational reality is a constraint on \emph{implementation}, not on \emph{wh
 
 \textbf{Question:} ``Start simple, refactor when needed. Technical debt is manageable.''
 
-\textbf{Response:} Refactoring from distributed to centralized is $O(n)$ work---you pay the accumulated Simplicity Tax all at once. If you have $n$ sites each paying tax $k$, refactoring costs at least $nk$ effort.
+\textbf{Response:} Refactoring from distributed to centralized is $O(n)$ work; you pay the accumulated Simplicity Tax all at once. If you have $n$ sites each paying tax $k$, refactoring costs at least $nk$ effort.
 
-Moreover, distributed implementations create dependencies. Each workaround becomes a local assumption that must be preserved during refactoring. The refactoring cost is often \emph{superlinear} in $n$.
+Moreover, distributed implementations create dependencies. Each workaround becomes a local assumption that must be preserved during refactoring. Under dependency models where local assumptions interact, refactoring cost is \emph{superlinear} in $n$.
 
 \subsection{On Weighted Importance}
 
-\textbf{Question:} ``Real problems have axes of varying importance. A tool that covers the important axes might be good enough.''
+\textbf{Question:} ``Real problems have axes of varying importance. A tool that covers the important axes is good enough.''
 
 \textbf{Response:} The theorem is conservative: it counts axes uniformly. Weighted versions strengthen the result.
 
@@ -120,5 +120,4 @@ If axis $a$ has importance $w_a$, define weighted tax:
 
 The incomplete tool pays $\sum w_a \times n$ while the complete tool pays 0. The qualitative result is unchanged.
 
-The ``cover important axes'' heuristic only works if you \emph{correctly identify} which axes are important. By Theorem~\ref{thm:sufficiency-conp}, this identification is coNP-complete---returning us to the original hardness result.
-
+The ``cover important axes'' heuristic only works if you \emph{correctly identify} which axes are important. By Theorem~\ref{thm:sufficiency-conp}, this identification is coNP-complete; returning us to the original hardness result.

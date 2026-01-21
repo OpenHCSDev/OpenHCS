@@ -1,6 +1,6 @@
 \section{Implications for Software Architecture}\label{sec:implications}
 
-The complexity results have direct implications for software engineering practice.
+This section states corollaries for software architecture. The complexity results have direct implications for software engineering practice.
 
 \subsection{Why Over-Specification Is Rational}
 
@@ -45,7 +45,7 @@ Based on our theoretical results:
 
 \subsection{Hardness Distribution: Right Place vs Wrong Place}\label{sec:hardness-distribution}
 
-A fundamental principle emerges from the complexity results: problem hardness is conserved but can be \emph{distributed} across a system in qualitatively different ways.
+A general principle emerges from the complexity results: problem hardness is conserved and is \emph{distributed} across a system in qualitatively different ways.
 
 \begin{definition}[Hardness Distribution]\label{def:hardness-distribution}
 Let $P$ be a problem with intrinsic hardness $H(P)$ (measured in computational steps, implementation effort, or error probability). A \emph{solution architecture} $S$ partitions this hardness into:
@@ -122,4 +122,3 @@ The decision quotient (Section~\ref{sec:foundations}) measures which coordinates
 \end{remark}
 
 The next section develops the major practical consequence of this framework: the Simplicity Tax Theorem.
-

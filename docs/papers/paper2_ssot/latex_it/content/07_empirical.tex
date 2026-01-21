@@ -1,11 +1,15 @@
-\section{Computational Realization: Empirical Validation}\label{sec:empirical}
+\section{Corollary: Realizability Patterns (Worked Example)}\label{sec:empirical}
 %==============================================================================
 
-We validate the theoretical results with concrete before/after examples from OpenHCS~\cite{openhcs2025}, a production bioimage analysis platform implemented in Python. These examples demonstrate how definition-time computation and introspection achieve DOF = 1 for structural facts in a DOF-1-complete programming language.
+We provide a concrete worked example from OpenHCS~\cite{openhcs2025}, a production bioimage analysis platform implemented in Python. This section supplies a constructive instantiation of the realizability theorem: it shows explicit mechanisms that satisfy the abstract requirements in a real system.
+
+\begin{corollary}[Realizability Patterns]\label{cor:realizability-patterns}
+In any system that satisfies the realizability conditions of Theorem~\ref{thm:ssot-iff} (definition-time hooks and introspectable derivations), DOF = 1 can be achieved by a small set of structural patterns: contract enforcement from a single definition, automatic registration at definition time, and automatic discovery via introspection. The examples below instantiate these patterns.
+\end{corollary}
 
 \textbf{Methodology:} This case study follows established guidelines for software engineering case studies~\cite{runeson2009guidelines}. We use a single-case embedded design with multiple units of analysis (DOF measurements, code changes, maintenance complexity).
 
-The value of these examples is \emph{qualitative demonstration of realizability}: they show the realization patterns, not aggregate statistics. Each example demonstrates a specific mechanism for achieving DOF = 1. Readers can verify these patterns apply to their own computational systems.
+The value of these examples is \emph{constructive}: they exhibit explicit mechanisms that satisfy the realizability conditions. Each example is a worked instance of Theorem~\ref{thm:ssot-iff}, not statistical evidence.
 
 \subsection{DOF = 1 Realization Patterns}\label{sec:ssot-patterns-practical}
 
@@ -285,7 +289,7 @@ The pattern is simple: traverse an object graph, query definition-time metadata 
 
 \subsection{Summary}\label{sec:practical-summary}
 
-These four patterns (contract enforcement, automatic registration, automatic discovery, and introspection-driven generation) demonstrate how DOF-1-complete computational systems realize optimal encoding rate for structural facts:
+These four patterns (contract enforcement, automatic registration, automatic discovery, and introspection-driven generation) exhibit how DOF-1-complete computational systems realize optimal encoding rate for structural facts:
 
 \begin{itemize}
 \item \textbf{PR \#44 is verifiable:} The 47 $\to$ 1 DOF reduction can be confirmed by inspecting the public pull request.
@@ -300,6 +304,6 @@ These four patterns (contract enforcement, automatic registration, automatic dis
   Remove either capability, and the patterns break (as demonstrated by impossibility in Java, Rust, Go).
 \end{itemize}
 
-The theoretical prediction (Theorem~\ref{thm:ssot-iff}: DOF = 1 requires definition-time computation and introspection) is empirically validated by these examples. The patterns shown are instances of the general realizability framework proved in Section~\ref{sec:requirements}.
+The theoretical prediction (Theorem~\ref{thm:ssot-iff}: DOF = 1 requires definition-time computation and introspection) is illustrated by these examples. The patterns shown are instances of the general realizability framework proved in Section~\ref{sec:requirements}.
 
 %==============================================================================

@@ -6,33 +6,25 @@
 
 ## Abstract
 
-We extend classical source coding to *interactive encoding systems*---systems where a fact $F$ is encoded at multiple locations and the encoding can be modified over time. When can such a system guarantee coherence (the impossibility of disagreement among locations)?
+We extend classical source coding to *interactive encoding systems*---systems where a fact $F$ (e.g., a configuration parameter, type definition, or database schema) is encoded at multiple locations and the encoding can be modified over time. A central question is: When can such a system guarantee **coherence**---the impossibility of disagreement among locations?
 
-We prove that exactly one independent encoding (DOF = 1, where DOF counts independent storage locations) is the unique rate achieving guaranteed coherence. This result connects to multi-version coding [@rashmi2015multiversion], which establishes an "inevitable storage cost for consistency" in distributed systems; we establish an analogous *encoding rate* cost for coherence under modification.
+We prove that exactly one independent encoding (DOF = 1, where DOF counts independent storage locations) is the **unique rate** achieving guaranteed coherence. This result connects to multi-version coding [@rashmi2015multiversion], which establishes an "inevitable storage cost for consistency" in distributed systems; we establish an analogous *encoding rate* cost for coherence under modification.
 
 **Main Results.**
 
 1.  **Coherence Capacity (Theorem [\[thm:dof-optimal\]](#thm:dof-optimal){reference-type="ref" reference="thm:dof-optimal"}):** DOF = 1 is the unique encoding rate guaranteeing coherence. DOF = 0 fails to encode $F$; DOF $> 1$ permits incoherent configurations where locations disagree.
 
-2.  **Resolution Impossibility (Theorem [\[thm:oracle-arbitrary\]](#thm:oracle-arbitrary){reference-type="ref" reference="thm:oracle-arbitrary"}):** Under incoherence (DOF $> 1$ with divergent values), no resolution procedure is information-theoretically justified---any selection leaves another value disagreeing. This is a static analog of the FLP impossibility [@flp1985impossibility] for distributed consensus.
+2.  **Resolution Impossibility (Theorem [\[thm:oracle-arbitrary\]](#thm:oracle-arbitrary){reference-type="ref" reference="thm:oracle-arbitrary"}):** Under incoherence (DOF $> 1$ with divergent values), no resolution procedure is information-theoretically justified---any selection leaves another value disagreeing. This is the formal encoding-theoretic counterpart of the FLP impossibility [@flp1985impossibility] for distributed consensus.
 
 3.  **Rate-Complexity Tradeoff (Theorem [\[thm:unbounded-gap\]](#thm:unbounded-gap){reference-type="ref" reference="thm:unbounded-gap"}):** DOF = 1 achieves $O(1)$ modification complexity; DOF $> 1$ requires $\Omega(n)$. The gap grows without bound as $n \to \infty$.
 
 4.  **Realizability Requirements (Theorem [\[thm:ssot-iff\]](#thm:ssot-iff){reference-type="ref" reference="thm:ssot-iff"}):** Encoding systems achieving DOF = 1 via derivation require two information-theoretic properties: (a) *causal update propagation*---source changes automatically trigger derived location updates, and (b) *provenance observability*---the derivation structure is queryable. These abstract to arbitrary encoding systems; programming language features (definition-time hooks, introspection) are one instantiation.
 
-**Connections to Established IT.** The DOF = 1 optimum generalizes Rissanen's Minimum Description Length principle [@rissanen1978mdl] to interactive encoding systems. The realizability requirements connect to: channel coding with feedback (causal propagation), Slepian-Wolf side information [@slepian1973noiseless] (provenance observability), and write-once memory codes [@rivest1982wom] (irreversible structural encoding). The coherence requirement instantiates the CAP theorem [@brewer2000cap]: DOF = 1 sidesteps the consistency-availability tradeoff by eliminating the partition dimension.
+**Connections to established IT.** The DOF = 1 optimum generalizes Rissanen's Minimum Description Length principle [@rissanen1978mdl] to interactive encoding systems. The realizability requirements connect to channel coding with feedback (causal propagation), Slepian-Wolf side information [@slepian1973noiseless] (provenance observability), and write-once memory codes [@rivest1982wom] (irreversible structural encoding). The oracle arbitrariness result parallels zero-error decoding: without sufficient side information, correctness cannot be guaranteed.
 
-**Instantiations.** The abstract encoding model applies across domains:
+**Instantiations.** The abstract model applies to distributed storage, configuration management, and programming-language semantics; we include illustrative instantiations, but the core theorems are independent of any specific domain.
 
--   **Distributed databases:** Replica consistency under update constraints
-
--   **Configuration systems:** Multi-file settings with coherence requirements
-
--   **Software systems:** Type definitions, class registries, interface contracts
-
--   **Version control:** Merge resolution under conflicting branches
-
-We evaluate computational realizations against the formal realizability criteria. Among mainstream programming languages, Python uniquely satisfies both requirements (causal propagation via `__init_subclass__`, provenance observability via `__subclasses__()`). Most (Java, C++, Rust, Go, TypeScript) lack one or both and cannot achieve DOF = 1 within their design constraints.
+We also formalize encoding-theoretic versions of CAP and FLP (Theorems [\[thm:cap-encoding\]](#thm:cap-encoding){reference-type="ref" reference="thm:cap-encoding"} and [\[thm:static-flp\]](#thm:static-flp){reference-type="ref" reference="thm:static-flp"}).
 
 All theorems machine-checked in Lean 4 (9,351 lines, 541 theorems, 0 `sorry` placeholders).
 
@@ -103,29 +95,27 @@ These abstract to arbitrary encoding systems; programming language features (def
 
 **Connection to multi-version coding.** Rashmi et al. [@rashmi2015multiversion] prove an "inevitable storage cost for consistency" in distributed storage. Our realizability theorem is analogous: systems lacking causal propagation or provenance observability *cannot* achieve DOF = 1---the cost is fundamental, not implementation-specific.
 
-**Evaluation across computational systems.** We evaluate programming languages, distributed databases, and configuration systems against these criteria. Among mainstream programming languages (TIOBE top-10, 5+ year consistency), Python uniquely satisfies both requirements (causal propagation via `__init_subclass__`, provenance observability via `__subclasses__()`). Most (Java, C++, Rust, Go, TypeScript) lack one or both and cannot achieve DOF = 1 for structural facts.
+**Applications across computational systems.** We include a programming-language instantiation and a worked case study as *corollaries* of the abstract theory. These sections exemplify the realizability theorem; the core theorems and their proofs are independent of any specific language or system.
 
 ## Paper Organization and Main Results {#overview}
 
-This paper establishes four theorems characterizing optimal encoding under coherence constraints. All results are machine-checked in Lean 4 [@demoura2021lean4] (9,351 lines, 541 theorems, 0 `sorry` placeholders).
+This paper establishes four *core* theorems characterizing optimal encoding under coherence constraints. All results are machine-checked in Lean 4 [@demoura2021lean4] (9,351 lines, 541 theorems, 0 `sorry` placeholders).
 
-**Section [\[sec:foundations\]](#sec:foundations){reference-type="ref" reference="sec:foundations"}---Encoding Model.** We formalize multi-location encoding systems: facts stored at multiple locations with independence and derivability relations. DOF (Degrees of Freedom) counts independent locations. Coherence means all locations agree.
+**Section [\[sec:foundations\]](#sec:foundations){reference-type="ref" reference="sec:foundations"}---Encoding Model.** We formalize multi-location encoding systems: facts stored at multiple locations with independence and derivability relations. DOF (Degrees of Freedom) counts independent locations. Coherence means all locations agree. Section [\[sec:cap-flp\]](#sec:cap-flp){reference-type="ref" reference="sec:cap-flp"} formalizes encoding-theoretic CAP/FLP analogs inside this model.
 
 **Section [\[sec:ssot\]](#sec:ssot){reference-type="ref" reference="sec:ssot"}---Optimal Rate.** We prove DOF = 1 is the unique rate guaranteeing coherence (Theorem [\[thm:dof-optimal\]](#thm:dof-optimal){reference-type="ref" reference="thm:dof-optimal"}). The proof constructs incoherent configurations for all DOF $> 1$ and shows DOF = 1 makes disagreement impossible.
 
 **Section [\[sec:requirements\]](#sec:requirements){reference-type="ref" reference="sec:requirements"}---Realizability.** We derive necessary and sufficient conditions for encoding systems to achieve DOF = 1 via derivation (Theorem [\[thm:ssot-iff\]](#thm:ssot-iff){reference-type="ref" reference="thm:ssot-iff"}). Both causal update propagation and provenance observability are required---these are information-theoretic encoder properties that abstract across domains.
 
-**Section [\[sec:evaluation\]](#sec:evaluation){reference-type="ref" reference="sec:evaluation"}---System Evaluation.** We evaluate computational realizations (programming languages, distributed databases) against formal criteria. Python, CLOS, and Smalltalk satisfy requirements; Java, C++, Rust, Go, TypeScript do not.
+**Section [\[sec:evaluation\]](#sec:evaluation){reference-type="ref" reference="sec:evaluation"}---Corollary Instantiation.** We provide a programming-language instantiation of the realizability criteria as a corollary of Theorem [\[thm:ssot-iff\]](#thm:ssot-iff){reference-type="ref" reference="thm:ssot-iff"}; the core proofs remain abstract.
 
 **Section [\[sec:bounds\]](#sec:bounds){reference-type="ref" reference="sec:bounds"}---Complexity Bounds.** We prove the rate-complexity tradeoff: DOF = 1 achieves $O(1)$ modification cost; DOF $> 1$ requires $\Omega(n)$ (Theorem [\[thm:unbounded-gap\]](#thm:unbounded-gap){reference-type="ref" reference="thm:unbounded-gap"}). The gap grows without bound.
 
-**Section [\[sec:empirical\]](#sec:empirical){reference-type="ref" reference="sec:empirical"}---Empirical Validation.** Case studies from production systems (OpenHCS [@openhcs2025]) demonstrate DOF reduction (47 $\to$ 1) via Python's definition-time hooks.
-
-**Connection to software engineering.** The "Don't Repeat Yourself" (DRY) principle [@hunt1999pragmatic] in software engineering is the practitioner recognition of encoding optimality. We prove DRY = DOF = 1, formalizing an informal principle with information-theoretic foundations.
+**Section [\[sec:empirical\]](#sec:empirical){reference-type="ref" reference="sec:empirical"}---Worked Instantiation.** A case study from a production system (OpenHCS [@openhcs2025]) instantiates the realizability requirements.
 
 ## Core Theorems {#sec:core-theorems}
 
-We establish four theorems characterizing optimal encoding under coherence constraints:
+We establish four *core* theorems characterizing optimal encoding under coherence constraints:
 
 1.  **Theorem [\[thm:oracle-arbitrary\]](#thm:oracle-arbitrary){reference-type="ref" reference="thm:oracle-arbitrary"} (Resolution Impossibility):** For any incoherent encoding system (DOF $> 1$ with divergent values) and any resolution procedure selecting a value, there exists an equally-present value disagreeing with the selection. No resolution is information-theoretically justified.
 
@@ -187,13 +177,13 @@ This paper makes six contributions:
 
 -   Connection to WOM codes: structural irreversibility constraint analogous to write-once constraint
 
-**4. Language evaluation (Section [\[sec:evaluation\]](#sec:evaluation){reference-type="ref" reference="sec:evaluation"}):**
+**4. Language instantiation (Section [\[sec:evaluation\]](#sec:evaluation){reference-type="ref" reference="sec:evaluation"}):**
 
--   Exhaustive evaluation of 10 mainstream languages
+-   Representative instantiation over a mainstream language class
 
--   Extended evaluation of 3 non-mainstream languages (CLOS, Smalltalk, Ruby)
+-   Extended instantiation of three MOP-equipped languages (CLOS, Smalltalk, Ruby)
 
--   Theorem [\[thm:three-lang\]](#thm:three-lang){reference-type="ref" reference="thm:three-lang"}: Exactly three languages satisfy requirements
+-   Theorem [\[thm:three-lang\]](#thm:three-lang){reference-type="ref" reference="thm:three-lang"}: Exactly three languages satisfy requirements within the evaluated class
 
 **5. Complexity bounds (Section [\[sec:bounds\]](#sec:bounds){reference-type="ref" reference="sec:bounds"}):**
 
@@ -203,103 +193,15 @@ This paper makes six contributions:
 
 -   Theorem [\[thm:unbounded-gap\]](#thm:unbounded-gap){reference-type="ref" reference="thm:unbounded-gap"}: The gap is unbounded
 
-**6. Practical demonstration (Section [\[sec:empirical\]](#sec:empirical){reference-type="ref" reference="sec:empirical"}):**
+**6. Worked instantiation (Section [\[sec:empirical\]](#sec:empirical){reference-type="ref" reference="sec:empirical"}):**
 
 -   Before/after examples from OpenHCS (production Python codebase)
 
 -   PR #44 [@openhcsPR44]: Migration from 47 scattered checks to 1 ABC (DOF 47 $\to$ 1)
 
--   Empirical validation that coherence is achievable in practice
+-   Concrete instantiation of realizability mechanisms in a production system
 
-## Empirical Context: OpenHCS {#sec:openhcs-context}
-
-**What it does:** OpenHCS [@openhcs2025] is an open-source bioimage analysis platform for high-content screening (45K LoC Python). It processes microscopy images through configurable pipelines, with GUI-based design and Python code export. The system requires:
-
--   Automatic registration of analysis components
-
--   Type-safe configuration with inheritance
-
--   Runtime enumeration of available processors
-
--   Provenance tracking for reproducibility
-
-**Why it matters for this paper:** OpenHCS requires SSOT for structural facts. When a new image processor is added (by subclassing `BaseProcessor`), it must automatically appear in:
-
--   The GUI component palette
-
--   The configuration schema
-
--   The serialization registry
-
--   The documentation generator
-
-Without SSOT, adding a processor requires updating 4+ locations. With SSOT, only the class definition is needed. Python's `__init_subclass__` and `__subclasses__()` handle the rest.
-
-**Key finding:** PR #44 [@openhcsPR44] migrated from duck typing (`hasattr()` checks) to nominal typing (ABC contracts). This eliminated 47 scattered checks, reducing DOF from 47 to 1. The migration validates both:
-
-1.  The theoretical prediction: DOF reduction is achievable
-
-2.  The practical benefit: Maintenance cost decreased measurably
-
-## Decision Procedure, Not Preference {#sec:decision}
-
-The contribution of this paper is not the theorems alone, but their consequence: *language selection for coherent representation becomes a decision procedure*.
-
-Given coherence as a requirement:
-
-1.  DOF = 1 is necessary (Corollary [\[cor:coherence-forces-ssot\]](#cor:coherence-forces-ssot){reference-type="ref" reference="cor:coherence-forces-ssot"})
-
-2.  DOF = 1 for structural facts requires definition-time hooks AND introspection (Theorem [\[thm:ssot-iff\]](#thm:ssot-iff){reference-type="ref" reference="thm:ssot-iff"})
-
-3.  Languages lacking these features cannot achieve coherence for structural facts
-
-**Implications:**
-
-1.  **Language design.** Future languages should include definition-time hooks and introspection if coherent structural representation is a design goal.
-
-2.  **Architecture.** When coherence is required, language selection is constrained. "I prefer Go" is not valid when structural coherence is required.
-
-3.  **Tooling.** External tools can work around language limitations but operate outside language semantics.
-
-4.  **Pedagogy.** DRY should be taught as epistemic necessity with language requirements, not as a vague guideline.
-
-## Paper Structure {#sec:structure}
-
-Section [\[sec:foundations\]](#sec:foundations){reference-type="ref" reference="sec:foundations"} establishes epistemic foundations (coherence, oracle arbitrariness) and instantiates them to software. Section [\[sec:ssot\]](#sec:ssot){reference-type="ref" reference="sec:ssot"} defines SSOT as the coherent representation and proves its properties. Section [\[sec:requirements\]](#sec:requirements){reference-type="ref" reference="sec:requirements"} derives language requirements with necessity proofs. Section [\[sec:evaluation\]](#sec:evaluation){reference-type="ref" reference="sec:evaluation"} evaluates mainstream languages exhaustively. Section [\[sec:bounds\]](#sec:bounds){reference-type="ref" reference="sec:bounds"} proves complexity bounds. Section [\[sec:empirical\]](#sec:empirical){reference-type="ref" reference="sec:empirical"} demonstrates practical application. Section [\[sec:related\]](#sec:related){reference-type="ref" reference="sec:related"} surveys related work. Appendix [\[sec:rebuttals\]](#sec:rebuttals){reference-type="ref" reference="sec:rebuttals"} addresses anticipated objections. Appendix [\[sec:lean\]](#sec:lean){reference-type="ref" reference="sec:lean"} contains complete Lean 4 proof listings.
-
-## Anticipated Objections {#sec:objection-summary}
-
-Before proceeding, we address objections readers are likely forming. Each is refuted in detail in Appendix [\[sec:rebuttals\]](#sec:rebuttals){reference-type="ref" reference="sec:rebuttals"}; here we summarize the key points.
-
-#### "The model doesn't capture real Python/Rust semantics."
-
-The model is validated through instantiation proofs (§[\[sec:rebuttals\]](#sec:rebuttals){reference-type="ref" reference="sec:rebuttals"}, Part I). `PythonInstantiation.lean` proves that all Python observables factor through the (B, S) axes. `LangPython.lean` directly encodes Python's datamodel specification. The model is falsifiable: produce Python code where two types with identical `__bases__` and `__dict__` behave differently, or where `__init_subclass__` fails to fire.
-
-#### "Rust can achieve SSOT with proc macros and static registries."
-
-No. Proc macros are per-item isolated---they cannot see other items during expansion. Registration is bypassable: you can `impl Trait` without any `#[derive]` annotation. The `inventory` crate uses linker tricks external to language semantics. Contrast Python: `__init_subclass__` fires automatically and *cannot be bypassed*. This is enforcement vs. enablement (§[\[sec:rebuttals\]](#sec:rebuttals){reference-type="ref" reference="sec:rebuttals"}, Part III).
-
-#### "The requirements are circular---you define structural facts as fixed at definition time, then prove you need definition-time hooks."
-
-No. We define structural facts by their *syntactic locus* (encoded in type definitions). The observation that they are fixed at definition time is a *consequence* of this locus. The theorem that hooks are required is *derived* from the observation. The circularity objection mistakes consequence for premise (§[\[sec:rebuttals\]](#sec:rebuttals){reference-type="ref" reference="sec:rebuttals"}, Part II).
-
-#### "Build.rs / external tools can achieve SSOT."
-
-External tools operate outside language semantics. They can fail, be misconfigured, or be bypassed. They provide no runtime verification---the program cannot confirm derivation occurred. Build tool configuration becomes a second source (DOF $\geq$ 2). This approximates SSOT but does not achieve it (§[\[sec:rebuttals\]](#sec:rebuttals){reference-type="ref" reference="sec:rebuttals"}, Parts II--III).
-
-#### "The DOF = 1 definition is too restrictive."
-
-The definition is *derived*, not chosen. DOF = 0 means the fact is unrepresented. DOF $> 1$ means multiple sources can diverge. DOF = 1 is the unique optimal point. Systems with DOF $> 1$ may be pragmatically acceptable but do not satisfy SSOT (§[\[sec:rebuttals\]](#sec:rebuttals){reference-type="ref" reference="sec:rebuttals"}, Part II).
-
-#### "You just need discipline, not language features."
-
-Discipline *is* the external oracle. The theorem states: with DOF $> 1$, consistency requires an external oracle. "Code review and documentation" are exactly that oracle---human-maintained, fallible, bypassable. Language enforcement cannot be forgotten; human discipline can (§[\[sec:rebuttals\]](#sec:rebuttals){reference-type="ref" reference="sec:rebuttals"}, Part IV).
-
-#### "The proofs are trivial (`rfl`)."
-
-When modeling is correct, theorems become definitional. This is a feature. Not all proofs are `rfl`: `rust_lacks_introspection` is 40 lines of actual reasoning. The contribution is making the right definitions so that consequences follow structurally (§[\[sec:rebuttals\]](#sec:rebuttals){reference-type="ref" reference="sec:rebuttals"}, Part V).
-
-**If you have an objection not listed above,** check Appendix [\[sec:rebuttals\]](#sec:rebuttals){reference-type="ref" reference="sec:rebuttals"} (16 objections addressed) before concluding it has not been considered.
+**Note on scope.** The programming-language instantiation and worked case study (Sections [\[sec:evaluation\]](#sec:evaluation){reference-type="ref" reference="sec:evaluation"} and [\[sec:empirical\]](#sec:empirical){reference-type="ref" reference="sec:empirical"}) are corollaries of the realizability theorem. The core information-theoretic results are contained in Sections [\[sec:foundations\]](#sec:foundations){reference-type="ref" reference="sec:foundations"}--[\[sec:bounds\]](#sec:bounds){reference-type="ref" reference="sec:bounds"}.
 
 
 # Encoding Systems and Coherence {#sec:foundations}
@@ -392,7 +294,7 @@ The abstract encoding model (Definitions [\[def:encoding-system\]](#def:encodin
 
 -   **Version control:** Merge resolution under concurrent modifications
 
-We focus on *computational realizations*---systems where locations are syntactic constructs manipulated by tools or humans. Software codebases are the primary example, but the encoding model is not software-specific.
+We focus on *computational realizations*---systems where locations are syntactic constructs manipulated by tools or humans. Software codebases are the primary example, but the encoding model is not software-specific. This subsection is illustrative; the core information-theoretic results do not depend on any particular computational domain.
 
 ::: definition
 A *codebase* $C$ is a finite collection of source files, each containing syntactic constructs (classes, functions, statements, expressions). This is the canonical computational encoding system.
@@ -549,7 +451,7 @@ Here $L_2$ is derived from $L_1$. Updating the class definition automatically up
 []{#def:dof label="def:dof"} $$\text{DOF}(C, F) = |\{L \in C : \text{encodes}(L, F) \land \text{independent}(L)\}|$$ The number of *independent* locations encoding fact $F$.
 :::
 
-DOF is the key metric. Modification complexity $M$ counts all encoding locations. DOF counts only the independent ones. If all but one encoding location is derived, DOF = 1 even though $M$ may be large.
+DOF is the key metric. Modification complexity $M$ counts all encoding locations. DOF counts only the independent ones. If all but one encoding location is derived, DOF = 1 even though $M$ can be large.
 
 ::: theorem
 []{#thm:dof-inconsistency label="thm:dof-inconsistency"} $\text{DOF}(C, F) = k$ implies $k$ different values for $F$ can coexist in $C$ simultaneously. With $k > 1$, incoherent states are reachable.
@@ -596,6 +498,40 @@ DOF values form a lattice with distinct information-theoretic meanings:
 
 Only DOF = 1 achieves coherent representation. This is an information-theoretic optimality condition, not a design preference. ◻
 :::
+
+## Encoding-Theoretic CAP and FLP {#sec:cap-flp}
+
+We now formalize CAP and FLP inside the encoding model.
+
+::: definition
+[]{#def:local-availability label="def:local-availability"} An encoding system for fact $F$ is *locally available* iff for every encoding location $L$ of $F$ and every value $v$, there exists a valid edit $\delta \in E(C)$ such that $\text{updated}(L, \delta)$ and for every other encoding location $L'$, $\neg \text{updated}(L', \delta)$. Informally: each encoding location can be updated without coordinating with others.
+:::
+
+::: definition
+[]{#def:partition-tolerance label="def:partition-tolerance"} An encoding system for fact $F$ is *partition-tolerant* iff $F$ is encoded at two or more locations: $$|\{L \in C : \text{encodes}(L, F)\}| \ge 2.$$ This is the minimal formal notion of "replication" in our model; without it, partitions are vacuous.
+:::
+
+::: theorem
+[]{#thm:cap-encoding label="thm:cap-encoding"} No encoding system can simultaneously guarantee coherence (Definition [\[def:coherence\]](#def:coherence){reference-type="ref" reference="def:coherence"}), local availability (Definition [\[def:local-availability\]](#def:local-availability){reference-type="ref" reference="def:local-availability"}), and partition tolerance (Definition [\[def:partition-tolerance\]](#def:partition-tolerance){reference-type="ref" reference="def:partition-tolerance"}) for the same fact $F$.
+:::
+
+::: proof
+*Proof.* Partition tolerance gives at least two encoding locations. Local availability allows each to be updated without updating any other encoding location, so by Definition [\[def:independent\]](#def:independent){reference-type="ref" reference="def:independent"} there exist two independent locations and thus $\text{DOF}(C, F) > 1$. By Theorem [\[thm:dof-gt-one-incoherence\]](#thm:dof-gt-one-incoherence){reference-type="ref" reference="thm:dof-gt-one-incoherence"}, incoherent states are reachable, contradicting coherence. ◻
+:::
+
+::: definition
+[]{#def:resolution-procedure label="def:resolution-procedure"} A *resolution procedure* is a deterministic function $R$ that maps an encoding system state to a value present in that state.
+:::
+
+::: theorem
+[]{#thm:static-flp label="thm:static-flp"} For any incoherent encoding system state and any resolution procedure $R$, the returned value is arbitrary relative to the other values present; no deterministic $R$ can be justified by internal information alone.
+:::
+
+::: proof
+*Proof.* Immediate from Theorem [\[thm:oracle-arbitrary\]](#thm:oracle-arbitrary){reference-type="ref" reference="thm:oracle-arbitrary"}: in an incoherent state, at least two distinct values are present, and any choice leaves another value disagreeing. ◻
+:::
+
+These theorems are the encoding-theoretic counterparts of CAP [@brewer2000cap; @gilbert2002cap] and FLP [@flp1985impossibility]: CAP corresponds to the impossibility of coherence when replicated encodings remain independently updatable; FLP corresponds to the impossibility of truth-preserving resolution in an incoherent state without side information.
 
 ## Coherence Capacity Theorem {#sec:capacity}
 
@@ -656,7 +592,7 @@ When an encoding system is incoherent (DOF $> 1$ with divergent values), resolut
 :::
 
 ::: proof
-*Proof.* The $k$ independent locations partition the resolution problem into $k$ equally plausible alternatives. Without loss of generality, each location could be the authoritative source.
+*Proof.* The $k$ independent locations partition the resolution problem into $k$ equally plausible alternatives. Without loss of generality, each location is an equally plausible authoritative source.
 
 By Theorem [\[thm:oracle-arbitrary\]](#thm:oracle-arbitrary){reference-type="ref" reference="thm:oracle-arbitrary"}, no internal information distinguishes them. Resolution requires identifying which of $k$ alternatives is correct.
 
@@ -684,7 +620,7 @@ Therefore, resolution requires $\geq \log_2 k$ bits of side information. ◻
 
 -   `params.toml`: `threshold = 0.6`
 
-To resolve this incoherence requires $\log_2 3 \approx 1.58$ bits of side information. In practice, this might be:
+To resolve this incoherence requires $\log_2 3 \approx 1.58$ bits of side information. In practice, side information takes forms such as:
 
 -   A priority ordering: "YAML takes precedence" (encodes which of 3 is authoritative)
 
@@ -743,7 +679,9 @@ Bounded: $\emptyset \subseteq D \subseteq \top$ for all valid $D$. ◻
 []{#cor:minimal-dof1 label="cor:minimal-dof1"} A derivation relation $D$ with DOF($D$) = 1 is *minimal* iff removing any edge increases DOF.
 :::
 
-**Computational implication:** Given an encoding system, there may be multiple DOF-1-achieving derivation structures. The minimal ones use the fewest derivation edges---the most economical way to achieve coherence.
+**Computational implication:** Given an encoding system, there can be multiple DOF-1-achieving derivation structures. The minimal ones use the fewest derivation edges---the most economical way to achieve coherence.
+
+**Representation model for complexity.** For the algorithmic results below, we assume the derivation relation $D$ is given explicitly as a DAG over the location set $L$. The input size is $|L| + |D|$, and all complexity bounds are measured in this explicit representation.
 
 ::: theorem
 []{#thm:dof-complexity label="thm:dof-complexity"} Given an encoding system with explicit derivation relation $D$:
@@ -856,7 +794,7 @@ The DOF metric creates a fundamental tradeoff between encoding rate and modifica
 
 This is a *rate-distortion* analog: higher encoding rate (DOF $> 1$) incurs higher modification complexity. DOF = 1 achieves minimal complexity under the coherence constraint.
 
-**Key insight:** Many locations may encode $F$ (high total encoding locations), but if DOF = 1, coherence restoration requires only 1 manual update. The derivation mechanism handles propagation automatically.
+**Key insight:** Many locations can encode $F$ (high total encoding locations), but if DOF = 1, coherence restoration requires only 1 manual update. The derivation mechanism handles propagation automatically.
 
 ::: example
 []{#ex:ssot-large-m label="ex:ssot-large-m"} Consider an encoding system where a fact $F$ = "all processors must implement operation $P$" is encoded at 51 locations:
@@ -904,7 +842,7 @@ Derivation can occur at different times depending on the encoding system:
   Query/Access time     Database views, computed columns, lazy evaluation
 :::
 
-**Structural facts require definition-time derivation.** Structural facts (class existence, schema structure, service topology) are fixed when defined. Compile-time may be too early (declarative source not yet parsed). Runtime is too late (structure already immutable). Definition-time is the unique opportunity for structural derivation.
+**Structural facts require definition-time derivation.** Structural facts (class existence, schema structure, service topology) are fixed when defined. Compile-time derivation that runs before the definition is fixed is too early (the declarative source is not yet fixed). Runtime is too late (structure already immutable). Definition-time is the unique opportunity for structural derivation.
 
 ::: theorem
 []{#thm:derivation-excludes label="thm:derivation-excludes"} If $L_{\text{derived}}$ is derived from $L_{\text{source}}$, then $L_{\text{derived}}$ cannot diverge from $L_{\text{source}}$ and does not contribute to DOF.
@@ -1075,7 +1013,7 @@ Without causal propagation, there exists a temporal window between source modifi
 
 1.  The source exists with value $v$
 
-2.  Derived locations have not been updated (they may not exist, or hold stale values)
+2.  Derived locations have not been updated; they either do not exist yet or hold stale values
 
 3.  The system is temporarily incoherent
 
@@ -1138,7 +1076,7 @@ Without provenance observability, the encoding system is a "black box"---you can
 
 Step (1) requires querying what structures exist. Step (2) requires distinguishing sources from derived locations. Step (3) requires querying the derivation relationship.
 
-Without provenance observability, none of these queries are answerable from within the system. DOF = 1 may hold but cannot be verified. Bugs in derivation logic go undetected until coherence violations manifest. ◻
+Without provenance observability, none of these queries are answerable from within the system. DOF = 1 can hold but cannot be verified. Bugs in derivation logic go undetected until coherence violations manifest. ◻
 :::
 
 **Connection to coding theory:** In coding theory, a code's structure (generator matrix, parity-check matrix) must be known to the decoder. Provenance observability is analogous: the derivation structure must be queryable for verification.
@@ -1327,11 +1265,17 @@ Contrast with Python: the registry entry exists only in memory, created causally
 Both requirements are necessary. Neither is sufficient alone. Together they enable DOF-1-complete encoding systems that achieve the coherence-optimal rate.
 
 
-# Realization Evaluation: Computational Systems {#sec:evaluation}
+# Corollary: Programming-Language Instantiation {#sec:evaluation}
 
-We now evaluate computational systems against the DOF = 1 realizability requirements established in Section [\[sec:requirements\]](#sec:requirements){reference-type="ref" reference="sec:requirements"}. We focus on programming languages as the primary computational domain with detailed evaluation. The criteria apply to any computational system with declarative structures.
+We instantiate Theorem [\[thm:ssot-iff\]](#thm:ssot-iff){reference-type="ref" reference="thm:ssot-iff"} in the domain of programming languages. This section is a formal corollary of the realizability theorem: once a language's definition-time hooks and introspection capabilities are fixed, DOF = 1 realizability for structural facts is determined.
 
-This evaluation is exhaustive for mainstream programming languages: we check every mainstream language against formally-defined criteria derived from Theorem [\[thm:ssot-iff\]](#thm:ssot-iff){reference-type="ref" reference="thm:ssot-iff"}.
+::: corollary
+[]{#cor:lang-realizability label="cor:lang-realizability"} A programming language can realize DOF = 1 for structural facts iff it provides both (i) definition-time hooks and (ii) introspectable derivations. This is the direct instantiation of Theorem [\[thm:ssot-iff\]](#thm:ssot-iff){reference-type="ref" reference="thm:ssot-iff"}.
+:::
+
+**Instantiation map.** In the abstract model, an independent encoding is a location that can diverge under edits. In programming languages, structural facts are encoded at definition sites; *definition-time hooks* implement derivation (automatic propagation), and *introspection* implements provenance observability. Thus DEF corresponds to causal propagation and INTRO corresponds to queryable derivations; DOF = 1 is achievable exactly when both are present.
+
+We instantiate this corollary over a representative language class (Definition [\[def:mainstream\]](#def:mainstream){reference-type="ref" reference="def:mainstream"}).
 
 ## Evaluation Criteria {#sec:criteria}
 
@@ -1356,14 +1300,12 @@ We evaluate systems on four criteria, derived from the realizability requirement
 
 -   $\triangle$ = Partial/insufficient: Feature exists but fails a realizability requirement (e.g., needs external tooling or lacks runtime reach)
 
-**Methodology note (tooling exclusions):** We exclude capabilities that require external build tools or libraries (annotation processors, Lombok, `reflect-metadata`+`ts-transformer`, `ts-json-schema-generator`, etc.). Only language-native, runtime-verifiable features count toward realizability.
+**Tooling exclusions:** We exclude capabilities that require external build tools or libraries (annotation processors, Lombok, `reflect-metadata`+`ts-transformer`, `ts-json-schema-generator`, etc.). Only language-native, runtime-verifiable features count toward realizability. We use $\triangle$ only when a built-in mechanism exists but fails a requirement; for non-mainstream languages we note partial support where relevant. For INTRO, we require runtime subclass enumeration; Java's `getMethods()` does not qualify because it cannot enumerate subclasses without classpath scanning.
 
-**Note:** We use $\triangle$ sparingly for mainstream languages only when a built-in mechanism exists but fails realizability requirements (e.g., requires compile-time tooling or lacks runtime reach). For non-mainstream languages in Section [1.4](#sec:non-mainstream){reference-type="ref" reference="sec:non-mainstream"}, we note partial support where relevant since these languages are not our primary focus. For INTRO, we require *subclass enumeration*: the ability to answer "what classes inherit from X?" at runtime. Java's `getMethods()` does not satisfy this because it cannot enumerate subclasses without classpath scanning via external libraries.
-
-## Mainstream Language Definition {#sec:mainstream-def}
+## Language Class for Instantiation {#sec:mainstream-def}
 
 ::: definition
-[]{#def:mainstream label="def:mainstream"} A language is *mainstream* iff it appears in the top 20 of at least two of the following indices consistently over 5+ years:
+[]{#def:mainstream label="def:mainstream"} A language is in the *representative class* iff it appears in the top 20 of at least two of the following indices consistently over 5+ years:
 
 1.  TIOBE Index [@tiobe2024] (monthly language popularity)
 
@@ -1374,9 +1316,9 @@ We evaluate systems on four criteria, derived from the realizability requirement
 4.  RedMonk Programming Language Rankings (quarterly)
 :::
 
-This definition excludes niche languages (Haskell, Erlang, Clojure) while including all languages a typical software organization might consider. The 5-year consistency requirement excludes flash-in-the-pan languages.
+This definition excludes niche languages (e.g., Haskell, Erlang, Clojure) while including languages a typical software organization would consider. The 5-year consistency requirement excludes short-lived spikes.
 
-## Mainstream Language Evaluation {#sec:mainstream-eval}
+## Instantiation Over the Representative Class {#sec:mainstream-eval}
 
 ::: center
   **Language**      **DEF**      **INTRO**    **STRUCT**   **HIER**   **DOF-1?**
@@ -1393,136 +1335,42 @@ This definition excludes niche languages (Haskell, Erlang, Clojure) while includ
   Swift            $\times$      $\times$      $\times$    $\times$       NO
 :::
 
-TypeScript earns $\triangle$ for DEF/INTRO because decorators (aligned with ES decorators since TypeScript 5.0, 2023) plus `reflect-metadata` can run at class decoration time and expose limited metadata, but (a) they require `experimentalDecorators` or specific tsconfig flags instead of being always-on language features, (b) they cannot enumerate implementers at runtime (no `__subclasses__()` equivalent), and (c) type information is erased at compile time. Consequently DOF = 1 remains unrealizable without external tooling, so the overall verdict stays NO. **Note (as of 2026):** While ES decorators are now standard in JavaScript, they still lack subclass enumeration---the fundamental barrier to DOF = 1 remains.
+**Corollary interpretation.** The table instantiates Corollary [\[cor:lang-realizability\]](#cor:lang-realizability){reference-type="ref" reference="cor:lang-realizability"}: DOF = 1 realizability holds exactly when DEF and INTRO are both satisfied. The remaining columns (STRUCT, HIER) identify partial mechanisms but do not alter the DOF = 1 verdict.
 
-### Python: Full DOF-1 Support
+Verification method: for each language we check (i) existence of definition-time hooks that execute during class/type definition and (ii) runtime-introspectable derivations (e.g., subclass enumeration). Failure of either condition implies non-realizability by Corollary [\[cor:lang-realizability\]](#cor:lang-realizability){reference-type="ref" reference="cor:lang-realizability"}.
 
-Python provides all four capabilities:
+TypeScript earns $\triangle$ for DEF/INTRO because decorators (aligned with ES decorators) plus `reflect-metadata` can run at class decoration time and expose limited metadata, but (a) they require opt-in configuration, (b) they cannot enumerate implementers at runtime (no `__subclasses__()` equivalent), and (c) type information is erased at compile time. Consequently DOF = 1 remains unrealizable without external tooling, so the overall verdict stays NO.
 
-**DEF (Definition-time hooks):**
+### Python: Instantiation of Both Requirements
 
--   `__init_subclass__`: Executes when a subclass is defined
+Python satisfies both requirements. **DEF:** via `__init_subclass__`, metaclass `__new__`/`__init__`, and class decorators executing at definition time. **INTRO:** via `__subclasses__()` and MRO queries. **STRUCT/HIER:** via metaclass modification and subclass enumeration.
 
--   Metaclasses: `__new__` and `__init__` execute at class creation
+### JavaScript: Missing Both Requirements
 
--   Class decorators: Execute immediately after class body
+**DEF:** $\times$ (no definition-time execution in class syntax). **INTRO:** $\times$ (no subclass enumeration at runtime; `instanceof` is not enumeration). Therefore DOF = 1 fails by Corollary [\[cor:lang-realizability\]](#cor:lang-realizability){reference-type="ref" reference="cor:lang-realizability"}.
 
-**INTRO (Introspection):**
+### Java: Missing Both Requirements
 
--   `__subclasses__()`: Returns list of direct subclasses
+**DEF:** $\times$ (annotations are external tooling; class definitions are fixed before processing). **INTRO:** $\times$ (no runtime subclass enumeration; external classpath scanning is tooling, not a language feature). Thus DOF = 1 fails by Corollary [\[cor:lang-realizability\]](#cor:lang-realizability){reference-type="ref" reference="cor:lang-realizability"}.
 
--   `__mro__`: Returns method resolution order
+### C++: Missing Both Requirements
 
--   `type()`, `isinstance()`, `issubclass()`: Type queries
+**DEF:** $\times$ (templates are compile-time expansion, not definition-time hooks). **INTRO:** $\times$ (no runtime subclass enumeration). Therefore DOF = 1 fails by Corollary [\[cor:lang-realizability\]](#cor:lang-realizability){reference-type="ref" reference="cor:lang-realizability"}.
 
--   `dir()`, `vars()`, `getattr()`: Attribute introspection
+### Go: Missing Both Requirements
 
-**STRUCT (Structural modification):**
+**DEF:** $\times$ (no definition-time hooks). **INTRO:** $\times$ (no enumeration of interface implementers). Therefore DOF = 1 fails by Corollary [\[cor:lang-realizability\]](#cor:lang-realizability){reference-type="ref" reference="cor:lang-realizability"}.
 
--   Metaclasses can add/remove/modify class attributes
+### Rust: Missing Both Requirements
 
--   `__init_subclass__` can modify the subclass being defined
-
--   Decorators can return a different class entirely
-
-**HIER (Hierarchy queries):**
-
--   `__subclasses__()`: Enumerate subclasses
-
--   `__bases__`: Query parent classes
-
--   `__mro__`: Full inheritance chain
-
-### JavaScript: No DOF-1 Support
-
-JavaScript lacks definition-time hooks:
-
-**DEF:** $\times$. No code executes when a class is defined. The `class` syntax is declarative. Decorators (TC39 Stage 3, finalized 2024) exist but cannot access or enumerate subclasses at runtime.
-
-**INTRO:** $\times$. `Object.getPrototypeOf()`, `instanceof` exist but *cannot enumerate subclasses*. No equivalent to `__subclasses__()`.
-
-**STRUCT:** $\times$. Cannot modify class structure at definition time.
-
-**HIER:** $\times$. Cannot enumerate subclasses. No equivalent to `__subclasses__()`.
-
-### Java: No DOF-1 Support
-
-Java's annotations are metadata, not executable hooks [@gosling2021java]:
-
-**DEF:** $\times$. Annotations are processed by external tools (annotation processors), not by the JVM at class loading. The class is already fully defined when annotation processing occurs.
-
-**INTRO:** $\times$. `Class.getMethods()`, `Class.getInterfaces()`, `Class.getSuperclass()` exist but *cannot enumerate subclasses*. The JVM does not track subclass relationships. External libraries (Reflections, ClassGraph) provide this via classpath scanning, but that is external tooling, not a language feature.
-
-**STRUCT:** $\times$. Cannot modify class structure at runtime. Bytecode manipulation (ASM, ByteBuddy) is external tooling, not language-level support.
-
-**HIER:** $\times$. Cannot enumerate subclasses without external libraries (Reflections, ClassGraph).
-
-**Why annotation processors don't count:**
-
-1.  They run at compile time, not definition time. The class being processed is already fixed
-
-2.  They cannot modify the class being defined; they generate *new* classes
-
-3.  Generated classes are separate compilation units, not derived facts within the source
-
-4.  Results are not introspectable at runtime. You cannot query "was this method generated?"
-
-**Why Lombok doesn't count:** Lombok approximates SSOT but violates it: the Lombok configuration becomes a second source of truth. Changes require updating both source and Lombok annotations. The tool can fail, be misconfigured, or be bypassed.
-
-### C++: No DOF-1 Support
-
-C++ templates are compile-time, not definition-time [@stroustrup2013cpp]:
-
-**DEF:** $\times$. Templates expand at compile time but do not execute arbitrary code. `constexpr` functions are evaluated at compile time but cannot hook into class definition.
-
-**INTRO:** $\times$. No runtime type introspection. RTTI (`typeid`, `dynamic_cast`) provides minimal information. Cannot enumerate template instantiations.
-
-**STRUCT:** $\times$. Cannot modify class structure after definition.
-
-**HIER:** $\times$. Cannot enumerate subclasses. No runtime class registry.
-
-### Go: No DOF-1 Support
-
-Go's design philosophy explicitly rejects metaprogramming [@gospec2024]:
-
-**DEF:** $\times$. No hook mechanism. Types are defined declaratively. No code executes at type definition.
-
-**INTRO:** $\times$. `reflect` package provides limited introspection but cannot enumerate types implementing an interface.
-
-**STRUCT:** $\times$. Cannot modify type structure.
-
-**HIER:** $\times$. Interfaces are implicit (structural typing). Cannot enumerate implementers.
-
-### Rust: No DOF-1 Support
-
-Rust's procedural macros are compile-time and opaque [@rustref2024]:
-
-**DEF:** $\times$. Procedural macros execute at compile time, not definition time. The generated code is not introspectable at runtime.
-
-**INTRO:** $\times$. No runtime type introspection. `std::any::TypeId` provides minimal information.
-
-**STRUCT:** $\times$. Cannot modify type structure at runtime.
-
-**HIER:** $\times$. Cannot enumerate trait implementers.
-
-**Why procedural macros don't count:**
-
-1.  They execute at compile time, not definition time. The generated code is baked into the binary
-
-2.  `#[derive(Debug)]` generates code, but you cannot query "does this type derive Debug?" at runtime
-
-3.  Verification requires source inspection or documentation, not runtime query
-
-4.  No equivalent to Python's `__subclasses__()`. You cannot enumerate trait implementers
-
-**Consequence:** Rust achieves *compile-time* DOF = 1 but not *runtime* DOF = 1. For applications requiring runtime reflection (ORMs, serialization frameworks, dependency injection), Rust requires manual synchronization or external codegen tools.
+**DEF:** $\times$ (procedural macros are compile-time; no definition-time hooks). **INTRO:** $\times$ (no runtime trait implementer enumeration). Thus DOF = 1 fails by Corollary [\[cor:lang-realizability\]](#cor:lang-realizability){reference-type="ref" reference="cor:lang-realizability"}.
 
 ::: theorem
-[]{#thm:python-unique label="thm:python-unique"} Among mainstream programming languages, Python is the only language satisfying all DOF-1 realizability requirements.
+[]{#thm:python-unique label="thm:python-unique"} Within the representative language class (Definition [\[def:mainstream\]](#def:mainstream){reference-type="ref" reference="def:mainstream"}), Python is the only language satisfying all DOF-1 realizability requirements.
 :::
 
 ::: proof
-*Proof.* By exhaustive evaluation. We checked all 10 mainstream languages against the four criteria derived from Theorem [\[thm:ssot-iff\]](#thm:ssot-iff){reference-type="ref" reference="thm:ssot-iff"}. Only Python satisfies all four. The evaluation is complete. No mainstream language is omitted. ◻
+*Proof.* By inspection of DEF and INTRO in the representative class and application of Corollary [\[cor:lang-realizability\]](#cor:lang-realizability){reference-type="ref" reference="cor:lang-realizability"}. Only Python satisfies both requirements. ◻
 :::
 
 ## Non-Mainstream Languages {#sec:non-mainstream}
@@ -1539,83 +1387,37 @@ Three non-mainstream languages also satisfy DOF-1 realizability requirements:
 
 ### Common Lisp (CLOS)
 
-CLOS (Common Lisp Object System) provides the most powerful metaobject protocol:
-
-**DEF:** . The MOP (Metaobject Protocol) allows arbitrary code execution at class definition via `:metaclass` and method combinations.
-
-**INTRO:** . `class-direct-subclasses`, `class-precedence-list`, `class-slots` provide complete introspection.
-
-**STRUCT:** . MOP allows complete structural modification.
-
-**HIER:** . `class-direct-subclasses` enumerates subclasses.
-
-CLOS is arguably more powerful than Python for metaprogramming. However, it is not mainstream by our definition.
+CLOS provides a full MOP: definition-time execution via `:metaclass` and method combinations, complete introspection (`class-direct-subclasses`, `class-precedence-list`, `class-slots`), and structural modification. Thus DOF = 1 is realizable, though CLOS is not mainstream by Definition [\[def:mainstream\]](#def:mainstream){reference-type="ref" reference="def:mainstream"}.
 
 ### Smalltalk
 
-Smalltalk pioneered many of these concepts:
-
-**DEF:** . Classes are objects. Creating a class sends messages that can be intercepted.
-
-**INTRO:** . `subclasses`, `allSubclasses`, `superclass` provide complete introspection.
-
-**STRUCT:** . Classes can be modified at any time.
-
-**HIER:** . `subclasses` enumerates subclasses.
+Classes are objects; class creation is message-based and interceptable, and runtime introspection (`subclasses`, `allSubclasses`) is built in. Structural modification is supported, so DOF = 1 is realizable.
 
 ### Ruby
 
-Ruby provides hooks but with limitations [@flanagan2020ruby]:
-
-**DEF:** . `inherited`, `included`, `extended` hooks execute at definition time.
-
-**INTRO:** . `subclasses`, `ancestors`, `instance_methods` provide introspection.
-
-**STRUCT:** Partial. Ruby's `inherited` hook receives the subclass *after* its body has been parsed, meaning the hook cannot intercept or transform the class definition as it is being constructed. Contrast with Python's `__init_subclass__`, which executes *during* class creation with access to keyword arguments passed in the class definition (e.g., `class Foo(Base, key=val)`). Ruby can add methods post-hoc via `define_method`, but cannot parameterize class creation or inject attributes before the class body executes.
-
-**HIER:** . `subclasses` enumerates subclasses (added in Ruby 3.1).
-
-Ruby is close to full DOF-1 support but the structural modification limitations (no parameterized class creation, no pre-body hook) prevent complete realizability for use cases requiring definition-time configuration.
+Ruby provides definition-time hooks (`inherited`/`included`/`extended`) and introspection (`subclasses`, `ancestors`) [@flanagan2020ruby], but hooks run after the class body and cannot parameterize class creation. Structural modification is therefore partial, so DOF = 1 is not fully realizable for structural facts requiring definition-time configuration.
 
 ::: theorem
-[]{#thm:three-lang label="thm:three-lang"} Exactly three programming languages in common use satisfy complete DOF-1 realizability requirements: Python, Common Lisp (CLOS), and Smalltalk.
+[]{#thm:three-lang label="thm:three-lang"} Within the evaluated language set (mainstream representative class plus notable MOP-equipped languages), exactly three languages satisfy complete DOF-1 realizability requirements: Python, Common Lisp (CLOS), and Smalltalk.
 :::
 
 ::: proof
-*Proof.* By exhaustive evaluation of mainstream and notable non-mainstream languages. Python, CLOS, and Smalltalk satisfy all four criteria. Ruby satisfies three of four (partial STRUCT). All other evaluated languages fail at least two criteria. ◻
+*Proof.* By inspection of DEF and INTRO in the stated set and application of Corollary [\[cor:lang-realizability\]](#cor:lang-realizability){reference-type="ref" reference="cor:lang-realizability"}. Python, CLOS, and Smalltalk satisfy both requirements; Ruby fails STRUCT and thus lacks full realizability; all other evaluated languages fail at least one of DEF or INTRO. ◻
 :::
 
-## Implications for System Selection {#sec:implications}
+## Corollaries for System Selection {#sec:implications}
 
-The evaluation has practical implications for computational system selection:
+::: corollary
+[]{#cor:selection-constraints label="cor:selection-constraints"} If DOF = 1 is required for structural facts, then any language lacking DEF or INTRO is excluded. Within the representative class, only Python satisfies both requirements; outside it, CLOS and Smalltalk also satisfy them, while Ruby is partial.
+:::
 
-**1. If DOF = 1 for structural facts is required:**
+::: corollary
+[]{#cor:tooling-limits label="cor:tooling-limits"} External tooling that operates outside the language semantics does not satisfy provenance observability at runtime; therefore it does not realize DOF = 1 under Definition [\[def:encodes\]](#def:encodes){reference-type="ref" reference="def:encodes"} unless it provides introspectable derivations within the running system.
+:::
 
--   Among programming languages, Python is the only mainstream option
-
--   CLOS and Smalltalk are alternatives if mainstream status is not required
-
--   Ruby is a partial option with workarounds needed
-
--   Consider whether the domain truly requires runtime DOF = 1 or whether compile-time guarantees (Rust, Haskell) suffice
-
-**2. If using a DOF-1-incomplete system:**
-
--   External tooling (code generators, linters) can help maintain coherence
-
--   But tooling is not equivalent to native realizability
-
--   Tooling-based coherence cannot be verified at runtime
-
--   Tooling adds build complexity and introduces failure modes
-
-**3. For system designers:**
-
--   Definition-time computation and introspection should be considered if coherence guarantees are a design goal
-
--   These capabilities have costs (implementation complexity, runtime overhead, security surface) that must be weighed
-
--   The absence of these capabilities is a deliberate design choice with information-theoretic consequences for encodability
+::: corollary
+[]{#cor:design-implication label="cor:design-implication"} If coherence guarantees are a design goal for structural facts, then definition-time computation and introspection are necessary architectural features; their absence has information-theoretic consequences for encodability.
+:::
 
 
 # Rate-Complexity Bounds {#sec:bounds}
@@ -1631,6 +1433,8 @@ We now prove the rate-complexity bounds that make DOF = 1 optimal. The key resul
 **Unit of cost:** One edit = one syntactic modification to one location. We count locations, not keystrokes or characters. This abstracts over edit complexity to focus on the scaling behavior.
 
 **What we measure:** Manual edits only. Derived locations that update automatically have zero cost. This distinguishes DOF = 1 systems (where derivation handles propagation) from DOF $>$ 1 systems (where all updates are manual).
+
+**Asymptotic parameter:** We measure scaling in the number of encoding locations for fact $F$. Let $n = |\{L \in C : \text{encodes}(L, F)\}|$ and $k = \text{DOF}(C, F)$. Bounds of $O(1)$ and $\Omega(n)$ are in this parameter; in particular, the lower bound uses $n = k$ independent locations.
 
 ## Upper Bound: DOF = 1 Achieves O(1) {#sec:upper-bound}
 
@@ -1649,10 +1453,10 @@ When $F$ changes:
 
 3.  Total manual edits: 1
 
-The number of derived locations $k$ may grow with system size, but the number of *manual* edits remains 1. Therefore, $M_{\text{effective}}(C, \delta_F) = O(1)$. ◻
+The number of derived locations $k$ can grow with system size, but the number of *manual* edits remains 1. Therefore, $M_{\text{effective}}(C, \delta_F) = O(1)$. ◻
 :::
 
-**Note on "effective" vs. "total" complexity:** Total modification complexity $M(C, \delta_F)$ counts all locations that change. Effective modification complexity counts only manual edits. With DOF = 1, total complexity may be $O(n)$ (many derived locations change), but effective complexity is $O(1)$ (one manual edit).
+**Note on "effective" vs. "total" complexity:** Total modification complexity $M(C, \delta_F)$ counts all locations that change. Effective modification complexity counts only manual edits. With DOF = 1, total complexity can be $O(n)$ (many derived locations change), but effective complexity is $O(1)$ (one manual edit).
 
 ## Lower Bound: DOF $>$ 1 Requires $\Omega(n)$ {#sec:lower-bound}
 
@@ -1673,6 +1477,8 @@ By Definition [\[def:independent\]](#def:independent){reference-type="ref" refe
 
 Therefore, $M_{\text{effective}}(C, \delta_F) = \Omega(n)$. ◻
 :::
+
+**Tightness (Achievability + Converse).** Theorems [\[thm:upper-bound\]](#thm:upper-bound){reference-type="ref" reference="thm:upper-bound"} and [\[thm:lower-bound\]](#thm:lower-bound){reference-type="ref" reference="thm:lower-bound"} form a tight information-theoretic bound: DOF = 1 achieves constant modification cost (achievability), while any encoding with more than one independent location incurs linear cost in the number of independent encodings (converse). There is no intermediate regime with sublinear manual edits when $k > 1$ independent encodings are permitted.
 
 ## The Unbounded Gap {#sec:gap}
 
@@ -1707,9 +1513,9 @@ We now formalize the complete tradeoff space, analogous to rate-distortion theor
 
 -   $R$ = *Rate* (DOF): Number of independent encoding locations
 
--   $C$ = *Complexity*: Expected modification cost per change
+-   $C$ = *Complexity*: Manual modification cost per change
 
--   $P$ = *Coherence probability*: $1 - \Pr[\text{incoherent state reachable}]$
+-   $P$ = *Coherence indicator*: $P = 1$ iff no incoherent state is reachable; otherwise $P = 0$
 
 The *(R, C, P) tradeoff space* is the set of achievable $(R, C, P)$ tuples.
 :::
@@ -1722,7 +1528,7 @@ The *(R, C, P) tradeoff space* is the set of achievable $(R, C, P)$ tuples.
   ---------- ----------------- ----------------- ----------------------------------
    $R = 0$        $C = 0$       $P =$ undefined           Fact not encoded
    $R = 1$      $C = O(1)$          $P = 1$       **Optimal (capacity-achieving)**
-   $R > 1$    $C = \Omega(R)$       $P < 1$                Above capacity
+   $R > 1$    $C = \Omega(R)$       $P = 0$                Above capacity
 :::
 ::::
 
@@ -1731,7 +1537,7 @@ The *(R, C, P) tradeoff space* is the set of achievable $(R, C, P)$ tuples.
 
 **$R = 1$:** By Theorem [\[thm:upper-bound\]](#thm:upper-bound){reference-type="ref" reference="thm:upper-bound"}, $C = O(1)$. By Theorem [\[thm:coherence-capacity\]](#thm:coherence-capacity){reference-type="ref" reference="thm:coherence-capacity"}, $P = 1$ (coherence guaranteed). This is the capacity-achieving regime.
 
-**$R > 1$:** By Theorem [\[thm:lower-bound\]](#thm:lower-bound){reference-type="ref" reference="thm:lower-bound"}, $C = \Omega(R)$. By Theorem [\[thm:dof-gt-one-incoherence\]](#thm:dof-gt-one-incoherence){reference-type="ref" reference="thm:dof-gt-one-incoherence"}, incoherent states are reachable, so $P < 1$. ◻
+**$R > 1$:** By Theorem [\[thm:lower-bound\]](#thm:lower-bound){reference-type="ref" reference="thm:lower-bound"}, $C = \Omega(R)$. By Theorem [\[thm:dof-gt-one-incoherence\]](#thm:dof-gt-one-incoherence){reference-type="ref" reference="thm:dof-gt-one-incoherence"}, incoherent states are reachable, so $P = 0$. ◻
 :::
 
 ::: definition
@@ -1760,7 +1566,7 @@ The *Pareto frontier* is the set of all Pareto optimal points.
 **Uniqueness:** No other point achieves $P = 1$ except $R = 1$. ◻
 :::
 
-**Information-theoretic interpretation.** The Pareto frontier in rate-distortion theory is the curve $R(D)$ of minimum rate achieving distortion $D$. Here, the "distortion" is $1 - P$ (probability of incoherence), and the Pareto frontier collapses to a single point: $R = 1$ is the unique rate achieving $D = 0$.
+**Information-theoretic interpretation.** The Pareto frontier in rate-distortion theory is the curve $R(D)$ of minimum rate achieving distortion $D$. Here, the "distortion" is $1 - P$ (indicator of incoherence reachability), and the Pareto frontier collapses to a single point: $R = 1$ is the unique rate achieving $D = 0$.
 
 ::: corollary
 []{#cor:no-tradeoff label="cor:no-tradeoff"} Unlike rate-distortion where you can trade rate for distortion, there is no tradeoff at $P = 1$ (perfect coherence). The only option is $R = 1$.
@@ -1782,7 +1588,7 @@ In our framework:
 
 -   You *cannot* achieve higher coherence ($P$) with more independent locations
 
--   Higher rate ($R > 1$) *decreases* coherence probability
+-   Higher rate ($R > 1$) *eliminates* coherence guarantees ($P = 0$)
 
 -   $P = 1$ (perfect coherence) requires $R = 1$ exactly
 
@@ -1838,13 +1644,17 @@ For a fact modified 100 times with 50 independent encoding locations:
 The 50$\times$ reduction factor applies to every modification, compounding over the system lifetime.
 
 
-# Computational Realization: Empirical Validation {#sec:empirical}
+# Corollary: Realizability Patterns (Worked Example) {#sec:empirical}
 
-We validate the theoretical results with concrete before/after examples from OpenHCS [@openhcs2025], a production bioimage analysis platform implemented in Python. These examples demonstrate how definition-time computation and introspection achieve DOF = 1 for structural facts in a DOF-1-complete programming language.
+We provide a concrete worked example from OpenHCS [@openhcs2025], a production bioimage analysis platform implemented in Python. This section supplies a constructive instantiation of the realizability theorem: it shows explicit mechanisms that satisfy the abstract requirements in a real system.
+
+::: corollary
+[]{#cor:realizability-patterns label="cor:realizability-patterns"} In any system that satisfies the realizability conditions of Theorem [\[thm:ssot-iff\]](#thm:ssot-iff){reference-type="ref" reference="thm:ssot-iff"} (definition-time hooks and introspectable derivations), DOF = 1 can be achieved by a small set of structural patterns: contract enforcement from a single definition, automatic registration at definition time, and automatic discovery via introspection. The examples below instantiate these patterns.
+:::
 
 **Methodology:** This case study follows established guidelines for software engineering case studies [@runeson2009guidelines]. We use a single-case embedded design with multiple units of analysis (DOF measurements, code changes, maintenance complexity).
 
-The value of these examples is *qualitative demonstration of realizability*: they show the realization patterns, not aggregate statistics. Each example demonstrates a specific mechanism for achieving DOF = 1. Readers can verify these patterns apply to their own computational systems.
+The value of these examples is *constructive*: they exhibit explicit mechanisms that satisfy the realizability conditions. Each example is a worked instance of Theorem [\[thm:ssot-iff\]](#thm:ssot-iff){reference-type="ref" reference="thm:ssot-iff"}, not statistical evidence.
 
 ## DOF = 1 Realization Patterns {#sec:ssot-patterns-practical}
 
@@ -2104,7 +1914,7 @@ The pattern is simple: traverse an object graph, query definition-time metadata 
 
 ## Summary {#sec:practical-summary}
 
-These four patterns (contract enforcement, automatic registration, automatic discovery, and introspection-driven generation) demonstrate how DOF-1-complete computational systems realize optimal encoding rate for structural facts:
+These four patterns (contract enforcement, automatic registration, automatic discovery, and introspection-driven generation) exhibit how DOF-1-complete computational systems realize optimal encoding rate for structural facts:
 
 -   **PR #44 is verifiable:** The 47 $\to$ 1 DOF reduction can be confirmed by inspecting the public pull request.
 
@@ -2118,7 +1928,7 @@ These four patterns (contract enforcement, automatic registration, automatic dis
 
     Remove either capability, and the patterns break (as demonstrated by impossibility in Java, Rust, Go).
 
-The theoretical prediction (Theorem [\[thm:ssot-iff\]](#thm:ssot-iff){reference-type="ref" reference="thm:ssot-iff"}: DOF = 1 requires definition-time computation and introspection) is empirically validated by these examples. The patterns shown are instances of the general realizability framework proved in Section [\[sec:requirements\]](#sec:requirements){reference-type="ref" reference="sec:requirements"}.
+The theoretical prediction (Theorem [\[thm:ssot-iff\]](#thm:ssot-iff){reference-type="ref" reference="thm:ssot-iff"}: DOF = 1 requires definition-time computation and introspection) is illustrated by these examples. The patterns shown are instances of the general realizability framework proved in Section [\[sec:requirements\]](#sec:requirements){reference-type="ref" reference="sec:requirements"}.
 
 
 # Related Work {#sec:related}
@@ -2157,135 +1967,45 @@ Our framework extends this to *storage* rather than communication: encoding syst
 
 DOF = 1 is the MDL-optimal encoding for redundant facts: the single source is the model; derived locations have zero marginal description length (fully determined by source). Additional independent encodings add description length without reducing uncertainty---pure overhead. Our Theorem [\[thm:dof-optimal\]](#thm:dof-optimal){reference-type="ref" reference="thm:dof-optimal"} establishes analogous uniqueness for encoding systems under modification constraints.
 
+#### Closest prior work and novelty.
+
+The closest IT lineage is multi-version coding and zero-error/interactive source coding. These settings address consistency or decoding with side information, but they do not model *modifiable* encodings with a coherence constraint over time. Our contribution is a formal encoding model with explicit modification operations, a coherence capacity theorem (unique rate for guaranteed coherence), an iff realizability characterization, and tight rate--complexity bounds.
+
 ## Distributed Systems Consistency {#sec:related-distributed}
 
-Our coherence requirement connects to fundamental results in distributed systems.
-
-**CAP Theorem.** Brewer [@brewer2000cap] conjectured (Gilbert and Lynch [@gilbert2002cap] proved) that distributed systems cannot simultaneously guarantee Consistency, Availability, and Partition tolerance.
-
-Our DOF framework instantiates this tradeoff:
-
--   **Consistency** = Coherence (all locations agree)
-
--   **Availability** = Locations can be modified independently
-
--   **Partition tolerance** = No global synchronization required
-
-DOF $> 1$ with independent modification and no coordination is precisely the CAP-impossible regime. DOF = 1 sidesteps CAP by eliminating independent locations---there's only one source, so no partition between sources is possible.
-
-**FLP Impossibility.** Fischer, Lynch, and Paterson [@flp1985impossibility] proved that deterministic consensus is impossible in asynchronous systems with even one faulty process.
-
-Our resolution impossibility theorem (Theorem [\[thm:oracle-arbitrary\]](#thm:oracle-arbitrary){reference-type="ref" reference="thm:oracle-arbitrary"}) is a *static* analog: given incoherent encodings (DOF $> 1$ with divergent values), no resolution procedure is information-theoretically justified. FLP says consensus cannot be *reached*; we say which value is correct cannot be *determined*.
-
-**Consensus Algorithms.** Lamport's Paxos [@lamport1998paxos] and Ongaro's Raft [@ongaro2014raft] achieve consistency by coordinating updates across replicas. This is DOF $> 1$ with coordination overhead to maintain coherence.
-
-DOF = 1 eliminates the need for coordination: there's only one source, so consensus is trivial (the source is authoritative). The tradeoff: DOF = 1 has no redundancy for fault tolerance; DOF $> 1$ with consensus has fault tolerance but coordination cost.
-
-**Formal Connections.** We now state the precise relationships:
-
-::: theorem
-[]{#thm:dof-cap label="thm:dof-cap"} The DOF framework is an instantiation of CAP:
-
-1.  DOF = 1: Achieves Consistency (coherence) by eliminating Partition tolerance (only one source to partition)
-
-2.  DOF $> 1$ without coordination: Has Availability and Partition tolerance but not Consistency
-
-3.  DOF $> 1$ with consensus: Achieves Consistency by sacrificing Availability (blocking during coordination)
-:::
-
-::: proof
-*Proof.* **(1)** With DOF = 1, all locations except the source are derived. Derived locations cannot be modified independently---they track the source. There is no "partition between sources" because there is only one source. Consistency (coherence) is guaranteed by Theorem [\[thm:dof-one-coherence\]](#thm:dof-one-coherence){reference-type="ref" reference="thm:dof-one-coherence"}.
-
-**(2)** With DOF $> 1$ and no coordination, independent locations can be modified without synchronization (Availability) and without global knowledge of other locations (Partition tolerance). By Theorem [\[thm:dof-gt-one-incoherence\]](#thm:dof-gt-one-incoherence){reference-type="ref" reference="thm:dof-gt-one-incoherence"}, incoherent states are reachable (no Consistency).
-
-**(3)** Consensus protocols (Paxos, Raft) restore Consistency to DOF $> 1$ systems by blocking updates until agreement is reached. During consensus, locations are not available for independent modification. ◻
-:::
-
-::: theorem
-[]{#thm:resolution-flp label="thm:resolution-flp"} Our resolution impossibility (Theorem [\[thm:oracle-arbitrary\]](#thm:oracle-arbitrary){reference-type="ref" reference="thm:oracle-arbitrary"}) is a static analog of FLP:
-
--   **FLP:** In asynchronous systems with failures, no deterministic algorithm can guarantee consensus termination
-
--   **This work:** In incoherent encoding systems, no deterministic procedure can identify the correct value
-
-The common structure: insufficient information makes correct resolution impossible.
-:::
-
-::: proof
-*Proof.* FLP proves consensus impossibility by constructing adversarial message delays that prevent termination. Our proof (Theorem [\[thm:oracle-arbitrary\]](#thm:oracle-arbitrary){reference-type="ref" reference="thm:oracle-arbitrary"}) is simpler: with $k$ equally-present values and no side information distinguishing them, any selection is arbitrary.
-
-The parallel: FLP shows *which value is agreed upon* cannot be determined (no termination); we show *which value is correct* cannot be determined (no ground truth).
-
-The key insight: both results arise from insufficient information. FLP lacks information about process states; we lack information about authoritative sources. ◻
-:::
-
-::: corollary
-[]{#cor:dof1-flp label="cor:dof1-flp"} DOF = 1 systems avoid the FLP dilemma: with one independent source, "consensus" is trivial (the source is authoritative).
-:::
-
-::: proof
-*Proof.* FLP applies to systems with multiple processes that must agree. With DOF = 1, there are no multiple independent sources to agree---consensus is vacuously achieved. The single source determines all values. ◻
-:::
+We give formal encoding-theoretic versions of CAP and FLP in Section [\[sec:cap-flp\]](#sec:cap-flp){reference-type="ref" reference="sec:cap-flp"}. The connection is structural: CAP corresponds to the impossibility of coherence when replicated encodings remain independently updatable, and FLP corresponds to the impossibility of truth-preserving resolution in incoherent states without side information. Consensus protocols (Paxos [@lamport1998paxos], Raft [@ongaro2014raft]) operationalize this by enforcing coordination, which in our model corresponds to derivation (reducing DOF).
 
 ## Computational Reflection and Metaprogramming {#sec:related-meta}
 
-**Metaobject Protocols.** Kiczales et al. [@kiczales1991art] established theoretical foundations for MOPs in *The Art of the Metaobject Protocol*. MOPs allow programs to inspect and modify their own structure at runtime.
+**Metaobject protocols and reflection.** Kiczales et al. [@kiczales1991art] and Smith [@smith1984reflection] provide the classical foundations for systems that can execute code at definition time and introspect their own structure. These mechanisms correspond directly to DEF and INTRO in our realizability theorem, explaining why MOP-equipped languages admit DOF = 1 for structural facts.
 
-Our realizability requirements (causal propagation, provenance observability) explain *why* MOP-equipped systems (CLOS, Smalltalk, Python) can achieve DOF = 1: MOPs provide both capabilities. Systems without MOPs cannot achieve DOF = 1 for structural facts.
-
-**Computational Reflection.** Smith [@smith1984reflection] introduced computational reflection: programs reasoning about themselves. Reflection enables provenance observability (Requirement 2, Section [\[sec:provenance-observability\]](#sec:provenance-observability){reference-type="ref" reference="sec:provenance-observability"}).
-
-**Generative Complexity.** Heering [@heering2015generative; @heering2003software] formalized *generative complexity* as the Kolmogorov complexity of the shortest generator for a program family. DOF = 1 systems achieve minimal generative complexity: the single source is the shortest generator.
-
-Our contribution is the *constructive realization*: specific encoding-system properties (causal propagation, provenance observability) that achieve the theoretical minimum in practice.
+**Generative complexity.** Heering [@heering2015generative; @heering2003software] formalizes minimal generators for program families. DOF = 1 systems realize this minimal-generator viewpoint by construction: the single source is the generator and derived locations are generated instances.
 
 ## Software Engineering Principles {#sec:related-software}
 
-**DRY Principle.** Hunt and Thomas [@hunt1999pragmatic] articulated DRY (Don't Repeat Yourself):
-
-> "Every piece of knowledge must have a single, unambiguous, authoritative representation within a system."
-
-Our contribution: formal definition (DOF = 1), information-theoretic foundation, realizability requirements, and machine-checked proofs. Hunt and Thomas provide guidance; we provide a decision procedure.
-
-**Information Hiding.** Parnas [@parnas1972criteria] established information hiding: modules should hide decisions likely to change. DOF = 1 and information hiding are complementary:
-
--   Information hiding determines *what* to encapsulate
-
--   DOF = 1 determines *how* to avoid duplicating what is exposed
-
-**Complexity Metrics.** McCabe [@mccabe1976complexity] introduced cyclomatic complexity (execution complexity). Our DOF metric measures *modification* complexity, orthogonal to execution complexity.
-
-Stevens et al. [@stevens1974structured] introduced coupling and cohesion. High DOF indicates high coupling (many locations must change together) and low cohesion (related information is scattered).
-
-**Code Duplication.** Fowler [@fowler1999refactoring] identified duplication as a code smell. Roy and Cordy [@roy2007survey] survey clone detection; Juergens et al. [@juergens2009clones] showed clones cause maintenance problems. Our DOF metric formalizes this: DOF $> 1$ is duplication for a fact.
+Classical software-engineering principles such as DRY [@hunt1999pragmatic], information hiding [@parnas1972criteria], and code-duplication analyses [@fowler1999refactoring; @roy2007survey] motivate coherence and single-source design. Our contribution is not another guideline, but a formal encoding model and theorems that explain when such principles are forced by information constraints. These connections are interpretive; the proofs do not rely on SE assumptions.
 
 ## Formal Methods {#sec:related-formal}
 
-**Type Theory.** Pierce [@pierce2002types] formalized type systems with machine-checked proofs. Our work applies similar rigor to encoding theory and realizability requirements.
-
-**Program Semantics.** Winskel [@winskel1993semantics] formalized programming language semantics. Our formalization of DOF = 1 realizability requirements is in the same tradition.
-
-**Verified Software.** CompCert [@leroy2009compcert] demonstrated that production software can be formally verified. Our Lean 4 [@demoura2021lean4] proofs (9,351 lines, 541 theorems, 0 `sorry`) follow this tradition.
+Our Lean 4 [@demoura2021lean4] formalization follows the tradition of mechanized theory (e.g., Pierce [@pierce2002types], Winskel [@winskel1993semantics], CompCert [@leroy2009compcert]), but applies it to an information-theoretic encoding model.
 
 ## Novelty of This Work {#sec:novelty}
 
 To our knowledge, this is the first work to:
 
-1.  **Extend source coding to interactive encoding systems**---systems where encodings can be modified and must remain coherent. This generalizes classical IT (static encoding) to mutable systems.
+1.  **Formalize interactive encoding with modifications**---a model where encodings change over time and coherence is a system property, not a post hoc check.
 
-2.  **Connect multi-version coding to software architecture**---Rashmi et al.'s consistency cost for distributed storage is analogous to our coherence cost for software systems.
+2.  **Prove a coherence capacity theorem**---DOF = 1 is the unique rate guaranteeing coherence (achievability + converse).
 
-3.  **Abstract realizability requirements to IT**---"causal propagation" and "provenance observability" are encoder properties, not PL-specific features. Definition-time hooks and introspection are one instantiation.
+3.  **Give a realizability iff**---causal propagation and provenance observability are necessary and sufficient encoder properties for achieving DOF = 1.
 
-4.  **Establish DOF = 1 as capacity-optimal**---The coherence "capacity" of encoding systems is achieved at rate 1. This is a tight bound: DOF = 0 fails to encode; DOF $> 1$ cannot guarantee coherence.
+4.  **Establish tight rate--complexity bounds**---$O(1)$ for DOF = 1 vs. $\Omega(n)$ for DOF $> 1$, with an unbounded gap.
 
-5.  **Connect to CAP and FLP**---Our resolution impossibility (Theorem [\[thm:oracle-arbitrary\]](#thm:oracle-arbitrary){reference-type="ref" reference="thm:oracle-arbitrary"}) is a static analog of FLP; DOF = 1 sidesteps CAP by eliminating the partition dimension.
+5.  **Provide machine-checked proofs**---All theorems formalized in Lean 4 with 0 `sorry` placeholders.
 
-6.  **Provide machine-checked proofs**---All theorems formalized in Lean 4 with 0 `sorry` placeholders.
+**Information-theoretic contribution:** We extend classical IT to mutable encoding systems with coherence constraints. The coherence capacity theorem and tight rate--complexity bounds provide the achievability/converse structure; the realizability iff identifies the encoder properties required to attain capacity.
 
-**Information-theoretic contribution:** We extend classical IT to mutable encoding systems with coherence constraints. The rate-complexity tradeoff (DOF vs. modification cost) is analogous to rate-distortion; the realizability requirements (causal propagation, provenance observability) characterize when capacity is achievable.
-
-**Practical contribution:** The abstract requirements instantiate across domains: programming languages (hooks + introspection), databases (triggers + system catalogs), distributed systems (consensus + provenance tracking). The theory explains observed convergence toward certain architectural patterns.
+**Interpretive instantiations:** The abstract requirements instantiate across domains (e.g., programming languages and database systems). These instantiations are corollaries of the core theorems and are presented as examples, not as premises of the proofs.
 
 
 # Conclusion {#sec:conclusion}
@@ -2319,29 +2039,23 @@ We have established the first information-theoretic foundations for optimal enco
 
 **5. Realizability Requirements:** For computational systems, we prove that DOF = 1 realizability requires (1) definition-time computation AND (2) introspectable derivation (Theorem [\[thm:ssot-iff\]](#thm:ssot-iff){reference-type="ref" reference="thm:ssot-iff"}). Both are necessary; both together are sufficient. This is an if-and-only-if characterization.
 
-**6. Computational System Evaluation:** We exhaustively evaluate encoding systems against realizability criteria. Among mainstream programming languages, only Python satisfies both requirements (Theorem [\[thm:python-unique\]](#thm:python-unique){reference-type="ref" reference="thm:python-unique"}). CLOS and Smalltalk also satisfy them. Among databases, systems with materialized views and automatic refresh achieve DOF = 1 for aggregate facts.
+**6. Mathematical Necessity:** The uniqueness theorem (Theorem [\[thm:ssot-unique\]](#thm:ssot-unique){reference-type="ref" reference="thm:ssot-unique"}) establishes that DOF=1 is the unique minimal encoding rate: $|\{r : \text{optimal}(r)\}| = 1$. This singleton solution space eliminates design freedom. Given coherence as a requirement, the mathematics forces DOF = 1.
 
-**7. Mathematical Necessity:** The uniqueness theorem (Theorem [\[thm:ssot-unique\]](#thm:ssot-unique){reference-type="ref" reference="thm:ssot-unique"}) establishes that DOF=1 is the unique minimal encoding rate: $|\{r : \text{optimal}(r)\}| = 1$. This singleton solution space eliminates design freedom. Claiming "DOF = 1 is a valid choice among alternatives" while accepting uniqueness instantiates $P \land \neg P$: uniqueness entails $\neg\exists$ alternatives with equal optimality; preference presupposes $\exists$ such alternatives. Given coherence as a requirement, the mathematics forces DOF = 1. This is not a guideline---it is the unique solution to the stated constraints.
-
-**8. Empirical Validation:** Computational instantiation in production software (OpenHCS platform, 45K LoC Python) demonstrates 39--95% DOF reduction across fact categories, validating realizability requirements empirically.
+**Corollary instantiations.** We include a programming-language instantiation and a worked case study as corollaries of the realizability theorem. These illustrate the abstract results without being used in the proofs.
 
 **Implications:**
 
-1.  **For encoding system designers:** If coherence guarantees are required, the system must provide automatic derivation mechanisms (materialized views, definition-time computation, computed columns). Without these, coherence depends on manual discipline, which scales as $\Omega(n)$.
+1.  **For encoding system designers:** If coherence guarantees are required, the system must provide automatic derivation mechanisms; otherwise coherence scales as $\Omega(n)$ with the number of independent encodings.
 
-2.  **For computational system implementers:** Among programming languages, Python (or CLOS/Smalltalk) is necessary for DOF = 1 with structural facts. Other mainstream languages cannot achieve DOF = 1 realizability within the language. Among databases, materialized views achieve DOF = 1 for aggregate facts.
+2.  **For information theorists:** Classical source coding extends to interactive systems with modification constraints. The coherence requirement creates rate-complexity tradeoffs analogous to rate-distortion tradeoffs, with a unique optimal rate.
 
-3.  **For computational system designers:** Definition-time computation and introspection should be considered if coherence guarantees are a design goal. Their absence is a deliberate choice with information-theoretic consequences for encodability.
-
-4.  **For information theorists:** Classical source coding extends to interactive systems with modification constraints. The coherence requirement creates rate-complexity tradeoffs analogous to rate-distortion tradeoffs.
-
-5.  **For formal methods researchers:** Engineering principles can be formalized information-theoretically and machine-checked. This paper demonstrates the methodology: extend classical IT, prove optimality, formalize in proof assistant, evaluate realizations exhaustively.
+3.  **For formal methods researchers:** The results can be formalized in a proof assistant; the Lean proofs show theorems and model definitions are mechanizable.
 
 **Limitations:**
 
 -   Results apply primarily to facts with modification constraints. Streaming data and high-frequency updates have different characteristics.
 
--   The complexity bounds are asymptotic. Small encoding systems (DOF $< 5$) may not benefit significantly from DOF = 1 optimization.
+-   The complexity bounds are asymptotic. For small encoding systems (DOF $< 5$), the asymptotic gap is numerically small.
 
 -   Computational realization examples are primarily from software systems. The theory is general, but database and configuration system case studies are limited to canonical examples.
 
@@ -2359,30 +2073,20 @@ We have established the first information-theoretic foundations for optimal enco
 
 -   Characterize the information-theoretic limits of compile-time vs. runtime coherence mechanisms
 
-**Connection to Leverage Framework:**
+## Artifacts {#sec:data-availability}
 
-DOF = 1 encoding achieves *infinite leverage* in the framework of the companion paper on leverage-driven architecture: $$L(\text{DOF = 1}) = \frac{|\text{Derivations}|}{|\text{Independent Encodings}|} = \frac{n}{1} \to \infty \text{ as } n \to \infty$$
-
-A single independent encoding location derives arbitrarily many dependent locations. This is the theoretical maximum---no encoding architecture can exceed infinite leverage. The leverage framework provides a unified view: this paper (optimal encoding rate) and the companion paper on typing discipline selection are both instances of leverage maximization. The metatheorem---"maximize leverage"---subsumes both results.
-
-## Data Availability {#sec:data-availability}
-
-**OpenHCS Codebase:** The OpenHCS platform (45K LoC Python) is available at <https://github.com/trissim/openhcs> [@openhcs2025]. The codebase demonstrates computational realization of DOF = 1 patterns described in Section [\[sec:empirical\]](#sec:empirical){reference-type="ref" reference="sec:empirical"}.
-
-**PR #44:** The migration from duck typing (`hasattr()`) to ABC contracts is documented in a publicly verifiable pull request [@openhcsPR44]: <https://github.com/trissim/openhcs/pull/44>. Readers can inspect the before/after diff to verify the DOF 47 $\to$ 1 reduction, demonstrating the realizability requirements (definition-time computation via `__init_subclass__`, introspectable derivation via `__subclasses__()`).
-
-**Lean 4 Proofs:** The complete Lean 4 formalization (1,811 lines across 13 files, 0 `sorry` placeholders) [@openhcsLeanProofs] is included as supplementary material. The formalization covers the encoding theory foundations, optimal rate theorems, rate-complexity bounds, and realizability requirements. Reviewers can verify the proofs by running `lake build` in the proof directory.
+The Lean 4 formalization is included as supplementary material [@openhcsLeanProofs]. The OpenHCS case study and associated code references are provided for the worked instantiation (Section [\[sec:empirical\]](#sec:empirical){reference-type="ref" reference="sec:empirical"}).
 
 
 # Preemptive Rebuttals {#sec:rebuttals}
 
 This appendix addresses anticipated objections, organized thematically. Each objection is stated in its strongest form, then refuted.
 
-## Objection: The Model Doesn't Capture Real Semantics
+### Objection: The Model Doesn't Capture Real Semantics
 
 **Objection:** "You've formalized a toy model and proved properties about it. But the model doesn't capture real Python/Rust semantics. The proofs are valid but vacuously true about artificial constructs."
 
-**Response:** The model is validated through *instantiation proofs* that bridge abstract theorems to concrete language semantics. This is the standard methodology for programming language formalization [@pierce2002types].
+**Response:** The model is established through *instantiation proofs* that bridge abstract theorems to concrete language semantics. This is the standard methodology for programming language formalization [@pierce2002types].
 
 #### The Two-Layer Architecture.
 
@@ -2442,7 +2146,7 @@ The model is empirically vulnerable. No counterexample has been produced.
 
 Every formalization eventually requires interpretation to connect symbols to reality. The claim is not "this Lean code IS Python" but "this Lean code models Python's observable behavior with sufficient fidelity that theorems transfer." The instantiation proofs establish this transfer.
 
-## Objection: The DOF = 1 Optimality Claim is Too Restrictive
+### Objection: The DOF = 1 Optimality Claim is Too Restrictive
 
 **Objection:** "Your claim that DOF = 1 is optimal is too restrictive. Real-world encoding systems have acceptable levels of redundancy."
 
@@ -2456,9 +2160,9 @@ Every formalization eventually requires interpretation to connect symbols to rea
    $>$`<!-- -->`{=html}1  Multiple sources can diverge (incoherence reachable)
 :::
 
-DOF = 2 means two independent encoding locations can hold different values for the same fact. The *possibility* of incoherence exists. The definition is information-theoretic: optimal encoding requires DOF = 1. Systems with DOF $>$ 1 may be pragmatically acceptable but do not achieve the optimal encoding rate.
+DOF = 2 means two independent encoding locations can hold different values for the same fact. The *possibility* of incoherence exists. The definition is information-theoretic: optimal encoding requires DOF = 1. Systems with DOF $>$ 1 can be pragmatically acceptable but do not achieve the optimal encoding rate.
 
-## External Tools vs System-Native DOF = 1
+### External Tools vs System-Native DOF = 1
 
 External tools (annotation processors, code generators, build systems, schema migration tools) can approximate DOF = 1 behavior. These differ from system-native DOF = 1 in three dimensions:
 
@@ -2470,7 +2174,7 @@ External tools (annotation processors, code generators, build systems, schema mi
 
 The analysis characterizes DOF = 1 *within system semantics*, where coherence guarantees hold at runtime.
 
-## Objection: The Requirements Are Circular
+### Objection: The Requirements Are Circular
 
 **Objection:** "You define 'structural fact' as 'fixed at definition time,' then prove you need definition-time hooks. The conclusion is embedded in the definition---this is circular."
 
@@ -2492,7 +2196,7 @@ To reject this, you would need to show either:
 
 Neither objection has been sustained.
 
-## Derivation Order
+### Derivation Order
 
 The analysis proceeds from encoding theory to computational system evaluation:
 
@@ -2506,7 +2210,7 @@ The analysis proceeds from encoding theory to computational system evaluation:
 
 Among programming languages, three satisfy the criteria. Two (CLOS, Smalltalk) are not mainstream. This validates that the requirements characterize a genuine computational capability class. The requirements are derived from encoding theory, independent of any particular system's feature set.
 
-## Empirical Validation
+### Concrete Instantiation
 
 The case studies demonstrate patterns, with publicly verifiable instances:
 
@@ -2518,7 +2222,7 @@ The case studies demonstrate patterns, with publicly verifiable instances:
 
 The theoretical contribution is the formal proof. The examples demonstrate applicability.
 
-## Asymptotic Analysis
+### Asymptotic Analysis
 
 The complexity bounds are derived from the encoding structure:
 
@@ -2530,7 +2234,7 @@ The complexity bounds are derived from the encoding structure:
 
 PR #44 demonstrates the mechanism at $n = 47$: 47 `hasattr()` checks (DOF = 47) → 1 ABC definition (DOF = 1). The 47$\times$ reduction is observable via GitHub diff. The gap widens as encoding systems scale.
 
-## Cost-Benefit Analysis
+### Cost-Benefit Analysis
 
 DOF = 1 involves trade-offs:
 
@@ -2540,7 +2244,7 @@ DOF = 1 involves trade-offs:
 
 The analysis characterizes what DOF = 1 requires. The decision to optimize for DOF = 1 depends on encoding system scale, change frequency, and coherence requirements.
 
-## Machine-Checked Formalization
+### Machine-Checked Formalization
 
 The proofs formalize definitions precisely. Machine-checked proofs provide:
 
@@ -2552,7 +2256,7 @@ The proofs formalize definitions precisely. Machine-checked proofs provide:
 
 The contribution is formalization itself: converting informal principles into machine-verifiable theorems. Simple proofs from precise definitions are the goal.
 
-## Build Tool Analysis
+### Build Tool Analysis
 
 External build tools shift the DOF problem but do not eliminate it:
 
@@ -2568,7 +2272,7 @@ External tools reduce DOF from $n$ to $k$ where $k$ is the number of tool config
 
 Cross-system encoding (e.g., protobuf generating code for multiple languages) requires external tools. The analysis characterizes DOF = 1 *within system boundaries*.
 
-## Objection: Inconsistency Is Only in Comments
+### Objection: Inconsistency Is Only in Comments
 
 **Objection:** "The proofs don't formalize 'inconsistency'---it only appears in comments. The heavy lifting is done by the comments, not by the formal system."
 
@@ -2596,7 +2300,7 @@ The file proves:
 
 This addresses the critique directly: inconsistency is now a formal property that Lean knows about, not a comment. The interpretation "this models real configuration systems" still requires mapping to reality, but every formalization eventually bottoms out in interpretation. The contribution is making assumptions *explicit and attackable*, not eliminating interpretation entirely.
 
-## Objection: What About the Type's Name?
+### Objection: What About the Type's Name?
 
 **Objection:** "Your two-axis model (B, S) ignores the type's name. Isn't N (the name) a third independent axis?"
 
@@ -2618,7 +2322,7 @@ The operational test: given two classes with identical `__bases__` (B) and ident
 
 This is why the model is (B, S) and not (B, S, N). N is a fixed label assigned at definition, not an independent axis that can vary.
 
-## Objection: Model Doesn't Mirror Compiler Internals
+### Objection: Model Doesn't Mirror Compiler Internals
 
 **Objection:** "Your Rust model (RuntimeItem, erasure) doesn't mirror rustc's actual HIR→MIR phases. You haven't modeled proc-macro hygiene, `#[link_section]` retention, or the actual expander traces."
 
@@ -2632,7 +2336,7 @@ The model's `RuntimeItem` having no source field is *observationally accurate*: 
 
 If the model is wrong, show the Rust code that falsifies it. The burden is on the critic to produce the counterexample.
 
-## Objection: Rust Proc Macros + Static Registries Achieve DOF = 1
+### Objection: Rust Proc Macros + Static Registries Achieve DOF = 1
 
 **Objection:** "Rust can achieve DOF = 1 using proc macros and static registries. Example:
 
@@ -2670,7 +2374,7 @@ In Python, the hook is *unforgeable*. The language semantics guarantee that crea
 
 The objection confuses "can create a registry" with "can guarantee all items are in the registry." Rust enables the former; Python enforces the latter.
 
-## Objection: You Just Need Discipline
+### Objection: You Just Need Discipline
 
 **Objection:** "Real teams maintain consistency through code review, documentation, and discipline. You don't need language features."
 
@@ -2688,13 +2392,13 @@ The question is whether the oracle is:
 
 Language-level SSOT provides an internal oracle. Discipline provides an external one. Both satisfy consistency when they work. The difference is failure mode: language enforcement cannot be forgotten; human discipline can.
 
-## Objection: The Proofs Are Trivial
+### Objection: The Proofs Are Trivial
 
 **Objection:** "Most of your proofs are just `rfl` (reflexivity). That means they're trivial tautologies, not real theorems."
 
 **Response:** When you model correctly, theorems become definitional. This is a feature, not a bug.
 
-Consider: "The sum of two even numbers is even." In a well-designed formalization, this might be `rfl`---not because it's trivial, but because the definition of "even" was chosen to make the property structural.
+Consider: "The sum of two even numbers is even." In a well-designed formalization, this can be `rfl`---not because it's trivial, but because the definition of "even" was chosen to make the property structural.
 
 That said, not all proofs are `rfl`. The `rust_lacks_introspection` theorem is 40 lines of actual reasoning:
 
@@ -2708,7 +2412,7 @@ That said, not all proofs are `rfl`. The `rust_lacks_introspection` theorem is 4
 
 The proof structure (assumption → lemma application → contradiction) is genuine mathematical reasoning, not tautology. The `rfl` proofs establish the scaffolding; the substantive proofs build on that scaffolding.
 
-## Objection: Real Systems Don't Need Formal DOF Guarantees
+### Objection: Real Systems Don't Need Formal DOF Guarantees
 
 **Objection:** "Nobody actually needs Lean-enforced DOF guarantees. Conventions and manual synchronization work fine in practice."
 
@@ -2747,9 +2451,9 @@ This appendix presents the actual Lean 4 source code from the repository. Every 
 
 **Soundness argument:** The formalization is sound if:
 
--   The abstract predicates correspond to actual encoding system features (verified by the evaluation in Section [\[sec:evaluation\]](#sec:evaluation){reference-type="ref" reference="sec:evaluation"})
+-   The abstract predicates correspond to actual encoding system features (instantiated by the corollary in Section [\[sec:evaluation\]](#sec:evaluation){reference-type="ref" reference="sec:evaluation"})
 
--   The derivation relation correctly captures automatic propagation (verified by concrete examples in Section [\[sec:empirical\]](#sec:empirical){reference-type="ref" reference="sec:empirical"})
+-   The derivation relation correctly captures automatic propagation (illustrated by concrete examples in Section [\[sec:empirical\]](#sec:empirical){reference-type="ref" reference="sec:empirical"})
 
 **What we do NOT model:** Performance characteristics, security properties, concurrency semantics, or any property orthogonal to encoding rate optimality. The model is intentionally narrow: it captures exactly what is needed to prove DOF = 1 realizability requirements and optimality theorems, and nothing more.
 

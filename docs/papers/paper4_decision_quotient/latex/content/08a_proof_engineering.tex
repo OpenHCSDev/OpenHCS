@@ -6,7 +6,7 @@ This section discusses lessons learned from formalizing complexity-theoretic red
 
 \paragraph{Bundled reductions.} Packaging the reduction function, correctness proof, and polynomial bound into a single structure (\texttt{KarpReduction}) was essential. Early attempts using separate lemmas led to proof state explosion when composing reductions.
 
-\paragraph{Definitional equality for simple cases.} Where possible, we defined concepts so that simple cases reduce definitionally:
+\paragraph{Definitional equality for simple cases.} We defined concepts so that simple cases reduce definitionally whenever the definitions admit it:
 \begin{verbatim}
 -- Sufficiency of all coordinates is definitionally true
 example (D : DecisionProblemWithCoords n) :
@@ -68,7 +68,7 @@ def InW (t : ℕ) (P : DecisionProblem α) : Prop :=
 
 \subsection{Automation Opportunities}
 
-Several proof patterns are repetitive and could be automated:
+Automation targets for repetitive proof patterns:
 
 \begin{enumerate}
 \item \textbf{Reduction templates:} Given a mapping and correctness statement, generate the \texttt{KarpReduction} structure.
@@ -80,7 +80,7 @@ Several proof patterns are repetitive and could be automated:
 \item \textbf{Counterexample search:} For coNP-hardness, search for counterexamples to proposed reductions.
 \end{enumerate}
 
-We implemented (1) as a macro; (2)--(4) remain manual. A \texttt{complexity} tactic analogous to \texttt{continuity} or \texttt{measurability} would significantly accelerate future work.
+We implemented (1) as a macro; (2)--(4) remain manual. A \texttt{complexity} tactic analogous to \texttt{continuity} or \texttt{measurability} is the direct extension for automating routine reduction steps.
 
 \subsection{Recommendations for Future Work}
 
@@ -90,7 +90,7 @@ We implemented (1) as a macro; (2)--(4) remain manual. A \texttt{complexity} tac
 
 \paragraph{Use \texttt{\#print axioms} continuously.} We ran axiom checks after each major lemma. This caught unintended classical dependencies in constructive components.
 
-\paragraph{Separate ``math'' from ``encoding.''} The mathematical content (``sufficiency is the same as tautology under this encoding'') should be separate from encoding details (``how to represent formulas as coordinates''). This separation aids both clarity and reuse.
+\paragraph{Separate ``math'' from ``encoding.''} Keep the mathematical content (``sufficiency is the same as tautology under this encoding'') separate from encoding details (``how to represent formulas as coordinates''). This separation aids both clarity and reuse.
 
 \subsection{Lines of Code by Component}
 
@@ -115,4 +115,3 @@ Instances \& summary & 250 \\
 \end{center}
 
 The hardness proofs constitute 26\% of the codebase, with tractability results at 8\%. Core infrastructure (definitions, reductions, computation) accounts for 23\%, suggesting good reuse potential for other complexity formalizations.
-

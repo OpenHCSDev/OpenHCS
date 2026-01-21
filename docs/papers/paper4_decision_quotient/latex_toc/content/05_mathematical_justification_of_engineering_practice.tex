@@ -1,8 +1,8 @@
-\section{Why Over-Modeling Is Optimal}\label{sec:engineering-justification}
+\section{Implications for Practice: Why Over-Modeling Is Optimal}\label{sec:engineering-justification}
 
-The complexity results of Sections~\ref{sec:hardness} and~\ref{sec:dichotomy} transform engineering practice from art to mathematics. This section proves that observed behaviors---configuration over-specification, absence of automated minimization tools, heuristic model selection---are not failures of discipline but \emph{provably optimal responses} to computational constraints.
+This section states corollaries for engineering practice. Within the formal model, the complexity results of Sections~\ref{sec:hardness} and~\ref{sec:dichotomy} transform engineering practice from art to mathematics. The observed behaviors---configuration over-specification, absence of automated minimization tools, heuristic model selection---are not failures of discipline but \emph{provably optimal responses} to computational constraints under the stated cost model.
 
-The conventional critique of over-modeling (``you should identify only the essential variables'') is computationally naive. It asks engineers to solve \coNP-complete problems. The rational response is to include everything and pay linear maintenance costs, rather than attempt exponential minimization costs.
+The conventional critique of over-modeling (``identify only the essential variables'') is computationally unrealistic in the general case. It asks engineers to solve \coNP-complete problems. A rational response is to include everything and pay linear maintenance costs, rather than attempt exponential minimization costs.
 
 \subsection{Configuration Simplification is SUFFICIENCY-CHECK}
 
@@ -40,7 +40,7 @@ This reduction is \emph{parsimonious}: every instance of configuration simplific
 
 \subsection{Computational Rationality of Over-Modeling}
 
-We now prove that over-specification is the optimal engineering strategy given complexity constraints.
+We now prove that over-specification is an optimal engineering strategy given the stated cost model and complexity constraints.
 
 \begin{theorem}[Rational Over-Modeling]
 \label{thm:rational-overmodel}
@@ -58,12 +58,12 @@ When SUFFICIENCY-CHECK is \coNP-complete (Theorem~\ref{thm:sufficiency-conp}):
 \item For sufficiently large $n$, exponential cost dominates linear cost
 \end{enumerate}
 
-Therefore, when $n$ exceeds a threshold, over-modeling minimizes total expected cost:
+Therefore, there exists $n_0$ such that for all $n > n_0$, over-modeling minimizes total expected cost:
 \[
 C_{\text{over}}(k) < C_{\text{find}}(n) + C_{\text{under}}
 \]
 
-Over-modeling is the economically optimal strategy under computational constraints.
+Over-modeling is economically optimal under the stated model and complexity constraints.
 \end{theorem}
 
 \begin{proof}
@@ -95,12 +95,12 @@ Since $2^n$ grows faster than any polynomial in $k$ or $n$, there exists $n_0$ s
 C_{\text{over}}(k) \ll C_{\text{find}}(n)
 \]
 
-Adding underspecification risk $C_{\text{under}}$ (production failures from missing parameters), which can be arbitrarily large, makes over-specification strictly dominant.
+Adding underspecification risk $C_{\text{under}}$ (production failures from missing parameters), which is unbounded in the model, makes over-specification strictly dominant.
 \end{proof}
 
 \begin{corollary}[Impossibility of Automated Configuration Minimization]
 \label{cor:no-auto-minimize}
-There exists no polynomial-time algorithm that:
+Assuming $\Pclass \neq \coNP$, there exists no polynomial-time algorithm that:
 \begin{enumerate}
 \item Takes an arbitrary configuration file with $n$ parameters
 \item Identifies the minimal sufficient parameter subset
@@ -113,7 +113,7 @@ Such an algorithm would solve MINIMUM-SUFFICIENT-SET in polynomial time, contrad
 \end{proof}
 
 \begin{remark}
-Corollary~\ref{cor:no-auto-minimize} explains the observed absence of ``config cleanup'' tools in software engineering practice. Engineers who include extra parameters are not exhibiting poor discipline---they are adapting optimally to computational impossibility. The problem is not lack of tooling effort; it is mathematical intractability.
+Corollary~\ref{cor:no-auto-minimize} explains the observed absence of ``config cleanup'' tools in software engineering practice. Engineers who include extra parameters are not exhibiting poor discipline---they are adapting to computational constraints. The problem is not lack of tooling effort; it is mathematical intractability.
 \end{remark}
 
 \subsection{Connection to Observed Practice}
@@ -126,6 +126,4 @@ These theorems provide mathematical grounding for three widespread engineering b
 
 \textbf{3. ``Include everything'' is a legitimate strategy.} When determining relevance costs $\Omega(2^n)$, including all $n$ parameters costs $O(n)$. For large $n$, this is the rational choice.
 
-These are not workarounds or approximations. They are \emph{optimal responses} to computational constraints. The complexity results transform engineering practice from art to mathematics: over-modeling is not a failure---it is the provably correct strategy.
-
-
+These are not merely workarounds or approximations. They are optimal responses under the stated model. The complexity results provide a mathematical lens: over-modeling is not a failure---it is the rational strategy under the model.

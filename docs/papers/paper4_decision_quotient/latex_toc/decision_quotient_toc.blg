@@ -3,44 +3,46 @@ Capacity: max_strings=200000, hash_size=200000, hash_prime=170003
 The top-level auxiliary file: decision_quotient_toc.aux
 The style file: plain.bst
 Database file #1: references.bib
-You've used 20 entries,
+Warning--I didn't find a database entry for "amaldi1998complexity"
+You've used 18 entries,
             2118 wiz_defined-function locations,
-            615 strings with 6638 characters,
-and the built_in function-call counts, 6060 in all, are:
-= -- 613
-> -- 199
+            607 strings with 6438 characters,
+and the built_in function-call counts, 5594 in all, are:
+= -- 572
+> -- 179
 < -- 5
-+ -- 86
-- -- 60
-* -- 349
-:= -- 979
-add.period$ -- 63
-call.type$ -- 20
-change.case$ -- 83
++ -- 78
+- -- 54
+* -- 329
+:= -- 897
+add.period$ -- 57
+call.type$ -- 18
+change.case$ -- 76
 chr.to.int$ -- 0
-cite$ -- 20
-duplicate$ -- 270
-empty$ -- 543
-format.name$ -- 60
-if$ -- 1309
+cite$ -- 18
+duplicate$ -- 246
+empty$ -- 499
+format.name$ -- 54
+if$ -- 1210
 int.to.chr$ -- 0
-int.to.str$ -- 20
-missing$ -- 26
-newline$ -- 103
-num.names$ -- 40
-pop$ -- 118
+int.to.str$ -- 18
+missing$ -- 22
+newline$ -- 93
+num.names$ -- 36
+pop$ -- 101
 preamble$ -- 1
-purify$ -- 70
+purify$ -- 63
 quote$ -- 0
-skip$ -- 189
+skip$ -- 176
 stack$ -- 0
-substring$ -- 397
-swap$ -- 61
+substring$ -- 387
+swap$ -- 59
 text.length$ -- 5
 text.prefix$ -- 0
 top$ -- 0
-type$ -- 66
+type$ -- 62
 warning$ -- 0
-while$ -- 66
-width$ -- 22
-write$ -- 217
+while$ -- 62
+width$ -- 20
+write$ -- 197
+(There was 1 warning)

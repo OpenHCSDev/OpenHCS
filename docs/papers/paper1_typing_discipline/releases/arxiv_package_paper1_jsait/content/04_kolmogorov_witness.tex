@@ -4,11 +4,11 @@ Recall from Section 2 that the witness cost $W(P)$ is the minimum number of prim
 
 \begin{theorem}[Nominal-Tag Observers Achieve Minimum Witness Cost]
 Nominal-tag observers achieve the minimum witness cost for type identity:
-$$W(\text{type identity}) = O(1)$$
+$$W_{\text{eq}} = O(1)$$
 
 Specifically, the witness is a single tag read: compare $\text{tag}(v_1) = \text{tag}(v_2)$.
 
-Interface-only observers require $W(\text{type identity}) = \Omega(n)$ where $n$ is the number of interfaces.
+Interface-only observers require $W_{\text{eq}} = \Omega(n)$ where $n$ is the number of interfaces.
 \end{theorem}
 
 \begin{proof}

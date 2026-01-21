@@ -54,12 +54,6 @@ R.~L. Rivest and A.~Shamir, ``How to reuse a ``write-once'' memory,'' in
   foundational paper on write-once memory codes; capacity for $t$ writes is
   $\log_2(t+1)$ bits per cell.
 
-\bibitem{brewer2000cap}
-E.~A. Brewer, ``Towards robust distributed systems,'' in \emph{Proceedings of
-  the 19th Annual ACM Symposium on Principles of Distributed Computing}.\hskip
-  1em plus 0.5em minus 0.4em\relax ACM, 2000, keynote introducing CAP
-  conjecture: Consistency, Availability, Partition tolerance---pick two.
-
 \bibitem{korner1973graphs}
 J.~K{\"o}rner, ``Coding of an information source having ambiguous alphabet and
   the entropy of graphs,'' \emph{Transactions of the 6th Prague Conference on
@@ -76,6 +70,12 @@ P.~D. Gr{\"u}nwald, \emph{The Minimum Description Length Principle}.\hskip 1em
   plus 0.5em minus 0.4em\relax MIT Press, 2007, comprehensive treatment of MDL;
   DOF=1 (SSOT) can be framed as the MDL-optimal representation for redundant
   facts.
+
+\bibitem{brewer2000cap}
+E.~A. Brewer, ``Towards robust distributed systems,'' in \emph{Proceedings of
+  the 19th Annual ACM Symposium on Principles of Distributed Computing}.\hskip
+  1em plus 0.5em minus 0.4em\relax ACM, 2000, keynote introducing CAP
+  conjecture: Consistency, Availability, Partition tolerance---pick two.
 
 \bibitem{hunt2002vcdiff}
 J.~J. Hunt, K.-P. Vo, and W.~F. Tichy, ``Delta algorithms: An empirical
@@ -131,6 +131,11 @@ J.~Heering, ``Generative software complexity,'' \emph{Science of Computer
   measure software structure; the shortest generator for a set of programs
   indicates maximal complexity reduction.
 
+\bibitem{gilbert2002cap}
+S.~Gilbert and N.~Lynch, ``Brewer's conjecture and the feasibility of
+  consistent, available, partition-tolerant web services,'' \emph{ACM SIGACT
+  News}, vol.~33, no.~2, pp. 51--59, 2002, formal proof of CAP theorem.
+
 \bibitem{wolf1984wom}
 J.~K. Wolf \emph{et~al.}, ``Coding for a write-once memory,'' \emph{AT\&T Bell
   Laboratories Technical Journal}, vol.~63, no.~6, pp. 1089--1112, 1984,
@@ -139,24 +144,6 @@ J.~K. Wolf \emph{et~al.}, ``Coding for a write-once memory,'' \emph{AT\&T Bell
 \bibitem{tiobe2024}
 {TIOBE Software BV}, ``{TIOBE} index for programming languages,'' TIOBE
   Programming Community Index, 2024, online: tiobe.com/tiobe-index/.
-
-\bibitem{gosling2021java}
-J.~Gosling, B.~Joy, G.~Steele, G.~Bracha, A.~Buckley, D.~Smith, and G.~Bierman,
-  \emph{The {Java} Language Specification, {Java SE} 17 Edition}.\hskip 1em
-  plus 0.5em minus 0.4em\relax Oracle America, Inc., 2021, online:
-  docs.oracle.com/javase/specs/.
-
-\bibitem{stroustrup2013cpp}
-B.~Stroustrup, \emph{The {C++} Programming Language}, 4th~ed.\hskip 1em plus
-  0.5em minus 0.4em\relax Addison-Wesley Professional, 2013.
-
-\bibitem{gospec2024}
-{The Go Authors}, ``The {Go} programming language specification,'' Language
-  specification, 2024, online: go.dev/ref/spec.
-
-\bibitem{rustref2024}
-{The Rust Team}, ``The {Rust} reference,'' Language reference, 2024, online:
-  doc.rust-lang.org/reference/.
 
 \bibitem{flanagan2020ruby}
 D.~Flanagan and Y.~Matsumoto, \emph{The {Ruby} Programming Language}.\hskip 1em
@@ -183,11 +170,6 @@ N.~Ma and P.~Ishwar, ``Some results on distributed source coding for
 Y.~Xiang, ``Interactive schemes in information theory and statistics,'' Ph.D.
   dissertation, University of California, Berkeley, 2013, interactive
   information theory; feedback channels, distributed inference.
-
-\bibitem{gilbert2002cap}
-S.~Gilbert and N.~Lynch, ``Brewer's conjecture and the feasibility of
-  consistent, available, partition-tolerant web services,'' \emph{ACM SIGACT
-  News}, vol.~33, no.~2, pp. 51--59, 2002, formal proof of CAP theorem.
 
 \bibitem{lamport1998paxos}
 L.~Lamport, ``The part-time parliament,'' \emph{ACM Transactions on Computer
@@ -221,14 +203,6 @@ D.~L. Parnas, ``On the criteria to be used in decomposing systems into
   modules,'' \emph{Communications of the ACM}, vol.~15, no.~12, pp. 1053--1058,
   1972.
 
-\bibitem{mccabe1976complexity}
-T.~J. McCabe, ``A complexity measure,'' \emph{IEEE Transactions on software
-  Engineering}, vol. SE-2, no.~4, pp. 308--320, 1976.
-
-\bibitem{stevens1974structured}
-W.~P. Stevens, G.~J. Myers, and L.~L. Constantine, ``Structured design,''
-  \emph{IBM systems journal}, vol.~13, no.~2, pp. 115--139, 1974.
-
 \bibitem{fowler1999refactoring}
 M.~Fowler, \emph{Refactoring: improving the design of existing code}.\hskip 1em
   plus 0.5em minus 0.4em\relax Addison-Wesley Professional, 1999.
@@ -237,12 +211,6 @@ M.~Fowler, \emph{Refactoring: improving the design of existing code}.\hskip 1em
 C.~K. Roy and J.~R. Cordy, ``A survey on software clone detection research,''
   \emph{School of Computing TR 2007-541, Queen's University}, vol. 115, pp.
   64--68, 2007.
-
-\bibitem{juergens2009clones}
-E.~Juergens, F.~Deissenboeck, B.~Hummel, and S.~Wagner, ``Do code clones
-  matter?'' in \emph{Proceedings of the 31st International Conference on
-  Software Engineering}.\hskip 1em plus 0.5em minus 0.4em\relax IEEE, 2009, pp.
-  485--495.
 
 \bibitem{pierce2002types}
 B.~C. Pierce, \emph{Types and programming languages}.\hskip 1em plus 0.5em

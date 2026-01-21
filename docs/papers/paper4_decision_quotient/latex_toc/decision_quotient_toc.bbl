@@ -55,11 +55,6 @@ Richard~M. Karp.
 \newblock In {\em Complexity of Computer Computations}, pages 85--103.
   Springer, 1972.
 
-\bibitem{koller2009probabilistic}
-Daphne Koller and Nir Friedman.
-\newblock {\em Probabilistic Graphical Models: Principles and Techniques}.
-\newblock MIT Press, 2009.
-
 \bibitem{nipkow2014concrete}
 Tobias Nipkow and Gerwin Klein.
 \newblock {\em Concrete Semantics with {Isabelle/HOL}}.
@@ -69,11 +64,6 @@ Tobias Nipkow and Gerwin Klein.
 Christos~H. Papadimitriou.
 \newblock {\em Computational Complexity}.
 \newblock Addison-Wesley, 1994.
-
-\bibitem{pearl1988probabilistic}
-Judea Pearl.
-\newblock {\em Probabilistic Reasoning in Intelligent Systems}.
-\newblock Morgan Kaufmann, 1988.
 
 \bibitem{raiffa1961applied}
 Howard Raiffa and Robert Schlaifer.

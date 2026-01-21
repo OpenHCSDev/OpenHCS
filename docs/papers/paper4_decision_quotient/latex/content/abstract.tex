@@ -1,18 +1,19 @@
-We present a Lean 4 formalization of polynomial-time reductions and computational complexity proofs, demonstrated through a comprehensive analysis of \emph{decision-relevant information}---the problem of identifying which variables matter for optimal decision-making.
+We present a Lean 4 formalization of polynomial-time reductions and computational complexity proofs, demonstrated through a comprehensive analysis of \emph{decision-relevant information}: the problem of identifying which variables matter for optimal decision-making.
 
 \textbf{Formalization contributions.} We develop a reusable framework for expressing Karp reductions, oracle complexity classes, and parameterized hardness in Lean 4. The framework integrates with Mathlib's computability library and provides: (1) bundled reduction types with polynomial-time witnesses; (2) tactics for composing reductions; (3) templates for NP/coNP/\SigmaP{2} membership and hardness proofs.
 
-\textbf{Verified complexity results.} As a case study, we formalize the complexity of the SUFFICIENT-SET problem---determining which coordinates of a decision problem suffice for optimal action. We machine-verify:
+\textbf{Verified complexity results.} As a case study, we formalize the complexity of the SUFFICIENCY-CHECK problem---determining which coordinates of a decision problem suffice for optimal action. We machine-verify:
 \begin{itemize}
 \item \textbf{coNP-completeness} of sufficiency checking via reduction from TAUTOLOGY \cite{cook1971complexity}
 \item \textbf{Inapproximability} within $(1-\varepsilon)\ln n$ via L-reduction from SET-COVER \cite{feige1998threshold}
 \item \textbf{$2^{\Omega(n)}$ lower bounds} under ETH via circuit-based arguments \cite{impagliazzo2001complexity}
 \item \textbf{W[2]-hardness} for the parameterized variant with kernelization lower bounds
-\item \textbf{A complexity dichotomy}: polynomial for $O(\log n)$-size sufficient sets, exponential for $\Omega(n)$-size
+\item \textbf{A complexity dichotomy}: polynomial time in the explicit-state model for $O(\log |S|)$-size sufficient sets, exponential under ETH in the succinct model for $\Omega(n)$-size
 \end{itemize}
+All complexity claims use the input encodings fixed in Section~\ref{sec:encoding}.
 
 The formalization comprises $\sim$5,600 lines of Lean 4 with 230+ machine-verified theorems across 36 files. All reductions include explicit polynomial bounds. We identify proof engineering patterns for complexity theory in dependent type systems and discuss challenges of formalizing computational hardness constructively.
 
-\textbf{Practical implications.} The case study formalizes a fundamental principle: \emph{determining what you need to know is harder than knowing everything}. This explains why over-modeling is rational and why ``simpler'' tools often create more work (the Simplicity Tax Theorem, also machine-verified).
+\textbf{Practical corollaries.} The primary contribution is theoretical: a formalized reduction framework and a complete characterization of the core decision-relevant problems in the formal model (coNP/\(\Sigma_2^P\) completeness and tractable cases under explicit encoding assumptions). The case study formalizes the principle \emph{determining what you need to know is harder than knowing everything}. This implies that over-modeling is rational under the model and that ``simpler'' incomplete tools create more work (the Simplicity Tax Theorem, also machine-verified).
 
 \textbf{Keywords:} Lean 4, formal verification, polynomial-time reductions, coNP-completeness, computational complexity, Mathlib, interactive theorem proving

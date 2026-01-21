@@ -5,33 +5,35 @@ The complete Lean 4 formalization is available at:
 \url{https://doi.org/10.5281/zenodo.18140966}
 \end{center}
 
-\subsection{On the Nature of Foundational Proofs}\label{foundational-proofs-nature}
+The formalization is not a transcription; it exposes a reusable reduction library with compositional polynomial bounds, enabling later mechanized hardness proofs to reuse these components directly.
 
-The Lean proofs are straightforward applications of definitions and standard complexity-theoretic constructions. Foundational work produces insight through formalization.
+\subsection{On the Nature of Definitional Proofs}\label{definitional-proofs-nature}
+
+The Lean proofs are straightforward applications of definitions and standard complexity-theoretic constructions. Formalization produces insight through precision.
 
 \textbf{Definitional vs. derivational proofs.} The core theorems establish definitional properties and reduction constructions. For example, the polynomial reduction composition theorem (Theorem~\ref{thm:poly-compose}) proves that composing two polynomial-time reductions yields a polynomial-time reduction. The proof follows from the definition of polynomial time: composing two polynomials yields a polynomial.
 
-\textbf{Precedent in complexity theory.} This pattern appears throughout foundational complexity theory:
+\textbf{Precedent in complexity theory.} This pattern occurs throughout classical complexity theory:
 
 \begin{itemize}
 \item \textbf{Cook-Levin Theorem (1971):} SAT is NP-complete. The proof constructs a reduction from an arbitrary NP problem to SAT. The construction itself is straightforward (encode Turing machine computation as boolean formula), but the \emph{insight} is recognizing that SAT captures all of NP.
-\item \textbf{Ladner's Theorem (1975):} If P $\neq$ NP, then NP-intermediate problems exist. The proof is a diagonal construction---conceptually simple once the right framework is identified.
+\item \textbf{Ladner's Theorem (1975):} If P $\neq$ NP, then NP-intermediate problems exist. The proof is a diagonal construction; conceptually simple once the right framework is identified.
 \item \textbf{Toda's Theorem (1991):} The polynomial hierarchy is contained in P$^\#$P. The proof uses counting arguments that are elegant but not technically complex. The profundity is in the \emph{connection} between counting and the hierarchy.
 \end{itemize}
 
-\textbf{Why simplicity indicates strength.} A definitional theorem derived from precise formalization is \emph{stronger} than an informal argument. When we prove that sufficiency checking is coNP-complete (Theorem~\ref{thm:sufficiency-conp}), we are not saying ``we tried many algorithms and they all failed.'' We are saying something universal: \emph{any} algorithm solving sufficiency checking can solve TAUTOLOGY, and vice versa. The proof is a reduction construction that follows from the problem definitions.
+\textbf{Why simplicity indicates strength.} A definitional theorem derived from precise formalization is \emph{stronger} than an informal argument. When we prove that sufficiency checking is coNP-complete (Theorem~\ref{thm:sufficiency-conp}), we are not saying ``we tried many algorithms and they all failed.'' We are saying something general: \emph{any} algorithm solving sufficiency checking solves TAUTOLOGY, and vice versa. The proof is a reduction construction that follows from the problem definitions.
 
 \textbf{Where the insight lies.} The semantic contribution of our formalization is:
 
 \begin{enumerate}
 \item \textbf{Precision forcing.} Formalizing ``coordinate sufficiency'' in Lean requires stating exactly what it means for a coordinate subset to contain all decision-relevant information. This precision eliminates ambiguity about edge cases (what if projections differ only on irrelevant coordinates?).
 
-\item \textbf{Reduction correctness.} The TAUTOLOGY reduction (Section~\ref{sec:hardness}) is machine-checked to preserve the decision structure. Informal reductions can have subtle bugs; Lean verification guarantees the mapping is correct.
+\item \textbf{Reduction correctness.} The TAUTOLOGY reduction (Section~\ref{sec:hardness}) is machine-checked to preserve the decision structure. Informal reductions are error-prone; Lean verification guarantees the mapping is correct.
 
-\item \textbf{Complexity dichotomy.} Theorem~\ref{thm:dichotomy} proves that problem instances are either tractable (P) or intractable (coNP-complete), with no intermediate cases under standard assumptions. This emerges from the formalization of constraint structure, not from case enumeration.
+\item \textbf{Complexity dichotomy.} Theorem~\ref{thm:dichotomy} separates logarithmic and linear regimes: polynomial behavior when the minimal sufficient set has size $O(\log |S|)$, and exponential lower bounds under ETH when it has size $\Omega(n)$. Intermediate regimes are not ruled out by the lower-bound statement.
 \end{enumerate}
 
-\textbf{What machine-checking guarantees.} The Lean compiler verifies that every proof step is valid, every definition is consistent, and no axioms are added beyond Lean's foundations (extended with Mathlib for basic combinatorics and complexity definitions). Zero \texttt{sorry} placeholders means zero unproven claims. The 3,400+ lines establish a verified chain from basic definitions (decision problems, coordinate spaces, polynomial reductions) to the final theorems (hardness results, dichotomy, tractable cases). Reviewers need not trust our informal explanations---they can run \texttt{lake build} and verify the proofs themselves.
+\textbf{What machine-checking guarantees.} The Lean compiler verifies that every proof step is valid, every definition is consistent, and no axioms are added beyond Lean's foundations (extended with Mathlib for basic combinatorics and complexity definitions). Zero \texttt{sorry} placeholders means zero unproven claims. The 3,400+ lines establish a verified chain from basic definitions (decision problems, coordinate spaces, polynomial reductions) to the final theorems (hardness results, dichotomy, tractable cases). Reviewers need not trust our informal explanations; they run \texttt{lake build} and verify the proofs themselves.
 
 \textbf{Comparison to informal complexity arguments.} Prior work on model selection complexity (Chickering et al.~\cite{chickering2004large}, Teyssier \& Koller~\cite{teyssier2012ordering}) presents compelling informal arguments but lacks machine-checked proofs. Our contribution is not new \emph{wisdom}---the insight that model selection is hard is old. Our contribution is \emph{formalization}: making ``coordinate sufficiency'' precise enough to mechanize, constructing verified reductions, and proving the complexity results hold for the formalized definitions.
 

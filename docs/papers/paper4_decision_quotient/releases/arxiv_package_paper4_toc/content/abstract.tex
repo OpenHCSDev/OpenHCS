@@ -1,13 +1,15 @@
-We completely characterize the computational complexity of coordinate sufficiency in decision problems. Given action set $A$, state space $S = X_1 \times \cdots \times X_n$, and utility $u: A \times S \to \mathbb{R}$, a coordinate set $I$ is \emph{sufficient} if $s_I = s'_I \implies \Opt(s) = \Opt(s')$.
+We characterize the computational complexity of coordinate sufficiency in decision problems within the formal model. Given action set $A$, state space $S = X_1 \times \cdots \times X_n$, and utility $u: A \times S \to \mathbb{R}$, a coordinate set $I$ is \emph{sufficient} if $s_I = s'_I \implies \Opt(s) = \Opt(s')$.
 
-\textbf{The complete landscape:}
+\textbf{The landscape in the formal model:}
 \begin{itemize}
-\item \textbf{General case:} Sufficiency-Check is \coNP-complete; Anchor-Sufficiency is $\SigmaP{2}$-complete.
-\item \textbf{Tractable cases:} Polynomial-time for bounded action sets ($|A| \leq k$), separable utilities ($u = f + g$), and tree-structured dependencies.
-\item \textbf{Sharp dichotomy:} Polynomial when the minimal sufficient set has size $O(\log |S|)$; exponential ($2^{\Omega(n)}$ under ETH) when size is $\Omega(n)$.
+\item \textbf{General case:} SUFFICIENCY-CHECK is \coNP-complete; ANCHOR-SUFFICIENCY is $\SigmaP{2}$-complete.
+\item \textbf{Tractable cases:} Polynomial-time for bounded action sets under the explicit-state encoding; separable utilities ($u = f + g$) under any encoding; and tree-structured utility with explicit local factors.
+\item \textbf{Dichotomy:} Polynomial in the explicit-state model when the minimal sufficient set has size $O(\log |S|)$; exponential ($2^{\Omega(n)}$ under ETH) in the succinct model when size is $\Omega(n)$.
 \end{itemize}
 
-The tractable cases are tight: relaxing any condition restores \coNP-hardness. Together, these results answer the question ``when can we identify decision-relevant information efficiently?'' with a precise boundary.
+The tractable cases are stated with explicit encoding assumptions (Section~\ref{sec:encoding}). Together, these results answer the question ``when is decision-relevant information identifiable efficiently?'' within the stated regimes.
+
+The primary contribution is theoretical: a formalized reduction framework and a complete characterization of the core decision-relevant problems in the formal model (coNP/\(\Sigma_2^P\) completeness and tractable cases under explicit encoding assumptions). The practical corollaries follow from these theorems.
 
 All results are machine-checked in Lean 4 ($\sim$5,000 lines, 200+ theorems).
 

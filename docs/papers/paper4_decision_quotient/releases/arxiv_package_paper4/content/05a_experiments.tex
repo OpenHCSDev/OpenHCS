@@ -2,9 +2,11 @@
 
 We validate our theoretical complexity bounds through synthetic experiments on randomly generated decision problems. These runtime experiments are separate from the Lean 4 formalization; they confirm that the asymptotic bounds predicted by the formal proofs match observed behavior. All experiments use the straightforward $O(|S|^2 \cdot |A|)$ algorithm for SUFFICIENCY-CHECK.
 
+\textbf{Model note.} These experiments assume the explicit-state encoding of Section~\ref{sec:encoding} (the input includes all states and utilities). The ETH-based lower bounds elsewhere assume the succinct circuit encoding. The results are complementary: the experiments validate scaling in the explicit model, while the ETH reductions rule out subexponential algorithms in the succinct model.
+
 \subsection{Runtime Scaling with State Space Size}
 
-Our theory predicts $O(|S|^2)$ runtime scaling. Table~\ref{tab:state-scaling} confirms this prediction---the normalized ratio $t/|S|^2$ remains constant as $|S|$ grows.
+Our theory predicts $O(|S|^2)$ runtime scaling. Table~\ref{tab:state-scaling} confirms this prediction; the normalized ratio $t/|S|^2$ remains constant as $|S|$ grows.
 
 \begin{table}[h]
 \centering
@@ -45,7 +47,7 @@ $|A|$ & Time (ms) \\
 
 \subsection{Early Termination}
 
-A key practical observation: when $I$ is \emph{not} sufficient, the algorithm often terminates early upon finding a counterexample pair $(s, s')$ with $s \sim_I s'$ but $\text{Opt}(s) \neq \text{Opt}(s')$.
+A key practical observation: in our experiments, when $I$ is \emph{not} sufficient, the algorithm terminates early upon finding a counterexample pair $(s, s')$ with $s \sim_I s'$ but $\text{Opt}(s) \neq \text{Opt}(s')$.
 
 Table~\ref{tab:early-termination} shows dramatic speedups for insufficient sets versus sufficient ones (which require full traversal).
 
@@ -78,5 +80,3 @@ These experiments validate our theoretical predictions:
 \end{enumerate}
 
 The experiments use $|A| = 5$ actions with deterministic optimal action per state (ensuring full traversal is required for sufficient sets). Code is available in the supplementary material.
-
-

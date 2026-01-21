@@ -69,7 +69,7 @@ The \emph{decision quotient} for state $s$ under coordinate set $I$ is:
 \[
 \text{DQ}_I(s) = \frac{|\{a \in A : a \in \Opt(s') \text{ for some } s' \sim_I s\}|}{|A|}
 \]
-This measures the fraction of actions that \emph{could} be optimal given only the information in $I$.
+This measures the fraction of actions that are optimal for at least one state consistent with $I$.
 \end{definition}
 
 \begin{proposition}[Sufficiency Characterization]\label{prop:sufficiency-char}
@@ -82,8 +82,25 @@ If $I$ is sufficient, then $s \sim_I s' \implies \Opt(s) = \Opt(s')$, so the set
 Conversely, if the condition holds, then for any $s \sim_I s'$, the optimal actions form the same set (since $\text{DQ}_I(s) = \text{DQ}_I(s')$ and both equal the relative size of the common optimal set).
 \end{proof}
 
+\subsection{Computational Model and Input Encoding}\label{sec:encoding}
+
+We fix the computational model used by the complexity claims.
+
+\paragraph{Succinct encoding (primary for hardness).}
+This succinct circuit encoding is the standard representation for decision problems in complexity theory; hardness is stated with respect to the input length of the circuit description \cite{arora2009computational}.
+An instance is encoded as:
+\begin{itemize}
+\item a finite action set $A$ given explicitly,
+\item coordinate domains $X_1,\ldots,X_n$ given by their sizes in binary,
+\item a Boolean or arithmetic circuit $C_U$ that on input $(a,s)$ outputs $U(a,s)$.
+\end{itemize}
+The input length is $L = |A| + \sum_i \log |X_i| + |C_U|$. Polynomial time and all complexity classes (\coNP, $\Sigma_2^P$, ETH, W[2]) are measured in $L$. All hardness results in Section~\ref{sec:hardness} use this encoding.
+
+\paragraph{Explicit-state encoding (used for enumeration algorithms and experiments).}
+The utility is given as a full table over $A \times S$. The input length is $L_{\text{exp}} = \Theta(|A||S|)$ (up to the bitlength of utilities). Polynomial time is measured in $L_{\text{exp}}$. Results stated in terms of $|S|$ use this encoding.
+
+Unless explicitly stated otherwise, ``polynomial time'' refers to the succinct encoding.
+
 
 % Include the hardness proofs (already developed)
 \input{hardness_proofs.tex}
-
-

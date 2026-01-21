@@ -7,29 +7,20 @@ We prove that exactly one independent encoding (DOF = 1, where DOF counts indepe
 \begin{enumerate}
 \item \textbf{Coherence Capacity (Theorem~\ref{thm:dof-optimal}):} DOF = 1 is the unique encoding rate guaranteeing coherence. DOF = 0 fails to encode $F$; DOF $> 1$ permits incoherent configurations where locations disagree.
 
-\item \textbf{Resolution Impossibility (Theorem~\ref{thm:oracle-arbitrary}):} Under incoherence (DOF $> 1$ with divergent values), no resolution procedure is information-theoretically justified---any selection leaves another value disagreeing. This is a static analog of the FLP impossibility~\cite{flp1985impossibility} for distributed consensus.
+\item \textbf{Resolution Impossibility (Theorem~\ref{thm:oracle-arbitrary}):} Under incoherence (DOF $> 1$ with divergent values), no resolution procedure is information-theoretically justified---any selection leaves another value disagreeing. This is the formal encoding-theoretic counterpart of the FLP impossibility~\cite{flp1985impossibility} for distributed consensus.
 
 \item \textbf{Rate-Complexity Tradeoff (Theorem~\ref{thm:unbounded-gap}):} DOF = 1 achieves $O(1)$ modification complexity; DOF $> 1$ requires $\Omega(n)$. The gap grows without bound as $n \to \infty$.
 
 \item \textbf{Realizability Requirements (Theorem~\ref{thm:ssot-iff}):} Encoding systems achieving DOF = 1 via derivation require two information-theoretic properties: (a) \emph{causal update propagation}---source changes automatically trigger derived location updates, and (b) \emph{provenance observability}---the derivation structure is queryable. These abstract to arbitrary encoding systems; programming language features (definition-time hooks, introspection) are one instantiation.
 \end{enumerate}
 
-\textbf{Connections to Established IT.} The DOF = 1 optimum generalizes Rissanen's Minimum Description Length principle~\cite{rissanen1978mdl} to interactive encoding systems. The realizability requirements connect to: channel coding with feedback (causal propagation), Slepian-Wolf side information~\cite{slepian1973noiseless} (provenance observability), and write-once memory codes~\cite{rivest1982wom} (irreversible structural encoding). The coherence requirement instantiates the CAP theorem~\cite{brewer2000cap}: DOF = 1 sidesteps the consistency-availability tradeoff by eliminating the partition dimension.
+\textbf{Connections to established IT.} The DOF = 1 optimum generalizes Rissanen's Minimum Description Length principle~\cite{rissanen1978mdl} to interactive encoding systems. The realizability requirements connect to channel coding with feedback (causal propagation), Slepian-Wolf side information~\cite{slepian1973noiseless} (provenance observability), and write-once memory codes~\cite{rivest1982wom} (irreversible structural encoding). The oracle arbitrariness result parallels zero-error decoding: without sufficient side information, correctness cannot be guaranteed.
 
-\textbf{Instantiations.} The abstract encoding model applies across domains:
-\begin{itemize}
-\tightlist
-\item \textbf{Distributed databases:} Replica consistency under update constraints
-\item \textbf{Configuration systems:} Multi-file settings with coherence requirements
-\item \textbf{Software systems:} Type definitions, class registries, interface contracts
-\item \textbf{Version control:} Merge resolution under conflicting branches
-\end{itemize}
+\textbf{Instantiations.} The abstract model applies to distributed storage, configuration management, and programming-language semantics; we include illustrative instantiations, but the core theorems are independent of any specific domain.
 
-We evaluate computational realizations against the formal realizability criteria. Among mainstream programming languages, Python uniquely satisfies both requirements (causal propagation via \texttt{\_\_init\_subclass\_\_}, provenance observability via \texttt{\_\_subclasses\_\_()}). Most (Java, C++, Rust, Go, TypeScript) lack one or both and cannot achieve DOF = 1 within their design constraints.
+We also formalize encoding-theoretic versions of CAP and FLP (Theorems~\ref{thm:cap-encoding} and~\ref{thm:static-flp}).
 
 All theorems machine-checked in Lean 4 (9,351 lines, 541 theorems, 0 \texttt{sorry} placeholders).
 
 \textbf{Index Terms---}Interactive encoding systems, coherence constraints, multi-version coding, minimum description length, distributed source coding, rate-complexity tradeoffs, write-once memory, CAP theorem
 \end{abstract}
-
-

@@ -58,7 +58,7 @@ P(v) = \tilde{P}(\alpha(v)) \quad \text{for all } v \in \mathcal{V}.
 In the PL instantiation, $\alpha(v) = (B(v), S(v))$, so in-scope semantic properties are functions of $(B,S)$.
 
 \begin{proof}
-An admissible $\Phi$-only strategy observes $v$ solely through responses to primitive queries $q_I \in \Phi$. By hypothesis each such response is a function of $\alpha(v)$. Therefore every query transcript — and hence any strategy's output — depends only on $\alpha(v)$, so the computed property factors through $\alpha$.
+An admissible $\Phi$-only strategy observes $v$ solely through responses to primitive queries $q_I \in \Phi$. By hypothesis each such response is a function of $\alpha(v)$. Therefore every query transcript, and hence any strategy's output, depends only on $\alpha(v)$, so the computed property factors through $\alpha$.
 \end{proof}
 
 \subsection{Interface Equivalence and Observational Limits}
@@ -160,8 +160,8 @@ For any property $P$:
 
 We now define the three-dimensional tradeoff space that characterizes observation strategies, using information-theoretic units.
 
-\begin{definition}[Tag length (Rate)]
-Let $\mathcal{T}$ be the set of type identifiers (tags) with $|\mathcal{T}| = k$. The \emph{tag length} $L$ is the number of bits required to encode a type identifier:
+\begin{definition}[Tag rate]
+For a set of type identifiers (tags) $\mathcal{T}$ with $|\mathcal{T}| = k$, the \emph{tag rate} $L$ is the minimum number of bits required to encode a type identifier:
 \[
 L \geq \log_2 k \quad \text{bits per value}
 \]
