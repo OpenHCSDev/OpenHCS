@@ -10,7 +10,7 @@ This paper characterizes the efficient cases of coordinate sufficiency within th
 Section~\ref{sec:encoding} fixes the computational model and input encodings used for all complexity claims.
 
 \begin{center}
-\begin{tabular}{lll}
+\begin{tabularx}{\linewidth}{@{}llX@{}}
 \toprule
 \textbf{Problem} & \textbf{Complexity} & \textbf{When Tractable} \\
 \midrule
@@ -18,7 +18,7 @@ SUFFICIENCY-CHECK & \coNP-complete & Bounded actions (explicit-state), separable
 MINIMUM-SUFFICIENT-SET & \coNP-complete & Same conditions \\
 ANCHOR-SUFFICIENCY & $\SigmaP{2}$-complete & Open \\
 \bottomrule
-\end{tabular}
+\end{tabularx}
 \end{center}
 
 The tractable cases are stated with explicit encoding assumptions (Section~\ref{sec:encoding}). Outside those regimes, the succinct model yields hardness.
