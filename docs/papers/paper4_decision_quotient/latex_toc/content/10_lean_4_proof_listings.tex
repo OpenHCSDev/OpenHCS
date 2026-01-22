@@ -1,15 +1,12 @@
 \section{Lean 4 Proof Listings}\label{app:lean}
 
-The complete Lean 4 formalization is available at:
-\begin{center}
-\url{https://doi.org/10.5281/zenodo.18140966}
-\end{center}
+The complete Lean 4 formalization is included in the appendix and companion artifact (Zenodo DOI is listed on the paper title page).
 
 The formalization is not a transcription; it exposes a reusable reduction library with compositional polynomial bounds, enabling later mechanized hardness proofs to reuse these components directly.
 
 \subsection{On the Nature of Definitional Proofs}\label{definitional-proofs-nature}
 
-The Lean proofs are straightforward applications of definitions and standard complexity-theoretic constructions. Formalization produces insight through precision.
+The Lean proofs follow directly from the formal definitions and standard complexity-theoretic constructions. The mechanization provides machine-checked verification and precision.
 
 \textbf{Definitional vs. derivational proofs.} The core theorems establish definitional properties and reduction constructions. For example, the polynomial reduction composition theorem (Theorem~\ref{thm:poly-compose}) proves that composing two polynomial-time reductions yields a polynomial-time reduction. The proof follows from the definition of polynomial time: composing two polynomials yields a polynomial.
 
@@ -28,12 +25,12 @@ The Lean proofs are straightforward applications of definitions and standard com
 \begin{enumerate}
 \item \textbf{Precision forcing.} Formalizing ``coordinate sufficiency'' in Lean requires stating exactly what it means for a coordinate subset to contain all decision-relevant information. This precision eliminates ambiguity about edge cases (what if projections differ only on irrelevant coordinates?).
 
-\item \textbf{Reduction correctness.} The TAUTOLOGY reduction (Section~\ref{sec:hardness}) is machine-checked to preserve the decision structure. Informal reductions are error-prone; Lean verification guarantees the mapping is correct.
+\item \textbf{Reduction correctness.} The TAUTOLOGY reduction (Section~\ref{sec:hardness}) is machine-checked to preserve the decision structure. Complexity reductions are subtle and easy to mis-specify. We therefore mechanize the definitions and key reductions in Lean to rule out common formalization mistakes.
 
-\item \textbf{Complexity dichotomy.} Theorem~\ref{thm:dichotomy} separates logarithmic and linear regimes: polynomial behavior when the minimal sufficient set has size $O(\log |S|)$, and exponential lower bounds under ETH when it has size $\Omega(n)$. Intermediate regimes are not ruled out by the lower-bound statement.
+\item \textbf{Encoding-regime separation.} Theorem~\ref{thm:dichotomy} contrasts explicit-state polynomial-time (polynomial in $|S|$) with a succinct worst-case ETH lower bound witnessed by a hard family with $k^*=n$ requiring $2^{\Omega(n)}$ time. Intermediate regimes are not ruled out by the lower-bound statement.
 \end{enumerate}
 
-\textbf{What machine-checking guarantees.} The Lean compiler verifies that every proof step is valid, every definition is consistent, and no axioms are added beyond Lean's foundations (extended with Mathlib for basic combinatorics and complexity definitions). Zero \texttt{sorry} placeholders means zero unproven claims. The 3,400+ lines establish a verified chain from basic definitions (decision problems, coordinate spaces, polynomial reductions) to the final theorems (hardness results, dichotomy, tractable cases). Reviewers need not trust our informal explanations---they run \texttt{lake build} and verify the proofs themselves.
+\textbf{What machine-checking guarantees.} The Lean compiler verifies that each proof step is valid and each definition is consistent; the mechanization does not introduce additional axioms beyond the chosen foundations. The mechanization contains no \texttt{sorry} placeholders. Reviewers can independently verify the proofs by running \texttt{lake build} in the mechanization directory and inspecting the companion artifact.
 
 \textbf{Comparison to informal complexity arguments.} Prior work on model selection complexity (Chickering et al.~\cite{chickering2004large}, Teyssier \& Koller~\cite{teyssier2012ordering}) presents compelling informal arguments but lacks machine-checked proofs. Our contribution is not new \emph{wisdom}---the insight that model selection is hard is old. Our contribution is \emph{formalization}: making ``coordinate sufficiency'' precise enough to mechanize, constructing verified reductions, and proving the complexity results hold for the formalized definitions.
 
@@ -48,6 +45,7 @@ The formalization consists of 33 files organized as follows:
 \item \texttt{AlgorithmComplexity.lean} -- Complexity definitions (polynomial time, reductions)
 \item \texttt{PolynomialReduction.lean} -- Polynomial reduction composition (Theorem~\ref{thm:poly-compose})
 \item \texttt{Reduction.lean} -- TAUTOLOGY reduction for sufficiency checking
+\item \texttt{Reduction\_AllCoords.lean} -- Strengthened gadget: if $\varphi$ is not a tautology then every coordinate is relevant
 \item \texttt{Hardness/} -- Counting complexity and approximation barriers
 \item \texttt{Tractability/} -- Bounded actions, separable utilities, tree structure, FPT
 \item \texttt{Economics/} -- Value of information and elicitation connections
@@ -92,9 +90,4 @@ theorem simplicity_preference_fallacy (T_simple T_complex : Tool)
 
 \subsection{Verification Status}
 
-\begin{itemize}
-\item Total lines: $\sim$5,000
-\item Theorems: 200+
-\item Files: 33
-\item Status: All proofs compile with no \texttt{sorry}
-\end{itemize}
+The mechanization and its verification status are documented in the companion artifact; reviewers may consult the artifact for exact counts and files. The proofs compile and can be verified via the provided build instructions.

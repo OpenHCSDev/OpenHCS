@@ -23,15 +23,15 @@ With declared interfaces, the constraint ``$v$ must satisfy interface $I$'' requ
 \end{proof}
 
 \begin{theorem}[Attribute-only localization]\label{thm:attribute-localization}
-$E(\text{attribute-only}) = \Omega(n)$ where $n$ = number of query sites.
+$E(\text{attribute-only}) = \Omega(m)$ where $m$ = number of query sites.
 \end{theorem}
 
 \begin{proof}
-Under attribute-only observation, each query site independently checks ``does $v$ have attribute $a$?'' with no centralized declaration. For $n$ query sites, each must be inspected. Lower bound is $\Omega(n)$.
+Under attribute-only observation, each query site independently checks ``does $v$ have attribute $a$?'' with no centralized declaration. For $m$ query sites, each must be inspected. Lower bound is $\Omega(m)$.
 \end{proof}
 
 \begin{corollary}[Strict dominance]\label{cor:strict-dominance}
-Nominal-tag observation strictly dominates attribute-only: $E(\text{nominal-tag}) = O(1) < \Omega(n) = E(\text{attribute-only})$ for all $n > 1$.
+Nominal-tag observation strictly dominates attribute-only: $E(\text{nominal-tag}) = O(1) < \Omega(m) = E(\text{attribute-only})$ for all $m > 1$.
 \end{corollary}
 
 \subsection{The Information Scattering Theorem}\label{the-information-scattering-theorem}
@@ -41,7 +41,7 @@ Let $I(\mathcal{O}, c)$ be the set of locations where constraint $c$ is encoded 
 \end{definition}
 
 \begin{theorem}[Attribute-only scattering]\label{thm:attribute-scattering}
-For attribute-only observation, $|I(\text{attribute-only}, c)| = O(n)$ where $n$ = query sites using constraint $c$.
+For attribute-only observation, $|I(\text{attribute-only}, c)| = O(m)$ where $m$ = query sites using constraint $c$.
 \end{theorem}
 
 \begin{proof}
@@ -59,5 +59,4 @@ The constraint ``must be of class $A$'' is encoded once in the definition of $A$
 \begin{corollary}[Maintenance entropy]\label{cor:maintenance-entropy}
 Attribute-only observation maximizes maintenance entropy; nominal-tag observation minimizes it.
 \end{corollary}
-
 

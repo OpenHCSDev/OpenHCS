@@ -57,15 +57,11 @@ For $n$ use sites, total realized hardness is:
 \[H_{\text{total}}(S) = H_{\text{central}}(S) + n \cdot H_{\text{distributed}}(S)\]
 \end{definition}
 
-\begin{theorem}[Hardness Conservation]\label{thm:hardness-conservation}
+\begin{definition}[Hardness Conservation Principle]\label{def:hardness-conservation}
 For any problem $P$ with intrinsic hardness $H(P)$, any solution $S$ satisfies:
-\[H_{\text{central}}(S) + H_{\text{distributed}}(S) \geq H(P)\]
-Hardness cannot be eliminated, only redistributed.
-\end{theorem}
-
-\begin{proof}
-By definition of intrinsic hardness: any correct solution must perform at least $H(P)$ units of work (computational, cognitive, or error-handling). This work is either centralized or distributed. \qed
-\end{proof}
+\[H_{\text{central}}(S) + H_{\text{distributed}}(S) \geq H(P).\]
+This statement is presented as a definitional principle grounded in the prior definition of intrinsic hardness: any correct solution must account for at least $H(P)$ units of work, which the architecture may allocate centrally or distribute across use sites. The substantive, theorem-like consequences (for example, Centralization Dominance) follow from this grounding.
+\end{definition}
 
 \begin{definition}[Hardness Efficiency]\label{def:hardness-efficiency}
 The \emph{hardness efficiency} of solution $S$ with $n$ use sites is:
@@ -120,5 +116,8 @@ For $n$ use sites, manual implementation costs $n \cdot H_{\text{distributed}}$,
 \begin{remark}[Connection to Decision Quotient]
 The decision quotient (Section~\ref{sec:foundations}) measures which coordinates are decision-relevant. Hardness distribution measures where the cost of \emph{handling} those coordinates is paid. A high-axis system makes relevance explicit (central hardness); a low-axis system requires users to track relevance themselves (distributed hardness).
 \end{remark}
+
+\paragraph{Mechanized strengthening (sketch).}
+We formalized a strengthened reduction in the mechanization: given a Boolean formula $\varphi$ over $n$ variables we construct a decision problem with $n$ coordinates so that if $\varphi$ is not a tautology then every coordinate is decision-relevant. Intuitively, the construction places a copy of the base gadget at each coordinate and makes the global ``accept'' condition hold only when every coordinate's local test succeeds; a single falsifying assignment at one coordinate therefore changes the global optimal set, witnessing that coordinate's relevance. The mechanized statement and proof appear in the development as \texttt{Reduction\_AllCoords.lean} (the lemma \texttt{all\_coords\_relevant\_of\_not\_tautology}).
 
 The next section develops the major practical consequence of this framework: the Simplicity Tax Theorem.

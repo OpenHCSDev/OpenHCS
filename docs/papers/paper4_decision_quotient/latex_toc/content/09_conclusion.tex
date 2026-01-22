@@ -22,13 +22,13 @@ This paper establishes the computational complexity of coordinate sufficiency pr
 \item \textbf{SUFFICIENCY-CHECK} is \coNP-complete (Theorem~\ref{thm:sufficiency-conp})
 \item \textbf{MINIMUM-SUFFICIENT-SET} is \coNP-complete (Theorem~\ref{thm:minsuff-conp})
 \item \textbf{ANCHOR-SUFFICIENCY} is $\SigmaP{2}$-complete (Theorem~\ref{thm:anchor-sigma2p})
-\item A complexity dichotomy separates polynomial (logarithmic minimal set) from exponential (linear minimal set) cases (Theorem~\ref{thm:dichotomy})
+\item An encoding-regime separation contrasts explicit-state polynomial-time (polynomial in $|S|$) with a succinct worst-case ETH lower bound witnessed by a hard family with $k^*=n$ (Theorem~\ref{thm:dichotomy})
 \item Tractable subcases exist for explicit-state encoding, separable utility, and tree-structured utility with explicit local factors (Theorem~\ref{thm:tractable})
 \end{itemize}
 
 These results place the problem of identifying decision-relevant coordinates at the first and second levels of the polynomial hierarchy.
 
-All proofs are machine-checked in Lean 4 ($\sim$5,000 lines). The formalization verifies the reduction mappings and equivalence theorems; complexity classifications follow from standard results (TAUTOLOGY is \coNP-complete, $\exists\forall$-SAT is $\SigmaP{2}$-complete) under the encoding model of Section~\ref{sec:encoding}.
+Proofs are machine-checked in Lean 4 (see Appendix~\ref{app:lean} for proof listings). The formalization verifies the reduction mappings and equivalence theorems; complexity classifications follow from standard results (TAUTOLOGY is \coNP-complete, $\exists\forall$-SAT is $\SigmaP{2}$-complete) under the encoding model of Section~\ref{sec:encoding}. In particular, the strengthened gadget showing that non-tautologies yield instances with \emph{all coordinates relevant} (hence $k^*=\Omega(n)$) is also mechanized (see Appendix~\ref{app:lean}).
 
 \subsection*{Complexity Characterization}
 
@@ -39,9 +39,7 @@ The results provide precise complexity characterizations within the formal model
 
 \item \textbf{Constructive reductions.} The reductions from TAUTOLOGY and $\exists\forall$-SAT are explicit and machine-checked.
 
-\item \textbf{Dichotomy between regimes.} Under ETH, the complexity separates into polynomial behavior when the minimal sufficient set is logarithmic and exponential lower bounds when it is linear. Intermediate regimes are not ruled out by the lower-bound statement.
-
-\item \textbf{Explicit tractability conditions.} The tractability conditions are stated with explicit encoding assumptions (Section~\ref{sec:encoding}).
+\item \textbf{Encoding-regime separation.} Under the explicit-state encoding, SUFFICIENCY-CHECK is polynomial in $|S|$. Under ETH, there exist succinctly encoded worst-case instances (witnessed by a strengthened gadget family with $k^*=n$) requiring $2^{\Omega(n)}$ time. Intermediate regimes are not ruled out by the lower-bound statement.
 \end{enumerate}
 
 \subsection*{The Complexity Conservation Law}
@@ -64,6 +62,10 @@ Several questions remain for future work:
 \item \textbf{Quantum complexity:} Does quantum computation provide speedups for sufficiency checking?
 \item \textbf{Learning cost formalization:} Can central cost $H_{\text{central}}$ be formalized as the rank of a concept matroid, making the amortization threshold precisely computable?
 \end{itemize}
+
+\subsection*{Practical interpretation}
+
+While this work is theoretical, the complexity bounds have practical meaning. Under ETH, worst-case instances of SUFFICIENCY-CHECK and related problems grow exponentially with problem size; practitioners should therefore not expect polynomial‑time worst‑case solvers for arbitrary inputs. In practice, real datasets often have structure (sparsity, bounded dependency depth, separable utilities) that the tractable subcases capture. Thus, engineering efforts should focus on (a) detecting and exploiting structural restrictions in inputs, and (b) designing heuristic or approximate methods for large unstructured instances. Our experiments illustrate performance on representative inputs, but the theoretical bounds underline the need for domain constraints to achieve scalable, worst‑case guarantees.
 
 
 \appendix

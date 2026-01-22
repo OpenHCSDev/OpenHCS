@@ -3,7 +3,7 @@ This paper presents an information-theoretic analysis of classification under ob
 \begin{enumerate}
 \item \textbf{Information Barrier}: Observers limited to attribute-membership queries cannot compute properties that vary within indistinguishability classes. This is universal: it applies to biological taxonomy, database systems, library classification, and programming language runtimes alike.
 
-\item \textbf{Witness Optimality}: Nominal-tag observers achieve $W(\text{identity}) = O(1)$, the minimum witness cost. The gap from attribute-only observation ($\Omega(n)$) is unbounded.
+\item \textbf{Witness Optimality}: Nominal-tag observers achieve $W(\text{identity}) = O(1)$, the minimum witness cost. The gap from attribute-only observation ($\Omega(d)$, with a worst-case family where $d = n$) is unbounded.
 
 \item \textbf{Matroid Structure}: Minimal distinguishing query sets form the bases of a matroid. The distinguishing dimension of a classification problem is well-defined and computable.
 \end{enumerate}
@@ -25,7 +25,7 @@ The information barrier is not a quirk of any particular domain; it is a mathema
 \subsection{Implications}
 
 \begin{itemize}
-\item \textbf{Nominal tags are not optional} when identity queries are required. They are the unique mechanism achieving $O(1)$ witness cost with zero distortion.
+\item \textbf{The necessity of nominal tags is a theorem, not a preference.} In information-barrier domains (Definition~\ref{def:info-barrier-domain}), any scheme achieving zero-error identification ($D = 0$) requires tag length $L \ge \log_2 k$ (Theorem~\ref{thm:converse}). Nominal-tag observation achieves the unique Pareto-optimal $D=0$ point with $W = O(1)$ at this bound (Theorem~\ref{thm:lwd-optimal}).
 
 \item \textbf{The barrier is informational, not computational}: even with unbounded resources, attribute-only observers cannot overcome it.
 
@@ -44,9 +44,8 @@ The information barrier is not a quirk of any particular domain; it is a mathema
 
 \subsection{Conclusion}
 
-Classification under observational constraints admits a clean information-theoretic analysis. Nominal tags are not a design preference; they are the provably optimal strategy for identity verification under the $(L, W, D)$ tradeoff. The results are universal, and all proofs are machine-verified in Lean 4.
+Classification under observational constraints admits a clean information-theoretic analysis. In information-barrier domains (Definition~\ref{def:info-barrier-domain}), nominal-tag observation achieves the unique Pareto-optimal $D=0$ point in the $(L, W, D)$ tradeoff (Theorem~\ref{thm:lwd-optimal}), and any $D=0$ scheme necessarily has $L \ge \log_2 k$ (Theorem~\ref{thm:converse}). The results are universal within the stated observation model, and all proofs are machine-verified in Lean 4.
 
 \subsection*{AI Disclosure}
 
 This work was developed with AI assistance (Claude, Anthropic). The AI contributed to exposition, code generation, and proof exploration. All mathematical claims were verified by the authors and machine-checked in Lean 4. The Lean proofs are the authoritative source; no theorem depends solely on AI-generated reasoning.
-

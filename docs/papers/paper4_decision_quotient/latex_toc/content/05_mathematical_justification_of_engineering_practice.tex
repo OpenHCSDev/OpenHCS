@@ -1,8 +1,8 @@
 \section{Implications for Practice: Why Over-Modeling Is Optimal}\label{sec:engineering-justification}
 
-This section states corollaries for engineering practice. Within the formal model, the complexity results of Sections~\ref{sec:hardness} and~\ref{sec:dichotomy} transform engineering practice from art to mathematics. The observed behaviors---configuration over-specification, absence of automated minimization tools, heuristic model selection---are not failures of discipline but \emph{provably optimal responses} to computational constraints under the stated cost model.
+This section states corollaries for engineering practice. Within the formal model, the complexity results of Sections~\ref{sec:hardness} and~\ref{sec:dichotomy} shift parts of this workflow from informal judgment toward explicit, checkable criteria. The observed behaviors---configuration over-specification, absence of automated minimization tools, heuristic model selection---are not failures of discipline but \emph{provably optimal responses} to computational constraints under the stated cost model.
 
-The conventional critique of over-modeling (``identify only the essential variables'') is computationally unrealistic in the general case. It asks engineers to solve \coNP-complete problems. A rational response is to include everything and pay linear maintenance costs, rather than attempt exponential minimization costs.
+Some common prescriptions implicitly require exact minimization of sufficient parameter sets. In the worst case, that task is \coNP-complete in our model, so we should calibrate critiques and expectations accordingly. A rational response is to include everything and pay linear maintenance costs, rather than attempt exponential minimization costs.
 
 \subsection{Configuration Simplification is SUFFICIENCY-CHECK}
 
@@ -35,7 +35,7 @@ Therefore, ``does parameter subset $I$ preserve all behaviors?'' is exactly SUFF
 \end{proof}
 
 \begin{remark}
-This reduction is \emph{parsimonious}: every instance of configuration simplification corresponds bijectively to an instance of SUFFICIENCY-CHECK. The problems are not merely related---they are identical up to encoding.
+This reduction is \emph{parsimonious}: configuration simplification can be cast as an instance of SUFFICIENCY-CHECK under a direct encoding.
 \end{remark}
 
 \subsection{Computational Rationality of Over-Modeling}
@@ -53,9 +53,9 @@ Consider an engineer specifying a system configuration with $n$ parameters. Let:
 
 When SUFFICIENCY-CHECK is \coNP-complete (Theorem~\ref{thm:sufficiency-conp}):
 \begin{enumerate}
-\item Worst-case finding cost is exponential: $C_{\text{find}}(n) = \Omega(2^n)$
-\item Maintenance cost is linear: $C_{\text{over}}(k) = O(k)$
-\item For sufficiently large $n$, exponential cost dominates linear cost
+\item Naive exhaustive search inspects $2^n$ candidate subsets, so the brute-force finding cost grows exponentially in $n$; more formally, exhaustive search yields an upper bound $C_{\text{find}}(n) = O(2^n)$. A matching *unconditional* lower bound of $2^{\Omega(n)}$ does not follow from \coNP-completeness alone. Instead, \coNP-completeness implies there is no polynomial‑time algorithm for arbitrary inputs unless $\Pclass = \coNP$. Stronger assumptions (e.g., the Exponential Time Hypothesis) yield explicit worst-case lower bounds: under ETH, SUFFICIENCY-CHECK has a $2^{\Omega(n)}$ worst-case time lower bound in the succinct encoding (witnessed by the strengthened TAUTOLOGY gadget family).
+\item Maintenance cost is linear: $C_{\text{over}}(k) = O(k)$.
+\item Under the ETH (or when considering naive exhaustive search), exponential finding cost dominates linear maintenance cost for sufficiently large $n$.
 \end{enumerate}
 
 Therefore, there exists $n_0$ such that for all $n > n_0$, over-modeling minimizes total expected cost:
@@ -67,17 +67,15 @@ Over-modeling is economically optimal under the stated model and complexity cons
 \end{theorem}
 
 \begin{proof}
-By Theorem~\ref{thm:sufficiency-conp}, SUFFICIENCY-CHECK is \coNP-complete. Under standard complexity assumptions ($\Pclass \neq \coNP$), no polynomial-time algorithm exists for checking sufficiency.
+By Theorem~\ref{thm:sufficiency-conp}, SUFFICIENCY-CHECK is \coNP-complete, so under the assumption $\Pclass \neq \coNP$ there is no polynomial‑time algorithm that decides sufficiency for arbitrary inputs.
 
-Finding the minimal sufficient set requires checking sufficiency of multiple candidate sets. Exhaustive search examines:
+Finding the minimal sufficient set by brute force requires checking many candidate sets. Exhaustive search examines
 \[
-\sum_{i=0}^{n} \binom{n}{i} = 2^n \text{ candidate subsets}
+\sum_{i=0}^{n} \binom{n}{i} = 2^n
 \]
+candidate subsets, so naive search has cost $O(2^n)$. This shows only that brute-force is exponential. To assert a matching lower bound of $2^{\Omega(n)}$ for *all* algorithms requires additional assumptions. For example, under the Exponential Time Hypothesis (ETH), TAUTOLOGY (and hence SUFFICIENCY-CHECK in the succinct encoding) requires $2^{\Omega(n)}$ time, and SUFFICIENCY-CHECK inherits this conditional lower bound via our reduction.
 
-Each check requires $\Omega(1)$ time (at minimum, reading the input). Therefore:
-\[
-C_{\text{find}}(n) = \Omega(2^n)
-\]
+% Note: the ETH implication is a worst-case lower bound in the succinct encoding, witnessed by the reduction family.
 
 Maintaining $k$ extra parameters incurs:
 \begin{itemize}
@@ -124,6 +122,6 @@ These theorems provide mathematical grounding for three widespread engineering b
 
 \textbf{2. Heuristic model selection dominates.} ML practitioners use AIC, BIC, cross-validation instead of optimal feature selection because optimal selection is intractable (Theorem~\ref{thm:rational-overmodel}).
 
-\textbf{3. ``Include everything'' is a legitimate strategy.} When determining relevance costs $\Omega(2^n)$, including all $n$ parameters costs $O(n)$. For large $n$, this is the rational choice.
+\textbf{3. ``Include everything'' is a legitimate strategy.} When determining relevance/minimal sufficiency is exponential in the worst case (e.g., $O(2^n)$ by naive subset enumeration, and under ETH a $2^{\Omega(n)}$ worst-case lower bound in the succinct encoding; see Theorem~\ref{thm:dichotomy}), including all $n$ parameters costs $O(n)$. For large $n$, this is the rational choice.
 
-These are not merely workarounds or approximations. They are optimal responses under the stated model. The complexity results provide a mathematical lens: over-modeling is not a failure---it is the rational strategy under the model.
+These behaviors are not ad hoc workarounds; under the stated computational model they are rational responses to worst-case intractability. The complexity results provide a mathematical lens: over-modeling is not a failure---it is the rational strategy under the model.

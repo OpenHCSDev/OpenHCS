@@ -21,7 +21,7 @@ ANCHOR-SUFFICIENCY & $\SigmaP{2}$-complete & Open \\
 \end{tabular}
 \end{center}
 
-The tractable cases are stated with explicit encoding assumptions (Section~\ref{sec:encoding}). Outside those regimes, the succinct model yields hardness. The dichotomy statement uses the same input measures: polynomial time in the explicit-state model for $O(\log |S|)$-size minimal sufficient sets and $2^{\Omega(n)}$ lower bounds under ETH in the succinct model when the minimal sufficient set is $\Omega(n)$.
+The tractable cases are stated with explicit encoding assumptions (Section~\ref{sec:encoding}). Outside those regimes, the succinct model yields hardness.
 
 \subsection{Landscape Summary}
 
@@ -37,10 +37,10 @@ The tractable cases are stated with explicit encoding assumptions (Section~\ref{
 
 Each condition is stated with its encoding assumption. Outside these regimes, the general problem remains \coNP-hard (Theorem~\ref{thm:sufficiency-conp}).
 
-\textbf{When is it intractable?} The general problem is \coNP-complete (Theorem~\ref{thm:sufficiency-conp}), with a dichotomy between logarithmic and linear regimes:
+\textbf{When is it intractable?} The general problem is \coNP-complete (Theorem~\ref{thm:sufficiency-conp}), with a separation between explicit-state tractability and succinct worst-case hardness:
 \begin{itemize}
-\item In the explicit-state model: if the minimal sufficient set has size $O(\log |S|)$, brute-force over $2^{O(\log |S|)}$ subsets runs in polynomial time in $|S|$.
-\item In the succinct model: if the minimal sufficient set has size $\Omega(n)$, SUFFICIENCY-CHECK requires $2^{\Omega(n)}$ time under ETH.
+\item In the explicit-state model: SUFFICIENCY-CHECK is solvable in polynomial time in $|S|$ by explicitly computing $\Opt(s)$ for all $s\in S$ and checking all pairs $(s,s')$ with equal $I$-projection. In particular, instances with $k^* = O(\log |S|)$ are tractable in this model.
+\item In the succinct model: under ETH there exist worst-case instances produced by our strengthened gadget in which the minimal sufficient set has size $\Omega(n)$ (indeed $n$) and SUFFICIENCY-CHECK requires $2^{\Omega(n)}$ time.
 \end{itemize}
 
 The lower-bound statement does not address intermediate regimes.
@@ -54,7 +54,9 @@ The lower-bound statement does not address intermediate regimes.
 
 \item \textbf{Theorem~\ref{thm:anchor-sigma2p}:} ANCHOR-SUFFICIENCY is $\SigmaP{2}$-complete via reduction from $\exists\forall$-SAT.
 
-\item \textbf{Theorem~\ref{thm:dichotomy}:} Dichotomy between $O(\log n)$ and $\Omega(n)$ regimes (under ETH for the lower bound).
+\item \textbf{Theorem~\ref{thm:dichotomy}:} Encoding-regime separation: explicit-state polynomial-time (polynomial in $|S|$), and under ETH a succinct worst-case lower bound witnessed by a hard family with $k^* = n$.
+ 
+% NOTE: Theorem \ref{thm:dichotomy} is an encoding-regime separation; the succinct-side statement is worst-case (there exists a hard family with $k^*=n$).
 
 \item \textbf{Theorem~\ref{thm:tractable}:} Polynomial algorithms for bounded actions, separable utility, tree structure.
 \end{enumerate}

@@ -77,6 +77,10 @@ By the basis-exchange lemma and the standard characterization of matroid bases \
 The \emph{distinguishing dimension} of a classification system is the common cardinality of all minimal distinguishing sets.
 \end{definition}
 
+\begin{remark}[Ambient attribute count vs. distinguishing dimension]
+Let $n := |\mathcal{I}|$ be the ambient number of available attributes (interfaces). Clearly $d \le n$, and there exist worst-case families with $d = n$.
+\end{remark}
+
 \begin{corollary}[Well-defined distinguishing dimension]
 All minimal distinguishing sets have equal cardinality. Thus the distinguishing dimension (Definition~\ref{def:distinguishing-dimension}) is well-defined.
 \end{corollary}
@@ -92,4 +96,3 @@ Any witness procedure must query at least one minimal distinguishing set.
 \end{proof}
 
 The key insight: the distinguishing dimension is invariant across all minimal query strategies. The difference between nominal-tag and interface-only observers lies in \emph{witness cost}: a nominal tag achieves $W = O(1)$ by storing the identity directly, bypassing query enumeration.
-

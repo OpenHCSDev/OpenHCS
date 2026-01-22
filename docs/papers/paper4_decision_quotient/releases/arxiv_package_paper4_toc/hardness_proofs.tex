@@ -9,16 +9,16 @@ This section establishes the computational complexity of determining which state
     \item \textbf{ANCHOR-SUFFICIENCY} (fixed coordinates) is $\Sigma_2^P$-complete
 \end{enumerate}
 
-These results sit beyond NP-completeness and formally explain why engineers default to over-modeling: finding the minimal set of decision-relevant factors is computationally intractable.
+Within the formal model (Section~\ref{sec:foundations}) and the succinct encoding used for hardness (Section~\ref{sec:encoding}), these results sit beyond NP-completeness and provide a rigorous explanation for why over-modeling can be a rational strategy: in the worst case, finding (or even certifying) a minimal set of decision-relevant factors is computationally intractable.
 
 \subsection{Problem Definitions}
 
 \begin{definition}[Decision Problem Encoding]
-A \emph{decision problem instance} is a tuple $(A, n, U)$ where:
+A \emph{decision problem instance} is a tuple $(A, X_1, \ldots, X_n, U)$ where:
 \begin{itemize}
     \item $A$ is a finite set of alternatives
-    \item $n$ is the number of state coordinates, with state space $S = \{0,1\}^n$
-    \item $U: A \times S \to \mathbb{Q}$ is the utility function, given as a Boolean circuit
+    \item $X_1, \ldots, X_n$ are the coordinate domains, with state space $S = X_1 \times \cdots \times X_n$
+    \item $U: A \times S \to \mathbb{Q}$ is the utility function (in the succinct encoding, $U$ is given as a Boolean circuit)
 \end{itemize}
 \end{definition}
 
@@ -38,12 +38,12 @@ where $s_I$ denotes the projection of $s$ onto coordinates in $I$.
 \end{definition}
 
 \begin{problem}[SUFFICIENCY-CHECK]
-\textbf{Input:} Decision problem $(A, n, U)$ and coordinate set $I \subseteq \{1,\ldots,n\}$ \\
+\textbf{Input:} Decision problem $(A, X_1, \ldots, X_n, U)$ and coordinate set $I \subseteq \{1,\ldots,n\}$ \\
 \textbf{Question:} Is $I$ sufficient?
 \end{problem}
 
 \begin{problem}[MINIMUM-SUFFICIENT-SET]
-\textbf{Input:} Decision problem $(A, n, U)$ and integer $k$ \\
+\textbf{Input:} Decision problem $(A, X_1, \ldots, X_n, U)$ and integer $k$ \\
 \textbf{Question:} Does there exist a sufficient set $I$ with $|I| \leq k$?
 \end{problem}
 
@@ -51,7 +51,7 @@ where $s_I$ denotes the projection of $s$ onto coordinates in $I$.
 
 \begin{theorem}[coNP-completeness of SUFFICIENCY-CHECK]
 \label{thm:sufficiency-conp}
-SUFFICIENCY-CHECK is coNP-complete \cite{cook1971complexity, karp1972reducibility}.
+SUFFICIENCY-CHECK is coNP-complete \cite{cook1971complexity, karp1972reducibility}. \emph{(Machine-verified in Lean 4; see Appendix~\ref{app:lean}.)}
 \end{theorem}
 
 \begin{center}
@@ -67,7 +67,7 @@ SET-COVER & MINIMUM-SUFFICIENT-SET & Set size maps to coordinate size \\
 \end{center}
 
 \begin{proof}
-\textbf{Membership in coNP:} The complementary problem INSUFFICIENCY is in NP. Given $(A, n, U, I)$, a witness for insufficiency is a pair $(s, s')$ such that:
+\textbf{Membership in coNP:} The complementary problem INSUFFICIENCY is in NP. Given a decision problem $(A, X_1, \ldots, X_n, U)$ and coordinate set $I$, a witness for insufficiency is a pair $(s, s')$ such that:
 \begin{enumerate}
     \item $s_I = s'_I$ (verifiable in polynomial time)
     \item $\text{Opt}(s) \neq \text{Opt}(s')$ (verifiable by evaluating $U$ on all alternatives)
@@ -78,7 +78,7 @@ SET-COVER & MINIMUM-SUFFICIENT-SET & Set size maps to coordinate size \\
 Given Boolean formula $\varphi(x_1, \ldots, x_n)$, construct a decision problem with:
 \begin{itemize}
     \item Alternatives: $A = \{\text{accept}, \text{reject}\}$
-    \item State space: $S = \{\text{reference}\} \cup \{0,1\}^n$
+    \item State space: $S = \{\text{reference}\} \cup \{0,1\}^n$ (equivalently, encode this as a product space with one extra coordinate $r \in \{0,1\}$ indicating whether the state is the reference state)
     \item Utility:
     \begin{align*}
         U(\text{accept}, \text{reference}) &= 1 \\
@@ -100,6 +100,11 @@ For $\text{Opt}$ to be constant, $\varphi(a)$ must be true for all assignments $
 
 ($\Leftarrow$) If $\varphi$ is a tautology, then $U(\text{accept}, a) = 1 > 0 = U(\text{reject}, a)$ for all assignments $a$. Thus $\text{Opt}(s) = \{\text{accept}\}$ for all states $s$, making $I = \emptyset$ sufficient.
 \end{proof}
+
+\paragraph{Mechanized strengthening (all coordinates relevant).}
+The reduction above establishes coNP-hardness using a single witness set $I=\emptyset$. For the ETH-based lower bound in Theorem~\ref{thm:dichotomy}, we additionally need worst-case instances where the minimal sufficient set has \emph{linear} size.
+
+We formalized a strengthened reduction in Lean 4: given a Boolean formula $\varphi$ over $n$ variables, construct a decision problem with $n$ coordinates such that if $\varphi$ is not a tautology then \emph{every} coordinate is decision-relevant (so $k^* = n$). Intuitively, the construction places a copy of the base gadget at each coordinate and makes the global ``accept'' condition hold only when every coordinate's local test succeeds; a single falsifying assignment at one coordinate therefore changes the global optimal set, witnessing that coordinate's relevance. This strengthening is mechanized in Lean; see Appendix~\ref{app:lean}.
 
 \subsection{Complexity of MINIMUM-SUFFICIENT-SET}
 
@@ -135,7 +140,7 @@ there exists an \emph{assignment} to those coordinates that makes the optimal ac
 constant on the induced subcube.
 
 \begin{problem}[ANCHOR-SUFFICIENCY]
-\textbf{Input:} Decision problem $(A, n, U)$ and fixed coordinate set $I \subseteq \{1,\ldots,n\}$ \\
+\textbf{Input:} Decision problem $(A, X_1, \ldots, X_n, U)$ and fixed coordinate set $I \subseteq \{1,\ldots,n\}$ \\
 \textbf{Question:} Does there exist an assignment $\alpha$ to $I$ such that
 $\text{Opt}(s)$ is constant for all states $s$ with $s_I = \alpha$?
 \end{problem}
@@ -212,7 +217,7 @@ This formally explains the engineering phenomenon:
 \end{enumerate}
 \end{corollary}
 
-This connects to the pentalogy's leverage framework: the ``epistemic budget'' for deciding what to model is itself a computationally constrained resource.
+This connects to the pentalogy's leverage framework: the modeling budget for deciding what to model is itself a computationally constrained resource.
 
 \subsection{Remark: The Collapse to coNP}
 

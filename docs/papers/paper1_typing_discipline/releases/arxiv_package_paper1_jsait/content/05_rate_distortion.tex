@@ -37,7 +37,7 @@ In such domains, interface-only observers achieve:
 See Lean formalization: \texttt{proofs/python\_instantiation.lean}. The proof verifies:
 \begin{enumerate}
 \item \texttt{nominal\_cost\_constant}: Nominal-tag achieves $(L, W, D) = (O(1), O(1), 0)$
-\item \texttt{interface\_cost\_linear}: Interface-only requires $O(n)$ queries
+\item \texttt{interface\_cost\_linear}: Interface-only admits the generic upper bound $W \le n$ (query all $n$ attributes); combined with the lower bound $W = \Omega(d)$, this yields an unbounded separation from nominal tagging
 \item \texttt{python\_gap\_unbounded}: The cost gap is unbounded in the limit
 \item Interface observations alone cannot distinguish provenance; nominal tags can
 \end{enumerate}
@@ -98,3 +98,19 @@ The Lean 4 formalization (Appendix~\ref{sec:lean}) provides a machine-checked pr
 In programming language terms: \emph{nominal typing} corresponds to nominal-tag observers (e.g., CPython's \texttt{isinstance}, Java's \texttt{.getClass()}). \emph{Duck typing} corresponds to interface-only observers (e.g., Python's \texttt{hasattr}). \emph{Structural typing} is an intermediate case with $D = 0$ but $W = O(n)$.
 \end{remark}
 
+\begin{remark}[Structural-typing cost parameter]
+Using the notation above, a structural check that traverses $s$ members/fields has $W = O(s)$ with $s \le n$.
+\end{remark}
+
+
+% Notation: $n := |\mathcal{I}|$ is the ambient attribute universe size; $s$ is the number of members actually traversed in a structural check (so $s \le n$).
+\begin{remark}[Structural-check cost parameter]
+When structural typing checks traverse $s$ members/fields (rather than ranging over the full attribute universe), the natural bound is $W = O(s)$ with $s \le n$.
+\end{remark}
+
+\noindent Using the notation above, a structural check that traverses $s$ members/fields has $W = O(s)$ with $s \le n$.
+
+% Notation: $n := |\mathcal{I}|$ is the ambient attribute universe size; $s$ is the number of members actually traversed in a structural check (so $s \le n$).
+\begin{remark}[Structural-check cost parameter]
+When structural typing checks traverse $s$ members/fields (rather than ranging over the full attribute universe), the natural bound is $W = O(s)$ with $s \le n$.
+\end{remark}

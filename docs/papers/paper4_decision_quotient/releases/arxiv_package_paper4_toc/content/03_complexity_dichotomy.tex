@@ -1,32 +1,36 @@
-\section{Complexity Dichotomy}\label{sec:dichotomy}
+\section{Encoding-Regime Separation}\label{sec:dichotomy}
 
-The hardness results of Section~\ref{sec:hardness} apply to worst-case instances under the succinct encoding. This section states a dichotomy that separates an explicit-state upper bound from a succinct-encoding lower bound.
+The hardness results of Section~\ref{sec:hardness} apply to worst-case instances under the succinct encoding. This section states an encoding-regime separation: an explicit-state upper bound versus a succinct-encoding worst-case lower bound.
 
-\paragraph{Model note.} Part~1 is an explicit-state upper bound (time polynomial in $|S|$). Part~2 is a succinct-encoding lower bound under ETH (time exponential in $n$). The encodings are defined in Section~\ref{sec:encoding}.
+\paragraph{Model note.} Part~1 is an explicit-state upper bound (time polynomial in $|S|$). Part~2 is a succinct-encoding lower bound under ETH (time exponential in $n$). The encodings are defined in Section~\ref{sec:encoding}. These two parts are stated in different encodings and are not directly comparable as functions of a single input length.
 
-\begin{theorem}[Complexity Dichotomy]\label{thm:dichotomy}
+\begin{theorem}[Explicit--Succinct Regime Separation]\label{thm:dichotomy}
 Let $\mathcal{D} = (A, X_1, \ldots, X_n, U)$ be a decision problem with $|S| = N$ states. Let $k^*$ be the size of the minimal sufficient set.
 
 \begin{enumerate}
-\item \textbf{Logarithmic case (explicit-state upper bound):} If $k^* = O(\log N)$, then SUFFICIENCY-CHECK is solvable in polynomial time in $N$ under the explicit-state encoding.
+\item \textbf{Explicit-state upper bound:} Under the explicit-state encoding, SUFFICIENCY-CHECK is solvable in time polynomial in $N$ (e.g. $O(N^2|A|)$).
 
-\item \textbf{Linear case (succinct lower bound under ETH):} If $k^* = \Omega(n)$, then SUFFICIENCY-CHECK requires time $\Omega(2^{n/c})$ for some constant $c > 0$ under the succinct encoding (assuming ETH).
+\item \textbf{Succinct lower bound under ETH (worst case):} Assuming ETH, there exists a family of succinctly encoded instances with $n$ coordinates and minimal sufficient set size $k^* = n$ such that SUFFICIENCY-CHECK requires time $2^{\Omega(n)}$.
 \end{enumerate}
 \end{theorem}
 
 \begin{proof}
-\textbf{Part 1 (Logarithmic case):} If $k^* = O(\log N)$, then the number of distinct projections $|S_{I^*}|$ is at most $2^{k^*} = O(N^c)$ for some constant $c$. Under the explicit-state encoding, we enumerate all projections and verify sufficiency in polynomial time.
+\textbf{Part 1 (Explicit-state upper bound):} Under the explicit-state encoding, SUFFICIENCY-CHECK is decidable in time polynomial in $N$ by direct enumeration: compute $\Opt(s)$ for all $s\in S$ and then check all pairs $(s,s')$ with $s_I=s'_I$.
 
-\textbf{Part 2 (Linear case):} The reduction from TAUTOLOGY in Theorem~\ref{thm:sufficiency-conp} produces instances where the minimal sufficient set has size $\Omega(n)$ (all coordinates are relevant when the formula is not a tautology). Under the Exponential Time Hypothesis (ETH) \cite{impagliazzo2001complexity}, TAUTOLOGY requires time $2^{\Omega(n)}$ in the succinct encoding, so SUFFICIENCY-CHECK inherits this lower bound.
+Equivalently, for any fixed $I$, the projection map $s\mapsto s_I$ has image size $|S_I|\le |S|=N$, so any algorithm that iterates over projection classes (or over all state pairs) runs in polynomial time in $N$. Thus, in particular, when $k^*=O(\log N)$, SUFFICIENCY-CHECK is solvable in polynomial time under the explicit-state encoding.
+
+\paragraph{Remark (bounded coordinate domains).} In the general model $S=\prod_i X_i$, for a fixed $I$ one always has $|S_I|\le \prod_{i\in I}|X_i|$ (and $|S_I|\le N$). If the coordinate domains are uniformly bounded, $|X_i|\le d$ for all $i$, then $|S_I|\le d^{|I|}$.
+
+\textbf{Part 2 (Succinct ETH lower bound, worst case):} A strengthened version of the TAUTOLOGY reduction used in Theorem~\ref{thm:sufficiency-conp} produces a family of instances in which the minimal sufficient set has size $k^* = n$: given a Boolean formula $\varphi$ over $n$ variables, we construct a decision problem with $n$ coordinates such that if $\varphi$ is not a tautology then \emph{every} coordinate is decision-relevant (thus $k^*=n$). This strengthening is mechanized in Lean (see Appendix~\ref{app:lean}). Under the Exponential Time Hypothesis (ETH) \cite{impagliazzo2001complexity}, TAUTOLOGY requires time $2^{\Omega(n)}$ in the succinct encoding, so SUFFICIENCY-CHECK inherits a $2^{\Omega(n)}$ worst-case lower bound via this reduction.
 \end{proof}
 
-\begin{corollary}[Phase Transition]
-There is a sharp transition between tractable and intractable regimes at the logarithmic scale (with respect to the encodings in Section~\ref{sec:encoding}):
+\begin{corollary}[Regime Separation (by Encoding)]
+There is a clean separation between explicit-state tractability and succinct worst-case hardness (with respect to the encodings in Section~\ref{sec:encoding}):
 \begin{itemize}
-\item If $k^* = O(\log N)$, SUFFICIENCY-CHECK is polynomial in $N$ under the explicit-state encoding
-\item If $k^* = \Omega(n)$, SUFFICIENCY-CHECK is exponential in $n$ under ETH in the succinct encoding
+\item Under the explicit-state encoding, SUFFICIENCY-CHECK is polynomial in $N=|S|$.
+\item Under ETH, there exist succinctly encoded instances with $k^* = \Omega(n)$ (indeed $k^*=n$) for which SUFFICIENCY-CHECK requires $2^{\Omega(n)}$ time.
 \end{itemize}
-For Boolean coordinate spaces ($N = 2^n$), this corresponds to $k^* = O(\log n)$ versus $k^* = \Omega(n)$.
+For Boolean coordinate spaces ($N = 2^n$), the explicit-state bound is polynomial in $2^n$ (exponential in $n$), while under ETH the succinct lower bound yields $2^{\Omega(n)}$ time for the hard family in which $k^* = \Omega(n)$.
 \end{corollary}
 
-This dichotomy explains why some domains admit tractable model selection (few relevant variables) while others require heuristics (many relevant variables).
+This encoding-regime separation explains why some domains admit tractable model selection under explicit-state assumptions, while other domains (or encodings) exhibit worst-case hardness that forces heuristic approaches.

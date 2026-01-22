@@ -6,13 +6,13 @@ Linnean taxonomy classifies organisms by observable phenotypic characters: morph
 
 \textbf{The cryptic species problem:} Cryptic species share identical phenotypic profiles but are reproductively isolated and genetically distinct. Attribute-only observation (morphology) cannot distinguish them: $\pi(A) = \pi(B)$ but $\text{species}(A) \neq \text{species}(B)$.
 
-\textbf{The nominal tag:} DNA barcoding provides the resolution \cite{DNABarcoding}. A short genetic sequence (e.g., mitochondrial COI) acts as the nominal tag: $O(1)$ identity verification via sequence comparison. This reduced cryptic species identification from $\Omega(n)$ morphological examination to constant-time molecular lookup.
+\textbf{The nominal tag:} DNA barcoding provides the resolution \cite{DNABarcoding}. A short genetic sequence (e.g., mitochondrial COI) acts as the nominal tag: $O(1)$ identity verification via sequence comparison. This reduced cryptic species identification from $\Omega(s)$ phenotypic examination (checking $s$ characters) to constant-time molecular lookup.
 
 \subsection{Library Classification: Subject vs ISBN}
 
 Library classification systems like Dewey Decimal observe subject matter, a form of attribute-only classification. Two books on the same subject are indistinguishable by subject code alone.
 
-\textbf{The nominal tag:} The ISBN (International Standard Book Number) is the nominal tag \cite{ISBN}. Given two physical books, identity verification is $O(1)$: compare ISBNs. Without ISBNs, distinguishing two copies of different editions on the same subject requires $O(n)$ attribute inspection (publication date, page count, publisher, etc.).
+\textbf{The nominal tag:} The ISBN (International Standard Book Number) is the nominal tag \cite{ISBN}. Given two physical books, identity verification is $O(1)$: compare ISBNs. Without ISBNs, distinguishing two copies of different editions on the same subject requires $O(s)$ attribute inspection (publication date, page count, publisher, etc.).
 
 \subsection{Database Systems: Columns vs Primary Keys}
 
@@ -32,7 +32,7 @@ Every CPython heap object begins with a \texttt{PyObject} header containing an \
 
 \textbf{Witness procedure:} Given objects \texttt{a} and \texttt{b}, type identity is \texttt{type(a) is type(b)}---two pointer dereferences and one pointer comparison. Cost: $O(1)$ primitive operations, independent of interface count.
 
-\textbf{Contrast with \texttt{hasattr}:} Interface-only observation in Python uses \texttt{hasattr(obj, name)} for each required method. To verify an object satisfies a protocol with $k$ methods requires $k$ attribute lookups. Worse: different call sites may check different subsets, creating $\Omega(n)$ total checks where $n$ is the number of call sites. The nominal tag eliminates this entirely.
+\textbf{Contrast with \texttt{hasattr}:} Interface-only observation in Python uses \texttt{hasattr(obj, name)} for each required method. To verify an object satisfies a protocol with $s$ required methods requires $s$ attribute lookups. Worse: different call sites may check different subsets, creating $\Omega(m)$ total checks where $m$ is the number of call sites. The nominal tag eliminates this entirely.
 
 \subsubsection{Java: \texttt{.getClass()} and the Method Table}
 
@@ -44,7 +44,7 @@ Java's object model stores a pointer to the class object in every instance heade
 
 TypeScript uses attribute-only (declared) observation \cite{TypeScriptDocs}: the compiler checks structural compatibility, not nominal identity. Two types are assignment-compatible iff their structures match.
 
-\textbf{Implication:} Type identity checking requires traversing the structure. For a type with $n$ fields/methods, $W(\text{type-identity}) = O(n)$. This is inherent to the observation model: no compilation strategy can reduce this to $O(1)$ without adding nominal tags.
+\textbf{Implication:} Type identity checking requires traversing the structure. For a type with $s$ fields/methods, $W(\text{type-identity}) = O(s)$. This is inherent to the observation model: no compilation strategy can reduce this to $O(1)$ without adding nominal tags.
 
 \subsubsection{Rust: Static Nominal Tags}
 
@@ -65,12 +65,11 @@ Libraries & Subject (Dewey) & ISBN & $O(1)$ \\
 Databases & Column values & Primary key & $O(1)$ \\
 CPython & \texttt{hasattr} probing & \texttt{ob\_type} pointer & $O(1)$ \\
 Java & Interface check & \texttt{.getClass()} & $O(1)$ \\
-TypeScript & Structural check & (none at runtime) & $O(n)$ \\
+TypeScript & Structural check & (none at runtime) & $O(s)$ \\
 Rust (static) & Trait bounds & \texttt{TypeId} & $O(1)$ \\
 \hline
 \end{tabular}
-\caption{Witness cost for identity across classification systems. Nominal tags achieve $O(1)$; attribute-only pays $O(n)$ or $O(k)$.}
+\caption{Witness cost for identity across classification systems. Nominal tags achieve $O(1)$; attribute-only pays $O(s)$ per structural check (or $O(k)$ when enumerating classes/declared interfaces).}
 \end{table}
 
-The pattern is universal: systems with nominal tags achieve $O(1)$ witness cost; systems without them pay $O(n)$ or $O(k)$. This is not domain-specific; it is the information barrier theorem instantiated across classification systems.
-
+The pattern is universal: systems with nominal tags achieve $O(1)$ witness cost; systems without them pay $O(s)$ or $O(k)$. This is not domain-specific; it is the information barrier theorem instantiated across classification systems.

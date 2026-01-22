@@ -14,7 +14,7 @@ We characterize the computational complexity of coordinate sufficiency in decisi
 
 -   **Tractable cases:** Polynomial-time for bounded action sets under the explicit-state encoding; separable utilities ($u = f + g$) under any encoding; and tree-structured utility with explicit local factors.
 
--   **Dichotomy:** Polynomial in the explicit-state model when the minimal sufficient set has size $O(\log |S|)$; exponential ($2^{\Omega(n)}$ under ETH) in the succinct model when size is $\Omega(n)$.
+-   **Encoding-regime separation:** Polynomial-time under the explicit-state encoding (polynomial in $|S|$). Under ETH, there exist succinctly encoded worst-case instances witnessed by a strengthened gadget construction (mechanized in Lean; see Appendix [\[app:lean\]](#app:lean){reference-type="ref" reference="app:lean"}) with $k^*=n$ for which SUFFICIENCY-CHECK requires $2^{\Omega(n)}$ time.
 
 The tractable cases are stated with explicit encoding assumptions (Section [\[sec:encoding\]](#sec:encoding){reference-type="ref" reference="sec:encoding"}). Together, these results answer the question "when is decision-relevant information identifiable efficiently?" within the stated regimes.
 
@@ -41,7 +41,7 @@ Section [\[sec:encoding\]](#sec:encoding){reference-type="ref" reference="sec:e
   ANCHOR-SUFFICIENCY       $\SigmaP{2}$-complete   Open
 :::
 
-The tractable cases are stated with explicit encoding assumptions (Section [\[sec:encoding\]](#sec:encoding){reference-type="ref" reference="sec:encoding"}). Outside those regimes, the succinct model yields hardness. The dichotomy statement uses the same input measures: polynomial time in the explicit-state model for $O(\log |S|)$-size minimal sufficient sets and $2^{\Omega(n)}$ lower bounds under ETH in the succinct model when the minimal sufficient set is $\Omega(n)$.
+The tractable cases are stated with explicit encoding assumptions (Section [\[sec:encoding\]](#sec:encoding){reference-type="ref" reference="sec:encoding"}). Outside those regimes, the succinct model yields hardness.
 
 ## Landscape Summary
 
@@ -55,11 +55,11 @@ The tractable cases are stated with explicit encoding assumptions (Section [\[s
 
 Each condition is stated with its encoding assumption. Outside these regimes, the general problem remains -hard (Theorem [\[thm:sufficiency-conp\]](#thm:sufficiency-conp){reference-type="ref" reference="thm:sufficiency-conp"}).
 
-**When is it intractable?** The general problem is -complete (Theorem [\[thm:sufficiency-conp\]](#thm:sufficiency-conp){reference-type="ref" reference="thm:sufficiency-conp"}), with a dichotomy between logarithmic and linear regimes:
+**When is it intractable?** The general problem is -complete (Theorem [\[thm:sufficiency-conp\]](#thm:sufficiency-conp){reference-type="ref" reference="thm:sufficiency-conp"}), with a separation between explicit-state tractability and succinct worst-case hardness:
 
--   In the explicit-state model: if the minimal sufficient set has size $O(\log |S|)$, brute-force over $2^{O(\log |S|)}$ subsets runs in polynomial time in $|S|$.
+-   In the explicit-state model: SUFFICIENCY-CHECK is solvable in polynomial time in $|S|$ by explicitly computing $\Opt(s)$ for all $s\in S$ and checking all pairs $(s,s')$ with equal $I$-projection. In particular, instances with $k^* = O(\log |S|)$ are tractable in this model.
 
--   In the succinct model: if the minimal sufficient set has size $\Omega(n)$, SUFFICIENCY-CHECK requires $2^{\Omega(n)}$ time under ETH.
+-   In the succinct model: under ETH there exist worst-case instances produced by our strengthened gadget in which the minimal sufficient set has size $\Omega(n)$ (indeed $n$) and SUFFICIENCY-CHECK requires $2^{\Omega(n)}$ time.
 
 The lower-bound statement does not address intermediate regimes.
 
@@ -71,7 +71,7 @@ The lower-bound statement does not address intermediate regimes.
 
 3.  **Theorem [\[thm:anchor-sigma2p\]](#thm:anchor-sigma2p){reference-type="ref" reference="thm:anchor-sigma2p"}:** ANCHOR-SUFFICIENCY is $\SigmaP{2}$-complete via reduction from $\exists\forall$-SAT.
 
-4.  **Theorem [\[thm:dichotomy\]](#thm:dichotomy){reference-type="ref" reference="thm:dichotomy"}:** Dichotomy between $O(\log n)$ and $\Omega(n)$ regimes (under ETH for the lower bound).
+4.  **Theorem [\[thm:dichotomy\]](#thm:dichotomy){reference-type="ref" reference="thm:dichotomy"}:** Encoding-regime separation: explicit-state polynomial-time (polynomial in $|S|$), and under ETH a succinct worst-case lower bound witnessed by a hard family with $k^* = n$.
 
 5.  **Theorem [\[thm:tractable\]](#thm:tractable){reference-type="ref" reference="thm:tractable"}:** Polynomial algorithms for bounded actions, separable utility, tree structure.
 
@@ -185,39 +185,45 @@ The utility is given as a full table over $A \times S$. The input length is $L_{
 Unless explicitly stated otherwise, "polynomial time" refers to the succinct encoding.
 
 
-# Complexity Dichotomy {#sec:dichotomy}
+# Encoding-Regime Separation {#sec:dichotomy}
 
-The hardness results of Section [\[sec:hardness\]](#sec:hardness){reference-type="ref" reference="sec:hardness"} apply to worst-case instances under the succinct encoding. This section states a dichotomy that separates an explicit-state upper bound from a succinct-encoding lower bound.
+The hardness results of Section [\[sec:hardness\]](#sec:hardness){reference-type="ref" reference="sec:hardness"} apply to worst-case instances under the succinct encoding. This section states an encoding-regime separation: an explicit-state upper bound versus a succinct-encoding worst-case lower bound.
 
 #### Model note.
 
-Part 1 is an explicit-state upper bound (time polynomial in $|S|$). Part 2 is a succinct-encoding lower bound under ETH (time exponential in $n$). The encodings are defined in Section [\[sec:encoding\]](#sec:encoding){reference-type="ref" reference="sec:encoding"}.
+Part 1 is an explicit-state upper bound (time polynomial in $|S|$). Part 2 is a succinct-encoding lower bound under ETH (time exponential in $n$). The encodings are defined in Section [\[sec:encoding\]](#sec:encoding){reference-type="ref" reference="sec:encoding"}. These two parts are stated in different encodings and are not directly comparable as functions of a single input length.
 
 ::: theorem
 []{#thm:dichotomy label="thm:dichotomy"} Let $\mathcal{D} = (A, X_1, \ldots, X_n, U)$ be a decision problem with $|S| = N$ states. Let $k^*$ be the size of the minimal sufficient set.
 
-1.  **Logarithmic case (explicit-state upper bound):** If $k^* = O(\log N)$, then SUFFICIENCY-CHECK is solvable in polynomial time in $N$ under the explicit-state encoding.
+1.  **Explicit-state upper bound:** Under the explicit-state encoding, SUFFICIENCY-CHECK is solvable in time polynomial in $N$ (e.g. $O(N^2|A|)$).
 
-2.  **Linear case (succinct lower bound under ETH):** If $k^* = \Omega(n)$, then SUFFICIENCY-CHECK requires time $\Omega(2^{n/c})$ for some constant $c > 0$ under the succinct encoding (assuming ETH).
+2.  **Succinct lower bound under ETH (worst case):** Assuming ETH, there exists a family of succinctly encoded instances with $n$ coordinates and minimal sufficient set size $k^* = n$ such that SUFFICIENCY-CHECK requires time $2^{\Omega(n)}$.
 :::
 
 ::: proof
-*Proof.* **Part 1 (Logarithmic case):** If $k^* = O(\log N)$, then the number of distinct projections $|S_{I^*}|$ is at most $2^{k^*} = O(N^c)$ for some constant $c$. Under the explicit-state encoding, we enumerate all projections and verify sufficiency in polynomial time.
+*Proof.* **Part 1 (Explicit-state upper bound):** Under the explicit-state encoding, SUFFICIENCY-CHECK is decidable in time polynomial in $N$ by direct enumeration: compute $\Opt(s)$ for all $s\in S$ and then check all pairs $(s,s')$ with $s_I=s'_I$.
 
-**Part 2 (Linear case):** The reduction from TAUTOLOGY in Theorem [\[thm:sufficiency-conp\]](#thm:sufficiency-conp){reference-type="ref" reference="thm:sufficiency-conp"} produces instances where the minimal sufficient set has size $\Omega(n)$ (all coordinates are relevant when the formula is not a tautology). Under the Exponential Time Hypothesis (ETH) [@impagliazzo2001complexity], TAUTOLOGY requires time $2^{\Omega(n)}$ in the succinct encoding, so SUFFICIENCY-CHECK inherits this lower bound. ◻
+Equivalently, for any fixed $I$, the projection map $s\mapsto s_I$ has image size $|S_I|\le |S|=N$, so any algorithm that iterates over projection classes (or over all state pairs) runs in polynomial time in $N$. Thus, in particular, when $k^*=O(\log N)$, SUFFICIENCY-CHECK is solvable in polynomial time under the explicit-state encoding.
+
+#### Remark (bounded coordinate domains).
+
+In the general model $S=\prod_i X_i$, for a fixed $I$ one always has $|S_I|\le \prod_{i\in I}|X_i|$ (and $|S_I|\le N$). If the coordinate domains are uniformly bounded, $|X_i|\le d$ for all $i$, then $|S_I|\le d^{|I|}$.
+
+**Part 2 (Succinct ETH lower bound, worst case):** A strengthened version of the TAUTOLOGY reduction used in Theorem [\[thm:sufficiency-conp\]](#thm:sufficiency-conp){reference-type="ref" reference="thm:sufficiency-conp"} produces a family of instances in which the minimal sufficient set has size $k^* = n$: given a Boolean formula $\varphi$ over $n$ variables, we construct a decision problem with $n$ coordinates such that if $\varphi$ is not a tautology then *every* coordinate is decision-relevant (thus $k^*=n$). This strengthening is mechanized in Lean (see Appendix [\[app:lean\]](#app:lean){reference-type="ref" reference="app:lean"}). Under the Exponential Time Hypothesis (ETH) [@impagliazzo2001complexity], TAUTOLOGY requires time $2^{\Omega(n)}$ in the succinct encoding, so SUFFICIENCY-CHECK inherits a $2^{\Omega(n)}$ worst-case lower bound via this reduction. ◻
 :::
 
 ::: corollary
-There is a sharp transition between tractable and intractable regimes at the logarithmic scale (with respect to the encodings in Section [\[sec:encoding\]](#sec:encoding){reference-type="ref" reference="sec:encoding"}):
+There is a clean separation between explicit-state tractability and succinct worst-case hardness (with respect to the encodings in Section [\[sec:encoding\]](#sec:encoding){reference-type="ref" reference="sec:encoding"}):
 
--   If $k^* = O(\log N)$, SUFFICIENCY-CHECK is polynomial in $N$ under the explicit-state encoding
+-   Under the explicit-state encoding, SUFFICIENCY-CHECK is polynomial in $N=|S|$.
 
--   If $k^* = \Omega(n)$, SUFFICIENCY-CHECK is exponential in $n$ under ETH in the succinct encoding
+-   Under ETH, there exist succinctly encoded instances with $k^* = \Omega(n)$ (indeed $k^*=n$) for which SUFFICIENCY-CHECK requires $2^{\Omega(n)}$ time.
 
-For Boolean coordinate spaces ($N = 2^n$), this corresponds to $k^* = O(\log n)$ versus $k^* = \Omega(n)$.
+For Boolean coordinate spaces ($N = 2^n$), the explicit-state bound is polynomial in $2^n$ (exponential in $n$), while under ETH the succinct lower bound yields $2^{\Omega(n)}$ time for the hard family in which $k^* = \Omega(n)$.
 :::
 
-This dichotomy explains why some domains admit tractable model selection (few relevant variables) while others require heuristics (many relevant variables).
+This encoding-regime separation explains why some domains admit tractable model selection under explicit-state assumptions, while other domains (or encodings) exhibit worst-case hardness that forces heuristic approaches.
 
 
 # Tractable Special Cases: When You Can Solve It {#sec:tractable}
@@ -265,9 +271,9 @@ We distinguish the encodings of Section [\[sec:encoding\]](#sec:encoding){refer
 
 # Implications for Practice: Why Over-Modeling Is Optimal {#sec:engineering-justification}
 
-This section states corollaries for engineering practice. Within the formal model, the complexity results of Sections [\[sec:hardness\]](#sec:hardness){reference-type="ref" reference="sec:hardness"} and [\[sec:dichotomy\]](#sec:dichotomy){reference-type="ref" reference="sec:dichotomy"} transform engineering practice from art to mathematics. The observed behaviors---configuration over-specification, absence of automated minimization tools, heuristic model selection---are not failures of discipline but *provably optimal responses* to computational constraints under the stated cost model.
+This section states corollaries for engineering practice. Within the formal model, the complexity results of Sections [\[sec:hardness\]](#sec:hardness){reference-type="ref" reference="sec:hardness"} and [\[sec:dichotomy\]](#sec:dichotomy){reference-type="ref" reference="sec:dichotomy"} shift parts of this workflow from informal judgment toward explicit, checkable criteria. The observed behaviors---configuration over-specification, absence of automated minimization tools, heuristic model selection---are not failures of discipline but *provably optimal responses* to computational constraints under the stated cost model.
 
-The conventional critique of over-modeling ("identify only the essential variables") is computationally unrealistic in the general case. It asks engineers to solve -complete problems. A rational response is to include everything and pay linear maintenance costs, rather than attempt exponential minimization costs.
+Some common prescriptions implicitly require exact minimization of sufficient parameter sets. In the worst case, that task is -complete in our model, so we should calibrate critiques and expectations accordingly. A rational response is to include everything and pay linear maintenance costs, rather than attempt exponential minimization costs.
 
 ## Configuration Simplification is SUFFICIENCY-CHECK
 
@@ -298,7 +304,7 @@ Therefore, "does parameter subset $I$ preserve all behaviors?" is exactly SUFFIC
 :::
 
 ::: remark
-This reduction is *parsimonious*: every instance of configuration simplification corresponds bijectively to an instance of SUFFICIENCY-CHECK. The problems are not merely related---they are identical up to encoding.
+This reduction is *parsimonious*: configuration simplification can be cast as an instance of SUFFICIENCY-CHECK under a direct encoding.
 :::
 
 ## Computational Rationality of Over-Modeling
@@ -316,11 +322,11 @@ We now prove that over-specification is an optimal engineering strategy given th
 
 When SUFFICIENCY-CHECK is -complete (Theorem [\[thm:sufficiency-conp\]](#thm:sufficiency-conp){reference-type="ref" reference="thm:sufficiency-conp"}):
 
-1.  Worst-case finding cost is exponential: $C_{\text{find}}(n) = \Omega(2^n)$
+1.  Naive exhaustive search inspects $2^n$ candidate subsets, so the brute-force finding cost grows exponentially in $n$; more formally, exhaustive search yields an upper bound $C_{\text{find}}(n) = O(2^n)$. A matching \*unconditional\* lower bound of $2^{\Omega(n)}$ does not follow from -completeness alone. Instead, -completeness implies there is no polynomial‑time algorithm for arbitrary inputs unless $\Pclass = \coNP$. Stronger assumptions (e.g., the Exponential Time Hypothesis) yield explicit worst-case lower bounds: under ETH, SUFFICIENCY-CHECK has a $2^{\Omega(n)}$ worst-case time lower bound in the succinct encoding (witnessed by the strengthened TAUTOLOGY gadget family).
 
-2.  Maintenance cost is linear: $C_{\text{over}}(k) = O(k)$
+2.  Maintenance cost is linear: $C_{\text{over}}(k) = O(k)$.
 
-3.  For sufficiently large $n$, exponential cost dominates linear cost
+3.  Under the ETH (or when considering naive exhaustive search), exponential finding cost dominates linear maintenance cost for sufficiently large $n$.
 
 Therefore, there exists $n_0$ such that for all $n > n_0$, over-modeling minimizes total expected cost: $$C_{\text{over}}(k) < C_{\text{find}}(n) + C_{\text{under}}$$
 
@@ -328,11 +334,9 @@ Over-modeling is economically optimal under the stated model and complexity cons
 :::
 
 ::: proof
-*Proof.* By Theorem [\[thm:sufficiency-conp\]](#thm:sufficiency-conp){reference-type="ref" reference="thm:sufficiency-conp"}, SUFFICIENCY-CHECK is -complete. Under standard complexity assumptions ($\Pclass \neq \coNP$), no polynomial-time algorithm exists for checking sufficiency.
+*Proof.* By Theorem [\[thm:sufficiency-conp\]](#thm:sufficiency-conp){reference-type="ref" reference="thm:sufficiency-conp"}, SUFFICIENCY-CHECK is -complete, so under the assumption $\Pclass \neq \coNP$ there is no polynomial‑time algorithm that decides sufficiency for arbitrary inputs.
 
-Finding the minimal sufficient set requires checking sufficiency of multiple candidate sets. Exhaustive search examines: $$\sum_{i=0}^{n} \binom{n}{i} = 2^n \text{ candidate subsets}$$
-
-Each check requires $\Omega(1)$ time (at minimum, reading the input). Therefore: $$C_{\text{find}}(n) = \Omega(2^n)$$
+Finding the minimal sufficient set by brute force requires checking many candidate sets. Exhaustive search examines $$\sum_{i=0}^{n} \binom{n}{i} = 2^n$$ candidate subsets, so naive search has cost $O(2^n)$. This shows only that brute-force is exponential. To assert a matching lower bound of $2^{\Omega(n)}$ for \*all\* algorithms requires additional assumptions. For example, under the Exponential Time Hypothesis (ETH), TAUTOLOGY (and hence SUFFICIENCY-CHECK in the succinct encoding) requires $2^{\Omega(n)}$ time, and SUFFICIENCY-CHECK inherits this conditional lower bound via our reduction.
 
 Maintaining $k$ extra parameters incurs:
 
@@ -377,9 +381,9 @@ These theorems provide mathematical grounding for three widespread engineering b
 
 **2. Heuristic model selection dominates.** ML practitioners use AIC, BIC, cross-validation instead of optimal feature selection because optimal selection is intractable (Theorem [\[thm:rational-overmodel\]](#thm:rational-overmodel){reference-type="ref" reference="thm:rational-overmodel"}).
 
-**3. "Include everything" is a legitimate strategy.** When determining relevance costs $\Omega(2^n)$, including all $n$ parameters costs $O(n)$. For large $n$, this is the rational choice.
+**3. "Include everything" is a legitimate strategy.** When determining relevance/minimal sufficiency is exponential in the worst case (e.g., $O(2^n)$ by naive subset enumeration, and under ETH a $2^{\Omega(n)}$ worst-case lower bound in the succinct encoding; see Theorem [\[thm:dichotomy\]](#thm:dichotomy){reference-type="ref" reference="thm:dichotomy"}), including all $n$ parameters costs $O(n)$. For large $n$, this is the rational choice.
 
-These are not merely workarounds or approximations. They are optimal responses under the stated model. The complexity results provide a mathematical lens: over-modeling is not a failure---it is the rational strategy under the model.
+These behaviors are not ad hoc workarounds; under the stated computational model they are rational responses to worst-case intractability. The complexity results provide a mathematical lens: over-modeling is not a failure---it is the rational strategy under the model.
 
 
 # Implications for Software Architecture {#sec:implications}
@@ -436,12 +440,8 @@ A general principle emerges from the complexity results: problem hardness is con
 For $n$ use sites, total realized hardness is: $$H_{\text{total}}(S) = H_{\text{central}}(S) + n \cdot H_{\text{distributed}}(S)$$
 :::
 
-::: theorem
-[]{#thm:hardness-conservation label="thm:hardness-conservation"} For any problem $P$ with intrinsic hardness $H(P)$, any solution $S$ satisfies: $$H_{\text{central}}(S) + H_{\text{distributed}}(S) \geq H(P)$$ Hardness cannot be eliminated, only redistributed.
-:::
-
-::: proof
-*Proof.* By definition of intrinsic hardness: any correct solution must perform at least $H(P)$ units of work (computational, cognitive, or error-handling). This work is either centralized or distributed. 0◻ ◻
+::: definition
+[]{#def:hardness-conservation label="def:hardness-conservation"} For any problem $P$ with intrinsic hardness $H(P)$, any solution $S$ satisfies: $$H_{\text{central}}(S) + H_{\text{distributed}}(S) \geq H(P).$$ This statement is presented as a definitional principle grounded in the prior definition of intrinsic hardness: any correct solution must account for at least $H(P)$ units of work, which the architecture may allocate centrally or distribute across use sites. The substantive, theorem-like consequences (for example, Centralization Dominance) follow from this grounding.
 :::
 
 ::: definition
@@ -496,6 +496,10 @@ For $n$ use sites, manual implementation costs $n \cdot H_{\text{distributed}}$,
 ::: remark
 The decision quotient (Section [\[sec:foundations\]](#sec:foundations){reference-type="ref" reference="sec:foundations"}) measures which coordinates are decision-relevant. Hardness distribution measures where the cost of *handling* those coordinates is paid. A high-axis system makes relevance explicit (central hardness); a low-axis system requires users to track relevance themselves (distributed hardness).
 :::
+
+#### Mechanized strengthening (sketch).
+
+We formalized a strengthened reduction in the mechanization: given a Boolean formula $\varphi$ over $n$ variables we construct a decision problem with $n$ coordinates so that if $\varphi$ is not a tautology then every coordinate is decision-relevant. Intuitively, the construction places a copy of the base gadget at each coordinate and makes the global "accept" condition hold only when every coordinate's local test succeeds; a single falsifying assignment at one coordinate therefore changes the global optimal set, witnessing that coordinate's relevance. The mechanized statement and proof appear in the development as `Reduction_AllCoords.lean` (the lemma `all_coords_relevant_of_not_tautology`).
 
 The next section develops the major practical consequence of this framework: the Simplicity Tax Theorem.
 
@@ -579,13 +583,13 @@ This paper establishes the computational complexity of coordinate sufficiency pr
 
 -   **ANCHOR-SUFFICIENCY** is $\SigmaP{2}$-complete (Theorem [\[thm:anchor-sigma2p\]](#thm:anchor-sigma2p){reference-type="ref" reference="thm:anchor-sigma2p"})
 
--   A complexity dichotomy separates polynomial (logarithmic minimal set) from exponential (linear minimal set) cases (Theorem [\[thm:dichotomy\]](#thm:dichotomy){reference-type="ref" reference="thm:dichotomy"})
+-   An encoding-regime separation contrasts explicit-state polynomial-time (polynomial in $|S|$) with a succinct worst-case ETH lower bound witnessed by a hard family with $k^*=n$ (Theorem [\[thm:dichotomy\]](#thm:dichotomy){reference-type="ref" reference="thm:dichotomy"})
 
 -   Tractable subcases exist for explicit-state encoding, separable utility, and tree-structured utility with explicit local factors (Theorem [\[thm:tractable\]](#thm:tractable){reference-type="ref" reference="thm:tractable"})
 
 These results place the problem of identifying decision-relevant coordinates at the first and second levels of the polynomial hierarchy.
 
-All proofs are machine-checked in Lean 4 ($\sim$`<!-- -->`{=html}5,000 lines). The formalization verifies the reduction mappings and equivalence theorems; complexity classifications follow from standard results (TAUTOLOGY is -complete, $\exists\forall$-SAT is $\SigmaP{2}$-complete) under the encoding model of Section [\[sec:encoding\]](#sec:encoding){reference-type="ref" reference="sec:encoding"}.
+Proofs are machine-checked in Lean 4 (see Appendix [\[app:lean\]](#app:lean){reference-type="ref" reference="app:lean"} for proof listings). The formalization verifies the reduction mappings and equivalence theorems; complexity classifications follow from standard results (TAUTOLOGY is -complete, $\exists\forall$-SAT is $\SigmaP{2}$-complete) under the encoding model of Section [\[sec:encoding\]](#sec:encoding){reference-type="ref" reference="sec:encoding"}. In particular, the strengthened gadget showing that non-tautologies yield instances with *all coordinates relevant* (hence $k^*=\Omega(n)$) is also mechanized (see Appendix [\[app:lean\]](#app:lean){reference-type="ref" reference="app:lean"}).
 
 ## Complexity Characterization {#complexity-characterization .unnumbered}
 
@@ -595,9 +599,7 @@ The results provide precise complexity characterizations within the formal model
 
 2.  **Constructive reductions.** The reductions from TAUTOLOGY and $\exists\forall$-SAT are explicit and machine-checked.
 
-3.  **Dichotomy between regimes.** Under ETH, the complexity separates into polynomial behavior when the minimal sufficient set is logarithmic and exponential lower bounds when it is linear. Intermediate regimes are not ruled out by the lower-bound statement.
-
-4.  **Explicit tractability conditions.** The tractability conditions are stated with explicit encoding assumptions (Section [\[sec:encoding\]](#sec:encoding){reference-type="ref" reference="sec:encoding"}).
+3.  **Encoding-regime separation.** Under the explicit-state encoding, SUFFICIENCY-CHECK is polynomial in $|S|$. Under ETH, there exist succinctly encoded worst-case instances (witnessed by a strengthened gadget family with $k^*=n$) requiring $2^{\Omega(n)}$ time. Intermediate regimes are not ruled out by the lower-bound statement.
 
 ## The Complexity Conservation Law {#the-complexity-conservation-law .unnumbered}
 
@@ -623,20 +625,20 @@ Several questions remain for future work:
 
 -   **Learning cost formalization:** Can central cost $H_{\text{central}}$ be formalized as the rank of a concept matroid, making the amortization threshold precisely computable?
 
+## Practical interpretation {#practical-interpretation .unnumbered}
+
+While this work is theoretical, the complexity bounds have practical meaning. Under ETH, worst-case instances of SUFFICIENCY-CHECK and related problems grow exponentially with problem size; practitioners should therefore not expect polynomial‑time worst‑case solvers for arbitrary inputs. In practice, real datasets often have structure (sparsity, bounded dependency depth, separable utilities) that the tractable subcases capture. Thus, engineering efforts should focus on (a) detecting and exploiting structural restrictions in inputs, and (b) designing heuristic or approximate methods for large unstructured instances. Our experiments illustrate performance on representative inputs, but the theoretical bounds underline the need for domain constraints to achieve scalable, worst‑case guarantees.
+
 
 # Lean 4 Proof Listings {#app:lean}
 
-The complete Lean 4 formalization is available at:
-
-::: center
-<https://doi.org/10.5281/zenodo.18140966>
-:::
+The complete Lean 4 formalization is included in the appendix and companion artifact (Zenodo DOI is listed on the paper title page).
 
 The formalization is not a transcription; it exposes a reusable reduction library with compositional polynomial bounds, enabling later mechanized hardness proofs to reuse these components directly.
 
 ## On the Nature of Definitional Proofs {#definitional-proofs-nature}
 
-The Lean proofs are straightforward applications of definitions and standard complexity-theoretic constructions. Formalization produces insight through precision.
+The Lean proofs follow directly from the formal definitions and standard complexity-theoretic constructions. The mechanization provides machine-checked verification and precision.
 
 **Definitional vs. derivational proofs.** The core theorems establish definitional properties and reduction constructions. For example, the polynomial reduction composition theorem (Theorem [\[thm:poly-compose\]](#thm:poly-compose){reference-type="ref" reference="thm:poly-compose"}) proves that composing two polynomial-time reductions yields a polynomial-time reduction. The proof follows from the definition of polynomial time: composing two polynomials yields a polynomial.
 
@@ -654,11 +656,11 @@ The Lean proofs are straightforward applications of definitions and standard com
 
 1.  **Precision forcing.** Formalizing "coordinate sufficiency" in Lean requires stating exactly what it means for a coordinate subset to contain all decision-relevant information. This precision eliminates ambiguity about edge cases (what if projections differ only on irrelevant coordinates?).
 
-2.  **Reduction correctness.** The TAUTOLOGY reduction (Section [\[sec:hardness\]](#sec:hardness){reference-type="ref" reference="sec:hardness"}) is machine-checked to preserve the decision structure. Informal reductions are error-prone; Lean verification guarantees the mapping is correct.
+2.  **Reduction correctness.** The TAUTOLOGY reduction (Section [\[sec:hardness\]](#sec:hardness){reference-type="ref" reference="sec:hardness"}) is machine-checked to preserve the decision structure. Complexity reductions are subtle and easy to mis-specify. We therefore mechanize the definitions and key reductions in Lean to rule out common formalization mistakes.
 
-3.  **Complexity dichotomy.** Theorem [\[thm:dichotomy\]](#thm:dichotomy){reference-type="ref" reference="thm:dichotomy"} separates logarithmic and linear regimes: polynomial behavior when the minimal sufficient set has size $O(\log |S|)$, and exponential lower bounds under ETH when it has size $\Omega(n)$. Intermediate regimes are not ruled out by the lower-bound statement.
+3.  **Encoding-regime separation.** Theorem [\[thm:dichotomy\]](#thm:dichotomy){reference-type="ref" reference="thm:dichotomy"} contrasts explicit-state polynomial-time (polynomial in $|S|$) with a succinct worst-case ETH lower bound witnessed by a hard family with $k^*=n$ requiring $2^{\Omega(n)}$ time. Intermediate regimes are not ruled out by the lower-bound statement.
 
-**What machine-checking guarantees.** The Lean compiler verifies that every proof step is valid, every definition is consistent, and no axioms are added beyond Lean's foundations (extended with Mathlib for basic combinatorics and complexity definitions). Zero `sorry` placeholders means zero unproven claims. The 3,400+ lines establish a verified chain from basic definitions (decision problems, coordinate spaces, polynomial reductions) to the final theorems (hardness results, dichotomy, tractable cases). Reviewers need not trust our informal explanations---they run `lake build` and verify the proofs themselves.
+**What machine-checking guarantees.** The Lean compiler verifies that each proof step is valid and each definition is consistent; the mechanization does not introduce additional axioms beyond the chosen foundations. The mechanization contains no `sorry` placeholders. Reviewers can independently verify the proofs by running `lake build` in the mechanization directory and inspecting the companion artifact.
 
 **Comparison to informal complexity arguments.** Prior work on model selection complexity (Chickering et al. [@chickering2004large], Teyssier & Koller [@teyssier2012ordering]) presents compelling informal arguments but lacks machine-checked proofs. Our contribution is not new *wisdom*---the insight that model selection is hard is old. Our contribution is *formalization*: making "coordinate sufficiency" precise enough to mechanize, constructing verified reductions, and proving the complexity results hold for the formalized definitions.
 
@@ -675,6 +677,8 @@ The formalization consists of 33 files organized as follows:
 -   `PolynomialReduction.lean` -- Polynomial reduction composition (Theorem [\[thm:poly-compose\]](#thm:poly-compose){reference-type="ref" reference="thm:poly-compose"})
 
 -   `Reduction.lean` -- TAUTOLOGY reduction for sufficiency checking
+
+-   `Reduction_AllCoords.lean` -- Strengthened gadget: if $\varphi$ is not a tautology then every coordinate is relevant
 
 -   `Hardness/` -- Counting complexity and approximation barriers
 
@@ -717,13 +721,7 @@ The formalization consists of 33 files organized as follows:
 
 ## Verification Status
 
--   Total lines: $\sim$`<!-- -->`{=html}5,000
-
--   Theorems: 200+
-
--   Files: 33
-
--   Status: All proofs compile with no `sorry`
+The mechanization and its verification status are documented in the companion artifact; reviewers may consult the artifact for exact counts and files. The proofs compile and can be verified via the provided build instructions.
 
 
 

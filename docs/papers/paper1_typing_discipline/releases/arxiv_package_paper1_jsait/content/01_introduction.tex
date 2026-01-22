@@ -37,6 +37,11 @@ q_I(v) = \begin{cases} 1 & \text{if } v \text{ satisfies interface } I \\ 0 & \t
 Let $\Phi_{\mathcal{I}} = \{q_I : I \in \mathcal{I}\}$ denote the interface observation family.
 \end{definition}
 
+\begin{remark}[Notation for size parameters]
+We write $n := |\mathcal{I}|$ for the ambient number of available attributes (interfaces). We write $d$ for the distinguishing dimension (the common size of all minimal distinguishing query sets; Definition~\ref{def:distinguishing-dimension}), so $d \le n$ and there exist worst-case families with $d = n$. We write $m$ for the number of \emph{query sites} (call sites) that perform attribute checks in a program or protocol (used only in the complexity-of-maintenance discussion).
+When discussing a particular identification/verification task, we may write $s$ for the number of attributes actually queried/traversed by the procedure (e.g., members/fields checked in a structural type test, phenotypic characters checked in taxonomy), with $s \le n$.
+\end{remark}
+
 \begin{definition}[Interface profile]
 The interface profile function $\pi: \mathcal{V} \to \{0,1\}^{|\mathcal{I}|}$ maps each value to its complete interface signature:
 \[
@@ -173,4 +178,3 @@ This paper establishes the following results:
 \subsection{Paper Organization}
 
 Section~\ref{sec:framework} formalizes the compression framework and defines the $(L, W, D)$ tradeoff. Section~\ref{sec:complexity} establishes complexity bounds for error localization. Section~\ref{sec:matroid} proves the matroid structure of type axes. Section~\ref{sec:witness} analyzes witness cost in detail. Section~\ref{sec:lwd} proves Pareto optimality. Section~\ref{sec:applications} instantiates the theory in real runtimes. Section~\ref{sec:conclusion} concludes. Appendix~\ref{sec:lean} describes the Lean 4 formalization.
-

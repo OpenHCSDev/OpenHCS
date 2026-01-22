@@ -52,6 +52,7 @@ lake build
 | `QueryComplexity.lean` | QueryComplexity |
 | `Quotient.lean` | Quotient |
 | `Reduction.lean` | Reduction |
+| `Reduction_AllCoords.lean` | Reduction_AllCoords |
 | `Sufficiency.lean` | Sufficiency |
 | `Summary.lean` | Summary |
 | `BoundedActions.lean` | BoundedActions |

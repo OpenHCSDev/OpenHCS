@@ -8,14 +8,14 @@ $$W_{\text{eq}} = O(1)$$
 
 Specifically, the witness is a single tag read: compare $\text{tag}(v_1) = \text{tag}(v_2)$.
 
-Interface-only observers require $W_{\text{eq}} = \Omega(n)$ where $n$ is the number of interfaces.
+Interface-only observers require $W_{\text{eq}} = \Omega(d)$ where $d$ is the distinguishing dimension (and $d \le n$, with worst-case $d = n$).
 \end{theorem}
 
 \begin{proof}
 See Lean formalization: \texttt{proofs/nominal\_resolution.lean}. The proof shows:
 \begin{enumerate}
 \item Nominal-tag access is a single primitive query
-\item Interface-only observers must query $n$ interfaces to distinguish all types
+\item Interface-only observers must query at least $d$ interfaces in the worst case (a generic strategy queries all $n$)
 \item No shorter witness exists for interface-only observers (by the information barrier)
 \end{enumerate}
 \end{proof}
@@ -29,11 +29,10 @@ See Lean formalization: \texttt{proofs/nominal\_resolution.lean}. The proof show
 \textbf{Observer Class} & \textbf{Witness Procedure} & \textbf{Witness Cost $W$} \\
 \hline
 Nominal-tag & Single tag read & $O(1)$ \\
-Interface-only & Query $n$ interfaces & $O(n)$ \\
+Interface-only & Query a distinguishing set & $\Omega(d)$ \\
 \hline
 \end{tabular}
 \caption{Witness cost for type identity by observer class.}
 \end{table}
 
 The Lean 4 formalization (Appendix~\ref{sec:lean}) provides a machine-checked proof that nominal-tag access minimizes witness cost for type identity.
-

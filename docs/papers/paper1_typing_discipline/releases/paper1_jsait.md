@@ -10,13 +10,13 @@ We extend classical rate-distortion theory to a discrete classification setting 
 
 **Information barrier (zero-error identifiability).** When distinct classes share identical attribute profiles, no algorithm, regardless of computational power, can identify the class from attribute queries alone. Formally: if $\pi$ is not injective on classes, then zero-error identification from attribute queries alone is impossible.
 
-**Rate-identification tradeoff.** We identify the unique Pareto-optimal zero-error point in the $(L, W, D)$ tradeoff space and describe the induced tradeoff geometry. A nominal tag of $L = \lceil \log_2 k \rceil$ bits for $k$ classes yields $W = O(1)$ with $D = 0$. Without tags ($L = 0$), identification requires $W = \Omega(n)$ queries and, in the presence of attribute collisions, incurs $D > 0$.
+**Rate-identification tradeoff.** We identify the unique Pareto-optimal zero-error point in the $(L, W, D)$ tradeoff space and describe the induced tradeoff geometry. A nominal tag of $L = \lceil \log_2 k \rceil$ bits for $k$ classes yields $W = O(1)$ with $D = 0$. Without tags ($L = 0$), zero-error identification requires $W = \Omega(d)$ attribute queries, where $d$ is the distinguishing dimension; in the worst case $d = n$ (the ambient attribute count), giving $W = \Omega(n)$. In the presence of attribute collisions, any tag-free scheme incurs $D > 0$.
 
 **Converse.** In any information-barrier domain, any scheme achieving $D = 0$ requires $L \geq \log_2 k$ bits. This is tight: nominal tagging achieves the bound with $W = O(1)$.
 
 **Matroid structure.** Minimal sufficient query sets form the bases of a matroid. The *distinguishing dimension* (the common cardinality of all minimal query sets) is well-defined, connecting to zero-error source coding via graph entropy.
 
-**Applications.** The theory instantiates to type systems (duck vs. nominal typing), databases (attribute vs. key lookup), and biological taxonomy (phenotype vs. species identifier). The unbounded gap $\Omega(n)$ vs. $O(1)$ explains convergence toward hybrid systems combining structural observation with nominal tagging.
+**Applications.** The theory instantiates to type systems (duck vs. nominal typing), databases (attribute vs. key lookup), and biological taxonomy (phenotype vs. species identifier). The unbounded gap $\Omega(d)$ vs. $O(1)$ (with a worst-case family where $d = n$) explains convergence toward hybrid systems combining structural observation with nominal tagging.
 
 All results are machine-checked in Lean 4 (6,000+ lines, 0 `sorry`).
 
@@ -57,6 +57,10 @@ We use "attribute" for the abstract concept. In type systems, attributes are *in
 
 ::: definition
 For each $I \in \mathcal{I}$, define the interface-membership observation $q_I: \mathcal{V} \to \{0,1\}$: $$q_I(v) = \begin{cases} 1 & \text{if } v \text{ satisfies interface } I \\ 0 & \text{otherwise} \end{cases}$$ Let $\Phi_{\mathcal{I}} = \{q_I : I \in \mathcal{I}\}$ denote the interface observation family.
+:::
+
+::: remark
+We write $n := |\mathcal{I}|$ for the ambient number of available attributes (interfaces). We write $d$ for the distinguishing dimension (the common size of all minimal distinguishing query sets; Definition [\[def:distinguishing-dimension\]](#def:distinguishing-dimension){reference-type="ref" reference="def:distinguishing-dimension"}), so $d \le n$ and there exist worst-case families with $d = n$. We write $m$ for the number of *query sites* (call sites) that perform attribute checks in a program or protocol (used only in the complexity-of-maintenance discussion). When discussing a particular identification/verification task, we may write $s$ for the number of attributes actually queried/traversed by the procedure (e.g., members/fields checked in a structural type test, phenotypic characters checked in taxonomy), with $s \le n$.
 :::
 
 ::: definition
@@ -225,6 +229,8 @@ A value $v \in \mathcal{V}$ has representation $(B(v), S(v))$ where: $$\begin{al
 B(v) &= \text{lineage}(\text{class}(v)) \quad \text{(class derivation chain)} \\
 S(v) &= \pi(v) = (q_I(v))_{I \in \mathcal{I}} \quad \text{(interface profile)}
 \end{aligned}$$ The lineage axis captures *nominal* identity: where the class comes from. The profile axis captures *structural* identity: what the value can do.
+
+In the PL instantiation, $B$ is carried by the runtime lineage order (e.g., C3/MRO output), while OpenHCS additionally uses a separate normalization registry $R$ applied before lookup and not defining inheritance (Appendix [\[sec:lean\]](#sec:lean){reference-type="ref" reference="sec:lean"}).
 :::
 
 ::: theorem
@@ -234,7 +240,7 @@ S(v) &= \pi(v) = (q_I(v))_{I \in \mathcal{I}} \quad \text{(interface profile)}
 In the PL instantiation, $\alpha(v) = (B(v), S(v))$, so in-scope semantic properties are functions of $(B,S)$.
 
 ::: proof
-*Proof.* An admissible $\Phi$-only strategy observes $v$ solely through responses to primitive queries $q_I \in \Phi$. By hypothesis each such response is a function of $\alpha(v)$. Therefore every query transcript --- and hence any strategy's output --- depends only on $\alpha(v)$, so the computed property factors through $\alpha$. ◻
+*Proof.* An admissible $\Phi$-only strategy observes $v$ solely through responses to primitive queries $q_I \in \Phi$. By hypothesis each such response is a function of $\alpha(v)$. Therefore every query transcript, and hence any strategy's output, depends only on $\alpha(v)$, so the computed property factors through $\alpha$. ◻
 :::
 
 ## Interface Equivalence and Observational Limits
@@ -373,7 +379,7 @@ $D = 0$ means the observation strategy is *sound*: type equality (as computed by
 
 -   *Preprocessing*: With unbounded preprocessing over the type universe $\mathcal{T}$, one could build a lookup table mapping attribute profiles to types. This reduces identification to $O(1)$ table lookup, but the table has size $O(|\mathcal{T}|)$, hiding the complexity in space rather than eliminating it. The constraint models systems that cannot afford $O(|\mathcal{T}|)$ storage per observer.
 
--   *Amortization*: If $W$ were amortized over $n$ identifications, one could cache earlier results. This again hides complexity in state. The per-identification model captures stateless observers (typical in type checking, database queries, and biological identification).
+-   *Amortization*: If $W$ were amortized over a sequence of identifications, one could cache earlier results. This again hides complexity in state. The per-identification model captures stateless observers (typical in type checking, database queries, and biological identification).
 
 Dropping these constraints changes the achievable region but not the qualitative separation: nominal tags still dominate for $D = 0$ because they provide $O(1)$ worst-case identification without requiring $O(|\mathcal{T}|)$ preprocessing.
 
@@ -510,6 +516,10 @@ $\mathcal{B}$ is the set of bases of a matroid on ground set $E$.
 []{#def:distinguishing-dimension label="def:distinguishing-dimension"} The *distinguishing dimension* of a classification system is the common cardinality of all minimal distinguishing sets.
 :::
 
+::: remark
+Let $n := |\mathcal{I}|$ be the ambient number of available attributes (interfaces). Clearly $d \le n$, and there exist worst-case families with $d = n$.
+:::
+
 ::: corollary
 All minimal distinguishing sets have equal cardinality. Thus the distinguishing dimension (Definition [\[def:distinguishing-dimension\]](#def:distinguishing-dimension){reference-type="ref" reference="def:distinguishing-dimension"}) is well-defined.
 :::
@@ -536,7 +546,7 @@ Nominal-tag observers achieve the minimum witness cost for type identity: $$W_{\
 
 Specifically, the witness is a single tag read: compare $\text{tag}(v_1) = \text{tag}(v_2)$.
 
-Interface-only observers require $W_{\text{eq}} = \Omega(n)$ where $n$ is the number of interfaces.
+Interface-only observers require $W_{\text{eq}} = \Omega(d)$ where $d$ is the distinguishing dimension (and $d \le n$, with worst-case $d = n$).
 :::
 
 ::: proof
@@ -544,7 +554,7 @@ Interface-only observers require $W_{\text{eq}} = \Omega(n)$ where $n$ is the nu
 
 1.  Nominal-tag access is a single primitive query
 
-2.  Interface-only observers must query $n$ interfaces to distinguish all types
+2.  Interface-only observers must query at least $d$ interfaces in the worst case (a generic strategy queries all $n$)
 
 3.  No shorter witness exists for interface-only observers (by the information barrier)
 
@@ -553,10 +563,10 @@ Interface-only observers require $W_{\text{eq}} = \Omega(n)$ where $n$ is the nu
 
 ## Witness Cost Comparison
 
-  **Observer Class**    **Witness Procedure**   **Witness Cost $W$**
-  -------------------- ----------------------- ----------------------
-  Nominal-tag              Single tag read             $O(1)$
-  Interface-only        Query $n$ interfaces           $O(n)$
+  **Observer Class**      **Witness Procedure**      **Witness Cost $W$**
+  -------------------- ---------------------------- ----------------------
+  Nominal-tag                Single tag read                $O(1)$
+  Interface-only        Query a distinguishing set       $\Omega(d)$
 
   : Witness cost for type identity by observer class.
 
@@ -588,15 +598,15 @@ Let $E(\mathcal{O})$ be the number of locations that must be inspected to find a
 :::
 
 ::: theorem
-[]{#thm:attribute-localization label="thm:attribute-localization"} $E(\text{attribute-only}) = \Omega(n)$ where $n$ = number of query sites.
+[]{#thm:attribute-localization label="thm:attribute-localization"} $E(\text{attribute-only}) = \Omega(m)$ where $m$ = number of query sites.
 :::
 
 ::: proof
-*Proof.* Under attribute-only observation, each query site independently checks "does $v$ have attribute $a$?" with no centralized declaration. For $n$ query sites, each must be inspected. Lower bound is $\Omega(n)$. ◻
+*Proof.* Under attribute-only observation, each query site independently checks "does $v$ have attribute $a$?" with no centralized declaration. For $m$ query sites, each must be inspected. Lower bound is $\Omega(m)$. ◻
 :::
 
 ::: corollary
-[]{#cor:strict-dominance label="cor:strict-dominance"} Nominal-tag observation strictly dominates attribute-only: $E(\text{nominal-tag}) = O(1) < \Omega(n) = E(\text{attribute-only})$ for all $n > 1$.
+[]{#cor:strict-dominance label="cor:strict-dominance"} Nominal-tag observation strictly dominates attribute-only: $E(\text{nominal-tag}) = O(1) < \Omega(m) = E(\text{attribute-only})$ for all $m > 1$.
 :::
 
 ## The Information Scattering Theorem
@@ -606,7 +616,7 @@ Let $I(\mathcal{O}, c)$ be the set of locations where constraint $c$ is encoded 
 :::
 
 ::: theorem
-[]{#thm:attribute-scattering label="thm:attribute-scattering"} For attribute-only observation, $|I(\text{attribute-only}, c)| = O(n)$ where $n$ = query sites using constraint $c$.
+[]{#thm:attribute-scattering label="thm:attribute-scattering"} For attribute-only observation, $|I(\text{attribute-only}, c)| = O(m)$ where $m$ = query sites using constraint $c$.
 :::
 
 ::: proof
@@ -669,7 +679,7 @@ In such domains, interface-only observers achieve:
 
 1.  `nominal_cost_constant`: Nominal-tag achieves $(L, W, D) = (O(1), O(1), 0)$
 
-2.  `interface_cost_linear`: Interface-only requires $O(n)$ queries
+2.  `interface_cost_linear`: Interface-only admits the generic upper bound $W \le n$ (query all $n$ attributes); combined with the lower bound $W = \Omega(d)$, this yields an unbounded separation from nominal tagging
 
 3.  `python_gap_unbounded`: The cost gap is unbounded in the limit
 
@@ -699,6 +709,20 @@ The Lean 4 formalization (Appendix [\[sec:lean\]](#sec:lean){reference-type="re
 In programming language terms: *nominal typing* corresponds to nominal-tag observers (e.g., CPython's `isinstance`, Java's `.getClass()`). *Duck typing* corresponds to interface-only observers (e.g., Python's `hasattr`). *Structural typing* is an intermediate case with $D = 0$ but $W = O(n)$.
 :::
 
+::: remark
+Using the notation above, a structural check that traverses $s$ members/fields has $W = O(s)$ with $s \le n$.
+:::
+
+::: remark
+When structural typing checks traverse $s$ members/fields (rather than ranging over the full attribute universe), the natural bound is $W = O(s)$ with $s \le n$.
+:::
+
+Using the notation above, a structural check that traverses $s$ members/fields has $W = O(s)$ with $s \le n$.
+
+::: remark
+When structural typing checks traverse $s$ members/fields (rather than ranging over the full attribute universe), the natural bound is $W = O(s)$ with $s \le n$.
+:::
+
 
 The preceding sections established abstract results about observer classes and witness cost. We now ground these in concrete systems across multiple domains, showing that real classification systems instantiate the theoretical categories and that the complexity bounds are not artifacts of the model but observable properties of deployed implementations.
 
@@ -708,13 +732,13 @@ Linnean taxonomy classifies organisms by observable phenotypic characters: morph
 
 **The cryptic species problem:** Cryptic species share identical phenotypic profiles but are reproductively isolated and genetically distinct. Attribute-only observation (morphology) cannot distinguish them: $\pi(A) = \pi(B)$ but $\text{species}(A) \neq \text{species}(B)$.
 
-**The nominal tag:** DNA barcoding provides the resolution [@DNABarcoding]. A short genetic sequence (e.g., mitochondrial COI) acts as the nominal tag: $O(1)$ identity verification via sequence comparison. This reduced cryptic species identification from $\Omega(n)$ morphological examination to constant-time molecular lookup.
+**The nominal tag:** DNA barcoding provides the resolution [@DNABarcoding]. A short genetic sequence (e.g., mitochondrial COI) acts as the nominal tag: $O(1)$ identity verification via sequence comparison. This reduced cryptic species identification from $\Omega(s)$ phenotypic examination (checking $s$ characters) to constant-time molecular lookup.
 
 ## Library Classification: Subject vs ISBN
 
 Library classification systems like Dewey Decimal observe subject matter, a form of attribute-only classification. Two books on the same subject are indistinguishable by subject code alone.
 
-**The nominal tag:** The ISBN (International Standard Book Number) is the nominal tag [@ISBN]. Given two physical books, identity verification is $O(1)$: compare ISBNs. Without ISBNs, distinguishing two copies of different editions on the same subject requires $O(n)$ attribute inspection (publication date, page count, publisher, etc.).
+**The nominal tag:** The ISBN (International Standard Book Number) is the nominal tag [@ISBN]. Given two physical books, identity verification is $O(1)$: compare ISBNs. Without ISBNs, distinguishing two copies of different editions on the same subject requires $O(s)$ attribute inspection (publication date, page count, publisher, etc.).
 
 ## Database Systems: Columns vs Primary Keys
 
@@ -734,7 +758,7 @@ Every CPython heap object begins with a `PyObject` header containing an `ob_type
 
 **Witness procedure:** Given objects `a` and `b`, type identity is `type(a) is type(b)`---two pointer dereferences and one pointer comparison. Cost: $O(1)$ primitive operations, independent of interface count.
 
-**Contrast with `hasattr`:** Interface-only observation in Python uses `hasattr(obj, name)` for each required method. To verify an object satisfies a protocol with $k$ methods requires $k$ attribute lookups. Worse: different call sites may check different subsets, creating $\Omega(n)$ total checks where $n$ is the number of call sites. The nominal tag eliminates this entirely.
+**Contrast with `hasattr`:** Interface-only observation in Python uses `hasattr(obj, name)` for each required method. To verify an object satisfies a protocol with $s$ required methods requires $s$ attribute lookups. Worse: different call sites may check different subsets, creating $\Omega(m)$ total checks where $m$ is the number of call sites. The nominal tag eliminates this entirely.
 
 ### Java: `.getClass()` and the Method Table
 
@@ -746,7 +770,7 @@ Java's object model stores a pointer to the class object in every instance heade
 
 TypeScript uses attribute-only (declared) observation [@TypeScriptDocs]: the compiler checks structural compatibility, not nominal identity. Two types are assignment-compatible iff their structures match.
 
-**Implication:** Type identity checking requires traversing the structure. For a type with $n$ fields/methods, $W(\text{type-identity}) = O(n)$. This is inherent to the observation model: no compilation strategy can reduce this to $O(1)$ without adding nominal tags.
+**Implication:** Type identity checking requires traversing the structure. For a type with $s$ fields/methods, $W(\text{type-identity}) = O(s)$. This is inherent to the observation model: no compilation strategy can reduce this to $O(1)$ without adding nominal tags.
 
 ### Rust: Static Nominal Tags
 
@@ -763,12 +787,12 @@ Rust resolves type identity at compile time via its nominal type system. At runt
   Databases       Column values            Primary key          $O(1)$
   CPython         `hasattr` probing        `ob_type` pointer    $O(1)$
   Java            Interface check          `.getClass()`        $O(1)$
-  TypeScript      Structural check         (none at runtime)    $O(n)$
+  TypeScript      Structural check         (none at runtime)    $O(s)$
   Rust (static)   Trait bounds             `TypeId`             $O(1)$
 
-  : Witness cost for identity across classification systems. Nominal tags achieve $O(1)$; attribute-only pays $O(n)$ or $O(k)$.
+  : Witness cost for identity across classification systems. Nominal tags achieve $O(1)$; attribute-only pays $O(s)$ per structural check (or $O(k)$ when enumerating classes/declared interfaces).
 
-The pattern is universal: systems with nominal tags achieve $O(1)$ witness cost; systems without them pay $O(n)$ or $O(k)$. This is not domain-specific; it is the information barrier theorem instantiated across classification systems.
+The pattern is universal: systems with nominal tags achieve $O(1)$ witness cost; systems without them pay $O(s)$ or $O(k)$. This is not domain-specific; it is the information barrier theorem instantiated across classification systems.
 
 
 ## Noisy Query Model
@@ -835,7 +859,7 @@ This paper presents an information-theoretic analysis of classification under ob
 
 1.  **Information Barrier**: Observers limited to attribute-membership queries cannot compute properties that vary within indistinguishability classes. This is universal: it applies to biological taxonomy, database systems, library classification, and programming language runtimes alike.
 
-2.  **Witness Optimality**: Nominal-tag observers achieve $W(\text{identity}) = O(1)$, the minimum witness cost. The gap from attribute-only observation ($\Omega(n)$) is unbounded.
+2.  **Witness Optimality**: Nominal-tag observers achieve $W(\text{identity}) = O(1)$, the minimum witness cost. The gap from attribute-only observation ($\Omega(d)$, with a worst-case family where $d = n$) is unbounded.
 
 3.  **Matroid Structure**: Minimal distinguishing query sets form the bases of a matroid. The distinguishing dimension of a classification problem is well-defined and computable.
 
@@ -853,7 +877,7 @@ The information barrier is not a quirk of any particular domain; it is a mathema
 
 ## Implications
 
--   **Nominal tags are not optional** when identity queries are required. They are the unique mechanism achieving $O(1)$ witness cost with zero distortion.
+-   **The necessity of nominal tags is a theorem, not a preference.** In information-barrier domains (Definition [\[def:info-barrier-domain\]](#def:info-barrier-domain){reference-type="ref" reference="def:info-barrier-domain"}), any scheme achieving zero-error identification ($D = 0$) requires tag length $L \ge \log_2 k$ (Theorem [\[thm:converse\]](#thm:converse){reference-type="ref" reference="thm:converse"}). Nominal-tag observation achieves the unique Pareto-optimal $D=0$ point with $W = O(1)$ at this bound (Theorem [\[thm:lwd-optimal\]](#thm:lwd-optimal){reference-type="ref" reference="thm:lwd-optimal"}).
 
 -   **The barrier is informational, not computational**: even with unbounded resources, attribute-only observers cannot overcome it.
 
@@ -869,7 +893,7 @@ The information barrier is not a quirk of any particular domain; it is a mathema
 
 ## Conclusion
 
-Classification under observational constraints admits a clean information-theoretic analysis. Nominal tags are not a design preference; they are the provably optimal strategy for identity verification under the $(L, W, D)$ tradeoff. The results are universal, and all proofs are machine-verified in Lean 4.
+Classification under observational constraints admits a clean information-theoretic analysis. In information-barrier domains (Definition [\[def:info-barrier-domain\]](#def:info-barrier-domain){reference-type="ref" reference="def:info-barrier-domain"}), nominal-tag observation achieves the unique Pareto-optimal $D=0$ point in the $(L, W, D)$ tradeoff (Theorem [\[thm:lwd-optimal\]](#thm:lwd-optimal){reference-type="ref" reference="thm:lwd-optimal"}), and any $D=0$ scheme necessarily has $L \ge \log_2 k$ (Theorem [\[thm:converse\]](#thm:converse){reference-type="ref" reference="thm:converse"}). The results are universal within the stated observation model, and all proofs are machine-verified in Lean 4.
 
 ## AI Disclosure {#ai-disclosure .unnumbered}
 
@@ -899,21 +923,26 @@ We provide machine-checked proofs of our core theorems in Lean 4. The complete d
 
 2.  **Python instantiation layer** (Sections 6.1--6.11): The dual-axis resolution algorithm, provenance preservation, and OpenHCS-specific invariants: proving that Python's `type(name, bases, namespace)` and C3 linearization correctly instantiate the abstract model.
 
-3.  **Complexity bounds layer** (Section 6.13): Formalization of O(1) vs O(k) vs $\Omega(n)$ complexity separation. Proves that nominal error localization is O(1), interface-only (declared) is O(k), interface-only is $\Omega(n)$, and the gap grows without bound.
+3.  **Complexity bounds layer** (Section 6.13): Formalization of O(1) vs O(k) vs $\Omega(m)$ complexity separation (where $m$ is the number of query sites). Proves that nominal error localization is O(1), interface-only (declared) is O(k), interface-only is $\Omega(m)$, and the gap grows without bound.
 
 The abstract layer establishes that our theorems apply to Java, C#, Ruby, Scala, and any language with the $(B, S)$ structure. The Python layer demonstrates concrete realization. The complexity layer proves the asymptotic dominance is machine-checkable, not informal.
 
-## Type Universe and Registry
+## Type Universe, Normalization Registry, and Lineage {#type-universe-and-registry}
 
-Types are represented as natural numbers, capturing nominal identity:
+We represent nominal types as atoms (`Typ := Nat`). The model uses two distinct structures: (i) a lineage order `mro : MRO` (most-specific-first) capturing multi-step inheritance (e.g., the result of C3 linearization), and (ii) an OpenHCS-specific normalization registry `R : Registry` that optionally rewrites certain nominal types to a canonical base type used for resolution and provenance reporting. Importantly, `R` is not the inheritance relation; inheritance is carried by `mro`. The registry invariant `R.wellFormed` states that normalization targets are fixed points (canonical bases do not normalize further), yielding normalization idempotence.
 
 ``` {style="lean"}
-abbrev Typ := Nat  -- Types as natural numbers (nominal identity)
+-- Types as natural numbers (nominal identity)
+abbrev Typ := Nat
+
+-- Normalization registry: optional rewrite to a canonical base type
 def Registry := Typ -> Option Typ
 
+-- Well-formed normalization: rewrite targets are fixed points
 def Registry.wellFormed (R : Registry) : Prop :=
   forall L B, R L = some B -> R B = none
 
+-- One-step normalization used during resolution / provenance
 def normalizeType (R : Registry) (T : Typ) : Typ :=
   match R T with | some B => B | none => T
 ```
@@ -941,6 +970,8 @@ structure ConfigInstance where
 
 def ConfigContext := ScopeId -> List ConfigInstance
 ```
+
+Here, `mro : MRO` denotes the multi-step inheritance linearization (most-specific-first); our mechanized results assume it is a valid linearization (e.g., produced by C3 when it succeeds).
 
 ## The RESOLVE Algorithm
 
@@ -1124,7 +1155,7 @@ The machine-checked verification establishes:
 
 -   **C3 correctness**: We assume MRO is well-formed. Python's C3 algorithm can fail on pathological diamonds (raising `TypeError`). Our proofs apply only when C3 succeeds.
 
--   **Registry invariants**: `Registry.wellFormed` is an axiom (base types not in domain). We prove theorems *given* this axiom but do not derive it from more primitive foundations.
+-   **Normalization-registry invariant**: `Registry.wellFormed` is assumed as an OpenHCS invariant: canonical base types are fixed points of normalization (normalization does not chain). We prove all results conditional on this invariant, but do not derive it from more primitive foundations.
 
 -   **Termination and complexity**: We use Lean's termination checker to verify `resolve` terminates. The complexity bound O(scopes $\times$ MRO) is also mechanically verified via `resolution_complexity_bound` and related lemmas proving linearity in each dimension.
 

@@ -45,8 +45,8 @@ Module & Lines & Theorems & Purpose \\
   instantiate the abstract model.
 \item
   \textbf{Complexity bounds layer} (Section 6.13): Formalization of O(1)
-  vs O(k) vs $\Omega(n)$ complexity separation. Proves that nominal error
-  localization is O(1), interface-only (declared) is O(k), interface-only is $\Omega(n)$, and the gap
+  vs O(k) vs $\Omega(m)$ complexity separation (where $m$ is the number of query sites). Proves that nominal error
+  localization is O(1), interface-only (declared) is O(k), interface-only is $\Omega(m)$, and the gap
   grows without bound.
 \end{enumerate}
 
@@ -55,18 +55,26 @@ Ruby, Scala, and any language with the \((B, S)\) structure. The
 Python layer demonstrates concrete realization. The complexity layer
 proves the asymptotic dominance is machine-checkable, not informal.
 
-\subsection{Type Universe and
-Registry}\label{type-universe-and-registry}
+\subsection{Type Universe, Normalization Registry, and
+Lineage}\label{type-universe-and-registry}
 
-Types are represented as natural numbers, capturing nominal identity:
+We represent nominal types as atoms (\texttt{Typ := Nat}). The model uses two distinct structures:
+(i) a lineage order \texttt{mro : MRO} (most-specific-first) capturing multi-step inheritance (e.g., the result of C3 linearization), and
+(ii) an OpenHCS-specific normalization registry \texttt{R : Registry} that optionally rewrites certain nominal types to a canonical base type used for resolution and provenance reporting.
+Importantly, \texttt{R} is not the inheritance relation; inheritance is carried by \texttt{mro}. The registry invariant \texttt{R.wellFormed} states that normalization targets are fixed points (canonical bases do not normalize further), yielding normalization idempotence.
 
 \begin{lstlisting}[style=lean]
-abbrev Typ := Nat  -- Types as natural numbers (nominal identity)
+-- Types as natural numbers (nominal identity)
+abbrev Typ := Nat
+
+-- Normalization registry: optional rewrite to a canonical base type
 def Registry := Typ -> Option Typ
 
+-- Well-formed normalization: rewrite targets are fixed points
 def Registry.wellFormed (R : Registry) : Prop :=
   forall L B, R L = some B -> R B = none
 
+-- One-step normalization used during resolution / provenance
 def normalizeType (R : Registry) (T : Typ) : Typ :=
   match R T with | some B => B | none => T
 \end{lstlisting}
@@ -94,6 +102,8 @@ structure ConfigInstance where
 
 def ConfigContext := ScopeId -> List ConfigInstance
 \end{lstlisting}
+
+\noindent Here, \texttt{mro : MRO} denotes the multi-step inheritance linearization (most-specific-first); our mechanized results assume it is a valid linearization (e.g., produced by C3 when it succeeds).
 
 \subsection{The RESOLVE Algorithm}\label{the-resolve-algorithm}
 
@@ -293,9 +303,7 @@ The machine-checked verification establishes:
   algorithm can fail on pathological diamonds (raising
   \texttt{TypeError}). Our proofs apply only when C3 succeeds.
 \item
-  \textbf{Registry invariants}: \texttt{Registry.wellFormed} is an axiom
-  (base types not in domain). We prove theorems \emph{given} this axiom
-  but do not derive it from more primitive foundations.
+  \textbf{Normalization-registry invariant}: \texttt{Registry.wellFormed} is assumed as an OpenHCS invariant: canonical base types are fixed points of normalization (normalization does not chain). We prove all results conditional on this invariant, but do not derive it from more primitive foundations.
 \item
   \textbf{Termination and complexity}: We use Lean's termination checker to verify
   \texttt{resolve} terminates. The complexity bound

@@ -46,6 +46,8 @@ B(v) &= \text{lineage}(\text{class}(v)) \quad \text{(class derivation chain)} \\
 S(v) &= \pi(v) = (q_I(v))_{I \in \mathcal{I}} \quad \text{(interface profile)}
 \end{align}
 The lineage axis captures \emph{nominal} identity: where the class comes from. The profile axis captures \emph{structural} identity: what the value can do.
+
+In the PL instantiation, $B$ is carried by the runtime lineage order (e.g., C3/MRO output), while OpenHCS additionally uses a separate normalization registry $R$ applied before lookup and not defining inheritance (Appendix~\ref{sec:lean}).
 \end{definition}
 
 \begin{theorem}[Fixed-axis completeness]\label{thm:model-completeness}
@@ -58,7 +60,7 @@ P(v) = \tilde{P}(\alpha(v)) \quad \text{for all } v \in \mathcal{V}.
 In the PL instantiation, $\alpha(v) = (B(v), S(v))$, so in-scope semantic properties are functions of $(B,S)$.
 
 \begin{proof}
-An admissible $\Phi$-only strategy observes $v$ solely through responses to primitive queries $q_I \in \Phi$. By hypothesis each such response is a function of $\alpha(v)$. Therefore every query transcript — and hence any strategy's output — depends only on $\alpha(v)$, so the computed property factors through $\alpha$.
+An admissible $\Phi$-only strategy observes $v$ solely through responses to primitive queries $q_I \in \Phi$. By hypothesis each such response is a function of $\alpha(v)$. Therefore every query transcript, and hence any strategy's output, depends only on $\alpha(v)$, so the computed property factors through $\alpha$.
 \end{proof}
 
 \subsection{Interface Equivalence and Observational Limits}
@@ -219,7 +221,7 @@ $D = 0$ means the observation strategy is \emph{sound}: type equality (as comput
 \textbf{Justification.} The ``no preprocessing'' and ``no amortization'' constraints exclude trivializations:
 \begin{itemize}
 \item \emph{Preprocessing}: With unbounded preprocessing over the type universe $\mathcal{T}$, one could build a lookup table mapping attribute profiles to types. This reduces identification to $O(1)$ table lookup, but the table has size $O(|\mathcal{T}|)$, hiding the complexity in space rather than eliminating it. The constraint models systems that cannot afford $O(|\mathcal{T}|)$ storage per observer.
-\item \emph{Amortization}: If $W$ were amortized over $n$ identifications, one could cache earlier results. This again hides complexity in state. The per-identification model captures stateless observers (typical in type checking, database queries, and biological identification).
+\item \emph{Amortization}: If $W$ were amortized over a sequence of identifications, one could cache earlier results. This again hides complexity in state. The per-identification model captures stateless observers (typical in type checking, database queries, and biological identification).
 \end{itemize}
 Dropping these constraints changes the achievable region but not the qualitative separation: nominal tags still dominate for $D = 0$ because they provide $O(1)$ worst-case identification without requiring $O(|\mathcal{T}|)$ preprocessing.
 
