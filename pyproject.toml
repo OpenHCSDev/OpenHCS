@@ -2,6 +2,20 @@
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
+# NOTE: For automatic ZeroC-Ice installation with OMERO extras,
+# this project uses build hooks to automatically download and install
+# zeroc-ice from Glencoe Software's repository.
+#
+# When installing with OMERO support, use:
+#   pip install -e ".[omero]"  # For editable installs (build hook runs automatically)
+#   pip install ".[omero]"      # For regular installs
+#
+# The build hook will automatically download and install zeroc-ice from
+# Glencoe Software's repository before installing OMERO dependencies.
+#
+# For more information, see:
+# https://www.glencoesoftware.com/blog/2023/12/08/ice-binaries-for-omero.html
+
 [project]
 name = "openhcs"
 dynamic = ["version"]
@@ -128,6 +142,25 @@ viz = [
 ]
 
 # OMERO integration dependencies
+#
+# IMPORTANT: zeroc-ice is a dependency of omero-py but is NOT available on PyPI.
+# The build hook will automatically download and install zeroc-ice from
+# Glencoe Software's repository during installation.
+#
+# Installation (automatic):
+#   pip install 'openhcs[omero]'
+#
+# Alternative installation (using requirements file):
+#   pip install -r requirements-omero.txt
+#
+# Manual installation (if automatic fails):
+#   python scripts/install_omero_deps.py
+#   pip install 'openhcs[omero]'
+#
+# For more information, see:
+#   - https://www.glencoesoftware.com/blog/2023/12/08/ice-binaries-for-omero.html
+#   - scripts/install_omero_deps.py
+#   - requirements-omero.txt
 omero = [
     "omero-py>=5.19.0",
 ]
@@ -141,6 +174,12 @@ docs = [
 ]
 
 # Remote execution and OMERO integration
+#
+# IMPORTANT: zeroc-ice is a dependency of omero-py but is NOT available on PyPI.
+# The build hook will automatically download and install zeroc-ice from
+# Glencoe Software's repository during installation.
+#
+# See the 'omero' optional dependency section above for more details.
 remote = [
     "pyzmq>=26.0.0",  # ZMQ-based remote execution and streaming
     "omero-py>=5.19.0",  # OMERO Python bindings for OMERO backend
@@ -238,6 +277,11 @@ version = {attr = "openhcs.__version__"}
 
 [tool.setuptools.package-data]
 openhcs = ["**/*.css", "**/*.yaml", "**/*.yml", "**/*.json"]
+
+# Build hook configuration for automatic ZeroC-Ice installation
+[tool.setuptools.build-options]
+# Build hook for editable installs
+build-editable = "pyproject_hooks.build_editable:build_editable"
 
 # GPU Dependencies Version Notes:
 # - JAX 0.4.38: Last version compatible with CuDNN 9.5.x (JAX 0.5.0+ requires CuDNN 9.8+)

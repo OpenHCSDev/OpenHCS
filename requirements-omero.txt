@@ -1,0 +1,26 @@
+# OMERO Integration Requirements
+#
+# This file installs OMERO integration dependencies for openhcs.
+# The zeroc-ice dependency is not available on PyPI, so we use
+# --find-links to point to Glencoe Software's wheel repository.
+#
+# For more information, see:
+# https://www.glencoesoftware.com/blog/2023/12/08/ice-binaries-for-omero.html
+#
+# Installation:
+#   pip install -r requirements-omero.txt
+#
+# Alternative (automatic script):
+#   python scripts/install_omero_deps.py
+#   pip install 'openhcs[omero]'
+
+# ZeroC-Ice wheels from Glencoe Software
+# These URLs provide pre-built wheels for Python 3.11 and 3.12
+--find-links https://downloads.openmicroscopy.org/ice/python-3.11
+--find-links https://downloads.openmicroscopy.org/ice/python-3.12
+
+# OMERO Python bindings (depends on zeroc-ice)
+omero-py>=5.19.0
+
+# ZeroMQ for remote execution and streaming (also needed for OMERO integration)
+pyzmq>=26.0.0
