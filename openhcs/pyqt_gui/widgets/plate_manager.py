@@ -370,6 +370,10 @@ class PlateManagerWidget(AbstractManagerWidget):
         )
         logger.info(f"Rebuilt orchestrator-specific config for plate: {orchestrator.plate_path}")
 
+        # NOTE: ObjectState now auto-detects delegate changes, so no manual sync needed.
+        # When the orchestrator's ObjectState is next accessed, it will automatically
+        # detect that pipeline_config has been replaced and re-extract parameters.
+
         effective_config = orchestrator.get_effective_config()
         self.orchestrator_config_changed.emit(str(orchestrator.plate_path), effective_config)
 
@@ -679,6 +683,8 @@ class PlateManagerWidget(AbstractManagerWidget):
             self.service_adapter.set_global_config(new_config)
             set_global_config_for_editing(GlobalPipelineConfig, new_config)
             self._save_global_config_to_cache(new_config)
+            self.global_config = new_config
+
             for plate in self.plates:
                 orchestrator = ObjectStateRegistry.get_object(plate['path'])
                 if orchestrator:
@@ -1012,6 +1018,11 @@ class PlateManagerWidget(AbstractManagerWidget):
     def _apply_global_config_from_code(self, new_global_config) -> None:
         """Apply global config from executed code."""
         self.global_config = new_global_config
+
+        # Update the ObjectState for global config to point to new instance (using public API)
+        global_state = ObjectStateRegistry.get_by_scope("")
+        if global_state:
+            global_state.update_object_instance(new_global_config)
 
         # Apply to all orchestrators
         for plate in self.plates:
