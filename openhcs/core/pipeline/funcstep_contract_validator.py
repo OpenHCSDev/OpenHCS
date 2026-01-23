@@ -56,6 +56,17 @@ def missing_required_args_error(func_name, step_name, missing_args):
 def complex_pattern_error(step_name):
     return f"Step '{step_name}' with special decorators must use simple function pattern"
 
+def missing_external_library_error(func_name, step_name, module_name, install_command=None):
+    error_msg = (
+        f"Function '{func_name}' in step '{step_name}' requires external library '{module_name}' which is not installed.\n"
+        f"\n"
+        f"💡 SOLUTION: Install the required library before compiling the pipeline.\n"
+        f"\n"
+    )
+    if install_command:
+        error_msg += f"Install with: {install_command}\n"
+    return error_msg
+
 class FuncStepContractValidator:
     """
     Validator for FunctionStep memory type contracts.
@@ -72,6 +83,66 @@ class FuncStepContractValidator:
     6. When using (func, kwargs) pattern, all required positional arguments must be
        explicitly provided in the kwargs dict
     """
+
+    @staticmethod
+    def validate_external_library_installation(func: Callable, step_name: str) -> None:
+        """
+        Validate that external libraries required by a function are installed.
+
+        This checks the function's module and attempts to import it to ensure
+        the required external library is available. If the import fails,
+        a clear error is raised at compile time instead of execution time.
+
+        Args:
+            func: The function to check for external library dependencies
+            step_name: The name of the step containing the function
+
+        Raises:
+            ValueError: If the external library required by the function is not installed
+        """
+        # Get the module name from the function
+        module_name = getattr(func, '__module__', None)
+        if module_name is None:
+            # No module info, skip validation (e.g., built-in or dynamically created)
+            return
+
+        # Extract the top-level package name
+        # e.g., "openhcs.processing.backends.analysis.skan_axon_analysis" -> "openhcs"
+        # e.g., "skimage.measure" -> "skimage"
+        # e.g., "skan" -> "skan"
+        top_level_package = module_name.split('.')[0]
+
+        # Skip validation for openhcs internal modules
+        if top_level_package == 'openhcs':
+            return
+
+        # Try to import the module to verify it's installed
+        try:
+            __import__(module_name)
+        except ImportError as e:
+            # Extract the library name from the error message or module name
+            # For common libraries, provide specific install commands
+            install_command = None
+            if top_level_package == 'skan':
+                install_command = 'pip install skan'
+            elif top_level_package == 'skimage':
+                install_command = 'pip install scikit-image'
+            elif top_level_package == 'pyclesperanto':
+                install_command = 'pip install pyclesperanto'
+            elif top_level_package == 'cupy':
+                install_command = 'pip install cupy-cuda12  # or cupy-cuda11, cupy-cuda10'
+            elif top_level_package == 'torch':
+                install_command = 'pip install torch'
+            elif top_level_package == 'tensorflow':
+                install_command = 'pip install tensorflow'
+            elif top_level_package == 'jax':
+                install_command = 'pip install jax jaxlib'
+            else:
+                install_command = f'pip install {top_level_package}'
+
+            raise ValueError(missing_external_library_error(
+                func.__name__, step_name, top_level_package, install_command
+            )) from e
 
     @staticmethod
     def validate_pipeline(steps: List[Any], pipeline_context: Optional[Dict[str, Any]] = None, orchestrator=None) -> Dict[str, Dict[str, str]]:
@@ -261,6 +332,10 @@ class FuncStepContractValidator:
 
         # Get memory types from the first function
         first_fn = functions[0]
+
+        # Validate that external libraries are installed (compile-time check)
+        # This catches missing dependencies like 'skan' before execution
+        FuncStepContractValidator.validate_external_library_installation(first_fn, step_name)
 
         # Validate that the function has explicit memory type declarations
         try:
