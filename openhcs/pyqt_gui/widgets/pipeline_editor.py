@@ -310,11 +310,25 @@ class PipelineEditorWidget(AbstractManagerWidget):
         if not pipeline_state:
             return
 
-        # Build scope IDs for all steps
+        # Seed tokens for all steps (ensures each has a unique _scope_token)
+        ScopeTokenService.seed_from_objects(plate_path, steps)
+
+        # Build scope IDs and register each step with ObjectState
         step_scope_ids = []
         for step in steps:
-            scope_id = self._build_step_scope_id(step)
+            scope_id = ScopeTokenService.build_scope_id(plate_path, step)
             step_scope_ids.append(scope_id)
+
+            # Register step with ObjectState if not already registered
+            existing = ObjectStateRegistry.get_by_scope(scope_id)
+            if not existing:
+                state = ObjectState(
+                    object_instance=step,
+                    scope_id=scope_id,
+                    parent_state=ObjectStateRegistry.get_by_scope(plate_path),
+                )
+                ObjectStateRegistry.register(state)
+                logger.debug(f"Registered ObjectState for step: {scope_id}")
 
         # Update Pipeline ObjectState parameter
         pipeline_state.update_parameter("step_scope_ids", step_scope_ids)
