@@ -5,7 +5,6 @@ This module provides the FuncStepContractValidator class, which is responsible f
 validating memory type declarations for FunctionStep instances in a pipeline.
 """
 
-import inspect
 import logging
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -81,7 +80,7 @@ class FuncStepContractValidator:
     4. No fallback or inference of memory types is allowed
     5. All function patterns (callable, tuple, list, dict) are supported
     6. When using (func, kwargs) pattern, all required positional arguments must be
-       explicitly provided in the kwargs dict
+        explicitly provided in the kwargs dict
     """
 
     @staticmethod
@@ -89,8 +88,8 @@ class FuncStepContractValidator:
         """
         Validate that external libraries required by a function are installed.
 
-        This checks the function's module and attempts to import it to ensure
-        the required external library is available. If the import fails,
+        This checks of function's module and attempts to import it to ensure
+        required external library is available. If the import fails,
         a clear error is raised at compile time instead of execution time.
 
         Args:
@@ -100,13 +99,15 @@ class FuncStepContractValidator:
         Raises:
             ValueError: If the external library required by the function is not installed
         """
-        # Get the module name from the function
+        import re
+
+        # Get of module name from the function
         module_name = getattr(func, '__module__', None)
         if module_name is None:
             # No module info, skip validation (e.g., built-in or dynamically created)
             return
 
-        # Extract the top-level package name
+        # Extract of top-level package name
         # e.g., "openhcs.processing.backends.analysis.skan_axon_analysis" -> "openhcs"
         # e.g., "skimage.measure" -> "skimage"
         # e.g., "skan" -> "skan"
@@ -117,11 +118,11 @@ class FuncStepContractValidator:
             return
 
         # Try to import the module to verify it's installed
+        # This catches cases where imports are inside helper functions
         try:
             __import__(module_name)
         except ImportError as e:
-            # Extract the library name from the error message or module name
-            # For common libraries, provide specific install commands
+            # Provide specific install commands for common libraries
             install_command = None
             if top_level_package == 'skan':
                 install_command = 'pip install skan'
@@ -137,6 +138,8 @@ class FuncStepContractValidator:
                 install_command = 'pip install tensorflow'
             elif top_level_package == 'jax':
                 install_command = 'pip install jax jaxlib'
+            elif top_level_package == 'polystore':
+                install_command = 'pip install polystore'
             else:
                 install_command = f'pip install {top_level_package}'
 
@@ -223,7 +226,6 @@ class FuncStepContractValidator:
     def validate_funcstep(step: FunctionStep, orchestrator=None) -> Dict[str, str]:
         """
         Validate memory type contracts, func_pattern structure, and dict pattern keys for a FunctionStep instance.
-        If special I/O or chainbreaker decorators are used, the func_pattern must be simple.
 
         Args:
             step: The FunctionStep to validate
@@ -445,22 +447,12 @@ class FuncStepContractValidator:
             still_missing = set()
             for key in missing_keys:
                 try:
-                    # Try converting pattern key to int and check if int version exists in available keys
+                    # Try converting pattern key to int and check if int version exists
                     key_as_int = int(key)
-                    if str(key_as_int) not in available_keys_set:
-                        still_missing.add(key)
+                    if str(key_as_int) in available_keys_set:
+                        continue  # Key exists as integer, not missing
                 except (ValueError, TypeError):
-                    # Try converting available keys to int and check if string key matches
-                    found_as_int = False
-                    for avail_key in available_keys_set:
-                        try:
-                            if int(avail_key) == int(key):
-                                found_as_int = True
-                                break
-                        except (ValueError, TypeError):
-                            continue
-                    if not found_as_int:
-                        still_missing.add(key)
+                    still_missing.add(key)
 
             if still_missing:
                 raise ValueError(
@@ -483,7 +475,7 @@ class FuncStepContractValidator:
 
         Supports nested patterns of arbitrary depth, including:
         - Direct callable
-        - Tuple of (callable, kwargs)
+        - Tuple of (callable/FunctionReference, kwargs)
         - List of callables or patterns
         - Dict of keyed callables or patterns
 
@@ -563,7 +555,7 @@ class FuncStepContractValidator:
                 # The kwargs dict is optional - if provided, it will be used during execution
                 # No need to validate required args here as the execution logic handles this gracefully
                 functions.append(resolved_first)
-                return functions
+            return functions
 
         # Case 4: List of patterns
         if isinstance(func, list):
@@ -575,11 +567,11 @@ class FuncStepContractValidator:
                     (callable(f) and not isinstance(f, type))
                 )
                 if is_valid_pattern:
-                    nested_functions = FuncStepContractValidator._extract_functions_from_pattern(
-                        f, step_name)
+                    nested_functions = FuncStepContractValidator._extract_functions_from_pattern(f, step_name)
                     functions.extend(nested_functions)
                 else:
                     raise ValueError(invalid_function_error(f"list at index {i}", f))
+
             return functions
 
         # Case 5: Dict of keyed patterns
@@ -592,11 +584,11 @@ class FuncStepContractValidator:
                     (callable(f) and not isinstance(f, type))
                 )
                 if is_valid_pattern:
-                    nested_functions = FuncStepContractValidator._extract_functions_from_pattern(
-                        f, step_name)
+                    nested_functions = FuncStepContractValidator._extract_functions_from_pattern(f, step_name)
                     functions.extend(nested_functions)
                 else:
                     raise ValueError(invalid_function_error(f"dict with key '{key}'", f))
+
             return functions
 
         # Invalid type
