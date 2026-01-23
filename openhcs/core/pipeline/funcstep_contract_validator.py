@@ -5,8 +5,12 @@ This module provides the FuncStepContractValidator class, which is responsible f
 validating memory type declarations for FunctionStep instances in a pipeline.
 """
 
+import ast
+import importlib
+import inspect
 import logging
-from typing import Any, Callable, Dict, List, Optional, Tuple
+import sys
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from openhcs.constants.constants import VALID_MEMORY_TYPES, get_openhcs_config
 from openhcs.core.steps.function_step import FunctionStep
@@ -66,6 +70,218 @@ def missing_external_library_error(func_name, step_name, module_name, install_co
         error_msg += f"Install with: {install_command}\n"
     return error_msg
 
+
+class ImportStatementExtractor(ast.NodeVisitor):
+    """
+    AST visitor to extract import statements from a function's source code.
+
+    This visitor identifies explicit import statements (import x, from x import y)
+    both at the module level and inside functions. It does not analyze attribute
+    access patterns, avoiding false positives from local aliases like 'np' instead
+    of 'numpy'.
+    """
+
+    def __init__(self, module_name: Optional[str] = None):
+        """
+        Initialize the extractor.
+
+        Args:
+            module_name: The name of the module being analyzed (for resolving relative imports)
+        """
+        self.modules: Set[str] = set()
+        self.module_name = module_name
+        # Common Python standard library modules to skip
+        self.stdlib_modules = {
+            'os', 'sys', 're', 'math', 'json', 'collections', 'itertools',
+            'functools', 'typing', 'datetime', 'time', 'pathlib', 'io',
+            'logging', 'warnings', 'contextlib', 'copy', 'pickle', 'random',
+            'string', 'enum', 'dataclasses', 'inspect', 'ast', 'importlib',
+            'types', 'numbers', 'abc', 'threading', 'multiprocessing',
+            'concurrent', 'queue', 'subprocess', 'shutil', 'tempfile',
+            'glob', 'fnmatch', 'hashlib', 'base64', 'uuid', 'decimal',
+            'fractions', 'statistics', 'secrets', 'textwrap', 'unicodedata',
+            'codecs', 'csv', 'configparser', 'xml', 'html', 'urllib',
+            'http', 'email', 'mimetypes', 'socket', 'ssl', 'hashlib',
+            'hmac', 'secrets', 'zipfile', 'tarfile', 'gzip', 'bz2', 'lzma',
+            'sqlite3', 'decimal', 'fractions', 'statistics', 'typing',
+            'typing_extensions', 'builtins', '__future__', 'warnings',
+        }
+
+    def visit_Import(self, node: ast.Import) -> None:
+        """Visit import statements."""
+        for alias in node.names:
+            module_name = alias.name.split('.')[0]
+            self._add_module_if_external(module_name)
+        self.generic_visit(node)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        """Visit function definitions to extract inline imports."""
+        self.generic_visit(node)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        """Visit async function definitions to extract inline imports."""
+        self.generic_visit(node)
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        """Visit from-import statements (AST uses node.level for relative imports)."""
+        level = getattr(node, "level", 0) or 0
+
+        if level > 0:
+            # Relative import: use node.level to determine how many levels to go up
+            absolute_module = self._resolve_relative_import(node.module, level)
+            if absolute_module:
+                # Only consider the true top-level package
+                self._add_module_if_external(absolute_module.split(".")[0])
+        elif node.module:
+            # Absolute import: no level means it's an absolute import
+            self._add_module_if_external(node.module.split(".")[0])
+
+        self.generic_visit(node)
+
+    def _resolve_relative_import(self, module: Optional[str], level: Optional[int] = None) -> Optional[str]:
+        """
+        Resolve an ImportFrom-relative import (module + level) to an absolute module name.
+
+        This method supports two calling conventions for backward compatibility:
+        1. New interface: _resolve_relative_import(module, level) - AST-based
+        2. Old interface: _resolve_relative_import(relative_module) - string-based
+
+        Args:
+            module: The ImportFrom module (e.g., 'percentile_utils' for `from .percentile_utils import ...`)
+                    OR the relative module string (e.g., '.percentile_utils') for old interface
+            level: The ImportFrom level (1='.', 2='..', ...) for new interface, or None for old interface
+
+        Returns:
+            Absolute module name if resolution succeeds, None otherwise
+        """
+        if self.module_name is None:
+            return None
+
+        # Handle old interface (string-based) for backward compatibility
+        if level is None:
+            # Old interface: module is the relative module string (e.g., '.percentile_utils')
+            relative_module = module
+            if relative_module is None:
+                return None
+
+            # Count the number of dots in the relative import
+            # e.g., '.' -> 1 (current package), '..' -> 2 (parent package), '...' -> 3 (grandparent package)
+            level = 0
+            for char in relative_module:
+                if char == '.':
+                    level += 1
+                else:
+                    break
+
+            # Get the package part of the relative import (after the dots)
+            # e.g., '.percentile_utils' -> 'percentile_utils'
+            # e.g., '..utils' -> 'utils'
+            package_part = relative_module[level:]
+        else:
+            # New interface: module is the module name (without dots), level is provided separately
+            package_part = module
+
+        # Split the current module name into parts
+        # e.g., 'openhcs.processing.backends.processors.numpy_processor'
+        # -> ['openhcs', 'processing', 'backends', 'processors', 'numpy_processor']
+        module_parts = self.module_name.split('.')
+
+        # Remove the last part (the module name itself)
+        # e.g., ['openhcs', 'processing', 'backends', 'processors', 'numpy_processor']
+        # -> ['openhcs', 'processing', 'backends', 'processors']
+        module_parts = module_parts[:-1]
+
+        # Go up the specified number of levels
+        # In Python relative imports:
+        # - '.' (level=1) means current package (same directory) -> don't go up
+        # - '..' (level=2) means parent package -> go up 1 level
+        # - '...' (level=3) means grandparent package -> go up 2 levels
+        # So we need to go up (level - 1) levels
+        levels_to_go_up = max(level - 1, 0)
+
+        if levels_to_go_up >= len(module_parts):
+            return None
+
+        module_parts = module_parts[:-levels_to_go_up] if levels_to_go_up > 0 else module_parts
+
+        # Add the module path parts (may be nested like "utils.foo")
+        if package_part:
+            package_parts = package_part.split(".")
+            module_parts.extend(package_parts)
+
+        # Join to get the absolute module name
+        absolute_module = '.'.join(module_parts)
+        return absolute_module
+
+    def _add_module_if_external(self, module_name: str) -> None:
+        """
+        Add a module if it's external (not stdlib or openhcs).
+
+        Args:
+            module_name: The module name to check
+        """
+        # Skip openhcs internal modules
+        if module_name == 'openhcs':
+            return
+
+        # Skip standard library modules
+        if module_name in self.stdlib_modules:
+            return
+
+        # Skip built-in modules
+        if module_name in ('builtins', '__builtins__'):
+            return
+
+        # Add the module
+        self.modules.add(module_name)
+
+
+def extract_import_statements(func: Callable) -> Set[str]:
+    """
+    Extract explicit import statements from a function's module's source code.
+
+    This function parses the entire module's source code using AST and identifies
+    only explicit import statements (import x, from x import y), avoiding
+    false positives from attribute access patterns.
+
+    Args:
+        func: The function to analyze for import statements
+
+    Returns:
+        Set of top-level module names that are explicitly imported
+    """
+    # Get the module name from the function
+    module_name = getattr(func, '__module__', None)
+    if module_name is None:
+        return set()
+
+    try:
+        # Get the module's source file
+        module = importlib.import_module(module_name)
+        module_file = getattr(module, '__file__', None)
+        if module_file is None:
+            return set()
+
+        # Read the source code
+        with open(module_file, 'r', encoding='utf-8') as f:
+            source = f.read()
+    except Exception:
+        # Can't get source code
+        return set()
+
+    try:
+        # Parse the source code into an AST
+        tree = ast.parse(source)
+    except SyntaxError:
+        # Can't parse the source
+        return set()
+
+    # Extract import statements using the AST visitor
+    extractor = ImportStatementExtractor(module_name)
+    extractor.visit(tree)
+
+    return extractor.modules
+
 class FuncStepContractValidator:
     """
     Validator for FunctionStep memory type contracts.
@@ -88,9 +304,21 @@ class FuncStepContractValidator:
         """
         Validate that external libraries required by a function are installed.
 
-        This checks of function's module and attempts to import it to ensure
-        required external library is available. If the import fails,
-        a clear error is raised at compile time instead of execution time.
+        This function uses a combined approach:
+        1. For openhcs modules: Parse the module's source code to find all import statements
+        2. For external modules: Import the module directly to verify it's installed
+
+        This approach is more reliable than AST-based analysis because:
+        1. It actually tests if dependencies work
+        2. No false positives from local aliases (e.g., np instead of numpy)
+        3. Works for any importable function
+        4. The import error message will identify the missing dependency
+        5. Catches dependencies in helper functions called by the main function
+        6. Doesn't incorrectly flag openhcs internal modules as external
+
+        Note: For openhcs modules, we parse the source code to find all import statements
+        (including those in helper functions) and try to import each one. For external
+        modules, we import the module directly.
 
         Args:
             func: The function to check for external library dependencies
@@ -99,53 +327,74 @@ class FuncStepContractValidator:
         Raises:
             ValueError: If the external library required by the function is not installed
         """
-        import re
-
-        # Get of module name from the function
+        # Get the module name from the function
         module_name = getattr(func, '__module__', None)
         if module_name is None:
             # No module info, skip validation (e.g., built-in or dynamically created)
             return
 
-        # Extract of top-level package name
+        # Extract the top-level package name
         # e.g., "openhcs.processing.backends.analysis.skan_axon_analysis" -> "openhcs"
         # e.g., "skimage.measure" -> "skimage"
         # e.g., "skan" -> "skan"
         top_level_package = module_name.split('.')[0]
 
-        # Skip validation for openhcs internal modules
+        # For openhcs modules, parse source code for import statements
         if top_level_package == 'openhcs':
-            return
+            # Extract import statements from the module's source code
+            import_statements = extract_import_statements(func)
 
-        # Try to import the module to verify it's installed
-        # This catches cases where imports are inside helper functions
-        try:
-            __import__(module_name)
-        except ImportError as e:
-            # Provide specific install commands for common libraries
-            install_command = None
-            if top_level_package == 'skan':
-                install_command = 'pip install skan'
-            elif top_level_package == 'skimage':
-                install_command = 'pip install scikit-image'
-            elif top_level_package == 'pyclesperanto':
-                install_command = 'pip install pyclesperanto'
-            elif top_level_package == 'cupy':
-                install_command = 'pip install cupy-cuda12  # or cupy-cuda11, cupy-cuda10'
-            elif top_level_package == 'torch':
-                install_command = 'pip install torch'
-            elif top_level_package == 'tensorflow':
-                install_command = 'pip install tensorflow'
-            elif top_level_package == 'jax':
-                install_command = 'pip install jax jaxlib'
-            elif top_level_package == 'polystore':
-                install_command = 'pip install polystore'
-            else:
-                install_command = f'pip install {top_level_package}'
+            # Try to import each module to verify it's installed
+            for module_name_to_import in import_statements:
+                try:
+                    importlib.import_module(module_name_to_import)
+                except ImportError as e:
+                    # Parse the error message to extract the missing module name
+                    error_str = str(e)
+                    missing_module = module_name_to_import
 
-            raise ValueError(missing_external_library_error(
-                func.__name__, step_name, top_level_package, install_command
-            )) from e
+                    # Try to extract the missing module from the error message
+                    if "No module named" in error_str:
+                        import re
+                        match = re.search(r"No module named '([^']+)'", error_str)
+                        if match:
+                            missing_module = match.group(1)
+
+                    # Generate a generic install command for the module
+                    install_command = f'pip install {missing_module}'
+
+                    raise ValueError(missing_external_library_error(
+                        func.__name__, step_name, missing_module, install_command
+                    )) from e
+        else:
+            # For external modules, try to import the module directly
+            try:
+                importlib.import_module(module_name)
+            except ImportError as e:
+                # Parse the error message to extract the missing module name
+                # ImportError messages typically look like:
+                # "No module named 'numpy'"
+                # "cannot import name 'something' from 'module'"
+                error_str = str(e)
+                missing_module = top_level_package  # Default to the top-level package
+
+                # Try to extract the missing module from the error message
+                if "No module named" in error_str:
+                    # Extract module name from quotes
+                    import re
+                    match = re.search(r"No module named '([^']+)'", error_str)
+                    if match:
+                        missing_module = match.group(1)
+                elif "cannot import name" in error_str or "cannot import" in error_str:
+                    # Use the top-level package as fallback
+                    missing_module = top_level_package
+
+                # Generate a generic install command for the module
+                install_command = f'pip install {missing_module}'
+
+                raise ValueError(missing_external_library_error(
+                    func.__name__, step_name, missing_module, install_command
+                )) from e
 
     @staticmethod
     def validate_pipeline(steps: List[Any], pipeline_context: Optional[Dict[str, Any]] = None, orchestrator=None) -> Dict[str, Dict[str, str]]:
