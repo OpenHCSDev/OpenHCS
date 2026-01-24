@@ -4,7 +4,7 @@ Base Form Dialog for PyQt6
 Base class for dialogs that use ParameterFormManager to ensure proper cleanup
 of cross-window placeholder update connections.
 
-This base class solves the problem of ghost form managers remaining in the
+This base class solves the problem of ghost form managers remaining in
 _active_form_managers registry after a dialog closes, which causes infinite
 placeholder refresh loops and runaway CPU usage.
 
@@ -19,6 +19,7 @@ how the dialog is closed.
 The default implementation automatically discovers all ParameterFormManager
 instances in the widget tree, so subclasses don't need to manually track them.
 
+
 Usage:
     1. Inherit from BaseFormDialog instead of QDialog
     2. That's it! All ParameterFormManager instances are automatically discovered and cleaned up.
@@ -29,8 +30,7 @@ Example:
             super().__init__(...)
             self.form_manager = ParameterFormManager(...)
             # No need to override _get_form_managers() - automatic discovery!
-"""
-
+    """
 import logging
 from typing import Optional, Protocol, Callable
 
@@ -45,7 +45,7 @@ from pyqt_reactor.widgets.shared.clickable_help_components import (
     HelpButton,
     HelpIndicator,
     GroupBoxWithHelp,
-)
+    )
 from pyqt_reactor.widgets.shared.config_hierarchy_tree import ConfigHierarchyTreeHelper
 from openhcs.config_framework.object_state import ObjectStateRegistry
 from pyqt_reactor.services.window_manager import WindowManager
@@ -68,6 +68,22 @@ class BaseFormDialog(ScopedBorderMixin, QDialog):
     Ensures only ONE window per (scope_id, window_class) is open at a time.
     If a window for this scope already exists, show() focuses it instead of creating a duplicate.
     """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._unregistered = False  # Track if we've already unregistered
+        self._flash_overlay_cleaned = False  # Track overlay cleanup when dialog is reused
+        self._scope_accent_color = None  # Stored for deferred application to async widgets
+
+        # CRITICAL: Register with global event bus for cross-window updates
+        # This is the OpenHCS "set and forget" pattern - all windows automatically
+        # receive updates from all other windows without manual connections
+        event_bus = self._get_event_bus()
+        if event_bus:
+            event_bus.register_window(self)
+            # Connect to pipeline_changed signal if this window cares about pipeline updates
+            if hasattr(self, '_on_pipeline_changed'):
+                event_bus.pipeline_changed.connect(self._on_pipeline_changed)
+                logger.debug(f"{self.__class__.__name__}: Registered with global event bus")
 
     def show(self) -> None:
         """Override show to enforce singleton-per-scope behavior.
@@ -102,13 +118,13 @@ class BaseFormDialog(ScopedBorderMixin, QDialog):
         self._init_scope_border()
 
         # Register self with WindowManager (it will handle closeEvent cleanup)
-        # NOTE: WindowManager.register() also eagerly creates the flash overlay
+        # NOTE: WindowManager.register() also eagerly creates a flash overlay
         WindowManager.register(scope_key, self)
         super().show()
         if overlay_was_cleaned:
             self._reregister_flash_elements()
             self._flash_overlay_cleaned = False
-        logger.debug(f"[SINGLETON] Registered and showed new window for {scope_key}")
+            logger.debug(f"[SINGLETON] Registered and showed new window for {scope_key}")
 
     def _get_window_scope_key(self) -> Optional[str]:
         """Build unique key for WindowManager registration.
@@ -118,8 +134,8 @@ class BaseFormDialog(ScopedBorderMixin, QDialog):
             Returns None if no scope_id is set (legacy behavior - no singleton enforcement)
 
         Note: We use scope_id directly (not scope_id::ClassName) so that provenance
-        navigation can find windows by scope_id. The scope_id is already unique
-        per context (global, plate, step, function).
+            navigation can find windows by scope_id. The scope_id is already unique
+            per context (global, plate, step, function).
         """
         scope_id = getattr(self, 'scope_id', None)
         if scope_id is None:
@@ -130,6 +146,7 @@ class BaseFormDialog(ScopedBorderMixin, QDialog):
     def _setup_save_button(self, button: 'QPushButton', save_callback: Callable):
         """
         Connects a save button to support Shift+Click for 'Save without close'.
+
         The save_callback should accept only close_window as a keyword argument.
         If Shift is held, close_window will be False (update only); otherwise True.
         """
@@ -146,10 +163,10 @@ class BaseFormDialog(ScopedBorderMixin, QDialog):
         Regular save calls accept() which also marks saved but additionally closes window.
 
         CRITICAL: This ensures shift-click save works the same as regular save:
-        - Marks all states as saved (reconstructs object_instance from ORM values via to_object())
-        - Updates saved baseline so closing window later won't revert changes
-        - Refreshes all form managers with new saved values
-        - Notifies other windows of changes
+            - Marks all states as saved (reconstructs object_instance from ORM values via to_object())
+            - Updates saved baseline so closing window later won't revert changes
+            - Refreshes all form managers with new saved values
+            - Notifies other windows of changes
         """
         # Mark all states as saved (updates object_instance from ORM values)
         self._apply_state_action('mark_saved')
@@ -162,43 +179,80 @@ class BaseFormDialog(ScopedBorderMixin, QDialog):
             ParameterOpsService().refresh_with_live_context(manager)
             # Emit context_changed to notify other windows (bulk refresh)
             manager.context_changed.emit(manager.scope_id or "", "")
-    """
-    Base class for dialogs that use ParameterFormManager.
-    
-    Automatically handles unregistration from cross-window updates when the dialog
-    closes via any method (accept, reject, or closeEvent).
-    
-    Subclasses should:
-    1. Store their ParameterFormManager instance(s) in a way that can be discovered
-    2. Override _get_form_managers() to return a list of all form managers to unregister
-    
-    Example:
-        class MyDialog(BaseFormDialog):
-            def __init__(self, ...):
-                super().__init__(...)
-                self.form_manager = ParameterFormManager(...)
-                
-            def _get_form_managers(self):
-                return [self.form_manager]
-    """
-    
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._unregistered = False  # Track if we've already unregistered
-        self._flash_overlay_cleaned = False  # Track overlay cleanup when dialog is reused
-        self._scope_accent_color = None  # Stored for deferred application to async widgets
 
-        # CRITICAL: Register with global event bus for cross-window updates
-        # This is the OpenHCS "set and forget" pattern - all windows automatically
-        # receive updates from all other windows without manual connections
+    def _apply_state_action(self, action: str) -> None:
+        """Apply a state-level action (mark_saved/restore_saved) to all discovered managers."""
+        if action not in ("mark_saved", "restore_saved"):
+            return
+
+        seen_states = set()
+        for manager in self._get_form_managers():
+            try:
+                state = manager.state
+            except AttributeError:
+                continue
+
+            state_id = id(state)
+            if state_id in seen_states:
+                continue
+
+            try:
+                field_id = getattr(state, 'field_id', '?')
+                scope_id = getattr(state, 'scope_id', '?')
+                obj_type = type(state.object_instance).__name__ if hasattr(state, 'object_instance') else '?'
+                logger.debug(f"🐛 {self.__class__.__name__}: About to call {action} on state field_id={field_id!r}, scope={scope_id!r}, obj_type={obj_type}")
+                logger.debug(f"🐛 {self.__class__.__name__}: State has _saved_parameters={hasattr(state, '_saved_parameters')}, is None={getattr(state, '_saved_parameters', 'N/A') is None}")
+                if action == "mark_saved":
+                    state.mark_saved()
+                else:
+                    state.restore_saved()
+            except Exception as e:
+                import traceback
+                field_id = getattr(state, 'field_id', '?')
+                logger.warning(f"{self.__class__.__name__}: failed to {action} for state {field_id}: {e}")
+                logger.warning(f"🐛 Full traceback:\n{traceback.format_exc()}")
+
+            seen_states.add(state_id)
+
+    def _get_event_bus(self):
+        """Get the global event bus from the service adapter.
+
+        Returns:
+            GlobalEventBus instance or None if not found
+        """
+        try:
+            # Navigate up to find main window with service adapter
+            current = self.parent()
+            while current:
+                if hasattr(current, 'service_adapter'):
+                    return current.service_adapter.get_event_bus()
+                current = current.parent()
+            logger.debug(f"{self.__class__.__name__}: Could not find service adapter for event bus")
+            return None
+        except Exception as e:
+            logger.error(f"Error getting event bus: {e}")
+            return None
+
+    def _broadcast_pipeline_changed(self, pipeline_steps: list):
+        """Broadcast pipeline changed event to all windows via event bus.
+
+        Args:
+            pipeline_steps: Updated list of FunctionStep objects
+        """
         event_bus = self._get_event_bus()
         if event_bus:
-            event_bus.register_window(self)
-            # Connect to pipeline_changed signal if this window cares about pipeline updates
-            if hasattr(self, '_on_pipeline_changed'):
-                event_bus.pipeline_changed.connect(self._on_pipeline_changed)
-            logger.debug(f"{self.__class__.__name__}: Registered with global event bus")
-        
+            event_bus.emit_pipeline_changed(pipeline_steps)
+
+    def _broadcast_config_changed(self, config):
+        """Broadcast config changed event to all windows via event bus.
+
+        Args:
+            config: Updated config object
+        """
+        event_bus = self._get_event_bus()
+        if event_bus:
+            event_bus.emit_config_changed(config)
+
     def _get_form_managers(self):
         """
         Return a list of all ParameterFormManager instances that need to be unregistered.
@@ -222,16 +276,12 @@ class BaseFormDialog(ScopedBorderMixin, QDialog):
 
         Uses Protocol-based duck typing to check for unregister method, avoiding
         hasattr smell for guaranteed attributes while still supporting dynamic discovery.
-
-        Args:
-            widget: Widget to search
-            managers: List to append found managers to
-            visited: Set of already-visited widget IDs to prevent infinite loops
         """
         # Prevent infinite loops from circular references
         widget_id = id(widget)
         if widget_id in visited:
             return
+
         visited.add(widget_id)
 
         # Check if this widget IS a ParameterFormManager (duck typing via Protocol)
@@ -308,7 +358,7 @@ class BaseFormDialog(ScopedBorderMixin, QDialog):
                 manager._on_build_complete_callbacks.append(self._apply_accent_to_help_buttons)
 
     def _apply_accent_to_help_buttons(self) -> None:
-        """Apply scope accent color to all HelpButton, HelpIndicator, GroupBoxWithHelp, FunctionPaneWidget, and tree instances."""
+        """Apply scope accent color to all HelpButton, HelpIndicator, GroupBoxWithHelp, and FunctionPaneWidget, and tree instances."""
         accent_color = getattr(self, '_scope_accent_color', None)
         if not accent_color:
             return
@@ -367,7 +417,6 @@ class BaseFormDialog(ScopedBorderMixin, QDialog):
                 obj_type = type(state.object_instance).__name__ if hasattr(state, 'object_instance') else '?'
                 logger.debug(f"🐛 {self.__class__.__name__}: About to call {action} on state field_id={field_id!r}, scope={scope_id!r}, obj_type={obj_type}")
                 logger.debug(f"🐛 {self.__class__.__name__}: State has _saved_parameters={hasattr(state, '_saved_parameters')}, is None={getattr(state, '_saved_parameters', 'N/A') is None}")
-
                 if action == "mark_saved":
                     state.mark_saved()
                 else:
@@ -379,7 +428,7 @@ class BaseFormDialog(ScopedBorderMixin, QDialog):
                 logger.warning(f"🐛 Full traceback:\n{traceback.format_exc()}")
 
             seen_states.add(state_id)
-    
+
     def _get_event_bus(self):
         """Get the global event bus from the service adapter.
 
@@ -393,7 +442,6 @@ class BaseFormDialog(ScopedBorderMixin, QDialog):
                 if hasattr(current, 'service_adapter'):
                     return current.service_adapter.get_event_bus()
                 current = current.parent()
-
             logger.debug(f"{self.__class__.__name__}: Could not find service adapter for event bus")
             return None
         except Exception as e:
@@ -435,7 +483,6 @@ class BaseFormDialog(ScopedBorderMixin, QDialog):
             logger.debug(f"{self.__class__.__name__}: Unregistered from global event bus")
 
         managers = self._get_form_managers()
-
         if not managers:
             logger.debug(f"🔍 {self.__class__.__name__}: No form managers found to unregister")
             return
@@ -449,7 +496,7 @@ class BaseFormDialog(ScopedBorderMixin, QDialog):
 
         self._unregistered = True
         logger.info(f"🔍 {self.__class__.__name__}: All form managers unregistered")
-    
+
     def accept(self):
         """Override accept to unregister before closing."""
         logger.info(f"🔍 {self.__class__.__name__}: accept() called")
@@ -467,8 +514,26 @@ class BaseFormDialog(ScopedBorderMixin, QDialog):
     def reject(self):
         """Override reject to unregister before closing."""
         logger.info(f"🔍 {self.__class__.__name__}: reject() called")
-        # Revert to last saved baseline before closing
-        self._apply_state_action('restore_saved')
+        
+        # CRITICAL FIX: Only restore saved state if there are unsaved changes
+        # Check if there are unsaved changes that need to be reverted
+        has_unsaved_changes = False
+        for manager in self._get_form_managers():
+            try:
+                state = manager.state
+                if hasattr(state, 'dirty_fields') and state.dirty_fields:
+                    has_unsaved_changes = True
+                    break
+            except AttributeError:
+                continue
+        
+        if has_unsaved_changes:
+            # Revert to last saved baseline before closing
+            self._apply_state_action('restore_saved')
+        else:
+            # No unsaved changes - don't restore, just unregister
+            logger.debug(f"🔍 {self.__class__.__name__}: No unsaved changes, skipping restore_saved()")
+        
         self._unregister_all_form_managers()
 
         # CRITICAL: Cleanup WindowFlashOverlay to prevent memory leak
@@ -492,12 +557,9 @@ class BaseFormDialog(ScopedBorderMixin, QDialog):
         # Restore saved state (reverts unsaved changes)
         # This is safe even if no changes - restore_saved() is idempotent
         self._apply_state_action('restore_saved')
-
         self._unregister_all_form_managers()
 
         # CRITICAL: Cleanup WindowFlashOverlay to prevent memory leak
-        # Without this, every window's overlay stays in _overlays dict forever,
-        # making flash operations progressively slower (O(n) where n = windows ever opened)
         self._flash_overlay_cleaned = True
         WindowFlashOverlay.cleanup_window(self)
         logger.info(f"🔍 {self.__class__.__name__}: Cleaned up WindowFlashOverlay")
@@ -518,7 +580,7 @@ class BaseFormDialog(ScopedBorderMixin, QDialog):
         logger.info(f"🔍 {self.__class__.__name__}: Triggered global refresh after closeEvent")
 
     def _reregister_flash_elements(self):
-        """Re-register flashable widgets after overlay cleanup when reusing the dialog instance."""
+        """Re-register flashable widgets after overlay cleanup when reusing dialog instance."""
         for manager in self._get_form_managers():
             try:
                 if hasattr(manager, "reregister_flash_elements"):
