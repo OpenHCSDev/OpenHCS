@@ -1194,6 +1194,8 @@ class PlateManagerWidget(ButtonListWidget):
             for orchestrator in selected_orchestrators:
                 # Direct synchronous call - no async needed
                 orchestrator.apply_pipeline_config(new_config)
+
+
             count = len(selected_orchestrators)
             self.app.current_status = f"Per-orchestrator configuration applied to {count} orchestrator(s)"
 

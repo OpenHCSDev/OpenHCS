@@ -84,14 +84,14 @@ class OpenHCSExecutionServer:
     def _register_backend(self):
         """Initialize and register OMERO backend."""
         from polystore.omero_local import OMEROLocalBackend
-        from openhcs.omero import get_omero_parser_registry
+        from openhcs.microscopes.microscope_interfaces import FILENAME_PARSERS
         from polystore.backend_registry import _backend_instances
 
         backend = OMEROLocalBackend(
             omero_data_dir=self.omero_data_dir,
             omero_conn=self.omero_conn,
             namespace_prefix="openhcs",
-            parser_registry=get_omero_parser_registry(),
+            parser_registry=FILENAME_PARSERS,
             lock_dir_name=".openhcs",
         )
 

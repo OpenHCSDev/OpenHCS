@@ -10,8 +10,6 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Type, Union
 
-import omero.model
-
 from openhcs.constants.constants import Backend
 from polystore.filemanager import FileManager
 from openhcs.microscopes.microscope_base import MicroscopeHandler
@@ -204,6 +202,7 @@ class OMEROMetadataHandler(MetadataHandler):
 
             # Try to get grid dimensions from MapAnnotation
             for ann in plate.listAnnotations():
+                import omero.model  # Lazy import - only needed when OMERO is actually used
                 if ann.OMERO_TYPE == omero.model.MapAnnotationI:
                     if ann.getNs() == "openhcs.metadata":
                         # Parse key-value pairs

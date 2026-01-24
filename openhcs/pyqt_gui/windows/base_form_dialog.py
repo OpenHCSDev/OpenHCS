@@ -362,13 +362,21 @@ class BaseFormDialog(ScopedBorderMixin, QDialog):
                 continue
 
             try:
+                field_id = getattr(state, 'field_id', '?')
+                scope_id = getattr(state, 'scope_id', '?')
+                obj_type = type(state.object_instance).__name__ if hasattr(state, 'object_instance') else '?'
+                logger.debug(f"🐛 {self.__class__.__name__}: About to call {action} on state field_id={field_id!r}, scope={scope_id!r}, obj_type={obj_type}")
+                logger.debug(f"🐛 {self.__class__.__name__}: State has _saved_parameters={hasattr(state, '_saved_parameters')}, is None={getattr(state, '_saved_parameters', 'N/A') is None}")
+
                 if action == "mark_saved":
                     state.mark_saved()
                 else:
                     state.restore_saved()
             except Exception as e:
+                import traceback
                 field_id = getattr(state, 'field_id', '?')
                 logger.warning(f"{self.__class__.__name__}: failed to {action} for state {field_id}: {e}")
+                logger.warning(f"🐛 Full traceback:\n{traceback.format_exc()}")
 
             seen_states.add(state_id)
     

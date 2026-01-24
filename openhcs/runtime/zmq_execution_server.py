@@ -126,9 +126,6 @@ class OpenHCSExecutionServer(ExecutionServer):
         from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
         from openhcs.constants import AllComponents, VariableComponents, GroupBy, MULTIPROCESSING_AXIS
         from polystore.base import reset_memory_backend, storage_registry
-        from openhcs.runtime.omero_instance_manager import OMEROInstanceManager
-        from polystore.omero_local import OMEROLocalBackend
-        from openhcs.omero import get_omero_parser_registry
 
         try:
             if multiprocessing.get_start_method(allow_none=True) != "spawn":
@@ -157,13 +154,18 @@ class OpenHCSExecutionServer(ExecutionServer):
             is_omero_plate_id = plate_path_str.startswith("/omero/")
 
         if is_omero_plate_id:
+            # Lazy-load OMERO dependencies only when OMERO is actually used
+            from openhcs.runtime.omero_instance_manager import OMEROInstanceManager
+            from polystore.omero_local import OMEROLocalBackend
+            from openhcs.microscopes.microscope_interfaces import FILENAME_PARSERS
+            
             omero_manager = OMEROInstanceManager()
             if not omero_manager.connect(timeout=60):
                 raise RuntimeError("OMERO server not available")
             storage_registry["omero_local"] = OMEROLocalBackend(
                 omero_conn=omero_manager.conn,
                 namespace_prefix="openhcs",
-                parser_registry=get_omero_parser_registry(),
+                parser_registry=FILENAME_PARSERS,
                 lock_dir_name=".openhcs",
             )
 
