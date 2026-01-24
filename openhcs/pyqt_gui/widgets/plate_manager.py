@@ -681,7 +681,10 @@ class PlateManagerWidget(AbstractManagerWidget):
 
         def handle_global_config_save(new_config: GlobalPipelineConfig) -> None:
             self.service_adapter.set_global_config(new_config)
-            set_global_config_for_editing(GlobalPipelineConfig, new_config)
+            # FIX: Use set_saved_global_config() instead of set_global_config_for_editing()
+            # set_global_config_for_editing() sets BOTH saved and live, which overwrites unsaved edits
+            # set_saved_global_config() only updates saved, preserving live config for UI preview
+            set_saved_global_config(GlobalPipelineConfig, new_config)
             self._save_global_config_to_cache(new_config)
             self.global_config = new_config
 

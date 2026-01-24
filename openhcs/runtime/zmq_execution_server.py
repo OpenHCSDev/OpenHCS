@@ -157,7 +157,6 @@ class OpenHCSExecutionServer(ExecutionServer):
             # Lazy-load OMERO dependencies only when OMERO is actually used
             from openhcs.runtime.omero_instance_manager import OMEROInstanceManager
             from polystore.omero_local import OMEROLocalBackend
-            from openhcs.microscopes.microscope_interfaces import FILENAME_PARSERS
             
             omero_manager = OMEROInstanceManager()
             if not omero_manager.connect(timeout=60):
@@ -165,7 +164,6 @@ class OpenHCSExecutionServer(ExecutionServer):
             storage_registry["omero_local"] = OMEROLocalBackend(
                 omero_conn=omero_manager.conn,
                 namespace_prefix="openhcs",
-                parser_registry=FILENAME_PARSERS,
                 lock_dir_name=".openhcs",
             )
 
