@@ -387,7 +387,11 @@ def _initialize_orchestrator(test_config: TestConfig, sequential_config=None) ->
     # For OMERO: Register OMERO backend with connection
     omero_manager = None
     if test_config.is_omero:
+        # Import OMERO parsers BEFORE creating backend to ensure registration
+        # This is required because OMEROLocalBackend accesses FilenameParser.__registry__
+        # which is a LazyDiscoveryDict that only populates when first accessed
         from openhcs.runtime.omero_instance_manager import OMEROInstanceManager
+        from openhcs.microscopes import omero  # noqa: F401 - Import OMERO parsers to register them
         from polystore.omero_local import OMEROLocalBackend
         from polystore.base import storage_registry
 

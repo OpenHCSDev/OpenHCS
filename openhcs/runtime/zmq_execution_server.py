@@ -155,7 +155,11 @@ class OpenHCSExecutionServer(ExecutionServer):
 
         if is_omero_plate_id:
             # Lazy-load OMERO dependencies only when OMERO is actually used
+            # Import OMERO parsers BEFORE creating backend to ensure registration
+            # This is required because OMEROLocalBackend accesses FilenameParser.__registry__
+            # which is a LazyDiscoveryDict that only populates when first accessed
             from openhcs.runtime.omero_instance_manager import OMEROInstanceManager
+            from openhcs.microscopes import omero  # noqa: F401 - Import OMERO parsers to register them
             from polystore.omero_local import OMEROLocalBackend
             
             omero_manager = OMEROInstanceManager()
