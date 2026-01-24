@@ -5,7 +5,8 @@ This module provides shared utilities for build-time operations,
 including ZeroC-Ice installation for OMERO integration.
 """
 
-from openhcs.build_utils.zeroc_ice_installer import (
+# Use relative imports to avoid circular dependency during build
+from .zeroc_ice_installer import (
     get_python_version,
     get_platform,
     get_wheel_url,
