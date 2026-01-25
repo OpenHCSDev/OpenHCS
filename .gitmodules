@@ -16,7 +16,7 @@
 	branch = main
 [submodule "external/zmqruntime"]
 	path = external/zmqruntime
-	url = https://github.com/OpenHCSDev/zmqruntime.git
+	url = https://github.com/OpenHCSDev/ZMQRuntime.git
 	branch = main
 [submodule "external/pycodify"]
 	path = external/pycodify
