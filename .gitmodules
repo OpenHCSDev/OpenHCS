@@ -8,7 +8,7 @@
 	branch = master
 [submodule "external/pyqt-reactor"]
 	path = external/pyqt-reactor
-	url = https://github.com/OpenHCSDev/PyQT-reactor.git
+	url = https://github.com/OpenHCSDev/PyQT-reactive.git
 	branch = main
 [submodule "external/arraybridge"]
 	path = external/arraybridge

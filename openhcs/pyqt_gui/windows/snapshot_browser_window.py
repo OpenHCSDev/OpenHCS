@@ -14,10 +14,10 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction
 
 from openhcs.config_framework.object_state import ObjectStateRegistry
-from pyqt_reactor.widgets.shared.abstract_table_browser import (
+from pyqt_reactive.widgets.shared.abstract_table_browser import (
     AbstractTableBrowser, ColumnDef
 )
-from pyqt_reactor.theming import ColorScheme
+from pyqt_reactive.theming import ColorScheme
 from openhcs.pyqt_gui.widgets.shared.time_travel_widget import TimeTravelWidget
 
 

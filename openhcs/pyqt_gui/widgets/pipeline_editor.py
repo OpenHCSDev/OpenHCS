@@ -26,18 +26,18 @@ from polystore.filemanager import FileManager
 from openhcs.core.steps.function_step import FunctionStep
 from openhcs.core.pipeline import Pipeline
 # Mixin imports REMOVED - now in ABC (handle_selection_change_with_prevention, CrossWindowPreviewMixin)
-from pyqt_reactor.theming import StyleSheetGenerator
-from pyqt_reactor.widgets.shared.scope_visual_config import ListItemType
-from pyqt_reactor.theming import ColorScheme
+from pyqt_reactive.theming import StyleSheetGenerator
+from pyqt_reactive.widgets.shared.scope_visual_config import ListItemType
+from pyqt_reactive.theming import ColorScheme
 from openhcs.pyqt_gui.config import PyQtGUIConfig, get_default_pyqt_gui_config
 from openhcs.config_framework.object_state import ObjectState, ObjectStateRegistry
-from pyqt_reactor.services.scope_token_service import ScopeTokenService
-from pyqt_reactor.animation import WindowFlashOverlay
+from pyqt_reactive.services.scope_token_service import ScopeTokenService
+from pyqt_reactive.animation import WindowFlashOverlay
 
 # Import shared list widget components (single source of truth)
-from pyqt_reactor.core import ReorderableListWidget
-from pyqt_reactor.widgets.shared.list_item_delegate import MultilinePreviewItemDelegate, StyledText
-from pyqt_reactor.widgets.editors.simple_code_editor import SimpleCodeEditorService
+from pyqt_reactive.core import ReorderableListWidget
+from pyqt_reactive.widgets.shared.list_item_delegate import MultilinePreviewItemDelegate, StyledText
+from pyqt_reactive.widgets.editors.simple_code_editor import SimpleCodeEditorService
 from openhcs.config_framework.lazy_factory import PREVIEW_LABEL_REGISTRY
 from openhcs.core.config import ProcessingConfig
 import openhcs.serialization.pycodify_formatters  # noqa: F401
@@ -49,7 +49,7 @@ from openhcs.utils.pipeline_migration import (
 from openhcs.pyqt_gui.windows.dual_editor_window import DualEditorWindow
 
 # Import ABC base class (Phase 4 migration)
-from pyqt_reactor.widgets.shared.abstract_manager_widget import AbstractManagerWidget, ListItemFormat
+from pyqt_reactive.widgets.shared.abstract_manager_widget import AbstractManagerWidget, ListItemFormat
 
 from openhcs.utils.performance_monitor import timer
 

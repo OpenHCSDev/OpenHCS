@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLab
 from PyQt6.QtCore import Qt
 
 from openhcs.pyqt_gui.widgets.shared.plate_view_widget import PlateViewWidget
-from pyqt_reactor.theming import ColorScheme
+from pyqt_reactive.theming import ColorScheme
 
 logger = logging.getLogger(__name__)
 

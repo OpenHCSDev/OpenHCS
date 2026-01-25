@@ -19,7 +19,7 @@ from PyQt6.QtGui import QFileSystemModel
 from PyQt6.QtCore import Qt, QDir, pyqtSignal, QModelIndex
 from PyQt6.QtGui import QFont
 
-from pyqt_reactor.theming import ColorScheme
+from pyqt_reactive.theming import ColorScheme
 logger = logging.getLogger(__name__)
 
 

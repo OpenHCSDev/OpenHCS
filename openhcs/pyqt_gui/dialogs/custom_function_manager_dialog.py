@@ -16,9 +16,9 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 
-from pyqt_reactor.theming import ColorScheme
-from pyqt_reactor.theming import StyleSheetGenerator
-from pyqt_reactor.widgets.editors.simple_code_editor import QScintillaCodeEditorDialog
+from pyqt_reactive.theming import ColorScheme
+from pyqt_reactive.theming import StyleSheetGenerator
+from pyqt_reactive.widgets.editors.simple_code_editor import QScintillaCodeEditorDialog
 from openhcs.pyqt_gui.windows.base_form_dialog import BaseFormDialog
 from openhcs.processing.custom_functions import CustomFunctionManager
 from openhcs.processing.custom_functions.signals import custom_function_signals

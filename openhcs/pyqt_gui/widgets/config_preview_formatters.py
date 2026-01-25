@@ -12,7 +12,7 @@ FIELD_ABBREVIATIONS_REGISTRY. This file provides formatting utilities only.
 
 from typing import Any, Optional, Callable
 
-from pyqt_reactor.utils.preview_formatters import (
+from pyqt_reactive.utils.preview_formatters import (
     check_enabled_field as _check_enabled_field,
     format_preview_value,
 )

@@ -17,7 +17,7 @@ from typing import Any, Optional, Callable, Iterable, List, Dict
 
 from PyQt6.QtWidgets import QWidget
 
-from pyqt_reactor.protocols import (
+from pyqt_reactive.protocols import (
     FormGenConfig,
     set_form_config,
     register_llm_service,
@@ -166,11 +166,11 @@ class OpenHCSLogDiscoveryProvider:
     def discover_logs(self, base_log_path: Optional[str] = None, include_main_log: bool = True,
                       log_directory: Optional[Path] = None):
         from openhcs.core.log_utils import discover_logs
-        from pyqt_reactor.core.log_utils import LogFileInfo
+        from pyqt_reactive.core.log_utils import LogFileInfo
 
         logs = discover_logs(base_log_path=base_log_path, include_main_log=include_main_log,
                              log_directory=log_directory)
-        # Convert to pyqt_reactor LogFileInfo for consistency
+        # Convert to pyqt_reactive LogFileInfo for consistency
         converted = [
             LogFileInfo(path=l.path, log_type=l.log_type, worker_id=l.worker_id, display_name=l.display_name)
             for l in logs
@@ -191,7 +191,7 @@ class OpenHCSServerScanProvider:
         from openhcs.runtime.zmq_config import OPENHCS_ZMQ_CONFIG
         from zmqruntime.transport import get_zmq_transport_url, get_default_transport_mode
         from openhcs.core.log_utils import classify_log_file
-        from pyqt_reactor.core.log_utils import LogFileInfo
+        from pyqt_reactive.core.log_utils import LogFileInfo
 
         discovered = []
         ports_to_scan = get_all_streaming_ports(num_ports_per_type=10)
@@ -279,7 +279,7 @@ class OpenHCSComponentSelectionProvider:
 
     def select_components(self, available_components: Iterable[str], selected_components: Iterable[str],
                           group_by: Any, parent: Optional[Any] = None, **context: Any) -> Optional[List[str]]:
-        from pyqt_reactor.dialogs.group_by_selector_dialog import GroupBySelectorDialog
+        from pyqt_reactive.dialogs.group_by_selector_dialog import GroupBySelectorDialog
         return GroupBySelectorDialog.select_components(
             available_components=list(available_components),
             selected_components=list(selected_components),

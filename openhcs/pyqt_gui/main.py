@@ -22,11 +22,11 @@ from polystore.filemanager import FileManager
 from polystore.base import storage_registry
 
 from openhcs.pyqt_gui.services.service_adapter import PyQtServiceAdapter
-from pyqt_reactor.animation.flash_overlay_opengl import prewarm_opengl
-from pyqt_reactor.animation import WindowFlashOverlay
-from pyqt_reactor.widgets.log_viewer import LogViewerWindow
-from pyqt_reactor.widgets.system_monitor import SystemMonitorWidget
-from pyqt_reactor.widgets.editors.simple_code_editor import QScintillaCodeEditorDialog
+from pyqt_reactive.animation.flash_overlay_opengl import prewarm_opengl
+from pyqt_reactive.animation import WindowFlashOverlay
+from pyqt_reactive.widgets.log_viewer import LogViewerWindow
+from pyqt_reactive.widgets.system_monitor import SystemMonitorWidget
+from pyqt_reactive.widgets.editors.simple_code_editor import QScintillaCodeEditorDialog
 
 logger = logging.getLogger(__name__)
 
@@ -587,7 +587,7 @@ class OpenHCSMainWindow(QMainWindow):
         ObjectStateRegistry.add_unregister_callback(self._on_object_state_unregistered)
 
         # Register OpenHCS window factory for scope-aware window creation
-        from pyqt_reactor.protocols import register_window_factory
+        from pyqt_reactive.protocols import register_window_factory
         from openhcs.pyqt_gui.services.window_factory import OpenHCSWindowFactory
         register_window_factory(OpenHCSWindowFactory())
 
@@ -842,7 +842,7 @@ class OpenHCSMainWindow(QMainWindow):
             scope_id: Scope of the unregistered ObjectState
             state: The ObjectState being unregistered
         """
-        from pyqt_reactor.services.window_manager import WindowManager
+        from pyqt_reactive.services.window_manager import WindowManager
 
         if WindowManager.is_open(scope_id):
             WindowManager.close_window(scope_id)
@@ -861,7 +861,7 @@ class OpenHCSMainWindow(QMainWindow):
             dirty_states: List of (scope_id, ObjectState) tuples with unsaved changes
             triggering_scope: Scope that triggered the snapshot (for logging only)
         """
-        from pyqt_reactor.services.window_manager import WindowManager
+        from pyqt_reactive.services.window_manager import WindowManager
 
         logger.debug(f"⏱️ TIME_TRAVEL_CALLBACK: triggering_scope={triggering_scope!r} dirty_count={len(dirty_states)}")
 

@@ -10,7 +10,7 @@ import logging
 from typing import Dict, List, Tuple, Any
 from pathlib import Path
 from dataclasses import fields
-from pyqt_reactor.theming import ColorScheme
+from pyqt_reactive.theming import ColorScheme
 
 logger = logging.getLogger(__name__)
 

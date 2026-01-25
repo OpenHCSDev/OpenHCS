@@ -39,15 +39,15 @@ from openhcs.core.xdg_paths import get_config_file_path
 import openhcs.serialization.pycodify_formatters  # noqa: F401
 from pycodify import Assignment, BlankLine, CodeBlock, generate_python_source
 from openhcs.processing.backends.analysis.consolidate_analysis_results import consolidate_multi_plate_summaries
-from pyqt_reactor.theming import ColorScheme
+from pyqt_reactive.theming import ColorScheme
 from openhcs.pyqt_gui.windows.config_window import ConfigWindow
 from openhcs.pyqt_gui.windows.plate_viewer_window import PlateViewerWindow
-from pyqt_reactor.widgets.editors.simple_code_editor import SimpleCodeEditorService
-from pyqt_reactor.widgets.shared.abstract_manager_widget import AbstractManagerWidget, ListItemFormat
-from pyqt_reactor.forms import ParameterFormManager
+from pyqt_reactive.widgets.editors.simple_code_editor import SimpleCodeEditorService
+from pyqt_reactive.widgets.shared.abstract_manager_widget import AbstractManagerWidget, ListItemFormat
+from pyqt_reactive.forms import ParameterFormManager
 from openhcs.pyqt_gui.widgets.shared.services.zmq_execution_service import ZMQExecutionService
 from openhcs.pyqt_gui.widgets.shared.services.compilation_service import CompilationService
-from pyqt_reactor.widgets.shared.scope_visual_config import ListItemType
+from pyqt_reactive.widgets.shared.scope_visual_config import ListItemType
 
 logger = logging.getLogger(__name__)
 

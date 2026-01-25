@@ -12,8 +12,8 @@ from PyQt6.QtWidgets import (
     QLabel, QFrame, QButtonGroup
 )
 from PyQt6.QtCore import Qt, pyqtSignal
-from pyqt_reactor.theming import ColorScheme
-from pyqt_reactor.theming import StyleSheetGenerator
+from pyqt_reactive.theming import ColorScheme
+from pyqt_reactive.theming import StyleSheetGenerator
 
 logger = logging.getLogger(__name__)
 
