@@ -24,7 +24,7 @@
 	branch = main
 [submodule "external/uneval"]
 	path = external/uneval
-	url = https://github.com/OpenHCSDev/uneval.git
+	url = https://github.com/OpenHCSDev/pycodify.git
 	branch = main
 [submodule "external/PolyStore"]
 	path = external/PolyStore
