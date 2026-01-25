@@ -22,8 +22,8 @@
 	path = external/zmqruntime
 	url = https://github.com/OpenHCSDev/zmqruntime.git
 	branch = main
-[submodule "external/uneval"]
-	path = external/uneval
+[submodule "external/pycodify"]
+	path = external/pycodify
 	url = https://github.com/OpenHCSDev/pycodify.git
 	branch = main
 [submodule "external/PolyStore"]
