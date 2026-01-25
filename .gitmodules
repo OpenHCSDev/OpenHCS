@@ -29,3 +29,4 @@
 [submodule "external/pyqt-reactive"]
 	path = external/pyqt-reactive
 	url = https://github.com/OpenHCSDev/PyQT-reactive.git
+	branch = main
