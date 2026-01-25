@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pickle to Python Converter - OpenHCS uneval integration."""
+"""Pickle to Python Converter - OpenHCS pycodify integration."""
 
 from __future__ import annotations
 
@@ -8,10 +8,10 @@ from pathlib import Path
 
 import dill as pickle
 
-# Register OpenHCS-specific uneval formatters.
-import openhcs.serialization.uneval_formatters  # noqa: F401
+# Register OpenHCS-specific pycodify formatters.
+import openhcs.serialization.pycodify_formatters  # noqa: F401
 
-from uneval import Assignment, BlankLine, CodeBlock, generate_python_source
+from pycodify import Assignment, BlankLine, CodeBlock, generate_python_source
 
 
 def convert_pickle_to_python(

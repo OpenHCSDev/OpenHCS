@@ -736,9 +736,9 @@ class FunctionListEditorWidget(Container):
 
     def _generate_complete_python_code(self) -> str:
         """Generate complete Python code with imports (following debug module approach)."""
-        # Use uneval-based function pattern code generation
-        import openhcs.serialization.uneval_formatters  # noqa: F401
-        from uneval import Assignment, generate_python_source
+        # Use pycodify-based function pattern code generation
+        import openhcs.serialization.pycodify_formatters  # noqa: F401
+        from pycodify import Assignment, generate_python_source
 
         # Disable clean_mode to preserve all parameters when same function appears multiple times
         # This prevents parsing issues when the same function has different parameter sets
@@ -796,8 +796,8 @@ class FunctionListEditorWidget(Container):
         self._update_pattern_data()
 
         # Use centralized code generation from debug module to ensure consistent collision resolution
-        import openhcs.serialization.uneval_formatters  # noqa: F401
-        from uneval import Assignment, generate_python_source
+        import openhcs.serialization.pycodify_formatters  # noqa: F401
+        from pycodify import Assignment, generate_python_source
         return generate_python_source(
             Assignment("pattern", self.pattern_data),
             header="# Edit this function pattern and save to apply changes",

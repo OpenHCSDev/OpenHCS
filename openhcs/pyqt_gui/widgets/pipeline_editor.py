@@ -40,8 +40,8 @@ from pyqt_reactor.widgets.shared.list_item_delegate import MultilinePreviewItemD
 from pyqt_reactor.widgets.editors.simple_code_editor import SimpleCodeEditorService
 from openhcs.config_framework.lazy_factory import PREVIEW_LABEL_REGISTRY
 from openhcs.core.config import ProcessingConfig
-import openhcs.serialization.uneval_formatters  # noqa: F401
-from uneval import Assignment, generate_python_source
+import openhcs.serialization.pycodify_formatters  # noqa: F401
+from pycodify import Assignment, generate_python_source
 from openhcs.utils.pipeline_migration import (
     patch_step_constructors_for_migration,
     load_pipeline_with_migration,

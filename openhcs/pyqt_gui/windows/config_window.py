@@ -37,8 +37,8 @@ from openhcs.config_framework.global_config import (
     set_live_global_config,
     set_global_config_for_editing,
 )
-import openhcs.serialization.uneval_formatters  # noqa: F401
-from uneval import Assignment, generate_python_source
+import openhcs.serialization.pycodify_formatters  # noqa: F401
+from pycodify import Assignment, generate_python_source
 from openhcs.ui.shared.code_editor_form_updater import CodeEditorFormUpdater
 from openhcs.config_framework.object_state import ObjectState, ObjectStateRegistry
 # ❌ REMOVED: require_config_context decorator - enhanced decorator events system handles context automatically

@@ -30,7 +30,7 @@ from pyqt_reactor.protocols import (
     register_component_selection_provider,
     register_function_selection_provider,
 )
-import openhcs.serialization.uneval_formatters  # noqa: F401
+import openhcs.serialization.pycodify_formatters  # noqa: F401
 
 
 @dataclass
@@ -46,12 +46,12 @@ class OpenHCSFormGenConfig(FormGenConfig):
 
 
 class OpenHCSCodegenProvider:
-    """Codegen provider backed by uneval with OpenHCS formatters."""
+    """Codegen provider backed by pycodify with OpenHCS formatters."""
 
     def generate_complete_orchestrator_code(self, plate_paths, pipeline_data, global_config=None,
                                             per_plate_configs=None, pipeline_config=None, clean_mode=True) -> str:
         from openhcs.core.config import PipelineConfig
-        from uneval import Assignment, BlankLine, CodeBlock, generate_python_source
+        from pycodify import Assignment, BlankLine, CodeBlock, generate_python_source
 
         code_items = [
             Assignment("plate_paths", plate_paths),
@@ -79,7 +79,7 @@ class OpenHCSCodegenProvider:
         )
 
     def generate_complete_pipeline_steps_code(self, pipeline_steps, clean_mode=True) -> str:
-        from uneval import Assignment, generate_python_source
+        from pycodify import Assignment, generate_python_source
 
         return generate_python_source(
             Assignment("pipeline_steps", pipeline_steps),
@@ -88,7 +88,7 @@ class OpenHCSCodegenProvider:
         )
 
     def generate_complete_function_pattern_code(self, func_obj, clean_mode=False) -> str:
-        from uneval import Assignment, generate_python_source
+        from pycodify import Assignment, generate_python_source
 
         return generate_python_source(
             Assignment("pattern", func_obj),
@@ -97,7 +97,7 @@ class OpenHCSCodegenProvider:
         )
 
     def generate_step_code(self, step_obj, clean_mode=True) -> str:
-        from uneval import Assignment, generate_python_source
+        from pycodify import Assignment, generate_python_source
 
         return generate_python_source(
             Assignment("step", step_obj),
@@ -106,7 +106,7 @@ class OpenHCSCodegenProvider:
         )
 
     def generate_config_code(self, config_obj, clean_mode=True, config_class: Optional[type] = None) -> str:
-        from uneval import Assignment, generate_python_source
+        from pycodify import Assignment, generate_python_source
 
         return generate_python_source(
             Assignment("config", config_obj),

@@ -1596,7 +1596,7 @@ class PlateManagerWidget(ButtonListWidget):
                 else:
                     pipeline_data[plate_path] = []
 
-            # Use uneval-based serializer to generate complete script
+            # Use pycodify-based serializer to generate complete script
             from openhcs.textual_tui.services.terminal_launcher import TerminalLauncher
 
             # Create data structure the serializer expects
@@ -1611,8 +1611,8 @@ class PlateManagerWidget(ButtonListWidget):
             pipeline_data = data['pipeline_data']
 
             # Generate just the orchestrator configuration (no execution wrapper)
-            import openhcs.serialization.uneval_formatters  # noqa: F401
-            from uneval import Assignment, BlankLine, CodeBlock, generate_python_source
+            import openhcs.serialization.pycodify_formatters  # noqa: F401
+            from pycodify import Assignment, BlankLine, CodeBlock, generate_python_source
 
             python_code = generate_python_source(
                 CodeBlock.from_items([

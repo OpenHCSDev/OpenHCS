@@ -734,8 +734,8 @@ class PipelineEditorWidget(ButtonListWidget):
 
         try:
             # Use complete pipeline steps code generation
-            import openhcs.serialization.uneval_formatters  # noqa: F401
-            from uneval import Assignment, generate_python_source
+            import openhcs.serialization.pycodify_formatters  # noqa: F401
+            from pycodify import Assignment, generate_python_source
             from openhcs.textual_tui.services.terminal_launcher import TerminalLauncher
 
             # Generate complete pipeline steps code with imports

@@ -35,8 +35,8 @@ from openhcs.pyqt_gui.config import PyQtGUIConfig, get_default_pyqt_gui_config
 # uses existing lazy dataclass instances from the step
 from pyqt_reactor.forms import ParameterTypeUtils
 from openhcs.ui.shared.code_editor_form_updater import CodeEditorFormUpdater
-import openhcs.serialization.uneval_formatters  # noqa: F401
-from uneval import Assignment, generate_python_source
+import openhcs.serialization.pycodify_formatters  # noqa: F401
+from pycodify import Assignment, generate_python_source
 from openhcs.config_framework.object_state import ObjectState, ObjectStateRegistry
 
 logger = logging.getLogger(__name__)

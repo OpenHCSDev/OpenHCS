@@ -28,7 +28,7 @@ class CodeEditorFormUpdater:
 
     # REMOVED: extract_explicitly_set_fields() method
     # Raw None = inherited, raw concrete = user-set (same pattern as
-    # the uneval serializer and the rest of the config IO stack).
+    # the pycodify serializer and the rest of the config IO stack).
 
     @staticmethod
     def update_form_from_instance(
