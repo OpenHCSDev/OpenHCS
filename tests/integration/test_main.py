@@ -439,7 +439,7 @@ def _initialize_orchestrator(test_config: TestConfig, sequential_config=None) ->
 def _export_pipeline_to_file(pipeline: Pipeline, plate_dir: Path) -> None:
     """Export pipeline to Python file in the plate directory using the same code as the Code button."""
     import openhcs.serialization.pycodify_formatters  # noqa: F401
-    from uneval import Assignment, generate_python_source
+    from pycodify import Assignment, generate_python_source
     from datetime import datetime
 
     # Create output path in the plate directory
@@ -760,7 +760,7 @@ def _test_main_with_code_serialization(plate_dir: Union[Path, str, int], backend
 
     # Step 2: Convert to Python code using the serializer
     import openhcs.serialization.pycodify_formatters  # noqa: F401
-    from uneval import Assignment, generate_python_source
+    from pycodify import Assignment, generate_python_source
 
     print("\n🔄 Step 2: Converting objects to Python code...")
 
