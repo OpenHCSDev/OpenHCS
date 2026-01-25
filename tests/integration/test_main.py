@@ -438,7 +438,7 @@ def _initialize_orchestrator(test_config: TestConfig, sequential_config=None) ->
 
 def _export_pipeline_to_file(pipeline: Pipeline, plate_dir: Path) -> None:
     """Export pipeline to Python file in the plate directory using the same code as the Code button."""
-    import openhcs.serialization.uneval_formatters  # noqa: F401
+    import openhcs.serialization.pycodify_formatters  # noqa: F401
     from uneval import Assignment, generate_python_source
     from datetime import datetime
 
