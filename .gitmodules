@@ -6,10 +6,6 @@
 	path = external/python-introspect
 	url = https://github.com/OpenHCSDev/python-introspect.git
 	branch = master
-[submodule "external/pyqt-reactor"]
-	path = external/pyqt-reactive
-	url = https://github.com/OpenHCSDev/PyQT-reactive.git
-	branch = main
 [submodule "external/arraybridge"]
 	path = external/arraybridge
 	url = https://github.com/OpenHCSDev/arraybridge.git
