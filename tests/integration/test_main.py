@@ -759,7 +759,7 @@ def _test_main_with_code_serialization(plate_dir: Union[Path, str, int], backend
     print(f"   - Pipeline: {len(pipeline.steps)} steps")
 
     # Step 2: Convert to Python code using the serializer
-    import openhcs.serialization.uneval_formatters  # noqa: F401
+    import openhcs.serialization.pycodify_formatters  # noqa: F401
     from uneval import Assignment, generate_python_source
 
     print("\n🔄 Step 2: Converting objects to Python code...")
