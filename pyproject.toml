@@ -74,12 +74,24 @@ dependencies = [
     # System monitoring (required by ui/shared/system_monitor_core.py)
     "psutil>=5.9.0",
 
-    # External dependencies are dynamically added by the custom build backend:
-    # - Production/PyPI: Uses pip versions (e.g., "objectstate>=0.1.0")
-    # - Development: Uses local editable installs from external/ directory
-    #
-    # External modules: zmqruntime, pycodify, objectstate, python-introspect,
-    #                   metaclass-registry, arraybridge, polystore, pyqt-reactive
+    # External dependencies - use pip versions for PyPI releases
+    # For development, install local external modules separately:
+    #   pip install -e external/ObjectState
+    #   pip install -e external/python-introspect
+    #   pip install -e external/metaclass-registry
+    #   pip install -e external/arraybridge
+    #   pip install -e external/PolyStore
+    #   pip install -e external/pyqt-reactive
+    #   pip install -e external/zmqruntime
+    #   pip install -e external/pycodify
+    "zmqruntime>=0.1.0",
+    "pycodify>=0.1.0",
+    "objectstate>=0.1.0",
+    "python-introspect>=0.1.0",
+    "metaclass-registry>=0.1.0",
+    "arraybridge>=0.1.0",
+    "polystore>=0.1.0",
+    "pyqt-reactive>=0.1.0",
 ]
 
 [project.optional-dependencies]
