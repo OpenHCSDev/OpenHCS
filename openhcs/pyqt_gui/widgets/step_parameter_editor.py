@@ -271,9 +271,9 @@ class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
 
         item_type = data.get('type')
         if item_type == 'dataclass':
-            field_name = data.get('field_name')
-            if field_name:
-                self._scroll_to_section(field_name)
+            field_path = data.get('field_path') or data.get('field_name')
+            if field_path:
+                self._scroll_to_section(field_path)
         elif item_type == 'inheritance_link':
             target_class = data.get('target_class')
             if target_class:

@@ -352,13 +352,13 @@ class ImageBrowserWidget(QWidget):
         self.napari_enable_checkbox.toggled.connect(self._on_napari_enable_toggled)
         layout.addWidget(self.napari_enable_checkbox)
 
-        # Create PFM scoped to napari_config using field_prefix
+        # Create PFM scoped to napari_config using field_id
         from pyqt_reactive.forms import ParameterFormManager, FormManagerConfig
 
         config = FormManagerConfig(
             parent=panel,
             color_scheme=self.color_scheme,
-            field_prefix='napari_config'  # Scope to napari_config nested dataclass
+            field_id='napari_config'  # Scope to napari_config nested dataclass
         )
         self.napari_config_form = ParameterFormManager(
             state=self.state,  # Share root ObjectState
@@ -390,13 +390,13 @@ class ImageBrowserWidget(QWidget):
         self.fiji_enable_checkbox.toggled.connect(self._on_fiji_enable_toggled)
         layout.addWidget(self.fiji_enable_checkbox)
 
-        # Create PFM scoped to fiji_config using field_prefix
+        # Create PFM scoped to fiji_config using field_id
         from pyqt_reactive.forms import ParameterFormManager, FormManagerConfig
 
         config = FormManagerConfig(
             parent=panel,
             color_scheme=self.color_scheme,
-            field_prefix='fiji_config'  # Scope to fiji_config nested dataclass
+            field_id='fiji_config'  # Scope to fiji_config nested dataclass
         )
         self.fiji_config_form = ParameterFormManager(
             state=self.state,  # Share root ObjectState

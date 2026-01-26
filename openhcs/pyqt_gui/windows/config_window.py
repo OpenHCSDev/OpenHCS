@@ -140,6 +140,9 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
             color_scheme=self.color_scheme,
             use_scroll_area=False,  # Config window handles scrolling
         )
+        # Provide canonical dotted `field_id` for this root form
+        # Root forms use an empty `field_id` (top-level) so no traversal is attempted
+        config.field_id = ''
         self.form_manager = ParameterFormManager(state=self.state, config=config)
 
         if is_global_config_type(self.config_class):
@@ -360,10 +363,10 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
 
         if item_type == 'dataclass':
             # Navigate to the dataclass section in the form
-            field_name = data.get('field_name')
-            if field_name:
-                self._scroll_to_section(field_name)
-                logger.debug(f"Navigating to section: {field_name}")
+            field_path = data.get('field_path') or data.get('field_name')
+            if field_path:
+                self._scroll_to_section(field_path)
+                logger.debug(f"Navigating to section: {field_path}")
             else:
                 class_obj = data.get('class')
                 class_name = getattr(class_obj, '__name__', 'Unknown') if class_obj else 'Unknown'
