@@ -35,9 +35,6 @@ To install openhcs in development mode with local external modules:
 ```bash
 # Simple development install
 pip install -e ".[dev,gui]"
-
-# Or use the convenience script
-python scripts/dev_install.py
 ```
 
 The [`setup.py`](../setup.py) will automatically detect development mode and use local external modules from `external/` directory.
@@ -114,7 +111,7 @@ If you see errors about missing external modules during development:
    git submodule update --init --recursive
    ```
 
-2. Verify that the `external/` directory exists and contains the submodules:
+2. Verify that the `external/` directory exists and contains submodules:
    ```bash
    ls -la external/
    ```
