@@ -84,8 +84,7 @@ def get_external_dependencies():
         return PYPI_DEPENDENCIES
 
 
-# Call setup with dynamic dependencies
-# This will merge with dependencies from pyproject.toml
-setup(
-    install_requires=get_external_dependencies(),
-)
+# Call setup WITHOUT external module dependencies
+# External modules are only added in development mode via local paths
+# This avoids trying to install external modules that don't exist on PyPI
+setup()
