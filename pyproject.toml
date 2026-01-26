@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["setuptools>=61.0", "wheel", "tomli>=1.2.0"]
+build-backend = "openhcs_build"
 
 # NOTE: For OMERO extras, zeroc-ice is installed via direct URL references
 # with environment markers. This allows pip to automatically download and install
@@ -73,16 +73,13 @@ dependencies = [
 
     # System monitoring (required by ui/shared/system_monitor_core.py)
     "psutil>=5.9.0",
-    "zmqruntime @ git+https://github.com/OpenHCSDev/zmqruntime.git",
-    "pycodify @ git+https://github.com/OpenHCSDev/pycodify.git",
 
-    # External dependencies (pin to git commits until PyPI publication)
-    "objectstate @ git+https://github.com/OpenHCSDev/ObjectState.git@0a02629f0b9df23854e49e85f02ff2051605fb99",
-    "python-introspect @ git+https://github.com/OpenHCSDev/python-introspect.git@e9ac34aae163847c39fd0c4b4b9e50dab7a45f45",
-    "metaclass-registry @ git+https://github.com/OpenHCSDev/metaclass-registry.git",
-    "arraybridge @ git+https://github.com/OpenHCSDev/arraybridge.git",
-    "polystore @ git+https://github.com/OpenHCSDev/PolyStore.git",
-    "pyqt-reactive @ git+https://github.com/OpenHCSDev/pyqt-reactive.git",
+    # External dependencies are dynamically added by the custom build backend:
+    # - Production/PyPI: Uses pip versions (e.g., "objectstate>=0.1.0")
+    # - Development: Uses local editable installs from external/ directory
+    #
+    # External modules: zmqruntime, pycodify, objectstate, python-introspect,
+    #                   metaclass-registry, arraybridge, polystore, pyqt-reactive
 ]
 
 [project.optional-dependencies]
@@ -102,8 +99,8 @@ dev-gui = [
 ]
 
 # Terminal User Interface (TUI) - DEPRECATED, not available on PyPI
-# TUI has git dependencies that PyPI doesn't allow
-# Install manually if needed
+# TUI has external dependencies that require local development setup
+# For development, use pip install -e ".[dev,gui]" (custom build backend handles it)
 
 # PyQt6 Graphical User Interface (GUI) dependencies
 gui = [
@@ -315,10 +312,18 @@ openhcs = ["**/*.css", "**/*.yaml", "**/*.yml", "**/*.json"]
 #
 # Installation Examples:
 # - Base package only: pip install openhcs
-# - With TUI: pip install "openhcs[tui]"
 # - With GUI: pip install "openhcs[gui]"
 # - With GPU support: pip install "openhcs[gpu]"
 # - Full installation: pip install "openhcs[all]"
+#
+# Development Installation:
+#   pip install -e ".[dev,gui]"
+#   (The custom build backend automatically uses local external modules)
+#
+# Force production mode in development:
+#   OPENHCS_DEV_MODE=0 pip install -e ".[dev,gui]"
+#
+# See docs/development_setup.md for more details
 
 [tool.coverage.run]
 omit = [
