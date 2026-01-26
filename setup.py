@@ -31,16 +31,20 @@ PYPI_DEPENDENCIES = [
 ]
 
 # Local external modules for development
-LOCAL_EXTERNAL_DEPENDENCIES = [
-    "ObjectState @ file:///${PROJECT_ROOT}/external/ObjectState",
-    "python-introspect @ file:///${PROJECT_ROOT}/external/python-introspect",
-    "metaclass-registry @ file:///${PROJECT_ROOT}/external/metaclass-registry",
-    "arraybridge @ file:///${PROJECT_ROOT}/external/arraybridge",
-    "polystore @ file:///${PROJECT_ROOT}/external/PolyStore",
-    "pyqt-reactive @ file:///${PROJECT_ROOT}/external/pyqt-reactive",
-    "zmqruntime @ file:///${PROJECT_ROOT}/external/zmqruntime",
-    "pycodify @ file:///${PROJECT_ROOT}/external/pycodify",
-]
+# These are dynamically generated with absolute paths at runtime
+def get_local_external_dependencies():
+    """Generate local external dependencies with absolute paths."""
+    project_root = Path(__file__).parent.resolve()
+    return [
+        f"ObjectState @ file://{project_root}/external/ObjectState",
+        f"python-introspect @ file://{project_root}/external/python-introspect",
+        f"metaclass-registry @ file://{project_root}/external/metaclass-registry",
+        f"arraybridge @ file://{project_root}/external/arraybridge",
+        f"polystore @ file://{project_root}/external/PolyStore",
+        f"pyqt-reactive @ file://{project_root}/external/pyqt-reactive",
+        f"zmqruntime @ file://{project_root}/external/zmqruntime",
+        f"pycodify @ file://{project_root}/external/pycodify",
+    ]
 
 
 def is_development_mode():
@@ -48,13 +52,9 @@ def is_development_mode():
     Determine if we're in development mode.
 
     Development mode is detected when:
-    1. We're doing an editable install
-    2. The external/ directory exists with git submodules
-    3. OPENHCS_DEV_MODE environment variable is set
+    1. The external/ directory exists with git submodules
+    2. OPENHCS_DEV_MODE environment variable is set to "1", "true", or "yes"
     """
-    # Check for editable install (pip passes this via environment)
-    is_editable = os.environ.get("PIP_EDITABLE_INSTALL") == "1"
-
     # Check for external directory
     project_root = Path(__file__).parent
     external_dir = project_root / "external"
@@ -63,7 +63,7 @@ def is_development_mode():
     # Check for explicit dev mode flag
     dev_mode_env = os.environ.get("OPENHCS_DEV_MODE", "").lower() in ("1", "true", "yes")
 
-    result = is_editable and has_external or dev_mode_env
+    result = has_external or dev_mode_env
     if result:
         print("openhcs: Installing in DEVELOPMENT mode (using local external modules)")
     else:
@@ -79,12 +79,13 @@ def get_external_dependencies():
         list: List of dependency specifications
     """
     if is_development_mode():
-        return LOCAL_EXTERNAL_DEPENDENCIES
+        return get_local_external_dependencies()
     else:
         return PYPI_DEPENDENCIES
 
 
-# Call setup WITHOUT external module dependencies
-# External modules are only added in development mode via local paths
-# This avoids trying to install external modules that don't exist on PyPI
-setup()
+# Call setup with external module dependencies
+# External modules are dynamically added based on install mode
+setup(
+    install_requires=get_external_dependencies(),
+)
