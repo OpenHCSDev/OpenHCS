@@ -16,6 +16,7 @@ Usage:
 
 import os
 from pathlib import Path
+from setuptools import setup
 
 # External module versions for PyPI releases
 PYPI_DEPENDENCIES = [
@@ -83,6 +84,8 @@ def get_external_dependencies():
         return PYPI_DEPENDENCIES
 
 
-# This will be called by setuptools when building the package
-# We need to set this as a module-level variable so setuptools can find it
-install_requires = get_external_dependencies()
+# Call setup with dynamic dependencies
+# This will merge with dependencies from pyproject.toml
+setup(
+    install_requires=get_external_dependencies(),
+)

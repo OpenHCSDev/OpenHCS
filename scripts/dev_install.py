@@ -2,7 +2,8 @@
 """
 Development installation script for openhcs.
 
-This script installs openhcs in development mode with local external modules
+This script installs openhcs in development mode. The setup.py
+automatically detects development mode and uses local external modules
 from external/ directory (git submodules).
 
 Usage:
@@ -39,29 +40,17 @@ def main():
     args = parser.parse_args()
 
     # Install openhcs in editable mode with extras
+    # The setup.py automatically detects development mode
+    # and uses local external modules from external/ directory
     extras_spec = f"[{args.extras}]" if args.extras else ""
     cmd = [sys.executable, "-m", "pip", "install", "-e", f".{extras_spec}"]
     run_command(cmd)
 
-    # Install local external modules as editable installs
-    external_modules = [
-        "external/ObjectState",
-        "external/python-introspect",
-        "external/metaclass-registry",
-        "external/arraybridge",
-        "external/PolyStore",
-        "external/pyqt-reactive",
-        "external/zmqruntime",
-        "external/pycodify",
-    ]
-
-    for module in external_modules:
-        cmd = [sys.executable, "-m", "pip", "install", "-e", module]
-        run_command(cmd)
-
     print("\n" + "="*60)
     print("Development installation complete!")
     print("="*60)
+    print("\nThe setup.py automatically detected development mode")
+    print("and is using local external modules from the external/ directory.")
     print("\nYou can now run openhcs with:")
     print("  openhcs")
     print("\nOr run tests with:")
