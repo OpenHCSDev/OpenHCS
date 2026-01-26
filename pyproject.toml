@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel", "tomli>=1.2.0"]
-build-backend = "openhcs_build"
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
 
 # NOTE: For OMERO extras, zeroc-ice is installed via direct URL references
 # with environment markers. This allows pip to automatically download and install

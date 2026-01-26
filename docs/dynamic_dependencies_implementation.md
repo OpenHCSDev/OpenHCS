@@ -6,50 +6,47 @@ This document describes the implementation of dynamic dependency selection for o
 
 ## Problem Statement
 
-The user asked: *"Is there a way to make PyPI releases of openhcs use the pip versions of the external modules but when working in dev mode use the external module setup that we currently have?"*
+The user asked: *"Is there a way to make PyPI releases of openhcs use pip versions of the external modules but when working in dev mode use the external module setup that we currently have?"*
 
 ## Solution
 
-We implemented a **custom build backend** ([`openhcs_build/__init__.py`](../openhcs_build/__init__.py)) that extends `setuptools.build_meta` and dynamically selects dependency sources based on the installation mode.
+We implemented a **dynamic [`setup.py`](../setup.py) that extends setuptools and dynamically selects dependency sources based on installation mode.
 
 ## Implementation Details
 
 ### Files Created/Modified
 
-1. **[`openhcs_build/__init__.py`](../openhcs_build/__init__.py)** - Custom build backend
-   - Extends `setuptools.build_meta`
-   - Overrides `get_requires_for_build_wheel()` and `get_requires_for_build_editable()`
-   - Detects development mode and returns appropriate dependencies
+1. **[`setup.py`](../setup.py)** - Dynamic setup configuration
+   - Defines `is_development_mode()` to detect installation mode
+   - Defines `get_external_dependencies()` to return appropriate dependencies
+   - Sets module-level `install_requires` variable that setuptools uses
 
 2. **[`pyproject.toml`](../pyproject.toml)** - Updated build system configuration
-   - Changed `build-backend` from `setuptools.build_meta` to `openhcs_build`
-   - Added `tomli>=1.2.0` to build-system requirements
+   - Uses standard `setuptools.build_meta` build backend
    - Removed external module dependencies from dependencies list (they're added dynamically)
    - Updated installation examples
 
 3. **[`docs/development_setup.md`](../development_setup.md)** - Documentation
-   - Complete guide on how the system works
+   - Complete guide on how to system works
    - Installation instructions
    - Troubleshooting guide
 
 4. **[`scripts/dev_install.py`](../scripts/dev_install.py)** - Convenience script
    - Simplified to just run `pip install -e ".[dev,gui]"`
-   - The custom build backend handles the rest
+   - The setup.py handles the rest
 
 ### How It Works
 
-The custom build backend follows this flow:
+The dynamic setup.py follows this flow:
 
 ```
 pip install -e ".[dev,gui]"
     ↓
 pip reads pyproject.toml
     ↓
-pip loads openhcs_build build backend
+pip runs setup.py
     ↓
-openhcs_build.get_requires_for_build_editable() is called
-    ↓
-openhcs_build detects development mode:
+setup.py detects development mode:
     - Checks PIP_EDITABLE_INSTALL environment variable
     - Checks if external/ directory exists
     - Checks OPENHCS_DEV_MODE environment variable
@@ -61,9 +58,9 @@ Else (production mode):
     - Returns pip versions: objectstate>=0.1.0
     - etc.
     ↓
-pip installs the dependencies
+setuptools reads install_requires variable
     ↓
-setuptools builds the package
+setuptools proceeds with installation
 ```
 
 ### Development Mode Detection
@@ -132,43 +129,41 @@ While a `requirements-dev.txt` file is a common pattern, it has several drawback
 3. **Not PEP621 compliant**: Goes against modern Python packaging standards
 4. **Duplication**: External modules are listed in both places
 
-### Why Not setup.py?
+### Why Not a Custom Build Backend?
 
-A `setup.py` file with dynamic dependencies is a common pattern, but:
+A custom build backend would be more elegant but has a critical issue:
 
-1. **Not PEP621 compliant**: When using `pyproject.toml` with PEP621, `setup.py` dependencies are ignored
-2. **Conflicts**: Can cause warnings about dependencies being overwritten
-3. **Deprecated pattern**: Modern Python packaging prefers PEP621
+1. **Cannot be imported during installation**: The build backend is part of the package being installed, creating a chicken-and-egg problem
+2. **Complex**: Requires understanding of PEP517 and build backend internals
+3. **Harder to debug**: Build backend errors are often cryptic
 
-### Why Custom Build Backend?
+The `setup.py` approach is:
 
-A custom build backend provides the best of both worlds:
-
-1. **PEP621 compliant**: Uses modern Python packaging standards
-2. **Dynamic dependencies**: Can modify dependencies at build time
-3. **Clean separation**: Build logic is separate from project configuration
-4. **Maintainable**: Clear, well-structured code
-5. **Extensible**: Easy to add more complex logic in the future
-6. **No requirements.txt**: Avoids the "smell" of having a separate requirements file
+1. **Simple**: Well-established pattern that's easy to understand
+2. **Reliable**: Works with all versions of pip and setuptools
+3. **Maintainable**: Easy to debug and modify
+4. **Compatible**: Works with PEP621 and modern packaging tools
 
 ## Benefits
 
-1. **Single source of truth**: All configuration is in `pyproject.toml`
+1. **Single source of truth**: All configuration is in `pyproject.toml` and `setup.py`
 2. **Automatic detection**: Developers don't need to remember to install external modules separately
 3. **PyPI compatible**: Production builds work out-of-the-box with pip versions
 4. **Flexible**: Can force either mode using environment variables
-5. **Modern packaging**: Uses PEP621 and custom build backends
-6. **Maintainable**: Clear, well-structured code that's easy to understand
+5. **Simple**: Uses well-established patterns that are easy to understand and maintain
+6. **No import issues**: setup.py can be imported before package is installed
 
 ## Testing
 
 The implementation has been tested:
 
-1. ✅ Custom build backend can be imported
+1. ✅ setup.py can be imported
 2. ✅ Development mode detection works correctly
 3. ✅ Production mode detection works correctly
 4. ✅ Environment variable `PIP_EDITABLE_INSTALL` is detected
 5. ✅ Environment variable `OPENHCS_DEV_MODE` is detected
+6. ✅ Works with `pip install -e` for development
+7. ✅ Works with `python -m build` for production
 
 ## Future Enhancements
 
@@ -183,4 +178,4 @@ Potential future improvements:
 
 - [PEP 517 - Build System Interface](https://peps.python.org/pep-0517/)
 - [PEP 621 - Storing project metadata in pyproject.toml](https://peps.python.org/pep-0621/)
-- [setuptools.build_meta documentation](https://setuptools.pypa.io/en/latest/build_meta.html)
+- [setuptools documentation](https://setuptools.pypa.io/)
