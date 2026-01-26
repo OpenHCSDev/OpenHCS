@@ -10,7 +10,7 @@ Generated: 2025-10-21 01:49:14.400609
 from openhcs.constants.constants import GroupBy, VariableComponents
 from openhcs.constants.input_source import InputSource
 from openhcs.core.config import LazyFijiStreamingConfig, LazyNapariStreamingConfig, LazyStepMaterializationConfig, LazyStepWellFilterConfig, LazyProcessingConfig, NapariVariableSizeHandling
-from openhcs.core.memory.decorators import DtypeConversion
+from openhcs.core.memory import DtypeConversion
 from openhcs.core.steps.function_step import FunctionStep
 from openhcs.processing.backends.analysis.cell_counting_cpu import DetectionMethod, count_cells_single_channel
 from openhcs.processing.backends.assemblers.assemble_stack_cpu import assemble_stack_cpu
@@ -27,9 +27,6 @@ step_1 = FunctionStep(
             'high_percentile': 99.5
         }),
     name="Image Enhancement Processing",
-    step_well_filter_config=LazyStepWellFilterConfig(well_filter=4),
-    step_materialization_config=LazyStepMaterializationConfig(),
-    napari_streaming_config=LazyNapariStreamingConfig(port=5555)
 )
 pipeline_steps.append(step_1)
 
@@ -38,7 +35,6 @@ step_2 = FunctionStep(
     func=create_composite,
     name="create_composite",
     processing_config=LazyProcessingConfig(variable_components=[VariableComponents.CHANNEL]),
-    napari_streaming_config=LazyNapariStreamingConfig(port=5557)
 )
 pipeline_steps.append(step_2)
 
@@ -47,7 +43,6 @@ step_3 = FunctionStep(
     func=create_projection,
     name="Z-Stack Flattening",
     processing_config=LazyProcessingConfig(variable_components=[VariableComponents.Z_INDEX]),
-    step_materialization_config=LazyStepMaterializationConfig()
 )
 pipeline_steps.append(step_3)
 
@@ -106,8 +101,7 @@ step_8 = FunctionStep(
         })
     },
     name="Cell Counting",
-    napari_streaming_config=LazyNapariStreamingConfig(variable_size_handling=NapariVariableSizeHandling.PAD_TO_MAX, port=5559),
-    fiji_streaming_config=LazyFijiStreamingConfig()
+    napari_streaming_config=LazyNapariStreamingConfig(variable_size_handling=NapariVariableSizeHandling.PAD_TO_MAX),
 )
 pipeline_steps.append(step_8)
 

@@ -3,13 +3,6 @@ Consolidated orchestrator module for OpenHCS.
 
 This module provides a unified PipelineOrchestrator class that implements
 a two-phase (compile-all-then-execute-all) pipeline execution model.
-
-Doctrinal Clauses:
-- Clause 12 — Absolute Clean Execution
-- Clause 66 — Immutability After Construction
-- Clause 88 — No Inferred Capabilities
-- Clause 293 — GPU Pre-Declaration Enforcement
-- Clause 295 — GPU Scheduling Affinity
 """
 
 import logging
@@ -23,7 +16,7 @@ from openhcs.constants.constants import Backend, DEFAULT_IMAGE_EXTENSIONS, Group
 from openhcs.constants import Microscope
 from openhcs.core.config import GlobalPipelineConfig
 from openhcs.config_framework.global_config import get_current_global_config
-from openhcs.config_framework.lazy_factory import ContextProvider
+
 
 
 from openhcs.core.metadata_cache import get_metadata_cache, MetadataCache
@@ -32,10 +25,10 @@ from openhcs.core.pipeline.compiler import PipelineCompiler
 from openhcs.core.steps.abstract import AbstractStep
 from openhcs.core.components.validation import convert_enum_by_value
 from openhcs.core.orchestrator.execution_result import ExecutionResult, ExecutionStatus
-from openhcs.io.filemanager import FileManager
+from polystore.filemanager import FileManager
 # Zarr backend is CPU-only; always import it (even in subprocess/no-GPU mode)
 import os
-from openhcs.io.zarr import ZarrStorageBackend
+from polystore.zarr import ZarrStorageBackend
 # PipelineConfig now imported directly above
 from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization
 from openhcs.microscopes import create_microscope_handler
@@ -68,7 +61,7 @@ except ImportError:
 
 # Optional GPU memory management imports
 try:
-    from openhcs.core.memory.gpu_cleanup import cleanup_all_gpu_frameworks
+    from openhcs.core.memory import cleanup_all_gpu_frameworks
 except ImportError:
     cleanup_all_gpu_frameworks = None
 
@@ -203,8 +196,8 @@ def _execute_axis_with_sequential_combinations(
         # Clear VFS after each combination to prevent memory accumulation
         # This must happen REGARDLESS of success/failure to prevent memory leaks
         # when worker processes handle multiple wells sequentially
-        from openhcs.io.base import reset_memory_backend
-        from openhcs.core.memory.gpu_cleanup import cleanup_all_gpu_frameworks
+        from polystore.base import reset_memory_backend
+        from openhcs.core.memory import cleanup_all_gpu_frameworks
 
         reset_memory_backend()
         if cleanup_all_gpu_frameworks:
@@ -349,6 +342,7 @@ def _configure_worker_with_gpu(log_file_base: str, global_config_dict: dict):
     # The parent subprocess runner may set OPENHCS_SUBPROCESS_NO_GPU=1 to stay lean,
     # but that flag must not leak into worker processes.
     os.environ.pop('OPENHCS_SUBPROCESS_NO_GPU', None)
+    os.environ.pop('POLYSTORE_SUBPROCESS_NO_GPU', None)
 
     # Configure logging only if log_file_base is provided
     if log_file_base:
@@ -395,7 +389,7 @@ _worker_log_file_base = None
 
 
 
-class PipelineOrchestrator(ContextProvider):
+class PipelineOrchestrator:
     """
     Updated orchestrator supporting both global and per-orchestrator configuration.
 
@@ -407,7 +401,11 @@ class PipelineOrchestrator(ContextProvider):
     Then, it executes the (now stateless) pipeline definition against these contexts,
     potentially in parallel, using `execute_compiled_plate()`.
     """
-    _context_type = "orchestrator"  # Register as orchestrator context provider
+
+    # ObjectState delegation: when ObjectState stores this orchestrator, extract
+    # editable parameters from pipeline_config (a dataclass) instead of the orchestrator.
+    # This enables time-travel to track the orchestrator lifecycle while forms edit the config.
+    __objectstate_delegate__ = 'pipeline_config'
 
     def __init__(
         self,
@@ -495,7 +493,7 @@ class PipelineOrchestrator(ContextProvider):
         else:
             # Use the global registry directly (don't copy) so that reset_memory_backend() works correctly
             # The global registry is a singleton, and VFS clearing needs to clear the same instance
-            from openhcs.io.base import storage_registry as global_storage_registry, ensure_storage_registry
+            from polystore.base import storage_registry as global_storage_registry, ensure_storage_registry
             # Ensure registry is initialized
             ensure_storage_registry()
             self.registry = global_storage_registry
@@ -573,12 +571,8 @@ class PipelineOrchestrator(ContextProvider):
 
         # Generic streaming config handling using polymorphic attributes
         if isinstance(config, StreamingConfig):
-            # Start global ack listener (must be before viewers connect)
-            from openhcs.runtime.zmq_base import start_global_ack_listener
-            start_global_ack_listener(config.transport_mode)
-
             # Pre-create queue tracker using polymorphic attributes
-            from openhcs.runtime.queue_tracker import GlobalQueueTrackerRegistry
+            from zmqruntime.queue_tracker import GlobalQueueTrackerRegistry
             registry = GlobalQueueTrackerRegistry()
             registry.get_or_create_tracker(config.port, config.viewer_type)
 
@@ -631,7 +625,8 @@ class PipelineOrchestrator(ContextProvider):
         logger.info(f"Initializing microscope handler using input directory: {self.input_dir}...")
         try:
             # Use configured microscope type or auto-detect
-            shared_context = get_current_global_config(GlobalPipelineConfig)
+            # Use SAVED global config (not live edits) for orchestrator initialization
+            shared_context = get_current_global_config(GlobalPipelineConfig, use_live=False)
             microscope_type = shared_context.microscope.value if shared_context.microscope != Microscope.AUTO else 'auto'
             self.microscope_handler = create_microscope_handler(
                 plate_folder=str(self.plate_path),
@@ -721,7 +716,7 @@ class PipelineOrchestrator(ContextProvider):
 
         # For plates with virtual workspace, metadata is already created by _build_virtual_mapping()
         # We just need to add the component metadata to the existing "." subdirectory
-        from openhcs.io.metadata_writer import get_subdirectory_name
+        from polystore.metadata_writer import get_subdirectory_name
         subdir_name = get_subdirectory_name(self.input_dir, self.plate_path)
 
         # Create context using SAME logic as create_context() to get full metadata
@@ -954,8 +949,8 @@ class PipelineOrchestrator(ContextProvider):
 
                 # Clear VFS after each combination to prevent memory accumulation
                 try:
-                    from openhcs.io.base import reset_memory_backend
-                    from openhcs.core.memory.gpu_cleanup import cleanup_all_gpu_frameworks
+                    from polystore.base import reset_memory_backend
+                    from openhcs.core.memory import cleanup_all_gpu_frameworks
 
                     reset_memory_backend()
                     cleanup_all_gpu_frameworks()

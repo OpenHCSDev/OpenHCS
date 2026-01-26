@@ -5,7 +5,7 @@ This version ACTUALLY eliminates duplication instead of adding abstraction theat
 """
 
 import logging
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Optional, Set, Tuple
 
@@ -53,7 +53,7 @@ def extract_attributes(pattern: Any) -> Dict[str, Any]:
     """Extract special I/O metadata and track per-group ownership."""
     output_names: Set[str] = set()
     output_groups: Dict[str, Set[Optional[str]]] = defaultdict(set)
-    inputs, mat_funcs = {}, {}
+    inputs, mat_specs = {}, {}
 
     for func, group_key, _ in normalize_pattern(pattern):
         normalized_key = None if group_key == "default" else group_key
@@ -64,7 +64,7 @@ def extract_attributes(pattern: Any) -> Dict[str, Any]:
             output_groups[output].add(normalized_key)
 
         inputs.update(getattr(func, '__special_inputs__', {}))
-        mat_funcs.update(getattr(func, '__materialization_functions__', {}))
+        mat_specs.update(getattr(func, '__materialization_specs__', {}))
 
     return {
         'outputs': {
@@ -72,7 +72,7 @@ def extract_attributes(pattern: Any) -> Dict[str, Any]:
             'groups': output_groups
         },
         'inputs': inputs,
-        'mat_funcs': mat_funcs
+        'mat_specs': mat_specs
     }
 
 
@@ -81,7 +81,7 @@ def extract_attributes(pattern: Any) -> Dict[str, Any]:
 class PathPlanner:
     """Minimal path planner with zero duplication."""
 
-    def __init__(self, context: ProcessingContext, pipeline_config):
+    def __init__(self, context: ProcessingContext, pipeline_config, orchestrator=None):
         self.ctx = context
         # CRITICAL: pipeline_config is now the merged config (GlobalPipelineConfig) from context.global_config
         # This ensures proper inheritance from global config without needing field-specific code
@@ -89,13 +89,102 @@ class PathPlanner:
         self.vfs = pipeline_config.vfs_config
         self.plans = context.step_plans
         self.declared = {}  # Tracks special outputs
+        self.orchestrator = orchestrator
 
         # Initial input determination (once)
         self.initial_input = Path(context.input_dir)
         self.plate_path = Path(context.plate_path)
 
+    @staticmethod
+    def _normalize_group_key(key: Optional[Any]) -> Optional[str]:
+        if key is None:
+            return None
+        return str(key)
+
+    def _get_execution_groups(self, step: AbstractStep) -> List[Optional[str]]:
+        """Determine which component groups this step will execute for."""
+        from openhcs.constants import GroupBy
+
+        if not isinstance(step, FunctionStep):
+            return [None]
+
+        func_pattern = step.func
+        if isinstance(func_pattern, dict):
+            return [self._normalize_group_key(k) for k in func_pattern.keys()]
+
+        group_by = getattr(step.processing_config, "group_by", None)
+        if not group_by or group_by == GroupBy.NONE or getattr(group_by, "value", None) is None:
+            return [None]
+
+        if self.orchestrator is None:
+            logger.warning(
+                "PathPlanner: orchestrator not available; "
+                "cannot resolve group_by component keys for special I/O planning."
+            )
+            return [None]
+
+        try:
+            return [self._normalize_group_key(k) for k in self.orchestrator.get_component_keys(group_by)]
+        except Exception as e:
+            logger.warning(f"PathPlanner: failed to resolve component keys for {group_by}: {e}")
+            return [None]
+
+    @staticmethod
+    def _build_paths_by_group(base_path: str, group_keys: List[Optional[str]]) -> Dict[Optional[str], str]:
+        from openhcs.core.pipeline.path_planner import PipelinePathPlanner
+
+        paths_by_group: Dict[Optional[str], str] = {}
+        for group_key in group_keys:
+            if group_key is None:
+                paths_by_group[group_key] = base_path
+            else:
+                paths_by_group[group_key] = PipelinePathPlanner.build_dict_pattern_path(base_path, group_key)
+        return paths_by_group
+
+    @staticmethod
+    def _build_special_outputs_by_group(special_outputs: Dict) -> Dict[Optional[str], OrderedDict]:
+        """Expand special outputs into per-group plans with finalized paths."""
+        if not special_outputs:
+            return {}
+
+        grouped: Dict[Optional[str], OrderedDict] = defaultdict(OrderedDict)
+        for output_key, output_info in special_outputs.items():
+            paths_by_group = output_info.get("paths_by_group") or {None: output_info.get("path")}
+            for group_key, group_path in paths_by_group.items():
+                info = output_info.copy()
+                info["path"] = group_path
+                grouped[group_key][output_key] = info
+        return dict(grouped)
+
+    @staticmethod
+    def _build_special_inputs_by_group(special_inputs: Dict, consumer_groups: List[Optional[str]]) -> Dict[Optional[str], OrderedDict]:
+        """Expand special inputs into per-group plans with finalized paths."""
+        if not special_inputs:
+            return {}
+
+        grouped: Dict[Optional[str], OrderedDict] = {}
+        for group_key in consumer_groups:
+            per_group = OrderedDict()
+            for input_key, input_info in special_inputs.items():
+                paths_by_group = input_info.get("paths_by_group")
+                if paths_by_group:
+                    if group_key in paths_by_group:
+                        path = paths_by_group[group_key]
+                    elif None in paths_by_group:
+                        path = paths_by_group[None]
+                    else:
+                        continue
+                else:
+                    path = input_info.get("path")
+                info = input_info.copy()
+                info["path"] = path
+                per_group[input_key] = info
+            grouped[group_key] = per_group
+        return grouped
+
     def plan(self, pipeline: List[AbstractStep]) -> Dict:
         """Plan all paths with zero duplication."""
+        self._prime_future_special_inputs(pipeline)
         for i, step in enumerate(pipeline):
             self._plan_step(step, i, pipeline)
 
@@ -110,6 +199,24 @@ class PathPlanner:
 
         return self.plans
 
+    def _prime_future_special_inputs(self, pipeline: List[AbstractStep]) -> None:
+        """Precompute special input keys used by later steps for each step index."""
+        future_inputs: Set[str] = set()
+        self.future_special_inputs: List[Set[str]] = [set() for _ in pipeline]
+
+        for i in range(len(pipeline) - 1, -1, -1):
+            self.future_special_inputs[i] = set(future_inputs)
+
+            step = pipeline[i]
+            if isinstance(step, FunctionStep):
+                pattern = self._strip_disabled_functions(step.func) if step.func else []
+                attrs = extract_attributes(pattern)
+                step_inputs = set(attrs.get("inputs", {}).keys())
+            else:
+                step_inputs = set(self._normalize_attr(getattr(step, 'special_inputs', {}), dict).keys())
+
+            future_inputs.update(step_inputs)
+
     def _plan_step(self, step: AbstractStep, i: int, pipeline: List):
         """Plan one step - no duplicate logic."""
         sid = i  # Use step index instead of step_id
@@ -123,7 +230,19 @@ class PathPlanner:
             step.func = self._inject_injectable_params(step.func, step)
             step.func = self._strip_disabled_functions(step.func)
             attrs = extract_attributes(step.func if step.func else [])
+            execution_groups = self._get_execution_groups(step)
+            # For non-dict patterns grouped by component, namespace outputs only
+            # when they are NOT consumed by any later step.
+            if not isinstance(step.func, dict) and execution_groups != [None] and attrs["outputs"]["names"]:
+                future_inputs = self.future_special_inputs[i] if hasattr(self, "future_special_inputs") else set()
+                for out_key in attrs["outputs"]["names"]:
+                    if out_key in future_inputs:
+                        attrs["outputs"]["groups"][out_key] = {None}
+                    else:
+                        attrs["outputs"]["groups"][out_key] = set(execution_groups)
+
         else:
+            execution_groups = [None]
             raw_outputs = self._normalize_attr(getattr(step, 'special_outputs', set()), set)
             default_groups = defaultdict(set)
             for name in raw_outputs:
@@ -134,18 +253,34 @@ class PathPlanner:
                     'groups': default_groups
                 },
                 'inputs': self._normalize_attr(getattr(step, 'special_inputs', {}), dict),
-                'mat_funcs': {}
+                'mat_specs': {}
             }
 
         # Process special I/O with unified logic
         special_outputs = self._process_special(
             attrs['outputs']['names'],
-            attrs['mat_funcs'],
+            attrs['mat_specs'],
             'output',
             sid,
-            attrs['outputs'].get('groups')
+            attrs['outputs'].get('groups'),
+            consumer_groups=execution_groups,
+            step_name=getattr(step, "name", str(sid))
         )
-        special_inputs = self._process_special(attrs['inputs'], attrs['outputs']['names'], 'input', sid)
+        special_inputs = self._process_special(
+            attrs['inputs'],
+            attrs['outputs']['names'],
+            'input',
+            sid,
+            consumer_groups=execution_groups,
+            step_name=getattr(step, "name", str(sid))
+        )
+
+        # Expand into per-group maps for runtime selection
+        special_outputs_by_group = self._build_special_outputs_by_group(special_outputs)
+        special_inputs_by_group = self._build_special_inputs_by_group(
+            special_inputs,
+            [self._normalize_group_key(g) for g in execution_groups]
+        )
 
         # Handle metadata injection after stripping disabled functions
         if isinstance(step, FunctionStep) and any(k in METADATA_RESOLVERS for k in attrs['inputs']):
@@ -212,6 +347,9 @@ class PathPlanner:
             'input_source': self._get_input_source(step, i),
             'special_inputs': special_inputs,
             'special_outputs': special_outputs,
+            'special_inputs_by_group': special_inputs_by_group,
+            'special_outputs_by_group': special_outputs_by_group,
+            'execution_groups': execution_groups,
             'funcplan': funcplan,
         })
 
@@ -330,7 +468,16 @@ class PathPlanner:
             return self._build_output_path(config)
         return None
 
-    def _process_special(self, items: Any, extra: Any, io_type: str, sid: str, output_groups: Optional[Dict[str, Set[Optional[str]]]] = None) -> Dict:
+    def _process_special(
+        self,
+        items: Any,
+        extra: Any,
+        io_type: str,
+        sid: str,
+        output_groups: Optional[Dict[str, Set[Optional[str]]]] = None,
+        consumer_groups: Optional[List[Optional[str]]] = None,
+        step_name: Optional[str] = None
+    ) -> Dict:
         """Unified special I/O processing - no duplication."""
         result = {}
 
@@ -342,17 +489,65 @@ class PathPlanner:
                 filename = PipelinePathPlanner._build_axis_filename(self.ctx.axis_id, key, step_index=sid)
                 path = results_path / filename
                 groups = output_groups.get(key, {None}) if output_groups else {None}
+                normalized_groups = sorted({self._normalize_group_key(g) for g in groups})
+                paths_by_group = self._build_paths_by_group(str(path), normalized_groups)
                 result[key] = {
                     'path': str(path),
-                    'materialization_function': extra.get(key),  # extra is mat_funcs
-                    'group_keys': sorted(groups)
+                    'materialization_spec': extra.get(key),  # extra is mat_specs
+                    'group_keys': normalized_groups,
+                    'paths_by_group': paths_by_group
                 }
-                self.declared[key] = str(path)
+                self.declared[key] = {
+                    'path': str(path),
+                    'group_keys': normalized_groups,
+                    'paths_by_group': paths_by_group,
+                    'step_index': sid,
+                    'step_name': step_name
+                }
 
         elif io_type == 'input' and items:  # Special inputs
+            consumer_groups = consumer_groups or [None]
+            normalized_consumers = [self._normalize_group_key(g) for g in consumer_groups]
+
             for key in sorted(items.keys() if isinstance(items, dict) else items):
                 if key in self.declared:
-                    result[key] = {'path': self.declared[key], 'source_step_id': 'prev'}
+                    producer = self.declared[key]
+                    producer_groups = producer.get("group_keys") or [None]
+
+                    if producer_groups != [None] and normalized_consumers == [None]:
+                        producer_name = producer.get("step_name", producer.get("step_index", "unknown"))
+                        consumer_name = step_name or sid
+                        raise ValueError(
+                            f"Ambiguous special input '{key}' in step '{consumer_name}': "
+                            f"producer step '{producer_name}' provides group-specific outputs {producer_groups}, "
+                            f"but the consumer is not grouped. Use a dict pattern or set group_by to match."
+                        )
+
+                    if producer_groups != [None]:
+                        missing = [g for g in normalized_consumers if g not in producer_groups]
+                        if missing:
+                            producer_name = producer.get("step_name", producer.get("step_index", "unknown"))
+                            consumer_name = step_name or sid
+                            raise ValueError(
+                                f"Special input '{key}' in step '{consumer_name}' cannot be resolved: "
+                                f"producer step '{producer_name}' provides groups {producer_groups}, "
+                                f"but consumer needs {missing}."
+                            )
+                        paths_by_group = {
+                            g: producer["paths_by_group"][g]
+                            for g in normalized_consumers
+                            if g in producer.get("paths_by_group", {})
+                        }
+                    else:
+                        # Global output: reuse same path for all consumer groups
+                        paths_by_group = {g: producer["path"] for g in normalized_consumers}
+
+                    result[key] = {
+                        'path': producer["path"],
+                        'paths_by_group': paths_by_group,
+                        'group_keys': producer_groups,
+                        'source_step_id': producer.get("step_index", "prev")
+                    }
                 elif key in extra:  # extra is outputs (self-fulfilling)
                     result[key] = {'path': 'self', 'source_step_id': sid}
                 elif key not in METADATA_RESOLVERS:
@@ -545,7 +740,6 @@ class PathPlanner:
         # NEW: Materialization path collision validation
         self._validate_materialization_paths(pipeline)
 
-
     def _validate_materialization_paths(self, pipeline: List[AbstractStep]) -> None:
         """Validate and resolve materialization path collisions with symmetric conflict resolution."""
         global_path = self._build_output_path(self.cfg)
@@ -604,7 +798,8 @@ class PipelinePathPlanner:
     @staticmethod
     def prepare_pipeline_paths(context: ProcessingContext,
                               pipeline_definition: List[AbstractStep],
-                              pipeline_config) -> Dict:
+                              pipeline_config,
+                              orchestrator=None) -> Dict:
         """
         Prepare pipeline paths.
 
@@ -613,8 +808,9 @@ class PipelinePathPlanner:
             pipeline_definition: List of pipeline steps
             pipeline_config: Merged GlobalPipelineConfig (from context.global_config)
                            NOT the raw PipelineConfig - ensures proper global config inheritance
+            orchestrator: Optional orchestrator for component key resolution
         """
-        return PathPlanner(context, pipeline_config).plan(pipeline_definition)
+        return PathPlanner(context, pipeline_config, orchestrator=orchestrator).plan(pipeline_definition)
 
     @staticmethod
     def _build_axis_filename(axis_id: str, key: str, extension: str = "pkl", step_index: Optional[int] = None) -> str:

@@ -33,14 +33,14 @@ from textual import work
 
 from openhcs.core.config import GlobalPipelineConfig, VFSConfig, MaterializationBackend
 from openhcs.core.pipeline import Pipeline
-from openhcs.io.filemanager import FileManager
-from openhcs.io.zarr import ZarrStorageBackend
+from polystore.filemanager import FileManager
+from polystore.zarr import ZarrStorageBackend
 from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
 from openhcs.constants.constants import Backend, VariableComponents, OrchestratorState
 from openhcs.textual_tui.services.file_browser_service import SelectionMode
 from openhcs.textual_tui.services.window_service import WindowService
 from openhcs.core.path_cache import get_cached_browser_path, PathCacheKey, get_path_cache
-from openhcs.introspection.signature_analyzer import SignatureAnalyzer
+from openhcs.introspection import SignatureAnalyzer
 
 logger = logging.getLogger(__name__)
 
@@ -798,8 +798,15 @@ class PlateManagerWidget(ButtonListWidget):
 
                 if response.get('status') != 'complete':
                     error_msg = response.get('message', 'Unknown error')
-                    logger.error(f"Plate {plate_path} execution failed: {error_msg}")
-                    self.app.show_error(f"Execution failed for {plate_path}: {error_msg}")
+                    traceback_str = response.get('traceback', '')
+
+                    # Log full traceback if available
+                    if traceback_str:
+                        logger.error(f"Plate {plate_path} execution failed:\n{traceback_str}")
+                        self.app.show_error(f"Execution failed for {plate_path}:\n\n{traceback_str}")
+                    else:
+                        logger.error(f"Plate {plate_path} execution failed: {error_msg}")
+                        self.app.show_error(f"Execution failed for {plate_path}: {error_msg}")
 
             # Execution complete
             self.current_execution_id = None
@@ -1187,6 +1194,8 @@ class PlateManagerWidget(ButtonListWidget):
             for orchestrator in selected_orchestrators:
                 # Direct synchronous call - no async needed
                 orchestrator.apply_pipeline_config(new_config)
+
+
             count = len(selected_orchestrators)
             self.app.current_status = f"Per-orchestrator configuration applied to {count} orchestrator(s)"
 
@@ -1587,10 +1596,10 @@ class PlateManagerWidget(ButtonListWidget):
                 else:
                     pipeline_data[plate_path] = []
 
-            # Use existing pickle_to_python logic to generate complete script
+            # Use pycodify-based serializer to generate complete script
             from openhcs.textual_tui.services.terminal_launcher import TerminalLauncher
 
-            # Create data structure like pickle_to_python expects
+            # Create data structure the serializer expects
             data = {
                 'plate_paths': plate_paths,
                 'pipeline_data': pipeline_data,
@@ -1602,13 +1611,19 @@ class PlateManagerWidget(ButtonListWidget):
             pipeline_data = data['pipeline_data']
 
             # Generate just the orchestrator configuration (no execution wrapper)
-            from openhcs.debug.pickle_to_python import generate_complete_orchestrator_code
+            import openhcs.serialization.pycodify_formatters  # noqa: F401
+            from pycodify import Assignment, BlankLine, CodeBlock, generate_python_source
 
-            python_code = generate_complete_orchestrator_code(
-                plate_paths=plate_paths,
-                pipeline_data=pipeline_data,
-                global_config=self.app.global_config,
-                clean_mode=True  # Default to clean mode - only show non-default values
+            python_code = generate_python_source(
+                CodeBlock.from_items([
+                    Assignment("plate_paths", plate_paths),
+                    BlankLine(),
+                    Assignment("global_config", self.app.global_config),
+                    BlankLine(),
+                    Assignment("pipeline_data", pipeline_data),
+                ]),
+                header="# Edit this orchestrator configuration and save to apply changes",
+                clean_mode=True,  # Default to clean mode - only show non-default values
             )
 
             # Create callback to handle edited code
@@ -1699,14 +1714,14 @@ class PlateManagerWidget(ButtonListWidget):
                 else:
                     pipeline_data[plate_path] = []
 
-            # Create data structure like pickle_to_python expects
+            # Create data structure the serializer expects
             data = {
                 'plate_paths': plate_paths,
                 'pipeline_data': pipeline_data,
                 'global_config': self.app.global_config
             }
 
-            # Generate complete executable Python script using pickle_to_python logic
+            # Generate complete executable Python script using the serializer
             python_code = self._generate_executable_script(data)
 
             # Launch file browser to save the script
@@ -1760,10 +1775,10 @@ class PlateManagerWidget(ButtonListWidget):
             self.app.current_status = f"Failed to save script: {e}"
 
     def _generate_executable_script(self, data: Dict) -> str:
-        """Generate fully executable Python script by creating a temp pickle and using existing convert_pickle_to_python."""
+        """Generate fully executable Python script by creating a temp pickle and using convert_pickle_to_python."""
         import tempfile
         import dill as pickle
-        from openhcs.debug.pickle_to_python import convert_pickle_to_python
+        from openhcs.debug.pickle_converter import convert_pickle_to_python
 
         # Create temporary pickle file
         with tempfile.NamedTemporaryFile(mode='wb', suffix='.pkl', delete=False) as temp_pickle:
@@ -1792,5 +1807,3 @@ class PlateManagerWidget(ButtonListWidget):
                 os.unlink(temp_output_path)
             except:
                 pass
-
-

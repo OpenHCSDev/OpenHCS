@@ -19,7 +19,7 @@ from PyQt6.QtGui import QFileSystemModel
 from PyQt6.QtCore import Qt, QDir, pyqtSignal, QModelIndex
 from PyQt6.QtGui import QFont
 
-from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
+from pyqt_reactive.theming import ColorScheme
 logger = logging.getLogger(__name__)
 
 
@@ -54,7 +54,7 @@ class FileBrowserWindow(QDialog):
                  filter_extensions: Optional[List[str]] = None,
                  title: str = "File Browser",
                  on_result_callback: Optional[Callable] = None,
-                 color_scheme: Optional[PyQt6ColorScheme] = None,
+                 color_scheme: Optional[ColorScheme] = None,
                  cache_key: Optional['PathCacheKey'] = None,
                  parent=None):
         """
@@ -74,7 +74,7 @@ class FileBrowserWindow(QDialog):
         super().__init__(parent)
 
         # Initialize color scheme
-        self.color_scheme = color_scheme or PyQt6ColorScheme()
+        self.color_scheme = color_scheme or ColorScheme()
 
         # Business logic state (extracted from Textual version)
         self.initial_path = initial_path or Path.home()
@@ -554,7 +554,7 @@ def open_file_browser_window(initial_path: Optional[Path] = None,
                             filter_extensions: Optional[List[str]] = None,
                             title: str = "File Browser",
                             on_result_callback: Optional[Callable] = None,
-                            color_scheme: Optional[PyQt6ColorScheme] = None,
+                            color_scheme: Optional[ColorScheme] = None,
                             cache_key: Optional['PathCacheKey'] = None,
                             parent=None):
     """

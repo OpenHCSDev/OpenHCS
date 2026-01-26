@@ -12,8 +12,8 @@ OpenHCS provides a Virtual File System (VFS) with multiple storage backends desi
 
 ```python
 # Three storage backends available through unified interface:
-from openhcs.io.base import storage_registry
-from openhcs.io.filemanager import FileManager
+from polystore.base import storage_registry
+from polystore.filemanager import FileManager
 
 # Backend registry with storage and streaming implementations:
 storage_registry = {

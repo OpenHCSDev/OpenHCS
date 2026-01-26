@@ -4,21 +4,6 @@ Abstract Step Interface
 This module defines the AbstractStep interface, which is the base class for all steps
 in the OpenHCS pipeline. It provides the core functionality for step execution,
 validation, and state management.
-
-Doctrinal Clauses:
-- Clause 3 — Declarative Primacy
-- Clause 12 — Absolute Clean Execution
-- Clause 21 — Context Immunity
-- Clause 65 — No Fallback Logic
-- Clause 66 — Immutability After Construction
-- Clause 88 — No Inferred Capabilities
-- Clause 92 — Structural Validation First
-- Clause 106-A — Declared Memory Types
-- Clause 244 — Rot Intolerance
-- Clause 245 — Declarative Enforcement
-- Clause 246 — Statelessness Mandate
-- Clause 251 — Declarative Memory Conversion
-- Clause 503 — Cognitive Load Transfer
 """
 
 import abc
@@ -32,9 +17,6 @@ from openhcs.constants.input_source import InputSource
 from openhcs.core.config import LazyStepMaterializationConfig, LazyStreamingDefaults, LazyNapariStreamingConfig, LazyFijiStreamingConfig
 from openhcs.core.config import LazyStepWellFilterConfig
 from openhcs.core.config import LazyProcessingConfig, LazyDtypeConfig
-
-# Import ContextProvider for automatic step context registration
-from openhcs.config_framework.lazy_factory import ContextProvider
 
 # ProcessingContext is used in type hints
 if TYPE_CHECKING:
@@ -63,12 +45,9 @@ if TYPE_CHECKING:
 #    return str(id(step))
 
 
-class AbstractStep(abc.ABC, ContextProvider):
+class AbstractStep(abc.ABC):
     """
     Abstract base class for all steps in the OpenHCS pipeline.
-
-    Inherits from ContextProvider to enable automatic context injection
-    for lazy configuration resolution.
 
     This class defines the interface that all steps must implement.
     Steps are stateful during pipeline definition and compilation (holding attributes
@@ -111,7 +90,6 @@ class AbstractStep(abc.ABC, ContextProvider):
     ```
 
     """
-    _context_type = "step"  # Register as step context provider
 
     # Attributes like input_memory_type, output_memory_type, etc.,
     # are defined in concrete subclasses (e.g., FunctionStep) as needed.
@@ -191,6 +169,4 @@ class AbstractStep(abc.ABC, ContextProvider):
             context: The frozen ProcessingContext containing all required fields,
                      including step_plans and filemanager.
         """
-        # Clause 246 — Statelessness Mandate
-        # Clause 21 — Context Immunity (Context is read-only for steps)
         raise NotImplementedError("AbstractStep.process() must be implemented by subclasses")

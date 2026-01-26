@@ -22,7 +22,7 @@ import logging
 from typing import Optional
 
 from openhcs.utils.import_utils import optional_import
-from openhcs.core.memory.decorators import jax as jax_func
+from openhcs.core.memory import jax as jax_func
 
 # Import JAX modules as optional dependencies
 from openhcs.core.lazy_gpu_imports import jax

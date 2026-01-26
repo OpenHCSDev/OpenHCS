@@ -15,7 +15,7 @@ import logging
 import os
 from typing import Any, List, Optional, Tuple
 
-from openhcs.core.memory.decorators import cupy as cupy_func
+from openhcs.core.memory import cupy as cupy_func
 from openhcs.core.utils import optional_import
 
 logger = logging.getLogger(__name__)
@@ -1022,8 +1022,8 @@ def sobel(image: "cp.ndarray", mask: Optional["cp.ndarray"] = None, *,
         raise ImportError("CuCIM is required for sobel edge detection but is not available")
 
     # Import here to avoid circular dependency
-    from openhcs.core.memory.decorators import DtypeConversion
-    from openhcs.core.memory.dtype_scaling import SCALING_FUNCTIONS
+    from openhcs.core.memory import DtypeConversion
+    from openhcs.core.memory import SCALING_FUNCTIONS
     from openhcs.constants.constants import MemoryType
 
     # Store original dtype

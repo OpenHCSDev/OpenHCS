@@ -456,7 +456,7 @@ Enable debug logging to see cache hits/misses:
 
    import logging
    logging.getLogger('openhcs.config_framework.context_manager').setLevel(logging.DEBUG)
-   logging.getLogger('openhcs.pyqt_gui.widgets.shared.services.live_context_service').setLevel(logging.DEBUG)
+   logging.getLogger('openhcs.config_framework.object_state').setLevel(logging.DEBUG)
 
 Log output will show:
 

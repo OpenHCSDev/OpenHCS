@@ -3,49 +3,39 @@ Centralized config preview formatters for UI widgets.
 
 Single source of truth for how config fields are formatted in preview labels
 across PipelineEditor, PlateManager, and other widgets.
+
+Preview labels are now declared on config classes via @global_pipeline_config(preview_label="NAP")
+and registered in PREVIEW_LABEL_REGISTRY. Field abbreviations are declared via
+@global_pipeline_config(field_abbreviations={'well_filter': 'wf'}) and registered in
+FIELD_ABBREVIATIONS_REGISTRY. This file provides formatting utilities only.
 """
 
-from typing import Any, Optional, Dict, Callable
+from typing import Any, Optional, Callable
+
+from pyqt_reactive.utils.preview_formatters import (
+    check_enabled_field as _check_enabled_field,
+    format_preview_value,
+)
+from openhcs.config_framework.lazy_factory import PREVIEW_LABEL_REGISTRY, FIELD_ABBREVIATIONS_REGISTRY
 
 
-# Config attribute name to display abbreviation mapping
-# Maps config attribute names to their preview text indicators
-CONFIG_INDICATORS: Dict[str, str] = {
-    'step_materialization_config': 'MAT',
-    'napari_streaming_config': 'NAP',
-    'fiji_streaming_config': 'FIJI',
-}
+def _get_preview_label(config: Any) -> Optional[str]:
+    """Get preview label from registry by config type.
 
-
-def _check_enabled_field(config: Any, resolve_attr: Optional[Callable] = None) -> bool:
-    """Check if a config object is enabled.
-
-    GENERAL RULE: Any config with an 'enabled: bool' parameter should only show
-    if it resolves to True.
-
-    Args:
-        config: Config object to check
-        resolve_attr: Optional function to resolve lazy config attributes
-
-    Returns:
-        True if config is enabled (or has no enabled field), False if disabled
+    Looks up the config's type (and base types) in PREVIEW_LABEL_REGISTRY.
     """
-    import dataclasses
+    config_type = type(config)
 
-    # Check if config has 'enabled' field
-    has_enabled = dataclasses.is_dataclass(config) and 'enabled' in {f.name for f in dataclasses.fields(config)}
+    # Direct lookup first
+    if config_type in PREVIEW_LABEL_REGISTRY:
+        return PREVIEW_LABEL_REGISTRY[config_type]
 
-    if has_enabled:
-        # Resolve enabled field if resolver provided
-        if resolve_attr:
-            enabled = resolve_attr(None, config, 'enabled', None)
-        else:
-            enabled = getattr(config, 'enabled', False)
+    # Check base classes (for lazy wrapper types)
+    for base in config_type.__mro__[1:]:
+        if base in PREVIEW_LABEL_REGISTRY:
+            return PREVIEW_LABEL_REGISTRY[base]
 
-        return bool(enabled)
-
-    # No enabled field - assume enabled
-    return True
+    return None
 
 
 def format_generic_config(config_attr: str, config: Any, resolve_attr: Optional[Callable] = None) -> Optional[str]:
@@ -63,9 +53,9 @@ def format_generic_config(config_attr: str, config: Any, resolve_attr: Optional[
     Returns:
         Formatted indicator string (e.g., 'NAP') or None if config is disabled
     """
-    # Get the base indicator
-    indicator = CONFIG_INDICATORS.get(config_attr)
-    if not indicator:
+    # Get the base indicator from registry
+    indicator = _get_preview_label(config)
+    if indicator is None:
         return None
 
     # Check if config is enabled (general rule for all configs)
@@ -110,14 +100,17 @@ def format_well_filter_config(config_attr: str, config: Any, resolve_attr: Optio
         well_filter = getattr(config, 'well_filter', None)
         mode = getattr(config, 'well_filter_mode', WellFilterMode.INCLUDE)
 
-    # Get indicator (NAP, FIJI, MAT, or default FILT)
-    indicator = CONFIG_INDICATORS.get(config_attr, 'FILT')
+    # Get indicator from registry (NAP, FIJI, MAT) or default to FILT
+    indicator = _get_preview_label(config)
+    if indicator is None:
+        indicator = 'FILT'
+    has_registered_label = indicator != 'FILT'
 
-    # If well_filter is None, show just the indicator (for configs with specific indicators)
+    # If well_filter is None, show just the indicator (for configs with registered labels)
     # or return None (for generic well filter configs)
     if well_filter is None:
-        # Configs with specific indicators (NAP/FIJI/MAT) show indicator even without well_filter
-        if config_attr in CONFIG_INDICATORS:
+        # Configs with registered labels (NAP/FIJI/MAT) show indicator even without well_filter
+        if has_registered_label:
             return indicator
         # Generic well filter configs require well_filter to be set
         return None
@@ -159,3 +152,38 @@ def format_config_indicator(config_attr: str, config: Any, resolve_attr: Optiona
         # All other configs use generic formatter (checks enabled field automatically)
         return format_generic_config(config_attr, config, resolve_attr)
 
+
+def get_field_abbreviation(field_name: str, config_type: type = None) -> str:
+    """Look up field abbreviation from registry.
+
+    Searches FIELD_ABBREVIATIONS_REGISTRY for the field name, checking:
+    1. The specific config_type (if provided)
+    2. All registered config types (as fallback for shared field names)
+
+    Args:
+        field_name: The field name to abbreviate (e.g., 'well_filter')
+        config_type: Optional config class to check first
+
+    Returns:
+        Abbreviated name if found, otherwise the original field_name
+    """
+    # Check specific config type first
+    if config_type is not None:
+        # Direct lookup
+        if config_type in FIELD_ABBREVIATIONS_REGISTRY:
+            abbrevs = FIELD_ABBREVIATIONS_REGISTRY[config_type]
+            if field_name in abbrevs:
+                return abbrevs[field_name]
+        # Check base classes (for lazy wrapper types)
+        for base in config_type.__mro__[1:]:
+            if base in FIELD_ABBREVIATIONS_REGISTRY:
+                abbrevs = FIELD_ABBREVIATIONS_REGISTRY[base]
+                if field_name in abbrevs:
+                    return abbrevs[field_name]
+
+    # Fallback: search all registered configs for this field name
+    for abbrevs in FIELD_ABBREVIATIONS_REGISTRY.values():
+        if field_name in abbrevs:
+            return abbrevs[field_name]
+
+    return field_name

@@ -14,8 +14,8 @@ from PyQt6.QtWidgets import QApplication, QMessageBox
 from PyQt6.QtGui import QIcon
 
 from openhcs.core.config import GlobalPipelineConfig
-from openhcs.io.base import storage_registry
-from openhcs.io.filemanager import FileManager
+from polystore.base import storage_registry
+from polystore.filemanager import FileManager
 
 from openhcs.pyqt_gui.main import OpenHCSMainWindow
 
@@ -66,7 +66,7 @@ class OpenHCSPyQtApp(QApplication):
         # Start async storage registry initialization in background thread
         import threading
         def init_storage_registry_background():
-            from openhcs.io.base import ensure_storage_registry
+            from polystore.base import ensure_storage_registry
             ensure_storage_registry()
             logger.info("Storage registry initialized in background")
 
@@ -90,6 +90,7 @@ class OpenHCSPyQtApp(QApplication):
         # This was missing and caused placeholder resolution to fall back to static defaults
         from openhcs.config_framework.global_config import set_global_config_for_editing
         from openhcs.config_framework.lazy_factory import ensure_global_config_context
+        from openhcs.config_framework.object_state import ObjectState, ObjectStateRegistry
         from openhcs.core.config import GlobalPipelineConfig
 
         # Set for editing (UI placeholders) - this uses threading.local() storage
@@ -98,6 +99,15 @@ class OpenHCSPyQtApp(QApplication):
         # ALSO ensure context for orchestrator creation (required by orchestrator.__init__)
         ensure_global_config_context(GlobalPipelineConfig, self.global_config)
 
+        # Register GlobalPipelineConfig ObjectState (singleton, persists for app lifetime)
+        # This is the root of the ObjectState hierarchy
+        # scope_id="" (empty string) for global scope - visible to all orchestrators
+        global_state = ObjectState(
+            object_instance=self.global_config,
+            scope_id="",  # Empty string = global scope
+        )
+        ObjectStateRegistry.register(global_state)
+
         # ARCHITECTURAL FIX: Do NOT set contextvars at app startup
         # contextvars is ONLY for temporary nested contexts (inside with config_context() blocks)
         # threading.local() is the single source of truth for persistent global config
@@ -105,6 +115,10 @@ class OpenHCSPyQtApp(QApplication):
         # This eliminates the dual storage architecture smell
 
         logger.info("Global configuration context established for lazy dataclass resolution")
+
+        # Register pyqt-reactor providers (LLM, codegen, log discovery, window factory, etc.)
+        from openhcs.pyqt_gui.services.reactor_providers import register_reactor_providers
+        register_reactor_providers()
 
         # Set application icon (if available)
         icon_path = Path(__file__).parent / "resources" / "openhcs_icon.png"

@@ -15,8 +15,11 @@ from typing import Tuple, Dict, List, Optional, Any
 from skimage.feature import canny, blob_dog as local_max
 from skimage.filters import median, threshold_li
 from skimage.morphology import skeletonize
-from openhcs.core.memory.decorators import torch as torch_func
+from openhcs.core.memory import torch as torch_func
 from openhcs.core.pipeline.function_contracts import special_outputs
+from openhcs.processing.materialization import register_materializer, materializer_spec, tiff_stack_materializer
+from openhcs.processing.materialization.core import _generate_output_path
+from openhcs.constants.constants import Backend
 
 # Import torch using the established optional import pattern
 from openhcs.core.utils import optional_import
@@ -26,11 +29,16 @@ from openhcs.core.lazy_gpu_imports import torch
 torbi = optional_import("torbi")
 
 
+@register_materializer("hmm_analysis_torbi")
 def materialize_hmm_analysis(
     hmm_analysis_data: Dict[str, Any],
     path: str,
     filemanager,
-    **kwargs
+    backends,
+    backend_kwargs: dict = None,
+    spec=None,
+    context=None,
+    extra_inputs: dict | None = None,
 ) -> str:
     """
     Materialize HMM neurite tracing analysis results to disk.
@@ -52,10 +60,16 @@ def materialize_hmm_analysis(
     import json
     import networkx as nx
     from pathlib import Path
-    from openhcs.constants.constants import Backend
+    # Backends are required to be disk-only for GraphML output
+    if isinstance(backends, str):
+        backends = [backends]
+    backend_kwargs = backend_kwargs or {}
+    for backend in backends:
+        if backend != Backend.DISK.value:
+            raise ValueError("hmm_analysis requires disk backend for GraphML output")
 
     # Generate output file paths
-    base_path = path.replace('.pkl', '')
+    base_path = _generate_output_path(path, "", "", strip_roi=False)
     json_path = f"{base_path}.json"
     graphml_path = f"{base_path}_graph.graphml"
     csv_path = f"{base_path}_edges.csv"
@@ -141,13 +155,27 @@ def materialize_trace_visualizations(data: List[np.ndarray], path: str, filemana
 
     return summary_path
 
-# Import alvahmm - use torbi version from GitHub dependency
+# Import alvahmm - use torbi version from GitHub dependency.
+#
+# IMPORTANT: This module registers materializers at import time. If an optional
+# dependency is partially installed (e.g., alva_machinery imports but its
+# submodules are missing), we must NOT raise during import, otherwise:
+#   1) the materializer may be registered,
+#   2) the module import fails and is removed from sys.modules,
+#   3) a later import retries and attempts to register again -> ValueError,
+#      which can break registry discovery globally.
 alva_machinery = optional_import("alva_machinery")
 if alva_machinery:
-    from alva_machinery.markov import aChain_torbi as alva_MCMC_torbi
-    from alva_machinery.markov import aChain as alva_MCMC
-    from alva_machinery.branching import aWay as alva_branch
-    ALVA_AVAILABLE = True
+    try:
+        from alva_machinery.markov import aChain_torbi as alva_MCMC_torbi
+        from alva_machinery.markov import aChain as alva_MCMC
+        from alva_machinery.branching import aWay as alva_branch
+        ALVA_AVAILABLE = True
+    except Exception:
+        ALVA_AVAILABLE = False
+        alva_MCMC_torbi = None
+        alva_MCMC = None
+        alva_branch = None
 else:
     ALVA_AVAILABLE = False
     alva_MCMC_torbi = None
@@ -454,10 +482,16 @@ def create_visualization_array(
     else:
         raise ValueError(f"Unknown visualization mode: {mode}")
 
-@special_outputs(("hmm_analysis", materialize_hmm_analysis), ("trace_visualizations", materialize_trace_visualizations))
+@special_outputs(
+    ("hmm_analysis", materializer_spec("hmm_analysis_torbi", allowed_backends=[Backend.DISK.value])),
+    ("trace_visualizations", tiff_stack_materializer(
+        normalize_uint8=True,
+        summary_suffix="_trace_summary.txt"
+    ))
+)
 @torch_func
 def trace_neurites_rrs_alva_torbi(
-    image_stack: torch.Tensor,
+    image_stack: "torch.Tensor",
     seeding_method: SeedingMethod = SeedingMethod.BLOB_DETECTION,
     return_trace_visualizations: bool = False,
     trace_visualization_mode: VisualizationMode = VisualizationMode.TRACE_ONLY,
@@ -471,7 +505,7 @@ def trace_neurites_rrs_alva_torbi(
     threshold: float = 0.02,
     normalize_image: bool = False,
     percentile: float = 99.9
-) -> Tuple[torch.Tensor, Dict[str, Any], List[np.ndarray]]:
+) -> "Tuple[torch.Tensor, Dict[str, Any], List[np.ndarray]]":
     """
     Trace neurites using the alvahmm RRS algorithm with torbi GPU acceleration.
 
@@ -638,4 +672,3 @@ def process_file_legacy(filename, input_folder, output_folder, **kwargs):
         "Legacy file-based processing not supported in OpenHCS. "
         "Use trace_neurites_rrs_alva() for array-in/array-out processing."
     )
-

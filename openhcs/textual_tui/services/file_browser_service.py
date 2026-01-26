@@ -7,7 +7,7 @@ from typing import List, Optional
 from enum import Enum
 
 from openhcs.constants.constants import Backend
-from openhcs.io.filemanager import FileManager
+from polystore.filemanager import FileManager
 
 
 class SelectionMode(Enum):

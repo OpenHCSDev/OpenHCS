@@ -22,8 +22,9 @@ import pyclesperanto as cle
 from scipy.spatial.distance import cdist
 
 # OpenHCS imports
-from openhcs.core.memory.decorators import pyclesperanto as pyclesperanto_func
+from openhcs.core.memory import pyclesperanto as pyclesperanto_func
 from openhcs.core.pipeline.function_contracts import special_outputs
+from openhcs.processing.materialization import materializer_spec, tiff_stack_materializer
 from openhcs.constants.constants import Backend
 
 
@@ -160,7 +161,12 @@ def materialize_segmentation_masks(data: List[np.ndarray], path: str, filemanage
 
 
 @pyclesperanto_func
-@special_outputs(("cell_counts", materialize_cell_counts), ("segmentation_masks", materialize_segmentation_masks))
+@special_outputs(
+    ("cell_counts", materializer_spec("cell_counts")),
+    ("segmentation_masks", tiff_stack_materializer(
+        summary_suffix="_segmentation_summary.txt"
+    ))
+)
 def count_cells_single_channel(
     image_stack: np.ndarray,
     # Detection method and parameters
@@ -267,7 +273,7 @@ def count_cells_single_channel(
 
 
 @pyclesperanto_func
-@special_outputs(("multi_channel_counts", materialize_cell_counts))
+@special_outputs(("multi_channel_counts", materializer_spec("cell_counts")))
 def count_cells_multi_channel(
     image_stack: np.ndarray,
     chan_1: int,                         # Index of first channel (positional arg)

@@ -91,18 +91,21 @@ ValueCollectionService
 
 Handles value collection from nested managers and dataclass operations.
 
+It works hand-in-hand with ``ObjectState``:
+
+- PFM uses ObjectState as the single source of truth for parameters and nested states.
+- Live context collection walks ObjectStateRegistry (not PFMs) and uses ``get_user_modified_values``/overlays.
+- Cancel/save flows rely on ObjectState baselines (mark_saved/restore_saved).
+
 .. code-block:: python
 
     from openhcs.pyqt_gui.widgets.shared.services.value_collection_service import ValueCollectionService
-    
+
     service = ValueCollectionService()
-    
+
     # Collect nested value with type-safe dispatch
     value = service.collect_nested_value(manager, param_name, nested_manager)
-    
-    # Reconstruct nested dataclasses from tuple format
-    reconstructed = ValueCollectionService.reconstruct_nested_dataclasses(live_values, base_instance)
-    
+
     # Unpack dataclass fields to instance attributes
     ValueCollectionService.unpack_to_self(target, source, prefix="config_")
 
@@ -247,4 +250,3 @@ See Also
 - :doc:`service-layer-architecture` - Framework-agnostic service layer patterns
 - :doc:`parameter_form_service_architecture` - ParameterFormService architecture
 - :doc:`parameter_form_lifecycle` - Form lifecycle management
-

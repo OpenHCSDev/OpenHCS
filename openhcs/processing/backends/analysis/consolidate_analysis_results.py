@@ -20,8 +20,10 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
-from openhcs.core.memory.decorators import numpy as numpy_func
+from openhcs.core.memory import numpy as numpy_func
 from openhcs.core.pipeline.function_contracts import special_outputs
+from openhcs.processing.materialization import register_materializer, materializer_spec
+from openhcs.processing.materialization.core import _generate_output_path
 
 # Import config classes with TYPE_CHECKING to avoid circular imports
 from typing import TYPE_CHECKING
@@ -425,22 +427,36 @@ def consolidate_analysis_results(
     return summary_df
 
 
+@register_materializer("consolidated_results")
 def materialize_consolidated_results(
     data: pd.DataFrame,
     output_path: str,
     filemanager,
-    backend: str,
-    well_id: str
+    backends,
+    backend_kwargs: dict = None,
+    spec=None,
+    context=None,
+    extra_inputs: dict | None = None,
 ) -> str:
     """Materialize consolidated results DataFrame to CSV using OpenHCS FileManager."""
     try:
+        options = spec.options if spec is not None else {}
+        filename_suffix = options.get("filename_suffix", ".csv")
+        strip_roi = options.get("strip_roi_suffix", False)
+        output_path = _generate_output_path(output_path, filename_suffix, ".csv", strip_roi=strip_roi)
+
+        if isinstance(backends, str):
+            backends = [backends]
+        backend_kwargs = backend_kwargs or {}
+
         csv_content = data.to_csv(index=False)
 
-        # Remove existing file if present
-        if filemanager.exists(output_path, backend):
-            filemanager.delete(output_path, backend)
+        for backend in backends:
+            if filemanager.exists(output_path, backend):
+                filemanager.delete(output_path, backend)
+            kwargs = backend_kwargs.get(backend, {})
+            filemanager.save(csv_content, output_path, backend, **kwargs)
 
-        filemanager.save(csv_content, output_path, backend)
         logger.info(f"Materialized consolidated results to {output_path}")
         return output_path
 
@@ -450,7 +466,7 @@ def materialize_consolidated_results(
 
 
 @numpy_func
-@special_outputs(("consolidated_results", materialize_consolidated_results))
+@special_outputs(("consolidated_results", materializer_spec("consolidated_results")))
 def consolidate_analysis_results_pipeline(
     image_stack: np.ndarray,
     results_directory: str,

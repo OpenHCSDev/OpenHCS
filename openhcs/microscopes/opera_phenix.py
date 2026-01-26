@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional, Union, Type, Tuple
 
 from openhcs.constants.constants import Backend
 from openhcs.microscopes.opera_phenix_xml_parser import OperaPhenixXmlParser
-from openhcs.io.filemanager import FileManager
+from polystore.filemanager import FileManager
 from openhcs.microscopes.microscope_base import MicroscopeHandler
 from openhcs.microscopes.microscope_interfaces import (FilenameParser,
                                                             MetadataHandler)
@@ -387,7 +387,6 @@ class OperaPhenixFilenameParser(FilenameParser):
         Returns:
             bool: True if this parser can parse the filename, False otherwise
         """
-        # 🔒 Clause 17 — VFS Boundary Method
         # This is a string operation that doesn't perform actual file I/O
         # Extract just the basename
         basename = os.path.basename(filename)
@@ -405,7 +404,6 @@ class OperaPhenixFilenameParser(FilenameParser):
         Returns:
             dict or None: Dictionary with extracted components or None if parsing fails.
         """
-        # 🔒 Clause 17 — VFS Boundary Method
         # This is a string operation that doesn't perform actual file I/O
         basename = os.path.basename(filename)
         logger.debug("OperaPhenixFilenameParser attempting to parse basename: '%s'", basename)

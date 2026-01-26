@@ -9,9 +9,9 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 
 # REUSE the actual working Textual TUI help components
-from openhcs.introspection.signature_analyzer import DocstringExtractor
-from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
-from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
+from openhcs.introspection import DocstringExtractor
+from pyqt_reactive.theming import ColorScheme
+from pyqt_reactive.theming import StyleSheetGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -19,11 +19,11 @@ logger = logging.getLogger(__name__)
 class BaseHelpWindow(QDialog):
     """Base class for all PyQt6 help windows - reuses Textual TUI help logic."""
     
-    def __init__(self, title: str = "Help", color_scheme: Optional[PyQt6ColorScheme] = None, parent=None):
+    def __init__(self, title: str = "Help", color_scheme: Optional[ColorScheme] = None, parent=None):
         super().__init__(parent)
 
         # Initialize color scheme and style generator
-        self.color_scheme = color_scheme or PyQt6ColorScheme()
+        self.color_scheme = color_scheme or ColorScheme()
         self.style_generator = StyleSheetGenerator(self.color_scheme)
 
         self.setWindowTitle(title)
@@ -61,7 +61,7 @@ class DocstringHelpWindow(BaseHelpWindow):
     """Help window for functions and classes - reuses Textual TUI DocstringExtractor."""
     
     def __init__(self, target: Union[Callable, type], title: Optional[str] = None,
-                 color_scheme: Optional[PyQt6ColorScheme] = None, parent=None):
+                 color_scheme: Optional[ColorScheme] = None, parent=None):
         self.target = target
 
         # REUSE Textual TUI docstring extraction logic

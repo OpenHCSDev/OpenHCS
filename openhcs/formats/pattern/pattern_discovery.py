@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from openhcs.constants.constants import DEFAULT_IMAGE_EXTENSION
-from openhcs.io.filemanager import FileManager
+from polystore.filemanager import FileManager
 # Core OpenHCS Interfaces
 from openhcs.microscopes.microscope_interfaces import FilenameParser
 
@@ -410,7 +410,6 @@ class PatternDiscoveryEngine:
                     else:
                         pattern_args[comp] = template_metadata[comp]
 
-            # 🔒 Clause 93 — Declarative Execution Enforcement
             # Ensure pattern generation succeeded
             if not pattern_args:
                 raise ValueError("Clause 93 Violation: No components found in template metadata for pattern generation")
@@ -431,7 +430,6 @@ class PatternDiscoveryEngine:
 
             patterns.append(pattern_str)
 
-        # 🔒 Clause 92 — Structural Validation First
         # Validate the final pattern list
         if not patterns:
             raise ValueError(

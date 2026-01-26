@@ -21,7 +21,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 # Import decorator directly from core.memory to avoid circular imports
-from openhcs.core.memory.decorators import cupy as cupy_func
+from openhcs.core.memory import cupy as cupy_func
 from openhcs.core.utils import optional_import
 
 # For type checking only

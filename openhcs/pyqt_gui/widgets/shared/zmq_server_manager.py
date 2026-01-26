@@ -21,7 +21,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QGroupBox, QMessageBox, QAbstractItemView
 )
 from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot, QTimer
-from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
+from pyqt_reactive.theming import StyleSheetGenerator
 import threading
 
 logger = logging.getLogger(__name__)
@@ -341,7 +341,8 @@ class ZMQServerManagerWidget(QWidget):
         import zmq
         import pickle
         from openhcs.constants.constants import CONTROL_PORT_OFFSET
-        from openhcs.runtime.zmq_base import get_zmq_transport_url, get_default_transport_mode
+        from openhcs.runtime.zmq_config import OPENHCS_ZMQ_CONFIG
+        from zmqruntime.transport import get_zmq_transport_url, get_default_transport_mode
 
         control_port = port + CONTROL_PORT_OFFSET
         control_context = None
@@ -355,7 +356,12 @@ class ZMQServerManagerWidget(QWidget):
 
             # Use transport mode-aware URL (IPC or TCP)
             transport_mode = get_default_transport_mode()
-            control_url = get_zmq_transport_url(control_port, transport_mode, 'localhost')
+            control_url = get_zmq_transport_url(
+                control_port,
+                host="localhost",
+                mode=transport_mode,
+                config=OPENHCS_ZMQ_CONFIG,
+            )
             control_socket.connect(control_url)
 
             # Send ping
@@ -402,7 +408,7 @@ class ZMQServerManagerWidget(QWidget):
     @pyqtSlot(list)
     def _update_server_list(self, servers: List[Dict[str, Any]]):
         """Update server tree on UI thread (called via signal)."""
-        from openhcs.runtime.queue_tracker import GlobalQueueTrackerRegistry
+        from zmqruntime.queue_tracker import GlobalQueueTrackerRegistry
 
         self.servers = servers
 
@@ -618,15 +624,16 @@ class ZMQServerManagerWidget(QWidget):
         import threading
 
         def kill_servers():
-            from openhcs.runtime.zmq_base import ZMQClient
-            from openhcs.runtime.queue_tracker import GlobalQueueTrackerRegistry
+            from openhcs.runtime.zmq_config import OPENHCS_ZMQ_CONFIG
+            from zmqruntime.client import ZMQClient
+            from zmqruntime.queue_tracker import GlobalQueueTrackerRegistry
             failed_ports = []
             registry = GlobalQueueTrackerRegistry()
 
             for port in ports_to_kill:
                 try:
                     logger.info(f"Attempting to quit server on port {port}...")
-                    success = ZMQClient.kill_server_on_port(port, graceful=True)
+                    success = ZMQClient.kill_server_on_port(port, graceful=True, config=OPENHCS_ZMQ_CONFIG)
                     if success:
                         logger.info(f"✅ Successfully quit server on port {port}")
                         # Clear queue tracker for this viewer
@@ -688,8 +695,9 @@ class ZMQServerManagerWidget(QWidget):
         import threading
 
         def kill_servers():
-            from openhcs.runtime.zmq_base import ZMQClient
-            from openhcs.runtime.queue_tracker import GlobalQueueTrackerRegistry
+            from openhcs.runtime.zmq_config import OPENHCS_ZMQ_CONFIG
+            from zmqruntime.client import ZMQClient
+            from zmqruntime.queue_tracker import GlobalQueueTrackerRegistry
             registry = GlobalQueueTrackerRegistry()
 
             for port in ports_to_kill:
@@ -697,7 +705,7 @@ class ZMQServerManagerWidget(QWidget):
                     logger.info(f"🔥 FORCE KILL: Force killing server on port {port} (kills workers AND server)")
                     # Use kill_server_on_port with graceful=False
                     # This handles both IPC and TCP modes correctly
-                    success = ZMQClient.kill_server_on_port(port, graceful=False)
+                    success = ZMQClient.kill_server_on_port(port, graceful=False, config=OPENHCS_ZMQ_CONFIG)
 
                     if success:
                         logger.info(f"✅ Successfully force killed server on port {port}")
@@ -741,4 +749,3 @@ class ZMQServerManagerWidget(QWidget):
                 "No Log File",
                 f"No log file available for this item.\n\nPort: {data.get('port', 'unknown') if data else 'unknown'}"
             )
-

@@ -7,12 +7,6 @@ including image normalization, sharpening, and other operations.
 It also includes a function registry system that automatically registers
 functions decorated with memory type decorators (@numpy, @cupy, etc.) for
 runtime discovery and inspection.
-
-Doctrinal Clauses:
-- Clause 3 — Declarative Primacy: All functions are pure and stateless
-- Clause 88 — No Inferred Capabilities: Explicit backend requirements
-- Clause 106-A — Declared Memory Types: All methods specify memory types
-- Clause 273 — Memory Backend Restrictions: GPU-only implementations are marked
 """
 
 
@@ -25,7 +19,7 @@ from openhcs.processing.func_registry import (FUNC_REGISTRY,
                                                  get_valid_memory_types,
                                                  is_registry_initialized)
 # Import decorators directly from core module (function_registry.py is deprecated)
-from openhcs.core.memory.decorators import (cupy, jax, numpy,
+from openhcs.core.memory import (cupy, jax, numpy,
                                            pyclesperanto, tensorflow, torch)
 
 

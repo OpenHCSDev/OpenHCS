@@ -34,7 +34,7 @@ except ImportError:
     
 
 from openhcs.pyqt_gui.app import OpenHCSPyQtApp
-from openhcs.pyqt_gui.utils.window_utils import install_global_window_bounds_filter
+from pyqt_reactive.utils.window_utils import install_global_window_bounds_filter
 
 
 def is_wsl() -> bool:

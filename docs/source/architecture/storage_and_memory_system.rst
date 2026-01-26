@@ -557,7 +557,7 @@ The materialization system bridges the gap between computational processing and 
 Special Output Decoration
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Functions declare their side effects using the ``@special_outputs`` decorator, which can optionally specify materialization functions for converting data to persistent formats.
+Functions declare their side effects using the ``@special_outputs`` decorator, which can optionally specify materialization specs (resolved via handlers) for converting data to persistent formats.
 
 **Basic Special Outputs** (memory backend only):
 
@@ -574,11 +574,14 @@ Functions declare their side effects using the ``@special_outputs`` decorator, w
        # Return: (main_output, special_output_1, special_output_2, ...)
        return processed_image, positions, metadata
 
-**With Materialization Functions** (memory + persistent storage):
+**With Materialization Specs** (memory + persistent storage):
 
 .. code:: python
 
-   @special_outputs(("cell_counts", materialize_cell_counts), ("masks", materialize_segmentation_masks))
+   from openhcs.processing.materialization import csv_materializer, roi_zip_materializer
+
+   @special_outputs(("cell_counts", csv_materializer(fields=["slice_index", "cell_count"], analysis_type="cell_counts")),
+                    ("masks", roi_zip_materializer()))
    def count_cells_with_materialization(image_stack):
        """Function with materialized special outputs."""
        processed_image, cell_counts, segmentation_masks = analyze_cells(image_stack)
@@ -590,16 +593,18 @@ Functions declare their side effects using the ``@special_outputs`` decorator, w
 
 .. code:: python
 
-   @special_outputs("debug_info", ("analysis_results", materialize_analysis_results))
+   from openhcs.processing.materialization import csv_materializer
+
+   @special_outputs("debug_info", ("analysis_results", csv_materializer(fields=["metric"], analysis_type="analysis_results")))
    def analyze_with_mixed_outputs(image_stack):
        """Function with both memory-only and materialized outputs."""
        # debug_info stays in memory, analysis_results gets materialized
        return processed_image, debug_info, analysis_results
 
-Materialization Function Implementation
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Materialization Handler Implementation
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Materialization functions follow standard signatures and handle the conversion from Python objects to persistent file formats. They receive data from the memory backend and save it using the FileManager with appropriate backend selection.
+Materialization handlers follow standard signatures and handle the conversion from Python objects to persistent file formats. They receive data from the memory backend and save it using the FileManager with appropriate backend selection.
 
 **Single Backend Signature** (for simple materialization):
 
@@ -742,7 +747,7 @@ The materialization system integrates with the OpenHCS configuration hierarchy t
 
 For complete configuration details and examples, see :doc:`configuration_framework`.
 
-**Architectural Pattern**: The configuration system provides declarative control over materialization behavior without requiring code changes. The same materialization function can save to different backends based purely on configuration settings.
+**Architectural Pattern**: The configuration system provides declarative control over materialization behavior without requiring code changes. The same materialization handler can save to different backends based purely on configuration settings.
 
 Execution Flow
 ~~~~~~~~~~~~~~
@@ -758,9 +763,9 @@ The materialization system operates in two phases during pipeline execution: mem
 
 **Phase 2: Persistent Materialization** (conditional):
 
-1. **Materialization Check**: System checks if special output has associated materialization function
+1. **Materialization Check**: System checks if special output has associated materialization spec
 2. **Data Loading**: Loads special output data from memory backend
-3. **Format Conversion**: Materialization function converts data to appropriate file format
+3. **Format Conversion**: Materialization handler converts data to appropriate file format
 4. **Backend Storage**: Saves converted data using configured materialization backend (disk/zarr)
 5. **Path Return**: Returns path to materialized file for logging/reference
 
@@ -779,13 +784,13 @@ The materialization system operates in two phases during pipeline execution: mem
    # - processed_image → memory backend (standard pipeline flow)
    # - cell_count_results → memory backend at VFS path "/memory/step_output/cell_counts.pkl"
 
-   # 3. Materialization execution (if materialization function exists)
+   # 3. Materialization execution (if materialization spec exists)
    # - Load cell_count_results from memory backend
    # - Call materialize_cell_counts(cell_count_results, "/memory/step_output/cell_counts.pkl", filemanager)
    # - Save CSV/JSON files to disk backend
    # - Log materialization completion
 
-**Configuration-Driven Behavior**: The materialization backend (disk vs zarr) is determined by the ``VFSConfig.materialization_backend`` setting, allowing the same materialization function to save to different storage formats based on configuration.
+**Configuration-Driven Behavior**: The materialization backend (disk vs zarr) is determined by the ``VFSConfig.materialization_backend`` setting, allowing the same materialization handler to save to different storage formats based on configuration.
 
 System Integration Patterns
 ---------------------------
@@ -882,8 +887,8 @@ The FileManager provides comprehensive file and directory operations beyond basi
 .. code:: python
 
    # Backends are automatically registered when their classes are defined
-   from openhcs.io.backend_registry import StorageBackendMeta, STORAGE_BACKENDS, create_storage_registry
-   from openhcs.io.base import DataSink
+   from polystore.backend_registry import StorageBackendMeta, STORAGE_BACKENDS, create_storage_registry
+   from polystore.base import DataSink
 
    # Example backend with automatic registration
    class DiskStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
@@ -917,7 +922,7 @@ The FileManager provides comprehensive file and directory operations beyond basi
        return registry
 
    # Global singleton storage registry
-   from openhcs.io.base import storage_registry  # Created at module import
+   from polystore.base import storage_registry  # Created at module import
 
 **Lazy Backend Discovery**: The backend discovery system uses lazy imports to avoid loading GPU-heavy backends during startup:
 
@@ -941,13 +946,13 @@ The FileManager provides comprehensive file and directory operations beyond basi
        """
        # Import GPU-heavy backends directly from their modules (not via __getattr__)
        # This ensures the module is imported and metaclass registration happens
-       importlib.import_module('openhcs.io.zarr')
-       importlib.import_module('openhcs.io.napari_stream')
-       importlib.import_module('openhcs.io.fiji_stream')
+       importlib.import_module('polystore.zarr')
+       importlib.import_module('polystore.napari_stream')
+       importlib.import_module('polystore.fiji_stream')
 
 **Key Design Points**:
 
-- **Lazy Loading**: GPU-heavy backends (zarr, napari_stream, fiji_stream) are not imported during ``openhcs.io`` module load
+- **Lazy Loading**: GPU-heavy backends (zarr, napari_stream, fiji_stream) are not imported during ``polystore`` module load
 - **Explicit Discovery**: ``discover_all_backends()`` uses ``importlib.import_module()`` to trigger module imports
 - **Metaclass Registration**: Backend classes register themselves via ``StorageBackendMeta`` during module import
 - **Startup Performance**: Defers GPU library imports (ome-zarr, napari, fiji) until first use
@@ -961,11 +966,11 @@ The FileManager provides comprehensive file and directory operations beyond basi
    # Check if we're in subprocess runner mode
    if os.getenv('OPENHCS_SUBPROCESS_NO_GPU') == '1':
        # Subprocess runner mode - only import essential backends
-       from openhcs.io import disk, memory
+       from polystore import disk, memory
        # Skips: zarr, napari_stream, fiji_stream (avoid GPU library imports)
    else:
        # Normal mode - discover all backends (including GPU-heavy ones)
-       from openhcs.io.backend_registry import discover_all_backends
+       from polystore.backend_registry import discover_all_backends
        discover_all_backends()
 
 This prevents GPU library imports in subprocess workers, which is critical for multiprocessing execution where worker processes don't need GPU access.
@@ -1152,7 +1157,7 @@ The following documents were consolidated into this unified architecture documen
 The materialization system content was integrated from existing documentation:
 
 - :doc:`special_io_system` - Cross-step communication patterns using materialization
-- Various function implementation files - Real materialization function examples
+- Various function implementation files - Real materialization handler examples
 
 Additional content was integrated from:
 

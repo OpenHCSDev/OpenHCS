@@ -98,7 +98,7 @@ def _get_component_enum_cache_manager():
     global _component_enum_cache_manager
     if _component_enum_cache_manager is None:
         try:
-            from openhcs.core.registry_cache import RegistryCacheManager, CacheConfig
+            from metaclass_registry.cache import RegistryCacheManager, CacheConfig
 
             def get_version():
                 try:
@@ -438,25 +438,6 @@ class MemoryType(Enum):
     TENSORFLOW = "tensorflow"
     JAX = "jax"
     PYCLESPERANTO = "pyclesperanto"
-
-    @property
-    def converter(self):
-        """Get the converter instance for this memory type."""
-        from openhcs.core.memory.conversion_helpers import _CONVERTERS
-        return _CONVERTERS[self]
-
-# Auto-generate to_X() methods on enum
-def _add_conversion_methods():
-    """Add to_X() conversion methods to MemoryType enum."""
-    for target_type in MemoryType:
-        method_name = f"to_{target_type.value}"
-        def make_method(target):
-            def method(self, data, gpu_id):
-                return getattr(self.converter, f"to_{target.value}")(data, gpu_id)
-            return method
-        setattr(MemoryType, method_name, make_method(target_type))
-
-_add_conversion_methods()
 
 
 CPU_MEMORY_TYPES: Set[MemoryType] = {MemoryType.NUMPY}

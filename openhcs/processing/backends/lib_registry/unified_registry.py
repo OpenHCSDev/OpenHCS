@@ -33,9 +33,9 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 
 
 from openhcs.core.xdg_paths import get_cache_file_path
-from openhcs.core.memory.stack_utils import unstack_slices, stack_slices
-from openhcs.core.auto_register_meta import AutoRegisterMeta, LazyDiscoveryDict
-from openhcs.core.config import LazyDtypeConfig 
+from openhcs.core.memory import unstack_slices, stack_slices
+from metaclass_registry import AutoRegisterMeta, LazyDiscoveryDict
+from openhcs.core.config import LazyDtypeConfig , LazyWellFilterConfig, LazyStepWellFilterConfig
 
 logger = logging.getLogger(__name__)
 
@@ -183,6 +183,8 @@ class LibraryRegistryBase(ABC, metaclass=AutoRegisterMeta):
     INJECTABLE_PARAMS = [
         ('enabled', True, bool),
         ('dtype_config', lambda: LazyDtypeConfig(), 'LazyDtypeConfig'),
+#        ('well_filter_config', lambda: LazyWellFilterConfig(), 'LazyWellFilterConfig'),
+#        ('step_well_filter_config', lambda: LazyStepWellFilterConfig(), 'LazyStepWellFilterConfig'),
     ]
 
     # Parameters injected only into FLEXIBLE contract functions
@@ -350,8 +352,8 @@ class LibraryRegistryBase(ABC, metaclass=AutoRegisterMeta):
     def _execute_slice_by_slice(self, func, image, *args, **kwargs):
         """Shared slice-by-slice execution logic."""
         if image.ndim == 3:
-            from openhcs.core.memory.stack_utils import unstack_slices, stack_slices
-            from openhcs.core.memory.converters import detect_memory_type
+            from openhcs.core.memory import unstack_slices, stack_slices
+            from openhcs.core.memory import detect_memory_type
             mem = detect_memory_type(image)
             slices = unstack_slices(image, mem, 0)
             results = [func(sl, *args, **kwargs) for sl in slices]
@@ -686,7 +688,7 @@ class RuntimeTestingRegistryBase(LibraryRegistryBase):
         """Extract type hints from docstring using mathematical simplification approach."""
         try:
             # Import from shared UI utilities (no circular dependency)
-            from openhcs.introspection.signature_analyzer import SignatureAnalyzer
+            from openhcs.introspection import SignatureAnalyzer
             import numpy as np
 
             logger.debug(f"🔍 ENHANCE ANNOTATIONS: {original_func.__name__} from {original_func.__module__}")

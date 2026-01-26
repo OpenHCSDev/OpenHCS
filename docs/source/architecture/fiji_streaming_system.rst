@@ -298,6 +298,4 @@ See Also
 
 - :doc:`external_integrations_overview` - Overview of all OpenHCS integrations
 - :doc:`napari_streaming_system` - Napari streaming (similar architecture)
-- :doc:`zmq_execution_system` - ZMQ base classes and patterns
 - :doc:`../guides/fiji_viewer_management` - Fiji viewer management guide
-

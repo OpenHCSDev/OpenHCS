@@ -4,7 +4,7 @@ import logging
 from typing import TYPE_CHECKING, List, Tuple, Union
 
 from openhcs.utils.import_utils import optional_import, create_placeholder_class
-from openhcs.core.memory.decorators import torch as torch_func # Changed from numpy_func
+from openhcs.core.memory import torch as torch_func # Changed from numpy_func
 
 # --- Backend Imports as optional dependencies ---
 # PyTorch

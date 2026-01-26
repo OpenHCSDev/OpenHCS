@@ -7,7 +7,7 @@ import logging
 from typing import List, Optional
 
 from openhcs.utils.import_utils import optional_import, create_placeholder_class
-from openhcs.core.memory.decorators import torch as torch_func
+from openhcs.core.memory import torch as torch_func
 from openhcs.core.lazy_gpu_imports import torch
 
 # Import torch modules as optional dependencies

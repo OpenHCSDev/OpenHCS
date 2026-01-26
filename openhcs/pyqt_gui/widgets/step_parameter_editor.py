@@ -6,28 +6,38 @@ Handles FunctionStep parameter editing with nested dataclass support.
 """
 
 import logging
-from typing import Any, Optional
+import dataclasses
+import os
+from typing import Any, Optional, Union, get_args, get_origin
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QScrollArea, QSplitter, QTreeWidget, QTreeWidgetItem
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 
 from openhcs.core.steps.function_step import FunctionStep
-from openhcs.introspection.signature_analyzer import SignatureAnalyzer
-from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager, FormManagerConfig
-from openhcs.pyqt_gui.widgets.shared.config_hierarchy_tree import ConfigHierarchyTreeHelper
-from openhcs.pyqt_gui.widgets.shared.collapsible_splitter_helper import CollapsibleSplitterHelper
-from openhcs.pyqt_gui.widgets.shared.scrollable_form_mixin import ScrollableFormMixin
-from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
-from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
+from openhcs.core.steps.abstract import AbstractStep
+from openhcs.introspection import SignatureAnalyzer
+from openhcs.core.config import PipelineConfig
+from openhcs.core.path_cache import PathCacheKey
+from pyqt_reactive.forms import ParameterFormManager, FormManagerConfig
+from pyqt_reactive.widgets.shared.config_hierarchy_tree import ConfigHierarchyTreeHelper
+from pyqt_reactive.core.collapsible_splitter_helper import CollapsibleSplitterHelper
+from pyqt_reactive.widgets.shared.scrollable_form_mixin import ScrollableFormMixin
+from pyqt_reactive.services.parameter_ops_service import ParameterOpsService
+from pyqt_reactive.widgets.editors.simple_code_editor import SimpleCodeEditorService
+from pyqt_reactive.theming import ColorScheme
+from pyqt_reactive.theming import StyleSheetGenerator
 from openhcs.pyqt_gui.config import PyQtGUIConfig, get_default_pyqt_gui_config
 # REMOVED: LazyDataclassFactory import - no longer needed since step editor
 # uses existing lazy dataclass instances from the step
-from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
+from pyqt_reactive.forms import ParameterTypeUtils
 from openhcs.ui.shared.code_editor_form_updater import CodeEditorFormUpdater
+import openhcs.serialization.pycodify_formatters  # noqa: F401
+from pycodify import Assignment, generate_python_source
+from openhcs.config_framework.object_state import ObjectState, ObjectStateRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -45,13 +55,13 @@ class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
     # Signals
     step_parameter_changed = pyqtSignal()
     
-    def __init__(self, step: FunctionStep, service_adapter=None, color_scheme: Optional[PyQt6ColorScheme] = None,
+    def __init__(self, step: FunctionStep, service_adapter=None, color_scheme: Optional[ColorScheme] = None,
                  gui_config: Optional[PyQtGUIConfig] = None, parent=None, pipeline_config=None, scope_id: Optional[str] = None,
                  step_index: Optional[int] = None):
         super().__init__(parent)
 
         # Initialize color scheme and GUI config
-        self.color_scheme = color_scheme or PyQt6ColorScheme()
+        self.color_scheme = color_scheme or ColorScheme()
         self.gui_config = gui_config or get_default_pyqt_gui_config()
         self.style_generator = StyleSheetGenerator(self.color_scheme)
 
@@ -70,7 +80,6 @@ class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
         #     logger.debug("🔍 STEP EDITOR: Created step-editor-specific coordinator for live step parameter updates")
         
         # Analyze AbstractStep signature to get all inherited parameters (mirrors Textual TUI)
-        from openhcs.core.steps.abstract import AbstractStep
         # Auto-detection correctly identifies constructors and includes all parameters
         param_info = SignatureAnalyzer.analyze(AbstractStep.__init__)
         
@@ -109,28 +118,30 @@ class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
         # CRITICAL FIX: Use pipeline_config as context_obj (parent for inheritance)
         # The step is the overlay (what's being edited), not the parent context
         # Context hierarchy: GlobalPipelineConfig (thread-local) -> PipelineConfig (context_obj) -> Step (overlay)
-        # CRITICAL FIX: Exclude 'func' parameter - it's handled by the Function Pattern tab
-        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import FormManagerConfig
+        # Look up ObjectState from registry using scope_id
+        # ObjectState MUST be registered by PipelineEditorWidget when step was added
+        logger.info(f"🔍 STEP_EDITOR: Looking up ObjectState for scope_id={self.scope_id}")
+        logger.info(f"🔍 STEP_EDITOR: Registry has scopes: {[s.scope_id for s in ObjectStateRegistry.get_all()]}")
+        self.state = ObjectStateRegistry.get_by_scope(self.scope_id) if self.scope_id else None
 
-        # Construct unique field_id based on step index for tree registry
-        # Format: "{plate_node_id}.step_{index}" or fallback to "step" if no index provided
-        if self.step_index is not None and self.scope_id:
-            field_id = f"{self.scope_id}.step_{self.step_index}"
-        else:
-            field_id = "step"  # Fallback for backward compatibility
+        if self.state is None:
+            # FAIL LOUD: The step MUST be registered by PipelineEditor before opening the editor
+            raise RuntimeError(
+                f"ObjectState not found for scope_id={self.scope_id}. "
+                f"PipelineEditor must register the step before opening the editor. "
+                f"Registry has: {[s.scope_id for s in ObjectStateRegistry.get_all()]}"
+            )
+
+        logger.info(f"🔍 STEP_EDITOR: Using REGISTERED ObjectState, params={list(self.state.parameters.keys())}")
 
         config = FormManagerConfig(
             parent=self,                         # Pass self as parent widget
-            context_obj=self.pipeline_config,    # Pipeline config as parent context for inheritance
-            exclude_params=['func'],             # Exclude func - it has its own dedicated tab
-            scope_id=self.scope_id,              # Pass scope_id to limit cross-window updates to same orchestrator
             color_scheme=self.color_scheme,      # Pass color scheme for consistent theming
             use_scroll_area=False                # Step editor manages its own scroll area
         )
 
         self.form_manager = ParameterFormManager(
-            object_instance=self.step,           # Step instance being edited (overlay)
-            field_id=field_id,                   # Unique field_id based on step index
+            state=self.state,                    # ObjectState (MODEL) from registry
             config=config                        # Pass configuration object
         )
         self.hierarchy_tree = None
@@ -140,9 +151,7 @@ class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
         self.setup_connections()
 
         # Ensure placeholders pick up live context (e.g., PipelineConfig edits) after registration.
-        from openhcs.pyqt_gui.widgets.shared.services import parameter_ops_service
-        from PyQt6.QtCore import QTimer
-        QTimer.singleShot(0, lambda: parameter_ops_service.ParameterOpsService().refresh_with_live_context(self.form_manager))
+        QTimer.singleShot(0, lambda: ParameterOpsService().refresh_with_live_context(self.form_manager))
 
         logger.debug(f"Step parameter editor initialized for step: {getattr(step, 'name', 'Unknown')}")
 
@@ -185,9 +194,6 @@ class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
 
         This is type-based discovery - no manual mappings needed.
         """
-        from openhcs.core.config import PipelineConfig
-        import dataclasses
-
         for field in dataclasses.fields(PipelineConfig):
             # Use string comparison to handle type identity issues
             if str(field.type) == str(target_type):
@@ -214,9 +220,6 @@ class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
 
     def _extract_dataclass_from_param_type(self, param_type):
         """Resolve the concrete dataclass type from the annotated parameter."""
-        import dataclasses
-        from typing import Union, get_args, get_origin
-
         resolved_type = param_type
 
         try:
@@ -242,9 +245,20 @@ class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
         if not getattr(self, '_tree_dataclass_params', None):
             return None
 
-        # Use default minimum_width=0 from shared helper (allows collapsing)
-        tree = self.tree_helper.create_tree_widget()
+        # Pass form_manager as flash_manager - tree reads from SAME _flash_colors dict as groupboxes
+        # ONE source of truth: form_manager already subscribes to ObjectState.on_resolved_changed
+        # Pass state for automatic dirty tracking subscription (handled by helper)
+        tree = self.tree_helper.create_tree_widget(
+            flash_manager=self.form_manager,
+            state=self.state
+        )
         self.tree_helper.populate_from_mapping(tree, self._tree_dataclass_params)
+
+        # Initialize dirty styling AFTER population (when _field_to_item is filled)
+        self.tree_helper.initialize_dirty_styling()
+
+        # Register tree repaint callback so flash animation triggers tree repaint
+        self.form_manager.register_repaint_callback(lambda: tree.viewport().update())
 
         tree.itemDoubleClicked.connect(self._on_tree_item_double_clicked)
         return tree
@@ -291,10 +305,10 @@ class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
         # Header with controls (like FunctionListEditorWidget)
         header_layout = QHBoxLayout()
 
-        # Header label
-        header_label = QLabel("Step Parameters")
-        header_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_accent)}; font-weight: bold; font-size: 14px;")
-        header_layout.addWidget(header_label)
+        # Header label (stored for scope accent styling)
+        self.header_label = QLabel("Step Parameters")
+        self.header_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_accent)}; font-weight: bold; font-size: 14px;")
+        header_layout.addWidget(self.header_label)
 
         header_layout.addStretch()
 
@@ -396,9 +410,9 @@ class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
             if len(path_parts) == 1:
                 leaf_field = path_parts[0]
 
-                # Get the properly converted value from the form manager
-                # The form manager handles all type conversions including List[Enum]
-                final_value = self.form_manager.get_current_values().get(leaf_field, value)
+                # Get the properly converted value from state
+                # The state handles all type conversions including List[Enum]
+                final_value = self.state.get_current_values().get(leaf_field, value)
 
                 # CRITICAL FIX: For function parameters, use fresh imports to avoid unpicklable registry wrappers
                 if leaf_field == 'func' and callable(final_value) and hasattr(final_value, '__module__'):
@@ -427,8 +441,6 @@ class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
             logger.warning("No service adapter available for file dialog")
             return
         
-        from openhcs.core.path_cache import PathCacheKey
-        
         file_path = self.service_adapter.show_cached_file_dialog(
             cache_key=PathCacheKey.STEP_SETTINGS,
             title="Load Step Settings (.step)",
@@ -444,8 +456,6 @@ class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
         if not self.service_adapter:
             logger.warning("No service adapter available for file dialog")
             return
-        
-        from openhcs.core.path_cache import PathCacheKey
         
         file_path = self.service_adapter.show_cached_file_dialog(
             cache_key=PathCacheKey.STEP_SETTINGS,
@@ -485,8 +495,8 @@ class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
         """Save step settings to file."""
         try:
             import dill as pickle
-            # Get current values from form manager
-            step_data = self.form_manager.get_current_values()
+            # Get current values from state
+            step_data = self.state.get_current_values()
             with open(file_path, 'wb') as f:
                 pickle.dump(step_data, f)
             logger.debug(f"Saved {len(step_data)} parameters to {file_path.name}")
@@ -515,38 +525,32 @@ class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
     def view_step_code(self):
         """View the complete FunctionStep as Python code."""
         try:
-            from openhcs.pyqt_gui.services.simple_code_editor import SimpleCodeEditorService
-            from openhcs.debug.pickle_to_python import generate_step_code
-            from openhcs.pyqt_gui.widgets.shared.services.parameter_ops_service import ParameterOpsService
-            import os
-
             # CRITICAL: Refresh with live context BEFORE getting current values
             # This ensures code editor shows unsaved changes from other open windows
             ParameterOpsService().refresh_with_live_context(self.form_manager)
 
-            # Get current step from form (includes live context values)
-            current_values = self.form_manager.get_current_values()
+            # Get current step from state using to_object() to properly reconstruct nested dataclasses
+            # NOTE: get_current_values() returns flat dotted paths which can't be passed to FunctionStep(**kwargs)
+            # to_object() reconstructs proper nested structure from flat storage
+            current_step = self.state.to_object()
 
             # CRITICAL: Get func from parent dual editor's function list editor if available
             # The func is managed by the Function Pattern tab in the dual editor
-            func = self.step.func  # Default to step's current func
-
-            # Check if we're inside a dual editor window with a function list editor
             parent_window = self.window()
             if hasattr(parent_window, 'func_editor') and parent_window.func_editor:
                 # Get live func pattern from function list editor
                 func = parent_window.func_editor.current_pattern
+                current_step.func = func
                 logger.debug(f"Using live func from function list editor: {func}")
             else:
-                logger.debug(f"Using func from step instance: {func}")
-
-            current_values['func'] = func
-
-            from openhcs.core.steps.function_step import FunctionStep
-            current_step = FunctionStep(**current_values)
+                logger.debug(f"Using func from step instance: {current_step.func}")
 
             # Generate code using existing pattern
-            python_code = generate_step_code(current_step, clean_mode=False)
+            python_code = generate_python_source(
+                Assignment("step", current_step),
+                header="# Function Step",
+                clean_mode=False,
+            )
 
             # Launch editor
             editor_service = SimpleCodeEditorService(self)

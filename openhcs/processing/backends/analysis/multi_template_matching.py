@@ -20,8 +20,10 @@ except ImportError:
     MTM = None
     logging.warning("MTM (Multi-Template-Matching) not available. Install with: pip install Multi-Template-Matching")
 
-from openhcs.core.memory.decorators import numpy as numpy_func
+from openhcs.core.memory import numpy as numpy_func
 from openhcs.core.pipeline.function_contracts import special_outputs
+from openhcs.processing.materialization import register_materializer, materializer_spec
+from openhcs.processing.materialization.core import _generate_output_path
 
 @dataclass
 class TemplateMatchResult:
@@ -35,7 +37,17 @@ class TemplateMatchResult:
     best_rotation_angle: float  # Angle of best matching template
     error_message: Optional[str] = None
 
-def materialize_mtm_match_results(data: List[TemplateMatchResult], path: str, filemanager, backends: Union[str, List[str]], backend_kwargs: dict = None) -> str:
+@register_materializer("mtm_match_results")
+def materialize_mtm_match_results(
+    data: List[TemplateMatchResult],
+    path: str,
+    filemanager,
+    backends: Union[str, List[str]],
+    backend_kwargs: dict = None,
+    spec=None,
+    context=None,
+    extra_inputs: dict | None = None,
+) -> str:
     """Materialize MTM match results as analysis-ready CSV with confidence analysis.
 
     Args:
@@ -55,11 +67,7 @@ def materialize_mtm_match_results(data: List[TemplateMatchResult], path: str, fi
     if backend_kwargs is None:
         backend_kwargs = {}
 
-    # Replace extension with _mtm_matches.csv (handles .pkl, .roi.zip, or any extension)
-    from pathlib import Path as PathLib
-    base_path = PathLib(path).stem  # Remove extension
-    parent_dir = PathLib(path).parent
-    csv_path = str(parent_dir / f"{base_path}_mtm_matches.csv")
+    csv_path = _generate_output_path(path, "_mtm_matches.csv", ".csv")
 
     rows = []
     for result in data:
@@ -148,7 +156,7 @@ def materialize_mtm_match_results(data: List[TemplateMatchResult], path: str, fi
 
 
 @numpy_func
-@special_outputs(("match_results", materialize_mtm_match_results))
+@special_outputs(("match_results", materializer_spec("mtm_match_results")))
 def multi_template_crop_reference_channel(
     image_stack: np.ndarray,
     template_path: str,
@@ -318,7 +326,7 @@ def multi_template_crop_reference_channel(
 
 
 @numpy_func
-@special_outputs("match_results")
+@special_outputs(("match_results", materializer_spec("mtm_match_results")))
 def multi_template_crop_subset(
     image_stack: np.ndarray,
     template_path: str,
@@ -467,7 +475,7 @@ def multi_template_crop_subset(
 
 
 @numpy_func
-@special_outputs("match_results")
+@special_outputs(("match_results", materializer_spec("mtm_match_results")))
 def multi_template_crop(
     image_stack: np.ndarray,
     template_path: str,

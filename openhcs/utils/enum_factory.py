@@ -26,7 +26,7 @@ def _get_colormap_cache_manager():
     global _cache_manager
     if _cache_manager is None:
         try:
-            from openhcs.core.registry_cache import RegistryCacheManager, CacheConfig
+            from metaclass_registry.cache import RegistryCacheManager, CacheConfig
 
             def get_version():
                 try:

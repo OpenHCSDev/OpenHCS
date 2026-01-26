@@ -17,9 +17,9 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
 
-from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
-from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
-from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
+from pyqt_reactive.forms import ParameterFormManager
+from pyqt_reactive.theming import StyleSheetGenerator
+from pyqt_reactive.theming import ColorScheme
 from openhcs.tests.generators.generate_synthetic_data import SyntheticMicroscopyGenerator
 
 logger = logging.getLogger(__name__)
@@ -36,7 +36,7 @@ class SyntheticPlateGeneratorWindow(QDialog):
     # Signals
     plate_generated = pyqtSignal(str, str)  # output_dir path, pipeline_path
     
-    def __init__(self, color_scheme: Optional[PyQt6ColorScheme] = None, parent=None):
+    def __init__(self, color_scheme: Optional[ColorScheme] = None, parent=None):
         """
         Initialize the synthetic plate generator window.
         
@@ -47,7 +47,7 @@ class SyntheticPlateGeneratorWindow(QDialog):
         super().__init__(parent)
         
         # Initialize color scheme and style generator
-        self.color_scheme = color_scheme or PyQt6ColorScheme()
+        self.color_scheme = color_scheme or ColorScheme()
         self.style_generator = StyleSheetGenerator(self.color_scheme)
         
         # Output directory (will be set by user or use temp)
@@ -102,16 +102,21 @@ class SyntheticPlateGeneratorWindow(QDialog):
         # Create form manager from SyntheticMicroscopyGenerator class
         # This automatically builds the UI from the __init__ signature (same pattern as function_pane.py)
         # CRITICAL: Pass color_scheme as parameter to ensure consistent theming with other parameter forms
-        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import FormManagerConfig
+        from pyqt_reactive.forms import FormManagerConfig
+        from openhcs.config_framework.object_state import ObjectState
+
+        # Standalone tool - create local ObjectState (not registered in registry)
+        self.state = ObjectState(
+            object_instance=SyntheticMicroscopyGenerator,  # Pass the class itself, not __init__
+            scope_id=None,
+            exclude_params=['output_dir', 'skip_files', 'include_all_components', 'random_seed'],
+        )
 
         self.form_manager = ParameterFormManager(
-            object_instance=SyntheticMicroscopyGenerator,  # Pass the class itself, not __init__
-            field_id="synthetic_plate_generator",
+            state=self.state,
             config=FormManagerConfig(
                 parent=self,
-                context_obj=None,
-                exclude_params=['output_dir', 'skip_files', 'include_all_components', 'random_seed'],  # Exclude advanced params (self is auto-excluded)
-                color_scheme=self.color_scheme  # Pass color_scheme as instance parameter, not class attribute
+                color_scheme=self.color_scheme  # Pass color_scheme as instance parameter
             )
         )
 
@@ -195,8 +200,8 @@ class SyntheticPlateGeneratorWindow(QDialog):
     def generate_plate(self):
         """Generate the synthetic plate with current parameters."""
         try:
-            # Get parameters from form
-            params = self.form_manager.get_current_values()
+            # Get parameters from state
+            params = self.state.get_current_values()
             
             # Determine output directory
             if self.output_dir is None:

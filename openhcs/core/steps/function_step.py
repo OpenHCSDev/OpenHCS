@@ -23,7 +23,7 @@ from openhcs.constants.constants import (DEFAULT_IMAGE_EXTENSIONS,
 from openhcs.core.context.processing_context import ProcessingContext
 from openhcs.core.steps.abstract import AbstractStep
 from openhcs.formats.func_arg_prep import prepare_patterns_and_functions
-from openhcs.core.memory.stack_utils import stack_slices, unstack_slices
+from openhcs.core.memory import stack_slices, unstack_slices
 # OpenHCS imports moved to local imports to avoid circular dependencies
 
 
@@ -41,35 +41,39 @@ def _generate_materialized_paths(memory_paths: List[str], step_output_dir: Path,
 
 def _filter_special_outputs_for_function(
     outputs_to_save: List[str],
-    special_outputs_map: Dict,
-    dict_key: str
+    special_outputs_map: Dict
 ) -> Dict:
-    """Filter and build channel-specific paths for special outputs.
+    """Filter special outputs for a specific function call.
 
     Args:
         outputs_to_save: List of output keys this function should save
         special_outputs_map: Map of all special outputs for the step
-        dict_key: Dict pattern key (e.g., "1" for channel 1, or "default")
 
     Returns:
-        Filtered map with channel-specific paths for dict patterns
+        Filtered map for this function
     """
-    from openhcs.core.pipeline.path_planner import PipelinePathPlanner
-
     result = {}
     for key in outputs_to_save:
         if key in special_outputs_map:
-            output_config = special_outputs_map[key].copy()
-
-            # For dict patterns, build channel-specific path
-            if dict_key != "default":
-                output_config['path'] = PipelinePathPlanner.build_dict_pattern_path(
-                    output_config['path'], dict_key
-                )
-
-            result[key] = output_config
+            result[key] = special_outputs_map[key]
 
     return result
+
+
+def _select_special_plan_for_component(
+    plan_by_group: Optional[Dict],
+    component_key: Optional[str],
+    default_plan: Dict
+) -> Dict:
+    """Select precompiled special I/O plan for a component."""
+    if not plan_by_group:
+        return default_plan
+
+    if component_key in plan_by_group:
+        return plan_by_group[component_key]
+    if None in plan_by_group:
+        return plan_by_group[None]
+    return default_plan
 
 
 def _filter_patterns_by_component(
@@ -465,7 +469,7 @@ def _execute_function_core(
                         vfs_path = vfs_path_info  # Fallback if it's already a string
 
                     # DEBUG: List what's currently in VFS before saving
-                    from openhcs.io.base import storage_registry as global_storage_registry
+                    from polystore.base import storage_registry as global_storage_registry
                     global_memory_backend = global_storage_registry[Backend.MEMORY.value]
                     global_existing_keys = list(global_memory_backend._memory_store.keys())
 
@@ -529,7 +533,7 @@ def _execute_chain_core(
             raise TypeError(f"Invalid item in function chain: {func_item}.")
 
         # Convert to function's input memory type (noop if same)
-        from openhcs.core.memory.converters import convert_memory
+        from openhcs.core.memory import convert_memory
         current_stack = convert_memory(
             data=current_stack,
             source_type=current_memory_type,
@@ -547,7 +551,7 @@ def _execute_chain_core(
         if execution_key in funcplan:
             outputs_to_save = funcplan[execution_key]
             outputs_plan_for_this_call = _filter_special_outputs_for_function(
-                outputs_to_save, step_special_outputs_plan, dict_key
+                outputs_to_save, step_special_outputs_plan
             )
         else:
             # Fallback: no funcplan entry, save nothing
@@ -644,13 +648,24 @@ def _process_single_pattern_group(
 
         final_base_kwargs = base_func_args.copy()
 
+        component_key = None if component_value is None else str(component_value)
         # Get step function from step plan
         step_func = context.step_plans[step_index]["func"]
 
         if isinstance(step_func, dict):
-            dict_key_for_funcplan = component_value  # Use actual dict key for dict patterns
+            dict_key_for_funcplan = component_key  # Use actual dict key for dict patterns
         else:
             dict_key_for_funcplan = "default"  # Use default for list/single patterns
+        special_inputs_for_component = _select_special_plan_for_component(
+            context.step_plans[step_index].get("special_inputs_by_group"),
+            component_key,
+            special_inputs_map
+        )
+        special_outputs_for_component = _select_special_plan_for_component(
+            context.step_plans[step_index].get("special_outputs_by_group"),
+            component_key,
+            special_outputs_map
+        )
 
         # Resolve FunctionReference if needed
         from openhcs.core.pipeline.compiler import FunctionReference
@@ -664,8 +679,9 @@ def _process_single_pattern_group(
         if isinstance(executable_func_or_chain, list):
             processed_stack = _execute_chain_core(
                 main_data_stack, executable_func_or_chain, context,
-                special_inputs_map, special_outputs_map, axis_id,
-                device_id, input_memory_type_from_plan, step_index, dict_key_for_funcplan
+                special_inputs_for_component, special_outputs_for_component, axis_id,
+                device_id, input_memory_type_from_plan, step_index,
+                dict_key_for_funcplan
             )
         elif callable(executable_func_or_chain) or (isinstance(executable_func_or_chain, tuple) and len(executable_func_or_chain) == 2):
             # Handle both direct callable and (callable, kwargs) tuple
@@ -683,7 +699,7 @@ def _process_single_pattern_group(
             if execution_key in funcplan:
                 outputs_to_save = funcplan[execution_key]
                 filtered_special_outputs_map = _filter_special_outputs_for_function(
-                    outputs_to_save, special_outputs_map, dict_key_for_funcplan
+                    outputs_to_save, special_outputs_for_component
                 )
             else:
                 # Fallback: no funcplan entry, save nothing
@@ -691,7 +707,7 @@ def _process_single_pattern_group(
 
             processed_stack = _execute_function_core(
                 executable_func_or_chain, main_data_stack, final_base_kwargs, context,
-                special_inputs_map, filtered_special_outputs_map, axis_id, input_memory_type_from_plan, device_id
+                special_inputs_for_component, filtered_special_outputs_map, axis_id, input_memory_type_from_plan, device_id
             )
         else:
             raise TypeError(f"Invalid executable_func_or_chain: {type(executable_func_or_chain)}")
@@ -793,10 +809,13 @@ def _process_single_pattern_group(
         raise ValueError(f"Failed to process pattern group {pattern_repr}: {e}") from e
 
 class FunctionStep(AbstractStep):
+    # Fields with dedicated editors - hidden from regular ParameterFormManager
+    # but included in ObjectState for tracking and preview
+    _ui_special_fields = ('func',)
 
     def __init__(
         self,
-        func: Union[Callable, Tuple[Callable, Dict], List[Union[Callable, Tuple[Callable, Dict]]]],
+        func: Union[Callable, Tuple[Callable, Dict], List[Union[Callable, Tuple[Callable, Dict]]]]= [],
         **kwargs
     ):
         # Generate default name from function if not provided
@@ -1356,13 +1375,6 @@ class FunctionStep(AbstractStep):
         """Materialize special outputs (ROIs, cell counts) to disk and streaming backends."""
         # Collect backends: main + streaming
         from openhcs.core.config import StreamingConfig
-        from openhcs.io.backend_registry import STORAGE_BACKENDS
-        
-        # Special outputs (ROIs, CSVs, visualizations) are arbitrary file formats
-        # Check if the backend class supports them using capability checking
-        backend_class = STORAGE_BACKENDS.get(backend.lower())
-        if backend_class and not backend_class.supports_arbitrary_files:
-            backend = Backend.DISK.value
         
         backends = [backend]
         backend_kwargs = {backend: {}}
@@ -1386,10 +1398,92 @@ class FunctionStep(AbstractStep):
         filemanager._materialization_context = {'images_dir': images_dir}
 
         # Get dict pattern info
+        def _resolve_materializer_inputs(mat_spec, *, dict_key):
+            options = getattr(mat_spec, "options", {}) or {}
+            inputs_spec = options.get("inputs") or {}
+            if not inputs_spec:
+                return {}
+            if not isinstance(inputs_spec, dict):
+                raise ValueError(
+                    f"MaterializationSpec.options['inputs'] must be a dict, got {type(inputs_spec)}"
+                )
+
+            resolved: Dict[str, Any] = {}
+
+            for input_name, input_desc in inputs_spec.items():
+                if not isinstance(input_desc, dict):
+                    raise ValueError(
+                        f"Materialization input '{input_name}' must be a dict, got {type(input_desc)}"
+                    )
+
+                kind = input_desc.get("kind")
+                if kind != "image_slices":
+                    raise ValueError(
+                        f"Unsupported materialization input kind for '{input_name}': {kind}. "
+                        "Supported kinds: 'image_slices'."
+                    )
+
+                source = input_desc.get("source")
+                if source == "step_input":
+                    source_dir = step_plan["input_dir"]
+                    source_backend = step_plan.get("read_backend", Backend.MEMORY.value)
+                elif source == "step_output":
+                    source_dir = step_plan["output_dir"]
+                    source_backend = Backend.MEMORY.value
+                else:
+                    raise ValueError(
+                        f"Unsupported materialization input source for '{input_name}': {source}. "
+                        "Supported sources: 'step_input', 'step_output'."
+                    )
+
+                get_paths_for_axis = step_plan.get("get_paths_for_axis")
+                if get_paths_for_axis is None:
+                    raise ValueError("Step plan missing get_paths_for_axis (cannot resolve materializer inputs)")
+
+                paths = get_paths_for_axis(source_dir, source_backend)
+
+                # Optional grouping filter (only when this materialization invocation is group-specific)
+                if dict_key is not None:
+                    group_by_key = input_desc.get("group_by")
+                    if group_by_key is None:
+                        group_by = step_plan.get("group_by")
+                        if group_by is not None and getattr(group_by, "value", None) is not None:
+                            group_by_key = str(group_by.value)
+
+                    if group_by_key is None:
+                        raise ValueError(
+                            f"Cannot resolve materialization input '{input_name}' for group '{dict_key}': "
+                            "no group_by specified in the input spec and step_plan['group_by'] is NONE."
+                        )
+                    if context is None:
+                        raise ValueError(
+                            f"Cannot resolve materialization input '{input_name}' for group '{dict_key}': "
+                            "context is required for filename parsing."
+                        )
+
+                    parser = context.microscope_handler.parser
+                    filtered_paths = []
+                    for p in paths:
+                        filename = Path(p).name
+                        metadata = parser.parse_filename(filename)
+                        if metadata and str(metadata.get(group_by_key)) == str(dict_key):
+                            filtered_paths.append(p)
+                    paths = filtered_paths
+
+                if not paths:
+                    raise ValueError(
+                        f"Materialization input '{input_name}' resolved to 0 paths "
+                        f"(source={source}, dir={source_dir}, backend={source_backend}, group={dict_key})."
+                    )
+
+                resolved[input_name] = filemanager.load_batch(paths, source_backend)
+
+            return resolved
+
         # Materialize each special output
         for output_key, output_info in special_outputs.items():
-            mat_func = output_info.get('materialization_function')
-            if not mat_func:
+            mat_spec = output_info.get('materialization_spec')
+            if not mat_spec:
                 continue
 
             memory_path = output_info['path']
@@ -1397,14 +1491,20 @@ class FunctionStep(AbstractStep):
 
             # For dict patterns, materialize only the channels that produced this output
             channels_to_process = output_info.get('group_keys') or [None]
+            paths_by_group = output_info.get('paths_by_group') or {}
 
             for dict_key in channels_to_process:
                 # Build channel-specific memory path if needed
                 if dict_key is not None:
-                    from openhcs.core.pipeline.path_planner import PipelinePathPlanner
-                    channel_path = PipelinePathPlanner.build_dict_pattern_path(memory_path, dict_key)
+                    if dict_key in paths_by_group:
+                        channel_path = paths_by_group[dict_key]
+                    elif None in paths_by_group:
+                        channel_path = paths_by_group[None]
+                    else:
+                        from openhcs.core.pipeline.path_planner import PipelinePathPlanner
+                        channel_path = PipelinePathPlanner.build_dict_pattern_path(memory_path, dict_key)
                 else:
-                    channel_path = memory_path
+                    channel_path = paths_by_group.get(None, memory_path)
 
                 if not filemanager.exists(channel_path, Backend.MEMORY.value):
                     logger.info(f"Skipping special output '{output_key}' for group '{dict_key}' - no data saved at {channel_path}")
@@ -1419,7 +1519,18 @@ class FunctionStep(AbstractStep):
                 analysis_path = analysis_output_dir / filename
 
                 # Materialize to all backends
-                mat_func(data, str(analysis_path), filemanager, backends, backend_kwargs)
+                from openhcs.processing.materialization import materialize
+                extra_inputs = _resolve_materializer_inputs(mat_spec, dict_key=dict_key)
+                materialize(
+                    mat_spec,
+                    data,
+                    str(analysis_path),
+                    filemanager,
+                    backends,
+                    backend_kwargs,
+                    context=context,
+                    extra_inputs=extra_inputs,
+                )
 
 
 def _update_metadata_for_zarr_conversion(
@@ -1433,7 +1544,7 @@ def _update_metadata_for_zarr_conversion(
     If zarr_subdir is None: add zarr to original_subdir's available_backends
     If zarr_subdir is set: create complete metadata for zarr subdirectory, set original main=false
     """
-    from openhcs.io.metadata_writer import get_metadata_path, AtomicMetadataWriter
+    from polystore.metadata_writer import get_metadata_path, AtomicMetadataWriter
     from openhcs.microscopes.openhcs import OpenHCSMetadataGenerator
 
     if zarr_subdir:

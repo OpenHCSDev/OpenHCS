@@ -25,21 +25,6 @@ WHY:
 EXCEPTION:
 - config_context(orchestrator.pipeline_config) is CORRECT - sets up lazy resolution context
 - Writing to orchestrator.pipeline_config is CORRECT - updates the raw config
-
-Doctrinal Clauses:
-- Clause 12 — Absolute Clean Execution
-- Clause 17 — VFS Exclusivity (FileManager is the only component that uses VirtualPath)
-- Clause 17-B — Path Format Discipline
-- Clause 66 — Immutability After Construction
-- Clause 88 — No Inferred Capabilities
-- Clause 101 — Memory Type Declaration
-- Clause 245 — Path Declaration
-- Clause 273 — Backend Authorization Doctrine
-- Clause 281 — Context-Bound Identifiers
-- Clause 293 — GPU Pre-Declaration Enforcement
-- Clause 295 — GPU Scheduling Affinity
-- Clause 504 — Pipeline Preparation Modifications
-- Clause 524 — Step = Declaration = ID = Runtime Authority
 """
 
 import inspect
@@ -199,7 +184,7 @@ def _get_function_reference(func):
                 # Note: __special_* use double underscores which violates Python convention (should be single
                 # underscore for private attributes). This is technical debt to be fixed later.
                 preserved_attrs = {}
-                for attr in ['__special_inputs__', '__special_outputs__', '__materialization_functions__',
+                for attr in ['__special_inputs__', '__special_outputs__', '__materialization_specs__',
                              'input_memory_type', 'output_memory_type', '__name__', '__module__']:
                     if hasattr(func, attr):
                         try:
@@ -333,7 +318,7 @@ class PipelineCompiler:
                 if not already_zarr:
                     # Determine if input uses virtual workspace
                     from openhcs.microscopes.openhcs import OpenHCSMetadataHandler
-                    from openhcs.io.metadata_writer import get_subdirectory_name
+                    from polystore.metadata_writer import get_subdirectory_name
 
                     openhcs_metadata_handler = OpenHCSMetadataHandler(context.filemanager)
                     metadata = openhcs_metadata_handler._load_metadata_dict(plate_path)
@@ -358,7 +343,8 @@ class PipelineCompiler:
         PipelinePathPlanner.prepare_pipeline_paths(
             context,
             steps_definition,
-            context.global_config  # Use merged config from context instead of raw pipeline_config
+            context.global_config,  # Use merged config from context instead of raw pipeline_config
+            orchestrator=orchestrator
         )
 
         # === FUNCTION OBJECT REFRESH ===
@@ -375,11 +361,11 @@ class PipelineCompiler:
         from openhcs.config_framework.context_manager import config_context
 
         # Resolve each step individually with nested context (pipeline -> step)
-        # NOTE: The caller has already set up config_context(orchestrator.pipeline_config)
+        # NOTE: The caller has already set up config_context(orchestrator.pipeline_config, use_live_global=False)
         # We add step-level context on top for each step
         resolved_steps = []
         for step in steps_definition:
-            with config_context(step):  # Step-level context on top of pipeline context
+            with config_context(step, use_live_global=False):  # Step-level context on top of pipeline context
                 resolved_step = resolve_lazy_configurations_for_serialization(step)
                 resolved_steps.append(resolved_step)
         steps_definition = resolved_steps
@@ -390,7 +376,7 @@ class PipelineCompiler:
             if step_index not in context.step_plans:
                 logger.error(
                     f"Critical error: Step {step.name} (index: {step_index}) "
-                    f"not found in step_plans after path planning phase. Clause 504."
+                    f"not found in step_plans after path planning phase."
                 )
                 # Create a minimal error plan
                 context.step_plans[step_index] = {
@@ -663,7 +649,7 @@ class PipelineCompiler:
                 missing_keys = [k for k in required_keys if k not in plan]
                 logger.error(
                     f"Materialization flag planning incomplete for step {step.name} (index: {step_index}). "
-                    f"Missing required keys: {missing_keys} (Clause 273)."
+                    f"Missing required keys: {missing_keys}."
                 )
 
 
@@ -807,7 +793,7 @@ class PipelineCompiler:
             if "input_memory_type" not in memory_types or "output_memory_type" not in memory_types:
                 step_name = context.step_plans[step_index]["step_name"]
                 raise AssertionError(
-                    f"Memory type validation must set input/output_memory_type for FunctionStep {step_name} (index: {step_index}) (Clause 101)."
+                    f"Memory type validation must set input/output_memory_type for FunctionStep {step_name} (index: {step_index})."
                 )
             if step_index in context.step_plans:
                 context.step_plans[step_index].update(memory_types)
@@ -859,7 +845,7 @@ class PipelineCompiler:
                     step_name = step_plan_val["step_name"]
                     raise AssertionError(
                         f"GPU validation must assign gpu_id for step {step_name} (index: {step_index}) "
-                        f"with GPU memory types (Clause 295)."
+                        f"with GPU memory types."
                     )
 
         for step_index, gpu_assignment in gpu_assignments.items():
@@ -1177,8 +1163,9 @@ class PipelineCompiler:
                 temp_context.step_axis_filters = global_step_axis_filters
 
                 # CRITICAL: Wrap all compilation steps in config_context() for lazy resolution
+                # Use use_live_global=False to ensure compiler uses SAVED global config, not live edits
                 from openhcs.config_framework.context_manager import config_context
-                with config_context(orchestrator.pipeline_config):
+                with config_context(orchestrator.pipeline_config, use_live_global=False):
                     # Validate sequential components compatibility BEFORE analyzing sequential mode
                     seq_config = temp_context.global_config.sequential_processing_config
                     if seq_config and seq_config.sequential_components:
@@ -1203,7 +1190,7 @@ class PipelineCompiler:
                         context.pipeline_sequential_combinations = combinations
                         context.current_sequential_combination = combo
 
-                        with config_context(orchestrator.pipeline_config):
+                        with config_context(orchestrator.pipeline_config, use_live_global=False):
                             resolved_steps = PipelineCompiler.initialize_step_plans_for_context(context, pipeline_definition, orchestrator, metadata_writer=is_responsible, plate_path=orchestrator.plate_path)
                             PipelineCompiler.declare_zarr_stores_for_context(context, resolved_steps, orchestrator)
                             PipelineCompiler.plan_materialization_flags_for_context(context, resolved_steps, orchestrator)
@@ -1224,7 +1211,7 @@ class PipelineCompiler:
                     context = orchestrator.create_context(axis_id)
                     context.step_axis_filters = global_step_axis_filters
 
-                    with config_context(orchestrator.pipeline_config):
+                    with config_context(orchestrator.pipeline_config, use_live_global=False):
                         resolved_steps = PipelineCompiler.initialize_step_plans_for_context(context, pipeline_definition, orchestrator, metadata_writer=is_responsible, plate_path=orchestrator.plate_path)
                         PipelineCompiler.declare_zarr_stores_for_context(context, resolved_steps, orchestrator)
                         PipelineCompiler.plan_materialization_flags_for_context(context, resolved_steps, orchestrator)

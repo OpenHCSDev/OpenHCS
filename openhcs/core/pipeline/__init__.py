@@ -4,19 +4,6 @@ Pipeline module for the OpenHCS pipeline architecture.
 
 This module provides components for building and executing pipelines,
 including compilation, execution, and result handling.
-
-Doctrinal Clauses:
-- Clause 17 — VFS Exclusivity (FileManager is the only component that uses VirtualPath)
-- Clause 17-B — Path Format Discipline
-- Clause 66 — Immutability After Construction
-- Clause 88 — No Inferred Capabilities
-- Clause 106-A — Declared Memory Types
-- Clause 251 — Declarative Memory Conversion
-- Clause 262 — Pre-Runtime Conversion
-- Clause 281 — Context-Bound Identifiers
-- Clause 297 — Immutable Result Enforcement
-- Clause 504 — Pipeline Preparation Modifications
-- Clause 524 — Step = Declaration = ID = Runtime Authority
 """
 
 # Import from constants
@@ -54,13 +41,9 @@ class Pipeline(list):
     - Backward compatible with existing .steps access
     - Rich metadata support for debugging and UI
     - Method chaining for fluent pipeline construction
-
-    Doctrinal Clauses:
-    - Clause 66 — Immutability After Construction (metadata can be set but steps are managed via list methods)
-    - Clause 88 — No Inferred Capabilities (explicit type declarations)
     """
 
-    def __init__(self, steps=None, *, name=None, metadata=None, description=None):
+    def __init__(self, steps=None, *, name=None, metadata=None, description=None, step_scope_ids=None):
         """
         Initialize a pipeline that behaves like a list of steps.
 
@@ -69,6 +52,7 @@ class Pipeline(list):
             name: Human-readable name for the pipeline
             metadata: Additional metadata dictionary
             description: Optional description of what this pipeline does
+            step_scope_ids: List of ObjectState scope IDs for steps (for UI state tracking)
         """
         # Initialize the list part with steps
         super().__init__(steps or [])
@@ -77,6 +61,9 @@ class Pipeline(list):
         self.name = name or f"Pipeline_{id(self)}"
         self.description = description
         self.metadata = metadata or {}
+
+        # ObjectState tracking - list of scope IDs for steps
+        self.step_scope_ids = step_scope_ids or []
 
         # Add creation timestamp for debugging
         from datetime import datetime

@@ -388,7 +388,7 @@ Materialization Workflow
 
 1. **Execution**: Function returns special outputs (e.g., labeled masks)
 2. **Storage**: Special outputs saved to memory backend with channel-specific paths
-3. **Materialization**: After step completion, materialization functions called
+3. **Materialization**: After step completion, materialization handlers are invoked
 4. **Multi-Backend**: ROIs saved to all backends (disk + streaming) simultaneously
 
 **Path Transformation**:
@@ -451,4 +451,3 @@ See Also
 - :doc:`fiji_streaming_system` - Fiji streaming architecture
 - :doc:`omero_backend_system` - OMERO backend implementation
 - :doc:`dict_pattern_case_study` - Dict pattern materialization
-

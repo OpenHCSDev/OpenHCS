@@ -26,8 +26,9 @@ from skimage.morphology import remove_small_objects, disk
 from skimage.measure import label, regionprops, regionprops_table
 
 # OpenHCS imports
-from openhcs.core.memory.decorators import numpy as numpy_func
+from openhcs.core.memory import numpy as numpy_func
 from openhcs.core.pipeline.function_contracts import special_outputs
+from openhcs.processing.materialization import materializer_spec, roi_zip_materializer
 from openhcs.constants.constants import Backend
 
 
@@ -162,7 +163,7 @@ def materialize_segmentation_masks(data: List[np.ndarray], path: str, filemanage
         return summary_path
 
     # Extract ROIs from labeled masks (once for all backends)
-    from openhcs.core.roi import extract_rois_from_labeled_mask
+    from polystore.roi import extract_rois_from_labeled_mask
 
     all_rois = []
     total_cells = 0
@@ -211,7 +212,10 @@ def materialize_segmentation_masks(data: List[np.ndarray], path: str, filemanage
 
 
 @numpy_func
-@special_outputs(("cell_counts", materialize_cell_counts), ("segmentation_masks", materialize_segmentation_masks))
+@special_outputs(
+    ("cell_counts", materializer_spec("cell_counts")),
+    ("segmentation_masks", roi_zip_materializer())
+)
 def count_cells_single_channel(
     image_stack: np.ndarray,
     # Detection method and parameters
@@ -325,7 +329,7 @@ def count_cells_single_channel(
 
 
 @numpy_func
-@special_outputs(("multi_channel_counts", materialize_cell_counts))
+@special_outputs(("multi_channel_counts", materializer_spec("cell_counts")))
 def count_cells_multi_channel(
     image_stack: np.ndarray,
     chan_1: int,                         # Index of first channel (positional arg)

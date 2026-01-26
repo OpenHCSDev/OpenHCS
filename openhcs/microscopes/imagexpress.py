@@ -14,8 +14,8 @@ from typing import Any, Dict, List, Optional, Tuple, Union, Type
 import tifffile
 
 from openhcs.constants.constants import Backend
-from openhcs.io.exceptions import MetadataNotFoundError
-from openhcs.io.filemanager import FileManager
+from polystore.exceptions import MetadataNotFoundError
+from polystore.filemanager import FileManager
 from openhcs.microscopes.microscope_base import MicroscopeHandler
 from openhcs.microscopes.microscope_interfaces import (FilenameParser,
                                                             MetadataHandler)
@@ -343,14 +343,12 @@ class ImageXpressFilenameParser(FilenameParser):
             bool: True if this parser can parse the filename, False otherwise
         """
         # For strings and other objects, convert to string and get basename
-        # 🔒 Clause 17 — VFS Boundary Method
         # Use Path.name instead of os.path.basename for string operations
         basename = Path(str(filename)).name
 
         # Check if the filename matches the ImageXpress pattern
         return bool(cls._pattern.match(basename))
 
-    # 🔒 Clause 17 — VFS Boundary Method
     # This is a string operation that doesn't perform actual file I/O
     # but is needed for filename parsing during runtime.
     def parse_filename(self, filename: Union[str, Any]) -> Optional[Dict[str, Any]]:
@@ -545,7 +543,6 @@ class ImageXpressMetadataHandler(MetadataHandler):
                 return Path(first_file)
             return first_file
 
-        # 🔒 Clause 65 — No Fallback Logic
         # Fail loudly if no HTD file is found
         raise MetadataNotFoundError("No HTD or metadata file found. ImageXpressHandler requires declared metadata.")
 
@@ -604,11 +601,9 @@ class ImageXpressMetadataHandler(MetadataHandler):
                 # FIXED: Return (rows, cols) for MIST compatibility instead of (cols, rows)
                 return grid_size_y, grid_size_x
 
-            # 🔒 Clause 65 — No Fallback Logic
             # Fail loudly if grid dimensions cannot be determined
             raise ValueError(f"Could not find grid dimensions in HTD file {htd_file}")
         except Exception as e:
-            # 🔒 Clause 65 — No Fallback Logic
             # Fail loudly on any error
             raise ValueError(f"Error parsing HTD file {htd_file}: {e}")
 
@@ -636,7 +631,6 @@ class ImageXpressMetadataHandler(MetadataHandler):
             # Pass the backend parameter as required by Clause 306 (Backend Positional Parameters)
             image_files = self.filemanager.list_image_files(plate_path, Backend.DISK.value, extensions={'.tif', '.tiff'}, recursive=True)
             if not image_files:
-                # 🔒 Clause 65 — No Fallback Logic
                 # Fail loudly if no image files are found
                 raise ValueError(f"No TIFF images found in {plate_path} to read pixel size")
 
@@ -668,12 +662,10 @@ class ImageXpressMetadataHandler(MetadataHandler):
                                     float(match.group(1)), first_image_path)
                          return float(match.group(1))
 
-            # 🔒 Clause 65 — No Fallback Logic
             # Fail loudly if pixel size cannot be determined
             raise ValueError(f"Could not find pixel size in image metadata for {plate_path}")
 
         except Exception as e:
-            # 🔒 Clause 65 — No Fallback Logic
             # Fail loudly on any error
             raise ValueError(f"Error getting pixel size from {plate_path}: {e}")
 

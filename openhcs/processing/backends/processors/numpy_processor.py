@@ -20,7 +20,7 @@ from skimage import morphology as morph
 from skimage import transform as trans
 
 # Use direct import from core memory decorators to avoid circular imports
-from openhcs.core.memory.decorators import numpy as numpy_func
+from openhcs.core.memory import numpy as numpy_func
 
 logger = logging.getLogger(__name__)
 

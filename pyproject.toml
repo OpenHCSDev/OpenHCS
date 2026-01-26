@@ -2,6 +2,17 @@
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
+# NOTE: For OMERO extras, zeroc-ice is installed via direct URL references
+# with environment markers. This allows pip to automatically download and install
+# the appropriate zeroc-ice wheel from Glencoe Software's repository.
+#
+# When installing with OMERO support, use:
+#   pip install -e ".[omero]"  # For editable installs
+#   pip install ".[omero]"      # For regular installs
+#
+# For more information, see:
+# https://www.glencoesoftware.com/blog/2023/12/08/ice-binaries-for-omero.html
+
 [project]
 name = "openhcs"
 dynamic = ["version"]
@@ -62,6 +73,16 @@ dependencies = [
 
     # System monitoring (required by ui/shared/system_monitor_core.py)
     "psutil>=5.9.0",
+
+    # External dependencies (PyPI versions for production builds)
+    "zmqruntime>=0.1.0",
+    "pycodify>=0.1.0",
+    "objectstate>=0.1.0",
+    "python-introspect>=0.1.0",
+    "metaclass-registry>=0.1.0",
+    "arraybridge>=0.1.0",
+    "polystore>=0.1.0",
+    "pyqt-reactive>=0.1.0",
 ]
 
 [project.optional-dependencies]
@@ -81,15 +102,18 @@ dev-gui = [
 ]
 
 # Terminal User Interface (TUI) - DEPRECATED, not available on PyPI
-# TUI has git dependencies that PyPI doesn't allow
-# Install manually if needed
+# TUI has external dependencies that require local development setup
+# For development, use pip install -e ".[dev,gui]" (custom build backend handles it)
 
 # PyQt6 Graphical User Interface (GUI) dependencies
 gui = [
     "PyQt6>=6.9.1",
     "PyQt6-QScintilla>=2.14.1",
     "pyqtgraph>=0.13.7",  # Used for system monitor visualization
+    "PyOpenGL>=3.1.7",  # GPU-accelerated flash overlay rendering (optional, auto-fallback to QPainter)
     "GPUtil>=1.4.0",
+    "distinctipy>=1.2.2",  # Perceptually distinct colors for scope-based visuals
+    "wcag-contrast-ratio>=0.9",  # Contrast checking for scope colors
     # plotext removed - PyQt GUI now uses pyqtgraph instead
     # psutil moved to core dependencies (required by ui/shared/system_monitor_core.py)
 ]
@@ -115,7 +139,38 @@ viz = [
 ]
 
 # OMERO integration dependencies
+#
+# IMPORTANT: zeroc-ice is a dependency of omero-py but is NOT available on PyPI.
+# We use direct URL references with environment markers to install the appropriate
+# zeroc-ice wheel from Glencoe Software's repository.
+#
+# Installation (automatic):
+#   pip install 'openhcs[omero]'
+#
+# Alternative installation (using requirements file):
+#   pip install -r requirements-omero.txt
+#
+# For more information, see:
+#   - https://www.glencoesoftware.com/blog/2023/12/08/ice-binaries-for-omero.html
+#   - scripts/install_omero_deps.py
+#   - requirements-omero.txt
 omero = [
+    # Linux x86_64
+    "zeroc-ice @ https://github.com/glencoesoftware/zeroc-ice-py-linux-x86_64/releases/download/20240202/zeroc_ice-3.6.5-cp311-cp311-manylinux_2_28_x86_64.whl ; sys_platform == 'linux' and platform_machine == 'x86_64' and python_version == '3.11'",
+    "zeroc-ice @ https://github.com/glencoesoftware/zeroc-ice-py-linux-x86_64/releases/download/20240202/zeroc_ice-3.6.5-cp312-cp312-manylinux_2_28_x86_64.whl ; sys_platform == 'linux' and platform_machine == 'x86_64' and python_version == '3.12'",
+
+    # Linux aarch64
+    "zeroc-ice @ https://github.com/glencoesoftware/zeroc-ice-py-linux-aarch64/releases/download/20240621/zeroc_ice-3.6.5-cp311-cp311-manylinux_2_28_aarch64.whl ; sys_platform == 'linux' and platform_machine == 'aarch64' and python_version == '3.11'",
+    "zeroc-ice @ https://github.com/glencoesoftware/zeroc-ice-py-linux-aarch64/releases/download/20240621/zeroc_ice-3.6.5-cp312-cp312-manylinux_2_28_aarch64.whl ; sys_platform == 'linux' and platform_machine == 'aarch64' and python_version == '3.12'",
+
+    # macOS universal2
+    "zeroc-ice @ https://github.com/glencoesoftware/zeroc-ice-py-macos/releases/download/20231208/zeroc_ice-3.6.5-cp311-cp311-macosx_11_0_universal2.whl ; sys_platform == 'darwin' and python_version == '3.11'",
+    "zeroc-ice @ https://github.com/glencoesoftware/zeroc-ice-py-macos/releases/download/20231208/zeroc_ice-3.6.5-cp312-cp312-macosx_11_0_universal2.whl ; sys_platform == 'darwin' and python_version == '3.12'",
+
+    # Windows amd64
+    "zeroc-ice @ https://github.com/glencoesoftware/zeroc-ice-py-windows-x86_64/releases/download/20240326/zeroc_ice-3.6.5-cp311-cp311-win_amd64.whl ; sys_platform == 'win32' and python_version == '3.11'",
+    "zeroc-ice @ https://github.com/glencoesoftware/zeroc-ice-py-windows-x86_64/releases/download/20240326/zeroc_ice-3.6.5-cp312-cp312-win_amd64.whl ; sys_platform == 'win32' and python_version == '3.12'",
+
     "omero-py>=5.19.0",
 ]
 
@@ -128,9 +183,32 @@ docs = [
 ]
 
 # Remote execution and OMERO integration
+#
+# IMPORTANT: zeroc-ice is a dependency of omero-py but is NOT available on PyPI.
+# We use direct URL references with environment markers to install the appropriate
+# zeroc-ice wheel from Glencoe Software's repository.
+#
+# See the 'omero' optional dependency section above for more details.
 remote = [
     "pyzmq>=26.0.0",  # ZMQ-based remote execution and streaming
     "omero-py>=5.19.0",  # OMERO Python bindings for OMERO backend
+
+    # Duplicate zeroc-ice URLs (extras can't reference other extras)
+    # Linux x86_64
+    "zeroc-ice @ https://github.com/glencoesoftware/zeroc-ice-py-linux-x86_64/releases/download/20240202/zeroc_ice-3.6.5-cp311-cp311-manylinux_2_28_x86_64.whl ; sys_platform == 'linux' and platform_machine == 'x86_64' and python_version == '3.11'",
+    "zeroc-ice @ https://github.com/glencoesoftware/zeroc-ice-py-linux-x86_64/releases/download/20240202/zeroc_ice-3.6.5-cp312-cp312-manylinux_2_28_x86_64.whl ; sys_platform == 'linux' and platform_machine == 'x86_64' and python_version == '3.12'",
+
+    # Linux aarch64
+    "zeroc-ice @ https://github.com/glencoesoftware/zeroc-ice-py-linux-aarch64/releases/download/20240621/zeroc_ice-3.6.5-cp311-cp311-manylinux_2_28_aarch64.whl ; sys_platform == 'linux' and platform_machine == 'aarch64' and python_version == '3.11'",
+    "zeroc-ice @ https://github.com/glencoesoftware/zeroc-ice-py-linux-aarch64/releases/download/20240621/zeroc_ice-3.6.5-cp312-cp312-manylinux_2_28_aarch64.whl ; sys_platform == 'linux' and platform_machine == 'aarch64' and python_version == '3.12'",
+
+    # macOS universal2
+    "zeroc-ice @ https://github.com/glencoesoftware/zeroc-ice-py-macos/releases/download/20231208/zeroc_ice-3.6.5-cp311-cp311-macosx_11_0_universal2.whl ; sys_platform == 'darwin' and python_version == '3.11'",
+    "zeroc-ice @ https://github.com/glencoesoftware/zeroc-ice-py-macos/releases/download/20231208/zeroc_ice-3.6.5-cp312-cp312-macosx_11_0_universal2.whl ; sys_platform == 'darwin' and python_version == '3.12'",
+
+    # Windows amd64
+    "zeroc-ice @ https://github.com/glencoesoftware/zeroc-ice-py-windows-x86_64/releases/download/20240326/zeroc_ice-3.6.5-cp311-cp311-win_amd64.whl ; sys_platform == 'win32' and python_version == '3.11'",
+    "zeroc-ice @ https://github.com/glencoesoftware/zeroc-ice-py-windows-x86_64/releases/download/20240326/zeroc_ice-3.6.5-cp312-cp312-win_amd64.whl ; sys_platform == 'win32' and python_version == '3.12'",
 ]
 
 # GPU acceleration dependencies
@@ -163,7 +241,7 @@ gpu = [
     "pyclesperanto>=0.17.1",
 
     # torbi - GPU-accelerated Viterbi decoding (git dependency, install manually if needed)
-    # "torbi @ git+https://github.com/trissim/torbi.git",
+    # "torbi @ git+https://github.com/OpenHCSDev/torbi.git",
 ]
 
 # All non-dev extras combined (TUI excluded - deprecated)
@@ -194,7 +272,7 @@ all = [
     "tensorflow>=2.19.0,<2.20.0",
     "tensorflow-probability[tf]>=0.25.0,<0.26.0",
     "pyclesperanto>=0.17.1",
-    # "torbi @ git+https://github.com/trissim/torbi.git",  # Git dependency, install manually if needed
+    # "torbi @ git+https://github.com/OpenHCSDev/torbi.git",  # Git dependency, install manually if needed
 ]
 
 [project.urls]
@@ -237,10 +315,18 @@ openhcs = ["**/*.css", "**/*.yaml", "**/*.yml", "**/*.json"]
 #
 # Installation Examples:
 # - Base package only: pip install openhcs
-# - With TUI: pip install "openhcs[tui]"
 # - With GUI: pip install "openhcs[gui]"
 # - With GPU support: pip install "openhcs[gpu]"
 # - Full installation: pip install "openhcs[all]"
+#
+# Development Installation:
+#   pip install -e ".[dev,gui]"
+#   (The custom build backend automatically uses local external modules)
+#
+# Force production mode in development:
+#   OPENHCS_DEV_MODE=0 pip install -e ".[dev,gui]"
+#
+# See docs/development_setup.md for more details
 
 [tool.coverage.run]
 omit = [

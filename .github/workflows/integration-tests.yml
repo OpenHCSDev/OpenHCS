@@ -87,30 +87,59 @@ jobs:
           path: .coverage
           retention-days: 1
 
-      - name: Show ZMQ server logs on failure
+      - name: Show ZMQ logs on failure
         if: failure()
         shell: bash
         run: |
-          echo "=== ZMQ Server Logs ==="
-          if [ "$RUNNER_OS" == "Windows" ]; then
-            LOG_DIR="$USERPROFILE/.local/share/openhcs/logs"
-          else
-            LOG_DIR="$HOME/.local/share/openhcs/logs"
-          fi
-          if [ -d "$LOG_DIR" ]; then
-            echo "Log directory: $LOG_DIR"
-            ls -la "$LOG_DIR" || dir "$LOG_DIR"
-            echo ""
-            for log in "$LOG_DIR"/openhcs_zmq_server_*.log; do
-              if [ -f "$log" ]; then
-                echo "=== $log ==="
-                cat "$log"
-                echo ""
-              fi
-            done
-          else
-            echo "Log directory not found: $LOG_DIR"
-          fi
+          python - <<'PY'
+          from pathlib import Path
+          import os
+
+          candidates = []
+          home = Path.home()
+          candidates.append(home / ".local" / "share" / "openhcs" / "logs")
+          candidates.append(home / ".local" / "state" / "openhcs" / "logs")
+          xdg_state = os.environ.get("XDG_STATE_HOME")
+          if xdg_state:
+            candidates.append(Path(xdg_state) / "openhcs" / "logs")
+
+          patterns = [
+            "openhcs_zmq_server_*.log",
+            "zmq_worker_exec_*.log",
+            "openhcs_unified_*.log",
+            "openhcs_subprocess_*.log",
+          ]
+
+          seen = set()
+          for log_dir in candidates:
+            if log_dir in seen:
+              continue
+            seen.add(log_dir)
+            if not log_dir.is_dir():
+              continue
+            print(f"=== OpenHCS Logs: {log_dir} ===")
+            for pattern in patterns:
+              for log in sorted(log_dir.glob(pattern)):
+                if log.is_file():
+                  print(f"--- {log} ---")
+                  try:
+                    print(log.read_text())
+                  except Exception as exc:
+                    print(f"[WARN] Failed to read {log}: {exc}")
+            print("")
+
+          if not any(p.is_dir() for p in candidates):
+            print("No OpenHCS log directories found.")
+          PY
+
+      - name: Upload ZMQ logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zmq-logs-python-${{ matrix.python-version }}-${{ matrix.os }}
+          path: |
+            ~/.local/share/openhcs/logs
+            ~/.local/state/openhcs/logs
 
   # Group 2: Backend and microscope coverage (12 jobs)
   # Test all backend/microscope combinations on all 3 OSes with Python 3.12
@@ -150,30 +179,59 @@ jobs:
           path: .coverage
           retention-days: 1
 
-      - name: Show ZMQ server logs on failure
+      - name: Show ZMQ logs on failure
         if: failure()
         shell: bash
         run: |
-          echo "=== ZMQ Server Logs ==="
-          if [ "$RUNNER_OS" == "Windows" ]; then
-            LOG_DIR="$USERPROFILE/.local/share/openhcs/logs"
-          else
-            LOG_DIR="$HOME/.local/share/openhcs/logs"
-          fi
-          if [ -d "$LOG_DIR" ]; then
-            echo "Log directory: $LOG_DIR"
-            ls -la "$LOG_DIR" || dir "$LOG_DIR"
-            echo ""
-            for log in "$LOG_DIR"/openhcs_zmq_server_*.log; do
-              if [ -f "$log" ]; then
-                echo "=== $log ==="
-                cat "$log"
-                echo ""
-              fi
-            done
-          else
-            echo "Log directory not found: $LOG_DIR"
-          fi
+          python - <<'PY'
+          from pathlib import Path
+          import os
+
+          candidates = []
+          home = Path.home()
+          candidates.append(home / ".local" / "share" / "openhcs" / "logs")
+          candidates.append(home / ".local" / "state" / "openhcs" / "logs")
+          xdg_state = os.environ.get("XDG_STATE_HOME")
+          if xdg_state:
+            candidates.append(Path(xdg_state) / "openhcs" / "logs")
+
+          patterns = [
+            "openhcs_zmq_server_*.log",
+            "zmq_worker_exec_*.log",
+            "openhcs_unified_*.log",
+            "openhcs_subprocess_*.log",
+          ]
+
+          seen = set()
+          for log_dir in candidates:
+            if log_dir in seen:
+              continue
+            seen.add(log_dir)
+            if not log_dir.is_dir():
+              continue
+            print(f"=== OpenHCS Logs: {log_dir} ===")
+            for pattern in patterns:
+              for log in sorted(log_dir.glob(pattern)):
+                if log.is_file():
+                  print(f"--- {log} ---")
+                  try:
+                    print(log.read_text())
+                  except Exception as exc:
+                    print(f"[WARN] Failed to read {log}: {exc}")
+            print("")
+
+          if not any(p.is_dir() for p in candidates):
+            print("No OpenHCS log directories found.")
+          PY
+
+      - name: Upload ZMQ logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zmq-logs-${{ matrix.os }}-${{ matrix.backend }}-${{ matrix.microscope }}
+          path: |
+            ~/.local/share/openhcs/logs
+            ~/.local/state/openhcs/logs
 
   # Group 3: OMERO testing on Linux (2 jobs)
   # Test OMERO on Linux with Python 3.11 and 3.12
@@ -377,5 +435,4 @@ jobs:
           name: coverage-wheel-integration
           path: .coverage.wheel
           retention-days: 1
-
 

@@ -364,7 +364,7 @@ The ``live_context`` dict maps **types** to their **current values**:
 - Keys are **types** (classes), not instances
 - Values are **dicts** of field names to values
 - Same type can appear multiple times (base type + lazy type)
-- Nested dataclasses are stored as ``(type, dict)`` tuples in ``get_user_modified_values()``
+- Nested dataclasses are stored as fully reconstructed instances in ``get_user_modified_values()``
 
 Collection Process
 ~~~~~~~~~~~~~~~~~~

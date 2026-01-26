@@ -16,7 +16,7 @@ import os
 from typing import Any, List, Optional, Tuple
 
 from openhcs.core.utils import optional_import
-from openhcs.core.memory.decorators import torch as torch_func
+from openhcs.core.memory import torch as torch_func
 
 logger = logging.getLogger(__name__)
 

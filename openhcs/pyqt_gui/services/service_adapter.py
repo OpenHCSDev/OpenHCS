@@ -15,8 +15,8 @@ from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtCore import QUrl
 
 from openhcs.core.path_cache import PathCacheKey, get_cached_dialog_path, cache_dialog_path
-from openhcs.pyqt_gui.shared.palette_manager import ThemeManager
-from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
+from pyqt_reactive.theming import ThemeManager
+from pyqt_reactive.theming import ColorScheme
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +140,7 @@ class PyQtServiceAdapter:
         """Apply dark theme globally for consistent dialog styling."""
         try:
             # Create dark color scheme (same as enhanced path widget)
-            dark_scheme = PyQt6ColorScheme()
+            dark_scheme = ColorScheme()
 
             # Apply the dark theme globally so all dialogs use consistent styling
             self.theme_manager.apply_color_scheme(dark_scheme)
@@ -450,12 +450,12 @@ class PyQtServiceAdapter:
         """
         return self.theme_manager
 
-    def get_current_color_scheme(self) -> PyQt6ColorScheme:
+    def get_current_color_scheme(self) -> ColorScheme:
         """
         Get the current color scheme.
 
         Returns:
-            PyQt6ColorScheme: Current color scheme
+            ColorScheme: Current color scheme
         """
         return self.theme_manager.color_scheme
 
@@ -468,7 +468,7 @@ class PyQtServiceAdapter:
         """
         return self.theme_manager.style_generator
 
-    def apply_color_scheme(self, color_scheme: PyQt6ColorScheme):
+    def apply_color_scheme(self, color_scheme: ColorScheme):
         """
         Apply a new color scheme to the entire application.
 
@@ -538,8 +538,8 @@ class PyQtServiceAdapter:
             return self.app.file_manager
         else:
             # Create default FileManager
-            from openhcs.io.filemanager import FileManager
-            from openhcs.io.base import storage_registry
+            from polystore.filemanager import FileManager
+            from polystore.base import storage_registry
             file_manager = FileManager(storage_registry)
             setattr(self.app, 'file_manager', file_manager)
             return file_manager

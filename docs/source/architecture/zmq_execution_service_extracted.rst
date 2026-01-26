@@ -205,7 +205,5 @@ See Also
 --------
 
 - :doc:`compilation_service` - Compilation service for preparing pipelines
-- :doc:`zmq_execution_system` - Core ZMQ execution architecture
 - :doc:`abstract_manager_widget` - ABC that PlateManager inherits from
 - :doc:`plate_manager_services` - Other PlateManager service extractions
-

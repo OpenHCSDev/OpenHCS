@@ -14,7 +14,7 @@ from textual.widgets import SelectionList
 from .button_list_widget import ButtonListWidget, ButtonConfig
 
 from openhcs.core.config import GlobalPipelineConfig
-from openhcs.io.filemanager import FileManager
+from polystore.filemanager import FileManager
 from openhcs.core.steps.function_step import FunctionStep
 from openhcs.constants.constants import OrchestratorState
 
@@ -734,13 +734,15 @@ class PipelineEditorWidget(ButtonListWidget):
 
         try:
             # Use complete pipeline steps code generation
-            from openhcs.debug.pickle_to_python import generate_complete_pipeline_steps_code
+            import openhcs.serialization.pycodify_formatters  # noqa: F401
+            from pycodify import Assignment, generate_python_source
             from openhcs.textual_tui.services.terminal_launcher import TerminalLauncher
 
             # Generate complete pipeline steps code with imports
-            python_code = generate_complete_pipeline_steps_code(
-                pipeline_steps=list(self.pipeline_steps),
-                clean_mode=True
+            python_code = generate_python_source(
+                Assignment("pipeline_steps", list(self.pipeline_steps)),
+                header="# Edit this pipeline and save to apply changes",
+                clean_mode=True,
             )
 
             # Create callback to handle edited code
@@ -758,7 +760,7 @@ class PipelineEditorWidget(ButtonListWidget):
                         if "unexpected keyword argument" in error_msg and ("group_by" in error_msg or "variable_components" in error_msg):
                             logger.info(f"Detected old-format step constructor, retrying with migration patch: {e}")
                             namespace = {}
-                            from openhcs.io.pipeline_migration import patch_step_constructors_for_migration
+                            from openhcs.utils.pipeline_migration import patch_step_constructors_for_migration
                             with patch_step_constructors_for_migration():
                                 exec(edited_code, namespace)
                         else:

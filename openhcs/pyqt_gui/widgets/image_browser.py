@@ -6,11 +6,12 @@ view them in Napari with configurable display settings.
 """
 
 import logging
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, List, Dict, Set, Any
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
+    QWidget, QVBoxLayout, QHBoxLayout, QTableWidgetItem,
     QPushButton, QLabel, QHeaderView, QAbstractItemView, QMessageBox,
     QSplitter, QGroupBox, QTreeWidget, QTreeWidgetItem, QScrollArea,
     QLineEdit, QTabWidget, QTextEdit
@@ -18,13 +19,25 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot
 
 from openhcs.constants.constants import Backend
-from openhcs.io.filemanager import FileManager
-from openhcs.io.base import storage_registry
-from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
-from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
-from openhcs.pyqt_gui.widgets.shared.column_filter_widget import MultiColumnFilterPanel
-
+from polystore.filemanager import FileManager
+from polystore.base import storage_registry
+from pyqt_reactive.theming import ColorScheme
+from pyqt_reactive.theming import StyleSheetGenerator
+from pyqt_reactive.widgets.shared.column_filter_widget import MultiColumnFilterPanel
+from pyqt_reactive.widgets.shared.image_table_browser import ImageTableBrowser
+from openhcs.config_framework.object_state import ObjectState, ObjectStateRegistry
+from openhcs.core.config import LazyNapariStreamingConfig, LazyFijiStreamingConfig
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ImageBrowserConfig:
+    """Namespace container for ImageBrowser's streaming configs.
+
+    Gives ImageBrowser a single root ObjectState with nested configs via dotted paths.
+    """
+    napari_config: LazyNapariStreamingConfig = field(default_factory=LazyNapariStreamingConfig)
+    fiji_config: LazyFijiStreamingConfig = field(default_factory=LazyFijiStreamingConfig)
 
 
 class ImageBrowserWidget(QWidget):
@@ -39,11 +52,11 @@ class ImageBrowserWidget(QWidget):
     image_selected = pyqtSignal(str)  # Emitted when an image is selected
     _status_update_signal = pyqtSignal(str)  # Internal signal for thread-safe status updates
 
-    def __init__(self, orchestrator=None, color_scheme: Optional[PyQt6ColorScheme] = None, parent=None):
+    def __init__(self, orchestrator=None, color_scheme: Optional[ColorScheme] = None, parent=None):
         super().__init__(parent)
 
         self.orchestrator = orchestrator
-        self.color_scheme = color_scheme or PyQt6ColorScheme()
+        self.color_scheme = color_scheme or ColorScheme()
         self.style_gen = StyleSheetGenerator(self.color_scheme)
         # Use orchestrator's filemanager if available, otherwise create a new one with global registry
         # This ensures the image browser can access all backends registered in the orchestrator's registry
@@ -54,11 +67,22 @@ class ImageBrowserWidget(QWidget):
         # Append a suffix so image browser uses a separate scope per plate
         self.scope_id: Optional[str] = f"{orchestrator.plate_path}::image_browser" if orchestrator else None
 
-        # Lazy config widgets (will be created in init_ui)
+        # Create root ObjectState from ImageBrowserConfig namespace container
+        # This gives us a single registered state with nested configs via dotted paths
+        self.config = ImageBrowserConfig()
+        parent_state = ObjectStateRegistry.get_by_scope(self.scope_id) if self.scope_id else None
+        self.state = ObjectState(
+            object_instance=self.config,
+            scope_id=self.scope_id,
+            parent_state=parent_state,
+        )
+        # Register in ObjectStateRegistry for cross-window inheritance
+        if self.scope_id:
+            ObjectStateRegistry.register(self.state)
+
+        # PFM widgets (will be created in init_ui)
         self.napari_config_form = None
-        self.lazy_napari_config = None
         self.fiji_config_form = None
-        self.lazy_fiji_config = None
 
         # File data tracking (images + results)
         self.all_files = {}  # filename -> metadata dict (merged images + results)
@@ -77,9 +101,21 @@ class ImageBrowserWidget(QWidget):
         # Column filter panel
         self.column_filter_panel = None
 
-        # Start global ack listener for image acknowledgment tracking
-        from openhcs.runtime.zmq_base import start_global_ack_listener
-        start_global_ack_listener()
+        # Search service (initialized lazily when first filter is applied)
+        self._search_service = None
+
+        # ZMQ manager widget (may be created in init_ui)
+        self.zmq_manager = None
+
+        # Streaming service for unified Napari/Fiji streaming
+        self._streaming_service = None
+        if orchestrator:
+            from openhcs.ui.shared.streaming_service import StreamingService
+            self._streaming_service = StreamingService(
+                filemanager=self.filemanager,
+                microscope_handler=orchestrator.microscope_handler,
+                plate_path=orchestrator.plate_path,
+            )
 
         self.init_ui()
 
@@ -191,8 +227,7 @@ class ImageBrowserWidget(QWidget):
         # Add splitter with stretch factor to fill vertical space
         layout.addWidget(main_splitter, 1)
 
-        # Connect selection change
-        self.file_table.itemSelectionChanged.connect(self.on_selection_changed)
+        # Note: Selection and double-click signals are connected in _create_table_widget()
 
     def _create_folder_tree(self):
         """Create folder tree widget for filtering images by directory."""
@@ -213,36 +248,20 @@ class ImageBrowserWidget(QWidget):
 
     def _create_table_widget(self):
         """Create and configure the unified file table widget (images + results)."""
-        table_container = QWidget()
-        layout = QVBoxLayout(table_container)
-        layout.setContentsMargins(0, 0, 0, 0)
+        # Use ImageTableBrowser for unified table (multi-select, dynamic columns)
+        self.image_table_browser = ImageTableBrowser(
+            color_scheme=self.color_scheme,
+            parent=self
+        )
 
-        # Unified table for images and results (columns will be set dynamically based on parser metadata)
-        self.file_table = QTableWidget()
-        self.file_table.setColumnCount(2)  # Start with Filename + Type
-        self.file_table.setHorizontalHeaderLabels(["Filename", "Type"])
+        # Connect signals
+        self.image_table_browser.item_double_clicked.connect(self._on_file_double_clicked)
+        self.image_table_browser.items_selected.connect(self._on_files_selected)
 
-        # Configure table
-        self.file_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.file_table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)  # Enable multi-selection
-        self.file_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.file_table.setSortingEnabled(True)
+        # Alias for backward compatibility during transition
+        self.file_table = self.image_table_browser.table_widget
 
-        # Configure header - make all columns resizable and movable (like function selector)
-        header = self.file_table.horizontalHeader()
-        header.setSectionsMovable(True)  # Allow column reordering
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)  # Filename - resizable
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)  # Type - resizable
-
-        # Apply styling
-        self.file_table.setStyleSheet(self.style_gen.generate_table_widget_style())
-
-        # Connect double-click to view in enabled viewer(s)
-        self.file_table.cellDoubleClicked.connect(self.on_file_double_clicked)
-
-        layout.addWidget(self.file_table)
-
-        return table_container
+        return self.image_table_browser
 
     # Removed _create_results_widget - now using unified file table
 
@@ -333,23 +352,16 @@ class ImageBrowserWidget(QWidget):
         self.napari_enable_checkbox.toggled.connect(self._on_napari_enable_toggled)
         layout.addWidget(self.napari_enable_checkbox)
 
-        # Create lazy Napari config instance
-        from openhcs.core.config import LazyNapariStreamingConfig
-        self.lazy_napari_config = LazyNapariStreamingConfig()
+        # Create PFM scoped to napari_config using field_prefix
+        from pyqt_reactive.forms import ParameterFormManager, FormManagerConfig
 
-        # Create parameter form for the lazy config
-        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager, FormManagerConfig
-
-        context_obj = self.orchestrator.pipeline_config if self.orchestrator else None
         config = FormManagerConfig(
             parent=panel,
-            context_obj=context_obj,
-            scope_id=self.scope_id,
-            color_scheme=self.color_scheme
+            color_scheme=self.color_scheme,
+            field_prefix='napari_config'  # Scope to napari_config nested dataclass
         )
         self.napari_config_form = ParameterFormManager(
-            object_instance=self.lazy_napari_config,
-            field_id="napari_config",
+            state=self.state,  # Share root ObjectState
             config=config
         )
 
@@ -378,23 +390,16 @@ class ImageBrowserWidget(QWidget):
         self.fiji_enable_checkbox.toggled.connect(self._on_fiji_enable_toggled)
         layout.addWidget(self.fiji_enable_checkbox)
 
-        # Create lazy Fiji config instance
-        from openhcs.config_framework.lazy_factory import LazyFijiStreamingConfig
-        self.lazy_fiji_config = LazyFijiStreamingConfig()
+        # Create PFM scoped to fiji_config using field_prefix
+        from pyqt_reactive.forms import ParameterFormManager, FormManagerConfig
 
-        # Create parameter form for the lazy config
-        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager, FormManagerConfig
-
-        context_obj = self.orchestrator.pipeline_config if self.orchestrator else None
         config = FormManagerConfig(
             parent=panel,
-            context_obj=context_obj,
-            scope_id=self.scope_id,
-            color_scheme=self.color_scheme
+            color_scheme=self.color_scheme,
+            field_prefix='fiji_config'  # Scope to fiji_config nested dataclass
         )
         self.fiji_config_form = ParameterFormManager(
-            object_instance=self.lazy_fiji_config,
-            field_id="fiji_config",
+            state=self.state,  # Share root ObjectState
             config=config
         )
 
@@ -422,16 +427,37 @@ class ImageBrowserWidget(QWidget):
         self.streaming_tabs.setTabText(self.napari_tab_index, napari_label)
         self.streaming_tabs.setTabText(self.fiji_tab_index, fiji_label)
 
+    def _get_config_values(self, prefix: str) -> Dict[str, Any]:
+        """Get current values for a nested config, scoped by prefix.
+
+        Args:
+            prefix: The dotted path prefix (e.g., 'napari_config' or 'fiji_config')
+
+        Returns:
+            Dict with prefix stripped from keys, e.g., {'port': 5555, 'host': 'localhost'}
+        """
+        prefix_dot = f'{prefix}.'
+        result = {}
+        for path, value in self.state.parameters.items():
+            if path.startswith(prefix_dot):
+                remainder = path[len(prefix_dot):]
+                # Only direct children (no nested dots in remainder)
+                if '.' not in remainder:
+                    result[remainder] = value
+        return result
+
     def _on_napari_enable_toggled(self, checked: bool):
         """Handle Napari enable checkbox toggle."""
         self.napari_config_form.setEnabled(checked)
-        self.view_napari_btn.setEnabled(checked and len(self.file_table.selectedItems()) > 0)
+        has_selection = len(self.image_table_browser.get_selected_keys()) > 0
+        self.view_napari_btn.setEnabled(checked and has_selection)
         self._update_tab_labels()
 
     def _on_fiji_enable_toggled(self, checked: bool):
         """Handle Fiji enable checkbox toggle."""
         self.fiji_config_form.setEnabled(checked)
-        self.view_fiji_btn.setEnabled(checked and len(self.file_table.selectedItems()) > 0)
+        has_selection = len(self.image_table_browser.get_selected_keys()) > 0
+        self.view_fiji_btn.setEnabled(checked and has_selection)
         self._update_tab_labels()
 
     def _create_instance_manager_panel(self):
@@ -462,23 +488,22 @@ class ImageBrowserWidget(QWidget):
     def set_orchestrator(self, orchestrator):
         """Set the orchestrator and load images."""
         self.orchestrator = orchestrator
-        self.scope_id = str(orchestrator.plate_path) if orchestrator else None
+        # CRITICAL: Preserve ::image_browser suffix to avoid scope conflicts with ConfigWindow
+        self.scope_id = f"{orchestrator.plate_path}::image_browser" if orchestrator else None
 
         # Use orchestrator's FileManager (has plate-specific backends like VirtualWorkspaceBackend)
         if orchestrator:
             self.filemanager = orchestrator.filemanager
             logger.debug("Image browser now using orchestrator's FileManager")
 
-        # Update config form contexts and scope_id to use new pipeline_config
-        if self.napari_config_form and orchestrator:
-            self.napari_config_form.context_obj = orchestrator.pipeline_config
-            self.napari_config_form.scope_id = self.scope_id
-            self.napari_config_form._refresh_all_placeholders()
-
-        if self.fiji_config_form and orchestrator:
-            self.fiji_config_form.context_obj = orchestrator.pipeline_config
-            self.fiji_config_form.scope_id = self.scope_id
-            self.fiji_config_form._refresh_all_placeholders()
+        # Update state context and scope_id to use new pipeline_config
+        if self.state and orchestrator:
+            self.state.context_obj = orchestrator.pipeline_config
+            self.state.scope_id = self.scope_id
+            if self.napari_config_form:
+                self.napari_config_form._refresh_all_placeholders()
+            if self.fiji_config_form:
+                self.fiji_config_form._refresh_all_placeholders()
 
         self.load_images()
 
@@ -661,22 +686,23 @@ class ImageBrowserWidget(QWidget):
         # Create searchable text extractor
         def create_searchable_text(metadata):
             """Create searchable text from file metadata."""
-            searchable_fields = [metadata.get('filename', '')]
+            # 'filename' is guaranteed to exist (set in load_images/load_results)
+            searchable_fields = [metadata['filename']]
             # Add all metadata values
             for key, value in metadata.items():
                 if key != 'filename' and value is not None:
                     searchable_fields.append(str(value))
             return " ".join(str(field) for field in searchable_fields)
 
-        # Create search service if not exists
-        if not hasattr(self, '_search_service'):
+        # Create or update search service
+        if self._search_service is None:
             self._search_service = SearchService(
                 all_items=self.all_files,
                 searchable_text_extractor=create_searchable_text
             )
-
-        # Update search service with current files
-        self._search_service.update_items(self.all_files)
+        else:
+            # Update search service with current files
+            self._search_service.update_items(self.all_files)
 
         # Perform search using shared service
         self.filtered_files = self._search_service.filter(search_term)
@@ -763,15 +789,8 @@ class ImageBrowserWidget(QWidget):
         # Sort keys for consistent column order (extension first, then alphabetical)
         self.metadata_keys = sorted(all_keys, key=lambda k: (k != 'extension', k))
 
-        # Set up table columns: Filename + metadata keys
-        column_headers = ["Filename"] + [k.replace('_', ' ').title() for k in self.metadata_keys]
-        self.file_table.setColumnCount(len(column_headers))
-        self.file_table.setHorizontalHeaderLabels(column_headers)
-
-        # Set all columns to Interactive resize mode
-        header = self.file_table.horizontalHeader()
-        for col in range(len(column_headers)):
-            header.setSectionResizeMode(col, QHeaderView.ResizeMode.Interactive)
+        # Configure ImageTableBrowser with dynamic columns
+        self.image_table_browser.set_metadata_keys(self.metadata_keys)
 
         # Initialize filtered files to all files
         self.filtered_files = self.all_files.copy()
@@ -810,7 +829,7 @@ class ImageBrowserWidget(QWidget):
             plate_path = self.orchestrator.plate_path
 
             # Load metadata JSON directly
-            from openhcs.io.metadata_writer import get_metadata_path
+            from polystore.metadata_writer import get_metadata_path
             import json
 
             metadata_path = get_metadata_path(plate_path)
@@ -947,11 +966,9 @@ class ImageBrowserWidget(QWidget):
 
             # For each enabled viewer, resolve config + viewer on UI thread, then spawn worker
             if napari_enabled:
-                from openhcs.core.config import LazyNapariStreamingConfig
-                current_values = self.napari_config_form.get_current_values()
-                temp_config = LazyNapariStreamingConfig(
-                    **{k: v for k, v in current_values.items() if v is not None}
-                )
+                current_values = self._get_config_values('napari_config')
+                # CRITICAL: Pass None values through for lazy resolution
+                temp_config = LazyNapariStreamingConfig(**current_values)
 
                 with config_context(self.orchestrator.pipeline_config):
                     with config_context(temp_config):
@@ -974,11 +991,9 @@ class ImageBrowserWidget(QWidget):
                 ).start()
 
             if fiji_enabled:
-                from openhcs.core.config import LazyFijiStreamingConfig
-                current_values = self.fiji_config_form.get_current_values()
-                temp_config = LazyFijiStreamingConfig(
-                    **{k: v for k, v in current_values.items() if v is not None}
-                )
+                current_values = self._get_config_values('fiji_config')
+                # CRITICAL: Pass None values through for lazy resolution
+                temp_config = LazyFijiStreamingConfig(**current_values)
 
                 with config_context(self.orchestrator.pipeline_config):
                     with config_context(temp_config):
@@ -1021,7 +1036,7 @@ class ImageBrowserWidget(QWidget):
             try:
                 from pathlib import Path as _Path
                 from PyQt6.QtCore import QTimer
-                from openhcs.core.roi import load_rois_from_zip
+                from polystore.roi import load_rois_from_zip
 
                 # Load ROIs from disk
                 self._status_update_signal.emit(
@@ -1098,25 +1113,13 @@ class ImageBrowserWidget(QWidget):
         threading.Thread(target=_worker, daemon=True).start()
 
     def _populate_table(self, files_dict: Dict[str, Dict]):
-        """Populate table with files (images + results) from dictionary."""
-        # Clear table
-        self.file_table.setRowCount(0)
+        """Populate table with files (images + results) using ImageTableBrowser."""
+        self.image_table_browser.set_items(files_dict)
 
-        # Populate rows
-        for i, (filename, metadata) in enumerate(files_dict.items()):
-            self.file_table.insertRow(i)
-
-            # Filename column
-            filename_item = QTableWidgetItem(filename)
-            filename_item.setData(Qt.ItemDataRole.UserRole, filename)
-            self.file_table.setItem(i, 0, filename_item)
-
-            # Metadata columns - use metadata display values
-            for col_idx, key in enumerate(self.metadata_keys, start=1):
-                value = metadata.get(key, 'N/A')
-                # Get display value (metadata name if available, otherwise raw value)
-                display_value = self._get_metadata_display_value(key, value)
-                self.file_table.setItem(i, col_idx, QTableWidgetItem(display_value))
+        # Update status label with file counts
+        total = len(self.all_files)
+        filtered = len(files_dict)
+        self.image_table_browser.status_label.setText(f"Files: {filtered}/{total}")
 
     def _build_folder_tree(self):
         """Build folder tree from file paths (images + results)."""
@@ -1172,29 +1175,38 @@ class ImageBrowserWidget(QWidget):
         if selected_folder is not None:
             self._restore_folder_selection(selected_folder, folder_items)
 
-    def on_selection_changed(self):
-        """Handle selection change in the table."""
-        has_selection = len(self.file_table.selectedItems()) > 0
+    def _on_files_selected(self, keys: list):
+        """Handle selection change from ImageTableBrowser."""
+        has_selection = len(keys) > 0
         # Enable buttons based on selection AND checkbox state
         self.view_napari_btn.setEnabled(has_selection and self.napari_enable_checkbox.isChecked())
         self.view_fiji_btn.setEnabled(has_selection and self.fiji_enable_checkbox.isChecked())
 
-    def on_file_double_clicked(self, row: int, column: int):
-        """Handle double-click on a file row - stream images or display results."""
-        # Get file info from table
-        filename_item = self.file_table.item(row, 0)
-        filename = filename_item.data(Qt.ItemDataRole.UserRole)
+    # Backward compatibility alias
+    def on_selection_changed(self):
+        """Handle selection change in the table (legacy)."""
+        selected_keys = self.image_table_browser.get_selected_keys()
+        self._on_files_selected(selected_keys)
+
+    def _on_file_double_clicked(self, key: str, item: dict):
+        """Handle double-click from ImageTableBrowser."""
+        file_info = self.all_files[key]
 
         # Check if this is a result file (has 'type' field) or an image
-        file_info = self.all_files.get(filename, {})
-        file_type = file_info.get('type')
-
-        if file_type:
+        if 'type' in file_info:
             # This is a result file (ROI, CSV, JSON)
             self._handle_result_double_click(file_info)
         else:
-            # This is an image file
+            # This is an image file (no 'type' field)
             self._handle_image_double_click()
+
+    # Backward compatibility alias
+    def on_file_double_clicked(self, row: int, column: int):
+        """Handle double-click on a file row (legacy)."""
+        filename_item = self.file_table.item(row, 0)
+        filename = filename_item.data(Qt.ItemDataRole.UserRole)
+        file_info = self.all_files[filename]
+        self._on_file_double_clicked(filename, file_info)
 
     def _handle_image_double_click(self):
         """Handle double-click on an image - stream to enabled viewer(s)."""
@@ -1223,12 +1235,9 @@ class ImageBrowserWidget(QWidget):
     def _handle_result_double_click(self, file_info: dict):
         """Handle double-click on a result file - stream ROIs or display CSV."""
         filename = file_info['filename']
-        file_path = self.result_full_paths.get(filename)
-
-        if not file_path:
-            logger.error(f"Could not find full path for result file: {filename}")
-            return
-
+        # Result files are populated in load_results() which stores both
+        # all_results[filename] and result_full_paths[filename] together - must exist
+        file_path = self.result_full_paths[filename]
         file_type = file_info['type']
 
         if file_type == 'ROI':
@@ -1245,23 +1254,13 @@ class ImageBrowserWidget(QWidget):
 
     def view_selected_in_napari(self):
         """View all selected images in Napari as a batch (builds hyperstack)."""
-        selected_rows = self.file_table.selectionModel().selectedRows()
-        if not selected_rows:
+        selected_keys = self.image_table_browser.get_selected_keys()
+        if not selected_keys:
             return
 
-        # Collect all filenames and separate ROI files from images
-        image_filenames = []
-        roi_filenames = []
-        for row_index in selected_rows:
-            row = row_index.row()
-            filename_item = self.file_table.item(row, 0)
-            filename = filename_item.data(Qt.ItemDataRole.UserRole)
-
-            # Check if this is a .roi.zip file
-            if filename.endswith('.roi.zip'):
-                roi_filenames.append(filename)
-            else:
-                image_filenames.append(filename)
+        # Separate ROI files from images
+        image_filenames = [k for k in selected_keys if not k.endswith('.roi.zip')]
+        roi_filenames = [k for k in selected_keys if k.endswith('.roi.zip')]
 
         try:
             # Stream ROI files in a batch (get viewer once, stream all ROIs)
@@ -1279,23 +1278,13 @@ class ImageBrowserWidget(QWidget):
 
     def view_selected_in_fiji(self):
         """View all selected images in Fiji as a batch (builds hyperstack)."""
-        selected_rows = self.file_table.selectionModel().selectedRows()
-        if not selected_rows:
+        selected_keys = self.image_table_browser.get_selected_keys()
+        if not selected_keys:
             return
 
-        # Collect all filenames and separate ROI files from images
-        image_filenames = []
-        roi_filenames = []
-        for row_index in selected_rows:
-            row = row_index.row()
-            filename_item = self.file_table.item(row, 0)
-            filename = filename_item.data(Qt.ItemDataRole.UserRole)
-
-            # Check if this is a .roi.zip file
-            if filename.endswith('.roi.zip'):
-                roi_filenames.append(filename)
-            else:
-                image_filenames.append(filename)
+        # Separate ROI files from images
+        image_filenames = [k for k in selected_keys if not k.endswith('.roi.zip')]
+        roi_filenames = [k for k in selected_keys if k.endswith('.roi.zip')]
 
         logger.info(f"🎯 IMAGE BROWSER: User selected {len(image_filenames)} images and {len(roi_filenames)} ROI files to view in Fiji")
         logger.info(f"🎯 IMAGE BROWSER: Image filenames: {image_filenames[:5]}{'...' if len(image_filenames) > 5 else ''}")
@@ -1316,15 +1305,17 @@ class ImageBrowserWidget(QWidget):
             logger.error(f"Failed to view images in Fiji: {e}")
             QMessageBox.warning(self, "Error", f"Failed to view images in Fiji: {e}")
 
-    def _load_and_stream_batch_to_napari(self, filenames: list):
-        """Load multiple images and stream as batch to Napari (builds hyperstack)."""
+    def _prepare_streaming(self, viewer_type: str) -> tuple:
+        """Prepare for streaming: resolve config, get viewer, get read backend.
+
+        Returns: (viewer, plate_path, read_backend, config)
+        """
         if not self.orchestrator:
             raise RuntimeError("No orchestrator set")
 
-        # Get plate path
         plate_path = Path(self.orchestrator.plate_path)
 
-        # Resolve backend (lightweight operation, safe in UI thread)
+        # Resolve backend
         from openhcs.config_framework.global_config import get_current_global_config
         from openhcs.core.config import GlobalPipelineConfig
         global_config = get_current_global_config(GlobalPipelineConfig)
@@ -1332,440 +1323,60 @@ class ImageBrowserWidget(QWidget):
         if global_config.vfs_config.read_backend != Backend.AUTO:
             read_backend = global_config.vfs_config.read_backend.value
         else:
-            read_backend = self.orchestrator.microscope_handler.get_primary_backend(plate_path, self.orchestrator.filemanager)
+            read_backend = self.orchestrator.microscope_handler.get_primary_backend(
+                plate_path, self.orchestrator.filemanager
+            )
 
-        # Resolve Napari config (lightweight operation, safe in UI thread)
+        # Resolve streaming config
         from openhcs.config_framework.context_manager import config_context
-        from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization, LazyNapariStreamingConfig
+        from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization
 
-        current_values = self.napari_config_form.get_current_values()
-        temp_config = LazyNapariStreamingConfig(**{k: v for k, v in current_values.items() if v is not None})
+        if viewer_type == 'napari':
+            config_key = 'napari_config'
+            LazyConfigClass = LazyNapariStreamingConfig
+        else:
+            config_key = 'fiji_config'
+            LazyConfigClass = LazyFijiStreamingConfig
+
+        current_values = self._get_config_values(config_key)
+        temp_config = LazyConfigClass(**current_values)
 
         with config_context(self.orchestrator.pipeline_config):
             with config_context(temp_config):
-                napari_config = resolve_lazy_configurations_for_serialization(temp_config)
+                resolved_config = resolve_lazy_configurations_for_serialization(temp_config)
 
-        # Get or create viewer (lightweight operation, safe in UI thread)
-        viewer = self.orchestrator.get_or_create_visualizer(napari_config)
+        viewer = self.orchestrator.get_or_create_visualizer(resolved_config)
+        return viewer, plate_path, read_backend, resolved_config
 
-        # Load and stream in background thread (HEAVY OPERATION - must not block UI)
-        self._load_and_stream_batch_to_napari_async(
-            viewer, filenames, plate_path, read_backend, napari_config
+    def _stream_images_to_viewer(self, filenames: list, viewer_type: str):
+        """Load and stream images to specified viewer type."""
+        viewer, plate_path, read_backend, config = self._prepare_streaming(viewer_type)
+
+        self._streaming_service.stream_images_async(
+            viewer=viewer,
+            filenames=filenames,
+            plate_path=plate_path,
+            read_backend=read_backend,
+            config=config,
+            viewer_type=viewer_type,
+            status_callback=self._status_update_signal.emit,
+            error_callback=lambda e: self._show_streaming_error(e) if viewer_type == 'napari'
+                           else self._show_fiji_streaming_error(e),
         )
+        logger.info(f"Streaming {len(filenames)} images to {viewer_type}...")
 
-        logger.info(f"Loading and streaming batch of {len(filenames)} images to Napari viewer on port {napari_config.port}...")
+    def _load_and_stream_batch_to_napari(self, filenames: list):
+        """Load multiple images and stream as batch to Napari (builds hyperstack)."""
+        self._stream_images_to_viewer(filenames, 'napari')
 
     def _load_and_stream_batch_to_fiji(self, filenames: list):
         """Load multiple images and stream as batch to Fiji (builds hyperstack)."""
-        if not self.orchestrator:
-            raise RuntimeError("No orchestrator set")
-
-        # Get plate path
-        plate_path = Path(self.orchestrator.plate_path)
-
-        # Resolve backend (lightweight operation, safe in UI thread)
-        from openhcs.config_framework.global_config import get_current_global_config
-        from openhcs.core.config import GlobalPipelineConfig
-        global_config = get_current_global_config(GlobalPipelineConfig)
-
-        if global_config.vfs_config.read_backend != Backend.AUTO:
-            read_backend = global_config.vfs_config.read_backend.value
-        else:
-            read_backend = self.orchestrator.microscope_handler.get_primary_backend(plate_path, self.orchestrator.filemanager)
-
-        # Resolve Fiji config (lightweight operation, safe in UI thread)
-        from openhcs.config_framework.context_manager import config_context
-        from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization
-        from openhcs.core.config import LazyFijiStreamingConfig
-
-        current_values = self.fiji_config_form.get_current_values()
-        temp_config = LazyFijiStreamingConfig(**{k: v for k, v in current_values.items() if v is not None})
-
-        with config_context(self.orchestrator.pipeline_config):
-            with config_context(temp_config):
-                fiji_config = resolve_lazy_configurations_for_serialization(temp_config)
-
-        # Get or create viewer (lightweight operation, safe in UI thread)
-        viewer = self.orchestrator.get_or_create_visualizer(fiji_config)
-
-        # Load and stream in background thread (HEAVY OPERATION - must not block UI)
-        self._load_and_stream_batch_to_fiji_async(
-            viewer, filenames, plate_path, read_backend, fiji_config
-        )
-
-        logger.info(f"Loading and streaming batch of {len(filenames)} images to Fiji viewer on port {fiji_config.port}...")
-
-    def _load_and_stream_batch_to_napari_async(self, viewer, filenames: list, plate_path: Path,
-                                                 read_backend: str, config):
-        """Load and stream batch of images to Napari in background thread (NEVER blocks UI).
-
-        Uses chunked streaming to prevent file descriptor exhaustion when streaming
-        large batches (200+ images). Each chunk creates shared memory segments that
-        consume file descriptors, so we limit concurrent chunks to prevent hitting
-        OS limits.
-        """
-        import threading
-        import time
-
-        # Chunk size to prevent file descriptor exhaustion
-        # Each image creates a shared memory segment (file descriptor on Linux)
-        CHUNK_SIZE = 50
-
-        def load_and_stream():
-            try:
-                # Register that we're launching a viewer BEFORE loading (so UI shows it immediately)
-                from openhcs.pyqt_gui.widgets.shared.zmq_server_manager import (
-                    register_launching_viewer, unregister_launching_viewer
-                )
-
-                # Check if viewer is already ready (quick ping with short timeout)
-                is_already_running = viewer.wait_for_ready(timeout=0.1)
-
-                if not is_already_running:
-                    # Viewer is launching - register it immediately so UI shows it
-                    register_launching_viewer(viewer.port, 'napari', len(filenames))
-                    logger.info(f"Registered launching Napari viewer on port {viewer.port} with {len(filenames)} queued images")
-
-                if not is_already_running:
-                    # Viewer is launching - wait for it to be ready before streaming
-                    logger.info(f"Waiting for Napari viewer on port {viewer.port} to be ready...")
-
-                    # Wait for viewer to be ready before streaming
-                    if not viewer.wait_for_ready(timeout=15.0):
-                        unregister_launching_viewer(viewer.port)
-                        raise RuntimeError(f"Napari viewer on port {viewer.port} failed to become ready")
-
-                    logger.info(f"Napari viewer on port {viewer.port} is ready")
-                    # Unregister from launching registry (now ready)
-                    unregister_launching_viewer(viewer.port)
-                else:
-                    logger.info(f"Napari viewer on port {viewer.port} is already running")
-
-                from openhcs.constants.constants import Backend as BackendEnum
-
-                # Stream in chunks to prevent file descriptor exhaustion
-                total_images = len(filenames)
-                num_chunks = (total_images + CHUNK_SIZE - 1) // CHUNK_SIZE
-                logger.info(f"Streaming {total_images} images in {num_chunks} chunks of {CHUNK_SIZE}")
-
-                for chunk_idx in range(num_chunks):
-                    start_idx = chunk_idx * CHUNK_SIZE
-                    end_idx = min(start_idx + CHUNK_SIZE, total_images)
-                    chunk_filenames = filenames[start_idx:end_idx]
-
-                    # Show loading status
-                    self._update_status_threadsafe(f"Loading chunk {chunk_idx + 1}/{num_chunks} ({len(chunk_filenames)} images)...")
-
-                    # Load chunk of images
-                    image_data_list = []
-                    file_paths = []
-                    for i, filename in enumerate(chunk_filenames, 1):
-                        image_path = plate_path / filename
-                        image_data = self.filemanager.load(str(image_path), read_backend)
-                        image_data_list.append(image_data)
-                        file_paths.append(filename)
-
-                    logger.info(f"Loaded chunk {chunk_idx + 1}/{num_chunks}: {len(image_data_list)} images")
-
-                    # Build source from subdirectory name (image viewer context)
-                    source = Path(file_paths[0]).parent.name if file_paths else 'unknown_source'
-
-                    # Prepare metadata for streaming
-                    metadata = {
-                        'port': viewer.port,
-                        'display_config': config,
-                        'microscope_handler': self.orchestrator.microscope_handler,
-                        'plate_path': self.orchestrator.plate_path,
-                        'source': source
-                    }
-
-                    # Stream chunk to Napari
-                    self.filemanager.save_batch(
-                        image_data_list,
-                        file_paths,
-                        BackendEnum.NAPARI_STREAM.value,
-                        **metadata
-                    )
-                    logger.info(f"Streamed chunk {chunk_idx + 1}/{num_chunks} ({len(file_paths)} images) to Napari on port {viewer.port}")
-
-                    # Brief pause between chunks to allow Napari to process and unlink shared memory
-                    # This prevents accumulation of file descriptors
-                    if chunk_idx < num_chunks - 1:
-                        time.sleep(0.1)
-
-                logger.info(f"Successfully streamed all {total_images} images to Napari on port {viewer.port}")
-                self._update_status_threadsafe(f"Streamed {total_images} images to Napari")
-            except Exception as e:
-                logger.error(f"Failed to load/stream batch to Napari: {e}")
-                # Show error in UI thread
-                # Use signal to safely update UI from background thread
-                self._status_update_signal.emit(f"Error: {e}")
-                # Also show error dialog
-                from PyQt6.QtCore import QTimer
-                QTimer.singleShot(0, lambda: self._show_streaming_error(str(e)))
-
-        # Start loading and streaming in background thread
-        thread = threading.Thread(target=load_and_stream, daemon=True)
-        thread.start()
-        logger.info(f"Started background thread to load and stream {len(filenames)} images to Napari in chunks")
-
-    def _stream_batch_to_napari(self, viewer, image_data_list: list, file_paths: list, config):
-        """Stream batch of images to Napari viewer asynchronously (builds hyperstack)."""
-        # Stream in background thread to avoid blocking UI
-        import threading
-
-        def stream_async():
-            try:
-                from openhcs.pyqt_gui.widgets.shared.zmq_server_manager import (
-                    register_launching_viewer, unregister_launching_viewer
-                )
-
-                # Check if viewer is already ready (quick ping with short timeout)
-                # If it responds immediately, it was already running - don't show as launching
-                is_already_running = viewer.wait_for_ready(timeout=0.1)
-
-                if not is_already_running:
-                    # Viewer is launching - register it and show in UI
-                    register_launching_viewer(viewer.port, 'napari', len(file_paths))
-                    logger.info(f"Waiting for Napari viewer on port {viewer.port} to be ready...")
-
-                    # Wait for viewer to be ready before streaming
-                    if not viewer.wait_for_ready(timeout=15.0):
-                        unregister_launching_viewer(viewer.port)
-                        raise RuntimeError(f"Napari viewer on port {viewer.port} failed to become ready")
-
-                    logger.info(f"Napari viewer on port {viewer.port} is ready")
-                    # Unregister from launching registry (now ready)
-                    unregister_launching_viewer(viewer.port)
-                else:
-                    logger.info(f"Napari viewer on port {viewer.port} is already running")
-
-                # Use the napari streaming backend to send the batch
-                from openhcs.constants.constants import Backend as BackendEnum
-
-                # Build source from subdirectory name (image viewer context)
-                # Use first file path to determine subdirectory
-                source = Path(file_paths[0]).parent.name if file_paths else 'unknown_source'
-
-                # Prepare metadata for streaming
-                metadata = {
-                    'port': viewer.port,
-                    'display_config': config,
-                    'microscope_handler': self.orchestrator.microscope_handler,
-                    'plate_path': self.orchestrator.plate_path,
-                    'source': source
-                }
-
-                # Stream batch to Napari
-                self.filemanager.save_batch(
-                    image_data_list,
-                    file_paths,
-                    BackendEnum.NAPARI_STREAM.value,
-                    **metadata
-                )
-                logger.info(f"Successfully streamed batch of {len(file_paths)} images to Napari on port {viewer.port}")
-            except Exception as e:
-                logger.error(f"Failed to stream batch to Napari: {e}")
-                # Show error in UI thread
-                # Use signal to safely update UI from background thread
-                self._status_update_signal.emit(f"Error: {e}")
-                # Also show error dialog
-                from PyQt6.QtCore import QTimer
-                QTimer.singleShot(0, lambda: self._show_streaming_error(str(e)))
-
-        # Start streaming in background thread
-        thread = threading.Thread(target=stream_async, daemon=True)
-        thread.start()
-        logger.info(f"Streaming batch of {len(file_paths)} images to Napari asynchronously...")
+        self._stream_images_to_viewer(filenames, 'fiji')
 
     @pyqtSlot(str)
     def _show_streaming_error(self, error_msg: str):
         """Show streaming error in UI thread (called via QMetaObject.invokeMethod)."""
         QMessageBox.warning(self, "Streaming Error", f"Failed to stream images to Napari: {error_msg}")
-
-    def _load_and_stream_batch_to_fiji_async(self, viewer, filenames: list, plate_path: Path,
-                                               read_backend: str, config):
-        """Load and stream batch of images to Fiji in background thread (NEVER blocks UI).
-
-        Uses chunked streaming to prevent file descriptor exhaustion when streaming
-        large batches (200+ images). Each chunk creates shared memory segments that
-        consume file descriptors, so we limit concurrent chunks to prevent hitting
-        OS limits.
-        """
-        import threading
-        import time
-
-        # Chunk size to prevent file descriptor exhaustion
-        # Each image creates a shared memory segment (file descriptor on Linux)
-        CHUNK_SIZE = 50
-
-        def load_and_stream():
-            try:
-                # Register that we're launching a viewer BEFORE loading (so UI shows it immediately)
-                from openhcs.pyqt_gui.widgets.shared.zmq_server_manager import (
-                    register_launching_viewer, unregister_launching_viewer
-                )
-
-                # Check if viewer is already ready (quick ping with short timeout)
-                is_already_running = viewer.wait_for_ready(timeout=0.1)
-
-                if not is_already_running:
-                    # Viewer is launching - register it immediately so UI shows it
-                    register_launching_viewer(viewer.port, 'fiji', len(filenames))
-                    logger.info(f"Registered launching Fiji viewer on port {viewer.port} with {len(filenames)} queued images")
-
-                if not is_already_running:
-                    # Viewer is launching - wait for it to be ready before streaming
-                    logger.info(f"Waiting for Fiji viewer on port {viewer.port} to be ready...")
-
-                    # Wait for viewer to be ready before streaming
-                    if not viewer.wait_for_ready(timeout=15.0):
-                        unregister_launching_viewer(viewer.port)
-                        raise RuntimeError(f"Fiji viewer on port {viewer.port} failed to become ready")
-
-                    logger.info(f"Fiji viewer on port {viewer.port} is ready")
-                    # Unregister from launching registry (now ready)
-                    unregister_launching_viewer(viewer.port)
-                else:
-                    logger.info(f"Fiji viewer on port {viewer.port} is already running")
-
-                from openhcs.constants.constants import Backend as BackendEnum
-
-                # Stream in chunks to prevent file descriptor exhaustion
-                total_images = len(filenames)
-                num_chunks = (total_images + CHUNK_SIZE - 1) // CHUNK_SIZE
-                logger.info(f"Streaming {total_images} images in {num_chunks} chunks of {CHUNK_SIZE}")
-
-                for chunk_idx in range(num_chunks):
-                    start_idx = chunk_idx * CHUNK_SIZE
-                    end_idx = min(start_idx + CHUNK_SIZE, total_images)
-                    chunk_filenames = filenames[start_idx:end_idx]
-
-                    # Show loading status
-                    self._update_status_threadsafe(f"Loading chunk {chunk_idx + 1}/{num_chunks} ({len(chunk_filenames)} images)...")
-
-                    # Load chunk of images
-                    image_data_list = []
-                    file_paths = []
-                    for i, filename in enumerate(chunk_filenames, 1):
-                        image_path = plate_path / filename
-                        image_data = self.filemanager.load(str(image_path), read_backend)
-                        image_data_list.append(image_data)
-                        file_paths.append(filename)
-
-                    logger.info(f"Loaded chunk {chunk_idx + 1}/{num_chunks}: {len(image_data_list)} images")
-
-                    # Build source from subdirectory name (image viewer context)
-                    source = Path(file_paths[0]).parent.name if file_paths else 'unknown_source'
-
-                    # Prepare metadata for streaming
-                    metadata = {
-                        'port': viewer.port,
-                        'display_config': config,
-                        'microscope_handler': self.orchestrator.microscope_handler,
-                        'plate_path': self.orchestrator.plate_path,
-                        'source': source
-                    }
-
-                    # Stream chunk to Fiji
-                    logger.info(f"🚀 IMAGE BROWSER: Calling save_batch with {len(image_data_list)} images (chunk {chunk_idx + 1}/{num_chunks})")
-                    self.filemanager.save_batch(
-                        image_data_list,
-                        file_paths,
-                        BackendEnum.FIJI_STREAM.value,
-                        **metadata
-                    )
-                    logger.info(f"✅ IMAGE BROWSER: Streamed chunk {chunk_idx + 1}/{num_chunks} ({len(file_paths)} images) to Fiji on port {viewer.port}")
-
-                    # Brief pause between chunks to allow Fiji to process and unlink shared memory
-                    # This prevents accumulation of file descriptors
-                    if chunk_idx < num_chunks - 1:
-                        time.sleep(0.1)
-
-                logger.info(f"Successfully streamed all {total_images} images to Fiji on port {viewer.port}")
-                self._update_status_threadsafe(f"Streamed {total_images} images to Fiji")
-            except Exception as e:
-                logger.error(f"Failed to load/stream batch to Fiji: {e}")
-                # Show error in UI thread
-                # Use signal to safely update UI from background thread
-                self._status_update_signal.emit(f"Error: {e}")
-                # Also show error dialog
-                from PyQt6.QtCore import QTimer
-                QTimer.singleShot(0, lambda: self._show_fiji_streaming_error(str(e)))
-
-        # Start loading and streaming in background thread
-        thread = threading.Thread(target=load_and_stream, daemon=True)
-        thread.start()
-        logger.info(f"Started background thread to load and stream {len(filenames)} images to Fiji in chunks")
-
-    def _stream_batch_to_fiji(self, viewer, image_data_list: list, file_paths: list, config):
-        """Stream batch of images to Fiji viewer asynchronously (builds hyperstack)."""
-        # Stream in background thread to avoid blocking UI
-        import threading
-
-        def stream_async():
-            try:
-                from openhcs.pyqt_gui.widgets.shared.zmq_server_manager import (
-                    register_launching_viewer, unregister_launching_viewer
-                )
-
-                # Check if viewer is already ready (quick ping with short timeout)
-                # If it responds immediately, it was already running - don't show as launching
-                is_already_running = viewer.wait_for_ready(timeout=0.1)
-
-                if not is_already_running:
-                    # Viewer is launching - register it and show in UI
-                    register_launching_viewer(viewer.port, 'fiji', len(file_paths))
-                    logger.info(f"Waiting for Fiji viewer on port {viewer.port} to be ready...")
-
-                    # Wait for viewer to be ready before streaming
-                    if not viewer.wait_for_ready(timeout=15.0):
-                        unregister_launching_viewer(viewer.port)
-                        raise RuntimeError(f"Fiji viewer on port {viewer.port} failed to become ready")
-
-                    logger.info(f"Fiji viewer on port {viewer.port} is ready")
-                    # Unregister from launching registry (now ready)
-                    unregister_launching_viewer(viewer.port)
-                else:
-                    logger.info(f"Fiji viewer on port {viewer.port} is already running")
-
-                # Use the Fiji streaming backend to send the batch
-                from openhcs.constants.constants import Backend as BackendEnum
-
-                # Build source from subdirectory name (image viewer context)
-                # Use first file path to determine subdirectory
-                source = Path(file_paths[0]).parent.name if file_paths else 'unknown_source'
-
-                # Prepare metadata for streaming
-                metadata = {
-                    'port': viewer.port,
-                    'display_config': config,
-                    'microscope_handler': self.orchestrator.microscope_handler,
-                    'plate_path': self.orchestrator.plate_path,
-                    'source': source
-                }
-
-                # Stream batch to Fiji
-                self.filemanager.save_batch(
-                    image_data_list,
-                    file_paths,
-                    BackendEnum.FIJI_STREAM.value,
-                    **metadata
-                )
-                logger.info(f"Successfully streamed batch of {len(file_paths)} images to Fiji on port {viewer.port}")
-            except Exception as e:
-                logger.error(f"Failed to stream batch to Fiji: {e}")
-                # Show error in UI thread
-                # Use signal to safely update UI from background thread
-                self._status_update_signal.emit(f"Error: {e}")
-                # Also show error dialog
-                from PyQt6.QtCore import QTimer
-                QTimer.singleShot(0, lambda: self._show_fiji_streaming_error(str(e)))
-
-        # Start streaming in background thread
-        thread = threading.Thread(target=stream_async, daemon=True)
-        thread.start()
-        logger.info(f"Streaming batch of {len(file_paths)} images to Fiji asynchronously...")
 
     @pyqtSlot(str)
     def _show_fiji_streaming_error(self, error_msg: str):
@@ -1773,182 +1384,29 @@ class ImageBrowserWidget(QWidget):
         QMessageBox.warning(self, "Streaming Error", f"Failed to stream images to Fiji: {error_msg}")
 
 
+    def _stream_rois_to_viewer(self, roi_filenames: list, plate_path: Path, viewer_type: str):
+        """Stream ROI files to specified viewer type."""
+        viewer, _, _, config = self._prepare_streaming(viewer_type)
+
+        self._streaming_service.stream_rois_async(
+            viewer=viewer,
+            roi_filenames=roi_filenames,
+            plate_path=plate_path,
+            config=config,
+            viewer_type=viewer_type,
+            status_callback=self._status_update_signal.emit,
+            error_callback=lambda e: self._show_streaming_error(e) if viewer_type == 'napari'
+                           else self._show_fiji_streaming_error(e),
+        )
+        logger.info(f"Streaming {len(roi_filenames)} ROI files to {viewer_type}...")
+
     def _stream_roi_batch_to_napari(self, roi_filenames: list, plate_path: Path):
         """Stream a batch of ROI files to Napari asynchronously (never blocks UI)."""
-        if not self.orchestrator:
-            raise RuntimeError("No orchestrator set")
-
-        from openhcs.config_framework.context_manager import config_context
-        from openhcs.config_framework.lazy_factory import (
-            resolve_lazy_configurations_for_serialization,
-        )
-        from openhcs.core.config import LazyNapariStreamingConfig
-        from openhcs.constants.constants import Backend as BackendEnum
-
-        current_values = self.napari_config_form.get_current_values()
-        temp_config = LazyNapariStreamingConfig(
-            **{k: v for k, v in current_values.items() if v is not None}
-        )
-
-        with config_context(self.orchestrator.pipeline_config):
-            with config_context(temp_config):
-                napari_config = resolve_lazy_configurations_for_serialization(temp_config)
-
-        viewer = self.orchestrator.get_or_create_visualizer(napari_config)
-
-        self._load_and_stream_roi_batch_async(
-            viewer,
-            roi_filenames,
-            plate_path,
-            BackendEnum.NAPARI_STREAM,
-            napari_config,
-            "napari",
-        )
+        self._stream_rois_to_viewer(roi_filenames, plate_path, 'napari')
 
     def _stream_roi_batch_to_fiji(self, roi_filenames: list, plate_path: Path):
         """Stream a batch of ROI files to Fiji asynchronously (never blocks UI)."""
-        if not self.orchestrator:
-            raise RuntimeError("No orchestrator set")
-
-        from openhcs.config_framework.context_manager import config_context
-        from openhcs.config_framework.lazy_factory import (
-            resolve_lazy_configurations_for_serialization,
-        )
-        from openhcs.core.config import LazyFijiStreamingConfig
-        from openhcs.constants.constants import Backend as BackendEnum
-
-        current_values = self.fiji_config_form.get_current_values()
-        temp_config = LazyFijiStreamingConfig(
-            **{k: v for k, v in current_values.items() if v is not None}
-        )
-
-        with config_context(self.orchestrator.pipeline_config):
-            with config_context(temp_config):
-                fiji_config = resolve_lazy_configurations_for_serialization(temp_config)
-
-        viewer = self.orchestrator.get_or_create_visualizer(fiji_config)
-
-        self._load_and_stream_roi_batch_async(
-            viewer,
-            roi_filenames,
-            plate_path,
-            BackendEnum.FIJI_STREAM,
-            fiji_config,
-            "fiji",
-        )
-
-
-    def _load_and_stream_roi_batch_async(
-        self,
-        viewer,
-        roi_filenames: list,
-        plate_path: Path,
-        backend_enum,
-        config,
-        viewer_type: str,
-    ) -> None:
-        """Load ROI files and stream them as a batch to a viewer in a background thread.
-
-        Heavy operations only:
-        - load_rois_from_zip for each ROI file
-        - viewer.wait_for_ready (long timeout)
-        - filemanager.save_batch
-        """
-
-        import threading
-
-        def _worker() -> None:
-            try:
-                from pathlib import Path as _Path
-                from PyQt6.QtCore import QTimer
-                from openhcs.core.roi import load_rois_from_zip
-
-                total = len(roi_filenames)
-                if total == 0:
-                    return
-
-                self._status_update_signal.emit(
-                    f"Loading {total} ROI file(s) from disk..."
-                )
-
-                data_list: list = []
-                paths: list[str] = []
-
-                for i, filename in enumerate(roi_filenames, 1):
-                    file_path = plate_path / filename
-                    rois = load_rois_from_zip(file_path)
-                    if not rois:
-                        logger.warning(f"No ROIs found in {file_path.name}")
-                        continue
-
-                    data_list.append(rois)
-                    paths.append(filename)
-
-                    if i % 5 == 0 or i == total:
-                        self._status_update_signal.emit(
-                            f"Loading ROIs: {i}/{total} file(s)..."
-                        )
-
-                if not data_list:
-                    msg = "No ROIs loaded from any selected files."
-                    logger.warning(msg)
-                    self._status_update_signal.emit(msg)
-                    return
-
-                # Wait for viewer to be ready in background thread
-                is_already_running = viewer.wait_for_ready(timeout=0.1)
-                if not is_already_running:
-                    logger.info(
-                        f"Waiting for {viewer_type.capitalize()} viewer on port {viewer.port} to be ready..."
-                    )
-                    if not viewer.wait_for_ready(timeout=15.0):
-                        raise RuntimeError(
-                            f"{viewer_type.capitalize()} viewer on port {viewer.port} failed to become ready"
-                        )
-
-                # Prepare metadata for streaming
-                source = _Path(paths[0]).parent.name if paths else "unknown_source"
-                metadata = {
-                    "port": viewer.port,
-                    "display_config": config,
-                    "microscope_handler": self.orchestrator.microscope_handler,
-                    "plate_path": self.orchestrator.plate_path,
-                    "source": source,
-                }
-
-                self._status_update_signal.emit(
-                    f"Streaming {len(paths)} ROI file(s) to {viewer_type.capitalize()}..."
-                )
-
-                self.filemanager.save_batch(
-                    data_list,
-                    paths,
-                    backend_enum.value,
-                    **metadata,
-                )
-
-                msg = (
-                    f"Streamed {len(paths)} ROI file(s) to {viewer_type.capitalize()} "
-                    f"on port {viewer.port}"
-                )
-                logger.info(msg)
-                self._status_update_signal.emit(msg)
-
-            except Exception as e:  # noqa: BLE001
-                logger.error(
-                    f"Failed to load/stream ROI batch to {viewer_type.capitalize()}: {e}"
-                )
-                self._status_update_signal.emit(f"Error: {e}")
-
-                from PyQt6.QtCore import QTimer
-
-                if viewer_type == "napari":
-                    QTimer.singleShot(0, lambda: self._show_streaming_error(str(e)))
-                else:
-                    QTimer.singleShot(0, lambda: self._show_fiji_streaming_error(str(e)))
-
-        thread = threading.Thread(target=_worker, daemon=True)
-        thread.start()
+        self._stream_rois_to_viewer(roi_filenames, plate_path, 'fiji')
 
 
     def _display_csv_file(self, csv_path: Path):
@@ -2002,12 +1460,8 @@ class ImageBrowserWidget(QWidget):
 
     def cleanup(self):
         """Clean up resources before widget destruction."""
-        # Stop global ack listener thread
-        from openhcs.runtime.zmq_base import stop_global_ack_listener
-        stop_global_ack_listener()
-
-        # Cleanup ZMQ server manager widget
-        if hasattr(self, 'zmq_manager') and self.zmq_manager:
+        # Cleanup ZMQ server manager widget (always initialized to None in __init__)
+        if self.zmq_manager is not None:
             self.zmq_manager.cleanup()
 
     # ========== Plate View Methods ==========

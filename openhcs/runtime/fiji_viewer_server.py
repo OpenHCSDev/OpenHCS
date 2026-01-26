@@ -10,10 +10,11 @@ import time
 import threading
 from typing import Dict, Any, List
 
-from openhcs.runtime.zmq_base import ZMQServer, SHARED_ACK_PORT, get_zmq_transport_url
-from openhcs.runtime.zmq_messages import ImageAck
 from openhcs.constants.streaming import StreamingDataType
-from openhcs.core.config import TransportMode
+from openhcs.core.config import TransportMode as OpenHCSTransportMode
+from openhcs.runtime.zmq_config import OPENHCS_ZMQ_CONFIG
+from zmqruntime.transport import coerce_transport_mode
+from zmqruntime.streaming import StreamingVisualizerServer
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,7 @@ def register_fiji_handler(data_type: StreamingDataType):
     return decorator
 
 
-class FijiViewerServer(ZMQServer):
+class FijiViewerServer(StreamingVisualizerServer):
     """
     ZMQ server for Fiji viewer that receives images from clients.
 
@@ -44,7 +45,7 @@ class FijiViewerServer(ZMQServer):
     DEBOUNCE_DELAY_MS = 500  # Collect items for 500ms before processing
     MAX_DEBOUNCE_WAIT_MS = 2000  # Maximum wait time before forcing batch processing
 
-    def __init__(self, port: int, viewer_title: str, display_config, log_file_path: str = None, transport_mode: TransportMode = TransportMode.IPC):
+    def __init__(self, port: int, viewer_title: str, display_config, log_file_path: str = None, transport_mode: OpenHCSTransportMode = OpenHCSTransportMode.IPC):
         """
         Initialize Fiji viewer server.
 
@@ -59,7 +60,15 @@ class FijiViewerServer(ZMQServer):
 
         # Initialize with REP socket for receiving images (synchronous request/reply)
         # REP socket forces workers to wait for acknowledgment before closing shared memory
-        super().__init__(port, host='*', log_file_path=log_file_path, data_socket_type=zmq.REP, transport_mode=transport_mode)
+        super().__init__(
+            port,
+            viewer_type="fiji",
+            host="*",
+            log_file_path=log_file_path,
+            data_socket_type=zmq.REP,
+            transport_mode=coerce_transport_mode(transport_mode),
+            config=OPENHCS_ZMQ_CONFIG,
+        )
 
         self.viewer_title = viewer_title
         self.display_config = display_config
@@ -71,9 +80,7 @@ class FijiViewerServer(ZMQServer):
         self._next_group_id = 1  # Counter for assigning group IDs
         self.window_dimension_values = {}  # Store dimension values (channel/slice/frame) per window
 
-        # Create PUSH socket for sending acknowledgments to shared ack port
-        self.ack_socket = None
-        self._setup_ack_socket()
+        # Ack socket handled by StreamingVisualizerServer
 
         # Debouncing for batched processing
         self._pending_items = []  # Queue of copied items waiting to be processed
@@ -92,17 +99,7 @@ class FijiViewerServer(ZMQServer):
 
     def _setup_ack_socket(self):
         """Setup PUSH socket for sending acknowledgments."""
-        import zmq
-        try:
-            ack_url = get_zmq_transport_url(SHARED_ACK_PORT, self.transport_mode, 'localhost')
-
-            context = zmq.Context.instance()
-            self.ack_socket = context.socket(zmq.PUSH)
-            self.ack_socket.connect(ack_url)
-            logger.info(f"🔬 FIJI SERVER: Connected ack socket to {ack_url}")
-        except Exception as e:
-            logger.warning(f"🔬 FIJI SERVER: Failed to setup ack socket: {e}")
-            self.ack_socket = None
+        super()._setup_ack_socket()
 
     def _send_ack(self, image_id: str, status: str = 'success', error: str = None):
         """Send acknowledgment that an image was processed.
@@ -112,22 +109,7 @@ class FijiViewerServer(ZMQServer):
             status: 'success' or 'error'
             error: Error message if status='error'
         """
-        if not self.ack_socket:
-            return
-
-        try:
-            ack = ImageAck(
-                image_id=image_id,
-                viewer_port=self.port,
-                viewer_type='fiji',
-                status=status,
-                timestamp=time.time(),
-                error=error
-            )
-            self.ack_socket.send_json(ack.to_dict())
-            logger.debug(f"🔬 FIJI SERVER: Sent ack for image {image_id}")
-        except Exception as e:
-            logger.warning(f"🔬 FIJI SERVER: Failed to send ack for {image_id}: {e}")
+        self.send_ack(image_id, status=status, error=error)
     
     def _wait_for_swing_ui_ready(self, timeout: float = 5.0) -> bool:
         """Wait for Java Swing UI to be fully initialized.
@@ -265,6 +247,10 @@ class FijiViewerServer(ZMQServer):
     def handle_data_message(self, message: Dict[str, Any]):
         """Handle incoming image data - called by process_messages()."""
         pass
+
+    def display_image(self, image_data, metadata: dict) -> None:
+        """Display a single image payload (no-op; Fiji uses batch processing)."""
+        return
 
     def _copy_items_from_shared_memory(self, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
@@ -1578,7 +1564,7 @@ def _handle_rois_for_window(self, window_key: str, items: List[Dict[str, Any]],
     Adds ROIs to ROI Manager with proper CZT positioning using shared coordinate space.
     ROIs are grouped by window_key to associate with corresponding hyperstack.
     """
-    from openhcs.runtime.roi_converters import FijiROIConverter
+    from polystore.roi_converters import FijiROIConverter
     import scyjava as sj
 
     # Get or create RoiManager - MUST be done on EDT to avoid Swing threading issues
@@ -1688,7 +1674,7 @@ FijiViewerServer._handle_images_for_window = _handle_images_for_window
 FijiViewerServer._handle_rois_for_window = _handle_rois_for_window
 
 
-def _fiji_viewer_server_process(port: int, viewer_title: str, display_config, log_file_path: str = None, transport_mode: TransportMode = TransportMode.IPC):
+def _fiji_viewer_server_process(port: int, viewer_title: str, display_config, log_file_path: str = None, transport_mode: OpenHCSTransportMode = OpenHCSTransportMode.IPC):
     """
     Fiji viewer server process function.
 
@@ -1763,4 +1749,3 @@ def _fiji_viewer_server_process(port: int, viewer_title: str, display_config, lo
         traceback.print_exc()
     finally:
         logger.info("🔬 FIJI SERVER: Process terminated")
-

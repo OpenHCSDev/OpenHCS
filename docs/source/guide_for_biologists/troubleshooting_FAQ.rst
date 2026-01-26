@@ -11,6 +11,5 @@ Remote Execution Server Stops Responding
 
 **Solution**: This was a critical bug in the ZMQ socket handling that has been fixed. Update to the latest version of OpenHCS. If you're running an older version, restart the server as a temporary workaround.
 
-**Technical Details**: See :doc:`../architecture/zmq_execution_system` for implementation details.
 
 (Under Construction - More troubleshooting entries coming soon)

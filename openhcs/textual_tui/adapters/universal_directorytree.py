@@ -14,7 +14,7 @@ from textual_universal_directorytree import UniversalDirectoryTree
 from upath import UPath
 
 from openhcs.constants.constants import Backend
-from openhcs.io.filemanager import FileManager
+from polystore.filemanager import FileManager
 
 logger = logging.getLogger(__name__)
 class OpenHCSDirectoryTree(UniversalDirectoryTree):
