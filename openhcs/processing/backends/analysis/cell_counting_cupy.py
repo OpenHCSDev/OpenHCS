@@ -44,8 +44,8 @@ from openhcs.core.memory import cupy as cupy_func
 from openhcs.core.pipeline.function_contracts import special_outputs
 from openhcs.processing.materialization import (
     MaterializationSpec,
-    TiffStackOptions,
-    ArrayExpansionOptions,
+    CsvOptions,
+    JsonOptions,
 )
 from openhcs.constants.constants import Backend
 
@@ -211,7 +211,14 @@ def count_cells_single_channel(
 
 
 @cupy_func
-@special_outputs(("multi_channel_counts", MaterializationSpec(ArrayExpansionOptions())))
+@special_outputs((
+    "multi_channel_counts",
+    MaterializationSpec(
+        JsonOptions(filename_suffix=".json", wrap_list=True),
+        CsvOptions(filename_suffix="_details.csv"),
+        primary=0,
+    ),
+))
 def count_cells_multi_channel(
     image_stack: cp.ndarray,
     chan_1: int,                         # Index of first channel (positional arg)

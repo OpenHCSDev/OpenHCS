@@ -24,8 +24,8 @@ from openhcs.core.memory import pyclesperanto as pyclesperanto_func
 from openhcs.core.pipeline.function_contracts import special_outputs
 from openhcs.processing.materialization import (
     MaterializationSpec,
-    TiffStackOptions,
-    ArrayExpansionOptions,
+    CsvOptions,
+    JsonOptions,
 )
 from openhcs.constants.constants import Backend
 

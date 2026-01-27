@@ -30,8 +30,9 @@ from openhcs.core.memory import numpy as numpy_func
 from openhcs.core.pipeline.function_contracts import special_outputs
 from openhcs.processing.materialization import (
     MaterializationSpec,
+    CsvOptions,
+    JsonOptions,
     ROIOptions,
-    ArrayExpansionOptions,
 )
 from openhcs.constants.constants import Backend
 
@@ -95,7 +96,14 @@ class MultiChannelResult:
 
 @numpy_func
 @special_outputs(
-    ("cell_counts", MaterializationSpec(ArrayExpansionOptions())),
+    (
+        "cell_counts",
+        MaterializationSpec(
+            JsonOptions(filename_suffix=".json", wrap_list=True),
+            CsvOptions(filename_suffix="_details.csv"),
+            primary=0,
+        ),
+    ),
     ("segmentation_masks", MaterializationSpec(ROIOptions()))
 )
 def count_cells_single_channel(
@@ -211,7 +219,14 @@ def count_cells_single_channel(
 
 
 @numpy_func
-@special_outputs(("multi_channel_counts", MaterializationSpec(ArrayExpansionOptions())))
+@special_outputs((
+    "multi_channel_counts",
+    MaterializationSpec(
+        JsonOptions(filename_suffix=".json", wrap_list=True),
+        CsvOptions(filename_suffix="_details.csv"),
+        primary=0,
+    ),
+))
 def count_cells_multi_channel(
     image_stack: np.ndarray,
     chan_1: int,                         # Index of first channel (positional arg)
