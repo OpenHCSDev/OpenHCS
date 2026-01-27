@@ -16,7 +16,7 @@ We instantiate this corollary over a representative language class (Definition~\
 We evaluate systems on four criteria, derived from the realizability requirements:
 
 \begin{center}
-\begin{tabular}{llp{6cm}}
+\begin{tabularx}{\linewidth}{llY}
 \toprule
 \textbf{Criterion} & \textbf{Abbrev} & \textbf{Test} \\
 \midrule
@@ -25,7 +25,7 @@ Introspectable results & INTRO & Can the program query what was derived? \\
 Structural modification & STRUCT & Can hooks modify the structure being defined? \\
 Hierarchy queries & HIER & Can the program enumerate subclasses/implementers? \\
 \bottomrule
-\end{tabular}
+\end{tabularx}
 \end{center}
 
 \textbf{DEF} and \textbf{INTRO} are the two requirements from Theorem~\ref{thm:ssot-iff}. \textbf{STRUCT} and \textbf{HIER} are refinements that distinguish partial from complete realizability.
@@ -58,6 +58,7 @@ This definition excludes niche languages (e.g., Haskell, Erlang, Clojure) while 
 \subsection{Instantiation Over the Representative Class}\label{sec:mainstream-eval}
 
 \begin{center}
+{\small\setlength{\tabcolsep}{4pt}\renewcommand{\arraystretch}{1.05}%
 \begin{tabular}{lccccc}
 \toprule
 \textbf{Language} & \textbf{DEF} & \textbf{INTRO} & \textbf{STRUCT} & \textbf{HIER} & \textbf{DOF-1?} \\
@@ -74,6 +75,7 @@ Kotlin & $\times$ & $\times$ & $\times$ & $\times$ & NO \\
 Swift & $\times$ & $\times$ & $\times$ & $\times$ & NO \\
 \bottomrule
 \end{tabular}
+}
 \end{center}
 
 \textbf{Corollary interpretation.} The table instantiates Corollary~\ref{cor:lang-realizability}: DOF = 1 realizability holds exactly when DEF and INTRO are both satisfied. The remaining columns (STRUCT, HIER) identify partial mechanisms but do not alter the DOF = 1 verdict.
@@ -124,6 +126,7 @@ By inspection of DEF and INTRO in the representative class and application of Co
 Three non-mainstream languages also satisfy DOF-1 realizability requirements:
 
 \begin{center}
+{\small\setlength{\tabcolsep}{4pt}\renewcommand{\arraystretch}{1.05}%
 \begin{tabular}{lccccc}
 \toprule
 \textbf{Language} & \textbf{DEF} & \textbf{INTRO} & \textbf{STRUCT} & \textbf{HIER} & \textbf{DOF-1?} \\
@@ -133,6 +136,7 @@ Smalltalk & \checkmark & \checkmark & \checkmark & \checkmark & \textbf{YES} \\
 Ruby & \checkmark & \checkmark & Partial & \checkmark & Partial \\
 \bottomrule
 \end{tabular}
+}
 \end{center}
 
 \subsubsection{Common Lisp (CLOS)}

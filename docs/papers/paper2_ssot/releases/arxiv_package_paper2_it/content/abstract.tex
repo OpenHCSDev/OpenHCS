@@ -1,26 +1,26 @@
 \begin{abstract}
-We extend classical source coding to \emph{interactive encoding systems}---systems where a fact $F$ (e.g., a configuration parameter, type definition, or database schema) is encoded at multiple locations and the encoding can be modified over time. A central question is: When can such a system guarantee \textbf{coherence}---the impossibility of disagreement among locations?
-
-We prove that exactly one independent encoding (DOF = 1, where DOF counts independent storage locations) is the \textbf{unique rate} achieving guaranteed coherence. This result connects to multi-version coding~\cite{rashmi2015multiversion}, which establishes an ``inevitable storage cost for consistency'' in distributed systems; we establish an analogous \emph{encoding rate} cost for coherence under modification.
+We extend zero-error source coding to \emph{interactive encoding systems}---systems where a fact $F$ is encoded at multiple locations and the encoding can be modified over time. We characterize the \textbf{zero-incoherence capacity}: the maximum encoding rate guaranteeing that no reachable system state has disagreement among locations.
 
 \textbf{Main Results.}
 \begin{enumerate}
-\item \textbf{Coherence Capacity (Theorem~\ref{thm:dof-optimal}):} DOF = 1 is the unique encoding rate guaranteeing coherence. DOF = 0 fails to encode $F$; DOF $> 1$ permits incoherent configurations where locations disagree.
+\item \textbf{Zero-Incoherence Capacity Theorem (Theorem~\ref{thm:coherence-capacity}):} The zero-incoherence capacity is exactly $C_0 = 1$. This bound is tight: achievable at encoding rate DOF $= 1$ (one independent location), impossible at DOF $> 1$. The achievability/converse structure parallels Shannon's channel capacity theorem.
 
-\item \textbf{Resolution Impossibility (Theorem~\ref{thm:oracle-arbitrary}):} Under incoherence (DOF $> 1$ with divergent values), no resolution procedure is information-theoretically justified---any selection leaves another value disagreeing. This is the formal encoding-theoretic counterpart of the FLP impossibility~\cite{flp1985impossibility} for distributed consensus.
+\item \textbf{Side Information Bound (Theorem~\ref{thm:side-info}):} Resolution of $k$-way incoherence (where $k$ independent locations hold distinct values) requires $\geq \log_2 k$ bits of side information. At DOF $= 1$, zero side information suffices (Corollary~\ref{cor:dof1-zero-side}). This quantifies the information cost of redundant independent encodings.
 
-\item \textbf{Rate-Complexity Tradeoff (Theorem~\ref{thm:unbounded-gap}):} DOF = 1 achieves $O(1)$ modification complexity; DOF $> 1$ requires $\Omega(n)$. The gap grows without bound as $n \to \infty$.
+\item \textbf{Resolution Impossibility (Theorem~\ref{thm:oracle-arbitrary}):} In any incoherent state, no deterministic resolution procedure is information-theoretically justified without external side information---the encoding system lacks sufficient information to determine correctness. This parallels zero-error capacity constraints: without side information, error-free decoding is impossible.
 
-\item \textbf{Realizability Requirements (Theorem~\ref{thm:ssot-iff}):} Encoding systems achieving DOF = 1 via derivation require two information-theoretic properties: (a) \emph{causal update propagation}---source changes automatically trigger derived location updates, and (b) \emph{provenance observability}---the derivation structure is queryable. These abstract to arbitrary encoding systems; programming language features (definition-time hooks, introspection) are one instantiation.
+\item \textbf{Rate-Complexity Tradeoff (Theorem~\ref{thm:unbounded-gap}):} Modification complexity scales as $O(1)$ at capacity (DOF $= 1$) versus $\Omega(n)$ above capacity (DOF $= n > 1$). The gap is unbounded.
 \end{enumerate}
 
-\textbf{Connections to established IT.} The DOF = 1 optimum generalizes Rissanen's Minimum Description Length principle~\cite{rissanen1978mdl} to interactive encoding systems. The realizability requirements connect to channel coding with feedback (causal propagation), Slepian-Wolf side information~\cite{slepian1973noiseless} (provenance observability), and write-once memory codes~\cite{rivest1982wom} (irreversible structural encoding). The oracle arbitrariness result parallels zero-error decoding: without sufficient side information, correctness cannot be guaranteed.
+\textbf{Information-Theoretic Framework.} We model encoding locations as terminals in a multi-terminal source coding problem. Derivation (automatic propagation from source to derived locations) introduces deterministic correlation, reducing the effective encoding rate. The capacity result shows that only complete correlation (all locations derived from one source) guarantees coherence---partial correlation permits divergence.
 
-\textbf{Instantiations.} The abstract model applies to distributed storage, configuration management, and programming-language semantics; we include illustrative instantiations, but the core theorems are independent of any specific domain.
+The side information bound connects to Slepian-Wolf distributed source coding~\cite{slepian1973noiseless}: provenance information acts as decoder side information enabling verification. The capacity theorem extends Körner-Lovász zero-error capacity~\cite{korner1973graphs,lovasz1979shannon} to interactive settings with modification constraints.
 
-We also formalize encoding-theoretic versions of CAP and FLP (Theorems~\ref{thm:cap-encoding} and~\ref{thm:static-flp}).
+\textbf{Encoder Realizability (Theorem~\ref{thm:ssot-iff}):} Achieving capacity requires two encoder properties: (a) \emph{causal update propagation}---feedback coupling between source and derived locations, and (b) \emph{provenance observability}---side information about derivation structure. Both are necessary; together sufficient.
+
+\textbf{Instantiations.} The framework applies to distributed storage (replica consistency), configuration systems (multi-file coherence), and programming languages (type registries). We provide instantiations as corollaries; core theorems are domain-independent.
 
 All theorems machine-checked in Lean 4 (9,351 lines, 541 theorems, 0 \texttt{sorry} placeholders).
 
-\textbf{Index Terms---}Interactive encoding systems, coherence constraints, multi-version coding, minimum description length, distributed source coding, rate-complexity tradeoffs, write-once memory, CAP theorem
+\textbf{Index Terms---}Zero-error source coding, multi-terminal encoding, coherence capacity, side information, interactive information theory, rate-complexity tradeoffs, distributed source coding
 \end{abstract}

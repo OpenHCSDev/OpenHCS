@@ -1,0 +1,23 @@
+\section{Measurement Tables and Methodology}
+\label{supp:measurements}
+
+This section contains the DOF measurement tables, methodology notes, and the raw counts used in the manuscript. The table below is a placeholder; replace with the exported CSV/LaTeX table of measured DOF counts and file-level statistics.
+
+\subsection{DOF Measurements (placeholder)}
+\begin{tabular}{lrr}
+\toprule
+Component & Pre-refactor DOF & Post-refactor DOF \\
+\midrule
+Pipeline checks & 47 & 1 \\
+Serializer checks & 10 & 1 \\
+Validator checks & 5 & 1 \\
+Total (example) & 62 & 3 \\
+\bottomrule
+\end{tabular}
+
+\subsection{Methodology}
+\begin{itemize}
+\item Measurement procedure: count independent encodings of structural facts (hasattr checks, registry entries, explicit imports).
+\item Verification: diffs and PRs cited in Section~\ref{supp:pr-diffs}.
+\item Reproducibility: include commit SHAs and a short script that computes DOF counts (recommended: a small Python script in the repository).
+\end{itemize}

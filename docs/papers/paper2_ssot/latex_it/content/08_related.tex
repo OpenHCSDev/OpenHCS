@@ -1,15 +1,17 @@
 \section{Related Work}\label{sec:related}
 %==============================================================================
 
-This section surveys related work across five areas: source coding under modification constraints, distributed systems consistency, computational reflection, software engineering principles, and formal methods.
+This section surveys related work across five areas: zero-error and multi-terminal source coding, interactive information theory, distributed systems, computational reflection, and formal methods.
 
-\subsection{Source Coding Under Modification Constraints}\label{sec:related-source-coding}
+\subsection{Zero-Error and Multi-Terminal Source Coding}\label{sec:related-source-coding}
 
-Our work extends classical source coding to \emph{interactive encoding systems}---systems where encodings can be modified and must remain coherent across modifications. This connects to several established IT areas.
+Our zero-incoherence capacity theorem extends classical source coding to interactive multi-terminal systems.
 
-\textbf{Multi-Version Coding.} Rashmi et al.~\cite{rashmi2015multiversion} formalize consistent distributed storage where multiple versions of data must be accessible while maintaining consistency guarantees. Their framework addresses a key question: what is the storage cost of ensuring that any $c$ servers can decode the latest common version? They prove an ``inevitable price, in terms of storage cost, to ensure consistency.''
+\textbf{Zero-Error Capacity.} Shannon~\cite{shannon1956zero} introduced zero-error capacity: the maximum rate achieving exactly zero error probability. Körner~\cite{korner1973graphs} connected this to graph entropy, and Lovász~\cite{lovasz1979shannon} characterized the Shannon capacity of the pentagon graph. Our zero-incoherence capacity is the storage analog: the maximum encoding rate achieving exactly zero incoherence probability. The achievability/converse structure (Theorems~\ref{thm:capacity-achievability},~\ref{thm:capacity-converse}) parallels zero-error proofs. The key parallel: zero-error capacity requires distinguishability between codewords; zero-incoherence capacity requires indistinguishability (all locations must agree).
 
-Our DOF = 1 theorem is analogous: we prove the \emph{encoding rate} cost of ensuring coherence under modification. Where multi-version coding trades storage for consistency across versions, we trade encoding rate for coherence across locations.
+\textbf{Multi-Terminal Source Coding.} Slepian and Wolf~\cite{slepian1973noiseless} characterized distributed encoding of correlated sources: sources $(X, Y)$ can be encoded at rates satisfying $R_X \geq H(X|Y)$ when $Y$ is decoder side information. We model encoding locations as terminals (Section~\ref{sec:side-information}). Derivation introduces \emph{perfect correlation}: a derived terminal's output is a deterministic function of its source, so $H(L_d | L_s) = 0$. The capacity result shows that only complete correlation (all terminals derived from one source) achieves zero incoherence.
+
+\textbf{Multi-Version Coding.} Rashmi et al.~\cite{rashmi2015multiversion} formalize consistent distributed storage where multiple versions must be accessible while maintaining consistency. They prove an ``inevitable price, in terms of storage cost, to ensure consistency.'' Our DOF = 1 theorem is analogous: we prove the \emph{encoding rate} cost of ensuring coherence. Where multi-version coding trades storage for version consistency, we trade encoding rate for location coherence.
 
 \textbf{Write-Once Memory Codes.} Rivest and Shamir~\cite{rivest1982wom} introduced WOM codes for storage media where bits can only transition $0 \to 1$. Despite this irreversibility constraint, clever coding achieves capacity $\log_2(t+1)$ for $t$ writes---more than the naive $1$ bit.
 
@@ -44,7 +46,7 @@ We give formal encoding-theoretic versions of CAP and FLP in Section~\ref{sec:ca
 
 \subsection{Computational Reflection and Metaprogramming}\label{sec:related-meta}
 
-\textbf{Metaobject protocols and reflection.} Kiczales et al.~\cite{kiczales1991art} and Smith~\cite{smith1984reflection} provide the classical foundations for systems that can execute code at definition time and introspect their own structure. These mechanisms correspond directly to DEF and INTRO in our realizability theorem, explaining why MOP-equipped languages admit DOF = 1 for structural facts.
+\textbf{Metaobject protocols and reflection.} Kiczales et al.~\cite{kiczales1991art} and Smith~\cite{smith1984reflection} provide the classical foundations for systems that can execute code at definition time and introspect their own structure. These mechanisms correspond directly to causal propagation and provenance observability in our realizability theorem, explaining why MOP-equipped languages admit DOF = 1 for structural facts.
 
 \textbf{Generative complexity.} Heering~\cite{heering2015generative,heering2003software} formalizes minimal generators for program families. DOF = 1 systems realize this minimal-generator viewpoint by construction: the single source is the generator and derived locations are generated instances.
 
@@ -56,24 +58,38 @@ Classical software-engineering principles such as DRY~\cite{hunt1999pragmatic}, 
 
 Our Lean 4~\cite{demoura2021lean4} formalization follows the tradition of mechanized theory (e.g., Pierce~\cite{pierce2002types}, Winskel~\cite{winskel1993semantics}, CompCert~\cite{leroy2009compcert}), but applies it to an information-theoretic encoding model.
 
-\subsection{Novelty of This Work}\label{sec:novelty}
+\subsection{Novelty and IT Contribution}\label{sec:novelty}
 
 To our knowledge, this is the first work to:
 \begin{enumerate}
 \tightlist
-\item \textbf{Formalize interactive encoding with modifications}---a model where encodings change over time and coherence is a system property, not a post hoc check.
+\item \textbf{Define zero-incoherence capacity}---the maximum encoding rate guaranteeing zero probability of location disagreement, extending zero-error capacity to multi-location storage.
 
-\item \textbf{Prove a coherence capacity theorem}---DOF = 1 is the unique rate guaranteeing coherence (achievability + converse).
+\item \textbf{Prove a capacity theorem with achievability/converse}---$C_0 = 1$ exactly, with explicit achievability (Theorem~\ref{thm:capacity-achievability}) and converse (Theorem~\ref{thm:capacity-converse}) following the Shannon proof structure.
 
-\item \textbf{Give a realizability iff}---causal propagation and provenance observability are necessary and sufficient encoder properties for achieving DOF = 1.
+\item \textbf{Quantify side information for resolution}---$\geq \log_2 k$ bits for $k$-way incoherence (Theorem~\ref{thm:side-info}), connecting to Slepian-Wolf decoder side information.
 
-\item \textbf{Establish tight rate--complexity bounds}---$O(1)$ for DOF = 1 vs.\ $\Omega(n)$ for DOF $> 1$, with an unbounded gap.
+\item \textbf{Characterize encoder realizability}---causal propagation (feedback) and provenance observability (side information) are necessary and sufficient for achieving capacity (Theorem~\ref{thm:ssot-iff}).
 
-\item \textbf{Provide machine-checked proofs}---All theorems formalized in Lean 4 with 0 \texttt{sorry} placeholders.
+\item \textbf{Establish rate-complexity tradeoffs}---$O(1)$ at capacity vs.\ $\Omega(n)$ above capacity, with unbounded gap (Theorem~\ref{thm:unbounded-gap}).
 \end{enumerate}
 
-\textbf{Information-theoretic contribution:} We extend classical IT to mutable encoding systems with coherence constraints. The coherence capacity theorem and tight rate--complexity bounds provide the achievability/converse structure; the realizability iff identifies the encoder properties required to attain capacity.
+\textbf{Relation to classical IT.}
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+\textbf{Classical IT Concept} & \textbf{This Work} & \textbf{Theorem} \\
+\midrule
+Zero-error capacity & Zero-incoherence capacity & \ref{thm:coherence-capacity} \\
+Channel capacity proof & Achievability + converse & \ref{thm:capacity-achievability}, \ref{thm:capacity-converse} \\
+Slepian-Wolf side info & Resolution side info & \ref{thm:side-info} \\
+Multi-terminal correlation & Derivation as correlation & Def.~\ref{def:derived} \\
+Feedback channel & Causal propagation & Thm.~\ref{thm:causal-necessary} \\
+Rate-distortion tradeoff & Rate-complexity tradeoff & \ref{thm:unbounded-gap} \\
+\bottomrule
+\end{tabular}
+\end{center}
 
-\textbf{Interpretive instantiations:} The abstract requirements instantiate across domains (e.g., programming languages and database systems). These instantiations are corollaries of the core theorems and are presented as examples, not as premises of the proofs.
+\textbf{What is new:} The setting (interactive multi-location encoding with modifications), the capacity theorem for this setting, the side information bound, the encoder realizability iff, and the machine-checked proofs. The instantiations (programming languages, databases) are corollaries illustrating the abstract theory.
 
 %==============================================================================

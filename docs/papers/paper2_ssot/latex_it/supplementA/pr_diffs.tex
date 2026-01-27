@@ -1,0 +1,30 @@
+\section{Repository Links and Verifiable Diffs}
+\label{supp:pr-diffs}
+
+This section lists the repositories and branches used for verification, with pointers to the branch names and placeholders for PR/commit links. Replace the placeholders with the final URLs (GitHub or DOI) when available.
+
+\subsection{OpenHCS (case study)}
+Repository: trissim/openhcs \\
+Branch: papers-archive (current) \\
+Default branch: main \\
+Notable PR: PR~44 (referenced in the manuscript). Link placeholder: \texttt{https://github.com/trissim/openhcs/pull/44}
+
+\subsection{python-introspect}
+Repository: OpenHCSDev/python-introspect \\
+Branch: master (current) \\
+Default branch: claude/add-tests-and-docs-011CUg8DhgUzShix8mcwpK3k \\
+Link placeholder: \texttt{https://github.com/OpenHCSDev/python-introspect}
+
+\subsection{ObjectState}
+Repository: OpenHCSDev/ObjectState \\
+Branch: main (current and default) \\
+Link placeholder: \texttt{https://github.com/OpenHCSDev/ObjectState}
+
+\bigskip
+
+For each repository above we recommend including:
+\begin{itemize}
+\item Exact commit SHA(s) used for the measurements (replace branch pointers with SHAs for reproducibility).
+\item Diffs or PR links used to demonstrate the before/after code changes (e.g., PR~44 for OpenHCS).
+\item A one-line verification instruction showing how to reproduce the diff locally (git fetch, checkout SHA).
+\end{itemize}

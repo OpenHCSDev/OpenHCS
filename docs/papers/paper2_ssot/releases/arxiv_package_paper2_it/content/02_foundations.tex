@@ -125,7 +125,7 @@ The granularity of facts is determined by the specification, not the implementat
 \noindent\textbf{Examples of facts:}
 
 \begin{center}
-\begin{tabular}{lp{8cm}}
+\begin{tabularx}{\linewidth}{lY}
 \toprule
 \textbf{Fact} & \textbf{Description} \\
 \midrule
@@ -135,7 +135,7 @@ $F_3$: ``\texttt{validate()} returns \texttt{bool}'' & A method signature \\
 $F_4$: ``\texttt{Detector} is a subclass of \texttt{Processor}'' & An inheritance relationship \\
 $F_5$: ``\texttt{Config} has field \texttt{name: str}'' & A dataclass field \\
 \bottomrule
-\end{tabular}
+\end{tabularx}
 \end{center}
 
 \begin{definition}[Structural Fact]\label{def:structural-fact}
@@ -177,7 +177,7 @@ where $\delta_F$ is an edit targeting fact $F$.
 \begin{example}[Encoding in Practice]\label{ex:encoding}
 Consider a type registry:
 
-\begin{verbatim}
+\begin{code}
 # Location L1: Class definition
 class PNGLoader(ImageLoader):
     format = "png"
@@ -187,7 +187,7 @@ LOADERS = {"png": PNGLoader, "jpg": JPGLoader}
 
 # Location L3: Documentation
 # Supported formats: png, jpg
-\end{verbatim}
+\end{code}
 
 The fact $F$ = ``\texttt{PNGLoader} handles \texttt{png}'' is encoded at:
 \begin{itemize}
@@ -246,25 +246,25 @@ Location $L_{\text{derived}}$ is \emph{derived from} $L_{\text{source}}$ iff upd
 Consider two architectures for the type registry:
 
 \textbf{Architecture A (independent locations):}
-\begin{verbatim}
+\begin{code}
 # L1: Class definition
 class PNGLoader(ImageLoader): ...
 
 # L2: Manual registry (independent of L1)
 LOADERS = {"png": PNGLoader}
-\end{verbatim}
+\end{code}
 
 Here $L_1$ and $L_2$ are independent. A developer can change $L_1$ without updating $L_2$, causing inconsistency.
 
 \textbf{Architecture B (derived location):}
-\begin{verbatim}
+\begin{code}
 # L1: Class definition with registration
 class PNGLoader(ImageLoader):
     format = "png"
 
 # L2: Derived registry (computed from L1)
 LOADERS = {cls.format: cls for cls in ImageLoader.__subclasses__()}
-\end{verbatim}
+\end{code}
 
 Here $L_2$ is derived from $L_1$. Updating the class definition automatically updates the registry. They cannot diverge.
 \end{example}
@@ -295,7 +295,7 @@ $\text{DOF}(C, F) > 1$ implies incoherent states are reachable. The codebase can
 DOF values form a lattice with distinct information-theoretic meanings:
 
 \begin{center}
-\begin{tabular}{cl}
+\begin{tabularx}{\linewidth}{cX}
 \toprule
 \textbf{DOF} & \textbf{Encoding Status} \\
 \midrule
@@ -303,7 +303,7 @@ DOF values form a lattice with distinct information-theoretic meanings:
 1 & Coherence guaranteed (optimal rate under coherence constraint) \\
 $k > 1$ & Incoherence possible (redundant independent encodings) \\
 \bottomrule
-\end{tabular}
+\end{tabularx}
 \end{center}
 
 \begin{theorem}[DOF = 1 is Uniquely Coherent]\label{thm:dof-optimal}
@@ -367,81 +367,192 @@ Immediate from Theorem~\ref{thm:oracle-arbitrary}: in an incoherent state, at le
 These theorems are the encoding-theoretic counterparts of CAP~\cite{brewer2000cap,gilbert2002cap} and FLP~\cite{flp1985impossibility}: CAP corresponds to the impossibility of coherence when replicated encodings remain independently updatable; FLP corresponds to the impossibility of truth-preserving resolution in an incoherent state without side information.
 
 %==============================================================================
-\subsection{Coherence Capacity Theorem}\label{sec:capacity}
+\subsection{Information-Theoretic Quantities}\label{sec:it-quantities}
 
-We now establish a tight capacity result analogous to Shannon's channel capacity theorem. Where Shannon characterizes the maximum rate for reliable communication, we characterize the maximum encoding rate for guaranteed coherence.
+Before establishing the capacity theorem, we define the information-theoretic quantities that characterize encoding systems.
 
-\begin{definition}[Coherence Capacity]\label{def:coherence-capacity}
-The \emph{coherence capacity} of an encoding system is the supremum of encoding rates (DOF) that guarantee coherence:
-\[
-C_{\text{coh}} = \sup\{r : \text{DOF} = r \Rightarrow \text{coherence guaranteed}\}
-\]
+\begin{definition}[Encoding Rate]\label{def:encoding-rate}
+The \emph{encoding rate} of system $C$ for fact $F$ is $R(C, F) = \text{DOF}(C, F)$, the number of independent encoding locations. This counts locations that can hold distinct values simultaneously.
 \end{definition}
 
-\begin{theorem}[Coherence Capacity = 1]\label{thm:coherence-capacity}
-The coherence capacity of any encoding system under independent modification is exactly 1:
+\begin{definition}[Value Entropy]\label{def:value-entropy}
+For a fact $F$ with value space $\mathcal{V}_F$, the \emph{value entropy} is:
 \[
-C_{\text{coh}} = 1
+H(F) = \log_2 |\mathcal{V}_F|
 \]
-This bound is tight: achievable at DOF = 1, impossible at DOF $> 1$.
+This is the information content of specifying $F$'s value.
+\end{definition}
+
+\begin{definition}[Encoding Redundancy]\label{def:redundancy}
+The \emph{encoding redundancy} of system $C$ for fact $F$ is:
+\[
+\rho(C, F) = \text{DOF}(C, F) - 1
+\]
+Redundancy measures excess independent encodings beyond the minimum needed to represent $F$.
+\end{definition}
+
+\begin{theorem}[Redundancy-Incoherence Equivalence]\label{thm:redundancy-incoherence}
+Encoding redundancy $\rho > 0$ is necessary and sufficient for incoherence reachability:
+\[
+\rho(C, F) > 0 \Longleftrightarrow \text{incoherent states reachable}
+\]
 \end{theorem}
 
 \begin{proof}
-\textbf{Achievability (DOF = 1 achieves capacity):} By Theorem~\ref{thm:dof-one-coherence}, DOF = 1 guarantees coherence. Therefore $C_{\text{coh}} \geq 1$.
+$(\Rightarrow)$ If $\rho > 0$, then DOF $> 1$. By Theorem~\ref{thm:dof-gt-one-incoherence}, incoherent states are reachable.
 
-\textbf{Converse (DOF $> 1$ exceeds capacity):} We prove that any encoding with DOF $> 1$ cannot guarantee coherence.
-
-Let $\text{DOF}(C, F) = k > 1$. By Definition~\ref{def:independent}, there exist locations $L_1, L_2$ that can be modified independently.
-
-Construct the following modification sequence:
-\begin{enumerate}
-\tightlist
-\item Set $L_1 = v_1$ (valid modification)
-\item Set $L_2 = v_2$ where $v_2 \neq v_1$ (valid modification, since $L_2$ is independent of $L_1$)
-\end{enumerate}
-
-The resulting state has $\text{value}(L_1) \neq \text{value}(L_2)$. By Definition~\ref{def:incoherence}, this is incoherent.
-
-Since incoherent states are reachable, coherence is not guaranteed. Therefore $C_{\text{coh}} < k$ for all $k > 1$.
-
-Combining: $C_{\text{coh}} \geq 1$ (achievable) and $C_{\text{coh}} < k$ for all $k > 1$ (converse).
-
-Therefore $C_{\text{coh}} = 1$ exactly.
+$(\Leftarrow)$ If incoherent states are reachable, then by contrapositive of Theorem~\ref{thm:dof-one-coherence}, DOF $\neq 1$. Since the fact is encoded, DOF $\geq 1$, so DOF $> 1$, hence $\rho > 0$.
 \end{proof}
 
-\textbf{Information-theoretic interpretation.} This theorem is analogous to Shannon's noisy channel coding theorem~\cite{shannon1948mathematical}, which states that reliable communication is possible at rates below channel capacity and impossible above. Here:
-\begin{itemize}
-\tightlist
-\item \textbf{Shannon:} Rate $R < C$ achieves arbitrarily low error; $R > C$ has unavoidable errors
-\item \textbf{This work:} DOF $\leq 1$ achieves zero incoherence; DOF $> 1$ has reachable incoherent states
-\end{itemize}
+\begin{definition}[Incoherence Entropy]\label{def:incoherence-entropy}
+For an incoherent state with $k$ independent locations holding distinct values, the \emph{incoherence entropy} is:
+\[
+H_{\text{inc}} = \log_2 k
+\]
+This quantifies the uncertainty about which value is ``correct.''
+\end{definition}
 
-The parallel extends to the operational meaning: capacity is the boundary between what's achievable and what's fundamentally impossible, not merely difficult.
+%==============================================================================
+\subsection{Zero-Incoherence Capacity Theorem}\label{sec:capacity}
 
-\begin{corollary}[Capacity-Achieving Encoding is Unique]\label{cor:capacity-unique}
-DOF = 1 is the unique capacity-achieving encoding rate. There is no alternative encoding strategy that achieves coherence at a higher rate.
-\end{corollary}
+We now establish the central capacity result. This extends zero-error capacity theory~\cite{korner1973graphs,lovasz1979shannon} to interactive encoding systems with modification constraints.
+
+\textbf{Background: Zero-Error Capacity.} Shannon~\cite{shannon1956zero} introduced zero-error capacity: the maximum rate at which information can be transmitted with \emph{zero} probability of error (not vanishing, but exactly zero). Körner~\cite{korner1973graphs} and Lovász~\cite{lovasz1979shannon} characterized this via graph entropy and confusability graphs. Our zero-incoherence capacity is analogous: the maximum encoding rate guaranteeing \emph{zero} probability of incoherence.
+
+\begin{definition}[Zero-Incoherence Capacity]\label{def:coherence-capacity}
+The \emph{zero-incoherence capacity} of an encoding system is:
+\[
+C_0 = \sup\{R : \text{encoding rate } R \Rightarrow \text{incoherence probability} = 0\}
+\]
+where ``incoherence probability = 0'' means no incoherent state is reachable under any modification sequence.
+\end{definition}
+
+\begin{theorem}[Zero-Incoherence Capacity]\label{thm:coherence-capacity}
+The zero-incoherence capacity of any encoding system under independent modification is exactly 1:
+\[
+C_0 = 1
+\]
+\end{theorem}
+
+We prove this via the standard achievability/converse structure.
+
+\begin{theorem}[Achievability]\label{thm:capacity-achievability}
+Encoding rate DOF $= 1$ achieves zero incoherence. Therefore $C_0 \geq 1$.
+\end{theorem}
 
 \begin{proof}
-By Theorem~\ref{thm:coherence-capacity}, any DOF $> 1$ fails to guarantee coherence. By definition, DOF = 0 fails to encode the fact. Therefore DOF = 1 is the unique coherence-guaranteeing rate.
+Let DOF$(C, F) = 1$. By Definition~\ref{def:dof}, exactly one location $L_s$ is independent; all other locations $\{L_i\}$ are derived from $L_s$.
+
+By Definition~\ref{def:derived}, derived locations satisfy: $\text{update}(L_s) \Rightarrow \text{automatically\_updated}(L_i)$. Therefore, for any reachable state:
+\[
+\forall i: \text{value}(L_i) = f_i(\text{value}(L_s))
+\]
+where $f_i$ is the derivation function. All values are determined by $L_s$. Disagreement requires two locations with different determining sources, but only $L_s$ exists. Therefore, no incoherent state is reachable.
 \end{proof}
+
+\begin{theorem}[Converse]\label{thm:capacity-converse}
+Encoding rate DOF $> 1$ does not achieve zero incoherence. Therefore $C_0 < R$ for all $R > 1$.
+\end{theorem}
+
+\begin{proof}
+Let DOF$(C, F) = k > 1$. By Definition~\ref{def:independent}, there exist locations $L_1, L_2$ that can be modified independently.
+
+\textbf{Construction of incoherent state:} Consider the modification sequence:
+\begin{enumerate}
+\tightlist
+\item $\delta_1$: Set $L_1 = v_1$ for some $v_1 \in \mathcal{V}_F$
+\item $\delta_2$: Set $L_2 = v_2$ for some $v_2 \neq v_1$
+\end{enumerate}
+
+Both modifications are valid (each location accepts values from $\mathcal{V}_F$). By independence, $\delta_2$ does not affect $L_1$. The resulting state has:
+\[
+\text{value}(L_1) = v_1 \neq v_2 = \text{value}(L_2)
+\]
+
+By Definition~\ref{def:incoherence}, this state is incoherent. Since it is reachable, zero incoherence is not achieved.
+\end{proof}
+
+\begin{proof}[Proof of Theorem~\ref{thm:coherence-capacity}]
+By Theorem~\ref{thm:capacity-achievability}, $C_0 \geq 1$.
+
+By Theorem~\ref{thm:capacity-converse}, $C_0 < R$ for all $R > 1$.
+
+Therefore $C_0 = 1$ exactly. The bound is tight: achieved at DOF $= 1$, not achieved at any DOF $> 1$.
+\end{proof}
+
+\textbf{Comparison to Shannon capacity.} The structure parallels Shannon's noisy channel coding theorem~\cite{shannon1948mathematical}:
+
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+& \textbf{Shannon (Channel)} & \textbf{This Work (Encoding)} \\
+\midrule
+Rate & Bits per channel use & Independent encoding locations \\
+Constraint & Error probability $\to 0$ & Incoherence probability $= 0$ \\
+Achievability & $R < C$ achieves & DOF $= 1$ achieves \\
+Converse & $R > C$ fails & DOF $> 1$ fails \\
+Capacity & $C = \max I(X;Y)$ & $C_0 = 1$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The key difference: Shannon capacity allows vanishing error; zero-incoherence capacity requires \emph{exactly} zero, paralleling zero-error capacity.
+
+\begin{corollary}[Capacity-Achieving Rate is Unique]\label{cor:capacity-unique}
+DOF $= 1$ is the unique capacity-achieving encoding rate. No alternative achieves zero incoherence at higher rate.
+\end{corollary}
+
+\begin{corollary}[Redundancy Above Capacity]\label{cor:redundancy-above}
+Any encoding with $\rho > 0$ (redundancy) operates above capacity and cannot guarantee coherence.
+\end{corollary}
 
 \subsection{Side Information for Resolution}\label{sec:side-information}
 
-When an encoding system is incoherent (DOF $> 1$ with divergent values), resolution requires external side information. We quantify exactly how much.
+When an encoding system is incoherent, resolution requires external side information. We establish a tight bound on the required side information, connecting to Slepian-Wolf distributed source coding.
+
+\subsubsection{The Multi-Terminal View}
+
+We can view an encoding system as a \emph{multi-terminal source coding} problem~\cite{slepian1973noiseless,cover2006elements}:
+\begin{itemize}
+\tightlist
+\item Each encoding location is a \emph{terminal} that can transmit (store) a value
+\item The fact $F$ is the \emph{source} to be encoded
+\item \emph{Derivation} introduces correlation: a derived terminal's output is a deterministic function of its source terminal
+\item The \emph{decoder} (any observer querying the system) must reconstruct $F$'s value
+\end{itemize}
+
+In Slepian-Wolf coding, correlated sources $(X, Y)$ can be encoded at rates $(R_X, R_Y)$ satisfying $R_X \geq H(X|Y)$, $R_Y \geq H(Y|X)$, $R_X + R_Y \geq H(X,Y)$. With perfect correlation ($Y = f(X)$), we have $H(X|Y) = 0$---the correlated source needs zero rate.
+
+\textbf{Derivation as perfect correlation.} In our model, derivation creates perfect correlation: if $L_d$ is derived from $L_s$, then $\text{value}(L_d) = f(\text{value}(L_s))$ deterministically. The ``rate'' of $L_d$ is effectively zero---it contributes no independent information. This is why derived locations do not contribute to DOF.
+
+\textbf{Independence as zero correlation.} Independent locations have no correlation. Each can hold any value in $\mathcal{V}_F$. The total ``rate'' is DOF $\cdot H(F)$, but with DOF $> 1$, the locations can encode \emph{different} values---incoherence.
+
+\subsubsection{Side Information Bound}
 
 \begin{theorem}[Side Information Requirement]\label{thm:side-info}
-Given an incoherent encoding system with $k$ independent locations holding distinct values, resolving to the correct value requires at least $\log_2 k$ bits of side information.
+Given an incoherent encoding system with $k$ independent locations holding distinct values $\{v_1, \ldots, v_k\}$, resolving to the correct value requires at least $\log_2 k$ bits of side information.
 \end{theorem}
 
 \begin{proof}
-The $k$ independent locations partition the resolution problem into $k$ equally plausible alternatives. Without loss of generality, each location is an equally plausible authoritative source.
+The $k$ independent locations partition the value space into $k$ equally plausible alternatives. By Theorem~\ref{thm:oracle-arbitrary}, no internal information distinguishes them---each is an equally valid ``source.''
 
-By Theorem~\ref{thm:oracle-arbitrary}, no internal information distinguishes them. Resolution requires identifying which of $k$ alternatives is correct.
+Let $S \in \{1, \ldots, k\}$ denote the index of the correct source. The decoder must determine $S$ to resolve correctly. Since $S$ is uniformly distributed over $k$ alternatives (by symmetry of the incoherent state):
+\[
+H(S) = \log_2 k
+\]
 
-Information-theoretically, selecting one of $k$ equally likely alternatives requires $\log_2 k$ bits (the entropy of a uniform distribution over $k$ outcomes).
+Any resolution procedure is a function $R: \text{State} \to \mathcal{V}_F$. Without side information $Y$:
+\[
+H(S | R(\text{State})) = H(S) = \log_2 k
+\]
+because $R$ can be computed from the state, which contains no information about which source is correct.
 
-Therefore, resolution requires $\geq \log_2 k$ bits of side information.
+With side information $Y$ that identifies the correct source:
+\[
+H(S | Y) = 0 \Rightarrow I(S; Y) = H(S) = \log_2 k
+\]
+
+Therefore, side information must provide at least $\log_2 k$ bits of mutual information with $S$.
 \end{proof}
 
 \begin{corollary}[DOF = 1 Requires Zero Side Information]\label{cor:dof1-zero-side}
@@ -449,10 +560,19 @@ With DOF = 1, resolution requires 0 bits of side information.
 \end{corollary}
 
 \begin{proof}
-$\log_2(1) = 0$. With one independent location, that location is trivially authoritative.
+With $k = 1$, there is one independent location. $H(S) = \log_2 1 = 0$. No uncertainty exists about the authoritative source.
 \end{proof}
 
-\textbf{Connection to Slepian-Wolf coding.} In distributed source coding~\cite{slepian1973noiseless}, the decoder uses side information $Y$ to decode $X$ at rate $H(X|Y)$ instead of $H(X)$. Our result is analogous: side information about the authoritative source reduces the ``decoding'' (resolution) problem from $\log_2 k$ bits to 0 bits.
+\begin{corollary}[Side Information Scales with Redundancy]\label{cor:side-info-redundancy}
+The required side information equals $\log_2(1 + \rho)$ where $\rho$ is encoding redundancy:
+\[
+\text{Side information required} = \log_2(\text{DOF}) = \log_2(1 + \rho)
+\]
+\end{corollary}
+
+\textbf{Connection to Slepian-Wolf.} In Slepian-Wolf coding, the decoder has side information $Y$ and decodes $X$ at rate $H(X|Y)$. Our setting inverts this: the decoder needs side information $S$ (source identity) to ``decode'' (resolve) which value is correct. The required side information is exactly the entropy of the source-selection variable.
+
+\textbf{Connection to zero-error decoding.} In zero-error channel coding, the decoder must identify the transmitted message with certainty. Without sufficient side information (channel structure), this is impossible. Similarly, without $\log_2 k$ bits identifying the authoritative source, zero-error resolution is impossible.
 
 \begin{example}[Side Information in Practice]\label{ex:side-info-practice}
 Consider a configuration system with DOF = 3:
@@ -463,16 +583,30 @@ Consider a configuration system with DOF = 3:
 \item \texttt{params.toml}: \texttt{threshold = 0.6}
 \end{itemize}
 
-To resolve this incoherence requires $\log_2 3 \approx 1.58$ bits of side information. In practice, side information takes forms such as:
+Resolution requires $\log_2 3 \approx 1.58$ bits of side information:
 \begin{itemize}
 \tightlist
-\item A priority ordering: ``YAML takes precedence'' (encodes which of 3 is authoritative)
-\item A timestamp: ``most recent wins'' (encodes temporal ordering)
-\item An explicit declaration: ``params.toml is the source of truth''
+\item A priority ordering: ``YAML $>$ JSON $>$ TOML'' (encodes permutation $\to$ identifies source)
+\item A timestamp comparison: ``most recent wins'' (encodes ordering $\to$ identifies source)
+\item An explicit declaration: ``params.toml is authoritative'' (directly encodes source identity)
 \end{itemize}
 
-With DOF = 1, no such side information is needed---the single source is self-evidently authoritative.
+With DOF = 1, zero bits suffice---the single source is self-evidently authoritative.
 \end{example}
+
+\subsubsection{Multi-Terminal Capacity Interpretation}
+
+The zero-incoherence capacity theorem (Theorem~\ref{thm:coherence-capacity}) can be restated in multi-terminal language:
+
+\begin{corollary}[Multi-Terminal Interpretation]\label{cor:multi-terminal}
+An encoding system achieves zero incoherence iff all terminals are perfectly correlated (every terminal's output is a deterministic function of one source terminal). Equivalently: the correlation structure must be a tree with one root.
+\end{corollary}
+
+\begin{proof}
+Perfect correlation means DOF = 1 (only the root is independent). By Theorem~\ref{thm:capacity-achievability}, this achieves zero incoherence. If any two terminals are independent (not perfectly correlated through the root), DOF $\geq 2$, and by Theorem~\ref{thm:capacity-converse}, incoherence is reachable.
+\end{proof}
+
+This connects to network information theory: in a multi-terminal network, achieving coherence requires complete dependence on a single source---no ``multicast'' of independent copies.
 
 \subsection{Structure Theorems: The Derivation Lattice}\label{sec:derivation-structure}
 

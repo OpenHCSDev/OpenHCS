@@ -59,7 +59,7 @@ This follows the tradition of foundational theory: Shannon~\cite{shannon1948math
 
 This file establishes the core abstractions. We model DOF as a natural number whose properties we prove directly, avoiding complex type machinery.
 
-\begin{verbatim}
+\begin{code}
 /-
   Encoding Theory Formalization - Basic Definitions
   Paper 2: Optimal Encoding Under Coherence Constraints
@@ -96,13 +96,13 @@ theorem dof_inconsistency_potential (k : Nat) (hk : k > 1) :
 theorem dof_gt_one_inconsistent (dof : Nat) (h : dof > 1) :
     dof != 1 := by  -- Lean 4: != is notation for \neq
   omega
-\end{verbatim}
+\end{code}
 
 \subsection*{SSOT.lean: Optimal Encoding Definition (38 lines)}\label{sec:lean-ssot}
 
 This file defines the optimal encoding rate (DOF = 1) and proves its uniqueness using a simple Nat-based formulation.
 
-\begin{verbatim}
+\begin{code}
 /-
   Encoding Theory Formalization - Optimal Rate Definition
   Paper 2: Optimal Encoding Under Coherence Constraints
@@ -133,13 +133,13 @@ theorem non_ssot_inconsistency (dof : Nat) (h : Not (satisfies_SSOT dof)) :
 -- DOF = 0: fact not encoded (underspecification)
 -- DOF = 1: optimal (guaranteed coherence)
 -- DOF > 1: incoherence reachable (suboptimal)
-\end{verbatim}
+\end{code}
 
 \subsection{Requirements.lean: Realizability Necessity Proofs (113 lines)}\label{sec:lean-requirements}
 
 This file proves that definition-time computation and introspection are necessary for DOF = 1 realizability in computational systems. These requirements are \emph{derived}, not chosen.
 
-\begin{verbatim}
+\begin{code}
 /-
   Encoding Theory Formalization - Realizability Requirements (Necessity Proofs)
   KEY INSIGHT: These requirements are DERIVED, not chosen.
@@ -212,13 +212,13 @@ theorem both_requirements_independent' :
       can_derive_at L Timing.definition = false := by
   intro L ⟨h_no_hooks, _⟩
   simp [can_derive_at, h_no_hooks]
-\end{verbatim}
+\end{code}
 
 \subsection{Bounds.lean: Rate-Complexity Bounds (56 lines)}\label{sec:lean-bounds}
 
 This file proves the rate-complexity tradeoff: DOF = 1 achieves $O(1)$ modification complexity, DOF $> 1$ requires $\Omega(n)$.
 
-\begin{verbatim}
+\begin{code}
 /-
   Encoding Theory Formalization - Rate-Complexity Bounds
   Paper 2: Optimal Encoding Under Coherence Constraints
@@ -257,7 +257,7 @@ theorem language_choice_asymptotic :
 
 -- Key insight: This is not about "slightly better"
 -- It's about constant vs linear complexity - fundamentally different scaling
-\end{verbatim}
+\end{code}
 
 \subsection{Computational System Evaluation: Semantics-Grounded Proofs}\label{sec:lean-languages}
 
@@ -267,17 +267,17 @@ The computational system capability claims are \emph{derived from formalized ope
 
 Consider the claim ``Python can achieve DOF = 1.'' In the formalization, this is not a tautology. It is the conclusion of a multi-step proof chain:
 
-\begin{verbatim}
+\begin{code}
 theorem python_can_achieve_ssot :
     CanAchieveSSOT Python.HasDefinitionHooks Python.HasIntrospection := by
   exact hooks_and_introspection_enable_ssot
     Python.python_has_hooks
     Python.python_has_introspection
-\end{verbatim}
+\end{code}
 
 Where \texttt{python\_has\_hooks} is proved from operational semantics:
 
-\begin{verbatim}
+\begin{code}
 -- From LangPython.lean: __init_subclass__ executes at definition time
 theorem python_has_hooks : HasDefinitionHooks := by
   intro rt name bases attrs methods parent h
@@ -289,7 +289,7 @@ theorem init_subclass_in_class_definition (rt : PyRuntime) ... :
     (execute_class_statement rt name bases attrs methods).2 := by
   rw [execute_produces_events]
   exact hook_event_in_all_events name bases parent h
-\end{verbatim}
+\end{code}
 
 The claim is grounded in \texttt{execute\_class\_statement}, which models Python's class definition semantics. To attack this proof, one must either:
 \begin{enumerate}
@@ -303,7 +303,7 @@ Both are empirically falsifiable, not matters of opinion.
 
 The Rust impossibility proof is substantive (40+ lines), not a one-liner:
 
-\begin{verbatim}
+\begin{code}
 def HasIntrospection : Prop :=
   exists query : RuntimeItem -> Option ItemSource,
     forall item macro_name, -- query can distinguish user-written from macro-expanded
@@ -321,7 +321,7 @@ theorem rust_lacks_introspection : not HasIntrospection := by
   -- ... (35 lines of actual proof)
   -- Same RuntimeItem cannot return two different sources
   cases h_src_eq  -- contradiction: .user_written /= .macro_expanded
-\end{verbatim}
+\end{code}
 
 This proof proceeds by:
 \begin{enumerate}
@@ -337,7 +337,7 @@ This is a genuine impossibility proof, not definitional unfolding.
 
 This file proves the central if-and-only-if theorem and the constructive impossibility theorems.
 
-\begin{verbatim}
+\begin{code}
 /-
   SSOT Formalization - Completeness Theorem (Iff)
 -/
@@ -382,13 +382,13 @@ theorem rust_impossibility (L : LanguageFeatures)
     (h_no_intro : L.has_introspection = false) :
     ¬ssot_complete L := by
   exact impossibility L (Or.inr h_no_intro)
-\end{verbatim}
+\end{code}
 
 \subsection{Inconsistency.lean: Formal Inconsistency Model (216 lines)}\label{sec:lean-inconsistency}
 
 This file responds to the critique that ``inconsistency'' was only defined in comments. Here we define \texttt{ConfigSystem}, formalize inconsistency as a \texttt{Prop}, and prove that DOF $>$ 1 implies the existence of inconsistent states.
 
-\begin{verbatim}
+\begin{code}
 /-
   ConfigSystem: locations that can hold values for a fact.
   Inconsistency means two locations disagree on the value.
@@ -422,13 +422,13 @@ theorem update_preserves_other_locations (c : ConfigSystem) (loc other : Locatio
 theorem resolution_requires_external_choice :
     exists o1 o2 : Oracle, valid_oracle o1 /\ valid_oracle o2 /\
     exists c l1 l2, o1 c l1 l2 != o2 c l1 l2
-\end{verbatim}
+\end{code}
 
 \subsection{SSOTGrounded.lean: Bridging SSOT to Operational Semantics (184 lines)}\label{sec:lean-grounded}
 
 This file is the key innovation addressing the ``trivial proofs'' critique. It bridges the abstract SSOT definition ($\text{DOF} = 1$) to concrete operational semantics from AbstractClassSystem. The central insight: SSOT failures arise when the same fact has multiple independent encodings that can diverge.
 
-\begin{verbatim}
+\begin{code}
 /-
   SSOTGrounded: Connecting SSOT to Operational Semantics
 
@@ -489,7 +489,7 @@ theorem dof_trichotomy : forall dof : Nat,
     (exists cfg : MultiEncodingConfig, cfg.dof = dof /\ inconsistent cfg)
 
 end SSOTGrounded
-\end{verbatim}
+\end{code}
 
 \textbf{Why this matters:} The \texttt{ssot\_unique\_complete\_consistent} theorem proves that DOF = 1 is the \emph{unique} configuration class that is both complete (fact is encoded) and guarantees consistency (no observer can see different values). This is not a tautology---it is a constructive proof that any DOF $\geq 2$ admits an inconsistent configuration.
 

@@ -143,7 +143,7 @@ No manual intervention is required. Coherence is maintained automatically.
 Derivation can occur at different times depending on the encoding system:
 
 \begin{center}
-\begin{tabular}{lp{9cm}}
+\begin{tabularx}{\linewidth}{lY}
 \toprule
 \textbf{Derivation Time} & \textbf{Examples Across Domains} \\
 \midrule
@@ -151,7 +151,7 @@ Compile/Build time & C++ templates, Rust macros, database schema generation, inf
 Definition time & Python metaclasses, ORM model registration, dynamic schema creation \\
 Query/Access time & Database views, computed columns, lazy evaluation \\
 \bottomrule
-\end{tabular}
+\end{tabularx}
 \end{center}
 
 \textbf{Structural facts require definition-time derivation.} Structural facts (class existence, schema structure, service topology) are fixed when defined. Compile-time derivation that runs before the definition is fixed is too early (the declarative source is not yet fixed). Runtime is too late (structure already immutable). Definition-time is the unique opportunity for structural derivation.
@@ -180,7 +180,7 @@ DOF = 1 is achieved across computational domains using definition-time derivatio
 
 \textbf{Software: Subclass Registration (Python)}
 
-\begin{verbatim}
+\begin{code}
 class Registry:
     _registry = {}
     def __init_subclass__(cls, **kwargs):
@@ -188,7 +188,7 @@ class Registry:
 
 class PNGHandler(Registry):  # Automatically registered
     pass
-\end{verbatim}
+\end{code}
 
 \textbf{Encoding structure:}
 \begin{itemize}
@@ -200,11 +200,11 @@ class PNGHandler(Registry):  # Automatically registered
 
 \textbf{Databases: Materialized Views}
 
-\begin{verbatim}
+\begin{code}
 CREATE TABLE users (id INT, name TEXT, created_at TIMESTAMP);
 CREATE MATERIALIZED VIEW user_count AS
   SELECT COUNT(*) FROM users;
-\end{verbatim}
+\end{code}
 
 \textbf{Encoding structure:}
 \begin{itemize}
@@ -216,7 +216,7 @@ CREATE MATERIALIZED VIEW user_count AS
 
 \textbf{Configuration: Infrastructure as Code (Terraform)}
 
-\begin{verbatim}
+\begin{code}
 resource "aws_instance" "app" {
   ami = "ami-12345"
   instance_type = "t2.micro"
@@ -225,7 +225,7 @@ resource "aws_instance" "app" {
 output "instance_ip" {
   value = aws_instance.app.public_ip
 }
-\end{verbatim}
+\end{code}
 
 \textbf{Encoding structure:}
 \begin{itemize}

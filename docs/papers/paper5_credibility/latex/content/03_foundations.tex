@@ -22,6 +22,33 @@ A signal maximizing one domain does not necessarily affect the other.
 
 \textbf{Remark (Credibility Domain Conflict).} When a signal achieves $C_M \to 1$ but $C_S \approx 0$, the mathematical and social domains are in conflict. A rational response in the mathematical domain (engage with proofs) differs from a rational response in the social domain (defer to hierarchy). Observers may respond in either domain. This paper's theorems apply within each domain separately; cross-domain dynamics require modeling both simultaneously.
 
+\subsection{Dual Truth Framework}\label{dual-truth-framework}
+
+This paper introduces a dual truth framework that distinguishes between objective validity and subjective acceptance:
+
+\textbf{Definition 2.0e (Epistemic Truth, $E$).} \emph{Epistemic truth} measures the probability that a claim corresponds to objective reality or logical truth. It is measurable via empirical evidence, logical proof, or formal verification. Range: $E \in [0, 1]$, where $E = 1$ indicates absolute truth and $E = 0$ indicates absolute falsity. Properties: objective, verifiable, independent of observer.
+
+\textbf{Definition 2.0f (Ego-Driven Truth, $G$).} \emph{Ego-driven truth} measures the probability that a claim aligns with an agent's self-interest, beliefs, or identity. It is measurable via incentive analysis, bias detection, or psychological modeling. Range: $G \in [0, 1]$, where $G = 1$ indicates perfect alignment and $G = 0$ indicates complete contradiction. Properties: subjective, observer-dependent, context-sensitive.
+
+\textbf{Definition 2.0g (Truth Vector).} The \emph{truth vector} is a 2D vector:
+\[
+\vec{T} = (E, G) \in [0, 1]^2
+\]
+representing both the objective validity and subjective acceptance of a claim. This vector captures the dual nature of truth in epistemic communication.
+
+\textbf{Theorem 2.0h (Truth Orthogonality).} Epistemic truth and ego-driven truth are orthogonal dimensions:
+\[
+E \perp G \quad \text{(no direct causal relationship)}
+\]
+A change in one dimension does not necessarily affect the other. This orthogonality is analogous to the independence of mathematical and social credibility domains.
+
+\emph{Proof.} Constructive. (1) High $E$, low $G$: a scientifically proven fact that contradicts an agent's deeply held beliefs (e.g., climate change for a fossil fuel executive). (2) Low $E$, high $G$: a comforting lie that aligns perfectly with an agent's self-interest (e.g., "I'm a great driver" despite poor performance). \qed
+
+\textbf{Corollary 2.0i (Truth Tradeoff).} For high-magnitude claims (low prior probability), there exists a threshold where increasing epistemic truth decreases ego-driven truth and vice versa:
+\[
+\exists k^* \in [0,1] : \forall E > k^* \implies \frac{\partial G}{\partial E} < 0
+\]
+
 \subsection{Signals and Costs}\label{signals-and-costs}
 
 \textbf{Definition 2.1 (Signal).} A \emph{signal} is a tuple

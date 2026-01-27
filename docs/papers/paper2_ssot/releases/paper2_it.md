@@ -6,58 +6,75 @@
 
 ## Abstract
 
-We extend classical source coding to *interactive encoding systems*---systems where a fact $F$ (e.g., a configuration parameter, type definition, or database schema) is encoded at multiple locations and the encoding can be modified over time. A central question is: When can such a system guarantee **coherence**---the impossibility of disagreement among locations?
-
-We prove that exactly one independent encoding (DOF = 1, where DOF counts independent storage locations) is the **unique rate** achieving guaranteed coherence. This result connects to multi-version coding [@rashmi2015multiversion], which establishes an "inevitable storage cost for consistency" in distributed systems; we establish an analogous *encoding rate* cost for coherence under modification.
+We extend zero-error source coding to *interactive encoding systems*---systems where a fact $F$ is encoded at multiple locations and the encoding can be modified over time. We characterize the **zero-incoherence capacity**: the maximum encoding rate guaranteeing that no reachable system state has disagreement among locations.
 
 **Main Results.**
 
-1.  **Coherence Capacity (Theorem [\[thm:dof-optimal\]](#thm:dof-optimal){reference-type="ref" reference="thm:dof-optimal"}):** DOF = 1 is the unique encoding rate guaranteeing coherence. DOF = 0 fails to encode $F$; DOF $> 1$ permits incoherent configurations where locations disagree.
+1.  **Zero-Incoherence Capacity Theorem (Theorem [\[thm:coherence-capacity\]](#thm:coherence-capacity){reference-type="ref" reference="thm:coherence-capacity"}):** The zero-incoherence capacity is exactly $C_0 = 1$. This bound is tight: achievable at encoding rate DOF $= 1$ (one independent location), impossible at DOF $> 1$. The achievability/converse structure parallels Shannon's channel capacity theorem.
 
-2.  **Resolution Impossibility (Theorem [\[thm:oracle-arbitrary\]](#thm:oracle-arbitrary){reference-type="ref" reference="thm:oracle-arbitrary"}):** Under incoherence (DOF $> 1$ with divergent values), no resolution procedure is information-theoretically justified---any selection leaves another value disagreeing. This is the formal encoding-theoretic counterpart of the FLP impossibility [@flp1985impossibility] for distributed consensus.
+2.  **Side Information Bound (Theorem [\[thm:side-info\]](#thm:side-info){reference-type="ref" reference="thm:side-info"}):** Resolution of $k$-way incoherence (where $k$ independent locations hold distinct values) requires $\geq \log_2 k$ bits of side information. At DOF $= 1$, zero side information suffices (Corollary [\[cor:dof1-zero-side\]](#cor:dof1-zero-side){reference-type="ref" reference="cor:dof1-zero-side"}). This quantifies the information cost of redundant independent encodings.
 
-3.  **Rate-Complexity Tradeoff (Theorem [\[thm:unbounded-gap\]](#thm:unbounded-gap){reference-type="ref" reference="thm:unbounded-gap"}):** DOF = 1 achieves $O(1)$ modification complexity; DOF $> 1$ requires $\Omega(n)$. The gap grows without bound as $n \to \infty$.
+3.  **Resolution Impossibility (Theorem [\[thm:oracle-arbitrary\]](#thm:oracle-arbitrary){reference-type="ref" reference="thm:oracle-arbitrary"}):** In any incoherent state, no deterministic resolution procedure is information-theoretically justified without external side information---the encoding system lacks sufficient information to determine correctness. This parallels zero-error capacity constraints: without side information, error-free decoding is impossible.
 
-4.  **Realizability Requirements (Theorem [\[thm:ssot-iff\]](#thm:ssot-iff){reference-type="ref" reference="thm:ssot-iff"}):** Encoding systems achieving DOF = 1 via derivation require two information-theoretic properties: (a) *causal update propagation*---source changes automatically trigger derived location updates, and (b) *provenance observability*---the derivation structure is queryable. These abstract to arbitrary encoding systems; programming language features (definition-time hooks, introspection) are one instantiation.
+4.  **Rate-Complexity Tradeoff (Theorem [\[thm:unbounded-gap\]](#thm:unbounded-gap){reference-type="ref" reference="thm:unbounded-gap"}):** Modification complexity scales as $O(1)$ at capacity (DOF $= 1$) versus $\Omega(n)$ above capacity (DOF $= n > 1$). The gap is unbounded.
 
-**Connections to established IT.** The DOF = 1 optimum generalizes Rissanen's Minimum Description Length principle [@rissanen1978mdl] to interactive encoding systems. The realizability requirements connect to channel coding with feedback (causal propagation), Slepian-Wolf side information [@slepian1973noiseless] (provenance observability), and write-once memory codes [@rivest1982wom] (irreversible structural encoding). The oracle arbitrariness result parallels zero-error decoding: without sufficient side information, correctness cannot be guaranteed.
+**Information-Theoretic Framework.** We model encoding locations as terminals in a multi-terminal source coding problem. Derivation (automatic propagation from source to derived locations) introduces deterministic correlation, reducing the effective encoding rate. The capacity result shows that only complete correlation (all locations derived from one source) guarantees coherence---partial correlation permits divergence.
 
-**Instantiations.** The abstract model applies to distributed storage, configuration management, and programming-language semantics; we include illustrative instantiations, but the core theorems are independent of any specific domain.
+The side information bound connects to Slepian-Wolf distributed source coding [@slepian1973noiseless]: provenance information acts as decoder side information enabling verification. The capacity theorem extends Körner-Lovász zero-error capacity [@korner1973graphs; @lovasz1979shannon] to interactive settings with modification constraints.
 
-We also formalize encoding-theoretic versions of CAP and FLP (Theorems [\[thm:cap-encoding\]](#thm:cap-encoding){reference-type="ref" reference="thm:cap-encoding"} and [\[thm:static-flp\]](#thm:static-flp){reference-type="ref" reference="thm:static-flp"}).
+**Encoder Realizability (Theorem [\[thm:ssot-iff\]](#thm:ssot-iff){reference-type="ref" reference="thm:ssot-iff"}):** Achieving capacity requires two encoder properties: (a) *causal update propagation*---feedback coupling between source and derived locations, and (b) *provenance observability*---side information about derivation structure. Both are necessary; together sufficient.
+
+**Instantiations.** The framework applies to distributed storage (replica consistency), configuration systems (multi-file coherence), and programming languages (type registries). We provide instantiations as corollaries; core theorems are domain-independent.
 
 All theorems machine-checked in Lean 4 (9,351 lines, 541 theorems, 0 `sorry` placeholders).
 
-**Index Terms---**Interactive encoding systems, coherence constraints, multi-version coding, minimum description length, distributed source coding, rate-complexity tradeoffs, write-once memory, CAP theorem
+**Index Terms---**Zero-error source coding, multi-terminal encoding, coherence capacity, side information, interactive information theory, rate-complexity tradeoffs, distributed source coding
 
 
 # Introduction
 
-## The Encoding Problem {#sec:encoding-problem}
+## Zero-Incoherence Capacity {#sec:encoding-problem}
 
-Consider an information system storing a fact $F$ (e.g., a threshold value, a configuration parameter, or a structural relationship) at $n$ locations. When can such a system guarantee **coherence**---the impossibility of disagreement among locations?
+We study a fundamental question in encoding theory: *What is the maximum encoding rate that guarantees zero probability of incoherence in a multi-location storage system?*
 
-If location $L_1$ encodes "threshold = 0.5" while location $L_2$ encodes "threshold = 0.7", which is correct? No information internal to the system determines this. Any resolution requires external side information (timestamps, priority orderings, external oracles) not present in the encodings themselves.
+An *encoding system* stores a fact $F$ (a value from alphabet $\mathcal{V}_F$) at multiple locations $\{L_1, \ldots, L_n\}$. The system is *coherent* if all locations encode the same value; *incoherent* if any two locations disagree. We define the **zero-incoherence capacity** $C_0$ as the supremum of encoding rates achieving incoherence probability exactly zero, and prove:
 
-This is an **information-theoretic** problem: what rate (number of independent encoding locations) guarantees zero-error decoding under modification constraints? We prove that exactly one independent encoding (DOF = 1, where DOF counts independent storage locations) is necessary and sufficient for guaranteed coherence.
-
-::: theorem
-For any incoherent encoding system (DOF $> 1$ with divergent values) and any resolution procedure selecting a value, there exists an equally-present value that disagrees. No resolution is information-theoretically justified.
+::: center
 :::
 
-This parallels zero-error capacity constraints [@korner1973graphs; @lovasz1979shannon]: without sufficient side information, error-free decoding is impossible. Our contribution extends this to **interactive encoding systems** with modification requirements.
+This extends *zero-error capacity theory* [@shannon1956zero; @korner1973graphs; @lovasz1979shannon] to interactive encoding systems. Shannon's zero-error capacity characterizes the maximum communication rate with exactly zero error probability. We characterize the maximum encoding rate with exactly zero incoherence probability.
 
-## The Optimal Rate Theorem {#sec:optimal-rate}
+**Main results.** Let DOF (Degrees of Freedom) denote the encoding rate: the number of independent locations that can hold distinct values simultaneously.
 
-We prove that DOF = 1 is the **unique optimal rate** for coherent encoding:
+-   **Achievability (Theorem [\[thm:capacity-achievability\]](#thm:capacity-achievability){reference-type="ref" reference="thm:capacity-achievability"}):** DOF $= 1$ achieves zero incoherence.
 
--   **DOF = 0:** Fact $F$ is not encoded (no information stored)
+-   **Converse (Theorem [\[thm:capacity-converse\]](#thm:capacity-converse){reference-type="ref" reference="thm:capacity-converse"}):** DOF $> 1$ does not achieve zero incoherence.
 
--   **DOF = 1:** Coherence guaranteed (unique independent source)
+-   **Capacity (Theorem [\[thm:coherence-capacity\]](#thm:coherence-capacity){reference-type="ref" reference="thm:coherence-capacity"}):** $C_0 = 1$ exactly. Tight.
 
--   **DOF $> 1$:** Incoherent configurations reachable (multiple independent sources can diverge)
+-   **Side Information (Theorem [\[thm:side-info\]](#thm:side-info){reference-type="ref" reference="thm:side-info"}):** Resolution of $k$-way incoherence requires $\geq \log_2 k$ bits.
 
-This generalizes Rissanen's Minimum Description Length (MDL) principle [@rissanen1978mdl; @gruenwald2007mdl] to systems with update constraints. MDL optimizes description length for static data; we optimize encoding rate for modifiable facts. The singleton solution space---exactly one rate achieves coherence---makes this a **forcing theorem**: given coherence as a requirement, DOF = 1 is mathematically necessary.
+::: theorem
+For any incoherent encoding system and any resolution procedure, there exists a value present in the system that disagrees with the resolution. Without $\log_2 k$ bits of side information (where $k$ = DOF), no resolution is information-theoretically justified.
+:::
+
+This parallels zero-error decoding constraints [@korner1973graphs; @lovasz1979shannon]: without sufficient side information, error-free reconstruction is impossible.
+
+## The Capacity Theorem {#sec:optimal-rate}
+
+The zero-incoherence capacity follows the achievability/converse structure of Shannon's channel capacity theorem:
+
+::: center
+  **Encoding Rate**    **Zero Incoherence?**   **Interpretation**
+  ------------------- ----------------------- --------------------
+  DOF $= 0$                     N/A             Fact not encoded
+  DOF $= 1$                   **Yes**          Capacity-achieving
+  DOF $> 1$                     No               Above capacity
+:::
+
+**Comparison to Shannon capacity.** Shannon's channel capacity $C$ is the supremum of rates $R$ achieving vanishing error probability: $\lim_{n \to \infty} P_e^{(n)} = 0$. Our zero-incoherence capacity is the supremum of rates achieving *exactly zero* incoherence probability---paralleling zero-error capacity [@shannon1956zero], not ordinary capacity.
+
+**Connection to MDL.** The capacity theorem generalizes Rissanen's Minimum Description Length principle [@rissanen1978mdl; @gruenwald2007mdl] to interactive systems. MDL optimizes description length for static data. We optimize encoding rate for modifiable data subject to coherence constraints. The result: exactly one rate ($R = 1$) achieves zero incoherence, making this a **forcing theorem**.
 
 ## Applications Across Domains {#sec:applications}
 
@@ -75,65 +92,71 @@ In each domain, the question is identical: given multiple encoding locations, wh
 
 ## Connection to Classical Information Theory {#sec:connection-it}
 
-Our results extend classical encoding theory in three ways:
+Our results extend classical source coding theory to interactive multi-terminal systems.
 
-**1. From static to interactive encoding.** Shannon's source coding theorem [@shannon1948mathematical] characterizes optimal encoding for static data. Slepian-Wolf [@slepian1973noiseless] extends this to distributed sources with side information. We extend to **interactive systems** where encodings can be modified and must remain coherent across modifications.
+**1. Multi-terminal source coding.** Slepian-Wolf [@slepian1973noiseless] characterizes distributed encoding of correlated sources. We model encoding locations as terminals: derivation introduces *perfect correlation* (deterministic dependence), reducing effective rate. The capacity result shows that only complete correlation (all terminals derived from one source) guarantees coherence---partial correlation permits divergence. Section [\[sec:side-information\]](#sec:side-information){reference-type="ref" reference="sec:side-information"} develops this connection.
 
-**2. Zero-error requirement with modification constraints.** Classical zero-error capacity [@korner1973graphs; @lovasz1979shannon] characterizes communication without errors. We characterize **encoding without incoherence**---a storage analog where errors are disagreements among locations, not bit flips.
+**2. Zero-error capacity.** Shannon [@shannon1956zero], Körner [@korner1973graphs], and Lovász [@lovasz1979shannon] characterize zero-error communication. We characterize **zero-incoherence encoding**---a storage analog where "errors" are disagreements among locations. The achievability/converse structure (Theorems [\[thm:capacity-achievability\]](#thm:capacity-achievability){reference-type="ref" reference="thm:capacity-achievability"}, [\[thm:capacity-converse\]](#thm:capacity-converse){reference-type="ref" reference="thm:capacity-converse"}) parallels zero-error capacity proofs.
 
-**3. Rate-complexity tradeoffs.** Rate-distortion theory [@cover2006elements] trades encoding rate against distortion. We trade encoding rate (DOF) against modification complexity: DOF = 1 achieves $O(1)$ updates; DOF $> 1$ requires $\Omega(n)$ synchronization.
+**3. Interactive information theory.** The BIRS workshop [@birs2012interactive] identified interactive IT as encoding/decoding with feedback and multi-round protocols. Our model is interactive: encodings are modified over time, and causal propagation (a realizability requirement) is analogous to channel feedback. Ma-Ishwar [@ma2011distributed] showed interaction can reduce rate; we show derivation (a form of interaction) can reduce effective DOF.
 
-## Realizability in Computational Systems {#sec:realizability}
+**4. Rate-complexity tradeoffs.** Rate-distortion theory [@cover2006elements] trades rate $R$ against distortion $D$. We trade encoding rate (DOF) against modification complexity $M$: DOF $= 1$ achieves $M = O(1)$; DOF $> 1$ requires $M = \Omega(n)$. The gap is unbounded (Theorem [\[thm:unbounded-gap\]](#thm:unbounded-gap){reference-type="ref" reference="thm:unbounded-gap"}).
 
-A key question: can the abstract optimality (DOF = 1) be **realized** in computational systems? We prove realizability requires two information-theoretic encoder properties:
+## Encoder Realizability {#sec:realizability}
 
-1.  **Causal update propagation:** Changes to the source must automatically trigger updates to derived locations. This is analogous to channel coding with feedback---the encoder (source) and decoder (derived locations) are coupled in real-time. Without causal propagation, a temporal window exists where source and derived locations diverge (temporary incoherence).
+A key question: what encoder properties are necessary and sufficient to achieve capacity ($C_0 = 1$)? We prove realizability requires two information-theoretic properties:
 
-2.  **Provenance observability:** The system must support queries about derivation structure (what is derived from what). This is the encoding-system analog of Slepian-Wolf side information [@slepian1973noiseless]---the decoder has access to structural information enabling verification.
+1.  **Causal update propagation (feedback coupling):** Changes to the source must automatically trigger updates to derived locations. This is analogous to *channel coding with feedback* [@cover2006elements]---the encoder (source) and decoder (derived locations) are coupled causally. Without feedback, a temporal window exists where source and derived locations diverge (temporary incoherence).
 
-These abstract to arbitrary encoding systems; programming language features (definition-time hooks, introspection) are one instantiation. Distributed databases use triggers and system catalogs; configuration systems use dependency graphs and state queries.
+2.  **Provenance observability (decoder side information):** The system must support queries about derivation structure. This is the encoding-system analog of *Slepian-Wolf side information* [@slepian1973noiseless]---the decoder has access to structural information enabling verification that all terminals are derived from the source.
 
-**Connection to multi-version coding.** Rashmi et al. [@rashmi2015multiversion] prove an "inevitable storage cost for consistency" in distributed storage. Our realizability theorem is analogous: systems lacking causal propagation or provenance observability *cannot* achieve DOF = 1---the cost is fundamental, not implementation-specific.
+::: theorem
+An encoding system achieves $C_0 = 1$ iff it provides both causal propagation and provenance observability. Neither alone suffices (Theorem [\[thm:independence\]](#thm:independence){reference-type="ref" reference="thm:independence"}).
+:::
 
-**Applications across computational systems.** We include a programming-language instantiation and a worked case study as *corollaries* of the abstract theory. These sections exemplify the realizability theorem; the core theorems and their proofs are independent of any specific language or system.
+**Connection to multi-version coding.** Rashmi et al. [@rashmi2015multiversion] prove an "inevitable storage cost for consistency" in distributed storage. Our realizability theorem is analogous: systems lacking either encoder property *cannot* achieve capacity---the constraint is information-theoretic, not implementation-specific.
 
-## Paper Organization and Main Results {#overview}
+**Instantiations.** The encoder properties instantiate across domains: programming languages (definition-time hooks, introspection), distributed databases (triggers, system catalogs), configuration systems (dependency graphs, state queries). Section [\[sec:evaluation\]](#sec:evaluation){reference-type="ref" reference="sec:evaluation"} provides a programming-language instantiation as a corollary; the core theorems are domain-independent.
 
-This paper establishes four *core* theorems characterizing optimal encoding under coherence constraints. All results are machine-checked in Lean 4 [@demoura2021lean4] (9,351 lines, 541 theorems, 0 `sorry` placeholders).
+## Paper Organization {#overview}
 
-**Section [\[sec:foundations\]](#sec:foundations){reference-type="ref" reference="sec:foundations"}---Encoding Model.** We formalize multi-location encoding systems: facts stored at multiple locations with independence and derivability relations. DOF (Degrees of Freedom) counts independent locations. Coherence means all locations agree. Section [\[sec:cap-flp\]](#sec:cap-flp){reference-type="ref" reference="sec:cap-flp"} formalizes encoding-theoretic CAP/FLP analogs inside this model.
+All results are machine-checked in Lean 4 [@demoura2021lean4] (9,351 lines, 541 theorems, 0 `sorry` placeholders).
 
-**Section [\[sec:ssot\]](#sec:ssot){reference-type="ref" reference="sec:ssot"}---Optimal Rate.** We prove DOF = 1 is the unique rate guaranteeing coherence (Theorem [\[thm:dof-optimal\]](#thm:dof-optimal){reference-type="ref" reference="thm:dof-optimal"}). The proof constructs incoherent configurations for all DOF $> 1$ and shows DOF = 1 makes disagreement impossible.
+**Section [\[sec:foundations\]](#sec:foundations){reference-type="ref" reference="sec:foundations"}---Encoding Model and Capacity.** We define multi-location encoding systems, encoding rate (DOF), and coherence/incoherence. We introduce information-theoretic quantities (value entropy, redundancy, incoherence entropy). We prove the **zero-incoherence capacity theorem** ($C_0 = 1$) with explicit achievability/converse structure, and the **side information bound** ($\geq \log_2 k$ bits for $k$-way resolution). We formalize encoding-theoretic CAP/FLP.
 
-**Section [\[sec:requirements\]](#sec:requirements){reference-type="ref" reference="sec:requirements"}---Realizability.** We derive necessary and sufficient conditions for encoding systems to achieve DOF = 1 via derivation (Theorem [\[thm:ssot-iff\]](#thm:ssot-iff){reference-type="ref" reference="thm:ssot-iff"}). Both causal update propagation and provenance observability are required---these are information-theoretic encoder properties that abstract across domains.
+**Section [\[sec:ssot\]](#sec:ssot){reference-type="ref" reference="sec:ssot"}---Derivation and Optimal Rate.** We characterize derivation as the mechanism achieving capacity: derived locations are perfectly correlated with their source, contributing zero effective rate.
 
-**Section [\[sec:evaluation\]](#sec:evaluation){reference-type="ref" reference="sec:evaluation"}---Corollary Instantiation.** We provide a programming-language instantiation of the realizability criteria as a corollary of Theorem [\[thm:ssot-iff\]](#thm:ssot-iff){reference-type="ref" reference="thm:ssot-iff"}; the core proofs remain abstract.
+**Section [\[sec:requirements\]](#sec:requirements){reference-type="ref" reference="sec:requirements"}---Encoder Realizability.** We prove that achieving capacity requires causal propagation (feedback) and provenance observability (decoder side information). Both necessary; together sufficient. This is an iff characterization.
 
-**Section [\[sec:bounds\]](#sec:bounds){reference-type="ref" reference="sec:bounds"}---Complexity Bounds.** We prove the rate-complexity tradeoff: DOF = 1 achieves $O(1)$ modification cost; DOF $> 1$ requires $\Omega(n)$ (Theorem [\[thm:unbounded-gap\]](#thm:unbounded-gap){reference-type="ref" reference="thm:unbounded-gap"}). The gap grows without bound.
+**Section [\[sec:bounds\]](#sec:bounds){reference-type="ref" reference="sec:bounds"}---Rate-Complexity Tradeoffs.** We prove modification complexity is $O(1)$ at capacity vs. $\Omega(n)$ above capacity. The gap is unbounded.
 
-**Section [\[sec:empirical\]](#sec:empirical){reference-type="ref" reference="sec:empirical"}---Worked Instantiation.** A case study from a production system (OpenHCS [@openhcs2025]) instantiates the realizability requirements.
+**Sections [\[sec:evaluation\]](#sec:evaluation){reference-type="ref" reference="sec:evaluation"}, [\[sec:empirical\]](#sec:empirical){reference-type="ref" reference="sec:empirical"}---Instantiations (Corollaries).** Programming-language instantiation and worked example. These illustrate the abstract theory; core results are domain-independent.
 
 ## Core Theorems {#sec:core-theorems}
 
-We establish four *core* theorems characterizing optimal encoding under coherence constraints:
+We establish five *core* theorems:
 
-1.  **Theorem [\[thm:oracle-arbitrary\]](#thm:oracle-arbitrary){reference-type="ref" reference="thm:oracle-arbitrary"} (Resolution Impossibility):** For any incoherent encoding system (DOF $> 1$ with divergent values) and any resolution procedure selecting a value, there exists an equally-present value disagreeing with the selection. No resolution is information-theoretically justified.
+1.  **Theorem [\[thm:coherence-capacity\]](#thm:coherence-capacity){reference-type="ref" reference="thm:coherence-capacity"} (Zero-Incoherence Capacity):** $C_0 = 1$. The maximum encoding rate guaranteeing zero incoherence is exactly 1.
 
-    *Proof:* By incoherence, at least two values exist. Any selection leaves another value disagreeing. No side information distinguishes them.
+    *Structure:* Achievability (Theorem [\[thm:capacity-achievability\]](#thm:capacity-achievability){reference-type="ref" reference="thm:capacity-achievability"}) + Converse (Theorem [\[thm:capacity-converse\]](#thm:capacity-converse){reference-type="ref" reference="thm:capacity-converse"}).
 
-2.  **Theorem [\[thm:dof-one-coherence\]](#thm:dof-one-coherence){reference-type="ref" reference="thm:dof-one-coherence"} (Optimal Rate):** DOF = 1 guarantees coherence. Exactly one independent encoding makes disagreement impossible.
+2.  **Theorem [\[thm:side-info\]](#thm:side-info){reference-type="ref" reference="thm:side-info"} (Side Information Bound):** Resolution of $k$-way incoherence requires $\geq \log_2 k$ bits of side information. At DOF $= 1$, zero bits suffice.
 
-    *Proof:* All other locations are derived from the single source. Derivation enforces agreement. Single source determines all values.
+    *Proof:* The $k$ alternatives have entropy $H(S) = \log_2 k$. Resolution requires mutual information $I(S; Y) \geq H(S)$.
 
-3.  **Theorem [\[thm:ssot-iff\]](#thm:ssot-iff){reference-type="ref" reference="thm:ssot-iff"} (Realizability Requirements):** An encoding system achieves DOF = 1 via derivation if and only if it provides: (a) causal update propagation (source changes automatically trigger derived location updates), and (b) provenance observability (derivation structure is queryable).
+3.  **Theorem [\[thm:oracle-arbitrary\]](#thm:oracle-arbitrary){reference-type="ref" reference="thm:oracle-arbitrary"} (Resolution Impossibility):** Without side information, no resolution procedure is information-theoretically justified.
 
-    *Proof:* Necessity by constructing incoherent configurations when either is missing. Sufficiency by exhibiting derivation mechanisms achieving DOF = 1. The requirements are information-theoretic encoder properties, not implementation details.
+    *Proof:* By incoherence, $k \geq 2$ values exist. Any selection leaves $k-1$ values disagreeing. No internal information distinguishes them.
 
-4.  **Theorem [\[thm:unbounded-gap\]](#thm:unbounded-gap){reference-type="ref" reference="thm:unbounded-gap"} (Rate-Complexity Tradeoff):** Modification complexity scales as: DOF = 1 achieves $O(1)$; DOF = $n > 1$ requires $\Omega(n)$. The ratio grows without bound: $\lim_{n \to \infty} \frac{n}{1} = \infty$.
+4.  **Theorem [\[thm:ssot-iff\]](#thm:ssot-iff){reference-type="ref" reference="thm:ssot-iff"} (Encoder Realizability):** Achieving capacity requires encoder properties: (a) causal propagation (feedback), and (b) provenance observability (side information). Both necessary; together sufficient.
 
-    *Proof:* DOF = 1 updates single source (constant). DOF = $n$ must synchronize $n$ independent locations (linear).
+    *Proof:* Necessity by constructing above-capacity configurations when either is missing. Sufficiency by exhibiting capacity-achieving encoders.
 
-**Forcing property.** DOF = 1 is the **unique** rate guaranteeing coherence. DOF = 0 means unencoded; DOF $> 1$ permits incoherence. Given coherence as a requirement, there is no design freedom---the solution is mathematically forced.
+5.  **Theorem [\[thm:unbounded-gap\]](#thm:unbounded-gap){reference-type="ref" reference="thm:unbounded-gap"} (Rate-Complexity Tradeoff):** Modification complexity scales as $O(1)$ at capacity vs. $\Omega(n)$ above capacity. The gap is unbounded.
+
+    *Proof:* At capacity, one source update suffices. Above capacity, $n$ independent locations require $n$ updates.
+
+**Uniqueness.** $C_0 = 1$ is the **unique** capacity: DOF $= 0$ fails to encode; DOF $> 1$ exceeds capacity. Given zero-incoherence as a constraint, the rate is mathematically forced.
 
 ## Scope {#sec:scope}
 
@@ -143,65 +166,47 @@ This work characterizes SSOT for *structural facts* (class existence, method sig
 
 ## Contributions {#sec:contributions}
 
-This paper makes six contributions:
+This paper makes five information-theoretic contributions:
 
-**1. Epistemic foundations (Section [\[sec:epistemic\]](#sec:epistemic){reference-type="ref" reference="sec:epistemic"}):**
+**1. Zero-incoherence capacity (Section [\[sec:capacity\]](#sec:capacity){reference-type="ref" reference="sec:capacity"}):**
 
--   Definition of coherence and incoherence for encoding systems
+-   Definition of encoding rate (DOF) and incoherence
 
--   **Theorem [\[thm:oracle-arbitrary\]](#thm:oracle-arbitrary){reference-type="ref" reference="thm:oracle-arbitrary"} (Oracle Arbitrariness):** Under incoherence, no resolution is principled. The epistemic core.
+-   **Theorem [\[thm:coherence-capacity\]](#thm:coherence-capacity){reference-type="ref" reference="thm:coherence-capacity"}:** $C_0 = 1$ (tight: achievability + converse)
 
--   **Theorem [\[thm:dof-one-coherence\]](#thm:dof-one-coherence){reference-type="ref" reference="thm:dof-one-coherence"} (Coherence Forcing):** DOF = 1 guarantees coherence
+-   **Theorem [\[thm:redundancy-incoherence\]](#thm:redundancy-incoherence){reference-type="ref" reference="thm:redundancy-incoherence"}:** Redundancy $\rho > 0$ iff incoherence reachable
 
--   **Theorem [\[thm:dof-gt-one-incoherence\]](#thm:dof-gt-one-incoherence){reference-type="ref" reference="thm:dof-gt-one-incoherence"}:** DOF $> 1$ permits incoherence
+**2. Side information bounds (Section [\[sec:side-information\]](#sec:side-information){reference-type="ref" reference="sec:side-information"}):**
 
--   **Corollary [\[cor:coherence-forces-ssot\]](#cor:coherence-forces-ssot){reference-type="ref" reference="cor:coherence-forces-ssot"}:** Given coherence requirement, DOF = 1 is necessary and sufficient
+-   **Theorem [\[thm:side-info\]](#thm:side-info){reference-type="ref" reference="thm:side-info"}:** $k$-way resolution requires $\geq \log_2 k$ bits
 
-**2. Software instantiation (Section [\[sec:edit-space\]](#sec:edit-space){reference-type="ref" reference="sec:edit-space"}):**
+-   **Corollary [\[cor:dof1-zero-side\]](#cor:dof1-zero-side){reference-type="ref" reference="cor:dof1-zero-side"}:** DOF $= 1$ requires zero side information
 
--   Mapping: encoding systems $\to$ codebases, facts $\to$ structural specifications
+-   Multi-terminal interpretation: derivation as perfect correlation
 
--   Definition of SSOT as DOF = 1 for software
+**3. Encoder realizability (Section [\[sec:requirements\]](#sec:requirements){reference-type="ref" reference="sec:requirements"}):**
 
--   Theorem [\[thm:ssot-determinate\]](#thm:ssot-determinate){reference-type="ref" reference="thm:ssot-determinate"}: SSOT eliminates indeterminacy
+-   **Theorem [\[thm:ssot-iff\]](#thm:ssot-iff){reference-type="ref" reference="thm:ssot-iff"}:** Capacity achieved iff causal propagation AND provenance observability
 
-**3. Realizability requirements (Section [\[sec:requirements\]](#sec:requirements){reference-type="ref" reference="sec:requirements"}):**
+-   **Theorem [\[thm:independence\]](#thm:independence){reference-type="ref" reference="thm:independence"}:** Requirements are independent
 
--   Theorem [\[thm:causal-necessary\]](#thm:causal-necessary){reference-type="ref" reference="thm:causal-necessary"}: Causal update propagation is necessary
+-   Connection to feedback channels and Slepian-Wolf side information
 
--   Theorem [\[thm:provenance-necessary\]](#thm:provenance-necessary){reference-type="ref" reference="thm:provenance-necessary"}: Provenance observability is necessary
+**4. Rate-complexity tradeoffs (Section [\[sec:bounds\]](#sec:bounds){reference-type="ref" reference="sec:bounds"}):**
 
--   Theorem [\[thm:ssot-iff\]](#thm:ssot-iff){reference-type="ref" reference="thm:ssot-iff"}: Both together are sufficient
+-   **Theorem [\[thm:upper-bound\]](#thm:upper-bound){reference-type="ref" reference="thm:upper-bound"}:** $O(1)$ at capacity
 
--   Connection to IT: causal propagation $\approx$ channel with feedback; provenance observability $\approx$ Slepian-Wolf side information
+-   **Theorem [\[thm:lower-bound\]](#thm:lower-bound){reference-type="ref" reference="thm:lower-bound"}:** $\Omega(n)$ above capacity
 
--   Connection to WOM codes: structural irreversibility constraint analogous to write-once constraint
+-   **Theorem [\[thm:unbounded-gap\]](#thm:unbounded-gap){reference-type="ref" reference="thm:unbounded-gap"}:** Gap unbounded
 
-**4. Language instantiation (Section [\[sec:evaluation\]](#sec:evaluation){reference-type="ref" reference="sec:evaluation"}):**
+**5. Encoding-theoretic CAP/FLP (Section [\[sec:cap-flp\]](#sec:cap-flp){reference-type="ref" reference="sec:cap-flp"}):**
 
--   Representative instantiation over a mainstream language class
+-   **Theorem [\[thm:cap-encoding\]](#thm:cap-encoding){reference-type="ref" reference="thm:cap-encoding"}:** CAP as encoding impossibility
 
--   Extended instantiation of three MOP-equipped languages (CLOS, Smalltalk, Ruby)
+-   **Theorem [\[thm:static-flp\]](#thm:static-flp){reference-type="ref" reference="thm:static-flp"}:** FLP as resolution impossibility
 
--   Theorem [\[thm:three-lang\]](#thm:three-lang){reference-type="ref" reference="thm:three-lang"}: Exactly three languages satisfy requirements within the evaluated class
-
-**5. Complexity bounds (Section [\[sec:bounds\]](#sec:bounds){reference-type="ref" reference="sec:bounds"}):**
-
--   Theorem [\[thm:upper-bound\]](#thm:upper-bound){reference-type="ref" reference="thm:upper-bound"}: SSOT achieves $O(1)$ coherence restoration
-
--   Theorem [\[thm:lower-bound\]](#thm:lower-bound){reference-type="ref" reference="thm:lower-bound"}: Non-SSOT requires $\Omega(n)$ modifications
-
--   Theorem [\[thm:unbounded-gap\]](#thm:unbounded-gap){reference-type="ref" reference="thm:unbounded-gap"}: The gap is unbounded
-
-**6. Worked instantiation (Section [\[sec:empirical\]](#sec:empirical){reference-type="ref" reference="sec:empirical"}):**
-
--   Before/after examples from OpenHCS (production Python codebase)
-
--   PR #44 [@openhcsPR44]: Migration from 47 scattered checks to 1 ABC (DOF 47 $\to$ 1)
-
--   Concrete instantiation of realizability mechanisms in a production system
-
-**Note on scope.** The programming-language instantiation and worked case study (Sections [\[sec:evaluation\]](#sec:evaluation){reference-type="ref" reference="sec:evaluation"} and [\[sec:empirical\]](#sec:empirical){reference-type="ref" reference="sec:empirical"}) are corollaries of the realizability theorem. The core information-theoretic results are contained in Sections [\[sec:foundations\]](#sec:foundations){reference-type="ref" reference="sec:foundations"}--[\[sec:bounds\]](#sec:bounds){reference-type="ref" reference="sec:bounds"}.
+**Instantiations (corollaries).** Sections [\[sec:evaluation\]](#sec:evaluation){reference-type="ref" reference="sec:evaluation"} and [\[sec:empirical\]](#sec:empirical){reference-type="ref" reference="sec:empirical"} instantiate the realizability theorem for programming languages and provide a worked example. These are illustrative corollaries; the core information-theoretic results are self-contained in Sections [\[sec:foundations\]](#sec:foundations){reference-type="ref" reference="sec:foundations"}--[\[sec:bounds\]](#sec:bounds){reference-type="ref" reference="sec:bounds"}.
 
 
 # Encoding Systems and Coherence {#sec:foundations}
@@ -320,15 +325,16 @@ The granularity of facts is determined by the specification, not the implementat
 
 **Examples of facts:**
 
-::: center
-  **Fact**                                           **Description**
-  -------------------------------------------------- -----------------------------
-  $F_1$: "threshold = 0.5"                           A configuration value
-  $F_2$: "`PNGLoader` handles `.png`"                A type-to-handler mapping
-  $F_3$: "`validate()` returns `bool`"               A method signature
-  $F_4$: "`Detector` is a subclass of `Processor`"   An inheritance relationship
-  $F_5$: "`Config` has field `name: str`"            A dataclass field
+:::: center
+::: tabularx
+lY **Fact** & **Description**\
+$F_1$: "threshold = 0.5" & A configuration value\
+$F_2$: "`PNGLoader` handles `.png`" & A type-to-handler mapping\
+$F_3$: "`validate()` returns `bool`" & A method signature\
+$F_4$: "`Detector` is a subclass of `Processor`" & An inheritance relationship\
+$F_5$: "`Config` has field `name: str`" & A dataclass field\
 :::
+::::
 
 ::: definition
 []{#def:structural-fact label="def:structural-fact"} A fact $F$ is *structural* with respect to encoding system $C$ iff the locations encoding $F$ are fixed at definition time: $$\text{structural}(F, C) \Longleftrightarrow \forall L: \text{encodes}(L, F) \rightarrow L \in \text{DefinitionSyntax}(C)$$ where $\text{DefinitionSyntax}(C)$ comprises declarative constructs that cannot change post-definition without recreation.
@@ -360,18 +366,16 @@ where $\delta_F$ is an edit targeting fact $F$.
 
 **Key insight:** This definition is **forced** by correctness, not chosen. We do not decide what encodes what. Correctness requirements determine it. If failing to update location $L$ when fact $F$ changes produces an incorrect program, then $L$ encodes $F$. This is an objective, observable property.
 
-::: example
+:::: example
 []{#ex:encoding label="ex:encoding"} Consider a type registry:
 
-    # Location L1: Class definition
-    class PNGLoader(ImageLoader):
-        format = "png"
+::: code
+\# Location L1: Class definition class PNGLoader(ImageLoader): format = \"png\"
 
-    # Location L2: Registry entry
-    LOADERS = {"png": PNGLoader, "jpg": JPGLoader}
+\# Location L2: Registry entry LOADERS = \"png\": PNGLoader, \"jpg\": JPGLoader
 
-    # Location L3: Documentation
-    # Supported formats: png, jpg
+\# Location L3: Documentation \# Supported formats: png, jpg
+:::
 
 The fact $F$ = "`PNGLoader` handles `png`" is encoded at:
 
@@ -382,7 +386,7 @@ The fact $F$ = "`PNGLoader` handles `png`" is encoded at:
 -   $L_3$: The documentation comment (tertiary encoding)
 
 If $F$ changes (e.g., to "`PNGLoader` handles `png` and `apng`"), all three locations must be updated for correctness. The program is incorrect if $L_2$ still says `{"png": PNGLoader}` when the class now handles both formats.
-:::
+::::
 
 ## Modification Complexity {#sec:mod-complexity}
 
@@ -422,30 +426,29 @@ Formally: $L_1$ and $L_2$ are independent iff there exists a sequence of edits t
 []{#def:derived label="def:derived"} Location $L_{\text{derived}}$ is *derived from* $L_{\text{source}}$ iff updating $L_{\text{source}}$ automatically updates $L_{\text{derived}}$. Derived locations are not independent of their sources.
 :::
 
-::: example
+::::: example
 []{#ex:independence label="ex:independence"} Consider two architectures for the type registry:
 
 **Architecture A (independent locations):**
 
-    # L1: Class definition
-    class PNGLoader(ImageLoader): ...
+::: code
+\# L1: Class definition class PNGLoader(ImageLoader): \...
 
-    # L2: Manual registry (independent of L1)
-    LOADERS = {"png": PNGLoader}
+\# L2: Manual registry (independent of L1) LOADERS = \"png\": PNGLoader
+:::
 
 Here $L_1$ and $L_2$ are independent. A developer can change $L_1$ without updating $L_2$, causing inconsistency.
 
 **Architecture B (derived location):**
 
-    # L1: Class definition with registration
-    class PNGLoader(ImageLoader):
-        format = "png"
+::: code
+\# L1: Class definition with registration class PNGLoader(ImageLoader): format = \"png\"
 
-    # L2: Derived registry (computed from L1)
-    LOADERS = {cls.format: cls for cls in ImageLoader.__subclasses__()}
+\# L2: Derived registry (computed from L1) LOADERS = cls.format: cls for cls in ImageLoader.\_\_subclasses\_\_()
+:::
 
 Here $L_2$ is derived from $L_1$. Updating the class definition automatically updates the registry. They cannot diverge.
-:::
+:::::
 
 ::: definition
 []{#def:dof label="def:dof"} $$\text{DOF}(C, F) = |\{L \in C : \text{encodes}(L, F) \land \text{independent}(L)\}|$$ The number of *independent* locations encoding fact $F$.
@@ -533,72 +536,148 @@ We now formalize CAP and FLP inside the encoding model.
 
 These theorems are the encoding-theoretic counterparts of CAP [@brewer2000cap; @gilbert2002cap] and FLP [@flp1985impossibility]: CAP corresponds to the impossibility of coherence when replicated encodings remain independently updatable; FLP corresponds to the impossibility of truth-preserving resolution in an incoherent state without side information.
 
-## Coherence Capacity Theorem {#sec:capacity}
+## Information-Theoretic Quantities {#sec:it-quantities}
 
-We now establish a tight capacity result analogous to Shannon's channel capacity theorem. Where Shannon characterizes the maximum rate for reliable communication, we characterize the maximum encoding rate for guaranteed coherence.
+Before establishing the capacity theorem, we define the information-theoretic quantities that characterize encoding systems.
 
 ::: definition
-[]{#def:coherence-capacity label="def:coherence-capacity"} The *coherence capacity* of an encoding system is the supremum of encoding rates (DOF) that guarantee coherence: $$C_{\text{coh}} = \sup\{r : \text{DOF} = r \Rightarrow \text{coherence guaranteed}\}$$
+[]{#def:encoding-rate label="def:encoding-rate"} The *encoding rate* of system $C$ for fact $F$ is $R(C, F) = \text{DOF}(C, F)$, the number of independent encoding locations. This counts locations that can hold distinct values simultaneously.
+:::
+
+::: definition
+[]{#def:value-entropy label="def:value-entropy"} For a fact $F$ with value space $\mathcal{V}_F$, the *value entropy* is: $$H(F) = \log_2 |\mathcal{V}_F|$$ This is the information content of specifying $F$'s value.
+:::
+
+::: definition
+[]{#def:redundancy label="def:redundancy"} The *encoding redundancy* of system $C$ for fact $F$ is: $$\rho(C, F) = \text{DOF}(C, F) - 1$$ Redundancy measures excess independent encodings beyond the minimum needed to represent $F$.
 :::
 
 ::: theorem
-[]{#thm:coherence-capacity label="thm:coherence-capacity"} The coherence capacity of any encoding system under independent modification is exactly 1: $$C_{\text{coh}} = 1$$ This bound is tight: achievable at DOF = 1, impossible at DOF $> 1$.
+[]{#thm:redundancy-incoherence label="thm:redundancy-incoherence"} Encoding redundancy $\rho > 0$ is necessary and sufficient for incoherence reachability: $$\rho(C, F) > 0 \Longleftrightarrow \text{incoherent states reachable}$$
 :::
 
 ::: proof
-*Proof.* **Achievability (DOF = 1 achieves capacity):** By Theorem [\[thm:dof-one-coherence\]](#thm:dof-one-coherence){reference-type="ref" reference="thm:dof-one-coherence"}, DOF = 1 guarantees coherence. Therefore $C_{\text{coh}} \geq 1$.
+*Proof.* $(\Rightarrow)$ If $\rho > 0$, then DOF $> 1$. By Theorem [\[thm:dof-gt-one-incoherence\]](#thm:dof-gt-one-incoherence){reference-type="ref" reference="thm:dof-gt-one-incoherence"}, incoherent states are reachable.
 
-**Converse (DOF $> 1$ exceeds capacity):** We prove that any encoding with DOF $> 1$ cannot guarantee coherence.
-
-Let $\text{DOF}(C, F) = k > 1$. By Definition [\[def:independent\]](#def:independent){reference-type="ref" reference="def:independent"}, there exist locations $L_1, L_2$ that can be modified independently.
-
-Construct the following modification sequence:
-
-1.  Set $L_1 = v_1$ (valid modification)
-
-2.  Set $L_2 = v_2$ where $v_2 \neq v_1$ (valid modification, since $L_2$ is independent of $L_1$)
-
-The resulting state has $\text{value}(L_1) \neq \text{value}(L_2)$. By Definition [\[def:incoherence\]](#def:incoherence){reference-type="ref" reference="def:incoherence"}, this is incoherent.
-
-Since incoherent states are reachable, coherence is not guaranteed. Therefore $C_{\text{coh}} < k$ for all $k > 1$.
-
-Combining: $C_{\text{coh}} \geq 1$ (achievable) and $C_{\text{coh}} < k$ for all $k > 1$ (converse).
-
-Therefore $C_{\text{coh}} = 1$ exactly. ◻
+$(\Leftarrow)$ If incoherent states are reachable, then by contrapositive of Theorem [\[thm:dof-one-coherence\]](#thm:dof-one-coherence){reference-type="ref" reference="thm:dof-one-coherence"}, DOF $\neq 1$. Since the fact is encoded, DOF $\geq 1$, so DOF $> 1$, hence $\rho > 0$. ◻
 :::
 
-**Information-theoretic interpretation.** This theorem is analogous to Shannon's noisy channel coding theorem [@shannon1948mathematical], which states that reliable communication is possible at rates below channel capacity and impossible above. Here:
+::: definition
+[]{#def:incoherence-entropy label="def:incoherence-entropy"} For an incoherent state with $k$ independent locations holding distinct values, the *incoherence entropy* is: $$H_{\text{inc}} = \log_2 k$$ This quantifies the uncertainty about which value is "correct."
+:::
 
--   **Shannon:** Rate $R < C$ achieves arbitrarily low error; $R > C$ has unavoidable errors
+## Zero-Incoherence Capacity Theorem {#sec:capacity}
 
--   **This work:** DOF $\leq 1$ achieves zero incoherence; DOF $> 1$ has reachable incoherent states
+We now establish the central capacity result. This extends zero-error capacity theory [@korner1973graphs; @lovasz1979shannon] to interactive encoding systems with modification constraints.
 
-The parallel extends to the operational meaning: capacity is the boundary between what's achievable and what's fundamentally impossible, not merely difficult.
+**Background: Zero-Error Capacity.** Shannon [@shannon1956zero] introduced zero-error capacity: the maximum rate at which information can be transmitted with *zero* probability of error (not vanishing, but exactly zero). Körner [@korner1973graphs] and Lovász [@lovasz1979shannon] characterized this via graph entropy and confusability graphs. Our zero-incoherence capacity is analogous: the maximum encoding rate guaranteeing *zero* probability of incoherence.
+
+::: definition
+[]{#def:coherence-capacity label="def:coherence-capacity"} The *zero-incoherence capacity* of an encoding system is: $$C_0 = \sup\{R : \text{encoding rate } R \Rightarrow \text{incoherence probability} = 0\}$$ where "incoherence probability = 0" means no incoherent state is reachable under any modification sequence.
+:::
+
+::: theorem
+[]{#thm:coherence-capacity label="thm:coherence-capacity"} The zero-incoherence capacity of any encoding system under independent modification is exactly 1: $$C_0 = 1$$
+:::
+
+We prove this via the standard achievability/converse structure.
+
+::: theorem
+[]{#thm:capacity-achievability label="thm:capacity-achievability"} Encoding rate DOF $= 1$ achieves zero incoherence. Therefore $C_0 \geq 1$.
+:::
+
+::: proof
+*Proof.* Let DOF$(C, F) = 1$. By Definition [\[def:dof\]](#def:dof){reference-type="ref" reference="def:dof"}, exactly one location $L_s$ is independent; all other locations $\{L_i\}$ are derived from $L_s$.
+
+By Definition [\[def:derived\]](#def:derived){reference-type="ref" reference="def:derived"}, derived locations satisfy: $\text{update}(L_s) \Rightarrow \text{automatically\_updated}(L_i)$. Therefore, for any reachable state: $$\forall i: \text{value}(L_i) = f_i(\text{value}(L_s))$$ where $f_i$ is the derivation function. All values are determined by $L_s$. Disagreement requires two locations with different determining sources, but only $L_s$ exists. Therefore, no incoherent state is reachable. ◻
+:::
+
+::: theorem
+[]{#thm:capacity-converse label="thm:capacity-converse"} Encoding rate DOF $> 1$ does not achieve zero incoherence. Therefore $C_0 < R$ for all $R > 1$.
+:::
+
+::: proof
+*Proof.* Let DOF$(C, F) = k > 1$. By Definition [\[def:independent\]](#def:independent){reference-type="ref" reference="def:independent"}, there exist locations $L_1, L_2$ that can be modified independently.
+
+**Construction of incoherent state:** Consider the modification sequence:
+
+1.  $\delta_1$: Set $L_1 = v_1$ for some $v_1 \in \mathcal{V}_F$
+
+2.  $\delta_2$: Set $L_2 = v_2$ for some $v_2 \neq v_1$
+
+Both modifications are valid (each location accepts values from $\mathcal{V}_F$). By independence, $\delta_2$ does not affect $L_1$. The resulting state has: $$\text{value}(L_1) = v_1 \neq v_2 = \text{value}(L_2)$$
+
+By Definition [\[def:incoherence\]](#def:incoherence){reference-type="ref" reference="def:incoherence"}, this state is incoherent. Since it is reachable, zero incoherence is not achieved. ◻
+:::
+
+::: proof
+*Proof of Theorem [\[thm:coherence-capacity\]](#thm:coherence-capacity){reference-type="ref" reference="thm:coherence-capacity"}.* By Theorem [\[thm:capacity-achievability\]](#thm:capacity-achievability){reference-type="ref" reference="thm:capacity-achievability"}, $C_0 \geq 1$.
+
+By Theorem [\[thm:capacity-converse\]](#thm:capacity-converse){reference-type="ref" reference="thm:capacity-converse"}, $C_0 < R$ for all $R > 1$.
+
+Therefore $C_0 = 1$ exactly. The bound is tight: achieved at DOF $= 1$, not achieved at any DOF $> 1$. ◻
+:::
+
+**Comparison to Shannon capacity.** The structure parallels Shannon's noisy channel coding theorem [@shannon1948mathematical]:
+
+::: center
+                  **Shannon (Channel)**       **This Work (Encoding)**
+  --------------- --------------------------- --------------------------------
+  Rate            Bits per channel use        Independent encoding locations
+  Constraint      Error probability $\to 0$   Incoherence probability $= 0$
+  Achievability   $R < C$ achieves            DOF $= 1$ achieves
+  Converse        $R > C$ fails               DOF $> 1$ fails
+  Capacity        $C = \max I(X;Y)$           $C_0 = 1$
+:::
+
+The key difference: Shannon capacity allows vanishing error; zero-incoherence capacity requires *exactly* zero, paralleling zero-error capacity.
 
 ::: corollary
-[]{#cor:capacity-unique label="cor:capacity-unique"} DOF = 1 is the unique capacity-achieving encoding rate. There is no alternative encoding strategy that achieves coherence at a higher rate.
+[]{#cor:capacity-unique label="cor:capacity-unique"} DOF $= 1$ is the unique capacity-achieving encoding rate. No alternative achieves zero incoherence at higher rate.
 :::
 
-::: proof
-*Proof.* By Theorem [\[thm:coherence-capacity\]](#thm:coherence-capacity){reference-type="ref" reference="thm:coherence-capacity"}, any DOF $> 1$ fails to guarantee coherence. By definition, DOF = 0 fails to encode the fact. Therefore DOF = 1 is the unique coherence-guaranteeing rate. ◻
+::: corollary
+[]{#cor:redundancy-above label="cor:redundancy-above"} Any encoding with $\rho > 0$ (redundancy) operates above capacity and cannot guarantee coherence.
 :::
 
 ## Side Information for Resolution {#sec:side-information}
 
-When an encoding system is incoherent (DOF $> 1$ with divergent values), resolution requires external side information. We quantify exactly how much.
+When an encoding system is incoherent, resolution requires external side information. We establish a tight bound on the required side information, connecting to Slepian-Wolf distributed source coding.
+
+### The Multi-Terminal View
+
+We can view an encoding system as a *multi-terminal source coding* problem [@slepian1973noiseless; @cover2006elements]:
+
+-   Each encoding location is a *terminal* that can transmit (store) a value
+
+-   The fact $F$ is the *source* to be encoded
+
+-   *Derivation* introduces correlation: a derived terminal's output is a deterministic function of its source terminal
+
+-   The *decoder* (any observer querying the system) must reconstruct $F$'s value
+
+In Slepian-Wolf coding, correlated sources $(X, Y)$ can be encoded at rates $(R_X, R_Y)$ satisfying $R_X \geq H(X|Y)$, $R_Y \geq H(Y|X)$, $R_X + R_Y \geq H(X,Y)$. With perfect correlation ($Y = f(X)$), we have $H(X|Y) = 0$---the correlated source needs zero rate.
+
+**Derivation as perfect correlation.** In our model, derivation creates perfect correlation: if $L_d$ is derived from $L_s$, then $\text{value}(L_d) = f(\text{value}(L_s))$ deterministically. The "rate" of $L_d$ is effectively zero---it contributes no independent information. This is why derived locations do not contribute to DOF.
+
+**Independence as zero correlation.** Independent locations have no correlation. Each can hold any value in $\mathcal{V}_F$. The total "rate" is DOF $\cdot H(F)$, but with DOF $> 1$, the locations can encode *different* values---incoherence.
+
+### Side Information Bound
 
 ::: theorem
-[]{#thm:side-info label="thm:side-info"} Given an incoherent encoding system with $k$ independent locations holding distinct values, resolving to the correct value requires at least $\log_2 k$ bits of side information.
+[]{#thm:side-info label="thm:side-info"} Given an incoherent encoding system with $k$ independent locations holding distinct values $\{v_1, \ldots, v_k\}$, resolving to the correct value requires at least $\log_2 k$ bits of side information.
 :::
 
 ::: proof
-*Proof.* The $k$ independent locations partition the resolution problem into $k$ equally plausible alternatives. Without loss of generality, each location is an equally plausible authoritative source.
+*Proof.* The $k$ independent locations partition the value space into $k$ equally plausible alternatives. By Theorem [\[thm:oracle-arbitrary\]](#thm:oracle-arbitrary){reference-type="ref" reference="thm:oracle-arbitrary"}, no internal information distinguishes them---each is an equally valid "source."
 
-By Theorem [\[thm:oracle-arbitrary\]](#thm:oracle-arbitrary){reference-type="ref" reference="thm:oracle-arbitrary"}, no internal information distinguishes them. Resolution requires identifying which of $k$ alternatives is correct.
+Let $S \in \{1, \ldots, k\}$ denote the index of the correct source. The decoder must determine $S$ to resolve correctly. Since $S$ is uniformly distributed over $k$ alternatives (by symmetry of the incoherent state): $$H(S) = \log_2 k$$
 
-Information-theoretically, selecting one of $k$ equally likely alternatives requires $\log_2 k$ bits (the entropy of a uniform distribution over $k$ outcomes).
+Any resolution procedure is a function $R: \text{State} \to \mathcal{V}_F$. Without side information $Y$: $$H(S | R(\text{State})) = H(S) = \log_2 k$$ because $R$ can be computed from the state, which contains no information about which source is correct.
 
-Therefore, resolution requires $\geq \log_2 k$ bits of side information. ◻
+With side information $Y$ that identifies the correct source: $$H(S | Y) = 0 \Rightarrow I(S; Y) = H(S) = \log_2 k$$
+
+Therefore, side information must provide at least $\log_2 k$ bits of mutual information with $S$. ◻
 :::
 
 ::: corollary
@@ -606,10 +685,16 @@ Therefore, resolution requires $\geq \log_2 k$ bits of side information. ◻
 :::
 
 ::: proof
-*Proof.* $\log_2(1) = 0$. With one independent location, that location is trivially authoritative. ◻
+*Proof.* With $k = 1$, there is one independent location. $H(S) = \log_2 1 = 0$. No uncertainty exists about the authoritative source. ◻
 :::
 
-**Connection to Slepian-Wolf coding.** In distributed source coding [@slepian1973noiseless], the decoder uses side information $Y$ to decode $X$ at rate $H(X|Y)$ instead of $H(X)$. Our result is analogous: side information about the authoritative source reduces the "decoding" (resolution) problem from $\log_2 k$ bits to 0 bits.
+::: corollary
+[]{#cor:side-info-redundancy label="cor:side-info-redundancy"} The required side information equals $\log_2(1 + \rho)$ where $\rho$ is encoding redundancy: $$\text{Side information required} = \log_2(\text{DOF}) = \log_2(1 + \rho)$$
+:::
+
+**Connection to Slepian-Wolf.** In Slepian-Wolf coding, the decoder has side information $Y$ and decodes $X$ at rate $H(X|Y)$. Our setting inverts this: the decoder needs side information $S$ (source identity) to "decode" (resolve) which value is correct. The required side information is exactly the entropy of the source-selection variable.
+
+**Connection to zero-error decoding.** In zero-error channel coding, the decoder must identify the transmitted message with certainty. Without sufficient side information (channel structure), this is impossible. Similarly, without $\log_2 k$ bits identifying the authoritative source, zero-error resolution is impossible.
 
 ::: example
 []{#ex:side-info-practice label="ex:side-info-practice"} Consider a configuration system with DOF = 3:
@@ -620,16 +705,30 @@ Therefore, resolution requires $\geq \log_2 k$ bits of side information. ◻
 
 -   `params.toml`: `threshold = 0.6`
 
-To resolve this incoherence requires $\log_2 3 \approx 1.58$ bits of side information. In practice, side information takes forms such as:
+Resolution requires $\log_2 3 \approx 1.58$ bits of side information:
 
--   A priority ordering: "YAML takes precedence" (encodes which of 3 is authoritative)
+-   A priority ordering: "YAML $>$ JSON $>$ TOML" (encodes permutation $\to$ identifies source)
 
--   A timestamp: "most recent wins" (encodes temporal ordering)
+-   A timestamp comparison: "most recent wins" (encodes ordering $\to$ identifies source)
 
--   An explicit declaration: "params.toml is the source of truth"
+-   An explicit declaration: "params.toml is authoritative" (directly encodes source identity)
 
-With DOF = 1, no such side information is needed---the single source is self-evidently authoritative.
+With DOF = 1, zero bits suffice---the single source is self-evidently authoritative.
 :::
+
+### Multi-Terminal Capacity Interpretation
+
+The zero-incoherence capacity theorem (Theorem [\[thm:coherence-capacity\]](#thm:coherence-capacity){reference-type="ref" reference="thm:coherence-capacity"}) can be restated in multi-terminal language:
+
+::: corollary
+[]{#cor:multi-terminal label="cor:multi-terminal"} An encoding system achieves zero incoherence iff all terminals are perfectly correlated (every terminal's output is a deterministic function of one source terminal). Equivalently: the correlation structure must be a tree with one root.
+:::
+
+::: proof
+*Proof.* Perfect correlation means DOF = 1 (only the root is independent). By Theorem [\[thm:capacity-achievability\]](#thm:capacity-achievability){reference-type="ref" reference="thm:capacity-achievability"}, this achieves zero incoherence. If any two terminals are independent (not perfectly correlated through the root), DOF $\geq 2$, and by Theorem [\[thm:capacity-converse\]](#thm:capacity-converse){reference-type="ref" reference="thm:capacity-converse"}, incoherence is reachable. ◻
+:::
+
+This connects to network information theory: in a multi-terminal network, achieving coherence requires complete dependence on a single source---no "multicast" of independent copies.
 
 ## Structure Theorems: The Derivation Lattice {#sec:derivation-structure}
 
@@ -834,13 +933,14 @@ Derivation is the mechanism by which DOF is reduced without losing encodings. A 
 
 Derivation can occur at different times depending on the encoding system:
 
-::: center
-  **Derivation Time**   **Examples Across Domains**
-  --------------------- --------------------------------------------------------------------------------------------
-  Compile/Build time    C++ templates, Rust macros, database schema generation, infrastructure-as-code compilation
-  Definition time       Python metaclasses, ORM model registration, dynamic schema creation
-  Query/Access time     Database views, computed columns, lazy evaluation
+:::: center
+::: tabularx
+lY **Derivation Time** & **Examples Across Domains**\
+Compile/Build time & C++ templates, Rust macros, database schema generation, infrastructure-as-code compilation\
+Definition time & Python metaclasses, ORM model registration, dynamic schema creation\
+Query/Access time & Database views, computed columns, lazy evaluation\
 :::
+::::
 
 **Structural facts require definition-time derivation.** Structural facts (class existence, schema structure, service topology) are fixed when defined. Compile-time derivation that runs before the definition is fixed is too early (the declarative source is not yet fixed). Runtime is too late (structure already immutable). Definition-time is the unique opportunity for structural derivation.
 
@@ -868,13 +968,11 @@ DOF = 1 is achieved across computational domains using definition-time derivatio
 
 **Software: Subclass Registration (Python)**
 
-    class Registry:
-        _registry = {}
-        def __init_subclass__(cls, **kwargs):
-            Registry._registry[cls.__name__] = cls
+::: code
+class Registry: \_registry = def \_\_init_subclass\_\_(cls, \*\*kwargs): Registry.\_registry\[cls.\_\_name\_\_\] = cls
 
-    class PNGHandler(Registry):  # Automatically registered
-        pass
+class PNGHandler(Registry): \# Automatically registered pass
+:::
 
 **Encoding structure:**
 
@@ -886,9 +984,9 @@ DOF = 1 is achieved across computational domains using definition-time derivatio
 
 **Databases: Materialized Views**
 
-    CREATE TABLE users (id INT, name TEXT, created_at TIMESTAMP);
-    CREATE MATERIALIZED VIEW user_count AS
-      SELECT COUNT(*) FROM users;
+::: code
+CREATE TABLE users (id INT, name TEXT, created_at TIMESTAMP); CREATE MATERIALIZED VIEW user_count AS SELECT COUNT(\*) FROM users;
+:::
 
 **Encoding structure:**
 
@@ -900,14 +998,11 @@ DOF = 1 is achieved across computational domains using definition-time derivatio
 
 **Configuration: Infrastructure as Code (Terraform)**
 
-    resource "aws_instance" "app" {
-      ami = "ami-12345"
-      instance_type = "t2.micro"
-    }
+::: code
+resource \"aws_instance\" \"app\" ami = \"ami-12345\" instance_type = \"t2.micro\"
 
-    output "instance_ip" {
-      value = aws_instance.app.public_ip
-    }
+output \"instance_ip\" value = aws_instance.app.public_ip
+:::
 
 **Encoding structure:**
 
@@ -1197,16 +1292,13 @@ This fact must be encoded in two places:
 
 **Python (DOF-1-complete) achieves DOF = 1:**
 
-    class ImageHandler:
-        _registry = {}
+::: code
+class ImageHandler: \_registry =
 
-        def __init_subclass__(cls, format=None, **kwargs):
-            super().__init_subclass__(**kwargs)
-            if format:
-                ImageHandler._registry[format] = cls  # DERIVED (causal)
+def \_\_init_subclass\_\_(cls, format=None, \*\*kwargs): super().\_\_init_subclass\_\_(\*\*kwargs) if format: ImageHandler.\_registry\[format\] = cls \# DERIVED (causal)
 
-    class PNGHandler(ImageHandler, format="png"):  # SOURCE
-        def load(self, path): ...
+class PNGHandler(ImageHandler, format=\"png\"): \# SOURCE def load(self, path): \...
+:::
 
 **Causal propagation:** When `class PNGHandler` executes, `__init_subclass__` fires immediately, adding the registry entry. No temporal gap.
 
@@ -1216,14 +1308,11 @@ This fact must be encoded in two places:
 
 **Java (DOF-1-incomplete) cannot achieve DOF = 1:**
 
-    // File 1: PNGHandler.java
-    @Handler(format = "png")  // Metadata, not executable
-    public class PNGHandler implements ImageHandler { ... }
+::: code
+// File 1: PNGHandler.java \@Handler(format = \"png\") // Metadata, not executable public class PNGHandler implements ImageHandler \...
 
-    // File 2: HandlerRegistry.java (SEPARATE SOURCE)
-    public class HandlerRegistry {
-        static { register("png", PNGHandler.class); }  // Manual
-    }
+// File 2: HandlerRegistry.java (SEPARATE SOURCE) public class HandlerRegistry static register(\"png\", PNGHandler.class); // Manual
+:::
 
 **No causal propagation:** The `@Handler` annotation is data, not code. Nothing executes when the class is defined.
 
@@ -1255,12 +1344,13 @@ Contrast with Python: the registry entry exists only in memory, created causally
 
 ## Summary: The Information-Theoretic Requirements {#sec:req-summary}
 
-::: center
-  **Requirement**            **IT Interpretation**                              **Why Necessary**
-  -------------------------- -------------------------------------------------- ----------------------------------------
-  Causal propagation         Channel with feedback; encoder-decoder coupling    Eliminates temporal incoherence window
-  Provenance observability   Side information at decoder; codebook visibility   Enables DOF verification
+:::: center
+::: tabularx
+lYY **Requirement** & **IT Interpretation** & **Why Necessary**\
+Causal propagation & Channel with feedback; encoder-decoder coupling & Eliminates temporal incoherence window\
+Provenance observability & Side information at decoder; codebook visibility & Enables DOF verification\
 :::
+::::
 
 Both requirements are necessary. Neither is sufficient alone. Together they enable DOF-1-complete encoding systems that achieve the coherence-optimal rate.
 
@@ -1281,14 +1371,15 @@ We instantiate this corollary over a representative language class (Definition 
 
 We evaluate systems on four criteria, derived from the realizability requirements:
 
-::: center
-  **Criterion**             **Abbrev**   **Test**
-  ------------------------- ------------ -----------------------------------------------------
-  Definition-time hooks     DEF          Can arbitrary code execute when a class is defined?
-  Introspectable results    INTRO        Can the program query what was derived?
-  Structural modification   STRUCT       Can hooks modify the structure being defined?
-  Hierarchy queries         HIER         Can the program enumerate subclasses/implementers?
+:::: center
+::: tabularx
+llY **Criterion** & **Abbrev** & **Test**\
+Definition-time hooks & DEF & Can arbitrary code execute when a class is defined?\
+Introspectable results & INTRO & Can the program query what was derived?\
+Structural modification & STRUCT & Can hooks modify the structure being defined?\
+Hierarchy queries & HIER & Can the program enumerate subclasses/implementers?\
 :::
+::::
 
 **DEF** and **INTRO** are the two requirements from Theorem [\[thm:ssot-iff\]](#thm:ssot-iff){reference-type="ref" reference="thm:ssot-iff"}. **STRUCT** and **HIER** are refinements that distinguish partial from complete realizability.
 
@@ -1520,17 +1611,18 @@ We now formalize the complete tradeoff space, analogous to rate-distortion theor
 The *(R, C, P) tradeoff space* is the set of achievable $(R, C, P)$ tuples.
 :::
 
-:::: theorem
+::::: theorem
 []{#thm:operating-regimes label="thm:operating-regimes"} The (R, C, P) space has three distinct operating regimes:
 
-::: center
-   **Rate**   **Complexity**     **Coherence**           **Interpretation**
-  ---------- ----------------- ----------------- ----------------------------------
-   $R = 0$        $C = 0$       $P =$ undefined           Fact not encoded
-   $R = 1$      $C = O(1)$          $P = 1$       **Optimal (capacity-achieving)**
-   $R > 1$    $C = \Omega(R)$       $P = 0$                Above capacity
+:::: center
+::: tabularx
+cccY **Rate** & **Complexity** & **Coherence** & **Interpretation**\
+$R = 0$ & $C = 0$ & $P =$ undefined & Fact not encoded\
+$R = 1$ & $C = O(1)$ & $P = 1$ & **Optimal (capacity-achieving)**\
+$R > 1$ & $C = \Omega(R)$ & $P = 0$ & Above capacity\
 :::
 ::::
+:::::
 
 ::: proof
 *Proof.* **$R = 0$:** No encoding exists. Complexity is zero (nothing to modify), but coherence is undefined (nothing to be coherent about).
@@ -1676,45 +1768,33 @@ This example is from a publicly verifiable pull request [@openhcsPR44]. The PR 
 
 **The Problem:** The codebase used duck typing to check for optional capabilities:
 
-    # BEFORE: 47 scattered hasattr() checks (DOF = 47)
+::: code
+\# BEFORE: 47 scattered hasattr() checks (DOF = 47)
 
-    # In pipeline.py
-    if hasattr(processor, 'supports_gpu'):
-        if processor.supports_gpu():
-            use_gpu_path(processor)
+\# In pipeline.py if hasattr(processor, 'supports_gpu'): if processor.supports_gpu(): use_gpu_path(processor)
 
-    # In serializer.py
-    if hasattr(obj, 'to_dict'):
-        return obj.to_dict()
+\# In serializer.py if hasattr(obj, 'to_dict'): return obj.to_dict()
 
-    # In validator.py
-    if hasattr(config, 'validate'):
-        config.validate()
+\# In validator.py if hasattr(config, 'validate'): config.validate()
 
-    # ... 44 more similar checks across 12 files
+\# \... 44 more similar checks across 12 files
+:::
 
 Each `hasattr()` check is an independent encoding of the fact "this type has capability X." If a capability is renamed or removed, all 47 checks must be updated.
 
 **The Solution:** Replace duck typing with ABC contracts:
 
-    # AFTER: 1 ABC definition (DOF = 1)
+::: code
+\# AFTER: 1 ABC definition (DOF = 1)
 
-    class GPUCapable(ABC):
-        @abstractmethod
-        def supports_gpu(self) -> bool: ...
+class GPUCapable(ABC): \@abstractmethod def supports_gpu(self) -\> bool: \...
 
-    class Serializable(ABC):
-        @abstractmethod
-        def to_dict(self) -> dict: ...
+class Serializable(ABC): \@abstractmethod def to_dict(self) -\> dict: \...
 
-    class Validatable(ABC):
-        @abstractmethod
-        def validate(self) -> None: ...
+class Validatable(ABC): \@abstractmethod def validate(self) -\> None: \...
 
-    # Usage: isinstance() checks are derived from ABC
-    if isinstance(processor, GPUCapable):
-        if processor.supports_gpu():
-            use_gpu_path(processor)
+\# Usage: isinstance() checks are derived from ABC if isinstance(processor, GPUCapable): if processor.supports_gpu(): use_gpu_path(processor)
+:::
 
 The ABC is the single source. The `isinstance()` check is derived. It queries the ABC's `__subclasshook__` or MRO, not an independent encoding.
 
@@ -1732,47 +1812,35 @@ This pattern applies whenever classes must be registered in a central location.
 
 **The Problem:** Type converters were registered in a manual dictionary:
 
-    # BEFORE: Manual registry (DOF = n, where n = number of converters)
+::: code
+\# BEFORE: Manual registry (DOF = n, where n = number of converters)
 
-    # In converters.py
-    class NumpyConverter:
-        def convert(self, data): ...
+\# In converters.py class NumpyConverter: def convert(self, data): \...
 
-    class TorchConverter:
-        def convert(self, data): ...
+class TorchConverter: def convert(self, data): \...
 
-    # In registry.py (SEPARATE FILE - independent encoding)
-    CONVERTERS = {
-        'numpy': NumpyConverter,
-        'torch': TorchConverter,
-        # ... more entries that must be maintained manually
-    }
+\# In registry.py (SEPARATE FILE - independent encoding) CONVERTERS = 'numpy': NumpyConverter, 'torch': TorchConverter, \# \... more entries that must be maintained manually
+:::
 
 Adding a new converter requires: (1) defining the class, (2) adding to the registry. Two independent edits, violating SSOT.
 
 **The Solution:** Use `__init_subclass__` for automatic registration:
 
-    # AFTER: Automatic registration (DOF = 1)
+::: code
+\# AFTER: Automatic registration (DOF = 1)
 
-    class Converter(ABC):
-        _registry = {}
+class Converter(ABC): \_registry =
 
-        def __init_subclass__(cls, format=None, **kwargs):
-            super().__init_subclass__(**kwargs)
-            if format:
-                Converter._registry[format] = cls
+def \_\_init_subclass\_\_(cls, format=None, \*\*kwargs): super().\_\_init_subclass\_\_(\*\*kwargs) if format: Converter.\_registry\[format\] = cls
 
-        @abstractmethod
-        def convert(self, data): ...
+\@abstractmethod def convert(self, data): \...
 
-    class NumpyConverter(Converter, format='numpy'):
-        def convert(self, data): ...
+class NumpyConverter(Converter, format='numpy'): def convert(self, data): \...
 
-    class TorchConverter(Converter, format='torch'):
-        def convert(self, data): ...
+class TorchConverter(Converter, format='torch'): def convert(self, data): \...
 
-    # Registry is automatically populated
-    # Converter._registry == {'numpy': NumpyConverter, 'torch': TorchConverter}
+\# Registry is automatically populated \# Converter.\_registry == 'numpy': NumpyConverter, 'torch': TorchConverter
+:::
 
 **DOF Analysis:**
 
@@ -1788,40 +1856,27 @@ This pattern applies whenever all subclasses of a type must be enumerated.
 
 **The Problem:** Plugins were discovered via explicit imports:
 
-    # BEFORE: Explicit plugin list (DOF = n, where n = number of plugins)
+::: code
+\# BEFORE: Explicit plugin list (DOF = n, where n = number of plugins)
 
-    # In plugin_loader.py
-    from plugins import (
-        DetectorPlugin,
-        SegmenterPlugin,
-        FilterPlugin,
-        # ... more imports that must be maintained
-    )
+\# In plugin_loader.py from plugins import ( DetectorPlugin, SegmenterPlugin, FilterPlugin, \# \... more imports that must be maintained )
 
-    PLUGINS = [
-        DetectorPlugin,
-        SegmenterPlugin,
-        FilterPlugin,
-        # ... more entries that must match the imports
-    ]
+PLUGINS = \[ DetectorPlugin, SegmenterPlugin, FilterPlugin, \# \... more entries that must match the imports \]
+:::
 
 Adding a plugin requires: (1) creating the plugin file, (2) adding the import, (3) adding to the list. Three edits for one fact, violating SSOT.
 
 **The Solution:** Use `__subclasses__()` for automatic discovery:
 
-    # AFTER: Automatic discovery (DOF = 1)
+::: code
+\# AFTER: Automatic discovery (DOF = 1)
 
-    class Plugin(ABC):
-        @abstractmethod
-        def execute(self, context): ...
+class Plugin(ABC): \@abstractmethod def execute(self, context): \...
 
-    # In plugin_loader.py
-    def discover_plugins():
-        return Plugin.__subclasses__()
+\# In plugin_loader.py def discover_plugins(): return Plugin.\_\_subclasses\_\_()
 
-    # Plugins just need to inherit from Plugin
-    class DetectorPlugin(Plugin):
-        def execute(self, context): ...
+\# Plugins just need to inherit from Plugin class DetectorPlugin(Plugin): def execute(self, context): \...
+:::
 
 **DOF Analysis:**
 
@@ -1847,44 +1902,23 @@ This pattern demonstrates why both SSOT requirements (definition-time hooks *and
 
 **Without SSOT:** Manual maintenance lists
 
-    # Hypothetical non-introspectable language
-    IMPORTS = {
-        "sklearn.filters": ["gaussian", "sobel"],
-        "numpy": ["array"],
-        # Must manually update when types change
-    }
+::: code
+\# Hypothetical non-introspectable language IMPORTS = \"sklearn.filters\": \[\"gaussian\", \"sobel\"\], \"numpy\": \[\"array\"\], \# Must manually update when types change
 
-    DEFAULT_VALUES = {
-        "gaussian": {"sigma": 1.0, "mode": "reflect"},
-        # Must manually update when signatures change
-    }
+DEFAULT_VALUES = \"gaussian\": \"sigma\": 1.0, \"mode\": \"reflect\", \# Must manually update when signatures change
+:::
 
 Every type, every function parameter, every enum. Each requires a manual entry. When a function signature changes, both the function *and* the metadata list must be updated. DOF $>$ 1.
 
 **With SSOT (Python):** Derive everything from introspection
 
-    def collect_imports_from_data(data_obj):
-        """Traverse structure, derive imports from metadata."""
-        if isinstance(obj, Enum):
-            # Enum definition is single source
-            module = obj.__class__.__module__
-            name = obj.__class__.__name__
-            enum_imports[module].add(name)
+::: code
+def collect_imports_from_data(data_obj): \"\"\"Traverse structure, derive imports from metadata.\"\"\" if isinstance(obj, Enum): \# Enum definition is single source module = obj.\_\_class\_\_.\_\_module\_\_ name = obj.\_\_class\_\_.\_\_name\_\_ enum_imports\[module\].add(name)
 
-        elif is_dataclass(obj):
-            # Dataclass definition is single source
-            function_imports[obj.__class__.__module__].add(
-                obj.__class__.__name__)
-            # Fields are derived via introspection
-            for f in fields(obj):
-                register_imports(getattr(obj, f.name))
+elif is_dataclass(obj): \# Dataclass definition is single source function_imports\[obj.\_\_class\_\_.\_\_module\_\_\].add( obj.\_\_class\_\_.\_\_name\_\_) \# Fields are derived via introspection for f in fields(obj): register_imports(getattr(obj, f.name))
 
-    def generate_dataclass_repr(instance):
-        """Generate constructor call from field metadata."""
-        for field in dataclasses.fields(instance):
-            current_value = getattr(instance, field.name)
-            # Field name, type, default all come from definition
-            lines.append(f"{field.name}={repr(current_value)}")
+def generate_dataclass_repr(instance): \"\"\"Generate constructor call from field metadata.\"\"\" for field in dataclasses.fields(instance): current_value = getattr(instance, field.name) \# Field name, type, default all come from definition lines.append(f\"field.name=repr(current_value)\")
+:::
 
 **The Key Insight:** The class definition at definition-time establishes facts:
 
@@ -1933,15 +1967,17 @@ The theoretical prediction (Theorem [\[thm:ssot-iff\]](#thm:ssot-iff){reference
 
 # Related Work {#sec:related}
 
-This section surveys related work across five areas: source coding under modification constraints, distributed systems consistency, computational reflection, software engineering principles, and formal methods.
+This section surveys related work across five areas: zero-error and multi-terminal source coding, interactive information theory, distributed systems, computational reflection, and formal methods.
 
-## Source Coding Under Modification Constraints {#sec:related-source-coding}
+## Zero-Error and Multi-Terminal Source Coding {#sec:related-source-coding}
 
-Our work extends classical source coding to *interactive encoding systems*---systems where encodings can be modified and must remain coherent across modifications. This connects to several established IT areas.
+Our zero-incoherence capacity theorem extends classical source coding to interactive multi-terminal systems.
 
-**Multi-Version Coding.** Rashmi et al. [@rashmi2015multiversion] formalize consistent distributed storage where multiple versions of data must be accessible while maintaining consistency guarantees. Their framework addresses a key question: what is the storage cost of ensuring that any $c$ servers can decode the latest common version? They prove an "inevitable price, in terms of storage cost, to ensure consistency."
+**Zero-Error Capacity.** Shannon [@shannon1956zero] introduced zero-error capacity: the maximum rate achieving exactly zero error probability. Körner [@korner1973graphs] connected this to graph entropy, and Lovász [@lovasz1979shannon] characterized the Shannon capacity of the pentagon graph. Our zero-incoherence capacity is the storage analog: the maximum encoding rate achieving exactly zero incoherence probability. The achievability/converse structure (Theorems [\[thm:capacity-achievability\]](#thm:capacity-achievability){reference-type="ref" reference="thm:capacity-achievability"}, [\[thm:capacity-converse\]](#thm:capacity-converse){reference-type="ref" reference="thm:capacity-converse"}) parallels zero-error proofs. The key parallel: zero-error capacity requires distinguishability between codewords; zero-incoherence capacity requires indistinguishability (all locations must agree).
 
-Our DOF = 1 theorem is analogous: we prove the *encoding rate* cost of ensuring coherence under modification. Where multi-version coding trades storage for consistency across versions, we trade encoding rate for coherence across locations.
+**Multi-Terminal Source Coding.** Slepian and Wolf [@slepian1973noiseless] characterized distributed encoding of correlated sources: sources $(X, Y)$ can be encoded at rates satisfying $R_X \geq H(X|Y)$ when $Y$ is decoder side information. We model encoding locations as terminals (Section [\[sec:side-information\]](#sec:side-information){reference-type="ref" reference="sec:side-information"}). Derivation introduces *perfect correlation*: a derived terminal's output is a deterministic function of its source, so $H(L_d | L_s) = 0$. The capacity result shows that only complete correlation (all terminals derived from one source) achieves zero incoherence.
+
+**Multi-Version Coding.** Rashmi et al. [@rashmi2015multiversion] formalize consistent distributed storage where multiple versions must be accessible while maintaining consistency. They prove an "inevitable price, in terms of storage cost, to ensure consistency." Our DOF = 1 theorem is analogous: we prove the *encoding rate* cost of ensuring coherence. Where multi-version coding trades storage for version consistency, we trade encoding rate for location coherence.
 
 **Write-Once Memory Codes.** Rivest and Shamir [@rivest1982wom] introduced WOM codes for storage media where bits can only transition $0 \to 1$. Despite this irreversibility constraint, clever coding achieves capacity $\log_2(t+1)$ for $t$ writes---more than the naive $1$ bit.
 
@@ -1989,23 +2025,34 @@ Classical software-engineering principles such as DRY [@hunt1999pragmatic], inf
 
 Our Lean 4 [@demoura2021lean4] formalization follows the tradition of mechanized theory (e.g., Pierce [@pierce2002types], Winskel [@winskel1993semantics], CompCert [@leroy2009compcert]), but applies it to an information-theoretic encoding model.
 
-## Novelty of This Work {#sec:novelty}
+## Novelty and IT Contribution {#sec:novelty}
 
 To our knowledge, this is the first work to:
 
-1.  **Formalize interactive encoding with modifications**---a model where encodings change over time and coherence is a system property, not a post hoc check.
+1.  **Define zero-incoherence capacity**---the maximum encoding rate guaranteeing zero probability of location disagreement, extending zero-error capacity to multi-location storage.
 
-2.  **Prove a coherence capacity theorem**---DOF = 1 is the unique rate guaranteeing coherence (achievability + converse).
+2.  **Prove a capacity theorem with achievability/converse**---$C_0 = 1$ exactly, with explicit achievability (Theorem [\[thm:capacity-achievability\]](#thm:capacity-achievability){reference-type="ref" reference="thm:capacity-achievability"}) and converse (Theorem [\[thm:capacity-converse\]](#thm:capacity-converse){reference-type="ref" reference="thm:capacity-converse"}) following the Shannon proof structure.
 
-3.  **Give a realizability iff**---causal propagation and provenance observability are necessary and sufficient encoder properties for achieving DOF = 1.
+3.  **Quantify side information for resolution**---$\geq \log_2 k$ bits for $k$-way incoherence (Theorem [\[thm:side-info\]](#thm:side-info){reference-type="ref" reference="thm:side-info"}), connecting to Slepian-Wolf decoder side information.
 
-4.  **Establish tight rate--complexity bounds**---$O(1)$ for DOF = 1 vs. $\Omega(n)$ for DOF $> 1$, with an unbounded gap.
+4.  **Characterize encoder realizability**---causal propagation (feedback) and provenance observability (side information) are necessary and sufficient for achieving capacity (Theorem [\[thm:ssot-iff\]](#thm:ssot-iff){reference-type="ref" reference="thm:ssot-iff"}).
 
-5.  **Provide machine-checked proofs**---All theorems formalized in Lean 4 with 0 `sorry` placeholders.
+5.  **Establish rate-complexity tradeoffs**---$O(1)$ at capacity vs. $\Omega(n)$ above capacity, with unbounded gap (Theorem [\[thm:unbounded-gap\]](#thm:unbounded-gap){reference-type="ref" reference="thm:unbounded-gap"}).
 
-**Information-theoretic contribution:** We extend classical IT to mutable encoding systems with coherence constraints. The coherence capacity theorem and tight rate--complexity bounds provide the achievability/converse structure; the realizability iff identifies the encoder properties required to attain capacity.
+**Relation to classical IT.**
 
-**Interpretive instantiations:** The abstract requirements instantiate across domains (e.g., programming languages and database systems). These instantiations are corollaries of the core theorems and are presented as examples, not as premises of the proofs.
+::: center
+  **Classical IT Concept**     **This Work**               **Theorem**
+  ---------------------------- --------------------------- -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Zero-error capacity          Zero-incoherence capacity   [\[thm:coherence-capacity\]](#thm:coherence-capacity){reference-type="ref" reference="thm:coherence-capacity"}
+  Channel capacity proof       Achievability + converse    [\[thm:capacity-achievability\]](#thm:capacity-achievability){reference-type="ref" reference="thm:capacity-achievability"}, [\[thm:capacity-converse\]](#thm:capacity-converse){reference-type="ref" reference="thm:capacity-converse"}
+  Slepian-Wolf side info       Resolution side info        [\[thm:side-info\]](#thm:side-info){reference-type="ref" reference="thm:side-info"}
+  Multi-terminal correlation   Derivation as correlation   Def. [\[def:derived\]](#def:derived){reference-type="ref" reference="def:derived"}
+  Feedback channel             Causal propagation          Thm. [\[thm:causal-necessary\]](#thm:causal-necessary){reference-type="ref" reference="thm:causal-necessary"}
+  Rate-distortion tradeoff     Rate-complexity tradeoff    [\[thm:unbounded-gap\]](#thm:unbounded-gap){reference-type="ref" reference="thm:unbounded-gap"}
+:::
+
+**What is new:** The setting (interactive multi-location encoding with modifications), the capacity theorem for this setting, the side information bound, the encoder realizability iff, and the machine-checked proofs. The instantiations (programming languages, databases) are corollaries illustrating the abstract theory.
 
 
 # Conclusion {#sec:conclusion}
@@ -2027,29 +2074,27 @@ Transparency about this methodology reflects our belief that the contribution is
 ----------------------------------------------------------------------------------------------------
 :::
 
-We have established the first information-theoretic foundations for optimal encoding under coherence constraints. The key contributions are:
+We have established a new capacity theorem extending zero-error source coding to interactive multi-location encoding systems. The key contributions are:
 
-**1. Extension of Source Coding Theory:** We extend classical source coding to *interactive encoding systems*---systems where encodings can be modified and must remain coherent across modifications. DOF (Degrees of Freedom) formalizes encoding rate as the count of independent encoding locations for a fact.
+**1. Zero-Incoherence Capacity Theorem:** We define zero-incoherence capacity $C_0$ as the maximum encoding rate guaranteeing zero probability of location disagreement, and prove $C_0 = 1$ exactly (Theorem [\[thm:coherence-capacity\]](#thm:coherence-capacity){reference-type="ref" reference="thm:coherence-capacity"}). The proof follows the achievability/converse structure of Shannon's channel capacity theorem.
 
-**2. Optimal Rate Uniqueness:** We prove that DOF = 1 is the **unique** optimal encoding rate guaranteeing coherence (Theorem [\[thm:ssot-unique\]](#thm:ssot-unique){reference-type="ref" reference="thm:ssot-unique"}). Any system with DOF $> 1$ permits incoherent states; DOF = 0 fails to represent the fact. This uniqueness is information-theoretic necessity, not design choice.
+**2. Side Information Bound:** We prove that resolution of $k$-way incoherence requires $\geq \log_2 k$ bits of side information (Theorem [\[thm:side-info\]](#thm:side-info){reference-type="ref" reference="thm:side-info"}). This connects to Slepian-Wolf distributed source coding: provenance information acts as decoder side information.
 
-**3. Rate-Complexity Tradeoffs:** We establish fundamental tradeoffs analogous to rate-distortion theory: DOF = 1 achieves $O(1)$ modification complexity; DOF $> 1$ requires $\Omega(n)$. The gap is unbounded---for any constant $k$, there exists an encoding system size where DOF = 1 provides at least $k\times$ reduction (Theorem [\[thm:unbounded-gap\]](#thm:unbounded-gap){reference-type="ref" reference="thm:unbounded-gap"}).
+**3. Multi-Terminal Interpretation:** We model encoding locations as terminals in a multi-terminal source coding problem. Derivation introduces perfect correlation (deterministic dependence), reducing effective rate. Only complete correlation (all terminals derived from one source) achieves zero incoherence.
 
-**4. Resolution Impossibility:** We prove an impossibility theorem (Theorem [\[thm:oracle-arbitrary\]](#thm:oracle-arbitrary){reference-type="ref" reference="thm:oracle-arbitrary"}) analogous to zero-error capacity: without coherence guarantees, no resolution procedure is information-theoretically justified. Multiple independent encodings create irresolvable ambiguity.
+**4. Rate-Complexity Tradeoffs:** We establish tradeoffs analogous to rate-distortion: $O(1)$ modification complexity at capacity vs. $\Omega(n)$ above capacity. The gap is unbounded (Theorem [\[thm:unbounded-gap\]](#thm:unbounded-gap){reference-type="ref" reference="thm:unbounded-gap"}).
 
-**5. Realizability Requirements:** For computational systems, we prove that DOF = 1 realizability requires (1) definition-time computation AND (2) introspectable derivation (Theorem [\[thm:ssot-iff\]](#thm:ssot-iff){reference-type="ref" reference="thm:ssot-iff"}). Both are necessary; both together are sufficient. This is an if-and-only-if characterization.
+**5. Encoder Realizability:** Achieving capacity requires two encoder properties: causal propagation (analogous to feedback) and provenance observability (analogous to decoder side information). Both necessary; together sufficient (Theorem [\[thm:ssot-iff\]](#thm:ssot-iff){reference-type="ref" reference="thm:ssot-iff"}).
 
-**6. Mathematical Necessity:** The uniqueness theorem (Theorem [\[thm:ssot-unique\]](#thm:ssot-unique){reference-type="ref" reference="thm:ssot-unique"}) establishes that DOF=1 is the unique minimal encoding rate: $|\{r : \text{optimal}(r)\}| = 1$. This singleton solution space eliminates design freedom. Given coherence as a requirement, the mathematics forces DOF = 1.
-
-**Corollary instantiations.** We include a programming-language instantiation and a worked case study as corollaries of the realizability theorem. These illustrate the abstract results without being used in the proofs.
+**Corollary instantiations.** The abstract theory instantiates across domains (programming languages, distributed databases, configuration systems). Sections [\[sec:evaluation\]](#sec:evaluation){reference-type="ref" reference="sec:evaluation"} and [\[sec:empirical\]](#sec:empirical){reference-type="ref" reference="sec:empirical"} provide illustrative corollaries; the core theorems are domain-independent.
 
 **Implications:**
 
-1.  **For encoding system designers:** If coherence guarantees are required, the system must provide automatic derivation mechanisms; otherwise coherence scales as $\Omega(n)$ with the number of independent encodings.
+1.  **For information theorists:** Zero-error capacity theory extends to interactive multi-location encoding. The setting (modifiable encodings, coherence constraints) is new; the achievability/converse structure and side information bounds connect to established IT.
 
-2.  **For information theorists:** Classical source coding extends to interactive systems with modification constraints. The coherence requirement creates rate-complexity tradeoffs analogous to rate-distortion tradeoffs, with a unique optimal rate.
+2.  **For coding theorists:** Derivation is the mechanism that introduces correlation, reducing effective encoding rate. The encoder realizability theorem characterizes what encoder properties enable capacity-achieving codes.
 
-3.  **For formal methods researchers:** The results can be formalized in a proof assistant; the Lean proofs show theorems and model definitions are mechanizable.
+3.  **For system designers:** The capacity theorem is a forcing result: if coherence is required, encoding rate must be $\leq 1$. Systems operating above capacity require external side information for resolution.
 
 **Limitations:**
 
@@ -2063,15 +2108,15 @@ We have established the first information-theoretic foundations for optimal enco
 
 **Future Work:**
 
--   Extend the encoding theory to probabilistic coherence (soft constraints, approximate agreement)
+-   **Probabilistic coherence:** Extend to soft constraints where incoherence probability is bounded but non-zero, analogous to the transition from zero-error to vanishing-error capacity.
 
--   Develop automated DOF measurement tools for multiple computational domains (code analysis, schema analysis, configuration analysis)
+-   **Network encoding:** Study coherence capacity in networked encoding systems with communication constraints, connecting to network information theory.
 
--   Study the relationship between DOF and other system quality metrics (reliability, maintainability, performance)
+-   **Rate-distortion extension:** Characterize the full rate-complexity function $R(M)$ trading encoding rate against modification complexity, analogous to rate-distortion $R(D)$.
 
--   Investigate DOF = 1 realizability in distributed systems with network partitions
+-   **Interactive capacity:** Study capacity under multi-round modification protocols, connecting to interactive information theory and directed information.
 
--   Characterize the information-theoretic limits of compile-time vs. runtime coherence mechanisms
+-   **Partial correlation:** Characterize coherence guarantees when derivation introduces partial (non-deterministic) correlation, extending beyond the perfect-correlation case.
 
 ## Artifacts {#sec:data-availability}
 
@@ -2102,15 +2147,11 @@ Paper 1 establishes this methodology:
 
 The file `PythonInstantiation.lean` (250 LOC) proves:
 
-    -- Python's type() factors into (B, S)
-    theorem python_type_is_two_axis (pt : PythonType) :
-        exists B S, pythonTypeAxes pt = (B, S)
+::: code
+-- Python's type() factors into (B, S) theorem python_type_is_two_axis (pt : PythonType) : exists B S, pythonTypeAxes pt = (B, S)
 
-    -- All observables factor through axes
-    lemma observables_factor_through_axes {p q : PythonType}
-        (h : sameAxes p q) (attr : AttrName) :
-        metaclassOf p = metaclassOf q /\
-        getattrHas p attr = getattrHas q attr
+-- All observables factor through axes lemma observables_factor_through_axes p q : PythonType (h : sameAxes p q) (attr : AttrName) : metaclassOf p = metaclassOf q / getattrHas p attr = getattrHas q attr
+:::
 
 The second theorem is the key: if two types have identical `__bases__` and `__dict__`, they are observationally indistinguishable. This proves the model captures Python's observable behavior.
 
@@ -2118,15 +2159,9 @@ The second theorem is the key: if two types have identical `__bases__` and `__di
 
 The `LangPython.lean` file (235 LOC) directly transcribes Python's documented semantics for class creation:
 
-    -- Class definition events (from Python datamodel docs)
-    inductive ClassDefEvent where
-      | metacall_start : PyId -> ClassDefEvent
-      | new_called : PyId -> ClassDefEvent
-      | namespace_populated : PyId -> ClassDefEvent
-      | init_subclass_called : PyId -> PyId -> ClassDefEvent
-      | subclasses_updated : PyId -> PyId -> ClassDefEvent
-      | init_called : PyId -> ClassDefEvent
-      | class_bound : PyId -> ClassDefEvent
+::: code
+-- Class definition events (from Python datamodel docs) inductive ClassDefEvent where \| metacall_start : PyId -\> ClassDefEvent \| new_called : PyId -\> ClassDefEvent \| namespace_populated : PyId -\> ClassDefEvent \| init_subclass_called : PyId -\> PyId -\> ClassDefEvent \| subclasses_updated : PyId -\> PyId -\> ClassDefEvent \| init_called : PyId -\> ClassDefEvent \| class_bound : PyId -\> ClassDefEvent
+:::
 
 The theorem `init_subclass_in_class_definition` is then *derived* from this semantics---not assumed. The model is a direct encoding of Python's specification.
 
@@ -2278,13 +2313,11 @@ Cross-system encoding (e.g., protobuf generating code for multiple languages) re
 
 **Response:** This critique was valid for earlier versions. We have since added `Ssot/Inconsistency.lean` (216 LOC, zero `sorry`), which formalizes inconsistency as a Lean `Prop`:
 
-    structure ConfigSystem where
-      num_locations : Nat
-      value_at : LocationId -> Value
+::: code
+structure ConfigSystem where num_locations : Nat value_at : LocationId -\> Value
 
-    def inconsistent (c : ConfigSystem) : Prop :=
-      exists l1 l2, l1 < c.num_locations /\ l2 < c.num_locations /\
-                    l1 != l2 /\ c.value_at l1 != c.value_at l2
+def inconsistent (c : ConfigSystem) : Prop := exists l1 l2, l1 \< c.num_locations / l2 \< c.num_locations / l1 != l2 / c.value_at l1 != c.value_at l2
+:::
 
 The file proves:
 
@@ -2314,9 +2347,9 @@ This addresses the critique directly: inconsistency is now a formal property tha
 
 The Lean formalization (AbstractClassSystem.lean) captures this:
 
-    -- N is just a label for a (B, S) pair
-    -- N contributes no observables beyond B
-    -- Theorem obs_eq_bs proves: (B, S) equality suffices; N adds nothing
+::: code
+-- N is just a label for a (B, S) pair -- N contributes no observables beyond B -- Theorem obs_eq_bs proves: (B, S) equality suffices; N adds nothing
+:::
 
 The operational test: given two classes with identical `__bases__` (B) and identical `__dict__` (S), can any Python code distinguish them behaviorally? No. The name is metadata, not a degree of freedom for the type's semantics.
 
@@ -2340,9 +2373,9 @@ If the model is wrong, show the Rust code that falsifies it. The burden is on th
 
 **Objection:** "Rust can achieve DOF = 1 using proc macros and static registries. Example:
 
-    #[derive(AutoRegister)]
-    struct MyHandler;
-    static HANDLERS: &[&dyn Handler] = &[&MyHandler, ...];
+::: code
+#\[derive(AutoRegister)\] struct MyHandler; static HANDLERS: &\[&dyn Handler\] = &\[&MyHandler, \...\];
+:::
 
 The macro generates the registry at compile time. There's no second DOF that can diverge."
 
@@ -2352,8 +2385,9 @@ The macro generates the registry at compile time. There's no second DOF that can
 
 2.  **Registration is bypassable.** You can write:
 
-        struct SneakyHandler;
-        impl Handler for SneakyHandler { ... }  // No #[derive]---NOT in registry
+    ::: code
+    struct SneakyHandler; impl Handler for SneakyHandler \... // No #\[derive\]---NOT in registry
+    :::
 
     The impl exists; the registry entry does not. **DOF = 2**: the impl and the registry are independent locations that can disagree.
 
@@ -2367,8 +2401,9 @@ The macro generates the registry at compile time. There's no second DOF that can
 
 Contrast Python:
 
-    class SneakyHandler(Registry):  # __init_subclass__ fires AUTOMATICALLY
-        pass  # Cannot create unregistered subclass---IMPOSSIBLE
+::: code
+class SneakyHandler(Registry): \# \_\_init_subclass\_\_ fires AUTOMATICALLY pass \# Cannot create unregistered subclass---IMPOSSIBLE
+:::
 
 In Python, the hook is *unforgeable*. The language semantics guarantee that creating a subclass triggers `__init_subclass__`. There is no syntax to bypass this. **DOF = 1** by construction.
 
@@ -2491,197 +2526,49 @@ This follows the tradition of foundational theory: Shannon [@shannon1948mathema
 
 This file establishes the core abstractions. We model DOF as a natural number whose properties we prove directly, avoiding complex type machinery.
 
-    /-
-      Encoding Theory Formalization - Basic Definitions
-      Paper 2: Optimal Encoding Under Coherence Constraints
-
-      Design principle: Keep definitions simple for clean proofs.
-      DOF and modification complexity are modeled as Nat values
-      whose properties we prove abstractly.
-    -/
-
-    -- Core abstraction: Degrees of Freedom as a natural number
-    -- DOF(C, F) = number of independent locations encoding fact F
-    -- We prove properties about DOF values directly
-
-    -- Key definitions stated as documentation:
-    -- EditSpace: set of syntactically valid modifications
-    -- Fact: atomic unit of program specification
-    -- Encodes(L, F): L must be updated when F changes
-    -- Independent(L): L can diverge (not derived from another location)
-    -- DOF(C, F) = |{L : encodes(L, F) \and independent(L)}|
-
-    -- Theorem 1.6: Correctness Forcing
-    -- M(C, delta_F) is the MINIMUM number of edits required for correctness
-    -- Fewer edits than M leaves at least one encoding location inconsistent
-    theorem correctness_forcing (M : Nat) (edits : Nat) (h : edits < M) :
-        M - edits > 0 := by
-      omega
-
-    -- Theorem 1.9: DOF = Inconsistency Potential
-    theorem dof_inconsistency_potential (k : Nat) (hk : k > 1) :
-        k > 1 := by
-      exact hk
-
-    -- Corollary 1.10: DOF > 1 implies potential inconsistency
-    theorem dof_gt_one_inconsistent (dof : Nat) (h : dof > 1) :
-        dof != 1 := by  -- Lean 4: != is notation for \neq
-      omega
-
 ## SSOT.lean: Optimal Encoding Definition (38 lines) {#sec:lean-ssot .unnumbered}
 
 This file defines the optimal encoding rate (DOF = 1) and proves its uniqueness using a simple Nat-based formulation.
 
-    /-
-      Encoding Theory Formalization - Optimal Rate Definition
-      Paper 2: Optimal Encoding Under Coherence Constraints
-    -/
+::: code
+/- Encoding Theory Formalization - Optimal Rate Definition Paper 2: Optimal Encoding Under Coherence Constraints -/
 
-    -- Definition 2.1: Optimal Encoding Rate
-    -- Optimal encoding holds for fact F iff DOF(C, F) = 1
-    def satisfies_SSOT (dof : Nat) : Prop := dof = 1
+-- Definition 2.1: Optimal Encoding Rate -- Optimal encoding holds for fact F iff DOF(C, F) = 1 def satisfies_SSOT (dof : Nat) : Prop := dof = 1
 
-    -- Theorem 2.2: Optimal Rate Uniqueness
-    theorem ssot_optimality (dof : Nat) (h : satisfies_SSOT dof) :
-        dof = 1 := by
-      exact h
+-- Theorem 2.2: Optimal Rate Uniqueness theorem ssot_optimality (dof : Nat) (h : satisfies_SSOT dof) : dof = 1 := by exact h
 
-    -- Corollary 2.3: DOF = 1 implies O(1) modification complexity
-    theorem ssot_implies_constant_complexity (dof : Nat) (h : satisfies_SSOT dof) :
-        dof <= 1 := by  -- Lean 4: <= is notation for \leq
-      unfold satisfies_SSOT at h
-      omega
+-- Corollary 2.3: DOF = 1 implies O(1) modification complexity theorem ssot_implies_constant_complexity (dof : Nat) (h : satisfies_SSOT dof) : dof \<= 1 := by -- Lean 4: \<= is notation for unfold satisfies_SSOT at h omega
 
-    -- Theorem: DOF != 1 implies potential incoherence
-    theorem non_ssot_inconsistency (dof : Nat) (h : Not (satisfies_SSOT dof)) :
-        dof = 0 \/ dof > 1 := by  -- Lean 4: \/ is notation for Or
-      unfold satisfies_SSOT at h
-      omega
+-- Theorem: DOF != 1 implies potential incoherence theorem non_ssot_inconsistency (dof : Nat) (h : Not (satisfies_SSOT dof)) : dof = 0 dof \> 1 := by -- Lean 4: is notation for Or unfold satisfies_SSOT at h omega
 
-    -- Key insight: DOF = 1 is the unique optimal encoding rate
-    -- DOF = 0: fact not encoded (underspecification)
-    -- DOF = 1: optimal (guaranteed coherence)
-    -- DOF > 1: incoherence reachable (suboptimal)
+-- Key insight: DOF = 1 is the unique optimal encoding rate -- DOF = 0: fact not encoded (underspecification) -- DOF = 1: optimal (guaranteed coherence) -- DOF \> 1: incoherence reachable (suboptimal)
+:::
 
 ## Requirements.lean: Realizability Necessity Proofs (113 lines) {#sec:lean-requirements}
 
 This file proves that definition-time computation and introspection are necessary for DOF = 1 realizability in computational systems. These requirements are *derived*, not chosen.
 
-    /-
-      Encoding Theory Formalization - Realizability Requirements (Necessity Proofs)
-      KEY INSIGHT: These requirements are DERIVED, not chosen.
-      The information-theoretic structure forces them from DOF = 1 optimality.
-    -/
-
-    import Ssot.Basic
-    import Ssot.Derivation
-
-    -- Language feature predicates
-    structure LanguageFeatures where
-      has_definition_hooks : Bool   -- Code executes when class/type is defined
-      has_introspection : Bool      -- Can query what was derived
-      has_structural_modification : Bool
-      has_hierarchy_queries : Bool  -- Can enumerate subclasses/implementers
-      deriving DecidableEq, Inhabited
-
-    -- Structural vs runtime facts
-    inductive FactKind where
-      | structural  -- Fixed at definition time
-      | runtime     -- Can be modified at runtime
-      deriving DecidableEq
-
-    inductive Timing where
-      | definition  -- At class/type definition
-      | runtime     -- After program starts
-      deriving DecidableEq
-
-    -- Axiom: Structural facts are fixed at definition time
-    def structural_timing : FactKind → Timing
-      | FactKind.structural => Timing.definition
-      | FactKind.runtime => Timing.runtime
-
-    -- Can a language derive at the required time?
-    def can_derive_at (L : LanguageFeatures) (t : Timing) : Bool :=
-      match t with
-      | Timing.definition => L.has_definition_hooks
-      | Timing.runtime => true  -- All languages can compute at runtime
-
-    -- Theorem 3.2: Definition-Time Hooks are NECESSARY
-    theorem definition_hooks_necessary (L : LanguageFeatures) :
-        can_derive_at L Timing.definition = false →
-        L.has_definition_hooks = false := by
-      intro h
-      simp [can_derive_at] at h
-      exact h
-
-    -- Theorem 3.4: Introspection is NECESSARY for Verifiable SSOT
-    def can_enumerate_encodings (L : LanguageFeatures) : Bool :=
-      L.has_introspection
-
-    theorem introspection_necessary_for_verification (L : LanguageFeatures) :
-        can_enumerate_encodings L = false →
-        L.has_introspection = false := by
-      intro h
-      simp [can_enumerate_encodings] at h
-      exact h
-
-    -- THE KEY THEOREM: Both requirements are independently necessary
-    theorem both_requirements_independent :
-        forall  L : LanguageFeatures,
-          (L.has_definition_hooks = true \and L.has_introspection = false) →
-          can_enumerate_encodings L = false := by
-      intro L ⟨_, h_no_intro⟩
-      simp [can_enumerate_encodings, h_no_intro]
-
-    theorem both_requirements_independent' :
-        forall  L : LanguageFeatures,
-          (L.has_definition_hooks = false \and L.has_introspection = true) →
-          can_derive_at L Timing.definition = false := by
-      intro L ⟨h_no_hooks, _⟩
-      simp [can_derive_at, h_no_hooks]
-
 ## Bounds.lean: Rate-Complexity Bounds (56 lines) {#sec:lean-bounds}
 
 This file proves the rate-complexity tradeoff: DOF = 1 achieves $O(1)$ modification complexity, DOF $> 1$ requires $\Omega(n)$.
 
-    /-
-      Encoding Theory Formalization - Rate-Complexity Bounds
-      Paper 2: Optimal Encoding Under Coherence Constraints
-    -/
+::: code
+/- Encoding Theory Formalization - Rate-Complexity Bounds Paper 2: Optimal Encoding Under Coherence Constraints -/
 
-    import Ssot.SSOT
-    import Ssot.Completeness
+import Ssot.SSOT import Ssot.Completeness
 
-    -- Theorem 6.1: SSOT Upper Bound (O(1))
-    theorem ssot_upper_bound (dof : Nat) (h : satisfies_SSOT dof) :
-        dof = 1 := by
-      exact h
+-- Theorem 6.1: SSOT Upper Bound (O(1)) theorem ssot_upper_bound (dof : Nat) (h : satisfies_SSOT dof) : dof = 1 := by exact h
 
-    -- Theorem 6.2: Non-SSOT Lower Bound (Omega(n))
-    theorem non_ssot_lower_bound (dof n : Nat) (h : dof = n) (hn : n > 1) :
-        dof >= n := by
-      omega
+-- Theorem 6.2: Non-SSOT Lower Bound (Omega(n)) theorem non_ssot_lower_bound (dof n : Nat) (h : dof = n) (hn : n \> 1) : dof \>= n := by omega
 
-    -- Theorem 6.3: Unbounded Complexity Gap
-    theorem complexity_gap_unbounded :
-        forall  bound : Nat, exists  n : Nat, n > bound := by
-      intro bound
-      exact ⟨bound + 1, Nat.lt_succ_self bound⟩
+-- Theorem 6.3: Unbounded Complexity Gap theorem complexity_gap_unbounded : forall bound : Nat, exists n : Nat, n \> bound := by intro bound exact ⟨bound + 1, Nat.lt_succ_self bound⟩
 
-    -- Corollary: The gap between O(1) and O(n) is unbounded
-    theorem gap_ratio_unbounded (n : Nat) (hn : n > 0) :
-        n / 1 = n := by
-      simp
+-- Corollary: The gap between O(1) and O(n) is unbounded theorem gap_ratio_unbounded (n : Nat) (hn : n \> 0) : n / 1 = n := by simp
 
-    -- Corollary: Language choice has asymptotic maintenance implications
-    theorem language_choice_asymptotic :
-        -- SSOT-complete: O(1) per fact change
-        -- SSOT-incomplete: O(n) per fact change, n = use sites
-        True := by
-      trivial
+-- Corollary: Language choice has asymptotic maintenance implications theorem language_choice_asymptotic : -- SSOT-complete: O(1) per fact change -- SSOT-incomplete: O(n) per fact change, n = use sites True := by trivial
 
-    -- Key insight: This is not about "slightly better"
-    -- It's about constant vs linear complexity - fundamentally different scaling
+-- Key insight: This is not about \"slightly better\" -- It's about constant vs linear complexity - fundamentally different scaling
+:::
 
 ## Computational System Evaluation: Semantics-Grounded Proofs {#sec:lean-languages}
 
@@ -2691,25 +2578,17 @@ The computational system capability claims are *derived from formalized operatio
 
 Consider the claim "Python can achieve DOF = 1." In the formalization, this is not a tautology. It is the conclusion of a multi-step proof chain:
 
-    theorem python_can_achieve_ssot :
-        CanAchieveSSOT Python.HasDefinitionHooks Python.HasIntrospection := by
-      exact hooks_and_introspection_enable_ssot
-        Python.python_has_hooks
-        Python.python_has_introspection
+::: code
+theorem python_can_achieve_ssot : CanAchieveSSOT Python.HasDefinitionHooks Python.HasIntrospection := by exact hooks_and_introspection_enable_ssot Python.python_has_hooks Python.python_has_introspection
+:::
 
 Where `python_has_hooks` is proved from operational semantics:
 
-    -- From LangPython.lean: __init_subclass__ executes at definition time
-    theorem python_has_hooks : HasDefinitionHooks := by
-      intro rt name bases attrs methods parent h
-      exact init_subclass_in_class_definition rt name bases attrs methods parent h
+::: code
+-- From LangPython.lean: \_\_init_subclass\_\_ executes at definition time theorem python_has_hooks : HasDefinitionHooks := by intro rt name bases attrs methods parent h exact init_subclass_in_class_definition rt name bases attrs methods parent h
 
-    -- Which derives from the modeled class statement execution:
-    theorem init_subclass_in_class_definition (rt : PyRuntime) ... :
-        ClassDefEvent.init_subclass_called parent name \in
-        (execute_class_statement rt name bases attrs methods).2 := by
-      rw [execute_produces_events]
-      exact hook_event_in_all_events name bases parent h
+-- Which derives from the modeled class statement execution: theorem init_subclass_in_class_definition (rt : PyRuntime) \... : ClassDefEvent.init_subclass_called parent name (execute_class_statement rt name bases attrs methods).2 := by rw \[execute_produces_events\] exact hook_event_in_all_events name bases parent h
+:::
 
 The claim is grounded in `execute_class_statement`, which models Python's class definition semantics. To attack this proof, one must either:
 
@@ -2723,23 +2602,11 @@ Both are empirically falsifiable, not matters of opinion.
 
 The Rust impossibility proof is substantive (40+ lines), not a one-liner:
 
-    def HasIntrospection : Prop :=
-      exists query : RuntimeItem -> Option ItemSource,
-        forall item macro_name, -- query can distinguish user-written from macro-expanded
-          exists ru in (erase_to_runtime user_state).items, query ru = some .user_written /\
-          exists rm in (erase_to_runtime macro_state).items, query rm = some (.macro_expanded ...)
+::: code
+def HasIntrospection : Prop := exists query : RuntimeItem -\> Option ItemSource, forall item macro_name, -- query can distinguish user-written from macro-expanded exists ru in (erase_to_runtime user_state).items, query ru = some .user_written / exists rm in (erase_to_runtime macro_state).items, query rm = some (.macro_expanded \...)
 
-    theorem rust_lacks_introspection : not HasIntrospection := by
-      intro h
-      rcases h with <query, hq>
-      -- Key lemma: erasure produces identical RuntimeItems
-      have h_eq : (erase_to_runtime user_state).items =
-                  (erase_to_runtime macro_state).items :=
-        erasure_destroys_source item macro_name
-      -- Extract witnesses and derive contradiction
-      -- ... (35 lines of actual proof)
-      -- Same RuntimeItem cannot return two different sources
-      cases h_src_eq  -- contradiction: .user_written /= .macro_expanded
+theorem rust_lacks_introspection : not HasIntrospection := by intro h rcases h with \<query, hq\> -- Key lemma: erasure produces identical RuntimeItems have h_eq : (erase_to_runtime user_state).items = (erase_to_runtime macro_state).items := erasure_destroys_source item macro_name -- Extract witnesses and derive contradiction -- \... (35 lines of actual proof) -- Same RuntimeItem cannot return two different sources cases h_src_eq -- contradiction: .user_written /= .macro_expanded
+:::
 
 This proof proceeds by:
 
@@ -2757,153 +2624,61 @@ This is a genuine impossibility proof, not definitional unfolding.
 
 This file proves the central if-and-only-if theorem and the constructive impossibility theorems.
 
-    /-
-      SSOT Formalization - Completeness Theorem (Iff)
-    -/
-
-    import Ssot.Requirements
-
-    -- Definition: SSOT-Complete Language
-    def ssot_complete (L : LanguageFeatures) : Prop :=
-      L.has_definition_hooks = true \and L.has_introspection = true
-
-    -- Theorem 3.6: Necessary and Sufficient Conditions for SSOT
-    theorem ssot_iff (L : LanguageFeatures) :
-        ssot_complete L <-> (L.has_definition_hooks = true \and
-                           L.has_introspection = true) := by
-      unfold ssot_complete
-      rfl
-
-    -- Corollary: A language is SSOT-incomplete iff it lacks either feature
-    theorem ssot_incomplete_iff (L : LanguageFeatures) :
-        ¬ssot_complete L <-> (L.has_definition_hooks = false or
-                            L.has_introspection = false) := by
-      -- [proof as before]
-
-    -- IMPOSSIBILITY THEOREM (Constructive)
-    -- For any language lacking either feature, SSOT is impossible
-    theorem impossibility (L : LanguageFeatures)
-        (h : L.has_definition_hooks = false \/ L.has_introspection = false) :
-        Not (ssot_complete L) := by
-      intro hc
-      exact ssot_incomplete_iff L |>.mpr h hc
-
-    -- Specific impossibility for Java-like languages
-    theorem java_impossibility (L : LanguageFeatures)
-        (h_no_hooks : L.has_definition_hooks = false)
-        (_ : L.has_introspection = true) :
-        ¬ssot_complete L := by
-      exact impossibility L (Or.inl h_no_hooks)
-
-    -- Specific impossibility for Rust-like languages
-    theorem rust_impossibility (L : LanguageFeatures)
-        (_ : L.has_definition_hooks = true)
-        (h_no_intro : L.has_introspection = false) :
-        ¬ssot_complete L := by
-      exact impossibility L (Or.inr h_no_intro)
-
 ## Inconsistency.lean: Formal Inconsistency Model (216 lines) {#sec:lean-inconsistency}
 
 This file responds to the critique that "inconsistency" was only defined in comments. Here we define `ConfigSystem`, formalize inconsistency as a `Prop`, and prove that DOF $>$ 1 implies the existence of inconsistent states.
 
-    /-
-      ConfigSystem: locations that can hold values for a fact.
-      Inconsistency means two locations disagree on the value.
-    -/
-    structure ConfigSystem where
-      num_locations : Nat
-      value_at : LocationId -> Value
+::: code
+/- ConfigSystem: locations that can hold values for a fact. Inconsistency means two locations disagree on the value. -/ structure ConfigSystem where num_locations : Nat value_at : LocationId -\> Value
 
-    def inconsistent (c : ConfigSystem) : Prop :=
-      exists l1 l2, l1 < c.num_locations /\ l2 < c.num_locations /\
-                    l1 != l2 /\ c.value_at l1 != c.value_at l2
+def inconsistent (c : ConfigSystem) : Prop := exists l1 l2, l1 \< c.num_locations / l2 \< c.num_locations / l1 != l2 / c.value_at l1 != c.value_at l2
 
-    -- DOF > 1 implies there exists an inconsistent configuration
-    theorem dof_gt_one_implies_inconsistency_possible (n : Nat) (h : n > 1) :
-        exists c : ConfigSystem, dof c = n /\ inconsistent c
+-- DOF \> 1 implies there exists an inconsistent configuration theorem dof_gt_one_implies_inconsistency_possible (n : Nat) (h : n \> 1) : exists c : ConfigSystem, dof c = n / inconsistent c
 
-    -- Contrapositive: guaranteed consistency requires DOF <= 1
-    theorem consistency_requires_dof_le_one (n : Nat)
-        (hall : forall c : ConfigSystem, dof c = n -> consistent c) : n <= 1
+-- Contrapositive: guaranteed consistency requires DOF \<= 1 theorem consistency_requires_dof_le_one (n : Nat) (hall : forall c : ConfigSystem, dof c = n -\> consistent c) : n \<= 1
 
-    -- DOF = 0 means the fact is not encoded
-    theorem dof_zero_means_not_encoded (c : ConfigSystem) (h : dof c = 0) :
-        Not (encodes_fact c)
+-- DOF = 0 means the fact is not encoded theorem dof_zero_means_not_encoded (c : ConfigSystem) (h : dof c = 0) : Not (encodes_fact c)
 
-    -- Independence: updating one location doesn't affect others
-    theorem update_preserves_other_locations (c : ConfigSystem) (loc other : LocationId)
-        (new_val : Value) (h : other != loc) :
-        (update_location c loc new_val).value_at other = c.value_at other
+-- Independence: updating one location doesn't affect others theorem update_preserves_other_locations (c : ConfigSystem) (loc other : LocationId) (new_val : Value) (h : other != loc) : (update_location c loc new_val).value_at other = c.value_at other
 
-    -- Oracle necessity: valid oracles can disagree
-    theorem resolution_requires_external_choice :
-        exists o1 o2 : Oracle, valid_oracle o1 /\ valid_oracle o2 /\
-        exists c l1 l2, o1 c l1 l2 != o2 c l1 l2
+-- Oracle necessity: valid oracles can disagree theorem resolution_requires_external_choice : exists o1 o2 : Oracle, valid_oracle o1 / valid_oracle o2 / exists c l1 l2, o1 c l1 l2 != o2 c l1 l2
+:::
 
 ## SSOTGrounded.lean: Bridging SSOT to Operational Semantics (184 lines) {#sec:lean-grounded}
 
 This file is the key innovation addressing the "trivial proofs" critique. It bridges the abstract SSOT definition ($\text{DOF} = 1$) to concrete operational semantics from AbstractClassSystem. The central insight: SSOT failures arise when the same fact has multiple independent encodings that can diverge.
 
-    /-
-      SSOTGrounded: Connecting SSOT to Operational Semantics
+::: code
+/- SSOTGrounded: Connecting SSOT to Operational Semantics
 
-      This file bridges the abstract SSOT definition (DOF = 1) to the
-      concrete operational semantics from AbstractClassSystem.
+This file bridges the abstract SSOT definition (DOF = 1) to the concrete operational semantics from AbstractClassSystem.
 
-      The key insight: SSOT failures arise when the same fact has multiple
-      independent encodings that can diverge.
-    -/
+The key insight: SSOT failures arise when the same fact has multiple independent encodings that can diverge. -/
 
-    import Ssot.AbstractClassSystem
-    import Ssot.SSOT
+import Ssot.AbstractClassSystem import Ssot.SSOT
 
-    namespace SSOTGrounded
+namespace SSOTGrounded
 
-    -- A fact encoding location in a configuration
-    structure EncodingLocation where
-      id : Nat
-      value : Nat
-      deriving DecidableEq
+-- A fact encoding location in a configuration structure EncodingLocation where id : Nat value : Nat deriving DecidableEq
 
-    -- A configuration with potentially multiple encodings of the same fact
-    structure MultiEncodingConfig where
-      locations : List EncodingLocation
-      dof : Nat := locations.length
+-- A configuration with potentially multiple encodings of the same fact structure MultiEncodingConfig where locations : List EncodingLocation dof : Nat := locations.length
 
-    -- All encodings agree on the value
-    def consistent (cfg : MultiEncodingConfig) : Prop :=
-      forall l1 l2, l1 in cfg.locations -> l2 in cfg.locations -> l1.value = l2.value
+-- All encodings agree on the value def consistent (cfg : MultiEncodingConfig) : Prop := forall l1 l2, l1 in cfg.locations -\> l2 in cfg.locations -\> l1.value = l2.value
 
-    -- At least two encodings disagree
-    def inconsistent (cfg : MultiEncodingConfig) : Prop :=
-      exists l1 l2, l1 in cfg.locations /\ l2 in cfg.locations /\ l1.value != l2.value
+-- At least two encodings disagree def inconsistent (cfg : MultiEncodingConfig) : Prop := exists l1 l2, l1 in cfg.locations / l2 in cfg.locations / l1.value != l2.value
 
-    -- DOF = 1 implies consistency (SSOT = no inconsistency possible)
-    theorem dof_one_implies_consistent (cfg : MultiEncodingConfig)
-        (h_nonempty : cfg.locations.length = 1) : consistent cfg
+-- DOF = 1 implies consistency (SSOT = no inconsistency possible) theorem dof_one_implies_consistent (cfg : MultiEncodingConfig) (h_nonempty : cfg.locations.length = 1) : consistent cfg
 
-    -- DOF > 1 permits inconsistency (can construct divergent state)
-    theorem dof_gt_one_permits_inconsistency :
-        exists cfg : MultiEncodingConfig, cfg.dof > 1 /\ inconsistent cfg
+-- DOF \> 1 permits inconsistency (can construct divergent state) theorem dof_gt_one_permits_inconsistency : exists cfg : MultiEncodingConfig, cfg.dof \> 1 / inconsistent cfg
 
-    -- Two types with same shape but different bases encode provenance differently
-    theorem same_shape_different_provenance :
-        exists T1 T2 : Typ, shapeEquivalent T1 T2 /\
-                            typeIdentityEncoding T1 != typeIdentityEncoding T2
+-- Two types with same shape but different bases encode provenance differently theorem same_shape_different_provenance : exists T1 T2 : Typ, shapeEquivalent T1 T2 / typeIdentityEncoding T1 != typeIdentityEncoding T2
 
-    -- SSOT uniqueness: only DOF = 1 is both complete and guarantees consistency
-    theorem ssot_unique_complete_consistent :
-        forall dof : Nat,
-          dof != 0 →  -- Complete: fact is encoded
-          (forall cfg : MultiEncodingConfig, cfg.dof = dof → consistent cfg) →
-          satisfies_SSOT dof
+-- SSOT uniqueness: only DOF = 1 is both complete and guarantees consistency theorem ssot_unique_complete_consistent : forall dof : Nat, dof != 0 → -- Complete: fact is encoded (forall cfg : MultiEncodingConfig, cfg.dof = dof → consistent cfg) → satisfies_SSOT dof
 
-    -- The trichotomy: every DOF is incomplete, optimal, or permits inconsistency
-    theorem dof_trichotomy : forall dof : Nat,
-        dof = 0 \/ satisfies_SSOT dof \/
-        (exists cfg : MultiEncodingConfig, cfg.dof = dof /\ inconsistent cfg)
+-- The trichotomy: every DOF is incomplete, optimal, or permits inconsistency theorem dof_trichotomy : forall dof : Nat, dof = 0 satisfies_SSOT dof (exists cfg : MultiEncodingConfig, cfg.dof = dof / inconsistent cfg)
 
-    end SSOTGrounded
+end SSOTGrounded
+:::
 
 **Why this matters:** The `ssot_unique_complete_consistent` theorem proves that DOF = 1 is the *unique* configuration class that is both complete (fact is encoded) and guarantees consistency (no observer can see different values). This is not a tautology---it is a constructive proof that any DOF $\geq 2$ admits an inconsistent configuration.
 

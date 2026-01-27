@@ -33,7 +33,7 @@ This example is from a publicly verifiable pull request~\cite{openhcsPR44}. The 
 
 \textbf{The Problem:} The codebase used duck typing to check for optional capabilities:
 
-\begin{verbatim}
+\begin{code}
 # BEFORE: 47 scattered hasattr() checks (DOF = 47)
 
 # In pipeline.py
@@ -50,13 +50,13 @@ if hasattr(config, 'validate'):
     config.validate()
 
 # ... 44 more similar checks across 12 files
-\end{verbatim}
+\end{code}
 
 Each \texttt{hasattr()} check is an independent encoding of the fact ``this type has capability X.'' If a capability is renamed or removed, all 47 checks must be updated.
 
 \textbf{The Solution:} Replace duck typing with ABC contracts:
 
-\begin{verbatim}
+\begin{code}
 # AFTER: 1 ABC definition (DOF = 1)
 
 class GPUCapable(ABC):
@@ -75,7 +75,7 @@ class Validatable(ABC):
 if isinstance(processor, GPUCapable):
     if processor.supports_gpu():
         use_gpu_path(processor)
-\end{verbatim}
+\end{code}
 
 The ABC is the single source. The \texttt{isinstance()} check is derived. It queries the ABC's \texttt{\_\_subclasshook\_\_} or MRO, not an independent encoding.
 
@@ -93,7 +93,7 @@ This pattern applies whenever classes must be registered in a central location.
 
 \textbf{The Problem:} Type converters were registered in a manual dictionary:
 
-\begin{verbatim}
+\begin{code}
 # BEFORE: Manual registry (DOF = n, where n = number of converters)
 
 # In converters.py
@@ -109,13 +109,13 @@ CONVERTERS = {
     'torch': TorchConverter,
     # ... more entries that must be maintained manually
 }
-\end{verbatim}
+\end{code}
 
 Adding a new converter requires: (1) defining the class, (2) adding to the registry. Two independent edits, violating SSOT.
 
 \textbf{The Solution:} Use \texttt{\_\_init\_subclass\_\_} for automatic registration:
 
-\begin{verbatim}
+\begin{code}
 # AFTER: Automatic registration (DOF = 1)
 
 class Converter(ABC):
@@ -137,7 +137,7 @@ class TorchConverter(Converter, format='torch'):
 
 # Registry is automatically populated
 # Converter._registry == {'numpy': NumpyConverter, 'torch': TorchConverter}
-\end{verbatim}
+\end{code}
 
 \textbf{DOF Analysis:}
 \begin{itemize}
@@ -153,7 +153,7 @@ This pattern applies whenever all subclasses of a type must be enumerated.
 
 \textbf{The Problem:} Plugins were discovered via explicit imports:
 
-\begin{verbatim}
+\begin{code}
 # BEFORE: Explicit plugin list (DOF = n, where n = number of plugins)
 
 # In plugin_loader.py
@@ -170,13 +170,13 @@ PLUGINS = [
     FilterPlugin,
     # ... more entries that must match the imports
 ]
-\end{verbatim}
+\end{code}
 
 Adding a plugin requires: (1) creating the plugin file, (2) adding the import, (3) adding to the list. Three edits for one fact, violating SSOT.
 
 \textbf{The Solution:} Use \texttt{\_\_subclasses\_\_()} for automatic discovery:
 
-\begin{verbatim}
+\begin{code}
 # AFTER: Automatic discovery (DOF = 1)
 
 class Plugin(ABC):
@@ -190,7 +190,7 @@ def discover_plugins():
 # Plugins just need to inherit from Plugin
 class DetectorPlugin(Plugin):
     def execute(self, context): ...
-\end{verbatim}
+\end{code}
 
 \textbf{DOF Analysis:}
 \begin{itemize}
@@ -215,7 +215,7 @@ This pattern demonstrates why both SSOT requirements (definition-time hooks \emp
 
 \textbf{Without SSOT:} Manual maintenance lists
 
-\begin{verbatim}
+\begin{code}
 # Hypothetical non-introspectable language
 IMPORTS = {
     "sklearn.filters": ["gaussian", "sobel"],
@@ -227,13 +227,13 @@ DEFAULT_VALUES = {
     "gaussian": {"sigma": 1.0, "mode": "reflect"},
     # Must manually update when signatures change
 }
-\end{verbatim}
+\end{code}
 
 Every type, every function parameter, every enum. Each requires a manual entry. When a function signature changes, both the function \emph{and} the metadata list must be updated. DOF $>$ 1.
 
 \textbf{With SSOT (Python):} Derive everything from introspection
 
-\begin{verbatim}
+\begin{code}
 def collect_imports_from_data(data_obj):
     """Traverse structure, derive imports from metadata."""
     if isinstance(obj, Enum):
@@ -256,7 +256,7 @@ def generate_dataclass_repr(instance):
         current_value = getattr(instance, field.name)
         # Field name, type, default all come from definition
         lines.append(f"{field.name}={repr(current_value)}")
-\end{verbatim}
+\end{code}
 
 \textbf{The Key Insight:} The class definition at definition-time establishes facts:
 \begin{itemize}

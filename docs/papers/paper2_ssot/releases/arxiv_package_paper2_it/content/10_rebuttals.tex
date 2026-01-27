@@ -22,7 +22,7 @@ This appendix addresses anticipated objections, organized thematically. Each obj
 
 \paragraph{Python Instantiation Proofs.} The file \texttt{PythonInstantiation.lean} (250 LOC) proves:
 
-\begin{verbatim}
+\begin{code}
 -- Python's type() factors into (B, S)
 theorem python_type_is_two_axis (pt : PythonType) :
     exists B S, pythonTypeAxes pt = (B, S)
@@ -32,13 +32,13 @@ lemma observables_factor_through_axes {p q : PythonType}
     (h : sameAxes p q) (attr : AttrName) :
     metaclassOf p = metaclassOf q /\
     getattrHas p attr = getattrHas q attr
-\end{verbatim}
+\end{code}
 
 The second theorem is the key: if two types have identical \texttt{\_\_bases\_\_} and \texttt{\_\_dict\_\_}, they are observationally indistinguishable. This proves the model captures Python's observable behavior.
 
 \paragraph{Semantic Correspondence.} The \texttt{LangPython.lean} file (235 LOC) directly transcribes Python's documented semantics for class creation:
 
-\begin{verbatim}
+\begin{code}
 -- Class definition events (from Python datamodel docs)
 inductive ClassDefEvent where
   | metacall_start : PyId -> ClassDefEvent
@@ -48,7 +48,7 @@ inductive ClassDefEvent where
   | subclasses_updated : PyId -> PyId -> ClassDefEvent
   | init_called : PyId -> ClassDefEvent
   | class_bound : PyId -> ClassDefEvent
-\end{verbatim}
+\end{code}
 
 The theorem \texttt{init\_subclass\_in\_class\_definition} is then \emph{derived} from this semantics---not assumed. The model is a direct encoding of Python's specification.
 
@@ -221,7 +221,7 @@ Cross-system encoding (e.g., protobuf generating code for multiple languages) re
 
 \textbf{Response:} This critique was valid for earlier versions. We have since added \texttt{Ssot/Inconsistency.lean} (216 LOC, zero \texttt{sorry}), which formalizes inconsistency as a Lean \texttt{Prop}:
 
-\begin{verbatim}
+\begin{code}
 structure ConfigSystem where
   num_locations : Nat
   value_at : LocationId -> Value
@@ -229,7 +229,7 @@ structure ConfigSystem where
 def inconsistent (c : ConfigSystem) : Prop :=
   exists l1 l2, l1 < c.num_locations /\ l2 < c.num_locations /\
                 l1 != l2 /\ c.value_at l1 != c.value_at l2
-\end{verbatim}
+\end{code}
 
 The file proves:
 
@@ -263,11 +263,11 @@ This addresses the critique directly: inconsistency is now a formal property tha
 
 The Lean formalization (AbstractClassSystem.lean) captures this:
 
-\begin{verbatim}
+\begin{code}
 -- N is just a label for a (B, S) pair
 -- N contributes no observables beyond B
 -- Theorem obs_eq_bs proves: (B, S) equality suffices; N adds nothing
-\end{verbatim}
+\end{code}
 
 The operational test: given two classes with identical \texttt{\_\_bases\_\_} (B) and identical \texttt{\_\_dict\_\_} (S), can any Python code distinguish them behaviorally? No. The name is metadata, not a degree of freedom for the type's semantics.
 
@@ -292,11 +292,11 @@ If the model is wrong, show the Rust code that falsifies it. The burden is on th
 \subsubsection{Objection: Rust Proc Macros + Static Registries Achieve DOF = 1}
 
 \textbf{Objection:} ``Rust can achieve DOF = 1 using proc macros and static registries. Example:
-\begin{verbatim}
+\begin{code}
 #[derive(AutoRegister)]
 struct MyHandler;
 static HANDLERS: &[&dyn Handler] = &[&MyHandler, ...];
-\end{verbatim}
+\end{code}
 The macro generates the registry at compile time. There's no second DOF that can diverge.''
 
 \textbf{Response:} This conflates \emph{enabling} a pattern with \emph{enforcing} it. The critical distinction:
@@ -305,10 +305,10 @@ The macro generates the registry at compile time. There's no second DOF that can
 \item \textbf{Proc macros are per-item isolated.} When \texttt{\#[derive(AutoRegister)]} executes on \texttt{MyHandler}, it cannot see \texttt{OtherHandler}. Each macro invocation is independent---there is no shared state during compilation. Therefore, no single macro can generate a complete registry.
 
 \item \textbf{Registration is bypassable.} You can write:
-\begin{verbatim}
+\begin{code}
 struct SneakyHandler;
 impl Handler for SneakyHandler { ... }  // No #[derive]---NOT in registry
-\end{verbatim}
+\end{code}
 The impl exists; the registry entry does not. \textbf{DOF = 2}: the impl and the registry are independent locations that can disagree.
 
 \item \textbf{The \texttt{inventory} crate uses linker tricks, not language semantics.} It works by emitting items into special linker sections and collecting them at link time. This is:
@@ -321,10 +321,10 @@ The impl exists; the registry entry does not. \textbf{DOF = 2}: the impl and the
 \end{enumerate}
 
 Contrast Python:
-\begin{verbatim}
+\begin{code}
 class SneakyHandler(Registry):  # __init_subclass__ fires AUTOMATICALLY
     pass  # Cannot create unregistered subclass---IMPOSSIBLE
-\end{verbatim}
+\end{code}
 
 In Python, the hook is \emph{unforgeable}. The language semantics guarantee that creating a subclass triggers \texttt{\_\_init\_subclass\_\_}. There is no syntax to bypass this. \textbf{DOF = 1} by construction.
 

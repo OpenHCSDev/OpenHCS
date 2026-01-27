@@ -1,60 +1,28 @@
 \section{Conclusion}\label{sec:conclusion}
 %==============================================================================
 
-\subsection*{Methodology and Disclosure}
+We have established a new capacity theorem extending zero-error source coding to interactive multi-location encoding systems. The key contributions are:
 
-\textbf{Role of LLMs in this work.} This paper was developed through
-human-AI collaboration. The author provided the core intuitions (the
-DOF formalization, the DEF+INTRO conjecture, the language evaluation
-criteria), while large language models (Claude, GPT-4) served as
-implementation partners for drafting proofs, formalizing definitions,
-and generating LaTeX.
+\textbf{1. Zero-Incoherence Capacity Theorem:} We define zero-incoherence capacity $C_0$ as the maximum encoding rate guaranteeing zero probability of location disagreement, and prove $C_0 = 1$ exactly (Theorem~\ref{thm:coherence-capacity}). The proof follows the achievability/converse structure of Shannon's channel capacity theorem.
 
-The Lean 4 proofs were iteratively developed: the author specified
-theorems to prove, the LLM proposed proof strategies, and the Lean
-compiler verified correctness. This is epistemically sound: a Lean proof
-that compiles is correct regardless of generation method. The proofs are
-\emph{costly signals} (per the companion paper on credibility) whose
-validity is independent of their provenance.
+\textbf{2. Side Information Bound:} We prove that resolution of $k$-way incoherence requires $\geq \log_2 k$ bits of side information (Theorem~\ref{thm:side-info}). This connects to Slepian-Wolf distributed source coding: provenance information acts as decoder side information.
 
-\textbf{What the author contributed:} The DOF = 1 formalization of SSOT,
-the DEF+INTRO language requirements, the claim that Python uniquely
-satisfies these among mainstream languages, the OpenHCS case studies,
-and the complexity bounds.
+\textbf{3. Multi-Terminal Interpretation:} We model encoding locations as terminals in a multi-terminal source coding problem. Derivation introduces perfect correlation (deterministic dependence), reducing effective rate. Only complete correlation (all terminals derived from one source) achieves zero incoherence.
 
-\textbf{What LLMs contributed:} LaTeX drafting, Lean tactic exploration,
-prose refinement, and literature search assistance.
+\textbf{4. Rate-Complexity Tradeoffs:} We establish tradeoffs analogous to rate-distortion: $O(1)$ modification complexity at capacity vs. $\Omega(n)$ above capacity. The gap is unbounded (Theorem~\ref{thm:unbounded-gap}).
 
-Transparency about this methodology reflects our belief that the
-contribution is the insight and the verified proof, not the typing
-labor.
+\textbf{5. Encoder Realizability:} Achieving capacity requires two encoder properties: causal propagation (analogous to feedback) and provenance observability (analogous to decoder side information). Both necessary; together sufficient (Theorem~\ref{thm:ssot-iff}).
 
-\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
-
-We have established the first information-theoretic foundations for optimal encoding under coherence constraints. The key contributions are:
-
-\textbf{1. Extension of Source Coding Theory:} We extend classical source coding to \emph{interactive encoding systems}---systems where encodings can be modified and must remain coherent across modifications. DOF (Degrees of Freedom) formalizes encoding rate as the count of independent encoding locations for a fact.
-
-\textbf{2. Optimal Rate Uniqueness:} We prove that DOF = 1 is the \textbf{unique} optimal encoding rate guaranteeing coherence (Theorem~\ref{thm:ssot-unique}). Any system with DOF $> 1$ permits incoherent states; DOF = 0 fails to represent the fact. This uniqueness is information-theoretic necessity, not design choice.
-
-\textbf{3. Rate-Complexity Tradeoffs:} We establish fundamental tradeoffs analogous to rate-distortion theory: DOF = 1 achieves $O(1)$ modification complexity; DOF $> 1$ requires $\Omega(n)$. The gap is unbounded---for any constant $k$, there exists an encoding system size where DOF = 1 provides at least $k\times$ reduction (Theorem~\ref{thm:unbounded-gap}).
-
-\textbf{4. Resolution Impossibility:} We prove an impossibility theorem (Theorem~\ref{thm:oracle-arbitrary}) analogous to zero-error capacity: without coherence guarantees, no resolution procedure is information-theoretically justified. Multiple independent encodings create irresolvable ambiguity.
-
-\textbf{5. Realizability Requirements:} For computational systems, we prove that DOF = 1 realizability requires (1) definition-time computation AND (2) introspectable derivation (Theorem~\ref{thm:ssot-iff}). Both are necessary; both together are sufficient. This is an if-and-only-if characterization.
-
-\textbf{6. Mathematical Necessity:} The uniqueness theorem (Theorem~\ref{thm:ssot-unique}) establishes that DOF=1 is the unique minimal encoding rate: $|\{r : \text{optimal}(r)\}| = 1$. This singleton solution space eliminates design freedom. Given coherence as a requirement, the mathematics forces DOF = 1.
-
-\textbf{Corollary instantiations.} We include a programming-language instantiation and a worked case study as corollaries of the realizability theorem. These illustrate the abstract results without being used in the proofs.
+\textbf{Corollary instantiations.} The abstract theory instantiates across domains (programming languages, distributed databases, configuration systems). Sections~\ref{sec:evaluation} and~\ref{sec:empirical} provide illustrative corollaries; the core theorems are domain-independent.
 
 \textbf{Implications:}
 
 \begin{enumerate}
-\item \textbf{For encoding system designers:} If coherence guarantees are required, the system must provide automatic derivation mechanisms; otherwise coherence scales as $\Omega(n)$ with the number of independent encodings.
+\item \textbf{For information theorists:} Zero-error capacity theory extends to interactive multi-location encoding. The setting (modifiable encodings, coherence constraints) is new; the achievability/converse structure and side information bounds connect to established IT.
 
-\item \textbf{For information theorists:} Classical source coding extends to interactive systems with modification constraints. The coherence requirement creates rate-complexity tradeoffs analogous to rate-distortion tradeoffs, with a unique optimal rate.
+\item \textbf{For coding theorists:} Derivation is the mechanism that introduces correlation, reducing effective encoding rate. The encoder realizability theorem characterizes what encoder properties enable capacity-achieving codes.
 
-\item \textbf{For formal methods researchers:} The results can be formalized in a proof assistant; the Lean proofs show theorems and model definitions are mechanizable.
+\item \textbf{For system designers:} The capacity theorem is a forcing result: if coherence is required, encoding rate must be $\leq 1$. Systems operating above capacity require external side information for resolution.
 \end{enumerate}
 
 \textbf{Limitations:}
@@ -69,11 +37,11 @@ We have established the first information-theoretic foundations for optimal enco
 \textbf{Future Work:}
 \begin{itemize}
 \tightlist
-\item Extend the encoding theory to probabilistic coherence (soft constraints, approximate agreement)
-\item Develop automated DOF measurement tools for multiple computational domains (code analysis, schema analysis, configuration analysis)
-\item Study the relationship between DOF and other system quality metrics (reliability, maintainability, performance)
-\item Investigate DOF = 1 realizability in distributed systems with network partitions
-\item Characterize the information-theoretic limits of compile-time vs. runtime coherence mechanisms
+\item \textbf{Probabilistic coherence:} Extend to soft constraints where incoherence probability is bounded but non-zero, analogous to the transition from zero-error to vanishing-error capacity.
+\item \textbf{Network encoding:} Study coherence capacity in networked encoding systems with communication constraints, connecting to network information theory.
+\item \textbf{Rate-distortion extension:} Characterize the full rate-complexity function $R(M)$ trading encoding rate against modification complexity, analogous to rate-distortion $R(D)$.
+\item \textbf{Interactive capacity:} Study capacity under multi-round modification protocols, connecting to interactive information theory and directed information.
+\item \textbf{Partial correlation:} Characterize coherence guarantees when derivation introduces partial (non-deterministic) correlation, extending beyond the perfect-correlation case.
 \end{itemize}
 
 \subsection{Artifacts}\label{sec:data-availability}

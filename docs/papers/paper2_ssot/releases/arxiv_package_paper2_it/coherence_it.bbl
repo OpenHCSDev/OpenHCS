@@ -21,38 +21,11 @@
 \providecommand{\BIBdecl}{\relax}
 \BIBdecl
 
-\bibitem{rashmi2015multiversion}
-K.~V. Rashmi, N.~B. Shah, K.~Ramchandran, and D.~Gu, ``Multi-version
-  coding---an information-theoretic perspective of consistent distributed
-  storage,'' \emph{IEEE Transactions on Information Theory}, vol.~63, no.~6,
-  pp. 4111--4128, 2017, information-theoretic framework for consistent
-  distributed storage; proves inevitable storage cost for consistency
-  guarantees.
-
-\bibitem{flp1985impossibility}
-M.~J. Fischer, N.~A. Lynch, and M.~S. Paterson, ``Impossibility of distributed
-  consensus with one faulty process,'' \emph{Journal of the ACM}, vol.~32,
-  no.~2, pp. 374--382, 1985, fLP impossibility: deterministic consensus
-  impossible in async systems with one failure.
-
-\bibitem{rissanen1978mdl}
-J.~Rissanen, ``Modeling by shortest data description,'' \emph{Automatica},
-  vol.~14, no.~5, pp. 465--471, 1978, foundational paper on Minimum Description
-  Length (MDL) principle: total description = model + data given model; optimal
-  model minimizes this sum.
-
 \bibitem{slepian1973noiseless}
 D.~Slepian and J.~K. Wolf, ``Noiseless coding of correlated information
   sources,'' \emph{IEEE Transactions on Information Theory}, vol.~19, no.~4,
   pp. 471--480, 1973, distributed source coding with side information; decoder
   uses correlated information to reduce required rate.
-
-\bibitem{rivest1982wom}
-R.~L. Rivest and A.~Shamir, ``How to reuse a ``write-once'' memory,'' in
-  \emph{Proceedings of the 14th Annual ACM Symposium on Theory of
-  Computing}.\hskip 1em plus 0.5em minus 0.4em\relax ACM, 1982, pp. 105--113,
-  foundational paper on write-once memory codes; capacity for $t$ writes is
-  $\log_2(t+1)$ bits per cell.
 
 \bibitem{korner1973graphs}
 J.~K{\"o}rner, ``Coding of an information source having ambiguous alphabet and
@@ -64,6 +37,12 @@ J.~K{\"o}rner, ``Coding of an information source having ambiguous alphabet and
 L.~Lov{\'a}sz, ``On the shannon capacity of a graph,'' \emph{IEEE Transactions
   on Information Theory}, vol.~25, no.~1, pp. 1--7, 1979, theta function bounds
   Shannon capacity; foundational for zero-error information theory.
+
+\bibitem{rissanen1978mdl}
+J.~Rissanen, ``Modeling by shortest data description,'' \emph{Automatica},
+  vol.~14, no.~5, pp. 465--471, 1978, foundational paper on Minimum Description
+  Length (MDL) principle: total description = model + data given model; optimal
+  model minimizes this sum.
 
 \bibitem{gruenwald2007mdl}
 P.~D. Gr{\"u}nwald, \emph{The Minimum Description Length Principle}.\hskip 1em
@@ -94,10 +73,17 @@ A.~Hunt and D.~Thomas, \emph{The Pragmatic Programmer: From Journeyman to
   Master}.\hskip 1em plus 0.5em minus 0.4em\relax Addison-Wesley Professional,
   1999.
 
-\bibitem{shannon1948mathematical}
-C.~E. Shannon, ``A mathematical theory of communication,'' \emph{Bell System
-  Technical Journal}, vol.~27, no.~3, pp. 379--423, 1948, foundational paper
-  establishing information theory; source coding and channel capacity.
+\bibitem{birs2012interactive}
+{Banff International Research Station}, ``Interactive information theory
+  (12w5119),'' Workshop Report, 2012, workshop on interactive IT: source
+  coding, channel coding, directed information;
+  \url{https://www.birs.ca/events/2012/5-day-workshops/12w5119}.
+
+\bibitem{ma2011distributed}
+N.~Ma and P.~Ishwar, ``Some results on distributed source coding for
+  interactive function computation,'' \emph{IEEE Transactions on Information
+  Theory}, vol.~57, no.~9, pp. 6180--6195, 2011, interactive distributed source
+  coding; shows interaction can reduce rate for function computation.
 
 \bibitem{cover2006elements}
 T.~M. Cover and J.~A. Thomas, \emph{Elements of Information Theory},
@@ -105,25 +91,18 @@ T.~M. Cover and J.~A. Thomas, \emph{Elements of Information Theory},
   comprehensive textbook covering rate-distortion theory, source coding,
   channel coding.
 
+\bibitem{rashmi2015multiversion}
+K.~V. Rashmi, N.~B. Shah, K.~Ramchandran, and D.~Gu, ``Multi-version
+  coding---an information-theoretic perspective of consistent distributed
+  storage,'' \emph{IEEE Transactions on Information Theory}, vol.~63, no.~6,
+  pp. 4111--4128, 2017, information-theoretic framework for consistent
+  distributed storage; proves inevitable storage cost for consistency
+  guarantees.
+
 \bibitem{demoura2021lean4}
 L.~de~Moura and S.~Ullrich, ``The {Lean} 4 theorem prover and programming
   language,'' in \emph{Automated Deduction -- CADE 28}.\hskip 1em plus 0.5em
   minus 0.4em\relax Springer, 2021, pp. 625--635.
-
-\bibitem{openhcs2025}
-\BIBentryALTinterwordspacing
-T.~Simas, ``{OpenHCS}: Open-source high-content screening platform,'' 2025,
-  version 0.1.0. Available at: \url{https://github.com/trissim/openhcs}.
-  [Online]. Available: \url{https://github.com/trissim/openhcs}
-\BIBentrySTDinterwordspacing
-
-\bibitem{openhcsPR44}
-\BIBentryALTinterwordspacing
-------, ``{UI Anti-Duck-Typing Refactor}: {ABC}-based architecture ({PR}
-  \#44),'' GitHub pull request, 2025, merged November 29, 2025. Available at:
-  \url{https://github.com/trissim/openhcs/pull/44}. [Online]. Available:
-  \url{https://github.com/trissim/openhcs/pull/44}
-\BIBentrySTDinterwordspacing
 
 \bibitem{heering2015generative}
 J.~Heering, ``Generative software complexity,'' \emph{Science of Computer
@@ -135,6 +114,24 @@ J.~Heering, ``Generative software complexity,'' \emph{Science of Computer
 S.~Gilbert and N.~Lynch, ``Brewer's conjecture and the feasibility of
   consistent, available, partition-tolerant web services,'' \emph{ACM SIGACT
   News}, vol.~33, no.~2, pp. 51--59, 2002, formal proof of CAP theorem.
+
+\bibitem{flp1985impossibility}
+M.~J. Fischer, N.~A. Lynch, and M.~S. Paterson, ``Impossibility of distributed
+  consensus with one faulty process,'' \emph{Journal of the ACM}, vol.~32,
+  no.~2, pp. 374--382, 1985, fLP impossibility: deterministic consensus
+  impossible in async systems with one failure.
+
+\bibitem{shannon1948mathematical}
+C.~E. Shannon, ``A mathematical theory of communication,'' \emph{Bell System
+  Technical Journal}, vol.~27, no.~3, pp. 379--423, 1948, foundational paper
+  establishing information theory; source coding and channel capacity.
+
+\bibitem{rivest1982wom}
+R.~L. Rivest and A.~Shamir, ``How to reuse a ``write-once'' memory,'' in
+  \emph{Proceedings of the 14th Annual ACM Symposium on Theory of
+  Computing}.\hskip 1em plus 0.5em minus 0.4em\relax ACM, 1982, pp. 105--113,
+  foundational paper on write-once memory codes; capacity for $t$ writes is
+  $\log_2(t+1)$ bits per cell.
 
 \bibitem{wolf1984wom}
 J.~K. Wolf \emph{et~al.}, ``Coding for a write-once memory,'' \emph{AT\&T Bell
@@ -149,22 +146,25 @@ J.~K. Wolf \emph{et~al.}, ``Coding for a write-once memory,'' \emph{AT\&T Bell
 D.~Flanagan and Y.~Matsumoto, \emph{The {Ruby} Programming Language}.\hskip 1em
   plus 0.5em minus 0.4em\relax O'Reilly Media, 2008.
 
+\bibitem{openhcs2025}
+\BIBentryALTinterwordspacing
+T.~Simas, ``{OpenHCS}: Open-source high-content screening platform,'' 2025,
+  version 0.1.0. Available at: \url{https://github.com/trissim/openhcs}.
+  [Online]. Available: \url{https://github.com/trissim/openhcs}
+\BIBentrySTDinterwordspacing
+
 \bibitem{runeson2009guidelines}
 P.~Runeson and M.~H{\"o}st, ``Guidelines for conducting and reporting case
   study research in software engineering,'' \emph{Empirical Software
   Engineering}, vol.~14, no.~2, pp. 131--164, 2009.
 
-\bibitem{birs2012interactive}
-{Banff International Research Station}, ``Interactive information theory
-  (12w5119),'' Workshop Report, 2012, workshop on interactive IT: source
-  coding, channel coding, directed information;
-  \url{https://www.birs.ca/events/2012/5-day-workshops/12w5119}.
-
-\bibitem{ma2011distributed}
-N.~Ma and P.~Ishwar, ``Some results on distributed source coding for
-  interactive function computation,'' \emph{IEEE Transactions on Information
-  Theory}, vol.~57, no.~9, pp. 6180--6195, 2011, interactive distributed source
-  coding; shows interaction can reduce rate for function computation.
+\bibitem{openhcsPR44}
+\BIBentryALTinterwordspacing
+T.~Simas, ``{UI Anti-Duck-Typing Refactor}: {ABC}-based architecture ({PR}
+  \#44),'' GitHub pull request, 2025, merged November 29, 2025. Available at:
+  \url{https://github.com/trissim/openhcs/pull/44}. [Online]. Available:
+  \url{https://github.com/trissim/openhcs/pull/44}
+\BIBentrySTDinterwordspacing
 
 \bibitem{xiang2013interactive}
 Y.~Xiang, ``Interactive schemes in information theory and statistics,'' Ph.D.

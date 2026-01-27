@@ -461,7 +461,7 @@ High $\eta$ indicates centralized hardness (paid once); low $\eta$ indicates dis
 :::
 
 ::: proof
-*Proof.* (1) follows from the total hardness formula. (2) follows from error site counting. (3) follows from the definition of leverage as $L = \Delta\text{Effect}/\Delta\text{Effort}$. 0◻ ◻
+*Proof.* (1) follows from the total hardness formula. (2) follows from error site counting. (3) follows from the definition of leverage as $L = \Delta\text{Effect}/\Delta\text{Effort}$. ◻
 :::
 
 ::: corollary

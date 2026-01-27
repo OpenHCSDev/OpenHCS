@@ -108,7 +108,7 @@ Contrapositive: If an encoding system lacks causal propagation, DOF = 1 for stru
 \textbf{Realizations across domains:}
 
 \begin{center}
-\begin{tabular}{lp{7cm}}
+\begin{tabularx}{\linewidth}{lX}
 \toprule
 \textbf{Domain} & \textbf{Causal Propagation Mechanism} \\
 \midrule
@@ -119,7 +119,7 @@ Databases & Triggers on schema operations (PostgreSQL event triggers) \\
 Distributed systems & Consensus protocols (Paxos, Raft) \\
 Configuration & Terraform dependency graph, reactive bindings \\
 \bottomrule
-\end{tabular}
+\end{tabularx}
 \end{center}
 
 \textbf{Systems lacking causal propagation:}
@@ -172,7 +172,7 @@ Without provenance observability, none of these queries are answerable from with
 \textbf{Realizations across domains:}
 
 \begin{center}
-\begin{tabular}{lp{7cm}}
+\begin{tabularx}{\linewidth}{lX}
 \toprule
 \textbf{Domain} & \textbf{Provenance Observability Mechanism} \\
 \midrule
@@ -183,7 +183,7 @@ Databases & System catalogs (\texttt{pg\_depend}), query plan introspection \\
 Distributed systems & Vector clocks, provenance tracking, \texttt{etcd} watch \\
 Configuration & Terraform \texttt{graph}, Kubernetes API server \\
 \bottomrule
-\end{tabular}
+\end{tabularx}
 \end{center}
 
 \textbf{Systems lacking provenance observability:}
@@ -277,7 +277,7 @@ Both settings involve achieving optimal encoding under irreversibility constrain
 %==============================================================================
 
 \begin{center}
-\fbox{\parbox{0.9\textwidth}{
+\fbox{\parbox{0.95\columnwidth}{
 \textbf{Observation:} Structural facts are fixed at definition time (irreversible encoding).
 
 $\downarrow$ (timing analysis)
@@ -319,7 +319,7 @@ This fact must be encoded in two places:
 
 \textbf{Python (DOF-1-complete) achieves DOF = 1:}
 
-\begin{verbatim}
+\begin{code}
 class ImageHandler:
     _registry = {}
 
@@ -330,7 +330,7 @@ class ImageHandler:
 
 class PNGHandler(ImageHandler, format="png"):  # SOURCE
     def load(self, path): ...
-\end{verbatim}
+\end{code}
 
 \textbf{Causal propagation:} When \texttt{class PNGHandler} executes, \texttt{\_\_init\_subclass\_\_} fires immediately, adding the registry entry. No temporal gap.
 
@@ -340,7 +340,7 @@ class PNGHandler(ImageHandler, format="png"):  # SOURCE
 
 \textbf{Java (DOF-1-incomplete) cannot achieve DOF = 1:}
 
-\begin{verbatim}
+\begin{code}
 // File 1: PNGHandler.java
 @Handler(format = "png")  // Metadata, not executable
 public class PNGHandler implements ImageHandler { ... }
@@ -349,7 +349,7 @@ public class PNGHandler implements ImageHandler { ... }
 public class HandlerRegistry {
     static { register("png", PNGHandler.class); }  // Manual
 }
-\end{verbatim}
+\end{code}
 
 \textbf{No causal propagation:} The \texttt{@Handler} annotation is data, not code. Nothing executes when the class is defined.
 
@@ -384,14 +384,14 @@ Contrast with Python: the registry entry exists only in memory, created causally
 %==============================================================================
 
 \begin{center}
-\begin{tabular}{lp{5cm}p{5cm}}
+\begin{tabularx}{\linewidth}{lYY}
 \toprule
 \textbf{Requirement} & \textbf{IT Interpretation} & \textbf{Why Necessary} \\
 \midrule
 Causal propagation & Channel with feedback; encoder-decoder coupling & Eliminates temporal incoherence window \\
 Provenance observability & Side information at decoder; codebook visibility & Enables DOF verification \\
 \bottomrule
-\end{tabular}
+\end{tabularx}
 \end{center}
 
 Both requirements are necessary. Neither is sufficient alone. Together they enable DOF-1-complete encoding systems that achieve the coherence-optimal rate.

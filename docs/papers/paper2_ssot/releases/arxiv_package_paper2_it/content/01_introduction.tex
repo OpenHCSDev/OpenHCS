@@ -1,31 +1,51 @@
 \section{Introduction}\label{introduction}
 
-\subsection{The Encoding Problem}\label{sec:encoding-problem}
+\subsection{Zero-Incoherence Capacity}\label{sec:encoding-problem}
 
-Consider an information system storing a fact $F$ (e.g., a threshold value, a configuration parameter, or a structural relationship) at $n$ locations. When can such a system guarantee \textbf{coherence}---the impossibility of disagreement among locations?
+We study a fundamental question in encoding theory: \emph{What is the maximum encoding rate that guarantees zero probability of incoherence in a multi-location storage system?}
 
-If location $L_1$ encodes ``threshold = 0.5'' while location $L_2$ encodes ``threshold = 0.7'', which is correct? No information internal to the system determines this. Any resolution requires external side information (timestamps, priority orderings, external oracles) not present in the encodings themselves.
+An \emph{encoding system} stores a fact $F$ (a value from alphabet $\mathcal{V}_F$) at multiple locations $\{L_1, \ldots, L_n\}$. The system is \emph{coherent} if all locations encode the same value; \emph{incoherent} if any two locations disagree. We define the \textbf{zero-incoherence capacity} $C_0$ as the supremum of encoding rates achieving incoherence probability exactly zero, and prove:
 
-This is an \textbf{information-theoretic} problem: what rate (number of independent encoding locations) guarantees zero-error decoding under modification constraints? We prove that exactly one independent encoding (DOF = 1, where DOF counts independent storage locations) is necessary and sufficient for guaranteed coherence.
+\begin{center}
+\fbox{$C_0 = 1$}
+\end{center}
 
-\begin{theorem}[Resolution Impossibility, informal]
-For any incoherent encoding system (DOF $> 1$ with divergent values) and any resolution procedure selecting a value, there exists an equally-present value that disagrees. No resolution is information-theoretically justified.
-\end{theorem}
+This extends \emph{zero-error capacity theory}~\cite{shannon1956zero,korner1973graphs,lovasz1979shannon} to interactive encoding systems. Shannon's zero-error capacity characterizes the maximum communication rate with exactly zero error probability. We characterize the maximum encoding rate with exactly zero incoherence probability.
 
-This parallels zero-error capacity constraints~\cite{korner1973graphs,lovasz1979shannon}: without sufficient side information, error-free decoding is impossible. Our contribution extends this to \textbf{interactive encoding systems} with modification requirements.
-
-\subsection{The Optimal Rate Theorem}\label{sec:optimal-rate}
-
-We prove that DOF = 1 is the \textbf{unique optimal rate} for coherent encoding:
-
+\textbf{Main results.} Let DOF (Degrees of Freedom) denote the encoding rate: the number of independent locations that can hold distinct values simultaneously.
 \begin{itemize}
 \tightlist
-\item \textbf{DOF = 0:} Fact $F$ is not encoded (no information stored)
-\item \textbf{DOF = 1:} Coherence guaranteed (unique independent source)
-\item \textbf{DOF $> 1$:} Incoherent configurations reachable (multiple independent sources can diverge)
+\item \textbf{Achievability (Theorem~\ref{thm:capacity-achievability}):} DOF $= 1$ achieves zero incoherence.
+\item \textbf{Converse (Theorem~\ref{thm:capacity-converse}):} DOF $> 1$ does not achieve zero incoherence.
+\item \textbf{Capacity (Theorem~\ref{thm:coherence-capacity}):} $C_0 = 1$ exactly. Tight.
+\item \textbf{Side Information (Theorem~\ref{thm:side-info}):} Resolution of $k$-way incoherence requires $\geq \log_2 k$ bits.
 \end{itemize}
 
-This generalizes Rissanen's Minimum Description Length (MDL) principle~\cite{rissanen1978mdl,gruenwald2007mdl} to systems with update constraints. MDL optimizes description length for static data; we optimize encoding rate for modifiable facts. The singleton solution space---exactly one rate achieves coherence---makes this a \textbf{forcing theorem}: given coherence as a requirement, DOF = 1 is mathematically necessary.
+\begin{theorem}[Resolution Impossibility, informal]
+For any incoherent encoding system and any resolution procedure, there exists a value present in the system that disagrees with the resolution. Without $\log_2 k$ bits of side information (where $k$ = DOF), no resolution is information-theoretically justified.
+\end{theorem}
+
+This parallels zero-error decoding constraints~\cite{korner1973graphs,lovasz1979shannon}: without sufficient side information, error-free reconstruction is impossible.
+
+\subsection{The Capacity Theorem}\label{sec:optimal-rate}
+
+The zero-incoherence capacity follows the achievability/converse structure of Shannon's channel capacity theorem:
+
+\begin{center}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Encoding Rate} & \textbf{Zero Incoherence?} & \textbf{Interpretation} \\
+\midrule
+DOF $= 0$ & N/A & Fact not encoded \\
+DOF $= 1$ & \textbf{Yes} & Capacity-achieving \\
+DOF $> 1$ & No & Above capacity \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{Comparison to Shannon capacity.} Shannon's channel capacity $C$ is the supremum of rates $R$ achieving vanishing error probability: $\lim_{n \to \infty} P_e^{(n)} = 0$. Our zero-incoherence capacity is the supremum of rates achieving \emph{exactly zero} incoherence probability---paralleling zero-error capacity~\cite{shannon1956zero}, not ordinary capacity.
+
+\textbf{Connection to MDL.} The capacity theorem generalizes Rissanen's Minimum Description Length principle~\cite{rissanen1978mdl,gruenwald2007mdl} to interactive systems. MDL optimizes description length for static data. We optimize encoding rate for modifiable data subject to coherence constraints. The result: exactly one rate ($R = 1$) achieves zero incoherence, making this a \textbf{forcing theorem}.
 
 \subsection{Applications Across Domains}\label{sec:applications}
 
@@ -43,75 +63,82 @@ In each domain, the question is identical: given multiple encoding locations, wh
 
 \subsection{Connection to Classical Information Theory}\label{sec:connection-it}
 
-Our results extend classical encoding theory in three ways:
+Our results extend classical source coding theory to interactive multi-terminal systems.
 
-\textbf{1. From static to interactive encoding.} Shannon's source coding theorem~\cite{shannon1948mathematical} characterizes optimal encoding for static data. Slepian-Wolf~\cite{slepian1973noiseless} extends this to distributed sources with side information. We extend to \textbf{interactive systems} where encodings can be modified and must remain coherent across modifications.
+\textbf{1. Multi-terminal source coding.} Slepian-Wolf~\cite{slepian1973noiseless} characterizes distributed encoding of correlated sources. We model encoding locations as terminals: derivation introduces \emph{perfect correlation} (deterministic dependence), reducing effective rate. The capacity result shows that only complete correlation (all terminals derived from one source) guarantees coherence---partial correlation permits divergence. Section~\ref{sec:side-information} develops this connection.
 
-\textbf{2. Zero-error requirement with modification constraints.} Classical zero-error capacity~\cite{korner1973graphs,lovasz1979shannon} characterizes communication without errors. We characterize \textbf{encoding without incoherence}---a storage analog where errors are disagreements among locations, not bit flips.
+\textbf{2. Zero-error capacity.} Shannon~\cite{shannon1956zero}, Körner~\cite{korner1973graphs}, and Lovász~\cite{lovasz1979shannon} characterize zero-error communication. We characterize \textbf{zero-incoherence encoding}---a storage analog where ``errors'' are disagreements among locations. The achievability/converse structure (Theorems~\ref{thm:capacity-achievability},~\ref{thm:capacity-converse}) parallels zero-error capacity proofs.
 
-\textbf{3. Rate-complexity tradeoffs.} Rate-distortion theory~\cite{cover2006elements} trades encoding rate against distortion. We trade encoding rate (DOF) against modification complexity: DOF = 1 achieves $O(1)$ updates; DOF $> 1$ requires $\Omega(n)$ synchronization.
+\textbf{3. Interactive information theory.} The BIRS workshop~\cite{birs2012interactive} identified interactive IT as encoding/decoding with feedback and multi-round protocols. Our model is interactive: encodings are modified over time, and causal propagation (a realizability requirement) is analogous to channel feedback. Ma-Ishwar~\cite{ma2011distributed} showed interaction can reduce rate; we show derivation (a form of interaction) can reduce effective DOF.
 
-\subsection{Realizability in Computational Systems}\label{sec:realizability}
+\textbf{4. Rate-complexity tradeoffs.} Rate-distortion theory~\cite{cover2006elements} trades rate $R$ against distortion $D$. We trade encoding rate (DOF) against modification complexity $M$: DOF $= 1$ achieves $M = O(1)$; DOF $> 1$ requires $M = \Omega(n)$. The gap is unbounded (Theorem~\ref{thm:unbounded-gap}).
 
-A key question: can the abstract optimality (DOF = 1) be \textbf{realized} in computational systems? We prove realizability requires two information-theoretic encoder properties:
+\subsection{Encoder Realizability}\label{sec:realizability}
+
+A key question: what encoder properties are necessary and sufficient to achieve capacity ($C_0 = 1$)? We prove realizability requires two information-theoretic properties:
 
 \begin{enumerate}
-\item \textbf{Causal update propagation:} Changes to the source must automatically trigger updates to derived locations. This is analogous to channel coding with feedback---the encoder (source) and decoder (derived locations) are coupled in real-time. Without causal propagation, a temporal window exists where source and derived locations diverge (temporary incoherence).
+\item \textbf{Causal update propagation (feedback coupling):} Changes to the source must automatically trigger updates to derived locations. This is analogous to \emph{channel coding with feedback}~\cite{cover2006elements}---the encoder (source) and decoder (derived locations) are coupled causally. Without feedback, a temporal window exists where source and derived locations diverge (temporary incoherence).
 
-\item \textbf{Provenance observability:} The system must support queries about derivation structure (what is derived from what). This is the encoding-system analog of Slepian-Wolf side information~\cite{slepian1973noiseless}---the decoder has access to structural information enabling verification.
+\item \textbf{Provenance observability (decoder side information):} The system must support queries about derivation structure. This is the encoding-system analog of \emph{Slepian-Wolf side information}~\cite{slepian1973noiseless}---the decoder has access to structural information enabling verification that all terminals are derived from the source.
 \end{enumerate}
 
-These abstract to arbitrary encoding systems; programming language features (definition-time hooks, introspection) are one instantiation. Distributed databases use triggers and system catalogs; configuration systems use dependency graphs and state queries.
+\begin{theorem}[Encoder Realizability, informal]
+An encoding system achieves $C_0 = 1$ iff it provides both causal propagation and provenance observability. Neither alone suffices (Theorem~\ref{thm:independence}).
+\end{theorem}
 
-\textbf{Connection to multi-version coding.} Rashmi et al.~\cite{rashmi2015multiversion} prove an ``inevitable storage cost for consistency'' in distributed storage. Our realizability theorem is analogous: systems lacking causal propagation or provenance observability \emph{cannot} achieve DOF = 1---the cost is fundamental, not implementation-specific.
+\textbf{Connection to multi-version coding.} Rashmi et al.~\cite{rashmi2015multiversion} prove an ``inevitable storage cost for consistency'' in distributed storage. Our realizability theorem is analogous: systems lacking either encoder property \emph{cannot} achieve capacity---the constraint is information-theoretic, not implementation-specific.
 
-\textbf{Applications across computational systems.} We include a programming-language instantiation and a worked case study as \emph{corollaries} of the abstract theory. These sections exemplify the realizability theorem; the core theorems and their proofs are independent of any specific language or system.
+\textbf{Instantiations.} The encoder properties instantiate across domains: programming languages (definition-time hooks, introspection), distributed databases (triggers, system catalogs), configuration systems (dependency graphs, state queries). Section~\ref{sec:evaluation} provides a programming-language instantiation as a corollary; the core theorems are domain-independent.
 
-\subsection{Paper Organization and Main Results}\label{overview}
+\subsection{Paper Organization}\label{overview}
 
-This paper establishes four \emph{core} theorems characterizing optimal encoding under coherence constraints. All results are machine-checked in Lean 4~\cite{demoura2021lean4} (9,351 lines, 541 theorems, 0 \texttt{sorry} placeholders).
+All results are machine-checked in Lean 4~\cite{demoura2021lean4} (9,351 lines, 541 theorems, 0 \texttt{sorry} placeholders).
 
-\textbf{Section~\ref{sec:foundations}---Encoding Model.} We formalize multi-location encoding systems: facts stored at multiple locations with independence and derivability relations. DOF (Degrees of Freedom) counts independent locations. Coherence means all locations agree. Section~\ref{sec:cap-flp} formalizes encoding-theoretic CAP/FLP analogs inside this model.
+\textbf{Section~\ref{sec:foundations}---Encoding Model and Capacity.} We define multi-location encoding systems, encoding rate (DOF), and coherence/incoherence. We introduce information-theoretic quantities (value entropy, redundancy, incoherence entropy). We prove the \textbf{zero-incoherence capacity theorem} ($C_0 = 1$) with explicit achievability/converse structure, and the \textbf{side information bound} ($\geq \log_2 k$ bits for $k$-way resolution). We formalize encoding-theoretic CAP/FLP.
 
-\textbf{Section~\ref{sec:ssot}---Optimal Rate.} We prove DOF = 1 is the unique rate guaranteeing coherence (Theorem~\ref{thm:dof-optimal}). The proof constructs incoherent configurations for all DOF $> 1$ and shows DOF = 1 makes disagreement impossible.
+\textbf{Section~\ref{sec:ssot}---Derivation and Optimal Rate.} We characterize derivation as the mechanism achieving capacity: derived locations are perfectly correlated with their source, contributing zero effective rate.
 
-\textbf{Section~\ref{sec:requirements}---Realizability.} We derive necessary and sufficient conditions for encoding systems to achieve DOF = 1 via derivation (Theorem~\ref{thm:ssot-iff}). Both causal update propagation and provenance observability are required---these are information-theoretic encoder properties that abstract across domains.
+\textbf{Section~\ref{sec:requirements}---Encoder Realizability.} We prove that achieving capacity requires causal propagation (feedback) and provenance observability (decoder side information). Both necessary; together sufficient. This is an iff characterization.
 
-\textbf{Section~\ref{sec:evaluation}---Corollary Instantiation.} We provide a programming-language instantiation of the realizability criteria as a corollary of Theorem~\ref{thm:ssot-iff}; the core proofs remain abstract.
+\textbf{Section~\ref{sec:bounds}---Rate-Complexity Tradeoffs.} We prove modification complexity is $O(1)$ at capacity vs. $\Omega(n)$ above capacity. The gap is unbounded.
 
-\textbf{Section~\ref{sec:bounds}---Complexity Bounds.} We prove the rate-complexity tradeoff: DOF = 1 achieves $O(1)$ modification cost; DOF $> 1$ requires $\Omega(n)$ (Theorem~\ref{thm:unbounded-gap}). The gap grows without bound.
-
-\textbf{Section~\ref{sec:empirical}---Worked Instantiation.} A case study from a production system (OpenHCS~\cite{openhcs2025}) instantiates the realizability requirements.
+\textbf{Sections~\ref{sec:evaluation},~\ref{sec:empirical}---Instantiations (Corollaries).} Programming-language instantiation and worked example. These illustrate the abstract theory; core results are domain-independent.
 
 
 \subsection{Core Theorems}\label{sec:core-theorems}
 
-We establish four \emph{core} theorems characterizing optimal encoding under coherence constraints:
+We establish five \emph{core} theorems:
 
 \begin{enumerate}
 \def\labelenumi{\arabic{enumi}.}
 \item
-  \textbf{Theorem~\ref{thm:oracle-arbitrary} (Resolution Impossibility):} For any incoherent encoding system (DOF $> 1$ with divergent values) and any resolution procedure selecting a value, there exists an equally-present value disagreeing with the selection. No resolution is information-theoretically justified.
+  \textbf{Theorem~\ref{thm:coherence-capacity} (Zero-Incoherence Capacity):} $C_0 = 1$. The maximum encoding rate guaranteeing zero incoherence is exactly 1.
 
-  \emph{Proof:} By incoherence, at least two values exist. Any selection leaves another value disagreeing. No side information distinguishes them.
-
-\item
-  \textbf{Theorem~\ref{thm:dof-one-coherence} (Optimal Rate):} DOF = 1 guarantees coherence. Exactly one independent encoding makes disagreement impossible.
-
-  \emph{Proof:} All other locations are derived from the single source. Derivation enforces agreement. Single source determines all values.
+  \emph{Structure:} Achievability (Theorem~\ref{thm:capacity-achievability}) + Converse (Theorem~\ref{thm:capacity-converse}).
 
 \item
-  \textbf{Theorem~\ref{thm:ssot-iff} (Realizability Requirements):} An encoding system achieves DOF = 1 via derivation if and only if it provides: (a) causal update propagation (source changes automatically trigger derived location updates), and (b) provenance observability (derivation structure is queryable).
+  \textbf{Theorem~\ref{thm:side-info} (Side Information Bound):} Resolution of $k$-way incoherence requires $\geq \log_2 k$ bits of side information. At DOF $= 1$, zero bits suffice.
 
-  \emph{Proof:} Necessity by constructing incoherent configurations when either is missing. Sufficiency by exhibiting derivation mechanisms achieving DOF = 1. The requirements are information-theoretic encoder properties, not implementation details.
+  \emph{Proof:} The $k$ alternatives have entropy $H(S) = \log_2 k$. Resolution requires mutual information $I(S; Y) \geq H(S)$.
 
 \item
-  \textbf{Theorem~\ref{thm:unbounded-gap} (Rate-Complexity Tradeoff):} Modification complexity scales as: DOF = 1 achieves $O(1)$; DOF = $n > 1$ requires $\Omega(n)$. The ratio grows without bound: $\lim_{n \to \infty} \frac{n}{1} = \infty$.
+  \textbf{Theorem~\ref{thm:oracle-arbitrary} (Resolution Impossibility):} Without side information, no resolution procedure is information-theoretically justified.
 
-  \emph{Proof:} DOF = 1 updates single source (constant). DOF = $n$ must synchronize $n$ independent locations (linear).
+  \emph{Proof:} By incoherence, $k \geq 2$ values exist. Any selection leaves $k-1$ values disagreeing. No internal information distinguishes them.
+
+\item
+  \textbf{Theorem~\ref{thm:ssot-iff} (Encoder Realizability):} Achieving capacity requires encoder properties: (a) causal propagation (feedback), and (b) provenance observability (side information). Both necessary; together sufficient.
+
+  \emph{Proof:} Necessity by constructing above-capacity configurations when either is missing. Sufficiency by exhibiting capacity-achieving encoders.
+
+\item
+  \textbf{Theorem~\ref{thm:unbounded-gap} (Rate-Complexity Tradeoff):} Modification complexity scales as $O(1)$ at capacity vs. $\Omega(n)$ above capacity. The gap is unbounded.
+
+  \emph{Proof:} At capacity, one source update suffices. Above capacity, $n$ independent locations require $n$ updates.
 \end{enumerate}
 
-\textbf{Forcing property.} DOF = 1 is the \textbf{unique} rate guaranteeing coherence. DOF = 0 means unencoded; DOF $> 1$ permits incoherence. Given coherence as a requirement, there is no design freedom---the solution is mathematically forced.
+\textbf{Uniqueness.} $C_0 = 1$ is the \textbf{unique} capacity: DOF $= 0$ fails to encode; DOF $> 1$ exceeds capacity. Given zero-incoherence as a constraint, the rate is mathematically forced.
 
 \subsection{Scope}\label{sec:scope}
 
@@ -121,61 +148,48 @@ This work characterizes SSOT for \emph{structural facts} (class existence, metho
 
 \subsection{Contributions}\label{sec:contributions}
 
-This paper makes six contributions:
+This paper makes five information-theoretic contributions:
 
-\textbf{1. Epistemic foundations (Section~\ref{sec:epistemic}):}
+\textbf{1. Zero-incoherence capacity (Section~\ref{sec:capacity}):}
 \begin{itemize}
 \tightlist
-\item Definition of coherence and incoherence for encoding systems
-\item \textbf{Theorem~\ref{thm:oracle-arbitrary} (Oracle Arbitrariness):} Under incoherence, no resolution is principled. The epistemic core.
-\item \textbf{Theorem~\ref{thm:dof-one-coherence} (Coherence Forcing):} DOF = 1 guarantees coherence
-\item \textbf{Theorem~\ref{thm:dof-gt-one-incoherence}:} DOF $> 1$ permits incoherence
-\item \textbf{Corollary~\ref{cor:coherence-forces-ssot}:} Given coherence requirement, DOF = 1 is necessary and sufficient
+\item Definition of encoding rate (DOF) and incoherence
+\item \textbf{Theorem~\ref{thm:coherence-capacity}:} $C_0 = 1$ (tight: achievability + converse)
+\item \textbf{Theorem~\ref{thm:redundancy-incoherence}:} Redundancy $\rho > 0$ iff incoherence reachable
 \end{itemize}
 
-\textbf{2. Software instantiation (Section~\ref{sec:edit-space}):}
+\textbf{2. Side information bounds (Section~\ref{sec:side-information}):}
 \begin{itemize}
 \tightlist
-\item Mapping: encoding systems $\to$ codebases, facts $\to$ structural specifications
-\item Definition of SSOT as DOF = 1 for software
-\item Theorem~\ref{thm:ssot-determinate}: SSOT eliminates indeterminacy
+\item \textbf{Theorem~\ref{thm:side-info}:} $k$-way resolution requires $\geq \log_2 k$ bits
+\item \textbf{Corollary~\ref{cor:dof1-zero-side}:} DOF $= 1$ requires zero side information
+\item Multi-terminal interpretation: derivation as perfect correlation
 \end{itemize}
 
-\textbf{3. Realizability requirements (Section~\ref{sec:requirements}):}
+\textbf{3. Encoder realizability (Section~\ref{sec:requirements}):}
 \begin{itemize}
 \tightlist
-\item Theorem~\ref{thm:causal-necessary}: Causal update propagation is necessary
-\item Theorem~\ref{thm:provenance-necessary}: Provenance observability is necessary
-\item Theorem~\ref{thm:ssot-iff}: Both together are sufficient
-\item Connection to IT: causal propagation $\approx$ channel with feedback; provenance observability $\approx$ Slepian-Wolf side information
-\item Connection to WOM codes: structural irreversibility constraint analogous to write-once constraint
+\item \textbf{Theorem~\ref{thm:ssot-iff}:} Capacity achieved iff causal propagation AND provenance observability
+\item \textbf{Theorem~\ref{thm:independence}:} Requirements are independent
+\item Connection to feedback channels and Slepian-Wolf side information
 \end{itemize}
 
-\textbf{4. Language instantiation (Section~\ref{sec:evaluation}):}
+\textbf{4. Rate-complexity tradeoffs (Section~\ref{sec:bounds}):}
 \begin{itemize}
 \tightlist
-\item Representative instantiation over a mainstream language class
-\item Extended instantiation of three MOP-equipped languages (CLOS, Smalltalk, Ruby)
-\item Theorem~\ref{thm:three-lang}: Exactly three languages satisfy requirements within the evaluated class
+\item \textbf{Theorem~\ref{thm:upper-bound}:} $O(1)$ at capacity
+\item \textbf{Theorem~\ref{thm:lower-bound}:} $\Omega(n)$ above capacity
+\item \textbf{Theorem~\ref{thm:unbounded-gap}:} Gap unbounded
 \end{itemize}
 
-\textbf{5. Complexity bounds (Section~\ref{sec:bounds}):}
+\textbf{5. Encoding-theoretic CAP/FLP (Section~\ref{sec:cap-flp}):}
 \begin{itemize}
 \tightlist
-\item Theorem~\ref{thm:upper-bound}: SSOT achieves $O(1)$ coherence restoration
-\item Theorem~\ref{thm:lower-bound}: Non-SSOT requires $\Omega(n)$ modifications
-\item Theorem~\ref{thm:unbounded-gap}: The gap is unbounded
+\item \textbf{Theorem~\ref{thm:cap-encoding}:} CAP as encoding impossibility
+\item \textbf{Theorem~\ref{thm:static-flp}:} FLP as resolution impossibility
 \end{itemize}
 
-\textbf{6. Worked instantiation (Section~\ref{sec:empirical}):}
-\begin{itemize}
-\tightlist
-\item Before/after examples from OpenHCS (production Python codebase)
-\item PR \#44~\cite{openhcsPR44}: Migration from 47 scattered checks to 1 ABC (DOF 47 $\to$ 1)
-\item Concrete instantiation of realizability mechanisms in a production system
-\end{itemize}
-
-\textbf{Note on scope.} The programming-language instantiation and worked case study (Sections~\ref{sec:evaluation} and~\ref{sec:empirical}) are corollaries of the realizability theorem. The core information-theoretic results are contained in Sections~\ref{sec:foundations}--\ref{sec:bounds}.
+\textbf{Instantiations (corollaries).} Sections~\ref{sec:evaluation} and~\ref{sec:empirical} instantiate the realizability theorem for programming languages and provide a worked example. These are illustrative corollaries; the core information-theoretic results are self-contained in Sections~\ref{sec:foundations}--\ref{sec:bounds}.
 
 
 %==============================================================================

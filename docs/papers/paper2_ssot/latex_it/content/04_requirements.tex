@@ -1,32 +1,32 @@
 \section{Information-Theoretic Realizability Requirements}\label{sec:requirements}
 %==============================================================================
 
-We now derive the capabilities necessary and sufficient for encoding systems to achieve DOF = 1 (optimal encoding rate). These requirements are \emph{information-theoretic necessities}---properties that any encoding system must have to guarantee coherence under modification, regardless of implementation domain.
+This section identifies, at an abstract information-theoretic level, the two properties an encoding system must provide to realize DOF = 1. Concrete programming-language and system-level instantiations are presented in the supplementary material; here we present the abstract requirements and their necessity/sufficiency proofs.
 
-The requirements emerge from the structure of the encoding problem itself. Programming languages, distributed databases, and configuration systems are specific realizations; the requirements apply universally.
+Informally, an encoding system provides a set of locations holding values and a space of allowed modifications. DOF = 1 is realizable when exactly one independent location exists (the source) and all other encodings are deterministic functions (derivations) of that source so divergence is impossible.
 
-\subsection{The Realizability Question}\label{sec:realizability-question}
-
-Given that DOF = 1 is the unique optimal encoding rate (Theorem~\ref{thm:dof-optimal}), a natural question arises: \emph{What must an encoding system provide for DOF = 1 to be realizable?}
-
-An encoding system consists of:
-\begin{itemize}
-\tightlist
-\item \textbf{Locations}: Sites where facts can be encoded
-\item \textbf{Encodings}: Values stored at locations
-\item \textbf{Modifications}: Operations that change encodings
-\item \textbf{Derivation mechanism}: Rules determining how some locations are computed from others
-\end{itemize}
-
-For DOF = 1 to hold, exactly one location must be independent (the \emph{source}), and all others must be \emph{derived}---automatically computed from the source such that divergence is impossible.
-
-We prove that two properties are necessary and sufficient for DOF = 1 realizability:
+We show that two encoder properties are necessary and sufficient:
 \begin{enumerate}
-\item \textbf{Causal update propagation}: Changes to the source automatically trigger updates to derived locations
-\item \textbf{Provenance observability}: The system supports queries about derivation structure (what is derived from what)
+\item \textbf{Causal update propagation:} updates to the source must automatically propagate to derived locations (eliminating transient incoherence windows);
+\item \textbf{Provenance observability:} the system must expose, to verification procedures, which locations are sources and which are derived (providing the side information necessary to verify DOF = 1).
 \end{enumerate}
 
-These are \textbf{encoder properties}, not implementation details. They determine whether an encoding system can achieve the optimal rate.
+The remainder of this section gives formal statements and proofs of necessity and sufficiency for these properties in the abstract model.
+
+\subsection{Confusability and Side-Information}
+\label{sec:confusability}
+
+To connect realizability to the information available at runtime, define the \emph{confusability graph} for a fact $F$: vertices are distinct values of $F$, and an undirected edge joins two values $x,x'$ iff they are indistinguishable given the available side information (i.e., no observation of derived locations can reliably separate $x$ from $x'$).
+
+\begin{lemma}[Confusability Clique Bound]\label{lem:confusability-clique}
+If the confusability graph for $F$ contains a clique of size $k$, then any side-information channel that yields vanishing error probability for distinguishing all $k$ values must convey at least $\log k$ bits about $F$. Equivalently, if the mutual information between $F$ and side information $S$ satisfies $I(F;S)<\log k - \epsilon$, then the error probability for distinguishing the $k$-clique is bounded away from zero.
+\end{lemma}
+
+\begin{proof}[Proof sketch]
+Restrict $F$ to the $k$ values in the clique; this induces a uniform $k$-ary hypothesis testing problem. Apply the Fano-style bound (Theorem~\ref{thm:fano-converse} in Section~\ref{sec:info-converse}) to conclude that vanishing error requires $I(F;S)\ge\log k - o(1)$. If $I(F;S)$ is strictly smaller than $\log k$, Fano's inequality implies a non-zero lower bound on error probability.
+\end{proof}
+
+\noindent The confusability graph provides a compact combinatorial certificate of necessary side-information: large cliques force large information requirements and hence constrain realizability in languages/environments with limited introspection or definition-time hooks.
 
 \subsection{The Structural Timing Constraint}\label{sec:timing}
 
@@ -108,7 +108,7 @@ Contrapositive: If an encoding system lacks causal propagation, DOF = 1 for stru
 \textbf{Realizations across domains:}
 
 \begin{center}
-\begin{tabular}{lp{7cm}}
+\begin{tabularx}{\linewidth}{lX}
 \toprule
 \textbf{Domain} & \textbf{Causal Propagation Mechanism} \\
 \midrule
@@ -119,7 +119,7 @@ Databases & Triggers on schema operations (PostgreSQL event triggers) \\
 Distributed systems & Consensus protocols (Paxos, Raft) \\
 Configuration & Terraform dependency graph, reactive bindings \\
 \bottomrule
-\end{tabular}
+\end{tabularx}
 \end{center}
 
 \textbf{Systems lacking causal propagation:}
@@ -172,7 +172,7 @@ Without provenance observability, none of these queries are answerable from with
 \textbf{Realizations across domains:}
 
 \begin{center}
-\begin{tabular}{lp{7cm}}
+\begin{tabularx}{\linewidth}{lX}
 \toprule
 \textbf{Domain} & \textbf{Provenance Observability Mechanism} \\
 \midrule
@@ -183,7 +183,7 @@ Databases & System catalogs (\texttt{pg\_depend}), query plan introspection \\
 Distributed systems & Vector clocks, provenance tracking, \texttt{etcd} watch \\
 Configuration & Terraform \texttt{graph}, Kubernetes API server \\
 \bottomrule
-\end{tabular}
+\end{tabularx}
 \end{center}
 
 \textbf{Systems lacking provenance observability:}
@@ -277,7 +277,7 @@ Both settings involve achieving optimal encoding under irreversibility constrain
 %==============================================================================
 
 \begin{center}
-\fbox{\parbox{0.9\textwidth}{
+\fbox{\parbox{0.95\columnwidth}{
 \textbf{Observation:} Structural facts are fixed at definition time (irreversible encoding).
 
 $\downarrow$ (timing analysis)
@@ -319,7 +319,7 @@ This fact must be encoded in two places:
 
 \textbf{Python (DOF-1-complete) achieves DOF = 1:}
 
-\begin{verbatim}
+\begin{code}
 class ImageHandler:
     _registry = {}
 
@@ -330,7 +330,7 @@ class ImageHandler:
 
 class PNGHandler(ImageHandler, format="png"):  # SOURCE
     def load(self, path): ...
-\end{verbatim}
+\end{code}
 
 \textbf{Causal propagation:} When \texttt{class PNGHandler} executes, \texttt{\_\_init\_subclass\_\_} fires immediately, adding the registry entry. No temporal gap.
 
@@ -340,7 +340,7 @@ class PNGHandler(ImageHandler, format="png"):  # SOURCE
 
 \textbf{Java (DOF-1-incomplete) cannot achieve DOF = 1:}
 
-\begin{verbatim}
+\begin{code}
 // File 1: PNGHandler.java
 @Handler(format = "png")  // Metadata, not executable
 public class PNGHandler implements ImageHandler { ... }
@@ -349,7 +349,7 @@ public class PNGHandler implements ImageHandler { ... }
 public class HandlerRegistry {
     static { register("png", PNGHandler.class); }  // Manual
 }
-\end{verbatim}
+\end{code}
 
 \textbf{No causal propagation:} The \texttt{@Handler} annotation is data, not code. Nothing executes when the class is defined.
 
@@ -384,14 +384,14 @@ Contrast with Python: the registry entry exists only in memory, created causally
 %==============================================================================
 
 \begin{center}
-\begin{tabular}{lp{5cm}p{5cm}}
+\begin{tabularx}{\linewidth}{lYY}
 \toprule
 \textbf{Requirement} & \textbf{IT Interpretation} & \textbf{Why Necessary} \\
 \midrule
 Causal propagation & Channel with feedback; encoder-decoder coupling & Eliminates temporal incoherence window \\
 Provenance observability & Side information at decoder; codebook visibility & Enables DOF verification \\
 \bottomrule
-\end{tabular}
+\end{tabularx}
 \end{center}
 
 Both requirements are necessary. Neither is sufficient alone. Together they enable DOF-1-complete encoding systems that achieve the coherence-optimal rate.
