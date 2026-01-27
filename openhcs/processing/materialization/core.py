@@ -10,38 +10,88 @@ import json
 import logging
 from dataclasses import dataclass, field, fields, is_dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, Generic, List, Optional, Sequence, TypeVar, Union
 
 import pandas as pd
 
 from openhcs.constants.constants import Backend
 
+# Type variables for generic MaterializationSpec
+T = TypeVar('T', bound=object)
+
 logger = logging.getLogger(__name__)
+
+# Import typed options for handler type narrowing
+# These are used for type annotations in handlers
+from openhcs.processing.materialization.options import (
+    TabularOptions,
+    ArrayExpansionOptions,
+    FileOutputOptions,
+    ROIOptions,
+    RegionPropsOptions,
+    TiffStackOptions,
+)
 
 
 @dataclass(frozen=True)
-class MaterializationSpec:
+class MaterializationSpec(Generic[T]):
     """
-    Declarative materialization spec.
+    Declarative materialization spec with type-safe options.
 
-    handler: Registered handler name in MaterializationRegistry.
-    options: Handler-specific options (serializable).
-    allowed_backends: Optional allowlist of backend names.
+    Type Parameters:
+        T: The type of options (e.g., TabularOptions, ArrayExpansionOptions, etc.)
+
+    Attributes:
+        handler: Registered handler name in MaterializationRegistry.
+        options: Typed handler-specific options (validated at construction).
+        allowed_backends: Optional allowlist of backend names.
+
+    Example:
+        >>> from openhcs.processing.materialization.options import TabularOptions
+        >>> spec = MaterializationSpec(
+        ...     handler="csv",
+        ...     options=TabularOptions(fields=["x", "y"]),
+        ... )
     """
     handler: str
-    options: Dict[str, Any] = field(default_factory=dict)
+    options: T
     allowed_backends: Optional[List[str]] = None
+
+    def __post_init__(self):
+        """Validate options type at construction time (fail fast)."""
+        # Import here to avoid circular dependency
+        from openhcs.processing.materialization.constants import HANDLER_OPTION_TYPES
+
+        handler_option_types = HANDLER_OPTION_TYPES
+
+        # Only validate if handler is registered (may not be during import time)
+        if self.handler in handler_option_types:
+            expected_type = handler_option_types[self.handler]
+
+            # Check if options is instance of expected type
+            if not isinstance(self.options, expected_type):
+                actual_type = type(self.options).__name__
+                raise TypeError(
+                    f"Handler '{self.handler}' expects {expected_type.__name__}, "
+                    f"got {actual_type}. "
+                    f"Use: {expected_type.__name__}(...) instead."
+                )
 
 
 @dataclass(frozen=True)
 class MaterializationHandler:
+    """Container for a materialization handler and its metadata."""
     name: str
     func: Callable[..., str]
     requires_arbitrary_files: bool = True
+    options_type: Optional[type] = None  # Expected options type for this handler
 
 
 class MaterializationRegistry:
+    """Registry for materialization handlers with type tracking."""
+
     _handlers: Dict[str, MaterializationHandler] = {}
+    _option_types: Dict[str, type] = {}  # Handler name -> options type mapping
 
     @classmethod
     def register(
@@ -49,37 +99,148 @@ class MaterializationRegistry:
         name: str,
         func: Callable[..., str],
         *,
+        options_type: Optional[type] = None,
         requires_arbitrary_files: bool = True
     ) -> None:
+        """Register a materialization handler with its options type.
+
+        Args:
+            name: Handler name (used in MaterializationSpec.handler)
+            func: Handler function
+            options_type: Expected options dataclass type for validation
+            requires_arbitrary_files: Whether this handler requires arbitrary file support
+
+        Raises:
+            ValueError: If handler already registered with a different function
+        """
+        # Check if already registered
         if name in cls._handlers:
-            raise ValueError(f"Materialization handler already registered: {name}")
+            existing = cls._handlers[name]
+            # Allow re-registration if it's the exact same function (idempotent)
+            if existing.func is func:
+                logger.debug(f"Handler '{name}' already registered with same function, skipping")
+                return
+            # Different function trying to use same name - error
+            raise ValueError(
+                f"Materialization handler '{name}' already registered with "
+                f"different function. Cannot re-register."
+            )
+
         cls._handlers[name] = MaterializationHandler(
             name=name,
             func=func,
-            requires_arbitrary_files=requires_arbitrary_files
+            requires_arbitrary_files=requires_arbitrary_files,
+            options_type=options_type
         )
+
+        # Store options type for validation
+        if options_type is not None:
+            cls._option_types[name] = options_type
+
+            # Also populate constants HANDLER_OPTION_TYPES for shared access
+            from openhcs.processing.materialization.constants import HANDLER_OPTION_TYPES
+            HANDLER_OPTION_TYPES[name] = options_type
 
     @classmethod
     def get(cls, name: str) -> MaterializationHandler:
+        """Get handler by name.
+
+        Args:
+            name: Handler name
+
+        Returns:
+            MaterializationHandler instance
+
+        Raises:
+            KeyError: If handler not found
+        """
         if name not in cls._handlers:
             raise KeyError(f"Unknown materialization handler: {name}")
         return cls._handlers[name]
+
+    @classmethod
+    def get_options_type(cls, name: str) -> Optional[type]:
+        """Get expected options type for a handler.
+
+        Args:
+            name: Handler name
+
+        Returns:
+            Options type or None if not specified
+        """
+        return cls._option_types.get(name)
 
 
 def register_materializer(
     name: str,
     *,
+    options_type: Optional[type] = None,
     requires_arbitrary_files: bool = True
 ) -> Callable[[Callable[..., str]], Callable[..., str]]:
+    """Decorator to register a materialization handler with type tracking.
+
+    Args:
+        name: Handler name
+        options_type: Expected options dataclass type for validation
+        requires_arbitrary_files: Whether handler requires arbitrary file support
+
+    Returns:
+        Decorator function
+
+    Example:
+        >>> from openhcs.processing.materialization.options import TabularOptions
+        >>>
+        >>> @register_materializer("csv", options_type=TabularOptions)
+        >>> def _materialize_csv(...):
+        ...     ...
+    """
     def decorator(func: Callable[..., str]) -> Callable[..., str]:
         MaterializationRegistry.register(
             name,
             func,
+            options_type=options_type,
             requires_arbitrary_files=requires_arbitrary_files
         )
         func.__materialization_handler__ = name
         return func
     return decorator
+
+
+# ===== Type Guard for Options =====
+
+T = TypeVar('T', bound=object)
+
+def _expect_options(spec: MaterializationSpec, options_type: type[T]) -> T:
+    """Type guard: runtime check + type narrowing for handler options.
+
+    This function provides BOTH:
+    - Runtime type checking (catches bugs early)
+    - Type narrowing (type checker understands the return type)
+
+    Args:
+        spec: MaterializationSpec containing options
+        options_type: Expected options type (e.g., TabularOptions)
+
+    Returns:
+        The options, narrowed to the specified type
+
+    Raises:
+        TypeError: If options don't match expected type
+
+    Example:
+        >>> # In handler:
+        >>> options = _expect_options(spec, TabularOptions)
+        >>> # Type checker knows options is TabularOptions
+        >>> fields = options.fields  # Autocomplete works!
+    """
+    if not isinstance(spec.options, options_type):
+        actual_type = type(spec.options).__name__
+        expected_type = options_type.__name__
+        raise TypeError(
+            f"Handler expects {expected_type}, got {actual_type}. "
+            f"Use: MaterializationSpec(handler, {expected_type}(...))"
+        )
+    return spec.options
 
 
 def _normalize_backends(backends: Sequence[str] | str) -> List[str]:
@@ -200,7 +361,7 @@ def materialize(
 
 # Built-in handlers
 
-@register_materializer("csv", requires_arbitrary_files=True)
+@register_materializer("csv", options_type=TabularOptions, requires_arbitrary_files=True)
 def _materialize_csv(
     data: List[Any],
     path: str,
@@ -211,10 +372,16 @@ def _materialize_csv(
     context: Any,
     extra_inputs: Dict[str, Any],
 ) -> str:
-    options = spec.options
-    fields_opt = options.get("fields")
-    filename_suffix = options.get("filename_suffix", ".csv")
-    strip_roi = options.get("strip_roi_suffix", False)
+    """Materialize data as CSV using typed TabularOptions."""
+    # Type guard: runtime check + type narrowing
+    options = _expect_options(spec, TabularOptions)
+
+    # Direct attribute access - no .get() needed!
+    fields_opt = options.fields
+    strip_roi = options.strip_roi_suffix if hasattr(options, 'strip_roi_suffix') else False
+
+    # Generate output path
+    filename_suffix = getattr(options, 'filename_suffix', '.csv')
     output_path = _generate_output_path(path, filename_suffix, ".csv", strip_roi=strip_roi)
 
     rows = []
@@ -236,7 +403,7 @@ def _materialize_csv(
     return output_path
 
 
-@register_materializer("json", requires_arbitrary_files=True)
+@register_materializer("json", options_type=TabularOptions, requires_arbitrary_files=True)
 def _materialize_json(
     data: List[Any],
     path: str,
@@ -247,12 +414,18 @@ def _materialize_json(
     context: Any,
     extra_inputs: Dict[str, Any],
 ) -> str:
-    options = spec.options
-    fields_opt = options.get("fields")
-    filename_suffix = options.get("filename_suffix", ".json")
-    analysis_type = options.get("analysis_type")
-    include_metadata = options.get("include_metadata", True)
-    strip_roi = options.get("strip_roi_suffix", False)
+    """Materialize data as JSON using typed TabularOptions."""
+    # Type guard: runtime check + type narrowing
+    options = _expect_options(spec, TabularOptions)
+
+    # Direct attribute access
+    fields_opt = options.fields
+    analysis_type = options.analysis_type
+    include_metadata = options.include_metadata
+    strip_roi = options.strip_roi_suffix if hasattr(options, 'strip_roi_suffix') else False
+
+    # Generate output path
+    filename_suffix = getattr(options, 'filename_suffix', '.json')
     output_path = _generate_output_path(path, filename_suffix, ".json", strip_roi=strip_roi)
 
     results = []
@@ -279,7 +452,7 @@ def _materialize_json(
     return output_path
 
 
-@register_materializer("dual", requires_arbitrary_files=True)
+@register_materializer("dual", options_type=TabularOptions, requires_arbitrary_files=True)
 def _materialize_dual(
     data: List[Any],
     path: str,
@@ -290,12 +463,17 @@ def _materialize_dual(
     context: Any,
     extra_inputs: Dict[str, Any],
 ) -> str:
-    options = spec.options
-    fields_opt = options.get("fields")
-    summary_fields = options.get("summary_fields")
-    analysis_type = options.get("analysis_type")
-    include_metadata = options.get("include_metadata", True)
-    strip_roi = options.get("strip_roi_suffix", False)
+    """Materialize data as dual output (CSV + JSON) using typed TabularOptions."""
+    # Type guard: runtime check + type narrowing
+    options = _expect_options(spec, TabularOptions)
+
+    # Direct attribute access
+    fields_opt = options.fields
+    summary_fields = options.summary_fields
+    analysis_type = options.analysis_type
+    include_metadata = options.include_metadata
+    strip_roi = options.strip_roi_suffix if hasattr(options, 'strip_roi_suffix') else False
+
     base_path = _generate_output_path(path, "", "", strip_roi=strip_roi)
     json_path = f"{base_path}.json"
     csv_path = f"{base_path}_details.csv"
@@ -333,7 +511,7 @@ def _materialize_dual(
     return json_path
 
 
-@register_materializer("tiff_stack", requires_arbitrary_files=True)
+@register_materializer("tiff_stack", options_type=TiffStackOptions, requires_arbitrary_files=True)
 def _materialize_tiff_stack(
     data: List[Any],
     path: str,
@@ -344,24 +522,26 @@ def _materialize_tiff_stack(
     context: Any,
     extra_inputs: Dict[str, Any],
 ) -> str:
-    options = spec.options
-    normalize_uint8 = options.get("normalize_uint8", False)
-    summary_suffix = options.get("summary_suffix", "_summary.txt")
-    strip_roi = options.get("strip_roi_suffix", False)
+    """Materialize image arrays as TIFF stack using typed TiffStackOptions."""
+    # Type guard: runtime check + type narrowing
+    options = _expect_options(spec, TiffStackOptions)
+
+    # Direct attribute access
+    normalize_uint8 = options.normalize_uint8
+    summary_suffix = options.summary_suffix
+    empty_summary = options.empty_summary
+    strip_roi = options.strip_roi_suffix
+    strip_pkl = options.strip_pkl
 
     if not data:
-        summary_path = _generate_output_path(path, summary_suffix, ".txt", strip_roi=strip_roi)
-        summary_content = options.get(
-            "empty_summary",
-            "No images generated (empty data)\n"
-        )
+        summary_path = _generate_output_path(path, summary_suffix, ".txt", strip_roi=strip_roi, strip_pkl=strip_pkl)
         for backend in backends:
             _prepare_output_path(filemanager, backend, summary_path)
             kwargs = backend_kwargs.get(backend, {})
-            filemanager.save(summary_content, summary_path, backend, **kwargs)
+            filemanager.save(empty_summary, summary_path, backend, **kwargs)
         return summary_path
 
-    base_path = _generate_output_path(path, "", "", strip_roi=strip_roi)
+    base_path = _generate_output_path(path, "", "", strip_roi=strip_roi, strip_pkl=strip_pkl)
     for i, arr in enumerate(data):
         filename = f"{base_path}_slice_{i:03d}.tif"
         out_arr = arr
@@ -392,7 +572,7 @@ def _materialize_tiff_stack(
     return summary_path
 
 
-@register_materializer("roi_zip", requires_arbitrary_files=True)
+@register_materializer("roi_zip", options_type=ROIOptions, requires_arbitrary_files=True)
 def _materialize_roi_zip(
     data: List[Any],
     path: str,
@@ -403,19 +583,22 @@ def _materialize_roi_zip(
     context: Any,
     extra_inputs: Dict[str, Any],
 ) -> str:
-    options = spec.options
-    min_area = options.get("min_area", 10)
-    extract_contours = options.get("extract_contours", True)
-    roi_suffix = options.get("roi_suffix", "_rois.roi.zip")
-    summary_suffix = options.get("summary_suffix", "_segmentation_summary.txt")
-    strip_roi = options.get("strip_roi_suffix", False)
+    """Materialize segmentation masks as ROI zip using typed ROIOptions."""
+    # Type guard: runtime check + type narrowing
+    options = _expect_options(spec, ROIOptions)
+
+    # Direct attribute access
+    min_area = options.min_area
+    extract_contours = options.extract_contours
+    roi_suffix = options.roi_suffix
+    summary_suffix = options.summary_suffix
+    strip_roi = options.strip_roi_suffix
+    strip_pkl = options.strip_pkl
 
     if not data:
-        summary_path = _generate_output_path(path, summary_suffix, ".txt", strip_roi=strip_roi)
-        summary_content = options.get(
-            "empty_summary",
-            "No segmentation masks generated (empty data)\n"
-        )
+        summary_path = _generate_output_path(path, summary_suffix, ".txt", strip_roi=strip_roi, strip_pkl=strip_pkl)
+        # Use default empty summary since ROIOptions doesn't have empty_summary field
+        summary_content = "No segmentation masks generated (empty data)\n"
         for backend in backends:
             _prepare_output_path(filemanager, backend, summary_path)
             kwargs = backend_kwargs.get(backend, {})
@@ -433,7 +616,7 @@ def _materialize_roi_zip(
         )
         all_rois.extend(rois)
 
-    base_path = _generate_output_path(path, "", "", strip_roi=strip_roi)
+    base_path = _generate_output_path(path, "", "", strip_roi=strip_roi, strip_pkl=strip_pkl)
     roi_path = f"{base_path}{roi_suffix}"
 
     if all_rois:
@@ -471,7 +654,7 @@ def _coerce_jsonable(value: Any) -> Any:
     return value
 
 
-@register_materializer("regionprops", requires_arbitrary_files=True)
+@register_materializer("regionprops", options_type=RegionPropsOptions, requires_arbitrary_files=True)
 def _materialize_regionprops(
     data: Any,
     path: str,
@@ -496,17 +679,20 @@ def _materialize_regionprops(
     from skimage.measure import regionprops_table
     from polystore.roi import ROI, extract_rois_from_labeled_mask
 
-    options = spec.options
-    analysis_type = options.get("analysis_type", "regionprops")
-    min_area = int(options.get("min_area", 10))
-    extract_contours = bool(options.get("extract_contours", True))
-    roi_suffix = options.get("roi_suffix", "_rois.roi.zip")
-    details_suffix = options.get("details_suffix", "_details.csv")
-    json_suffix = options.get("json_suffix", ".json")
-    require_intensity = bool(options.get("require_intensity", False))
+    # Type guard: runtime check + type narrowing
+    options = _expect_options(spec, RegionPropsOptions)
 
-    base_properties = list(options.get("properties") or ["label", "area", "perimeter", "centroid", "bbox"])
-    intensity_properties = list(options.get("intensity_properties") or ["mean_intensity"])
+    # Direct attribute access
+    analysis_type = options.analysis_type
+    min_area = options.min_area
+    extract_contours = options.extract_contours
+    roi_suffix = options.roi_suffix
+    details_suffix = options.details_suffix
+    json_suffix = options.json_suffix
+    require_intensity = options.require_intensity
+
+    base_properties = list(options.properties or ["label", "area", "perimeter", "centroid", "bbox"])
+    intensity_properties = list(options.intensity_properties or ["mean_intensity"])
 
     # Ensure required properties for filtering + stable schema
     for required in ("label", "area", "centroid", "bbox"):
@@ -672,14 +858,127 @@ def _materialize_regionprops(
     return json_path
 
 
-def _get_result_attr(obj: Any, name: str, default: Any = None) -> Any:
-    if isinstance(obj, dict):
-        return obj.get(name, default)
-    return getattr(obj, name, default)
+# ===== Helper functions for array field discovery and expansion =====
+
+def _is_array_field(field: Any, field_value: Any) -> bool:
+    """Check if a dataclass field is an array/tuple type.
+
+    Args:
+        field: dataclass field object
+        field_value: Runtime value of the field
+
+    Returns:
+        True if field represents an array/tuple structure
+    """
+    from typing import get_origin
+
+    # Check type annotation
+    origin = hasattr(field.type, '__origin__') and get_origin(field.type)
+    if origin in (list, List, tuple, Tuple):
+        return True
+
+    # Runtime check for list of tuples
+    if isinstance(field_value, list) and len(field_value) > 0:
+        first_elem = field_value[0]
+        if isinstance(first_elem, (tuple, list)):
+            return True
+
+    return False
 
 
-@register_materializer("cell_counts", requires_arbitrary_files=True)
-def _materialize_cell_counts(
+def _discover_array_fields(item: Any) -> List[str]:
+    """Discover all array/tuple fields in a dataclass.
+
+    Args:
+        item: Dataclass instance to inspect
+
+    Returns:
+        List of field names that are array/tuple types
+    """
+    if not hasattr(item, '__dataclass_fields__'):
+        return []
+
+    from dataclasses import fields
+
+    return [
+        f.name
+        for f in fields(item)
+        if _is_array_field(f, getattr(item, f.name, None))
+    ]
+
+
+def _discover_column_mapping(
+    field_name: str,
+    array_data: List[Any],
+    existing_mapping: Dict[str, str]
+) -> Dict[str, str]:
+    """Auto-discover column mapping for array expansion.
+
+    Args:
+        field_name: Name of the field being expanded
+        array_data: Array data to expand
+        existing_mapping: User-provided mapping (takes precedence)
+
+    Returns:
+        Dict mapping string indices to column names
+    """
+    if existing_mapping:
+        return existing_mapping
+
+    if not array_data:
+        return {}
+
+    first_elem = array_data[0]
+    if not isinstance(first_elem, (tuple, list)):
+        return {}
+
+    # Auto-generate: field_name_0, field_name_1, ...
+    return {
+        str(i): f"{field_name}_{i}"
+        for i in range(len(first_elem))
+    }
+
+
+def _expand_array_field(
+    array_data: List[Any],
+    base_row: Dict[str, Any],
+    row_columns: Dict[str, str]
+) -> List[Dict[str, Any]]:
+    """Expand an array field into multiple rows.
+
+    Args:
+        array_data: Array data to expand
+        base_row: Base fields to include in each row
+        row_columns: Mapping from array indices to column names
+
+    Returns:
+        List of expanded rows
+    """
+    if not array_data:
+        return [base_row]
+
+    rows = []
+    for element in array_data:
+        row = dict(base_row)
+        for idx_str, col_name in row_columns.items():
+            try:
+                idx = int(idx_str)
+                row[col_name] = element[idx]
+            except (ValueError, IndexError, TypeError) as e:
+                logger.warning(
+                    f"Failed to extract index {idx_str}: {e}. "
+                    f"element type: {type(element)}"
+                )
+        rows.append(row)
+
+    return rows
+
+
+# ===== Generic tabular handler with array expansion =====
+# This replaces the obsolete cell_counts handler
+
+@register_materializer("tabular", options_type=ArrayExpansionOptions, requires_arbitrary_files=True)
+def _materialize_tabular_with_arrays(
     data: List[Any],
     path: str,
     filemanager,
@@ -689,287 +988,248 @@ def _materialize_cell_counts(
     context: Any,
     extra_inputs: Dict[str, Any],
 ) -> str:
-    if not data:
-        logger.warning("CELL_COUNT materializer called with empty data")
-        return path
+    """
+    Generic handler for tabular output with array expansion.
 
-    options = spec.options
-    strip_roi = options.get("strip_roi_suffix", False)
-    base_path = _generate_output_path(path, "", "", strip_roi=strip_roi)
-    json_path = f"{base_path}.json"
+    Outputs:
+    1. JSON summary with aggregated statistics
+    2. CSV with one row per array element
+
+    Supports two expansion modes:
+    1. Dict-based: row_columns={"0": "x", "1": "y"} for simple tuple indexing
+    2. Callable: row_unpacker=custom_func for complex unpacking logic
+
+    Supports two aggregation modes:
+    1. String-based: aggregations={"field": "sum"} using built-in functions
+    2. Callable: aggregations={"field": custom_func} for custom logic
+    """
+    from openhcs.processing.materialization.options import BuiltinAggregations
+
+    # Type guard: runtime check + type narrowing
+    options = _expect_options(spec, ArrayExpansionOptions)
+
+    # Get configuration
+    fields_opt = options.fields
+    summary_fields = options.summary_fields or options.fields
+    analysis_type = options.analysis_type
+    include_metadata = options.include_metadata
+    strip_roi = options.strip_roi_suffix if hasattr(options, 'strip_roi_suffix') else False
+
+    # Generate output paths
+    filename_suffix = getattr(options, 'filename_suffix', '.json')
+    strip_pkl = options.strip_pkl if hasattr(options, 'strip_pkl') else True
+    base_path = _generate_output_path(path, "", "", strip_roi=strip_roi, strip_pkl=strip_pkl)
+    json_path = f"{base_path}{filename_suffix}"
     csv_path = f"{base_path}_details.csv"
 
-    is_multi_channel = _get_result_attr(data[0], "chan_1_results") is not None
+    # Build rows using array expansion
+    rows = []
+    for item_idx, item in enumerate(data or []):
+        # Extract base fields from item
+        base_row = _extract_fields(item, fields_opt)
+        if "slice_index" not in base_row and "slice_index" not in (fields_opt or []):
+            base_row["slice_index"] = item_idx
 
-    if is_multi_channel:
-        summary, rows = _build_cell_counts_multi_summary(data)
-    else:
-        summary, rows = _build_cell_counts_single_summary(data)
+        # STRATEGY DISPATCH: Choose expansion strategy
+        if options.row_unpacker:
+            # Strategy 1: Custom unpacker (user takes full control)
+            expanded_rows = options.row_unpacker(item)
+            for exp_row in expanded_rows:
+                exp_row.update(base_row)
+                rows.append(exp_row)
+            continue
 
+        if options.row_field:
+            # Strategy 2: User-specified field (explicit mode)
+            array_data = getattr(item, options.row_field, [])
+            row_columns = _discover_column_mapping(
+                options.row_field, array_data, options.row_columns
+            )
+            expanded = _expand_array_field(array_data, base_row, row_columns)
+            rows.extend(expanded)
+            continue
+
+        # Strategy 3: Auto-discovery (implicit mode)
+        array_fields = _discover_array_fields(item)
+        if not array_fields:
+            rows.append(base_row)
+            continue
+
+        # Expand primary array field
+        primary_field = array_fields[0]
+        array_data = getattr(item, primary_field, [])
+        row_columns = _discover_column_mapping(primary_field, array_data, {})
+        expanded = _expand_array_field(array_data, base_row, row_columns)
+        rows.extend(expanded)
+
+    # Build summary with aggregations
+    summary = _build_summary_from_data(
+        data or [],
+        summary_fields or fields_opt,
+        options.aggregations,
+        analysis_type,
+        include_metadata
+    )
+
+    # Ensure total_items is in summary
+    if "total_items" not in summary:
+        summary["total_items"] = len(data or [])
+
+    # Save JSON summary
     json_content = json.dumps(summary, indent=2, default=str)
-
     for backend in backends:
         _prepare_output_path(filemanager, backend, json_path)
-        _prepare_output_path(filemanager, backend, csv_path)
         kwargs = backend_kwargs.get(backend, {})
         filemanager.save(json_content, json_path, backend, **kwargs)
-        if rows:
-            df = pd.DataFrame(rows)
-            filemanager.save(df.to_csv(index=False), csv_path, backend, **kwargs)
 
+    # Save CSV details
+    if rows:
+        df = pd.DataFrame(rows)
+        csv_content = df.to_csv(index=False)
+        for backend in backends:
+            _prepare_output_path(filemanager, backend, csv_path)
+            kwargs = backend_kwargs.get(backend, {})
+            filemanager.save(csv_content, csv_path, backend, **kwargs)
+
+    logger.info(f"Materialized {len(rows)} rows (tabular with arrays) to {json_path}")
     return json_path
 
 
-def _build_cell_counts_single_summary(data: List[Any]) -> tuple[Dict[str, Any], List[Dict[str, Any]]]:
-    summary = {
-        "analysis_type": "single_channel_cell_counting",
-        "total_slices": len(data),
-        "results_per_slice": []
-    }
-    rows: List[Dict[str, Any]] = []
+def _discover_aggregations(data: List[Any]) -> Dict[str, str]:
+    """Auto-discover aggregations based on dataclass field types.
 
-    total_cells = 0
-    for result in data:
-        slice_index = _get_result_attr(result, "slice_index")
-        method = _get_result_attr(result, "method")
-        cell_count = _get_result_attr(result, "cell_count", 0)
-        cell_positions = _get_result_attr(result, "cell_positions", []) or []
-        cell_areas = _get_result_attr(result, "cell_areas", []) or []
-        cell_intensities = _get_result_attr(result, "cell_intensities", []) or []
-        detection_confidence = _get_result_attr(result, "detection_confidence", []) or []
-        parameters_used = _get_result_attr(result, "parameters_used", {}) or {}
+    Args:
+        data: List of dataclass instances
 
-        total_cells += cell_count
-        summary["results_per_slice"].append({
-            "slice_index": slice_index,
-            "method": method,
-            "cell_count": cell_count,
-            "avg_cell_area": float(sum(cell_areas) / len(cell_areas)) if cell_areas else 0,
-            "avg_cell_intensity": float(sum(cell_intensities) / len(cell_intensities)) if cell_intensities else 0,
-            "parameters": parameters_used
-        })
+    Returns:
+        Dict mapping aggregation names to built-in aggregation functions
+    """
+    if not data:
+        return {}
 
-        for i, (pos, area, intensity, confidence) in enumerate(zip(
-            cell_positions, cell_areas, cell_intensities, detection_confidence
-        )):
-            rows.append({
-                "slice_index": slice_index,
-                "cell_id": f"slice_{slice_index}_cell_{i}",
-                "x_position": pos[0],
-                "y_position": pos[1],
-                "cell_area": area,
-                "cell_intensity": intensity,
-                "detection_confidence": confidence,
-                "detection_method": method
-            })
+    first_item = data[0]
+    if not hasattr(first_item, '__dataclass_fields__'):
+        return {}
 
-    summary["total_cells_all_slices"] = total_cells
-    summary["average_cells_per_slice"] = total_cells / len(data) if data else 0
-    return summary, rows
+    from dataclasses import fields
+    from typing import get_origin
+
+    aggregations = {}
+
+    for f in fields(first_item):
+        field_value = getattr(first_item, f.name, None)
+        if field_value is None:
+            continue
+
+        # Get type origin for generic types
+        origin = get_origin(f.type)
+
+        # Dispatch based on type
+        if origin in (list, List):
+            aggregations[f"{f.name}_count"] = "count"
+        elif f.type in (int, float):
+            aggregations[f"{f.name}_sum"] = "sum"
+            if len(data) > 1:
+                aggregations[f"{f.name}_mean"] = "mean"
+        elif f.type == str:
+            aggregations[f"{f.name}_first"] = "first"
+
+    logger.debug(f"Auto-discovered aggregations: {list(aggregations.keys())}")
+    return aggregations
 
 
-def _build_cell_counts_multi_summary(data: List[Any]) -> tuple[Dict[str, Any], List[Dict[str, Any]]]:
-    summary = {
-        "analysis_type": "multi_channel_cell_counting_colocalization",
-        "total_slices": len(data),
-        "colocalization_summary": {
-            "total_chan_1_cells": 0,
-            "total_chan_2_cells": 0,
-            "total_colocalized": 0,
-            "average_colocalization_percentage": 0
-        },
-        "results_per_slice": []
-    }
-    rows: List[Dict[str, Any]] = []
+def _apply_builtin_aggregation(
+    data: List[Any],
+    field_names: Optional[List[str]],
+    agg_name: str,
+    agg_func: Callable
+) -> Optional[Any]:
+    """Apply a built-in aggregation function to data.
 
-    total_coloc_pct = 0
-    for result in data:
-        chan_1 = _get_result_attr(result, "chan_1_results")
-        chan_2 = _get_result_attr(result, "chan_2_results")
-        colocalized_count = _get_result_attr(result, "colocalized_count", 0)
-        colocalization_percentage = _get_result_attr(result, "colocalization_percentage", 0)
-        chan_1_only = _get_result_attr(result, "chan_1_only_count", 0)
-        chan_2_only = _get_result_attr(result, "chan_2_only_count", 0)
-        colocalization_method = _get_result_attr(result, "colocalization_method")
-        colocalization_metrics = _get_result_attr(result, "colocalization_metrics", {}) or {}
-        overlap_positions = _get_result_attr(result, "overlap_positions", []) or []
-        slice_index = _get_result_attr(result, "slice_index")
+    Args:
+        data: List of data items
+        field_names: Fields to extract from each item
+        agg_name: Name of the aggregation (for logging)
+        agg_func: Aggregation function to apply
 
-        summary["colocalization_summary"]["total_chan_1_cells"] += _get_result_attr(chan_1, "cell_count", 0)
-        summary["colocalization_summary"]["total_chan_2_cells"] += _get_result_attr(chan_2, "cell_count", 0)
-        summary["colocalization_summary"]["total_colocalized"] += colocalized_count
-        total_coloc_pct += colocalization_percentage
+    Returns:
+        Aggregated value or None if failed
+    """
+    values = []
+    for item in data:
+        extracted = _extract_fields(item, field_names) if field_names else {"value": item}
+        if len(extracted) == 1:
+            values.append(list(extracted.values())[0])
+        else:
+            logger.warning(
+                f"Built-in aggregation '{agg_name}' requires single field, "
+                f"got {len(extracted)} fields. Skipping."
+            )
+            return None
 
-        summary["results_per_slice"].append({
-            "slice_index": slice_index,
-            "chan_1_count": _get_result_attr(chan_1, "cell_count", 0),
-            "chan_2_count": _get_result_attr(chan_2, "cell_count", 0),
-            "colocalized_count": colocalized_count,
-            "colocalization_percentage": colocalization_percentage,
-            "chan_1_only": chan_1_only,
-            "chan_2_only": chan_2_only,
-            "colocalization_method": colocalization_method,
-            "colocalization_metrics": colocalization_metrics
-        })
+    if not values:
+        return None
 
-        for i, pos in enumerate(overlap_positions):
-            rows.append({
-                "slice_index": slice_index,
-                "colocalization_id": f"slice_{slice_index}_coloc_{i}",
-                "x_position": pos[0],
-                "y_position": pos[1],
-                "colocalization_method": colocalization_method
-            })
-
-    summary["colocalization_summary"]["average_colocalization_percentage"] = (
-        total_coloc_pct / len(data) if data else 0
-    )
-    return summary, rows
+    try:
+        return agg_func(values)
+    except Exception as e:
+        logger.warning(f"Aggregation '{agg_name}' failed: {e}")
+        return None
 
 
-# Convenience factory functions (return specs, not callables)
+def _build_summary_from_data(
+    data: List[Any],
+    field_names: Optional[List[str]],
+    aggregations: Dict[str, Union[str, Callable[[List[Any]], Any]]],
+    analysis_type: Optional[str],
+    include_metadata: bool
+) -> Dict[str, Any]:
+    """
+    Build summary dict from data using aggregation specifications.
 
-def csv_materializer(
-    fields: Optional[List[str]] = None,
-    filename_suffix: str = ".csv",
-    analysis_type: Optional[str] = None,
-    include_metadata: bool = True,
-    strip_roi_suffix: bool = False
-) -> MaterializationSpec:
-    return MaterializationSpec(
-        handler="csv",
-        options={
-            "fields": fields,
-            "filename_suffix": filename_suffix,
-            "analysis_type": analysis_type,
-            "include_metadata": include_metadata,
-            "strip_roi_suffix": strip_roi_suffix
-        }
-    )
+    Args:
+        data: List of data items
+        field_names: Fields to extract from each item
+        aggregations: Dict mapping result keys to aggregation specs
+        analysis_type: Type identifier for the analysis
+        include_metadata: Whether to include metadata
 
+    Returns:
+        Summary dict with aggregated values
+    """
+    summary = {}
 
-def json_materializer(
-    fields: Optional[List[str]] = None,
-    filename_suffix: str = ".json",
-    analysis_type: Optional[str] = None,
-    include_metadata: bool = True,
-    strip_roi_suffix: bool = False
-) -> MaterializationSpec:
-    return MaterializationSpec(
-        handler="json",
-        options={
-            "fields": fields,
-            "filename_suffix": filename_suffix,
-            "analysis_type": analysis_type,
-            "include_metadata": include_metadata,
-            "strip_roi_suffix": strip_roi_suffix
-        }
-    )
+    if include_metadata and analysis_type:
+        summary["analysis_type"] = analysis_type
 
+    # Auto-discover aggregations if not provided
+    if not aggregations:
+        aggregations = _discover_aggregations(data)
 
-def dual_materializer(
-    fields: Optional[List[str]] = None,
-    summary_fields: Optional[List[str]] = None,
-    analysis_type: Optional[str] = None,
-    include_metadata: bool = True,
-    strip_roi_suffix: bool = False
-) -> MaterializationSpec:
-    return MaterializationSpec(
-        handler="dual",
-        options={
-            "fields": fields,
-            "summary_fields": summary_fields,
-            "analysis_type": analysis_type,
-            "include_metadata": include_metadata,
-            "strip_roi_suffix": strip_roi_suffix
-        }
-    )
+    if not aggregations:
+        return summary
 
+    # Apply each aggregation
+    for key, agg_spec in aggregations.items():
+        if isinstance(agg_spec, str):
+            # Built-in aggregation
+            agg_func = BuiltinAggregations.get(agg_spec)
+            if agg_func is None:
+                logger.warning(f"Unknown aggregation '{agg_spec}', skipping")
+                continue
 
-def materializer_spec(
-    handler: str,
-    *,
-    options: Optional[Dict[str, Any]] = None,
-    allowed_backends: Optional[List[str]] = None
-) -> MaterializationSpec:
-    return MaterializationSpec(
-        handler=handler,
-        options=options or {},
-        allowed_backends=allowed_backends
-    )
+            result = _apply_builtin_aggregation(data, field_names, agg_spec, agg_func)
+            summary[key] = result
 
+        elif callable(agg_spec):
+            # Custom aggregation function
+            try:
+                result = agg_spec(data)
+                summary[key] = result
+            except Exception as e:
+                logger.warning(f"Custom aggregation failed: {e}")
+                summary[key] = None
+        else:
+            logger.warning(f"Invalid aggregation spec: {agg_spec}")
 
-def roi_zip_materializer(
-    *,
-    min_area: int = 10,
-    extract_contours: bool = True,
-    roi_suffix: str = "_rois.roi.zip",
-    summary_suffix: str = "_segmentation_summary.txt",
-    strip_roi_suffix: bool = False
-) -> MaterializationSpec:
-    return MaterializationSpec(
-        handler="roi_zip",
-        options={
-            "min_area": min_area,
-            "extract_contours": extract_contours,
-            "roi_suffix": roi_suffix,
-            "summary_suffix": summary_suffix,
-            "strip_roi_suffix": strip_roi_suffix
-        }
-    )
-
-
-def regionprops_materializer(
-    *,
-    min_area: int = 10,
-    extract_contours: bool = True,
-    roi_suffix: str = "_rois.roi.zip",
-    details_suffix: str = "_details.csv",
-    json_suffix: str = ".json",
-    analysis_type: str = "regionprops",
-    properties: Optional[List[str]] = None,
-    intensity_properties: Optional[List[str]] = None,
-    require_intensity: bool = False,
-    intensity_source: str | None = "step_output",
-    intensity_group_by: str | None = None,
-) -> MaterializationSpec:
-    inputs: Dict[str, Any] = {}
-    if intensity_source is not None:
-        inputs["intensity"] = {
-            "kind": "image_slices",
-            "source": intensity_source,
-            "group_by": intensity_group_by,
-        }
-    return MaterializationSpec(
-        handler="regionprops",
-        options={
-            "min_area": min_area,
-            "extract_contours": extract_contours,
-            "roi_suffix": roi_suffix,
-            "details_suffix": details_suffix,
-            "json_suffix": json_suffix,
-            "analysis_type": analysis_type,
-            "properties": properties,
-            "intensity_properties": intensity_properties,
-            "require_intensity": require_intensity,
-            "inputs": inputs,
-        },
-    )
-
-
-def tiff_stack_materializer(
-    *,
-    normalize_uint8: bool = False,
-    summary_suffix: str = "_summary.txt",
-    empty_summary: str = "No images generated (empty data)\n",
-    strip_roi_suffix: bool = False
-) -> MaterializationSpec:
-    return MaterializationSpec(
-        handler="tiff_stack",
-        options={
-            "normalize_uint8": normalize_uint8,
-            "summary_suffix": summary_suffix,
-            "empty_summary": empty_summary,
-            "strip_roi_suffix": strip_roi_suffix
-        }
-    )
+    return summary

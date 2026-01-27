@@ -33,7 +33,7 @@ def special_outputs(*output_specs) -> Callable[[F], F]:
     Args:
         *output_specs: Either strings or (string, MaterializationSpec) tuples
                       - String only: "positions" - no materialization
-                      - Tuple: ("cell_counts", csv_materializer(...)) - with materialization spec
+                      - Tuple: ("cell_counts", MaterializationSpec("csv", TabularOptions(...))) - with materialization spec
                       - Tuple: ("cell_counts", my_materializer) where my_materializer is
                         registered via @register_materializer (no options)
 
@@ -42,11 +42,11 @@ def special_outputs(*output_specs) -> Callable[[F], F]:
         def process_image(image):
             return processed_image, positions, metadata
 
-        @special_outputs(("cell_counts", csv_materializer(...)))  # With materialization spec
+        @special_outputs(("cell_counts", MaterializationSpec("csv", TabularOptions(...))))  # With materialization spec
         def count_cells(image):
             return processed_image, cell_count_results
 
-        @special_outputs("positions", ("cell_counts", csv_materializer(...)))  # Mixed
+        @special_outputs("positions", ("cell_counts", MaterializationSpec("csv", TabularOptions(...))))  # Mixed
         def analyze_image(image):
             return processed_image, positions, cell_count_results
     """

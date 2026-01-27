@@ -17,7 +17,11 @@ import logging
 # OpenHCS imports
 from openhcs.core.memory import numpy as numpy_func
 from openhcs.core.pipeline.function_contracts import special_outputs
-from openhcs.processing.materialization import register_materializer, materializer_spec, tiff_stack_materializer
+from openhcs.processing.materialization import (
+    register_materializer,
+    MaterializationSpec,
+    TiffStackOptions,
+)
 from openhcs.processing.materialization.core import _generate_output_path
 from polystore.roi import ROI
 
@@ -317,12 +321,15 @@ def materialize_skeleton_rois(
 
 
 @special_outputs(
-    ("axon_analysis", materializer_spec("axon_analysis_skan")),
-    ("skeleton_visualizations", tiff_stack_materializer(
-        normalize_uint8=True,
-        summary_suffix="_skeleton_summary.txt"
+    ("axon_analysis", MaterializationSpec("axon_analysis_skan", {})),
+    ("skeleton_visualizations", MaterializationSpec(
+        "tiff_stack",
+        TiffStackOptions(
+            normalize_uint8=True,
+            summary_suffix="_skeleton_summary.txt"
+        )
     )),
-    ("skeleton_masks", materializer_spec("skeleton_rois_skan"))  # Mask output gets converted to ROIs
+    ("skeleton_masks", MaterializationSpec("skeleton_rois_skan", {}))  # Mask output gets converted to ROIs
 )
 @numpy_func
 def skan_axon_skeletonize_and_analyze(

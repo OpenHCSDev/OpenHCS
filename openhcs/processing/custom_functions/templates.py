@@ -107,15 +107,15 @@ def my_custom_function(image, scale: float = 1.0, offset: float = 0.0):
 # 1. Import the decorators and materializers:
 #
 #    from openhcs.core.pipeline.function_contracts import special_outputs
-#    from openhcs.processing.materialization import csv_materializer
+#    from openhcs.processing.materialization import MaterializationSpec, TabularOptions
 #
 # 2. Declare outputs with @special_outputs:
 #
 #    @numpy
-#    @special_outputs(("measurements", csv_materializer(
+#    @special_outputs(("measurements", MaterializationSpec("csv", TabularOptions(
 #        fields=["slice_index", "mean", "std"],
 #        analysis_type="intensity_stats"
-#    )))
+#    ))))
 #    def analyze_intensity(image, threshold: float = 0.5):
 #        results = []
 #        for i, slice_data in enumerate(image):
@@ -128,9 +128,9 @@ def my_custom_function(image, scale: float = 1.0, offset: float = 0.0):
 #
 # 3. Available materializers:
 #
-#    csv_materializer(fields=[...], analysis_type="...")  - CSV file
-#    json_materializer(fields=[...], analysis_type="...")  - JSON file
-#    dual_materializer(fields=[...], summary_fields=[...]) - Both CSV + JSON
+#    MaterializationSpec("csv", TabularOptions(...))  - CSV file
+#    MaterializationSpec("json", TabularOptions(...))  - JSON file
+#    MaterializationSpec("dual", TabularOptions(...)) - Both CSV + JSON
 #
 # =============================================================================
 """
@@ -311,7 +311,7 @@ def my_custom_function(image, radius: float = 2.0):
 
 NUMPY_ANALYSIS_TEMPLATE = """from openhcs.core.memory import numpy
 from openhcs.core.pipeline.function_contracts import special_outputs
-from openhcs.processing.materialization import csv_materializer
+from openhcs.processing.materialization import MaterializationSpec, TabularOptions
 from dataclasses import dataclass
 from typing import List, Tuple
 import numpy as np
@@ -326,10 +326,10 @@ class AnalysisResult:
 
 
 @numpy
-@special_outputs(("analysis_results", csv_materializer(
+@special_outputs(("analysis_results", MaterializationSpec("csv", TabularOptions(
     fields=["slice_index", "measurement", "count"],
     analysis_type="slice_analysis"
-)))
+))))
 def my_analysis_function(image, threshold: float = 0.5) -> Tuple[np.ndarray, List[AnalysisResult]]:
     \"\"\"
     Analysis function that produces both processed image AND structured results.
@@ -345,7 +345,7 @@ def my_analysis_function(image, threshold: float = 0.5) -> Tuple[np.ndarray, Lis
 
     Notes:
         - @special_outputs declares that this function produces analysis data
-        - The csv_materializer auto-converts AnalysisResult fields to CSV columns
+        - The MaterializationSpec with TabularOptions auto-converts AnalysisResult fields to CSV columns
         - Return is ALWAYS a tuple: (image, special_output_1, special_output_2, ...)
     \"\"\"
     results = []
@@ -372,7 +372,7 @@ def my_analysis_function(image, threshold: float = 0.5) -> Tuple[np.ndarray, Lis
 
 NUMPY_DUAL_OUTPUT_TEMPLATE = """from openhcs.core.memory import numpy
 from openhcs.core.pipeline.function_contracts import special_outputs
-from openhcs.processing.materialization import csv_materializer, dual_materializer
+from openhcs.processing.materialization import MaterializationSpec, TabularOptions, ArrayExpansionOptions
 from dataclasses import dataclass
 from typing import List, Tuple, Dict, Any
 import numpy as np
@@ -388,7 +388,7 @@ class CellMeasurement:
     intensity: float
 
 
-@dataclass  
+@dataclass
 class SliceSummary:
     \"\"\"Per-slice summary statistics.\"\"\"
     slice_index: int
@@ -399,15 +399,15 @@ class SliceSummary:
 
 @numpy
 @special_outputs(
-    ("cell_measurements", csv_materializer(
+    ("cell_measurements", MaterializationSpec("csv", TabularOptions(
         filename_suffix="_cells.csv",
         analysis_type="cell_measurements"
-    )),
-    ("slice_summaries", dual_materializer(
+    ))),
+    ("slice_summaries", MaterializationSpec("dual", ArrayExpansionOptions(
         summary_fields=["slice_index", "cell_count"],
         fields=["slice_index", "cell_count", "total_area", "mean_intensity"],
         analysis_type="slice_summaries"
-    ))
+    )))
 )
 def analyze_cells(
     image,

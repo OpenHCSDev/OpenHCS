@@ -28,7 +28,11 @@ from skimage.measure import label, regionprops, regionprops_table
 # OpenHCS imports
 from openhcs.core.memory import numpy as numpy_func
 from openhcs.core.pipeline.function_contracts import special_outputs
-from openhcs.processing.materialization import materializer_spec, roi_zip_materializer
+from openhcs.processing.materialization import (
+    MaterializationSpec,
+    ROIOptions,
+    ArrayExpansionOptions,
+)
 from openhcs.constants.constants import Backend
 
 
@@ -213,8 +217,8 @@ def materialize_segmentation_masks(data: List[np.ndarray], path: str, filemanage
 
 @numpy_func
 @special_outputs(
-    ("cell_counts", materializer_spec("cell_counts")),
-    ("segmentation_masks", roi_zip_materializer())
+    ("cell_counts", MaterializationSpec("tabular", ArrayExpansionOptions())),
+    ("segmentation_masks", MaterializationSpec("roi_zip", ROIOptions()))
 )
 def count_cells_single_channel(
     image_stack: np.ndarray,
@@ -329,7 +333,7 @@ def count_cells_single_channel(
 
 
 @numpy_func
-@special_outputs(("multi_channel_counts", materializer_spec("cell_counts")))
+@special_outputs(("multi_channel_counts", MaterializationSpec("tabular", ArrayExpansionOptions())))
 def count_cells_multi_channel(
     image_stack: np.ndarray,
     chan_1: int,                         # Index of first channel (positional arg)

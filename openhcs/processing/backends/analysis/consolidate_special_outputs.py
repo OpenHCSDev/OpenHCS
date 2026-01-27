@@ -23,7 +23,7 @@ from enum import Enum
 
 from openhcs.core.memory import numpy as numpy_func
 from openhcs.core.pipeline.function_contracts import special_outputs
-from openhcs.processing.materialization import register_materializer, materializer_spec
+from openhcs.processing.materialization import register_materializer, MaterializationSpec
 from openhcs.processing.materialization.core import _generate_output_path
 from openhcs.constants.constants import Backend
 
@@ -273,8 +273,8 @@ def aggregate_series(series: pd.Series, strategy: AggregationStrategy) -> Dict[s
 
 @numpy_func
 @special_outputs(
-    ("consolidated_summary", materializer_spec("consolidated_summary")),
-    ("detailed_report", materializer_spec("detailed_report"))
+    ("consolidated_summary", MaterializationSpec("consolidated_summary", {})),
+    ("detailed_report", MaterializationSpec("detailed_report", {}))
 )
 def consolidate_special_outputs(
     image_stack: np.ndarray,

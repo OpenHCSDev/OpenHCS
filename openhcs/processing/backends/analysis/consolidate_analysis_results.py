@@ -22,7 +22,7 @@ from typing import Dict, List, Optional, Any
 
 from openhcs.core.memory import numpy as numpy_func
 from openhcs.core.pipeline.function_contracts import special_outputs
-from openhcs.processing.materialization import register_materializer, materializer_spec
+from openhcs.processing.materialization import register_materializer, MaterializationSpec
 from openhcs.processing.materialization.core import _generate_output_path
 
 # Import config classes with TYPE_CHECKING to avoid circular imports
@@ -466,7 +466,7 @@ def materialize_consolidated_results(
 
 
 @numpy_func
-@special_outputs(("consolidated_results", materializer_spec("consolidated_results")))
+@special_outputs(("consolidated_results", MaterializationSpec("consolidated_results", {})))
 def consolidate_analysis_results_pipeline(
     image_stack: np.ndarray,
     results_directory: str,

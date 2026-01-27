@@ -22,7 +22,10 @@ except ImportError:
 
 from openhcs.core.memory import numpy as numpy_func
 from openhcs.core.pipeline.function_contracts import special_outputs
-from openhcs.processing.materialization import register_materializer, materializer_spec
+from openhcs.processing.materialization import (
+    register_materializer,
+    MaterializationSpec,
+)
 from openhcs.processing.materialization.core import _generate_output_path
 
 @dataclass
@@ -156,7 +159,7 @@ def materialize_mtm_match_results(
 
 
 @numpy_func
-@special_outputs(("match_results", materializer_spec("mtm_match_results")))
+@special_outputs(("match_results", MaterializationSpec("mtm_match_results", {})))
 def multi_template_crop_reference_channel(
     image_stack: np.ndarray,
     template_path: str,
@@ -326,7 +329,7 @@ def multi_template_crop_reference_channel(
 
 
 @numpy_func
-@special_outputs(("match_results", materializer_spec("mtm_match_results")))
+@special_outputs(("match_results", MaterializationSpec("mtm_match_results", {})))
 def multi_template_crop_subset(
     image_stack: np.ndarray,
     template_path: str,
@@ -475,7 +478,7 @@ def multi_template_crop_subset(
 
 
 @numpy_func
-@special_outputs(("match_results", materializer_spec("mtm_match_results")))
+@special_outputs(("match_results", MaterializationSpec("mtm_match_results", {})))
 def multi_template_crop(
     image_stack: np.ndarray,
     template_path: str,

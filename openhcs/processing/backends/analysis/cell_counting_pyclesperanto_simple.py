@@ -22,7 +22,11 @@ import pyclesperanto as cle
 # OpenHCS imports
 from openhcs.core.memory import pyclesperanto as pyclesperanto_func
 from openhcs.core.pipeline.function_contracts import special_outputs
-from openhcs.processing.materialization import materializer_spec, tiff_stack_materializer
+from openhcs.processing.materialization import (
+    MaterializationSpec,
+    TiffStackOptions,
+    ArrayExpansionOptions,
+)
 from openhcs.constants.constants import Backend
 
 
@@ -174,9 +178,10 @@ def materialize_segmentation_masks(data: List[np.ndarray], path: str, filemanage
 
 @pyclesperanto_func
 @special_outputs(
-    ("cell_counts", materializer_spec("cell_counts")),
-    ("segmentation_masks", tiff_stack_materializer(
-        summary_suffix="_segmentation_summary.txt"
+    ("cell_counts", MaterializationSpec("tabular", ArrayExpansionOptions())),
+    ("segmentation_masks", MaterializationSpec(
+        "tiff_stack",
+        TiffStackOptions(summary_suffix="_segmentation_summary.txt")
     ))
 )
 def count_cells_single_channel(

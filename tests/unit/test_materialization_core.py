@@ -6,7 +6,7 @@ import pytest
 from polystore.filemanager import FileManager
 from polystore.memory import MemoryStorageBackend
 
-from openhcs.processing.materialization import materialize, regionprops_materializer
+from openhcs.processing.materialization import materialize, MaterializationSpec, RegionPropsOptions
 from openhcs.processing.materialization.core import _generate_output_path
 
 
@@ -17,7 +17,7 @@ def test_generate_output_path_strips_roi_zip_compound_suffix() -> None:
 
 
 @pytest.mark.unit
-def test_regionprops_materializer_writes_roi_csv_json_with_intensity() -> None:
+def test_regionprops_materialization_spec_writes_roi_csv_json_with_intensity() -> None:
     fm = FileManager({"memory": MemoryStorageBackend()})
 
     labels = np.zeros((10, 10), dtype=np.int32)
@@ -26,7 +26,7 @@ def test_regionprops_materializer_writes_roi_csv_json_with_intensity() -> None:
 
     intensity = np.arange(100, dtype=np.float32).reshape(10, 10)
 
-    spec = regionprops_materializer(intensity_source=None)
+    spec = MaterializationSpec("regionprops", RegionPropsOptions(intensity_source=None))
 
     out = materialize(
         spec,

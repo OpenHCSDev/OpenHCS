@@ -282,7 +282,7 @@ def enhance_contrast(image, clip_limit: float = 0.03):
 ```
 
 === FUNCTION WITH CSV OUTPUT ===
-When you need to save measurements to CSV, use @special_outputs with csv_materializer.
+When you need to save measurements to CSV, use @special_outputs with MaterializationSpec and TabularOptions.
 
 RETURN SEMANTICS: With N special_outputs, return (image, output1, output2, ..., outputN)
 
@@ -293,7 +293,7 @@ import numpy as np
 from skimage.measure import label, regionprops
 from openhcs.core.memory import numpy
 from openhcs.core.pipeline.function_contracts import special_outputs
-from openhcs.processing.materialization import csv_materializer
+from openhcs.processing.materialization import MaterializationSpec, TabularOptions
 
 @dataclass
 class CellMeasurement:
@@ -303,10 +303,10 @@ class CellMeasurement:
     mean_intensity: float
 
 @numpy
-@special_outputs(("cell_measurements", csv_materializer(
+@special_outputs(("cell_measurements", MaterializationSpec("csv", TabularOptions(
     fields=["slice_index", "cell_count", "total_area", "mean_intensity"],
     analysis_type="cell_counts"
-)))
+))))
 def count_cells_with_csv(
     image,
     threshold: float = 0.5,
@@ -339,10 +339,10 @@ import numpy as np
 from skimage.measure import label
 from openhcs.core.memory import numpy
 from openhcs.core.pipeline.function_contracts import special_outputs
-from openhcs.processing.materialization import roi_zip_materializer
+from openhcs.processing.materialization import MaterializationSpec, ROIOptions
 
 @numpy
-@special_outputs(("segmentation_masks", roi_zip_materializer()))
+@special_outputs(("segmentation_masks", MaterializationSpec("roi_zip", ROIOptions())))
 def segment_cells_with_rois(
     image,
     threshold: float = 0.5
@@ -364,7 +364,7 @@ import numpy as np
 from skimage.measure import label
 from openhcs.core.memory import numpy
 from openhcs.core.pipeline.function_contracts import special_outputs
-from openhcs.processing.materialization import regionprops_materializer
+from openhcs.processing.materialization import MaterializationSpec, RegionPropsOptions
 
 @numpy
 @special_outputs(
@@ -372,12 +372,12 @@ from openhcs.processing.materialization import regionprops_materializer
     # - ROI zip for Fiji + shapes for Napari
     # - CSV details table
     # - JSON summary
-    ("segmentation_masks", regionprops_materializer(
+    ("segmentation_masks", MaterializationSpec("regionprops", RegionPropsOptions(
         analysis_type="segmentation_regionprops",
         min_area=50,
         require_intensity=True,
         intensity_source="step_output",
-    ))
+    )))
 )
 def analyze_cells_full(
     image,
@@ -407,8 +407,7 @@ import numpy as np
 import pyclesperanto as cle
 from openhcs.core.memory import pyclesperanto
 from openhcs.core.pipeline.function_contracts import special_outputs
-from openhcs.processing.materialization import csv_materializer
-from openhcs.processing.materialization import roi_zip_materializer
+from openhcs.processing.materialization import MaterializationSpec, TabularOptions, ROIOptions
 
 @dataclass
 class CellStats:
@@ -419,8 +418,8 @@ class CellStats:
 
 @pyclesperanto
 @special_outputs(
-    ("cell_stats", csv_materializer(fields=["slice_index", "cell_count", "total_area", "mean_intensity"], analysis_type="cell_stats")),
-    ("segmentation_masks", roi_zip_materializer())
+    ("cell_stats", MaterializationSpec("csv", TabularOptions(fields=["slice_index", "cell_count", "total_area", "mean_intensity"], analysis_type="cell_stats"))),
+    ("segmentation_masks", MaterializationSpec("roi_zip", ROIOptions()))
 )
 def count_cells_gpu(
     image,
@@ -480,8 +479,7 @@ from cucim.skimage.filters import gaussian
 from cucim.skimage.measure import label, regionprops_table
 from openhcs.core.memory import cupy
 from openhcs.core.pipeline.function_contracts import special_outputs
-from openhcs.processing.materialization import csv_materializer
-from openhcs.processing.materialization import roi_zip_materializer
+from openhcs.processing.materialization import MaterializationSpec, TabularOptions, ROIOptions
 
 @dataclass
 class CellStats:
@@ -492,8 +490,8 @@ class CellStats:
 
 @cupy
 @special_outputs(
-    ("cell_stats", csv_materializer(fields=["slice_index", "cell_count", "total_area", "mean_intensity"], analysis_type="cell_stats")),
-    ("segmentation_masks", roi_zip_materializer())
+    ("cell_stats", MaterializationSpec("csv", TabularOptions(fields=["slice_index", "cell_count", "total_area", "mean_intensity"], analysis_type="cell_stats"))),
+    ("segmentation_masks", MaterializationSpec("roi_zip", ROIOptions()))
 )
 def count_cells_cupy(
     image,
@@ -565,10 +563,11 @@ from openhcs.core.pipeline.function_contracts import special_outputs, special_in
 
 # Materializers for CSV/JSON and ROI outputs
 from openhcs.processing.materialization import (
-    csv_materializer,
-    json_materializer,
-    dual_materializer,
-    roi_zip_materializer
+    MaterializationSpec,
+    TabularOptions,
+    ROIOptions,
+    RegionPropsOptions,
+    ArrayExpansionOptions
 )
 
 # Standard library (include as needed)
@@ -579,25 +578,35 @@ import numpy as np'''
     def _get_dynamic_materializers_section(self) -> str:
         """Generate materializers section with signatures from actual code."""
         try:
-            from openhcs.processing.materialization import csv_materializer, json_materializer, dual_materializer, roi_zip_materializer
+            from openhcs.processing.materialization import (
+                MaterializationSpec, TabularOptions, ROIOptions,
+                RegionPropsOptions, TiffStackOptions, ArrayExpansionOptions
+            )
             import inspect
 
-            csv_sig = str(inspect.signature(csv_materializer))
-            json_sig = str(inspect.signature(json_materializer))
-            dual_sig = str(inspect.signature(dual_materializer))
-            roi_sig = str(inspect.signature(roi_zip_materializer))
+            tabular_sig = str(inspect.signature(TabularOptions))
+            roi_sig = str(inspect.signature(ROIOptions))
+            regionprops_sig = str(inspect.signature(RegionPropsOptions))
+            tiff_sig = str(inspect.signature(TiffStackOptions))
+            arrayexp_sig = str(inspect.signature(ArrayExpansionOptions))
 
-            return f'''=== MATERIALIZER SIGNATURES ===
-csv_materializer{csv_sig}
-json_materializer{json_sig}
-dual_materializer{dual_sig}
-roi_zip_materializer{roi_sig}'''
+            return f'''=== MATERIALIZATION OPTIONS ===
+TabularOptions{tabular_sig}
+ROIOptions{roi_sig}
+RegionPropsOptions{regionprops_sig}
+TiffStackOptions{tiff_sig}
+ArrayExpansionOptions{arrayexp_sig}
+
+Usage: MaterializationSpec("csv", TabularOptions(fields=[...], analysis_type="..."))'''
         except Exception:
-            return '''=== MATERIALIZERS ===
-csv_materializer(fields: List[str], analysis_type: str, filename_suffix: str = ".csv", strip_roi_suffix: bool = False)
-json_materializer(fields: List[str], analysis_type: str, filename_suffix: str = ".json", strip_roi_suffix: bool = False)
-dual_materializer(fields: List[str], summary_fields: List[str], analysis_type: str, strip_roi_suffix: bool = False)
-roi_zip_materializer(min_area: int = 10, extract_contours: bool = True, strip_roi_suffix: bool = False)'''
+            return '''=== MATERIALIZATION OPTIONS ===
+TabularOptions(fields: List[str], analysis_type: str, filename_suffix: str = ".csv", strip_roi_suffix: bool = False)
+ROIOptions(min_area: int = 10, extract_contours: bool = True, strip_roi_suffix: bool = False)
+RegionPropsOptions(analysis_type: str, min_area: int = 10, properties: List[str] = None, require_intensity: bool = False, intensity_source: str = None, strip_roi_suffix: bool = False)
+TiffStackOptions(filename_suffix: str = ".tif", strip_roi_suffix: bool = False)
+ArrayExpansionOptions(fields: List[str], summary_fields: List[str], analysis_type: str, strip_roi_suffix: bool = False)
+
+Usage: MaterializationSpec("csv", TabularOptions(fields=[...], analysis_type="..."))'''
 
     def _get_pyclesperanto_function_docs(self) -> str:
         """Get pyclesperanto functions dynamically if available."""

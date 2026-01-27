@@ -17,7 +17,11 @@ from skimage.filters import median, threshold_li
 from skimage.morphology import skeletonize
 from openhcs.core.memory import torch as torch_func
 from openhcs.core.pipeline.function_contracts import special_outputs
-from openhcs.processing.materialization import register_materializer, materializer_spec, tiff_stack_materializer
+from openhcs.processing.materialization import (
+    register_materializer,
+    MaterializationSpec,
+    TiffStackOptions,
+)
 from openhcs.processing.materialization.core import _generate_output_path
 from openhcs.constants.constants import Backend
 
@@ -483,10 +487,13 @@ def create_visualization_array(
         raise ValueError(f"Unknown visualization mode: {mode}")
 
 @special_outputs(
-    ("hmm_analysis", materializer_spec("hmm_analysis_torbi", allowed_backends=[Backend.DISK.value])),
-    ("trace_visualizations", tiff_stack_materializer(
-        normalize_uint8=True,
-        summary_suffix="_trace_summary.txt"
+    ("hmm_analysis", MaterializationSpec("hmm_analysis_torbi", allowed_backends=[Backend.DISK.value])),
+    ("trace_visualizations", MaterializationSpec(
+        "tiff_stack",
+        TiffStackOptions(
+            normalize_uint8=True,
+            summary_suffix="_trace_summary.txt"
+        )
     ))
 )
 @torch_func
