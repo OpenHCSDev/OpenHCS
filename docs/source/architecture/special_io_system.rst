@@ -53,14 +53,14 @@ The Special I/O system uses a declarative approach where functions simply declar
 
 **Special Inputs**: Functions that need data from previous steps declare their requirements using ``@special_inputs``. The system automatically loads this data from the VFS and provides it as function parameters.
 
-**Materialization Support**: Special outputs can optionally include materialization specs that declaratively select a handler (CSV, JSON, ROI ZIP, etc.) for persistent formats.
+**Materialization Support**: Special outputs can optionally include materialization specs that declaratively select a handler (tabular, ROI ZIP, etc.) for persistent formats.
 
 .. code:: python
 
    # Example: Position generation with materialization spec
    from openhcs.processing.materialization import MaterializationSpec, TabularOptions
 
-   @special_outputs(("positions", MaterializationSpec("csv", TabularOptions(fields=["x", "y"], analysis_type="positions"))))
+   @special_outputs(("positions", MaterializationSpec(TabularOptions())))
    def generate_positions(image_stack):
        positions = calculate_positions(image_stack)
        return processed_image, positions
@@ -69,6 +69,10 @@ The Special I/O system uses a declarative approach where functions simply declar
    @special_inputs("positions")
    def stitch_images(image_stack, positions):
        return stitch(image_stack, positions)
+
+Note: Handler name is automatically inferred from options type. No need to specify it manually.
+TabularOptions auto-extracts all fields from your data. The ``fields`` parameter
+is only needed when you want to control column ordering or select a specific subset.
 
 Decorator Implementation
 ~~~~~~~~~~~~~~~~~~~~~~~~

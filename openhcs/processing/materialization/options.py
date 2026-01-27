@@ -42,15 +42,16 @@ class TabularOptions:
     """Options for handlers that produce tabular output (CSV/JSON).
 
     Attributes:
-        fields: List of field names to extract from data items. If None, extracts all fields.
-        summary_fields: Fields to include in JSON summary. If None, uses fields.
-        analysis_type: Type identifier for the analysis (e.g., "cell_counting", "regionprops").
+        fields: List of field names to extract from data items. If None (default), extracts all fields.
+            Only specify this when you need to control column ordering or select a subset.
+        summary_fields: Fields to include in JSON summary. If None (default), uses all fields.
         include_metadata: Whether to include metadata in output.
+        output_format: Output format - "csv", "json", or "dual" for both (default: "csv")
     """
     fields: Optional[List[str]] = None
     summary_fields: Optional[List[str]] = None
-    analysis_type: Optional[str] = None
     include_metadata: bool = True
+    output_format: str = "csv"  # "csv", "json", or "dual"
 
 
 # ===== Array Expansion Options =====
@@ -126,7 +127,6 @@ class RegionPropsOptions(FileOutputOptions):
     """Options for region properties computation from labeled masks.
 
     Attributes:
-        analysis_type: Type identifier for the analysis (default: "regionprops").
         properties: List of skimage regionprops to compute.
             Default: ["label", "area", "perimeter", "centroid", "bbox"]
         intensity_properties: List of intensity-based properties to compute.
@@ -138,7 +138,6 @@ class RegionPropsOptions(FileOutputOptions):
         details_suffix: Suffix for CSV details file.
         json_suffix: Suffix for JSON summary file.
     """
-    analysis_type: str = "regionprops"
     properties: Optional[List[str]] = None
     intensity_properties: Optional[List[str]] = None
     require_intensity: bool = False

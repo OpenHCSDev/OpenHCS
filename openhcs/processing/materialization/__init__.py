@@ -9,7 +9,12 @@ Architecture:
     - MaterializationSpec[T]: Type-safe declarative spec with generic options parameter
     - MaterializationRegistry + materialize(): Registry + dispatcher for specs
     - Typed options: TabularOptions, ArrayExpansionOptions, etc. (see options.py)
-    - Built-in handlers: csv, json, dual, tabular, roi_zip, regionprops, tiff_stack
+    - Built-in handlers: tabular, roi_zip, regionprops, tiff_stack
+
+Key Features:
+    - Handler name automatically inferred from options type (no manual specification)
+    - Fields auto-extracted from data (no manual field list needed)
+    - Type-safe options with IDE autocomplete and validation
 
 Usage:
     from openhcs.processing.materialization import (
@@ -18,17 +23,14 @@ Usage:
         ArrayExpansionOptions,
     )
 
-    # Simple tabular output
+    # Simple tabular output - auto-extracts ALL fields from data
     spec = MaterializationSpec(
-        handler="csv",
-        options=TabularOptions(fields=["x", "y"]),
+        options=TabularOptions(),
     )
 
     # Array expansion (e.g., for cell counting results)
     spec = MaterializationSpec(
-        handler="tabular",
         options=ArrayExpansionOptions(
-            fields=["slice_index", "cell_count"],
             row_field="cell_positions",
             row_columns={"0": "x_position", "1": "y_position"},
             aggregations={"cell_count": "sum"},

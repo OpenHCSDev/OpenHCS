@@ -362,22 +362,24 @@ Streams ROIs as ImageJ ROIs to ROI Manager via ZMQ:
             rm.addRoi(java_roi)
 
 Integration with Pipeline System
-=================================
+================================
 
 Special Outputs Registration
 -----------------------------
 
-Functions register ROI outputs using the ``@special_outputs`` decorator:
+Functions register ROI outputs using the ``@special_outputs`` decorator with materialization specs:
 
 .. code-block:: python
 
+    from openhcs.processing.materialization import MaterializationSpec, TabularOptions, ROIOptions
+
     @special_outputs(
-        cell_counts=materialize_cell_counts,
-        segmentation_masks=materialize_segmentation_masks
+        cell_counts=MaterializationSpec(TabularOptions()),
+        segmentation_masks=MaterializationSpec(ROIOptions())
     )
     def count_cells_single_channel(..., return_segmentation_mask: bool = False):
         """Count cells and optionally return segmentation masks."""
-        
+
         if return_segmentation_mask:
             return output_stack, cell_counts, labeled_masks
         else:

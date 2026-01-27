@@ -580,8 +580,8 @@ Functions declare their side effects using the ``@special_outputs`` decorator, w
 
    from openhcs.processing.materialization import MaterializationSpec, TabularOptions, ROIOptions
 
-   @special_outputs(("cell_counts", MaterializationSpec("csv", TabularOptions(fields=["slice_index", "cell_count"], analysis_type="cell_counts")),
-                    ("masks", MaterializationSpec("roi_zip", ROIOptions())))
+   @special_outputs(("cell_counts", MaterializationSpec(TabularOptions())),
+                    ("masks", MaterializationSpec(ROIOptions())))
    def count_cells_with_materialization(image_stack):
        """Function with materialized special outputs."""
        processed_image, cell_counts, segmentation_masks = analyze_cells(image_stack)
@@ -595,11 +595,15 @@ Functions declare their side effects using the ``@special_outputs`` decorator, w
 
    from openhcs.processing.materialization import MaterializationSpec, TabularOptions
 
-   @special_outputs("debug_info", ("analysis_results", MaterializationSpec("csv", TabularOptions(fields=["metric"], analysis_type="analysis_results"))))
+   @special_outputs("debug_info", ("analysis_results", MaterializationSpec(TabularOptions())))
    def analyze_with_mixed_outputs(image_stack):
        """Function with both memory-only and materialized outputs."""
        # debug_info stays in memory, analysis_results gets materialized
        return processed_image, debug_info, analysis_results
+
+Note: Handler name is automatically inferred from options type. No need to specify it manually.
+The ``fields`` parameter is optional and defaults to None (auto-extract all fields).
+Only specify ``fields`` when you need to control column ordering or select a subset.
 
 Materialization Handler Implementation
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

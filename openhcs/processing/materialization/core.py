@@ -10,7 +10,7 @@ import json
 import logging
 from dataclasses import dataclass, field, fields, is_dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, Generic, List, Optional, Sequence, TypeVar, Union
+from typing import Any, Callable, Dict, Generic, List, Optional, Sequence, Tuple, TypeVar, Union
 
 import pandas as pd
 
@@ -30,6 +30,7 @@ from openhcs.processing.materialization.options import (
     ROIOptions,
     RegionPropsOptions,
     TiffStackOptions,
+    BuiltinAggregations,
 )
 
 
@@ -42,40 +43,61 @@ class MaterializationSpec(Generic[T]):
         T: The type of options (e.g., TabularOptions, ArrayExpansionOptions, etc.)
 
     Attributes:
-        handler: Registered handler name in MaterializationRegistry.
-        options: Typed handler-specific options (validated at construction).
+        options: Optional typed handler-specific options (validated at construction).
+            Can be None for custom handlers that don't need options.
+        handler: Optional handler name. If not specified, automatically inferred from options type.
+            For custom handlers using dict options, handler must be specified explicitly.
         allowed_backends: Optional allowlist of backend names.
 
-    Example:
+    Example (built-in handler - handler inferred):
         >>> from openhcs.processing.materialization.options import TabularOptions
-        >>> spec = MaterializationSpec(
-        ...     handler="csv",
-        ...     options=TabularOptions(fields=["x", "y"]),
-        ... )
+        >>> spec = MaterializationSpec(options=TabularOptions())
+
+    Example (custom handler - handler required):
+        >>> spec = MaterializationSpec(handler="custom_handler", options={})
     """
-    handler: str
-    options: T
+    options: Optional[T] = None
+    handler: Optional[str] = None
     allowed_backends: Optional[List[str]] = None
 
     def __post_init__(self):
-        """Validate options type at construction time (fail fast)."""
-        # Import here to avoid circular dependency
+        """Infer handler if not specified, then validate."""
+        # If no options provided (custom handler), skip inference
+        if self.options is None:
+            return
+
+        # For custom handlers using dict options, handler is explicitly provided
+        # Don't try to infer (won't work for dict options)
+        if self.handler is None and isinstance(self.options, dict):
+            # Custom handler with dict options - keep handler as None
+            # Will be validated at runtime
+            return
+
+        # If handler not specified, infer from options type
+        if self.handler is None:
+            inferred = MaterializationRegistry.get_handler_for_options(type(self.options))
+            object.__setattr__(self, 'handler', inferred)
+
+        # Validate that options type is registered (only for typed handlers)
         from openhcs.processing.materialization.constants import HANDLER_OPTION_TYPES
 
         handler_option_types = HANDLER_OPTION_TYPES
+        actual_handler = self.handler
 
-        # Only validate if handler is registered (may not be during import time)
-        if self.handler in handler_option_types:
-            expected_type = handler_option_types[self.handler]
+        # Skip validation for custom handlers (no type registration)
+        if actual_handler is None or actual_handler not in handler_option_types:
+            return
 
-            # Check if options is instance of expected type
-            if not isinstance(self.options, expected_type):
-                actual_type = type(self.options).__name__
-                raise TypeError(
-                    f"Handler '{self.handler}' expects {expected_type.__name__}, "
-                    f"got {actual_type}. "
-                    f"Use: {expected_type.__name__}(...) instead."
-                )
+        expected_type = handler_option_types[actual_handler]
+
+        # Check if options is instance of expected type
+        if not isinstance(self.options, expected_type):
+            actual_type = type(self.options).__name__
+            raise TypeError(
+                f"Handler '{actual_handler}' expects {expected_type.__name__}, "
+                f"got {actual_type}. "
+                f"Use: {expected_type.__name__}(...) instead."
+            )
 
 
 @dataclass(frozen=True)
@@ -92,6 +114,7 @@ class MaterializationRegistry:
 
     _handlers: Dict[str, MaterializationHandler] = {}
     _option_types: Dict[str, type] = {}  # Handler name -> options type mapping
+    _options_to_handler: Dict[type, str] = {}  # Options type -> handler name (reverse mapping)
 
     @classmethod
     def register(
@@ -105,7 +128,7 @@ class MaterializationRegistry:
         """Register a materialization handler with its options type.
 
         Args:
-            name: Handler name (used in MaterializationSpec.handler)
+            name: Handler name
             func: Handler function
             options_type: Expected options dataclass type for validation
             requires_arbitrary_files: Whether this handler requires arbitrary file support
@@ -133,9 +156,10 @@ class MaterializationRegistry:
             options_type=options_type
         )
 
-        # Store options type for validation
+        # Store options type for validation and reverse lookup
         if options_type is not None:
             cls._option_types[name] = options_type
+            cls._options_to_handler[options_type] = name
 
             # Also populate constants HANDLER_OPTION_TYPES for shared access
             from openhcs.processing.materialization.constants import HANDLER_OPTION_TYPES
@@ -157,6 +181,18 @@ class MaterializationRegistry:
         if name not in cls._handlers:
             raise KeyError(f"Unknown materialization handler: {name}")
         return cls._handlers[name]
+
+    @classmethod
+    def get_handler_for_options(cls, options_type: type) -> Optional[str]:
+        """Get handler name from options type.
+
+        Args:
+            options_type: Options dataclass type
+
+        Returns:
+            Handler name string, or None if not registered (for custom handlers)
+        """
+        return cls._options_to_handler.get(options_type)
 
     @classmethod
     def get_options_type(cls, name: str) -> Optional[type]:
@@ -250,7 +286,34 @@ def _normalize_backends(backends: Sequence[str] | str) -> List[str]:
 
 
 def _extract_fields(item: Any, field_names: Optional[List[str]] = None) -> Dict[str, Any]:
-    """Extract fields from dataclass or dict."""
+    """Extract fields from dataclass, dict, or pandas DataFrame.
+
+    Supports:
+    - dataclass instances (uses dataclass reflection)
+    - dicts (uses dict keys)
+    - pandas DataFrames (uses column names)
+    - pandas Series (uses index)
+
+    Returns:
+        Dict mapping field names to values
+    """
+    # Handle pandas DataFrames
+    try:
+        import pandas as pd
+        if isinstance(item, pd.DataFrame):
+            if field_names:
+                # Select only requested columns that exist
+                return {f: item[f].tolist() for f in field_names if f in item.columns}
+            # Return all columns as lists
+            return {col: item[col].tolist() for col in item.columns}
+
+        if isinstance(item, pd.Series):
+            if field_names:
+                return {f: item[f] for f in field_names if f in item.index}
+            return item.to_dict()
+    except ImportError:
+        pass
+
     if is_dataclass(item):
         if field_names:
             return {f: getattr(item, f, None) for f in field_names if hasattr(item, f)}
@@ -344,9 +407,13 @@ def materialize(
     context: Any = None,
     extra_inputs: Optional[Dict[str, Any]] = None,
 ) -> str:
-    handler = MaterializationRegistry.get(spec.handler)
+    handler_name = spec.handler or "custom"
+
+    handler = MaterializationRegistry.get(handler_name)
     normalized_backends = _normalize_backends(backends)
     _validate_backends(spec, handler, normalized_backends, filemanager)
+
+    # Pass options if available, otherwise pass spec directly
     return handler.func(
         data,
         path,
@@ -361,8 +428,8 @@ def materialize(
 
 # Built-in handlers
 
-@register_materializer("csv", options_type=TabularOptions, requires_arbitrary_files=True)
-def _materialize_csv(
+@register_materializer("tabular", options_type=TabularOptions, requires_arbitrary_files=True)
+def _materialize_tabular(
     data: List[Any],
     path: str,
     filemanager,
@@ -372,112 +439,31 @@ def _materialize_csv(
     context: Any,
     extra_inputs: Dict[str, Any],
 ) -> str:
-    """Materialize data as CSV using typed TabularOptions."""
-    # Type guard: runtime check + type narrowing
+    """Unified tabular materializer for CSV, JSON, or dual output.
+
+    Uses options.output_format to determine which format(s) to generate:
+    - "csv": CSV file only
+    - "json": JSON file with nested results
+    - "dual": Both CSV + JSON files
+
+    Replaces the separate csv, json, and dual handlers with a single implementation.
+    """
     options = _expect_options(spec, TabularOptions)
 
-    # Direct attribute access - no .get() needed!
     fields_opt = options.fields
-    strip_roi = options.strip_roi_suffix if hasattr(options, 'strip_roi_suffix') else False
-
-    # Generate output path
-    filename_suffix = getattr(options, 'filename_suffix', '.csv')
-    output_path = _generate_output_path(path, filename_suffix, ".csv", strip_roi=strip_roi)
-
-    rows = []
-    for i, item in enumerate(data or []):
-        row = _extract_fields(item, fields_opt)
-        if "slice_index" not in row:
-            row["slice_index"] = i
-        rows.append(row)
-
-    if rows:
-        df = pd.DataFrame(rows)
-        csv_content = df.to_csv(index=False)
-        for backend in backends:
-            _prepare_output_path(filemanager, backend, output_path)
-            kwargs = backend_kwargs.get(backend, {})
-            filemanager.save(csv_content, output_path, backend, **kwargs)
-
-    logger.info(f"Materialized {len(rows)} rows to {output_path}")
-    return output_path
-
-
-@register_materializer("json", options_type=TabularOptions, requires_arbitrary_files=True)
-def _materialize_json(
-    data: List[Any],
-    path: str,
-    filemanager,
-    backends: List[str],
-    backend_kwargs: Dict[str, Dict[str, Any]],
-    spec: MaterializationSpec,
-    context: Any,
-    extra_inputs: Dict[str, Any],
-) -> str:
-    """Materialize data as JSON using typed TabularOptions."""
-    # Type guard: runtime check + type narrowing
-    options = _expect_options(spec, TabularOptions)
-
-    # Direct attribute access
-    fields_opt = options.fields
-    analysis_type = options.analysis_type
+    summary_fields = options.summary_fields or fields_opt
     include_metadata = options.include_metadata
     strip_roi = options.strip_roi_suffix if hasattr(options, 'strip_roi_suffix') else False
 
-    # Generate output path
-    filename_suffix = getattr(options, 'filename_suffix', '.json')
-    output_path = _generate_output_path(path, filename_suffix, ".json", strip_roi=strip_roi)
+    # Determine output format
+    format_name = spec.handler if spec.handler in ("csv", "json", "dual") else options.output_format
 
-    results = []
-    for i, item in enumerate(data or []):
-        record = _extract_fields(item, fields_opt)
-        if "slice_index" not in record:
-            record["slice_index"] = i
-        results.append(record)
-
-    summary = {
-        "total_items": len(results),
-        "results": results
-    }
-    if include_metadata and analysis_type:
-        summary["analysis_type"] = analysis_type
-
-    json_content = json.dumps(summary, indent=2, default=str)
-    for backend in backends:
-        _prepare_output_path(filemanager, backend, output_path)
-        kwargs = backend_kwargs.get(backend, {})
-        filemanager.save(json_content, output_path, backend, **kwargs)
-
-    logger.info(f"Materialized {len(results)} items to {output_path}")
-    return output_path
-
-
-@register_materializer("dual", options_type=TabularOptions, requires_arbitrary_files=True)
-def _materialize_dual(
-    data: List[Any],
-    path: str,
-    filemanager,
-    backends: List[str],
-    backend_kwargs: Dict[str, Dict[str, Any]],
-    spec: MaterializationSpec,
-    context: Any,
-    extra_inputs: Dict[str, Any],
-) -> str:
-    """Materialize data as dual output (CSV + JSON) using typed TabularOptions."""
-    # Type guard: runtime check + type narrowing
-    options = _expect_options(spec, TabularOptions)
-
-    # Direct attribute access
-    fields_opt = options.fields
-    summary_fields = options.summary_fields
-    analysis_type = options.analysis_type
-    include_metadata = options.include_metadata
-    strip_roi = options.strip_roi_suffix if hasattr(options, 'strip_roi_suffix') else False
-
+    # Generate output paths
     base_path = _generate_output_path(path, "", "", strip_roi=strip_roi)
-    json_path = f"{base_path}.json"
     csv_path = f"{base_path}_details.csv"
+    json_path = f"{base_path}.json"
 
+    # Extract data ONCE for all formats
     rows = []
     for i, item in enumerate(data or []):
         row = _extract_fields(item, fields_opt)
@@ -485,30 +471,37 @@ def _materialize_dual(
             row["slice_index"] = i
         rows.append(row)
 
-    summary_data = []
-    for i, item in enumerate(data or []):
-        record = _extract_fields(item, summary_fields or fields_opt)
-        if "slice_index" not in record:
-            record["slice_index"] = i
-        summary_data.append(record)
-
-    summary = {
-        "total_items": len(summary_data),
-        "results": summary_data
-    }
-    if include_metadata and analysis_type:
-        summary["analysis_type"] = analysis_type
-
-    for backend in backends:
-        _prepare_output_path(filemanager, backend, json_path)
-        kwargs = backend_kwargs.get(backend, {})
+    # Generate outputs based on format
+    if format_name in ("csv", "dual"):
         if rows:
             df = pd.DataFrame(rows)
-            filemanager.save(df.to_csv(index=False), csv_path, backend, **kwargs)
-        filemanager.save(json.dumps(summary, indent=2, default=str), json_path, backend, **kwargs)
+            csv_content = df.to_csv(index=False)
+            for backend in backends:
+                _prepare_output_path(filemanager, backend, csv_path)
+                kwargs = backend_kwargs.get(backend, {})
+                filemanager.save(csv_content, csv_path, backend, **kwargs)
 
-    logger.info(f"Materialized {len(rows)} rows (dual format) to {json_path}")
-    return json_path
+    if format_name in ("json", "dual"):
+        summary_data = []
+        for i, item in enumerate(data or []):
+            record = _extract_fields(item, summary_fields)
+            if "slice_index" not in record:
+                record["slice_index"] = i
+            summary_data.append(record)
+
+        summary = {
+            "total_items": len(summary_data),
+            "results": summary_data
+        }
+
+        json_content = json.dumps(summary, indent=2, default=str)
+        for backend in backends:
+            _prepare_output_path(filemanager, backend, json_path)
+            kwargs = backend_kwargs.get(backend, {})
+            filemanager.save(json_content, json_path, backend, **kwargs)
+
+    # Return primary path
+    return json_path if format_name in ("json", "dual") else csv_path
 
 
 @register_materializer("tiff_stack", options_type=TiffStackOptions, requires_arbitrary_files=True)
@@ -683,7 +676,6 @@ def _materialize_regionprops(
     options = _expect_options(spec, RegionPropsOptions)
 
     # Direct attribute access
-    analysis_type = options.analysis_type
     min_area = options.min_area
     extract_contours = options.extract_contours
     roi_suffix = options.roi_suffix
@@ -822,7 +814,6 @@ def _materialize_regionprops(
             all_rois.append(ROI(shapes=roi.shapes, metadata=metadata))
 
     summary = {
-        "analysis_type": analysis_type,
         "total_slices": len(label_slices),
         "total_regions": len(rows),
         "regions_per_slice": per_slice,
@@ -1011,7 +1002,6 @@ def _materialize_tabular_with_arrays(
     # Get configuration
     fields_opt = options.fields
     summary_fields = options.summary_fields or options.fields
-    analysis_type = options.analysis_type
     include_metadata = options.include_metadata
     strip_roi = options.strip_roi_suffix if hasattr(options, 'strip_roi_suffix') else False
 
@@ -1067,7 +1057,6 @@ def _materialize_tabular_with_arrays(
         data or [],
         summary_fields or fields_opt,
         options.aggregations,
-        analysis_type,
         include_metadata
     )
 
@@ -1095,7 +1084,7 @@ def _materialize_tabular_with_arrays(
     return json_path
 
 
-def _discover_aggregations(data: List[Any]) -> Dict[str, str]:
+def _discover_aggregations(data: List[Any]) -> Dict[str, Union[str, Callable[[List[Any]], Any]]]:
     """Auto-discover aggregations based on dataclass field types.
 
     Args:
@@ -1181,7 +1170,6 @@ def _build_summary_from_data(
     data: List[Any],
     field_names: Optional[List[str]],
     aggregations: Dict[str, Union[str, Callable[[List[Any]], Any]]],
-    analysis_type: Optional[str],
     include_metadata: bool
 ) -> Dict[str, Any]:
     """
@@ -1191,16 +1179,12 @@ def _build_summary_from_data(
         data: List of data items
         field_names: Fields to extract from each item
         aggregations: Dict mapping result keys to aggregation specs
-        analysis_type: Type identifier for the analysis
         include_metadata: Whether to include metadata
 
     Returns:
         Summary dict with aggregated values
     """
     summary = {}
-
-    if include_metadata and analysis_type:
-        summary["analysis_type"] = analysis_type
 
     # Auto-discover aggregations if not provided
     if not aggregations:

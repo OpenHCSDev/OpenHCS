@@ -303,10 +303,7 @@ class CellMeasurement:
     mean_intensity: float
 
 @numpy
-@special_outputs(("cell_measurements", MaterializationSpec("csv", TabularOptions(
-    fields=["slice_index", "cell_count", "total_area", "mean_intensity"],
-    analysis_type="cell_counts"
-))))
+@special_outputs(("cell_measurements", MaterializationSpec(TabularOptions())))
 def count_cells_with_csv(
     image,
     threshold: float = 0.5,
@@ -342,7 +339,7 @@ from openhcs.core.pipeline.function_contracts import special_outputs
 from openhcs.processing.materialization import MaterializationSpec, ROIOptions
 
 @numpy
-@special_outputs(("segmentation_masks", MaterializationSpec("roi_zip", ROIOptions())))
+@special_outputs(("segmentation_masks", MaterializationSpec(ROIOptions())))
 def segment_cells_with_rois(
     image,
     threshold: float = 0.5
@@ -372,9 +369,8 @@ from openhcs.processing.materialization import MaterializationSpec, RegionPropsO
     # - ROI zip for Fiji + shapes for Napari
     # - CSV details table
     # - JSON summary
-    ("segmentation_masks", MaterializationSpec("regionprops", RegionPropsOptions(
-        analysis_type="segmentation_regionprops",
-        min_area=50,
+    ("segmentation_masks", MaterializationSpec(RegionPropsOptions(
+        
         require_intensity=True,
         intensity_source="step_output",
     )))
@@ -418,8 +414,8 @@ class CellStats:
 
 @pyclesperanto
 @special_outputs(
-    ("cell_stats", MaterializationSpec("csv", TabularOptions(fields=["slice_index", "cell_count", "total_area", "mean_intensity"], analysis_type="cell_stats"))),
-    ("segmentation_masks", MaterializationSpec("roi_zip", ROIOptions()))
+    ("cell_stats", MaterializationSpec(TabularOptions())),
+    ("segmentation_masks", MaterializationSpec(ROIOptions()))
 )
 def count_cells_gpu(
     image,
@@ -490,8 +486,8 @@ class CellStats:
 
 @cupy
 @special_outputs(
-    ("cell_stats", MaterializationSpec("csv", TabularOptions(fields=["slice_index", "cell_count", "total_area", "mean_intensity"], analysis_type="cell_stats"))),
-    ("segmentation_masks", MaterializationSpec("roi_zip", ROIOptions()))
+    ("cell_stats", MaterializationSpec(TabularOptions())),
+    ("segmentation_masks", MaterializationSpec(ROIOptions()))
 )
 def count_cells_cupy(
     image,
@@ -597,7 +593,7 @@ RegionPropsOptions{regionprops_sig}
 TiffStackOptions{tiff_sig}
 ArrayExpansionOptions{arrayexp_sig}
 
-Usage: MaterializationSpec("csv", TabularOptions(fields=[...], analysis_type="..."))'''
+Usage: MaterializationSpec(TabularOptions())'''
         except Exception:
             return '''=== MATERIALIZATION OPTIONS ===
 TabularOptions(fields: List[str], analysis_type: str, filename_suffix: str = ".csv", strip_roi_suffix: bool = False)
@@ -606,7 +602,7 @@ RegionPropsOptions(analysis_type: str, min_area: int = 10, properties: List[str]
 TiffStackOptions(filename_suffix: str = ".tif", strip_roi_suffix: bool = False)
 ArrayExpansionOptions(fields: List[str], summary_fields: List[str], analysis_type: str, strip_roi_suffix: bool = False)
 
-Usage: MaterializationSpec("csv", TabularOptions(fields=[...], analysis_type="..."))'''
+Usage: MaterializationSpec(TabularOptions())'''
 
     def _get_pyclesperanto_function_docs(self) -> str:
         """Get pyclesperanto functions dynamically if available."""

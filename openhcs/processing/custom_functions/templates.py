@@ -112,7 +112,7 @@ def my_custom_function(image, scale: float = 1.0, offset: float = 0.0):
 # 2. Declare outputs with @special_outputs:
 #
 #    @numpy
-#    @special_outputs(("measurements", MaterializationSpec("csv", TabularOptions(
+#    @special_outputs(("measurements", MaterializationSpec(TabularOptions(
 #        fields=["slice_index", "mean", "std"],
 #        analysis_type="intensity_stats"
 #    ))))
@@ -128,9 +128,9 @@ def my_custom_function(image, scale: float = 1.0, offset: float = 0.0):
 #
 # 3. Available materializers:
 #
-#    MaterializationSpec("csv", TabularOptions(...))  - CSV file
-#    MaterializationSpec("json", TabularOptions(...))  - JSON file
-#    MaterializationSpec("dual", TabularOptions(...)) - Both CSV + JSON
+#    MaterializationSpec(TabularOptions(...))  - CSV file
+#    MaterializationSpec(TabularOptions(output_format="json", ...))  - JSON file
+#    MaterializationSpec(TabularOptions(output_format="dual", ...)) - Both CSV + JSON
 #
 # =============================================================================
 """
@@ -326,7 +326,7 @@ class AnalysisResult:
 
 
 @numpy
-@special_outputs(("analysis_results", MaterializationSpec("csv", TabularOptions(
+@special_outputs(("analysis_results", MaterializationSpec(TabularOptions(
     fields=["slice_index", "measurement", "count"],
     analysis_type="slice_analysis"
 ))))
@@ -399,7 +399,7 @@ class SliceSummary:
 
 @numpy
 @special_outputs(
-    ("cell_measurements", MaterializationSpec("csv", TabularOptions(
+    ("cell_measurements", MaterializationSpec(TabularOptions(
         filename_suffix="_cells.csv",
         analysis_type="cell_measurements"
     ))),
