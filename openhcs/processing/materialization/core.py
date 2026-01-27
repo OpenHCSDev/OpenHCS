@@ -285,6 +285,29 @@ def _normalize_backends(backends: Sequence[str] | str) -> List[str]:
     return list(backends)
 
 
+class BackendSaver:
+    """Centralized multi-backend save pattern.
+    
+    Eliminates repeated backend iteration boilerplate across handlers.
+    """
+    def __init__(self, backends: List[str], filemanager, backend_kwargs: Dict[str, Dict[str, Any]]):
+        self.backends = backends
+        self.filemanager = filemanager
+        self.backend_kwargs = backend_kwargs or {}
+    
+    def save(self, content, path: str) -> None:
+        """Save content to path across all backends."""
+        for backend in self.backends:
+            _prepare_output_path(self.filemanager, backend, path)
+            kwargs = self.backend_kwargs.get(backend, {})
+            self.filemanager.save(content, path, backend, **kwargs)
+    
+    def save_if(self, condition: bool, content, path: str) -> None:
+        """Save content if condition is True."""
+        if condition:
+            self.save(content, path)
+
+
 def _extract_fields(item: Any, field_names: Optional[List[str]] = None) -> Dict[str, Any]:
     """Extract fields from dataclass, dict, or pandas DataFrame.
 
@@ -329,7 +352,7 @@ def _strip_known_suffixes(path: str, *, strip_roi: bool = False, strip_pkl: bool
     """
     Strip known suffixes from a path while preserving compound suffix semantics.
 
-    Note: Path.stem only strips the last suffix (e.g., ".zip"), which breaks compound
+    Note: Path.stem only strips() the last suffix (e.g., ".zip"), which breaks compound
     suffixes like ".roi.zip" (it leaves a dangling ".roi"). We treat ".roi.zip" as a
     single compound suffix and remove it atomically.
     """
@@ -363,6 +386,25 @@ def _generate_output_path(
     if suffix:
         return str(parent / f"{path.name}{suffix}")
     return str(parent / f"{path.name}{default_ext}")
+
+
+class PathBuilder:
+    """Unified path generation for materialization handlers.
+    
+    Eliminates repeated path construction logic.
+    """
+    def __init__(self, base_path: str, *, strip_roi: bool = False, strip_pkl: bool = True):
+        self.base_path = _strip_known_suffixes(base_path, strip_roi=strip_roi, strip_pkl=strip_pkl)
+        self.parent = self.base_path.parent
+        self.name = self.base_path.name
+    
+    def with_suffix(self, suffix: str) -> str:
+        """Add a suffix to the base path."""
+        return str(self.parent / f"{self.name}{suffix}")
+    
+    def with_default_ext(self, default_ext: str) -> str:
+        """Add a default extension."""
+        return str(self.parent / f"{self.name}{default_ext}")
 
 
 def _prepare_output_path(filemanager, backend: str, output_path: str) -> None:
@@ -446,59 +488,37 @@ def _materialize_tabular(
     - "json": JSON file with nested results
     - "dual": Both CSV + JSON files
 
-    Replaces the separate csv, json, and dual handlers with a single implementation.
+    Replaceses separate csv, json, and dual handlers with a single implementation.
     """
     options = _expect_options(spec, TabularOptions)
-
-    fields_opt = options.fields
-    summary_fields = options.summary_fields or fields_opt
-    include_metadata = options.include_metadata
-    strip_roi = options.strip_roi_suffix if hasattr(options, 'strip_roi_suffix') else False
+    saver = BackendSaver(backends, filemanager, backend_kwargs)
 
     # Determine output format
     format_name = spec.handler if spec.handler in ("csv", "json", "dual") else options.output_format
 
     # Generate output paths
-    base_path = _generate_output_path(path, "", "", strip_roi=strip_roi)
-    csv_path = f"{base_path}_details.csv"
-    json_path = f"{base_path}.json"
+    paths = PathBuilder(path, strip_roi=options.strip_roi_suffix if hasattr(options, 'strip_roi_suffix') else False)
+    csv_path = paths.with_suffix("_details.csv")
+    json_path = paths.with_suffix(".json")
 
     # Extract data ONCE for all formats
     rows = []
     for i, item in enumerate(data or []):
-        row = _extract_fields(item, fields_opt)
+        row = _extract_fields(item, options.fields)
         if "slice_index" not in row:
             row["slice_index"] = i
         rows.append(row)
 
     # Generate outputs based on format
-    if format_name in ("csv", "dual"):
-        if rows:
-            df = pd.DataFrame(rows)
-            csv_content = df.to_csv(index=False)
-            for backend in backends:
-                _prepare_output_path(filemanager, backend, csv_path)
-                kwargs = backend_kwargs.get(backend, {})
-                filemanager.save(csv_content, csv_path, backend, **kwargs)
+    if format_name in ("csv", "dual") and rows:
+        csv_content = pd.DataFrame(rows).to_csv(index=False)
+        saver.save(csv_content, csv_path)
 
     if format_name in ("json", "dual"):
-        summary_data = []
-        for i, item in enumerate(data or []):
-            record = _extract_fields(item, summary_fields)
-            if "slice_index" not in record:
-                record["slice_index"] = i
-            summary_data.append(record)
-
-        summary = {
-            "total_items": len(summary_data),
-            "results": summary_data
-        }
-
-        json_content = json.dumps(summary, indent=2, default=str)
-        for backend in backends:
-            _prepare_output_path(filemanager, backend, json_path)
-            kwargs = backend_kwargs.get(backend, {})
-            filemanager.save(json_content, json_path, backend, **kwargs)
+        summary_data = [_extract_fields(item, options.summary_fields or options.fields) or {"slice_index": i}
+                      for i, item in enumerate(data or [])]
+        summary = {"total_items": len(summary_data), "results": summary_data}
+        saver.save(json.dumps(summary, indent=2, default=str), json_path)
 
     # Return primary path
     return json_path if format_name in ("json", "dual") else csv_path
@@ -516,23 +536,34 @@ def _materialize_tiff_stack(
     extra_inputs: Dict[str, Any],
 ) -> str:
     """Materialize image arrays as TIFF stack using typed TiffStackOptions."""
-    # Type guard: runtime check + type narrowing
     options = _expect_options(spec, TiffStackOptions)
+    saver = BackendSaver(backends, filemanager, backend_kwargs)
+    paths = PathBuilder(path, strip_roi=options.strip_roi_suffix, strip_pkl=options.strip_pkl)
 
-    # Direct attribute access
-    normalize_uint8 = options.normalize_uint8
-    summary_suffix = options.summary_suffix
-    empty_summary = options.empty_summary
-    strip_roi = options.strip_roi_suffix
-    strip_pkl = options.strip_pkl
-
+    # Empty data case
     if not data:
-        summary_path = _generate_output_path(path, summary_suffix, ".txt", strip_roi=strip_roi, strip_pkl=strip_pkl)
-        for backend in backends:
-            _prepare_output_path(filemanager, backend, summary_path)
-            kwargs = backend_kwargs.get(backend, {})
-            filemanager.save(empty_summary, summary_path, backend, **kwargs)
+        summary_path = paths.with_suffix(options.summary_suffix)
+        saver.save(options.empty_summary, summary_path)
         return summary_path
+
+    # Save individual TIFFs
+    base_name = paths.name
+    for i, arr in enumerate(data):
+        filename = str(paths.parent / f"{base_name}_slice_{i:03d}.tif")
+        out_arr = arr
+        if options.normalize_uint8 and out_arr.dtype != "uint8":
+            max_val = getattr(out_arr, "max", lambda: 0)()
+            out_arr = (out_arr * 255).astype("uint8") if max_val <= 1.0 else out_arr.astype("uint8")
+        saver.save(out_arr, filename)
+
+    # Save summary
+    summary_path = paths.with_suffix(options.summary_suffix)
+    summary_content = f"Images saved: {len(data)} files\n" \
+                     f"Base filename pattern: {base_name}_slice_XXX.tif\n" \
+                     f"Image dtype: {data[0].dtype}\n" \
+                     f"Image shape: {data[0].shape}\n"
+    saver.save(summary_content, summary_path)
+    return summary_path
 
     base_path = _generate_output_path(path, "", "", strip_roi=strip_roi, strip_pkl=strip_pkl)
     for i, arr in enumerate(data):
@@ -577,67 +608,43 @@ def _materialize_roi_zip(
     extra_inputs: Dict[str, Any],
 ) -> str:
     """Materialize segmentation masks as ROI zip using typed ROIOptions."""
-    # Type guard: runtime check + type narrowing
-    options = _expect_options(spec, ROIOptions)
-
-    # Direct attribute access
-    min_area = options.min_area
-    extract_contours = options.extract_contours
-    roi_suffix = options.roi_suffix
-    summary_suffix = options.summary_suffix
-    strip_roi = options.strip_roi_suffix
-    strip_pkl = options.strip_pkl
-
-    if not data:
-        summary_path = _generate_output_path(path, summary_suffix, ".txt", strip_roi=strip_roi, strip_pkl=strip_pkl)
-        # Use default empty summary since ROIOptions doesn't have empty_summary field
-        summary_content = "No segmentation masks generated (empty data)\n"
-        for backend in backends:
-            _prepare_output_path(filemanager, backend, summary_path)
-            kwargs = backend_kwargs.get(backend, {})
-            filemanager.save(summary_content, summary_path, backend, **kwargs)
-        return summary_path
-
     from polystore.roi import extract_rois_from_labeled_mask
 
+    options = _expect_options(spec, ROIOptions)
+    saver = BackendSaver(backends, filemanager, backend_kwargs)
+    paths = PathBuilder(path, strip_roi=options.strip_roi_suffix, strip_pkl=options.strip_pkl)
+
+    # Empty data case
+    if not data:
+        summary_path = paths.with_suffix(options.summary_suffix)
+        saver.save("No segmentation masks generated (empty data)\n", summary_path)
+        return summary_path
+
+    # Extract ROIs
     all_rois = []
     for mask in data:
-        rois = extract_rois_from_labeled_mask(
-            mask,
-            min_area=min_area,
-            extract_contours=extract_contours
-        )
+        rois = extract_rois_from_labeled_mask(mask, min_area=options.min_area, extract_contours=options.extract_contours)
         all_rois.extend(rois)
 
-    base_path = _generate_output_path(path, "", "", strip_roi=strip_roi, strip_pkl=strip_pkl)
-    roi_path = f"{base_path}{roi_suffix}"
+    # Save ROI file
+    roi_path = paths.with_suffix(options.roi_suffix)
+    saver.save_if(len(all_rois) > 0, all_rois, roi_path)
 
-    if all_rois:
-        for backend in backends:
-            _prepare_output_path(filemanager, backend, roi_path)
-            kwargs = backend_kwargs.get(backend, {})
-            filemanager.save(all_rois, roi_path, backend, **kwargs)
-
-    summary_path = f"{base_path}{summary_suffix}"
-    summary_content = f"Segmentation ROIs: {len(all_rois)} cells\n"
-    summary_content += f"Z-planes: {len(data)}\n"
+    # Save summary
+    summary_path = paths.with_suffix(options.summary_suffix)
+    summary_content = f"Segmentation ROIs: {len(all_rois)} cells\nZ-planes: {len(data)}\n"
     if all_rois:
         summary_content += f"ROI file: {roi_path}\n"
     else:
         summary_content += "No ROIs extracted (all regions below min_area threshold)\n"
-
-    for backend in backends:
-        _prepare_output_path(filemanager, backend, summary_path)
-        kwargs = backend_kwargs.get(backend, {})
-        filemanager.save(summary_content, summary_path, backend, **kwargs)
-
+    saver.save(summary_content, summary_path)
     return summary_path
 
 
 def _coerce_jsonable(value: Any) -> Any:
+    """Convert numpy types to JSON-serializable Python types."""
     try:
         import numpy as np
-
         if isinstance(value, np.generic):
             return value.item()
         if isinstance(value, np.ndarray):
@@ -645,6 +652,21 @@ def _coerce_jsonable(value: Any) -> Any:
     except Exception:
         pass
     return value
+
+
+def _normalize_slices(obj: Any, *, name: str) -> List[np.ndarray]:
+    """Normalize input to list of 2D arrays."""
+    import numpy as np
+    if obj is None:
+        return []
+    if isinstance(obj, list):
+        return [np.asarray(x) for x in obj]
+    arr = np.asarray(obj)
+    if arr.ndim == 2:
+        return [arr]
+    if arr.ndim == 3:
+        return [arr[i] for i in range(arr.shape[0])]
+    raise ValueError(f"{name} must be a 2D/3D array or list of 2D arrays, got shape {arr.shape}")
 
 
 @register_materializer("regionprops", options_type=RegionPropsOptions, requires_arbitrary_files=True)
@@ -672,147 +694,93 @@ def _materialize_regionprops(
     from skimage.measure import regionprops_table
     from polystore.roi import ROI, extract_rois_from_labeled_mask
 
-    # Type guard: runtime check + type narrowing
     options = _expect_options(spec, RegionPropsOptions)
+    saver = BackendSaver(backends, filemanager, backend_kwargs)
+    paths = PathBuilder(path)
 
-    # Direct attribute access
-    min_area = options.min_area
-    extract_contours = options.extract_contours
-    roi_suffix = options.roi_suffix
-    details_suffix = options.details_suffix
-    json_suffix = options.json_suffix
-    require_intensity = options.require_intensity
-
+    # Configure properties
     base_properties = list(options.properties or ["label", "area", "perimeter", "centroid", "bbox"])
     intensity_properties = list(options.intensity_properties or ["mean_intensity"])
-
-    # Ensure required properties for filtering + stable schema
     for required in ("label", "area", "centroid", "bbox"):
         if required not in base_properties:
             base_properties.append(required)
 
-    intensity = extra_inputs.get("intensity")
-    if intensity is None:
-        intensity = extra_inputs.get("intensity_slices")
-
-    def _normalize_slices(obj: Any, *, name: str) -> List[np.ndarray]:
-        if obj is None:
-            return []
-        if isinstance(obj, list):
-            return [np.asarray(x) for x in obj]
-        arr = np.asarray(obj)
-        if arr.ndim == 2:
-            return [arr]
-        if arr.ndim == 3:
-            return [arr[i] for i in range(arr.shape[0])]
-        raise ValueError(f"{name} must be a 2D/3D array or list of 2D arrays, got shape {arr.shape}")
-
-    label_slices = _normalize_slices(data, name="labeled_mask")
+    # Normalize input slices
+    intensity = extra_inputs.get("intensity") or extra_inputs.get("intensity_slices")
     intensity_slices = _normalize_slices(intensity, name="intensity") if intensity is not None else []
 
-    if require_intensity and not intensity_slices:
+    if options.require_intensity and not intensity_slices:
         raise ValueError(
-            "regionprops materializer requires intensity input, but none was provided. "
-            "Pass extra_inputs['intensity'] (aligned to label slices) or set require_intensity=False."
+            "regionprops materializer requires intensity input. "
+            "Pass extra_inputs['intensity'] or set require_intensity=False."
         )
-    if intensity_slices and len(intensity_slices) != len(label_slices):
-        raise ValueError(
-            f"Intensity/label slice mismatch: intensity={len(intensity_slices)} slices, "
-            f"labels={len(label_slices)} slices."
-        )
+    if intensity_slices and len(intensity_slices) != len(_normalize_slices(data, name="label")):
+        raise ValueError("Intensity/label slice count mismatch.")
 
-    base_path = _generate_output_path(path, "", "")
-    json_path = f"{base_path}{json_suffix}"
-    csv_path = f"{base_path}{details_suffix}"
-    roi_path = f"{base_path}{roi_suffix}"
+    # Setup paths
+    json_path = paths.with_suffix(options.json_suffix)
+    csv_path = paths.with_suffix(options.details_suffix)
+    roi_path = paths.with_suffix(options.roi_suffix)
 
     all_rois: List[ROI] = []
     rows: List[Dict[str, Any]] = []
     per_slice: List[Dict[str, Any]] = []
+    label_slices = _normalize_slices(data, name="labeled_mask")
 
+    # Process each slice
     for z_idx, labels in enumerate(label_slices):
         if labels.ndim != 2:
-            raise ValueError(f"Label slice {z_idx} must be 2D, got shape {labels.shape}")
+            raise ValueError(f"Label slice {z_idx} must be 2D")
         if not np.issubdtype(labels.dtype, np.integer):
             labels = labels.astype(np.int32)
 
-        intensity_img = None
-        if intensity_slices:
-            intensity_img = intensity_slices[z_idx]
-            if intensity_img.ndim != 2:
-                raise ValueError(f"Intensity slice {z_idx} must be 2D, got shape {intensity_img.shape}")
-            if intensity_img.shape != labels.shape:
-                raise ValueError(
-                    f"Intensity slice {z_idx} shape {intensity_img.shape} does not match "
-                    f"label slice shape {labels.shape}."
-                )
+        intensity_img = intensity_slices[z_idx] if intensity_slices else None
+        if intensity_img and (intensity_img.ndim != 2 or intensity_img.shape != labels.shape):
+            raise ValueError("Intensity slice shape mismatch.")
 
-        props = list(dict.fromkeys(base_properties + (intensity_properties if intensity_img is not None else [])))
-        table = regionprops_table(
-            labels,
-            intensity_image=intensity_img,
-            properties=props
-        )
+        # Compute region properties
+        props = list(dict.fromkeys(base_properties + (intensity_properties if intensity_img else [])))
+        table = regionprops_table(labels, intensity_image=intensity_img, properties=props)
 
-        # Filter out tiny regions (match ROI extraction behavior)
+        # Filter and extract data
         areas = table.get("area")
-        keep_idx: List[int] = []
-        if areas is not None:
-            keep_idx = [i for i, a in enumerate(areas) if float(a) >= min_area]
-        else:
-            keep_idx = list(range(len(table.get("label", []))))
-
+        keep_idx = [i for i, a in enumerate(areas or []) if float(a) >= options.min_area] if areas is not None else list(range(len(table.get("label", []))))
         labels_col = table.get("label", [])
-        kept_labels: List[int] = [int(labels_col[i]) for i in keep_idx]
+        kept_labels = [int(labels_col[i]) for i in keep_idx]
 
-        # Build rows from regionprops_table output
+        # Build CSV rows
         for i in keep_idx:
-            row: Dict[str, Any] = {"slice_index": z_idx}
-            for key, values in table.items():
-                if values is None:
-                    continue
-                norm_key = key.replace("-", "_")
-                row[norm_key] = _coerce_jsonable(values[i])
+            row = {"slice_index": z_idx}
+            for key, values in table.items() or {}:
+                if values is not None:
+                    row[key.replace("-", "_")] = _coerce_jsonable(values[i])
             rows.append(row)
 
-        # Per-slice summary
+        # Build per-slice summary
         slice_summary: Dict[str, Any] = {"slice_index": z_idx, "region_count": len(keep_idx)}
-        if areas is not None and keep_idx:
+        if areas and keep_idx:
             kept_areas = [float(areas[i]) for i in keep_idx]
-            slice_summary["total_area"] = float(sum(kept_areas))
-            slice_summary["mean_area"] = float(sum(kept_areas) / len(kept_areas))
-        if intensity_img is not None:
-            mean_int = table.get("mean_intensity")
-            if mean_int is not None and keep_idx:
-                kept_mean_int = [float(mean_int[i]) for i in keep_idx]
-                slice_summary["mean_mean_intensity"] = float(sum(kept_mean_int) / len(kept_mean_int))
+            slice_summary["total_area"] = sum(kept_areas)
+            slice_summary["mean_area"] = sum(kept_areas) / len(kept_areas)
+        if intensity_img and (mean_int := table.get("mean_intensity")) and keep_idx:
+            slice_summary["mean_mean_intensity"] = sum([float(mean_int[i]) for i in keep_idx]) / len(keep_idx)
         per_slice.append(slice_summary)
 
-        # Extract ROIs and attach slice/intensity metadata
-        rois = extract_rois_from_labeled_mask(
-            labels,
-            min_area=min_area,
-            extract_contours=extract_contours,
-        )
-
-        intensity_by_label: Dict[int, Dict[str, Any]] = {}
-        if intensity_img is not None and kept_labels:
-            for i in keep_idx:
-                label_id = int(labels_col[i])
-                intensity_by_label[label_id] = {
-                    k: _coerce_jsonable(table[k][i])
-                    for k in intensity_properties
-                    if k in table
-                }
+        # Extract and annotate ROIs
+        rois = extract_rois_from_labeled_mask(labels, min_area=options.min_area, extract_contours=options.extract_contours)
+        intensity_by_label = {
+            int(labels_col[i]): {k: _coerce_jsonable(table[k][i]) for k in intensity_properties if k in table}
+            for i in keep_idx
+        } if intensity_img and kept_labels else {}
 
         for roi in rois:
             label_id = int(roi.metadata.get("label", 0))
-            metadata = dict(roi.metadata)
-            metadata["slice_index"] = z_idx
+            metadata = dict(roi.metadata, slice_index=z_idx)
             if label_id in intensity_by_label:
                 metadata.update(intensity_by_label[label_id])
             all_rois.append(ROI(shapes=roi.shapes, metadata=metadata))
 
+    # Build and save summary
     summary = {
         "total_slices": len(label_slices),
         "total_regions": len(rows),
@@ -822,29 +790,13 @@ def _materialize_regionprops(
         "properties": base_properties,
         "intensity_properties": intensity_properties if intensity_slices else [],
     }
+    saver.save(json.dumps(summary, indent=2, default=str), json_path)
 
-    # JSON summary always (even if empty)
-    json_content = json.dumps(summary, indent=2, default=str)
-    for backend in backends:
-        _prepare_output_path(filemanager, backend, json_path)
-        kwargs = backend_kwargs.get(backend, {})
-        filemanager.save(json_content, json_path, backend, **kwargs)
-
-    # CSV details if any rows
+    # Save CSV and ROI if data exists
     if rows:
-        df = pd.DataFrame(rows)
-        csv_content = df.to_csv(index=False)
-        for backend in backends:
-            _prepare_output_path(filemanager, backend, csv_path)
-            kwargs = backend_kwargs.get(backend, {})
-            filemanager.save(csv_content, csv_path, backend, **kwargs)
-
-    # ROI zip if any ROIs
+        saver.save(pd.DataFrame(rows).to_csv(index=False), csv_path)
     if all_rois:
-        for backend in backends:
-            _prepare_output_path(filemanager, backend, roi_path)
-            kwargs = backend_kwargs.get(backend, {})
-            filemanager.save(all_rois, roi_path, backend, **kwargs)
+        saver.save(all_rois, roi_path)
 
     return json_path
 
@@ -994,93 +946,54 @@ def _materialize_tabular_with_arrays(
     1. String-based: aggregations={"field": "sum"} using built-in functions
     2. Callable: aggregations={"field": custom_func} for custom logic
     """
-    from openhcs.processing.materialization.options import BuiltinAggregations
-
-    # Type guard: runtime check + type narrowing
     options = _expect_options(spec, ArrayExpansionOptions)
+    saver = BackendSaver(backends, filemanager, backend_kwargs)
+    paths = PathBuilder(path, strip_roi=False, strip_pkl=True)
 
-    # Get configuration
-    fields_opt = options.fields
-    summary_fields = options.summary_fields or options.fields
-    include_metadata = options.include_metadata
-    strip_roi = options.strip_roi_suffix if hasattr(options, 'strip_roi_suffix') else False
-
-    # Generate output paths
-    filename_suffix = getattr(options, 'filename_suffix', '.json')
-    strip_pkl = options.strip_pkl if hasattr(options, 'strip_pkl') else True
-    base_path = _generate_output_path(path, "", "", strip_roi=strip_roi, strip_pkl=strip_pkl)
-    json_path = f"{base_path}{filename_suffix}"
-    csv_path = f"{base_path}_details.csv"
+    # Setup paths
+    json_path = paths.with_suffix(getattr(options, 'filename_suffix', '.json'))
+    csv_path = paths.with_suffix("_details.csv")
 
     # Build rows using array expansion
     rows = []
     for item_idx, item in enumerate(data or []):
-        # Extract base fields from item
-        base_row = _extract_fields(item, fields_opt)
-        if "slice_index" not in base_row and "slice_index" not in (fields_opt or []):
+        base_row = _extract_fields(item, options.fields)
+        if "slice_index" not in base_row and "slice_index" not in (options.fields or []):
             base_row["slice_index"] = item_idx
 
-        # STRATEGY DISPATCH: Choose expansion strategy
+        # Expansion strategy dispatch
         if options.row_unpacker:
-            # Strategy 1: Custom unpacker (user takes full control)
-            expanded_rows = options.row_unpacker(item)
-            for exp_row in expanded_rows:
-                exp_row.update(base_row)
-                rows.append(exp_row)
-            continue
-
-        if options.row_field:
-            # Strategy 2: User-specified field (explicit mode)
+            # Strategy 1: Custom unpacker
+            for exp_row in options.row_unpacker(item):
+                rows.append({**base_row, **exp_row})
+        elif options.row_field:
+            # Strategy 2: Explicit field mode
             array_data = getattr(item, options.row_field, [])
-            row_columns = _discover_column_mapping(
-                options.row_field, array_data, options.row_columns
-            )
-            expanded = _expand_array_field(array_data, base_row, row_columns)
-            rows.extend(expanded)
-            continue
-
-        # Strategy 3: Auto-discovery (implicit mode)
-        array_fields = _discover_array_fields(item)
-        if not array_fields:
+            row_columns = _discover_column_mapping(options.row_field, array_data, options.row_columns)
+            rows.extend(_expand_array_field(array_data, base_row, row_columns))
+        elif array_fields := _discover_array_fields(item):
+            # Strategy 3: Auto-discovery mode
+            primary_field = array_fields[0]
+            array_data = getattr(item, primary_field, [])
+            row_columns = _discover_column_mapping(primary_field, array_data, {})
+            rows.extend(_expand_array_field(array_data, base_row, row_columns))
+        else:
             rows.append(base_row)
-            continue
 
-        # Expand primary array field
-        primary_field = array_fields[0]
-        array_data = getattr(item, primary_field, [])
-        row_columns = _discover_column_mapping(primary_field, array_data, {})
-        expanded = _expand_array_field(array_data, base_row, row_columns)
-        rows.extend(expanded)
-
-    # Build summary with aggregations
+    # Build and save summary
     summary = _build_summary_from_data(
         data or [],
-        summary_fields or fields_opt,
+        options.summary_fields or options.fields,
         options.aggregations,
-        include_metadata
+        options.include_metadata
     )
+    summary.setdefault("total_items", len(data or []))
+    saver.save(json.dumps(summary, indent=2, default=str), json_path)
 
-    # Ensure total_items is in summary
-    if "total_items" not in summary:
-        summary["total_items"] = len(data or [])
-
-    # Save JSON summary
-    json_content = json.dumps(summary, indent=2, default=str)
-    for backend in backends:
-        _prepare_output_path(filemanager, backend, json_path)
-        kwargs = backend_kwargs.get(backend, {})
-        filemanager.save(json_content, json_path, backend, **kwargs)
-
-    # Save CSV details
+    # Save CSV
     if rows:
-        df = pd.DataFrame(rows)
-        csv_content = df.to_csv(index=False)
-        for backend in backends:
-            _prepare_output_path(filemanager, backend, csv_path)
-            kwargs = backend_kwargs.get(backend, {})
-            filemanager.save(csv_content, csv_path, backend, **kwargs)
-
-    logger.info(f"Materialized {len(rows)} rows (tabular with arrays) to {json_path}")
+        saver.save(pd.DataFrame(rows).to_csv(index=False), csv_path)
+    logger.info(f"Materialized {len(rows)} rows to {json_path}")
     return json_path
 
 
