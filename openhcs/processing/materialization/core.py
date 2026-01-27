@@ -432,42 +432,7 @@ class MaterializationSpec:
     allowed_backends: Optional[List[str]]
     primary: int
 
-    def __init__(
-        self,
-        *outputs: Any,
-        allowed_backends: Optional[List[str]] = None,
-        primary: int = 0,
-        **kwargs: Any,
-    ):
-        """Create a materialization spec.
-
-        Supports both:
-        - positional writer options: MaterializationSpec(JsonOptions(), CsvOptions(), primary=0)
-        - keyword construction for ObjectState/lazy serialization: MaterializationSpec(outputs=(...,), primary=0)
-        """
-
-        # ObjectState/lazy_factory constructs dataclasses using **resolved_fields.
-        if "outputs" in kwargs:
-            if outputs:
-                raise TypeError("MaterializationSpec: cannot mix positional outputs with outputs=...")
-            kw_outputs = kwargs.pop("outputs")
-            if isinstance(kw_outputs, (list, tuple)):
-                outputs = tuple(kw_outputs)
-            else:
-                outputs = (kw_outputs,)
-
-        if "allowed_backends" in kwargs:
-            if allowed_backends is not None:
-                raise TypeError("MaterializationSpec: cannot pass allowed_backends twice")
-            allowed_backends = kwargs.pop("allowed_backends")
-
-        if "primary" in kwargs:
-            primary = kwargs.pop("primary")
-
-        if kwargs:
-            unknown = ", ".join(sorted(kwargs.keys()))
-            raise TypeError(f"MaterializationSpec: unexpected keyword argument(s): {unknown}")
-
+    def __init__(self, *outputs: Any, allowed_backends: Optional[List[str]] = None, primary: int = 0):
         if len(outputs) == 1 and isinstance(outputs[0], (list, tuple)):
             outputs = tuple(outputs[0])
 
@@ -489,6 +454,17 @@ class MaterializationSpec:
         object.__setattr__(self, "outputs", tuple(outputs))
         object.__setattr__(self, "allowed_backends", allowed_backends)
         object.__setattr__(self, "primary", primary)
+
+    @classmethod
+    def __objectstate_rebuild__(
+        cls,
+        *,
+        outputs: Tuple[Any, ...],
+        allowed_backends: Optional[List[str]] = None,
+        primary: int = 0,
+    ) -> "MaterializationSpec":
+        # Rebuild via the normal constructor to keep validation behavior.
+        return cls(*outputs, allowed_backends=allowed_backends, primary=primary)
 
 
 def _normalize_backends(backends: Sequence[str] | str) -> list[str]:
