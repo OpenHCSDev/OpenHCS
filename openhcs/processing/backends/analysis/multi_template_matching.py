@@ -5,6 +5,8 @@ This module provides template matching capabilities using the Multi-Template-Mat
 to detect and crop regions of interest in image stacks.
 """
 
+from __future__ import annotations
+
 import numpy as np
 import cv2
 from typing import Tuple, List, Dict, Any, Optional, Union

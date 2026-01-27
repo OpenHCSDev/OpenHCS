@@ -353,13 +353,15 @@ def create_visualization_array(
             allowed_backends=[Backend.DISK.value],
         ),
     ),
-    ("trace_visualizations", MaterializationSpec(
-        "tiff_stack",
-        TiffStackOptions(
-            normalize_uint8=True,
-            summary_suffix="_trace_summary.txt"
-        )
-    ))
+    (
+        "trace_visualizations",
+        MaterializationSpec(
+            TiffStackOptions(
+                normalize_uint8=True,
+                summary_suffix="_trace_summary.txt",
+            )
+        ),
+    ),
 )
 @numpy
 def trace_neurites_rrs_alva(
