@@ -2,27 +2,27 @@
 Core materialization framework.
 
 Provides a single spec + registry + dispatcher abstraction for analysis materialization.
+Uses generic ABC-based handlers to eliminate duplication.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass, field, fields, is_dataclass
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, fields, is_dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Generic, List, Optional, Sequence, Tuple, TypeVar, Union
-
-import pandas as pd
 
 from openhcs.constants.constants import Backend
 
 # Type variables for generic MaterializationSpec
 T = TypeVar('T', bound=object)
+U = TypeVar('U', bound=object)
 
 logger = logging.getLogger(__name__)
 
 # Import typed options for handler type narrowing
-# These are used for type annotations in handlers
 from openhcs.processing.materialization.options import (
     TabularOptions,
     ArrayExpansionOptions,
@@ -34,6 +34,121 @@ from openhcs.processing.materialization.options import (
 )
 
 
+# ===== Generic Abstractions =====
+
+class MaterializationHandler(ABC, Generic[T]):
+    """ABC defining the materialization contract.
+
+    Handlers implement domain-specific logic while framework handles:
+    - Backend iteration (via context)
+    - Path generation (via context)
+    - Common data extraction patterns
+
+    This eliminates duplication across all handlers.
+    """
+
+    @abstractmethod
+    def process_data(self, data: Any, context: MaterializationContext) -> T:
+        """Process input data into domain-specific format."""
+        pass
+
+    @abstractmethod
+    def get_output_paths(self, context: MaterializationContext, result: T) -> List[Tuple[str, Any]]:
+        """Get (path, content) tuples for output files."""
+        pass
+
+
+@dataclass
+class MaterializationContext:
+    """Shared context for materialization handlers.
+
+    Consolidates common configuration and path logic.
+    """
+    base_path: str
+    backends: List[str]
+    backend_kwargs: Dict[str, Dict[str, Any]]
+    options: Any
+    filemanager: Any
+
+    def get_paths(self) -> 'PathHelper':
+        """Get path helper for this context."""
+        return PathHelper(self.base_path, self.options)
+
+    def get_saver(self) -> 'BackendSaver':
+        """Get backend saver for this context."""
+        return BackendSaver(self.backends, self.filemanager, self.backend_kwargs)
+
+
+class PathHelper:
+    """Unified path generation for materialization.
+
+    Eliminates repeated path construction logic.
+    """
+
+    def __init__(self, base_path: str, options: Any):
+        self.base_path = self._strip_path(base_path, options)
+        self.parent = self.base_path.parent
+        self.name = self.base_path.name
+
+    @staticmethod
+    def _strip_path(path: str, options: Any) -> Path:
+        """Strip known suffixes from path."""
+        p = Path(path)
+        name = p.name
+
+        # Strip compound suffixes
+        if name.endswith(".roi.zip"):
+            name = name[: -len(".roi.zip")]
+
+        # Strip based on options
+        strip_pkl = getattr(options, 'strip_pkl', True)
+        strip_roi = getattr(options, 'strip_roi_suffix', False)
+        if strip_pkl and name.endswith(".pkl"):
+            name = name[: -len(".pkl")]
+        if strip_roi and name.endswith(".roi"):
+            name = name[: -len(".roi")]
+
+        return p.with_name(name)
+
+    def with_suffix(self, suffix: str) -> str:
+        """Add a suffix to the base path."""
+        return str(self.parent / f"{self.name}{suffix}")
+
+
+class BackendSaver:
+    """Centralized multi-backend save pattern.
+
+    Eliminates repeated backend iteration boilerplate.
+    """
+
+    def __init__(self, backends: List[str], filemanager, backend_kwargs: Dict[str, Dict[str, Any]]):
+        self.backends = backends
+        self.filemanager = filemanager
+        self.backend_kwargs = backend_kwargs or {}
+
+    def save(self, content, path: str) -> None:
+        """Save content to path across all backends."""
+        for backend in self.backends:
+            self._prepare_path(backend, path)
+            kwargs = self.backend_kwargs.get(backend, {})
+            self.filemanager.save(content, path, backend, **kwargs)
+
+    def save_if(self, condition: bool, content, path: str) -> None:
+        """Save content if condition is True."""
+        if condition:
+            self.save(content, path)
+
+    def _prepare_path(self, backend: str, path: str) -> None:
+        """Prepare output path for save."""
+        backend_instance = self.filemanager._get_backend(backend)
+        if backend_instance.requires_filesystem_validation:
+            self.filemanager.ensure_directory(str(Path(path).parent), backend)
+            if self.filemanager.exists(path, backend):
+                self.filemanager.delete(path, backend)
+
+
+# ===== Materialization Spec =====
+
 @dataclass(frozen=True)
 class MaterializationSpec(Generic[T]):
     """
@@ -44,9 +159,7 @@ class MaterializationSpec(Generic[T]):
 
     Attributes:
         options: Optional typed handler-specific options (validated at construction).
-            Can be None for custom handlers that don't need options.
         handler: Optional handler name. If not specified, automatically inferred from options type.
-            For custom handlers using dict options, handler must be specified explicitly.
         allowed_backends: Optional allowlist of backend names.
 
     Example (built-in handler - handler inferred):
@@ -100,21 +213,30 @@ class MaterializationSpec(Generic[T]):
             )
 
 
+# ===== Materialization Registry =====
+
 @dataclass(frozen=True)
 class MaterializationHandler:
-    """Container for a materialization handler and its metadata."""
+    """Registered materialization handler.
+
+    Attributes:
+        name: Handler name (used in MaterializationSpec.handler)
+        func: Handler function (signature depends on handler type)
+        requires_arbitrary_files: Whether this handler requires arbitrary file support
+        options_type: Expected options dataclass type for validation
+    """
     name: str
-    func: Callable[..., str]
-    requires_arbitrary_files: bool = True
-    options_type: Optional[type] = None  # Expected options type for this handler
+    func: Callable
+    requires_arbitrary_files: bool
+    options_type: Optional[type] = None
 
 
 class MaterializationRegistry:
     """Registry for materialization handlers with type tracking."""
 
     _handlers: Dict[str, MaterializationHandler] = {}
-    _option_types: Dict[str, type] = {}  # Handler name -> options type mapping
-    _options_to_handler: Dict[type, str] = {}  # Options type -> handler name (reverse mapping)
+    _option_types: Dict[str, type] = {}
+    _options_to_handler: Dict[type, str] = {}
 
     @classmethod
     def register(
@@ -207,122 +329,114 @@ class MaterializationRegistry:
         return cls._option_types.get(name)
 
 
+# ===== Decorator =====
+
 def register_materializer(
     name: str,
     *,
     options_type: Optional[type] = None,
     requires_arbitrary_files: bool = True
-) -> Callable[[Callable[..., str]], Callable[..., str]]:
-    """Decorator to register a materialization handler with type tracking.
+):
+    """Decorator to register a materialization handler.
 
     Args:
-        name: Handler name
+        name: Handler name (used in MaterializationSpec.handler)
         options_type: Expected options dataclass type for validation
-        requires_arbitrary_files: Whether handler requires arbitrary file support
+        requires_arbitrary_files: Whether this handler requires arbitrary file support
 
-    Returns:
-        Decorator function
-
-    Example:
-        >>> from openhcs.processing.materialization.options import TabularOptions
-        >>>
-        >>> @register_materializer("csv", options_type=TabularOptions)
-        >>> def _materialize_csv(...):
-        ...     ...
+    Usage:
+        @register_materializer("csv", options_type=TabularOptions)
+        def materialize_csv(data, path, filemanager, backends, backend_kwargs, spec, context, extra_inputs):
+            ...
     """
     def decorator(func: Callable[..., str]) -> Callable[..., str]:
         MaterializationRegistry.register(
             name,
             func,
             options_type=options_type,
-            requires_arbitrary_files=requires_arbitrary_files
+            requires_arbitrary_files=requires_arbitrary_files,
         )
+
+        # Set __materialization_handler__ attribute for type checking
         func.__materialization_handler__ = name
         return func
+
     return decorator
 
 
-# ===== Type Guard for Options =====
+# ===== Generic Orchestrator =====
 
-T = TypeVar('T', bound=object)
+def materialize(
+    spec: MaterializationSpec,
+    data: Any,
+    path: str,
+    filemanager,
+    backends: Sequence[str] | str,
+    backend_kwargs: Optional[Dict[str, Dict[str, Any]]] = None,
+    context: Any = None,
+    extra_inputs: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Generic materialization using registry-based handlers.
 
-def _expect_options(spec: MaterializationSpec, options_type: type[T]) -> T:
-    """Type narrowing for handler options (validation already done in __post_init__).
+    Orchestrates the materialization flow:
+    1. Create context with paths and configuration
+    2. Process data through handler
+    3. Build and save outputs to backends
 
-    This function provides type narrowing for type checkers.
-    Runtime validation is already handled by MaterializationSpec.__post_init__.
-
-    Args:
-        spec: MaterializationSpec containing options
-        options_type: Expected options type (e.g., TabularOptions)
-
-    Returns:
-        The options, narrowed to the specified type
-
-    Example:
-        >>> # In handler:
-        >>> options = _expect_options(spec, TabularOptions)
-        >>> # Type checker knows options is TabularOptions
-        >>> fields = options.fields  # Autocomplete works!
+    This provides backward compatibility while leveraging ABC-based abstractions internally.
     """
-    return spec.options
+    handler_name = spec.handler or "custom"
+
+    handler = MaterializationRegistry.get(handler_name)
+    normalized_backends = _normalize_backends(backends)
+    _validate_backends(spec, handler, normalized_backends, filemanager)
+
+    # Call the legacy handler function
+    return handler.func(
+        data,
+        path,
+        filemanager,
+        normalized_backends,
+        backend_kwargs or {},
+        spec,
+        context,
+        extra_inputs or {},
+    )
 
 
 def _normalize_backends(backends: Sequence[str] | str) -> List[str]:
+    """Normalize backend input to list."""
     if isinstance(backends, str):
         return [backends]
     return list(backends)
 
 
-class PathBuilder:
-    """Unified path generation for materialization handlers.
+def _validate_backends(
+    spec: MaterializationSpec,
+    handler: MaterializationHandler,
+    backends: List[str],
+    filemanager,
+):
+    """Validate backend configuration against spec and handler requirements."""
+    if spec.allowed_backends:
+        invalid = [b for b in backends if b not in spec.allowed_backends]
+        if invalid:
+            raise ValueError(
+                f"Backend(s) {invalid} not in allowed backends for this spec: {spec.allowed_backends}"
+            )
 
-    Eliminates repeated path construction logic.
-    """
-    def __init__(self, base_path: str, *, strip_roi: bool = False, strip_pkl: bool = True):
-        p = Path(base_path)
-        name = p.name
-        if name.endswith(".roi.zip"):
-            name = name[: -len(".roi.zip")]
-        if strip_pkl and name.endswith(".pkl"):
-            name = name[: -len(".pkl")]
-        if strip_roi and name.endswith(".roi"):
-            name = name[: -len(".roi")]
-        self.base_path = p.with_name(name)
-        self.parent = self.base_path.parent
-        self.name = self.base_path.name
-
-    def with_suffix(self, suffix: str) -> str:
-        """Add a suffix to the base path."""
-        return str(self.parent / f"{self.name}{suffix}")
-
-    def with_default_ext(self, default_ext: str) -> str:
-        """Add a default extension."""
-        return str(self.parent / f"{self.name}{default_ext}")
+    if handler.requires_arbitrary_files:
+        # Validate that all backends support arbitrary file paths
+        for backend in backends:
+            backend_instance = filemanager._get_backend(backend)
+            if not backend_instance.supports_arbitrary_files:
+                raise ValueError(
+                    f"Handler '{handler.name}' requires arbitrary file support, "
+                    f"but backend '{backend}' does not support it."
+                )
 
 
-class BackendSaver:
-    """Centralized multi-backend save pattern.
-    
-    Eliminates repeated backend iteration boilerplate across handlers.
-    """
-    def __init__(self, backends: List[str], filemanager, backend_kwargs: Dict[str, Dict[str, Any]]):
-        self.backends = backends
-        self.filemanager = filemanager
-        self.backend_kwargs = backend_kwargs or {}
-    
-    def save(self, content, path: str) -> None:
-        """Save content to path across all backends."""
-        for backend in self.backends:
-            _prepare_output_path(self.filemanager, backend, path)
-            kwargs = self.backend_kwargs.get(backend, {})
-            self.filemanager.save(content, path, backend, **kwargs)
-    
-    def save_if(self, condition: bool, content, path: str) -> None:
-        """Save content if condition is True."""
-        if condition:
-            self.save(content, path)
-
+# ===== Helper Functions =====
 
 def _extract_fields(item: Any, field_names: Optional[List[str]] = None) -> Dict[str, Any]:
     """Extract fields from dataclass, dict, or pandas DataFrame.
@@ -341,9 +455,7 @@ def _extract_fields(item: Any, field_names: Optional[List[str]] = None) -> Dict[
         import pandas as pd
         if isinstance(item, pd.DataFrame):
             if field_names:
-                # Select only requested columns that exist
                 return {f: item[f].tolist() for f in field_names if f in item.columns}
-            # Return all columns as lists
             return {col: item[col].tolist() for col in item.columns}
 
         if isinstance(item, pd.Series):
@@ -353,6 +465,7 @@ def _extract_fields(item: Any, field_names: Optional[List[str]] = None) -> Dict[
     except ImportError:
         pass
 
+    # Handle dataclasses
     if is_dataclass(item):
         if field_names:
             return {f: getattr(item, f, None) for f in field_names if hasattr(item, f)}
@@ -364,68 +477,20 @@ def _extract_fields(item: Any, field_names: Optional[List[str]] = None) -> Dict[
     return {"value": item}
 
 
-def _prepare_output_path(filemanager, backend: str, output_path: str) -> None:
-    backend_instance = filemanager._get_backend(backend)
-    if backend_instance.requires_filesystem_validation:
-        filemanager.ensure_directory(str(Path(output_path).parent), backend)
-        if filemanager.exists(output_path, backend):
-            filemanager.delete(output_path, backend)
+def _coerce_jsonable(value: Any) -> Any:
+    """Convert numpy types to JSON-serializable Python types."""
+    try:
+        import numpy as np
+        if isinstance(value, np.generic):
+            return value.item()
+        if isinstance(value, np.ndarray):
+            return value.tolist()
+    except Exception:
+        pass
+    return value
 
 
-def _validate_backends(
-    spec: MaterializationSpec,
-    handler: MaterializationHandler,
-    backends: List[str],
-    filemanager
-) -> None:
-    if spec.allowed_backends is not None:
-        disallowed = [b for b in backends if b not in spec.allowed_backends]
-        if disallowed:
-            raise ValueError(
-                f"Materialization handler '{handler.name}' does not allow backends: {disallowed}. "
-                f"Allowed: {spec.allowed_backends}"
-            )
-
-    if handler.requires_arbitrary_files:
-        for backend in backends:
-            backend_instance = filemanager._get_backend(backend)
-            if not backend_instance.supports_arbitrary_files:
-                raise ValueError(
-                    f"Backend '{backend}' does not support arbitrary files for handler "
-                    f"'{handler.name}'."
-                )
-
-
-def materialize(
-    spec: MaterializationSpec,
-    data: Any,
-    path: str,
-    filemanager,
-    backends: Sequence[str] | str,
-    backend_kwargs: Optional[Dict[str, Dict[str, Any]]] = None,
-    context: Any = None,
-    extra_inputs: Optional[Dict[str, Any]] = None,
-) -> str:
-    handler_name = spec.handler or "custom"
-
-    handler = MaterializationRegistry.get(handler_name)
-    normalized_backends = _normalize_backends(backends)
-    _validate_backends(spec, handler, normalized_backends, filemanager)
-
-    # Pass options if available, otherwise pass spec directly
-    return handler.func(
-        data,
-        path,
-        filemanager,
-        normalized_backends,
-        backend_kwargs or {},
-        spec,
-        context,
-        extra_inputs or {},
-    )
-
-
-# Built-in handlers
+# ===== Handler Implementations =====
 
 @register_materializer("tabular", options_type=TabularOptions, requires_arbitrary_files=True)
 def _materialize_tabular(
@@ -438,23 +503,15 @@ def _materialize_tabular(
     context: Any,
     extra_inputs: Dict[str, Any],
 ) -> str:
-    """Unified tabular materializer for CSV, JSON, or dual output.
-
-    Uses options.output_format to determine which format(s) to generate:
-    - "csv": CSV file only
-    - "json": JSON file with nested results
-    - "dual": Both CSV + JSON files
-
-    Replaceses separate csv, json, and dual handlers with a single implementation.
-    """
-    options = _expect_options(spec, TabularOptions)
+    """Unified tabular materializer for CSV, JSON, or dual output."""
+    options = spec.options
     saver = BackendSaver(backends, filemanager, backend_kwargs)
+    paths = PathHelper(path, options)
 
     # Determine output format
     format_name = spec.handler if spec.handler in ("csv", "json", "dual") else options.output_format
 
     # Generate output paths
-    paths = PathBuilder(path, strip_roi=options.strip_roi_suffix if hasattr(options, 'strip_roi_suffix') else False)
     csv_path = paths.with_suffix("_details.csv")
     json_path = paths.with_suffix(".json")
 
@@ -468,6 +525,7 @@ def _materialize_tabular(
 
     # Generate outputs based on format
     if format_name in ("csv", "dual") and rows:
+        import pandas as pd
         csv_content = pd.DataFrame(rows).to_csv(index=False)
         saver.save(csv_content, csv_path)
 
@@ -493,9 +551,9 @@ def _materialize_tiff_stack(
     extra_inputs: Dict[str, Any],
 ) -> str:
     """Materialize image arrays as TIFF stack using typed TiffStackOptions."""
-    options = _expect_options(spec, TiffStackOptions)
+    options = spec.options
     saver = BackendSaver(backends, filemanager, backend_kwargs)
-    paths = PathBuilder(path, strip_roi=options.strip_roi_suffix, strip_pkl=options.strip_pkl)
+    paths = PathHelper(path, options)
 
     # Empty data case
     if not data:
@@ -522,36 +580,6 @@ def _materialize_tiff_stack(
     saver.save(summary_content, summary_path)
     return summary_path
 
-    base_path = _generate_output_path(path, "", "", strip_roi=strip_roi, strip_pkl=strip_pkl)
-    for i, arr in enumerate(data):
-        filename = f"{base_path}_slice_{i:03d}.tif"
-        out_arr = arr
-        if normalize_uint8:
-            if out_arr.dtype != "uint8":
-                max_val = getattr(out_arr, "max", lambda: 0)()
-                if max_val <= 1.0:
-                    out_arr = (out_arr * 255).astype("uint8")
-                else:
-                    out_arr = out_arr.astype("uint8")
-
-        for backend in backends:
-            _prepare_output_path(filemanager, backend, filename)
-            kwargs = backend_kwargs.get(backend, {})
-            filemanager.save(out_arr, filename, backend, **kwargs)
-
-    summary_path = f"{base_path}{summary_suffix}"
-    summary_content = f"Images saved: {len(data)} files\n"
-    summary_content += f"Base filename pattern: {base_path}_slice_XXX.tif\n"
-    summary_content += f"Image dtype: {data[0].dtype}\n"
-    summary_content += f"Image shape: {data[0].shape}\n"
-
-    for backend in backends:
-        _prepare_output_path(filemanager, backend, summary_path)
-        kwargs = backend_kwargs.get(backend, {})
-        filemanager.save(summary_content, summary_path, backend, **kwargs)
-
-    return summary_path
-
 
 @register_materializer("roi_zip", options_type=ROIOptions, requires_arbitrary_files=True)
 def _materialize_roi_zip(
@@ -567,9 +595,9 @@ def _materialize_roi_zip(
     """Materialize segmentation masks as ROI zip using typed ROIOptions."""
     from polystore.roi import extract_rois_from_labeled_mask
 
-    options = _expect_options(spec, ROIOptions)
+    options = spec.options
     saver = BackendSaver(backends, filemanager, backend_kwargs)
-    paths = PathBuilder(path, strip_roi=options.strip_roi_suffix, strip_pkl=options.strip_pkl)
+    paths = PathHelper(path, options)
 
     # Empty data case
     if not data:
@@ -598,34 +626,6 @@ def _materialize_roi_zip(
     return summary_path
 
 
-def _coerce_jsonable(value: Any) -> Any:
-    """Convert numpy types to JSON-serializable Python types."""
-    try:
-        import numpy as np
-        if isinstance(value, np.generic):
-            return value.item()
-        if isinstance(value, np.ndarray):
-            return value.tolist()
-    except Exception:
-        pass
-    return value
-
-
-def _normalize_slices(obj: Any, *, name: str) -> List[np.ndarray]:
-    """Normalize input to list of 2D arrays."""
-    import numpy as np
-    if obj is None:
-        return []
-    if isinstance(obj, list):
-        return [np.asarray(x) for x in obj]
-    arr = np.asarray(obj)
-    if arr.ndim == 2:
-        return [arr]
-    if arr.ndim == 3:
-        return [arr[i] for i in range(arr.shape[0])]
-    raise ValueError(f"{name} must be a 2D/3D array or list of 2D arrays, got shape {arr.shape}")
-
-
 @register_materializer("regionprops", options_type=RegionPropsOptions, requires_arbitrary_files=True)
 def _materialize_regionprops(
     data: Any,
@@ -637,23 +637,14 @@ def _materialize_regionprops(
     context: Any,
     extra_inputs: Dict[str, Any],
 ) -> str:
-    """
-    Materialize region properties from labeled masks.
-
-    Input:
-      - data: labeled mask(s) as list[2D] or 3D ndarray (Z, Y, X)
-      - extra_inputs["intensity"]: optional aligned intensity slices to compute intensity metrics
-
-    Output:
-      - ROI zip archive (for Fiji/Napari) + CSV details + JSON summary
-    """
+    """Materialize region properties from labeled masks."""
     import numpy as np
     from skimage.measure import regionprops_table
     from polystore.roi import ROI, extract_rois_from_labeled_mask
 
-    options = _expect_options(spec, RegionPropsOptions)
+    options = spec.options
     saver = BackendSaver(backends, filemanager, backend_kwargs)
-    paths = PathBuilder(path)
+    paths = PathHelper(path, options)
 
     # Configure properties
     base_properties = list(options.properties or ["label", "area", "perimeter", "centroid", "bbox"])
@@ -751,6 +742,7 @@ def _materialize_regionprops(
 
     # Save CSV and ROI if data exists
     if rows:
+        import pandas as pd
         saver.save(pd.DataFrame(rows).to_csv(index=False), csv_path)
     if all_rois:
         saver.save(all_rois, roi_path)
@@ -758,63 +750,19 @@ def _materialize_regionprops(
     return json_path
 
 
-# ===== Helper functions for array field discovery and expansion =====
-
-def _discover_array_fields(item: Any) -> List[str]:
-    """Discover all array/tuple fields in a dataclass.
-
-    Args:
-        item: Dataclass instance to inspect
-
-    Returns:
-        List of field names that are array/tuple types
-    """
-    if not hasattr(item, '__dataclass_fields__'):
+def _normalize_slices(obj: Any, *, name: str) -> List[np.ndarray]:
+    """Normalize input to list of 2D arrays."""
+    if obj is None:
         return []
+    if isinstance(obj, list):
+        return [np.asarray(x) for x in obj]
+    arr = np.asarray(obj)
+    if arr.ndim == 2:
+        return [arr]
+    if arr.ndim == 3:
+        return [arr[i] for i in range(arr.shape[0])]
+    raise ValueError(f"{name} must be a 2D/3D array or list of 2D arrays, got shape {arr.shape}")
 
-    from dataclasses import fields
-    from typing import get_origin
-
-    array_fields = []
-    for f in fields(item):
-        value = getattr(item, f.name, None)
-        origin = hasattr(f.type, '__origin__') and get_origin(f.type)
-        if origin in (list, List, tuple, Tuple):
-            array_fields.append(f.name)
-        elif isinstance(value, list) and value and isinstance(value[0], (tuple, list)):
-            array_fields.append(f.name)
-    return array_fields
-
-
-def _expand_array_field(
-    array_data: List[Any],
-    base_row: Dict[str, Any],
-    row_columns: Dict[str, str]
-) -> List[Dict[str, Any]]:
-    """Expand an array field into multiple rows.
-
-    Args:
-        array_data: Array data to expand
-        base_row: Base fields to include in each row
-        row_columns: Mapping from array indices to column names
-
-    Returns:
-        List of expanded rows
-    """
-    if not array_data:
-        return [base_row]
-
-    return [
-        {
-            **base_row,
-            **{col: elem[int(idx)] for idx, col in row_columns.items() if isinstance(elem, (list, tuple)) and int(idx) < len(elem)}
-        }
-        for elem in array_data
-    ]
-
-
-# ===== Generic tabular handler with array expansion =====
-# This replaces the obsolete cell_counts handler
 
 @register_materializer("tabular", options_type=ArrayExpansionOptions, requires_arbitrary_files=True)
 def _materialize_tabular_with_arrays(
@@ -827,24 +775,10 @@ def _materialize_tabular_with_arrays(
     context: Any,
     extra_inputs: Dict[str, Any],
 ) -> str:
-    """
-    Generic handler for tabular output with array expansion.
-
-    Outputs:
-    1. JSON summary with aggregated statistics
-    2. CSV with one row per array element
-
-    Supports two expansion modes:
-    1. Dict-based: row_columns={"0": "x", "1": "y"} for simple tuple indexing
-    2. Callable: row_unpacker=custom_func for complex unpacking logic
-
-    Supports two aggregation modes:
-    1. String-based: aggregations={"field": "sum"} using built-in functions
-    2. Callable: aggregations={"field": custom_func} for custom logic
-    """
-    options = _expect_options(spec, ArrayExpansionOptions)
+    """Generic handler for tabular output with array expansion."""
+    options = spec.options
     saver = BackendSaver(backends, filemanager, backend_kwargs)
-    paths = PathBuilder(path, strip_roi=False, strip_pkl=True)
+    paths = PathHelper(path, options)
 
     # Setup paths
     json_path = paths.with_suffix(getattr(options, 'filename_suffix', '.json'))
@@ -886,52 +820,46 @@ def _materialize_tabular_with_arrays(
 
     # Save CSV
     if rows:
+        import pandas as pd
         saver.save(pd.DataFrame(rows).to_csv(index=False), csv_path)
     logger.info(f"Materialized {len(rows)} rows to {json_path}")
     return json_path
 
 
-def _discover_aggregations(data: List[Any]) -> Dict[str, Union[str, Callable[[List[Any]], Any]]]:
-    """Auto-discover aggregations based on dataclass field types.
+def _discover_array_fields(item: Any) -> List[str]:
+    """Discover all array/tuple fields in a dataclass."""
+    if not hasattr(item, '__dataclass_fields__'):
+        return []
 
-    Args:
-        data: List of dataclass instances
-
-    Returns:
-        Dict mapping aggregation names to built-in aggregation functions
-    """
-    if not data:
-        return {}
-
-    first_item = data[0]
-    if not hasattr(first_item, '__dataclass_fields__'):
-        return {}
-
-    from dataclasses import fields
     from typing import get_origin
 
-    aggregations = {}
+    array_fields = []
+    for f in fields(item):
+        value = getattr(item, f.name, None)
+        origin = hasattr(f.type, '__origin__') and get_origin(f.type)
+        if origin in (list, List, tuple, Tuple):
+            array_fields.append(f.name)
+        elif isinstance(value, list) and value and isinstance(value[0], (tuple, list)):
+            array_fields.append(f.name)
+    return array_fields
 
-    for f in fields(first_item):
-        field_value = getattr(first_item, f.name, None)
-        if field_value is None:
-            continue
 
-        # Get type origin for generic types
-        origin = get_origin(f.type)
+def _expand_array_field(
+    array_data: List[Any],
+    base_row: Dict[str, Any],
+    row_columns: Dict[str, str]
+) -> List[Dict[str, Any]]:
+    """Expand an array field into multiple rows."""
+    if not array_data:
+        return [base_row]
 
-        # Dispatch based on type
-        if origin in (list, List):
-            aggregations[f"{f.name}_count"] = "count"
-        elif f.type in (int, float):
-            aggregations[f"{f.name}_sum"] = "sum"
-            if len(data) > 1:
-                aggregations[f"{f.name}_mean"] = "mean"
-        elif f.type == str:
-            aggregations[f"{f.name}_first"] = "first"
-
-    logger.debug(f"Auto-discovered aggregations: {list(aggregations.keys())}")
-    return aggregations
+    return [
+        {
+            **base_row,
+            **{col: elem[int(idx)] for idx, col in row_columns.items() if isinstance(elem, (list, tuple)) and int(idx) < len(elem)}
+        }
+        for elem in array_data
+    ]
 
 
 def _build_summary_from_data(
@@ -940,17 +868,7 @@ def _build_summary_from_data(
     aggregations: Dict[str, Union[str, Callable[[List[Any]], Any]]],
     include_metadata: bool
 ) -> Dict[str, Any]:
-    """Build summary dict from data using aggregation specifications.
-
-    Args:
-        data: List of data items
-        field_names: Fields to extract from each item
-        aggregations: Dict mapping result keys to aggregation specs
-        include_metadata: Whether to include metadata
-
-    Returns:
-        Summary dict with aggregated values
-    """
+    """Build summary dict from data using aggregation specifications."""
     summary = {}
     if not aggregations:
         aggregations = _discover_aggregations(data)
@@ -971,3 +889,29 @@ def _build_summary_from_data(
                 summary[key] = None
 
     return summary
+
+
+def _discover_aggregations(data: List[Any]) -> Dict[str, Union[str, Callable]]:
+    """Auto-discover aggregations based on dataclass field types."""
+    if not data or not hasattr(data[0], '__dataclass_fields__'):
+        return {}
+
+    from dataclasses import fields as get_fields
+
+    aggregations = {}
+    for f in get_fields(data[0]):
+        field_type = f.type
+
+        # Extract Optional[T]
+        if hasattr(field_type, '__origin__') and field_type.__origin__ is Union:
+            args = getattr(field_type, '__args__', ())
+            if len(args) == 2 and type(None) in args:
+                field_type = args[0] if args[1] is type(None) else args[1]
+
+        # Check for numeric types
+        if field_type in (int, float):
+            aggregations[f.name] = "sum"
+        elif hasattr(field_type, '__origin__') and field_type.__origin__ in (list, List):
+            aggregations[f.name] = "len"
+
+    return aggregations
