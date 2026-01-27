@@ -247,11 +247,10 @@ def register_materializer(
 T = TypeVar('T', bound=object)
 
 def _expect_options(spec: MaterializationSpec, options_type: type[T]) -> T:
-    """Type guard: runtime check + type narrowing for handler options.
+    """Type narrowing for handler options (validation already done in __post_init__).
 
-    This function provides BOTH:
-    - Runtime type checking (catches bugs early)
-    - Type narrowing (type checker understands the return type)
+    This function provides type narrowing for type checkers.
+    Runtime validation is already handled by MaterializationSpec.__post_init__.
 
     Args:
         spec: MaterializationSpec containing options
@@ -260,22 +259,12 @@ def _expect_options(spec: MaterializationSpec, options_type: type[T]) -> T:
     Returns:
         The options, narrowed to the specified type
 
-    Raises:
-        TypeError: If options don't match expected type
-
     Example:
         >>> # In handler:
         >>> options = _expect_options(spec, TabularOptions)
         >>> # Type checker knows options is TabularOptions
         >>> fields = options.fields  # Autocomplete works!
     """
-    if not isinstance(spec.options, options_type):
-        actual_type = type(spec.options).__name__
-        expected_type = options_type.__name__
-        raise TypeError(
-            f"Handler expects {expected_type}, got {actual_type}. "
-            f"Use: MaterializationSpec(handler, {expected_type}(...))"
-        )
     return spec.options
 
 
@@ -283,6 +272,33 @@ def _normalize_backends(backends: Sequence[str] | str) -> List[str]:
     if isinstance(backends, str):
         return [backends]
     return list(backends)
+
+
+class PathBuilder:
+    """Unified path generation for materialization handlers.
+
+    Eliminates repeated path construction logic.
+    """
+    def __init__(self, base_path: str, *, strip_roi: bool = False, strip_pkl: bool = True):
+        p = Path(base_path)
+        name = p.name
+        if name.endswith(".roi.zip"):
+            name = name[: -len(".roi.zip")]
+        if strip_pkl and name.endswith(".pkl"):
+            name = name[: -len(".pkl")]
+        if strip_roi and name.endswith(".roi"):
+            name = name[: -len(".roi")]
+        self.base_path = p.with_name(name)
+        self.parent = self.base_path.parent
+        self.name = self.base_path.name
+
+    def with_suffix(self, suffix: str) -> str:
+        """Add a suffix to the base path."""
+        return str(self.parent / f"{self.name}{suffix}")
+
+    def with_default_ext(self, default_ext: str) -> str:
+        """Add a default extension."""
+        return str(self.parent / f"{self.name}{default_ext}")
 
 
 class BackendSaver:
@@ -346,65 +362,6 @@ def _extract_fields(item: Any, field_names: Optional[List[str]] = None) -> Dict[
             return {f: item.get(f) for f in field_names if f in item}
         return item
     return {"value": item}
-
-
-def _strip_known_suffixes(path: str, *, strip_roi: bool = False, strip_pkl: bool = True) -> Path:
-    """
-    Strip known suffixes from a path while preserving compound suffix semantics.
-
-    Note: Path.stem only strips() the last suffix (e.g., ".zip"), which breaks compound
-    suffixes like ".roi.zip" (it leaves a dangling ".roi"). We treat ".roi.zip" as a
-    single compound suffix and remove it atomically.
-    """
-    p = Path(path)
-    name = p.name
-
-    # Strip compound suffixes first
-    if name.endswith(".roi.zip"):
-        name = name[: -len(".roi.zip")]
-
-    # Strip common single suffixes
-    if strip_pkl and name.endswith(".pkl"):
-        name = name[: -len(".pkl")]
-    if strip_roi and name.endswith(".roi"):
-        name = name[: -len(".roi")]
-
-    return p.with_name(name)
-
-
-def _generate_output_path(
-    base_path: str,
-    suffix: str,
-    default_ext: str,
-    *,
-    strip_roi: bool = False,
-    strip_pkl: bool = True
-) -> str:
-    """Generate output path with proper suffix handling."""
-    path = _strip_known_suffixes(base_path, strip_roi=strip_roi, strip_pkl=strip_pkl)
-    parent = path.parent
-    if suffix:
-        return str(parent / f"{path.name}{suffix}")
-    return str(parent / f"{path.name}{default_ext}")
-
-
-class PathBuilder:
-    """Unified path generation for materialization handlers.
-    
-    Eliminates repeated path construction logic.
-    """
-    def __init__(self, base_path: str, *, strip_roi: bool = False, strip_pkl: bool = True):
-        self.base_path = _strip_known_suffixes(base_path, strip_roi=strip_roi, strip_pkl=strip_pkl)
-        self.parent = self.base_path.parent
-        self.name = self.base_path.name
-    
-    def with_suffix(self, suffix: str) -> str:
-        """Add a suffix to the base path."""
-        return str(self.parent / f"{self.name}{suffix}")
-    
-    def with_default_ext(self, default_ext: str) -> str:
-        """Add a default extension."""
-        return str(self.parent / f"{self.name}{default_ext}")
 
 
 def _prepare_output_path(filemanager, backend: str, output_path: str) -> None:
@@ -803,32 +760,6 @@ def _materialize_regionprops(
 
 # ===== Helper functions for array field discovery and expansion =====
 
-def _is_array_field(field: Any, field_value: Any) -> bool:
-    """Check if a dataclass field is an array/tuple type.
-
-    Args:
-        field: dataclass field object
-        field_value: Runtime value of the field
-
-    Returns:
-        True if field represents an array/tuple structure
-    """
-    from typing import get_origin
-
-    # Check type annotation
-    origin = hasattr(field.type, '__origin__') and get_origin(field.type)
-    if origin in (list, List, tuple, Tuple):
-        return True
-
-    # Runtime check for list of tuples
-    if isinstance(field_value, list) and len(field_value) > 0:
-        first_elem = field_value[0]
-        if isinstance(first_elem, (tuple, list)):
-            return True
-
-    return False
-
-
 def _discover_array_fields(item: Any) -> List[str]:
     """Discover all array/tuple fields in a dataclass.
 
@@ -842,44 +773,17 @@ def _discover_array_fields(item: Any) -> List[str]:
         return []
 
     from dataclasses import fields
+    from typing import get_origin
 
-    return [
-        f.name
-        for f in fields(item)
-        if _is_array_field(f, getattr(item, f.name, None))
-    ]
-
-
-def _discover_column_mapping(
-    field_name: str,
-    array_data: List[Any],
-    existing_mapping: Dict[str, str]
-) -> Dict[str, str]:
-    """Auto-discover column mapping for array expansion.
-
-    Args:
-        field_name: Name of the field being expanded
-        array_data: Array data to expand
-        existing_mapping: User-provided mapping (takes precedence)
-
-    Returns:
-        Dict mapping string indices to column names
-    """
-    if existing_mapping:
-        return existing_mapping
-
-    if not array_data:
-        return {}
-
-    first_elem = array_data[0]
-    if not isinstance(first_elem, (tuple, list)):
-        return {}
-
-    # Auto-generate: field_name_0, field_name_1, ...
-    return {
-        str(i): f"{field_name}_{i}"
-        for i in range(len(first_elem))
-    }
+    array_fields = []
+    for f in fields(item):
+        value = getattr(item, f.name, None)
+        origin = hasattr(f.type, '__origin__') and get_origin(f.type)
+        if origin in (list, List, tuple, Tuple):
+            array_fields.append(f.name)
+        elif isinstance(value, list) and value and isinstance(value[0], (tuple, list)):
+            array_fields.append(f.name)
+    return array_fields
 
 
 def _expand_array_field(
@@ -900,21 +804,13 @@ def _expand_array_field(
     if not array_data:
         return [base_row]
 
-    rows = []
-    for element in array_data:
-        row = dict(base_row)
-        for idx_str, col_name in row_columns.items():
-            try:
-                idx = int(idx_str)
-                row[col_name] = element[idx]
-            except (ValueError, IndexError, TypeError) as e:
-                logger.warning(
-                    f"Failed to extract index {idx_str}: {e}. "
-                    f"element type: {type(element)}"
-                )
-        rows.append(row)
-
-    return rows
+    return [
+        {
+            **base_row,
+            **{col: elem[int(idx)] for idx, col in row_columns.items() if isinstance(elem, (list, tuple)) and int(idx) < len(elem)}
+        }
+        for elem in array_data
+    ]
 
 
 # ===== Generic tabular handler with array expansion =====
@@ -969,14 +865,12 @@ def _materialize_tabular_with_arrays(
         elif options.row_field:
             # Strategy 2: Explicit field mode
             array_data = getattr(item, options.row_field, [])
-            row_columns = _discover_column_mapping(options.row_field, array_data, options.row_columns)
-            rows.extend(_expand_array_field(array_data, base_row, row_columns))
+            rows.extend(_expand_array_field(array_data, base_row, options.row_columns))
         elif array_fields := _discover_array_fields(item):
             # Strategy 3: Auto-discovery mode
             primary_field = array_fields[0]
             array_data = getattr(item, primary_field, [])
-            row_columns = _discover_column_mapping(primary_field, array_data, {})
-            rows.extend(_expand_array_field(array_data, base_row, row_columns))
+            rows.extend(_expand_array_field(array_data, base_row, {}))
         else:
             rows.append(base_row)
 
@@ -1040,53 +934,13 @@ def _discover_aggregations(data: List[Any]) -> Dict[str, Union[str, Callable[[Li
     return aggregations
 
 
-def _apply_builtin_aggregation(
-    data: List[Any],
-    field_names: Optional[List[str]],
-    agg_name: str,
-    agg_func: Callable
-) -> Optional[Any]:
-    """Apply a built-in aggregation function to data.
-
-    Args:
-        data: List of data items
-        field_names: Fields to extract from each item
-        agg_name: Name of the aggregation (for logging)
-        agg_func: Aggregation function to apply
-
-    Returns:
-        Aggregated value or None if failed
-    """
-    values = []
-    for item in data:
-        extracted = _extract_fields(item, field_names) if field_names else {"value": item}
-        if len(extracted) == 1:
-            values.append(list(extracted.values())[0])
-        else:
-            logger.warning(
-                f"Built-in aggregation '{agg_name}' requires single field, "
-                f"got {len(extracted)} fields. Skipping."
-            )
-            return None
-
-    if not values:
-        return None
-
-    try:
-        return agg_func(values)
-    except Exception as e:
-        logger.warning(f"Aggregation '{agg_name}' failed: {e}")
-        return None
-
-
 def _build_summary_from_data(
     data: List[Any],
     field_names: Optional[List[str]],
     aggregations: Dict[str, Union[str, Callable[[List[Any]], Any]]],
     include_metadata: bool
 ) -> Dict[str, Any]:
-    """
-    Build summary dict from data using aggregation specifications.
+    """Build summary dict from data using aggregation specifications.
 
     Args:
         data: List of data items
@@ -1098,35 +952,22 @@ def _build_summary_from_data(
         Summary dict with aggregated values
     """
     summary = {}
-
-    # Auto-discover aggregations if not provided
     if not aggregations:
         aggregations = _discover_aggregations(data)
-
     if not aggregations:
         return summary
 
-    # Apply each aggregation
     for key, agg_spec in aggregations.items():
         if isinstance(agg_spec, str):
-            # Built-in aggregation
             agg_func = BuiltinAggregations.get(agg_spec)
-            if agg_func is None:
-                logger.warning(f"Unknown aggregation '{agg_spec}', skipping")
-                continue
-
-            result = _apply_builtin_aggregation(data, field_names, agg_spec, agg_func)
-            summary[key] = result
-
+            if agg_func:
+                values = [_extract_fields(item, field_names)[field_names[0]] if field_names and field_names[0] in _extract_fields(item, field_names) else list(_extract_fields(item, field_names).values())[0] if not field_names else item for item in data]
+                summary[key] = agg_func(values) if values else None
         elif callable(agg_spec):
-            # Custom aggregation function
             try:
-                result = agg_spec(data)
-                summary[key] = result
+                summary[key] = agg_spec(data)
             except Exception as e:
                 logger.warning(f"Custom aggregation failed: {e}")
                 summary[key] = None
-        else:
-            logger.warning(f"Invalid aggregation spec: {agg_spec}")
 
     return summary
