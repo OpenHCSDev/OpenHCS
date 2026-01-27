@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from abc import ABC
 
 if TYPE_CHECKING:
-    from openhcs.core.config import GlobalPipelineConfig, PipelineConfig
+    from openhcs.core.config import GlobalPipelineConfig, PipelineConfig, StreamingConfig
 
 
 def create_streaming_config(
