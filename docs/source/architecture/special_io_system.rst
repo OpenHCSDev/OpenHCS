@@ -58,9 +58,9 @@ The Special I/O system uses a declarative approach where functions simply declar
 .. code:: python
 
    # Example: Position generation with materialization spec
-   from openhcs.processing.materialization import csv_materializer
+   from openhcs.processing.materialization import MaterializationSpec, TabularOptions
 
-   @special_outputs(("positions", csv_materializer(fields=["x", "y"], analysis_type="positions")))
+   @special_outputs(("positions", MaterializationSpec("csv", TabularOptions(fields=["x", "y"], analysis_type="positions"))))
    def generate_positions(image_stack):
        positions = calculate_positions(image_stack)
        return processed_image, positions

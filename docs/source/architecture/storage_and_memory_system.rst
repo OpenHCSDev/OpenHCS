@@ -578,10 +578,10 @@ Functions declare their side effects using the ``@special_outputs`` decorator, w
 
 .. code:: python
 
-   from openhcs.processing.materialization import csv_materializer, roi_zip_materializer
+   from openhcs.processing.materialization import MaterializationSpec, TabularOptions, ROIOptions
 
-   @special_outputs(("cell_counts", csv_materializer(fields=["slice_index", "cell_count"], analysis_type="cell_counts")),
-                    ("masks", roi_zip_materializer()))
+   @special_outputs(("cell_counts", MaterializationSpec("csv", TabularOptions(fields=["slice_index", "cell_count"], analysis_type="cell_counts")),
+                    ("masks", MaterializationSpec("roi_zip", ROIOptions())))
    def count_cells_with_materialization(image_stack):
        """Function with materialized special outputs."""
        processed_image, cell_counts, segmentation_masks = analyze_cells(image_stack)
@@ -593,9 +593,9 @@ Functions declare their side effects using the ``@special_outputs`` decorator, w
 
 .. code:: python
 
-   from openhcs.processing.materialization import csv_materializer
+   from openhcs.processing.materialization import MaterializationSpec, TabularOptions
 
-   @special_outputs("debug_info", ("analysis_results", csv_materializer(fields=["metric"], analysis_type="analysis_results")))
+   @special_outputs("debug_info", ("analysis_results", MaterializationSpec("csv", TabularOptions(fields=["metric"], analysis_type="analysis_results"))))
    def analyze_with_mixed_outputs(image_stack):
        """Function with both memory-only and materialized outputs."""
        # debug_info stays in memory, analysis_results gets materialized
