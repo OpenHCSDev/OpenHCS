@@ -224,6 +224,9 @@ class LibraryRegistryBase(ABC, metaclass=AutoRegisterMeta):
 
         # If nothing to inject, return original function
         if not params_to_add:
+            # Still brand the callable as Enableable metadata.
+            from python_introspect import mark_enableable
+            mark_enableable(func, enabled_default=True)
             return func
 
         # Build new parameter list (insert before **kwargs)
@@ -254,6 +257,11 @@ class LibraryRegistryBase(ABC, metaclass=AutoRegisterMeta):
         # Explicitly copy __processing_contract__ if it exists
         if hasattr(func, '__processing_contract__'):
             wrapper.__processing_contract__ = func.__processing_contract__
+
+        # Nominal enable semantics: decorated callables are Enableable.
+        # (Enableable is metadata only; enabled remains a kw-only param for call sites.)
+        from python_introspect import mark_enableable
+        mark_enableable(wrapper, enabled_default=True)
 
         return wrapper
 

@@ -23,7 +23,7 @@ def create_streaming_config(
     visualizer_class_name: str,
     extra_fields: dict = None,
     preview_label: str = None
-):
+) -> Type[StreamingConfig]:
     """
     Factory to create streaming config classes with minimal boilerplate.
     
