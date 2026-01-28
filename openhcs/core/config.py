@@ -16,6 +16,7 @@ from abc import ABC, abstractmethod
 from openhcs.constants import Microscope, SequentialComponents, VirtualComponents, VariableComponents, GroupBy, DtypeConversion
 from openhcs.constants.constants import Backend, LiteralDtype, get_default_variable_components, get_default_group_by
 from openhcs.constants.input_source import InputSource
+from python_introspect import Enableable
 
 # Import decorator for automatic decorator creation
 from objectstate import auto_create_decorator
@@ -335,10 +336,11 @@ class SequentialProcessingConfig:
 
 @global_pipeline_config
 @dataclass(frozen=True)
-class AnalysisConsolidationConfig:
-    """Configuration for automatic analysis results consolidation."""
-    enabled: bool = True
-    """Whether to automatically run analysis consolidation after pipeline completion."""
+class AnalysisConsolidationConfig(Enableable):
+    """Configuration for automatic analysis results consolidation.
+
+    enabled controls whether consolidation runs after pipeline completion.
+    """
 
     metaxpress_style: bool = True
     """Whether to generate MetaXpress-compatible output format with headers."""
@@ -451,7 +453,7 @@ class StepWellFilterConfig(WellFilterConfig):
 
 @global_pipeline_config(preview_label='MAT')
 @dataclass(frozen=True)
-class StepMaterializationConfig(StepWellFilterConfig, PathPlanningConfig):
+class StepMaterializationConfig(Enableable, StepWellFilterConfig, PathPlanningConfig):
     """
     Configuration for per-step materialization - configurable in UI.
 
@@ -477,7 +479,7 @@ _DEFAULT_TRANSPORT_MODE = TransportMode.TCP if platform.system() == 'Windows' el
 
 @global_pipeline_config
 @dataclass(frozen=True)
-class StreamingDefaults(StepWellFilterConfig):
+class StreamingDefaults(Enableable, StepWellFilterConfig):
     """Default configuration for streaming to visualizers."""
     persistent: bool = True
     """Whether viewer stays open after pipeline completion."""

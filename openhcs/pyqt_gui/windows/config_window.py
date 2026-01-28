@@ -138,7 +138,6 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
             parent=None,
             scope_id=self.scope_id,
             color_scheme=self.color_scheme,
-            use_scroll_area=False,  # Config window handles scrolling
         )
         # Provide canonical dotted `field_id` for this root form
         # Root forms use an empty `field_id` (top-level) so no traversal is attempted

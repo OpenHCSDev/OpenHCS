@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from abc import ABC
 
 if TYPE_CHECKING:
-    from openhcs.core.config import GlobalPipelineConfig, PipelineConfig
+    from openhcs.core.config import GlobalPipelineConfig, PipelineConfig, StreamingConfig
 
 
 def create_streaming_config(
@@ -23,7 +23,7 @@ def create_streaming_config(
     visualizer_class_name: str,
     extra_fields: dict = None,
     preview_label: str = None
-):
+) -> Type['StreamingConfig']:
     """
     Factory to create streaming config classes with minimal boilerplate.
     
