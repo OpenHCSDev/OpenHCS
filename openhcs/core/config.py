@@ -252,7 +252,7 @@ FijiDisplayConfig._ui_hidden = True
 @dataclass(frozen=True)
 class WellFilterConfig:
     """Base configuration for well filtering functionality."""
-    well_filter: Annotated[Optional[Union[List[str], str, int]], abbreviation('filter')] = None
+    well_filter: Annotated[Optional[Union[List[str], str, int]], abbreviation('')] = None
     """Well filter specification: list of wells, pattern string, or max count integer. None means all wells."""
 
     well_filter_mode: Annotated[WellFilterMode, abbreviation('filter_mode')] = WellFilterMode.INCLUDE
@@ -460,7 +460,7 @@ class StepWellFilterConfig(WellFilterConfig):
     pass
 
 @abbreviation('mat')
-@global_pipeline_config(preview_label='MAT')
+@global_pipeline_config(preview_label='MAT', always_viewable_fields=['sub_dir'])
 @dataclass(frozen=True)
 class StepMaterializationConfig(Enableable, StepWellFilterConfig, PathPlanningConfig):
     """
@@ -471,6 +471,10 @@ class StepMaterializationConfig(Enableable, StepWellFilterConfig, PathPlanningCo
     materialization instances will inherit these defaults unless explicitly overridden.
 
     Uses multiple inheritance from PathPlanningConfig and StepWellFilterConfig.
+    
+    The 'sub_dir' field is conditionally shown in list item previews via always_viewable_fields.
+    Since this config is Enableable, the sub_dir will only appear when enabled=True.
+    This means disabled materialization configs won't clutter the preview with sub_dir.
     """
 
     #Override sub_dir for materialization-specific default
@@ -487,10 +491,17 @@ _DEFAULT_TRANSPORT_MODE = TransportMode.TCP if platform.system() == 'Windows' el
 
 
 @abbreviation('stream')
-@global_pipeline_config
+@global_pipeline_config(always_viewable_fields=['well_filter'])
 @dataclass(frozen=True)
 class StreamingDefaults(Enableable, StepWellFilterConfig):
-    """Default configuration for streaming to visualizers."""
+    """Default configuration for streaming to visualizers.
+    
+    The 'persistent' field is conditionally shown in list item previews via
+    always_viewable_fields. Since this config is Enableable, the persistent field
+    will only appear when enabled=True. This means disabled streaming configs won't
+    clutter the preview with persistence info, but enabled ones will show whether
+    the viewer persists after pipeline completion.
+    """
     persistent: Annotated[bool, abbreviation('persist')] = True
     """Whether viewer stays open after pipeline completion."""
 
