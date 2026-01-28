@@ -279,7 +279,7 @@ class ZarrConfig:
     """Chunking strategy: WELL (single chunk per well) or FILE (one chunk per file)."""
 
 
-@global_pipeline_config(field_abbreviations={'materialization_backend': 'mat', 'intermediate_backend': 'int', 'read_backend': 'read'})
+@global_pipeline_config(abbreviation='vfs', field_abbreviations={'materialization_backend': 'mat', 'intermediate_backend': 'int', 'read_backend': 'read'})
 @dataclass(frozen=True)
 class VFSConfig:
     """Configuration for Virtual File System (VFS) related operations."""
@@ -413,7 +413,7 @@ class ExperimentalAnalysisConfig:
     """Default format to use if auto-detection fails."""
 
 
-@global_pipeline_config(field_abbreviations={'output_dir_suffix': 'out', 'global_output_folder': 'gof', 'sub_dir': 'sub'})
+@global_pipeline_config(abbreviation='pp', field_abbreviations={'output_dir_suffix': 'out', 'global_output_folder': 'gof', 'sub_dir': 'sub'})
 @dataclass(frozen=True)
 class PathPlanningConfig(WellFilterConfig):
     """
@@ -451,7 +451,7 @@ class StepWellFilterConfig(WellFilterConfig):
     #well_filter: Optional[Union[List[str], str, int]] = 1
     pass
 
-@global_pipeline_config(preview_label='MAT')
+@global_pipeline_config(preview_label='MAT', abbreviation='mat')
 @dataclass(frozen=True)
 class StepMaterializationConfig(Enableable, StepWellFilterConfig, PathPlanningConfig):
     """
@@ -549,7 +549,8 @@ NapariStreamingConfig = create_streaming_config(
     display_config_class=NapariDisplayConfig,
     visualizer_module='openhcs.runtime.napari_stream_visualizer',
     visualizer_class_name='NapariStreamVisualizer',
-    preview_label='NAP'
+    preview_label='NAP',
+    abbreviation='nap'
 )
 
 FijiStreamingConfig = create_streaming_config(
@@ -562,7 +563,8 @@ FijiStreamingConfig = create_streaming_config(
     extra_fields={
         'fiji_executable_path': (Optional[Path], None)
     },
-    preview_label='FIJI'
+    preview_label='FIJI',
+    abbreviation='fiji'
 )
 
 # Inject all accumulated fields at the end of module loading.
