@@ -29,6 +29,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot, QTimer
 from pyqt_reactive.theming import StyleSheetGenerator
+import threading
 from objectstate import spawn_thread_with_context
 from zmqruntime.viewer_state import ViewerStateManager, ViewerState
 
