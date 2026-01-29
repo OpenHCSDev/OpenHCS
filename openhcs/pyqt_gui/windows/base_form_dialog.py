@@ -331,6 +331,11 @@ class BaseFormDialog(ScopedBorderMixin, QDialog):
         self._scope_accent_color = accent_color
         hex_color = accent_color.name()
 
+        # CRITICAL: Update all form_managers' _scope_accent_color so widgets created
+        # after this point will have the correct color from the start
+        for manager in self._get_form_managers():
+            manager._scope_accent_color = accent_color
+
         # Apply window-level stylesheet for input widget focus borders
         input_focus_style = f"""
             QLineEdit:focus {{
@@ -356,6 +361,38 @@ class BaseFormDialog(ScopedBorderMixin, QDialog):
         for manager in self._get_form_managers():
             if hasattr(manager, '_on_build_complete_callbacks'):
                 manager._on_build_complete_callbacks.append(self._apply_accent_to_help_buttons)
+
+    def _apply_scope_accent_to_widgets(self, batch_widgets) -> None:
+        """Apply scope accent color to widgets in a batch during async creation.
+
+        Called by form_init_service during async widget creation to apply
+        scope accent colors progressively as widgets are created.
+
+        Args:
+            batch_widgets: List of (param_name, widget) tuples created in this batch
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        accent_color = getattr(self, '_scope_accent_color', None)
+        logger.debug(f"[SCOPE_ACCENT] _apply_scope_accent_to_widgets called with {len(batch_widgets)} widgets, accent_color={accent_color}")
+        if not accent_color:
+            logger.debug(f"[SCOPE_ACCENT] No accent_color, skipping")
+            return
+
+        # Apply scope accent to all HelpButtons in the batch
+        # HelpButtons are nested inside the row widgets, so we need to search recursively
+        help_buttons_found = 0
+        for param_name, widget in batch_widgets:
+            # Find all HelpButtons that are children of this widget
+            help_btns = widget.findChildren(HelpButton)
+            logger.debug(f"[SCOPE_ACCENT] Widget {param_name}: found {len(help_btns)} help buttons")
+            for help_btn in help_btns:
+                logger.debug(f"[SCOPE_ACCENT] Calling set_scope_accent_color on help button")
+                help_btn.set_scope_accent_color(accent_color)
+                help_buttons_found += 1
+
+        logger.debug(f"[SCOPE_ACCENT] Applied accent to {help_buttons_found} help buttons in batch")
 
     def _apply_accent_to_help_buttons(self) -> None:
         """Apply scope accent color to all HelpButton, HelpIndicator, GroupBoxWithHelp, and FunctionPaneWidget, and tree instances."""

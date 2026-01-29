@@ -111,6 +111,12 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
         self.style_generator = StyleSheetGenerator(self.color_scheme)
         self.tree_helper = ConfigHierarchyTreeHelper()
 
+        # CRITICAL: Initialize scope-based border styling BEFORE creating form_manager
+        # This ensures _scope_accent_color is set BEFORE widgets are created
+        # scope_id must be set before calling this (it is, at line 100)
+        if self.scope_id:
+            self._init_scope_border()
+
         # SIMPLIFIED: Use dual-axis resolution
         # Determine placeholder prefix based on actual instance type (not class type)
         is_lazy_dataclass = FullLazyDefaultPlaceholderService.has_lazy_resolution(type(current_config))
@@ -138,6 +144,7 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
             parent=None,
             scope_id=self.scope_id,
             color_scheme=self.color_scheme,
+            scope_accent_color=getattr(self, '_scope_accent_color', None),  # Pass scope accent color
         )
         # Provide canonical dotted `field_id` for this root form
         # Root forms use an empty `field_id` (top-level) so no traversal is attempted
@@ -213,7 +220,8 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
         # Add help button for the dataclass itself
         self._help_btn = None
         if dataclasses.is_dataclass(self.config_class):
-            self._help_btn = HelpButton(help_target=self.config_class, text="Help", color_scheme=self.color_scheme)
+            self._help_btn = HelpButton(help_target=self.config_class, text="Help", color_scheme=self.color_scheme,
+                                       scope_accent_color=getattr(self, '_scope_accent_color', None))
             self._help_btn.setMaximumWidth(80)
             header_layout.addWidget(self._help_btn)
 
