@@ -80,17 +80,9 @@ class StreamingService:
 
         is_already_running = viewer.wait_for_ready(timeout=0.1)
 
-        # Update queued images for UI display via the manager. The QueueTracker
+        # Update queued images for UI display via manager. The QueueTracker
         # will later update counts precisely as images are sent/acked.
-        try:
-            manager.update_queued_images(viewer_type, viewer.port, num_items)
-        except Exception:
-            # If manager doesn't have an entry for this viewer yet, that's fine -
-            # get_or_create_viewer should have registered it earlier. We intentionally
-            # surface errors elsewhere instead of hiding them here.
-            logger.debug(
-                "ViewerStateManager: could not update queued images (no viewer registered yet)"
-            )
+        manager.update_queued_images(viewer_type, viewer.port, num_items)
 
         if not is_already_running:
             logger.info(
@@ -99,10 +91,7 @@ class StreamingService:
 
             if not viewer.wait_for_ready(timeout=15.0):
                 # Clear queued count for UI if startup failed
-                try:
-                    manager.update_queued_images(viewer_type, viewer.port, 0)
-                except Exception:
-                    pass
+                manager.update_queued_images(viewer_type, viewer.port, 0)
                 raise RuntimeError(
                     f"{viewer_type.capitalize()} viewer on port {viewer.port} failed to become ready"
                 )

@@ -29,7 +29,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot, QTimer
 from pyqt_reactive.theming import StyleSheetGenerator
-import threading
+from objectstate import spawn_thread_with_context
 from zmqruntime.viewer_state import ViewerStateManager, ViewerState
 
 logger = logging.getLogger(__name__)
@@ -250,8 +250,6 @@ class ZMQServerManagerWidget(QWidget):
         if self._is_cleaning_up:
             return
 
-        import threading
-
         def scan_and_update():
             """Background thread to scan ports without blocking UI."""
             import concurrent.futures
@@ -280,8 +278,7 @@ class ZMQServerManagerWidget(QWidget):
             self._scan_complete.emit(servers)
 
         # Start scan in background thread
-        thread = threading.Thread(target=scan_and_update, daemon=True)
-        thread.start()
+        spawn_thread_with_context(scan_and_update, name="scan_servers")
 
     def _ping_server(self, port: int) -> Optional[Dict[str, Any]]:
         """
@@ -593,8 +590,6 @@ class ZMQServerManagerWidget(QWidget):
             return
 
         # Kill in background thread to avoid blocking UI
-        import threading
-
         def kill_servers():
             from openhcs.runtime.zmq_config import OPENHCS_ZMQ_CONFIG
             from zmqruntime.client import ZMQClient
@@ -631,8 +626,7 @@ class ZMQServerManagerWidget(QWidget):
             else:
                 self._kill_complete.emit(True, "All servers quit successfully")
 
-        thread = threading.Thread(target=kill_servers, daemon=True)
-        thread.start()
+        spawn_thread_with_context(kill_servers, name="kill_servers")
 
     def force_kill_selected_servers(self):
         """Force kill selected servers (async to avoid blocking UI)."""
@@ -674,14 +668,13 @@ class ZMQServerManagerWidget(QWidget):
         if reply != QMessageBox.StandardButton.Yes:
             return
 
-        # Kill in background thread to avoid blocking UI
-        import threading
-
         def kill_servers():
+            """Kill selected servers gracefully or forcefully."""
             from openhcs.runtime.zmq_config import OPENHCS_ZMQ_CONFIG
             from zmqruntime.client import ZMQClient
             from zmqruntime.queue_tracker import GlobalQueueTrackerRegistry
 
+            failed_ports = []
             registry = GlobalQueueTrackerRegistry()
 
             for port in ports_to_kill:
@@ -720,8 +713,7 @@ class ZMQServerManagerWidget(QWidget):
                 True, "Force kill operation completed (list will refresh)"
             )
 
-        thread = threading.Thread(target=kill_servers, daemon=True)
-        thread.start()
+        spawn_thread_with_context(kill_servers, name="force_kill_servers")
 
     def _on_item_double_clicked(self, item: QTreeWidgetItem):
         """Handle double-click on tree item - open log file."""
