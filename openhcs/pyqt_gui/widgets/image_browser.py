@@ -11,10 +11,23 @@ from pathlib import Path
 from typing import Optional, List, Dict, Set, Any
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QTableWidgetItem,
-    QPushButton, QLabel, QHeaderView, QAbstractItemView, QMessageBox,
-    QSplitter, QGroupBox, QTreeWidget, QTreeWidgetItem, QScrollArea,
-    QLineEdit, QTabWidget, QTextEdit
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QTableWidgetItem,
+    QPushButton,
+    QLabel,
+    QHeaderView,
+    QAbstractItemView,
+    QMessageBox,
+    QSplitter,
+    QGroupBox,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QScrollArea,
+    QLineEdit,
+    QTabWidget,
+    QTextEdit,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot
 
@@ -27,6 +40,7 @@ from pyqt_reactive.widgets.shared.column_filter_widget import MultiColumnFilterP
 from pyqt_reactive.widgets.shared.image_table_browser import ImageTableBrowser
 from openhcs.config_framework.object_state import ObjectState, ObjectStateRegistry
 from openhcs.core.config import LazyNapariStreamingConfig, LazyFijiStreamingConfig
+
 logger = logging.getLogger(__name__)
 
 
@@ -36,8 +50,13 @@ class ImageBrowserConfig:
 
     Gives ImageBrowser a single root ObjectState with nested configs via dotted paths.
     """
-    napari_config: LazyNapariStreamingConfig = field(default_factory=LazyNapariStreamingConfig)
-    fiji_config: LazyFijiStreamingConfig = field(default_factory=LazyFijiStreamingConfig)
+
+    napari_config: LazyNapariStreamingConfig = field(
+        default_factory=LazyNapariStreamingConfig
+    )
+    fiji_config: LazyFijiStreamingConfig = field(
+        default_factory=LazyFijiStreamingConfig
+    )
 
 
 class ImageBrowserWidget(QWidget):
@@ -50,9 +69,13 @@ class ImageBrowserWidget(QWidget):
 
     # Signals
     image_selected = pyqtSignal(str)  # Emitted when an image is selected
-    _status_update_signal = pyqtSignal(str)  # Internal signal for thread-safe status updates
+    _status_update_signal = pyqtSignal(
+        str
+    )  # Internal signal for thread-safe status updates
 
-    def __init__(self, orchestrator=None, color_scheme: Optional[ColorScheme] = None, parent=None):
+    def __init__(
+        self, orchestrator=None, color_scheme: Optional[ColorScheme] = None, parent=None
+    ):
         super().__init__(parent)
 
         self.orchestrator = orchestrator
@@ -61,16 +84,22 @@ class ImageBrowserWidget(QWidget):
         # Use orchestrator's filemanager if available, otherwise create a new one with global registry
         # This ensures the image browser can access all backends registered in the orchestrator's registry
         # (e.g., virtual_workspace backend)
-        self.filemanager = orchestrator.filemanager if orchestrator else FileManager(storage_registry)
+        self.filemanager = (
+            orchestrator.filemanager if orchestrator else FileManager(storage_registry)
+        )
 
         # Scope ID for cross-window live context filtering (make distinct from PipelineConfig window)
         # Append a suffix so image browser uses a separate scope per plate
-        self.scope_id: Optional[str] = f"{orchestrator.plate_path}::image_browser" if orchestrator else None
+        self.scope_id: Optional[str] = (
+            f"{orchestrator.plate_path}::image_browser" if orchestrator else None
+        )
 
         # Create root ObjectState from ImageBrowserConfig namespace container
         # This gives us a single registered state with nested configs via dotted paths
         self.config = ImageBrowserConfig()
-        parent_state = ObjectStateRegistry.get_by_scope(self.scope_id) if self.scope_id else None
+        parent_state = (
+            ObjectStateRegistry.get_by_scope(self.scope_id) if self.scope_id else None
+        )
         self.state = ObjectState(
             object_instance=self.config,
             scope_id=self.scope_id,
@@ -79,6 +108,16 @@ class ImageBrowserWidget(QWidget):
         # Register in ObjectStateRegistry for cross-window inheritance
         if self.scope_id:
             ObjectStateRegistry.register(self.state)
+
+        # Compute scope accent color (use centralized service) so local widgets
+        # in ImageBrowser can use the same accent as scoped windows.
+        try:
+            from pyqt_reactive.services.scope_color_service import ScopeColorService
+
+            svc = ScopeColorService.instance()
+            self._scope_accent_color = svc.get_accent_color(self.scope_id)
+        except Exception:
+            self._scope_accent_color = None
 
         # PFM widgets (will be created in init_ui)
         self.napari_config_form = None
@@ -111,6 +150,7 @@ class ImageBrowserWidget(QWidget):
         self._streaming_service = None
         if orchestrator:
             from openhcs.ui.shared.streaming_service import StreamingService
+
             self._streaming_service = StreamingService(
                 filemanager=self.filemanager,
                 microscope_handler=orchestrator.microscope_handler,
@@ -158,21 +198,62 @@ class ImageBrowserWidget(QWidget):
         self.plate_view_toggle_btn = QPushButton("Show Plate View")
         self.plate_view_toggle_btn.setCheckable(True)
         self.plate_view_toggle_btn.clicked.connect(self._toggle_plate_view)
-        self.plate_view_toggle_btn.setStyleSheet(self.style_gen.generate_button_style())
+        # Apply scope-accented style when available
+        if getattr(self, "_scope_accent_color", None) is not None:
+            self.plate_view_toggle_btn.setStyleSheet(
+                self._accent_button_style(self._scope_accent_color)
+            )
+        else:
+            self.plate_view_toggle_btn.setStyleSheet(
+                self.style_gen.generate_button_style()
+            )
         search_layout.addWidget(self.plate_view_toggle_btn, 0)  # No stretch
 
         # Refresh button (moved from bottom)
         self.refresh_btn = QPushButton("Refresh")
         self.refresh_btn.clicked.connect(self.load_images)
-        self.refresh_btn.setStyleSheet(self.style_gen.generate_button_style())
+        if getattr(self, "_scope_accent_color", None) is not None:
+            self.refresh_btn.setStyleSheet(
+                self._accent_button_style(self._scope_accent_color)
+            )
+        else:
+            self.refresh_btn.setStyleSheet(self.style_gen.generate_button_style())
         search_layout.addWidget(self.refresh_btn, 0)  # No stretch
 
         # Info label (moved from bottom)
         self.info_label = QLabel("No images loaded")
-        self.info_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_disabled)};")
+        self.info_label.setStyleSheet(
+            f"color: {self.color_scheme.to_hex(self.color_scheme.text_disabled)};"
+        )
         search_layout.addWidget(self.info_label, 0)  # No stretch
 
         layout.addLayout(search_layout)
+
+        # Helper to build accent-style for buttons (attached to self for reuse)
+        def _accent_button_style_local(color):
+            try:
+                hex_color = color.name()
+                lighter = color.lighter(115).name()
+                darker = color.darker(115).name()
+            except Exception:
+                return self.style_gen.generate_button_style()
+            return f"""
+                QPushButton {{
+                    background-color: {hex_color};
+                    color: white;
+                    border: none;
+                    border-radius: 3px;
+                    padding: 5px;
+                }}
+                QPushButton:hover {{
+                    background-color: {lighter};
+                }}
+                QPushButton:pressed {{
+                    background-color: {darker};
+                }}
+            """
+
+        self._accent_button_style = _accent_button_style_local
 
         # Create main splitter (tree+filters | table | config)
         main_splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -187,8 +268,12 @@ class ImageBrowserWidget(QWidget):
         # Column filter panel (initially empty, populated when images load)
         # DO NOT wrap in scroll area - breaks splitter resizing!
         # Each filter has its own scroll area for checkboxes
-        self.column_filter_panel = MultiColumnFilterPanel(color_scheme=self.color_scheme)
-        self.column_filter_panel.filters_changed.connect(self._on_column_filters_changed)
+        self.column_filter_panel = MultiColumnFilterPanel(
+            color_scheme=self.color_scheme
+        )
+        self.column_filter_panel.filters_changed.connect(
+            self._on_column_filters_changed
+        )
         self.column_filter_panel.setVisible(False)  # Hidden until images load
         left_splitter.addWidget(self.column_filter_panel)
 
@@ -202,7 +287,10 @@ class ImageBrowserWidget(QWidget):
 
         # Plate view (initially hidden)
         from openhcs.pyqt_gui.widgets.shared.plate_view_widget import PlateViewWidget
-        self.plate_view_widget = PlateViewWidget(color_scheme=self.color_scheme, parent=self)
+
+        self.plate_view_widget = PlateViewWidget(
+            color_scheme=self.color_scheme, parent=self
+        )
         self.plate_view_widget.wells_selected.connect(self._on_wells_selected)
         self.plate_view_widget.detach_requested.connect(self._detach_plate_view)
         self.plate_view_widget.setVisible(False)
@@ -250,12 +338,13 @@ class ImageBrowserWidget(QWidget):
         """Create and configure the unified file table widget (images + results)."""
         # Use ImageTableBrowser for unified table (multi-select, dynamic columns)
         self.image_table_browser = ImageTableBrowser(
-            color_scheme=self.color_scheme,
-            parent=self
+            color_scheme=self.color_scheme, parent=self
         )
 
         # Connect signals
-        self.image_table_browser.item_double_clicked.connect(self._on_file_double_clicked)
+        self.image_table_browser.item_double_clicked.connect(
+            self._on_file_double_clicked
+        )
         self.image_table_browser.items_selected.connect(self._on_files_selected)
 
         # Alias for backward compatibility during transition
@@ -280,6 +369,7 @@ class ImageBrowserWidget(QWidget):
 
         # Tab widget for streaming configs
         from PyQt6.QtWidgets import QTabWidget
+
         self.streaming_tabs = QTabWidget()
         self.streaming_tabs.setStyleSheet(self.style_gen.generate_tab_widget_style())
 
@@ -303,13 +393,23 @@ class ImageBrowserWidget(QWidget):
         # View buttons beside tabs
         self.view_napari_btn = QPushButton("View in Napari")
         self.view_napari_btn.clicked.connect(self.view_selected_in_napari)
-        self.view_napari_btn.setStyleSheet(self.style_gen.generate_button_style())
+        if getattr(self, "_scope_accent_color", None) is not None:
+            self.view_napari_btn.setStyleSheet(
+                self._accent_button_style(self._scope_accent_color)
+            )
+        else:
+            self.view_napari_btn.setStyleSheet(self.style_gen.generate_button_style())
         self.view_napari_btn.setEnabled(False)
         tab_row.addWidget(self.view_napari_btn, 0)  # No stretch
 
         self.view_fiji_btn = QPushButton("View in Fiji")
         self.view_fiji_btn.clicked.connect(self.view_selected_in_fiji)
-        self.view_fiji_btn.setStyleSheet(self.style_gen.generate_button_style())
+        if getattr(self, "_scope_accent_color", None) is not None:
+            self.view_fiji_btn.setStyleSheet(
+                self._accent_button_style(self._scope_accent_color)
+            )
+        else:
+            self.view_fiji_btn.setStyleSheet(self.style_gen.generate_button_style())
         self.view_fiji_btn.setEnabled(False)
         tab_row.addWidget(self.view_fiji_btn, 0)  # No stretch
 
@@ -321,6 +421,7 @@ class ImageBrowserWidget(QWidget):
         # Extract the stacked widget (content area) from tab widget and add it to splitter
         # The tab bar is already in tab_row above
         from PyQt6.QtWidgets import QStackedWidget
+
         stacked_widget = self.streaming_tabs.findChild(QStackedWidget)
         if stacked_widget:
             stacked_widget.setMinimumWidth(300)  # Prevent clipping of config widgets
@@ -358,11 +459,11 @@ class ImageBrowserWidget(QWidget):
         config = FormManagerConfig(
             parent=panel,
             color_scheme=self.color_scheme,
-            field_id='napari_config'  # Scope to napari_config nested dataclass
+            field_id="napari_config",  # Scope to napari_config nested dataclass
         )
         self.napari_config_form = ParameterFormManager(
             state=self.state,  # Share root ObjectState
-            config=config
+            config=config,
         )
 
         # Wrap in scroll area for long forms (vertical scrolling only)
@@ -396,11 +497,11 @@ class ImageBrowserWidget(QWidget):
         config = FormManagerConfig(
             parent=panel,
             color_scheme=self.color_scheme,
-            field_id='fiji_config'  # Scope to fiji_config nested dataclass
+            field_id="fiji_config",  # Scope to fiji_config nested dataclass
         )
         self.fiji_config_form = ParameterFormManager(
             state=self.state,  # Share root ObjectState
-            config=config
+            config=config,
         )
 
         # Wrap in scroll area for long forms (vertical scrolling only)
@@ -436,13 +537,13 @@ class ImageBrowserWidget(QWidget):
         Returns:
             Dict with prefix stripped from keys, e.g., {'port': 5555, 'host': 'localhost'}
         """
-        prefix_dot = f'{prefix}.'
+        prefix_dot = f"{prefix}."
         result = {}
         for path, value in self.state.parameters.items():
             if path.startswith(prefix_dot):
-                remainder = path[len(prefix_dot):]
+                remainder = path[len(prefix_dot) :]
                 # Only direct children (no nested dots in remainder)
-                if '.' not in remainder:
+                if "." not in remainder:
                     result[remainder] = value
         return result
 
@@ -462,16 +563,19 @@ class ImageBrowserWidget(QWidget):
 
     def _create_instance_manager_panel(self):
         """Create the viewer instance manager panel using ZMQServerManagerWidget."""
-        from openhcs.pyqt_gui.widgets.shared.zmq_server_manager import ZMQServerManagerWidget
+        from openhcs.pyqt_gui.widgets.shared.zmq_server_manager import (
+            ZMQServerManagerWidget,
+        )
         from openhcs.core.config import get_all_streaming_ports
 
         # Scan all streaming ports using orchestrator's pipeline config
         # This ensures we find viewers launched with custom ports
         # Exclude execution server port (only want viewer ports)
         from openhcs.constants.constants import DEFAULT_EXECUTION_SERVER_PORT
+
         all_ports = get_all_streaming_ports(
             config=self.orchestrator.pipeline_config if self.orchestrator else None,
-            num_ports_per_type=10
+            num_ports_per_type=10,
         )
         ports_to_scan = [p for p in all_ports if p != DEFAULT_EXECUTION_SERVER_PORT]
 
@@ -480,7 +584,7 @@ class ImageBrowserWidget(QWidget):
             ports_to_scan=ports_to_scan,
             title="Viewer Instances",
             style_generator=self.style_gen,
-            parent=self
+            parent=self,
         )
 
         return zmq_manager
@@ -489,7 +593,9 @@ class ImageBrowserWidget(QWidget):
         """Set the orchestrator and load images."""
         self.orchestrator = orchestrator
         # CRITICAL: Preserve ::image_browser suffix to avoid scope conflicts with ConfigWindow
-        self.scope_id = f"{orchestrator.plate_path}::image_browser" if orchestrator else None
+        self.scope_id = (
+            f"{orchestrator.plate_path}::image_browser" if orchestrator else None
+        )
 
         # Use orchestrator's FileManager (has plate-specific backends like VirtualWorkspaceBackend)
         if orchestrator:
@@ -542,17 +648,21 @@ class ImageBrowserWidget(QWidget):
                 results_folder_path = f"{folder_path}_results"
 
                 result = {
-                    filename: metadata for filename, metadata in result.items()
-                    if (str(Path(filename).parent) == folder_path or
-                        filename.startswith(folder_path + "/") or
-                        str(Path(filename).parent) == results_folder_path or
-                        filename.startswith(results_folder_path + "/"))
+                    filename: metadata
+                    for filename, metadata in result.items()
+                    if (
+                        str(Path(filename).parent) == folder_path
+                        or filename.startswith(folder_path + "/")
+                        or str(Path(filename).parent) == results_folder_path
+                        or filename.startswith(results_folder_path + "/")
+                    )
                 }
 
         # Apply well filter if wells are selected
         if self.selected_wells:
             result = {
-                filename: metadata for filename, metadata in result.items()
+                filename: metadata
+                for filename, metadata in result.items()
                 if self._matches_wells(filename, metadata)
             }
 
@@ -566,10 +676,12 @@ class ImageBrowserWidget(QWidget):
                     matches = True
                     for column_name, selected_values in active_filters.items():
                         # Get the metadata key (lowercase with underscores)
-                        metadata_key = column_name.lower().replace(' ', '_')
-                        raw_value = metadata.get(metadata_key, '')
+                        metadata_key = column_name.lower().replace(" ", "_")
+                        raw_value = metadata.get(metadata_key, "")
                         # Get display value for comparison (metadata name if available)
-                        item_value = self._get_metadata_display_value(metadata_key, raw_value)
+                        item_value = self._get_metadata_display_value(
+                            metadata_key, raw_value
+                        )
                         if item_value not in selected_values:
                             matches = False
                             break
@@ -598,7 +710,7 @@ class ImageBrowserWidget(QWidget):
             otherwise just "raw_key"
         """
         if raw_value is None:
-            return 'N/A'
+            return "N/A"
 
         # Convert to string for lookup
         value_str = str(raw_value)
@@ -608,25 +720,33 @@ class ImageBrowserWidget(QWidget):
             try:
                 # Map metadata_key to AllComponents enum
                 from openhcs.constants import AllComponents
+
                 component_map = {
-                    'channel': AllComponents.CHANNEL,
-                    'site': AllComponents.SITE,
-                    'z_index': AllComponents.Z_INDEX,
-                    'timepoint': AllComponents.TIMEPOINT,
-                    'well': AllComponents.WELL,
+                    "channel": AllComponents.CHANNEL,
+                    "site": AllComponents.SITE,
+                    "z_index": AllComponents.Z_INDEX,
+                    "timepoint": AllComponents.TIMEPOINT,
+                    "well": AllComponents.WELL,
                 }
 
                 component = component_map.get(metadata_key)
                 if component:
-                    metadata_name = self.orchestrator._metadata_cache_service.get_component_metadata(component, value_str)
+                    metadata_name = self.orchestrator._metadata_cache_service.get_component_metadata(
+                        component, value_str
+                    )
                     if metadata_name:
                         # Format like TUI: "Channel 1 | HOECHST 33342"
                         # But for table cells, just show "1 | W1" (more compact)
                         return f"{value_str} | {metadata_name}"
                     else:
-                        logger.debug(f"No metadata name found for {metadata_key} {value_str}")
+                        logger.debug(
+                            f"No metadata name found for {metadata_key} {value_str}"
+                        )
             except Exception as e:
-                logger.warning(f"Could not get metadata for {metadata_key} {value_str}: {e}", exc_info=True)
+                logger.warning(
+                    f"Could not get metadata for {metadata_key} {value_str}: {e}",
+                    exc_info=True,
+                )
 
         # Fallback to raw value only
         return value_str
@@ -646,27 +766,33 @@ class ImageBrowserWidget(QWidget):
                 value = metadata.get(metadata_key)
                 if value is not None:
                     # Use metadata display value instead of raw value
-                    display_value = self._get_metadata_display_value(metadata_key, value)
+                    display_value = self._get_metadata_display_value(
+                        metadata_key, value
+                    )
                     unique_values.add(display_value)
 
             if unique_values:
                 # Create filter for this column
-                column_display_name = metadata_key.replace('_', ' ').title()
-                self.column_filter_panel.add_column_filter(column_display_name, sorted(list(unique_values)))
+                column_display_name = metadata_key.replace("_", " ").title()
+                self.column_filter_panel.add_column_filter(
+                    column_display_name, sorted(list(unique_values))
+                )
 
         # Show filter panel if we have filters
         if self.column_filter_panel.column_filters:
             self.column_filter_panel.setVisible(True)
 
         # Connect well filter to plate view for bidirectional sync
-        if 'Well' in self.column_filter_panel.column_filters and self.plate_view_widget:
-            well_filter = self.column_filter_panel.column_filters['Well']
+        if "Well" in self.column_filter_panel.column_filters and self.plate_view_widget:
+            well_filter = self.column_filter_panel.column_filters["Well"]
             self.plate_view_widget.set_well_filter_widget(well_filter)
 
             # Connect well filter changes to sync back to plate view
             well_filter.filter_changed.connect(self._on_well_filter_changed)
 
-        logger.debug(f"Built {len(self.column_filter_panel.column_filters)} column filters")
+        logger.debug(
+            f"Built {len(self.column_filter_panel.column_filters)} column filters"
+        )
 
     def _on_column_filters_changed(self):
         """Handle column filter changes."""
@@ -687,10 +813,10 @@ class ImageBrowserWidget(QWidget):
         def create_searchable_text(metadata):
             """Create searchable text from file metadata."""
             # 'filename' is guaranteed to exist (set in load_images/load_results)
-            searchable_fields = [metadata['filename']]
+            searchable_fields = [metadata["filename"]]
             # Add all metadata values
             for key, value in metadata.items():
-                if key != 'filename' and value is not None:
+                if key != "filename" and value is not None:
                     searchable_fields.append(str(value))
             return " ".join(str(field) for field in searchable_fields)
 
@@ -698,7 +824,7 @@ class ImageBrowserWidget(QWidget):
         if self._search_service is None:
             self._search_service = SearchService(
                 all_items=self.all_files,
-                searchable_text_extractor=create_searchable_text
+                searchable_text_extractor=create_searchable_text,
             )
         else:
             # Update search service with current files
@@ -723,13 +849,19 @@ class ImageBrowserWidget(QWidget):
             # Get metadata handler from orchestrator
             handler = self.orchestrator.microscope_handler
             metadata_handler = handler.metadata_handler
-            logger.info(f"IMAGE BROWSER: Got metadata handler: {type(metadata_handler).__name__}")
+            logger.info(
+                f"IMAGE BROWSER: Got metadata handler: {type(metadata_handler).__name__}"
+            )
 
             # Get image files from metadata (all subdirectories for browsing)
             plate_path = self.orchestrator.plate_path
-            logger.info(f"IMAGE BROWSER: Calling get_image_files for plate: {plate_path}")
+            logger.info(
+                f"IMAGE BROWSER: Calling get_image_files for plate: {plate_path}"
+            )
             image_files = metadata_handler.get_image_files(plate_path, all_subdirs=True)
-            logger.info(f"IMAGE BROWSER: get_image_files returned {len(image_files) if image_files else 0} files")
+            logger.info(
+                f"IMAGE BROWSER: get_image_files returned {len(image_files) if image_files else 0} files"
+            )
 
             if not image_files:
                 self.info_label.setText("No images found")
@@ -755,16 +887,14 @@ class ImageBrowserWidget(QWidget):
                 else:
                     size_str = "N/A"
 
-                metadata = {
-                    'filename': filename,
-                    'type': 'Image',
-                    'size': size_str
-                }
+                metadata = {"filename": filename, "type": "Image", "size": size_str}
                 if parsed:
                     metadata.update(parsed)
                 self.all_images[filename] = metadata
 
-            logger.info(f"IMAGE BROWSER: Built all_images dict with {len(self.all_images)} entries")
+            logger.info(
+                f"IMAGE BROWSER: Built all_images dict with {len(self.all_images)} entries"
+            )
 
         except Exception as e:
             logger.error(f"Failed to load images: {e}", exc_info=True)
@@ -784,10 +914,10 @@ class ImageBrowserWidget(QWidget):
             all_keys.update(file_metadata.keys())
 
         # Remove 'filename' from keys (it's always the first column)
-        all_keys.discard('filename')
+        all_keys.discard("filename")
 
         # Sort keys for consistent column order (extension first, then alphabetical)
-        self.metadata_keys = sorted(all_keys, key=lambda k: (k != 'extension', k))
+        self.metadata_keys = sorted(all_keys, key=lambda k: (k != "extension", k))
 
         # Configure ImageTableBrowser with dynamic columns
         self.image_table_browser.set_metadata_keys(self.metadata_keys)
@@ -808,7 +938,9 @@ class ImageBrowserWidget(QWidget):
         total_files = len(self.all_files)
         num_images = len(self.all_images)
         num_results = len(self.all_results)
-        self.info_label.setText(f"{total_files} files loaded ({num_images} images, {num_results} results)")
+        self.info_label.setText(
+            f"{total_files} files loaded ({num_images} images, {num_results} results)"
+        )
 
         # Update plate view if visible
         if self.plate_view_widget and self.plate_view_widget.isVisible():
@@ -834,7 +966,9 @@ class ImageBrowserWidget(QWidget):
 
             metadata_path = get_metadata_path(plate_path)
             if not metadata_path.exists():
-                logger.warning(f"IMAGE BROWSER RESULTS: Metadata file not found: {metadata_path}")
+                logger.warning(
+                    f"IMAGE BROWSER RESULTS: Metadata file not found: {metadata_path}"
+                )
                 self.all_results = {}
                 return
 
@@ -843,18 +977,27 @@ class ImageBrowserWidget(QWidget):
 
             # Collect ALL results directories from ALL subdirectories
             results_dirs = []
-            if metadata and 'subdirectories' in metadata:
-                for subdir_name, subdir_metadata in metadata['subdirectories'].items():
-                    if 'results_dir' in subdir_metadata and subdir_metadata['results_dir']:
-                        results_dir_path = plate_path / subdir_metadata['results_dir']
+            if metadata and "subdirectories" in metadata:
+                for subdir_name, subdir_metadata in metadata["subdirectories"].items():
+                    if (
+                        "results_dir" in subdir_metadata
+                        and subdir_metadata["results_dir"]
+                    ):
+                        results_dir_path = plate_path / subdir_metadata["results_dir"]
                         results_dirs.append((subdir_name, results_dir_path))
-                        logger.info(f"IMAGE BROWSER RESULTS: Found results_dir for subdirectory '{subdir_name}': {subdir_metadata['results_dir']}")
+                        logger.info(
+                            f"IMAGE BROWSER RESULTS: Found results_dir for subdirectory '{subdir_name}': {subdir_metadata['results_dir']}"
+                        )
 
             if not results_dirs:
-                logger.warning("IMAGE BROWSER RESULTS: No results_dir found in any subdirectory")
+                logger.warning(
+                    "IMAGE BROWSER RESULTS: No results_dir found in any subdirectory"
+                )
                 return
 
-            logger.info(f"IMAGE BROWSER RESULTS: Scanning {len(results_dirs)} results directories")
+            logger.info(
+                f"IMAGE BROWSER RESULTS: Scanning {len(results_dirs)} results directories"
+            )
 
             # Get parser from orchestrator for filename parsing
             handler = self.orchestrator.microscope_handler
@@ -863,33 +1006,47 @@ class ImageBrowserWidget(QWidget):
             file_count = 0
             for subdir_name, results_dir in results_dirs:
                 if not results_dir.exists():
-                    logger.warning(f"IMAGE BROWSER RESULTS: Results directory does not exist: {results_dir}")
+                    logger.warning(
+                        f"IMAGE BROWSER RESULTS: Results directory does not exist: {results_dir}"
+                    )
                     continue
 
-                logger.info(f"IMAGE BROWSER RESULTS: Scanning results directory for '{subdir_name}': {results_dir}")
+                logger.info(
+                    f"IMAGE BROWSER RESULTS: Scanning results directory for '{subdir_name}': {results_dir}"
+                )
 
                 # Scan for ROI JSON files and CSV files
-                for file_path in results_dir.rglob('*'):
+                for file_path in results_dir.rglob("*"):
                     if file_path.is_file():
                         file_count += 1
                         suffix = file_path.suffix.lower()
-                        logger.debug(f"IMAGE BROWSER RESULTS: Found file: {file_path.name} (suffix={suffix})")
+                        logger.debug(
+                            f"IMAGE BROWSER RESULTS: Found file: {file_path.name} (suffix={suffix})"
+                        )
 
                         # Determine file type using FileFormat registry
                         from openhcs.constants.constants import FileFormat
 
                         file_type = None
-                        if file_path.name.endswith('.roi.zip'):
-                            file_type = 'ROI'
-                            logger.info(f"IMAGE BROWSER RESULTS: ✓ Matched as ROI: {file_path.name}")
+                        if file_path.name.endswith(".roi.zip"):
+                            file_type = "ROI"
+                            logger.info(
+                                f"IMAGE BROWSER RESULTS: ✓ Matched as ROI: {file_path.name}"
+                            )
                         elif suffix in FileFormat.CSV.value:
-                            file_type = 'CSV'
-                            logger.info(f"IMAGE BROWSER RESULTS: ✓ Matched as CSV: {file_path.name}")
+                            file_type = "CSV"
+                            logger.info(
+                                f"IMAGE BROWSER RESULTS: ✓ Matched as CSV: {file_path.name}"
+                            )
                         elif suffix in FileFormat.JSON.value:
-                            file_type = 'JSON'
-                            logger.info(f"IMAGE BROWSER RESULTS: ✓ Matched as JSON: {file_path.name}")
+                            file_type = "JSON"
+                            logger.info(
+                                f"IMAGE BROWSER RESULTS: ✓ Matched as JSON: {file_path.name}"
+                            )
                         else:
-                            logger.debug(f"IMAGE BROWSER RESULTS: ✗ Filtered out: {file_path.name} (suffix={suffix})")
+                            logger.debug(
+                                f"IMAGE BROWSER RESULTS: ✗ Filtered out: {file_path.name} (suffix={suffix})"
+                            )
 
                         if file_type:
                             # Get relative path from plate_path (not results_dir) to include subdirectory
@@ -909,27 +1066,37 @@ class ImageBrowserWidget(QWidget):
 
                             # Build file info with parsed metadata (no full_path in metadata dict)
                             file_info = {
-                                'filename': str(rel_path),
-                                'type': file_type,
-                                'size': size_str,
+                                "filename": str(rel_path),
+                                "type": file_type,
+                                "size": size_str,
                             }
 
                             # Add parsed metadata components if parsing succeeded
                             if parsed:
                                 file_info.update(parsed)
-                                logger.info(f"IMAGE BROWSER RESULTS: ✓ Parsed result: {file_path.name} -> {parsed}")
-                                logger.info(f"IMAGE BROWSER RESULTS:   Full file_info: {file_info}")
+                                logger.info(
+                                    f"IMAGE BROWSER RESULTS: ✓ Parsed result: {file_path.name} -> {parsed}"
+                                )
+                                logger.info(
+                                    f"IMAGE BROWSER RESULTS:   Full file_info: {file_info}"
+                                )
                             else:
-                                logger.warning(f"IMAGE BROWSER RESULTS: ✗ Could not parse filename: {file_path.name}")
+                                logger.warning(
+                                    f"IMAGE BROWSER RESULTS: ✗ Could not parse filename: {file_path.name}"
+                                )
 
                             # Store file info and full path separately
                             self.all_results[str(rel_path)] = file_info
                             self.result_full_paths[str(rel_path)] = file_path
 
-            logger.info(f"IMAGE BROWSER RESULTS: Scanned {file_count} total files, matched {len(self.all_results)} result files")
+            logger.info(
+                f"IMAGE BROWSER RESULTS: Scanned {file_count} total files, matched {len(self.all_results)} result files"
+            )
 
         except Exception as e:
-            logger.error(f"IMAGE BROWSER RESULTS: Failed to load results: {e}", exc_info=True)
+            logger.error(
+                f"IMAGE BROWSER RESULTS: Failed to load results: {e}", exc_info=True
+            )
 
     # Removed _populate_results_table - now using unified _populate_table
     # Removed on_result_double_clicked - now using unified on_file_double_clicked
@@ -951,7 +1118,7 @@ class ImageBrowserWidget(QWidget):
                 QMessageBox.information(
                     self,
                     "No Viewer Enabled",
-                    "Please enable Napari or Fiji streaming to view ROIs."
+                    "Please enable Napari or Fiji streaming to view ROIs.",
                 )
                 return
 
@@ -966,15 +1133,19 @@ class ImageBrowserWidget(QWidget):
 
             # For each enabled viewer, resolve config + viewer on UI thread, then spawn worker
             if napari_enabled:
-                current_values = self._get_config_values('napari_config')
+                current_values = self._get_config_values("napari_config")
                 # CRITICAL: Pass None values through for lazy resolution
                 temp_config = LazyNapariStreamingConfig(**current_values)
 
                 with config_context(self.orchestrator.pipeline_config):
                     with config_context(temp_config):
-                        napari_config = resolve_lazy_configurations_for_serialization(temp_config)
+                        napari_config = resolve_lazy_configurations_for_serialization(
+                            temp_config
+                        )
 
-                napari_viewer = self.orchestrator.get_or_create_visualizer(napari_config)
+                napari_viewer = self.orchestrator.get_or_create_visualizer(
+                    napari_config
+                )
 
                 import threading
 
@@ -991,13 +1162,15 @@ class ImageBrowserWidget(QWidget):
                 ).start()
 
             if fiji_enabled:
-                current_values = self._get_config_values('fiji_config')
+                current_values = self._get_config_values("fiji_config")
                 # CRITICAL: Pass None values through for lazy resolution
                 temp_config = LazyFijiStreamingConfig(**current_values)
 
                 with config_context(self.orchestrator.pipeline_config):
                     with config_context(temp_config):
-                        fiji_config = resolve_lazy_configurations_for_serialization(temp_config)
+                        fiji_config = resolve_lazy_configurations_for_serialization(
+                            temp_config
+                        )
 
                 fiji_viewer = self.orchestrator.get_or_create_visualizer(fiji_config)
 
@@ -1021,8 +1194,9 @@ class ImageBrowserWidget(QWidget):
             logger.error(f"Failed to start ROI streaming: {e}")
             QMessageBox.warning(self, "Error", f"Failed to stream ROI file: {e}")
 
-
-    def _stream_single_roi_async(self, viewer, roi_zip_path: Path, config, backend_enum, viewer_type: str):
+    def _stream_single_roi_async(
+        self, viewer, roi_zip_path: Path, config, backend_enum, viewer_type: str
+    ):
         """Worker: load a single ROI file and stream to a viewer in a background thread.
 
         Heavy operations only:
@@ -1049,7 +1223,9 @@ class ImageBrowserWidget(QWidget):
                     self._status_update_signal.emit(msg)
 
                     # Show info dialog on UI thread
-                    QTimer.singleShot(0, lambda: QMessageBox.information(self, "No ROIs", msg))
+                    QTimer.singleShot(
+                        0, lambda: QMessageBox.information(self, "No ROIs", msg)
+                    )
                     return
 
                 # Wait for viewer to be ready (never on UI thread)
@@ -1102,9 +1278,7 @@ class ImageBrowserWidget(QWidget):
 
                 # Route to appropriate error dialog on UI thread
                 if viewer_type == "napari":
-                    QTimer.singleShot(
-                        0, lambda: self._show_streaming_error(str(e))
-                    )
+                    QTimer.singleShot(0, lambda: self._show_streaming_error(str(e)))
                 else:
                     QTimer.singleShot(
                         0, lambda: self._show_fiji_streaming_error(str(e))
@@ -1138,7 +1312,7 @@ class ImageBrowserWidget(QWidget):
             # Add all parent directories
             for parent in path.parents:
                 parent_str = str(parent)
-                if parent_str != '.' and not parent_str.endswith('_results'):
+                if parent_str != "." and not parent_str.endswith("_results"):
                     folders.add(parent_str)
 
         # Build tree structure
@@ -1179,8 +1353,12 @@ class ImageBrowserWidget(QWidget):
         """Handle selection change from ImageTableBrowser."""
         has_selection = len(keys) > 0
         # Enable buttons based on selection AND checkbox state
-        self.view_napari_btn.setEnabled(has_selection and self.napari_enable_checkbox.isChecked())
-        self.view_fiji_btn.setEnabled(has_selection and self.fiji_enable_checkbox.isChecked())
+        self.view_napari_btn.setEnabled(
+            has_selection and self.napari_enable_checkbox.isChecked()
+        )
+        self.view_fiji_btn.setEnabled(
+            has_selection and self.fiji_enable_checkbox.isChecked()
+        )
 
     # Backward compatibility alias
     def on_selection_changed(self):
@@ -1193,7 +1371,7 @@ class ImageBrowserWidget(QWidget):
         file_info = self.all_files[key]
 
         # Check if this is a result file (has 'type' field) or an image
-        if 'type' in file_info:
+        if "type" in file_info:
             # This is a result file (ROI, CSV, JSON)
             self._handle_result_double_click(file_info)
         else:
@@ -1229,28 +1407,30 @@ class ImageBrowserWidget(QWidget):
             QMessageBox.information(
                 self,
                 "No Viewer Enabled",
-                "Please enable Napari or Fiji streaming to view images."
+                "Please enable Napari or Fiji streaming to view images.",
             )
 
     def _handle_result_double_click(self, file_info: dict):
         """Handle double-click on a result file - stream ROIs or display CSV."""
-        filename = file_info['filename']
+        filename = file_info["filename"]
         # Result files are populated in load_results() which stores both
         # all_results[filename] and result_full_paths[filename] together - must exist
         file_path = self.result_full_paths[filename]
-        file_type = file_info['type']
+        file_type = file_info["type"]
 
-        if file_type == 'ROI':
+        if file_type == "ROI":
             # Stream ROI JSON to enabled viewer(s)
             self._stream_roi_file(file_path)
-        elif file_type == 'CSV':
+        elif file_type == "CSV":
             # Open CSV in system default application
             import subprocess
-            subprocess.run(['xdg-open', str(file_path)])
-        elif file_type == 'JSON':
+
+            subprocess.run(["xdg-open", str(file_path)])
+        elif file_type == "JSON":
             # Open JSON in system default application
             import subprocess
-            subprocess.run(['xdg-open', str(file_path)])
+
+            subprocess.run(["xdg-open", str(file_path)])
 
     def view_selected_in_napari(self):
         """View all selected images in Napari as a batch (builds hyperstack)."""
@@ -1259,8 +1439,8 @@ class ImageBrowserWidget(QWidget):
             return
 
         # Separate ROI files from images
-        image_filenames = [k for k in selected_keys if not k.endswith('.roi.zip')]
-        roi_filenames = [k for k in selected_keys if k.endswith('.roi.zip')]
+        image_filenames = [k for k in selected_keys if not k.endswith(".roi.zip")]
+        roi_filenames = [k for k in selected_keys if k.endswith(".roi.zip")]
 
         try:
             # Stream ROI files in a batch (get viewer once, stream all ROIs)
@@ -1283,11 +1463,15 @@ class ImageBrowserWidget(QWidget):
             return
 
         # Separate ROI files from images
-        image_filenames = [k for k in selected_keys if not k.endswith('.roi.zip')]
-        roi_filenames = [k for k in selected_keys if k.endswith('.roi.zip')]
+        image_filenames = [k for k in selected_keys if not k.endswith(".roi.zip")]
+        roi_filenames = [k for k in selected_keys if k.endswith(".roi.zip")]
 
-        logger.info(f"🎯 IMAGE BROWSER: User selected {len(image_filenames)} images and {len(roi_filenames)} ROI files to view in Fiji")
-        logger.info(f"🎯 IMAGE BROWSER: Image filenames: {image_filenames[:5]}{'...' if len(image_filenames) > 5 else ''}")
+        logger.info(
+            f"🎯 IMAGE BROWSER: User selected {len(image_filenames)} images and {len(roi_filenames)} ROI files to view in Fiji"
+        )
+        logger.info(
+            f"🎯 IMAGE BROWSER: Image filenames: {image_filenames[:5]}{'...' if len(image_filenames) > 5 else ''}"
+        )
         if roi_filenames:
             logger.info(f"🎯 IMAGE BROWSER: ROI filenames: {roi_filenames}")
 
@@ -1318,6 +1502,7 @@ class ImageBrowserWidget(QWidget):
         # Resolve backend
         from openhcs.config_framework.global_config import get_current_global_config
         from openhcs.core.config import GlobalPipelineConfig
+
         global_config = get_current_global_config(GlobalPipelineConfig)
 
         if global_config.vfs_config.read_backend != Backend.AUTO:
@@ -1329,13 +1514,15 @@ class ImageBrowserWidget(QWidget):
 
         # Resolve streaming config
         from openhcs.config_framework.context_manager import config_context
-        from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization
+        from openhcs.config_framework.lazy_factory import (
+            resolve_lazy_configurations_for_serialization,
+        )
 
-        if viewer_type == 'napari':
-            config_key = 'napari_config'
+        if viewer_type == "napari":
+            config_key = "napari_config"
             LazyConfigClass = LazyNapariStreamingConfig
         else:
-            config_key = 'fiji_config'
+            config_key = "fiji_config"
             LazyConfigClass = LazyFijiStreamingConfig
 
         current_values = self._get_config_values(config_key)
@@ -1343,7 +1530,9 @@ class ImageBrowserWidget(QWidget):
 
         with config_context(self.orchestrator.pipeline_config):
             with config_context(temp_config):
-                resolved_config = resolve_lazy_configurations_for_serialization(temp_config)
+                resolved_config = resolve_lazy_configurations_for_serialization(
+                    temp_config
+                )
 
         viewer = self.orchestrator.get_or_create_visualizer(resolved_config)
         return viewer, plate_path, read_backend, resolved_config
@@ -1360,31 +1549,37 @@ class ImageBrowserWidget(QWidget):
             config=config,
             viewer_type=viewer_type,
             status_callback=self._status_update_signal.emit,
-            error_callback=lambda e: self._show_streaming_error(e) if viewer_type == 'napari'
-                           else self._show_fiji_streaming_error(e),
+            error_callback=lambda e: self._show_streaming_error(e)
+            if viewer_type == "napari"
+            else self._show_fiji_streaming_error(e),
         )
         logger.info(f"Streaming {len(filenames)} images to {viewer_type}...")
 
     def _load_and_stream_batch_to_napari(self, filenames: list):
         """Load multiple images and stream as batch to Napari (builds hyperstack)."""
-        self._stream_images_to_viewer(filenames, 'napari')
+        self._stream_images_to_viewer(filenames, "napari")
 
     def _load_and_stream_batch_to_fiji(self, filenames: list):
         """Load multiple images and stream as batch to Fiji (builds hyperstack)."""
-        self._stream_images_to_viewer(filenames, 'fiji')
+        self._stream_images_to_viewer(filenames, "fiji")
 
     @pyqtSlot(str)
     def _show_streaming_error(self, error_msg: str):
         """Show streaming error in UI thread (called via QMetaObject.invokeMethod)."""
-        QMessageBox.warning(self, "Streaming Error", f"Failed to stream images to Napari: {error_msg}")
+        QMessageBox.warning(
+            self, "Streaming Error", f"Failed to stream images to Napari: {error_msg}"
+        )
 
     @pyqtSlot(str)
     def _show_fiji_streaming_error(self, error_msg: str):
         """Show Fiji streaming error in UI thread."""
-        QMessageBox.warning(self, "Streaming Error", f"Failed to stream images to Fiji: {error_msg}")
+        QMessageBox.warning(
+            self, "Streaming Error", f"Failed to stream images to Fiji: {error_msg}"
+        )
 
-
-    def _stream_rois_to_viewer(self, roi_filenames: list, plate_path: Path, viewer_type: str):
+    def _stream_rois_to_viewer(
+        self, roi_filenames: list, plate_path: Path, viewer_type: str
+    ):
         """Stream ROI files to specified viewer type."""
         viewer, _, _, config = self._prepare_streaming(viewer_type)
 
@@ -1395,19 +1590,19 @@ class ImageBrowserWidget(QWidget):
             config=config,
             viewer_type=viewer_type,
             status_callback=self._status_update_signal.emit,
-            error_callback=lambda e: self._show_streaming_error(e) if viewer_type == 'napari'
-                           else self._show_fiji_streaming_error(e),
+            error_callback=lambda e: self._show_streaming_error(e)
+            if viewer_type == "napari"
+            else self._show_fiji_streaming_error(e),
         )
         logger.info(f"Streaming {len(roi_filenames)} ROI files to {viewer_type}...")
 
     def _stream_roi_batch_to_napari(self, roi_filenames: list, plate_path: Path):
         """Stream a batch of ROI files to Napari asynchronously (never blocks UI)."""
-        self._stream_rois_to_viewer(roi_filenames, plate_path, 'napari')
+        self._stream_rois_to_viewer(roi_filenames, plate_path, "napari")
 
     def _stream_roi_batch_to_fiji(self, roi_filenames: list, plate_path: Path):
         """Stream a batch of ROI files to Fiji asynchronously (never blocks UI)."""
-        self._stream_rois_to_viewer(roi_filenames, plate_path, 'fiji')
-
+        self._stream_rois_to_viewer(roi_filenames, plate_path, "fiji")
 
     def _display_csv_file(self, csv_path: Path):
         """Display CSV file in preview area."""
@@ -1441,7 +1636,7 @@ class ImageBrowserWidget(QWidget):
             import json
 
             # Read JSON
-            with open(json_path, 'r') as f:
+            with open(json_path, "r") as f:
                 data = json.load(f)
 
             # Format as pretty JSON
@@ -1520,7 +1715,9 @@ class ImageBrowserWidget(QWidget):
         window_layout.addWidget(self.plate_view_widget)
 
         # Connect close event to reattach
-        self.plate_view_detached_window.closeEvent = lambda event: self._on_detached_window_closed(event)
+        self.plate_view_detached_window.closeEvent = (
+            lambda event: self._on_detached_window_closed(event)
+        )
 
         # Show window
         self.plate_view_detached_window.show()
@@ -1591,12 +1788,16 @@ class ImageBrowserWidget(QWidget):
         for well_id in well_ids:
             row, col = parser.extract_component_coordinates(well_id)
             # Convert row letter to index (A=1, B=2, etc.)
-            row_idx = sum((ord(c.upper()) - ord('A') + 1) * (26 ** i)
-                         for i, c in enumerate(reversed(row)))
+            row_idx = sum(
+                (ord(c.upper()) - ord("A") + 1) * (26**i)
+                for i, c in enumerate(reversed(row))
+            )
             coord_to_well[(row_idx, int(col))] = well_id
 
         # Update plate view with well IDs, dimensions, and coordinate mapping
-        self.plate_view_widget.set_available_wells(well_ids, plate_dimensions, coord_to_well)
+        self.plate_view_widget.set_available_wells(
+            well_ids, plate_dimensions, coord_to_well
+        )
 
         # Handle subdirectory selection
         current_folder = self._get_current_folder()
@@ -1686,7 +1887,7 @@ class ImageBrowserWidget(QWidget):
         Raises KeyError if metadata missing 'well' component.
         """
         # Well ID is a single component in metadata
-        return str(metadata['well'])
+        return str(metadata["well"])
 
     def _detect_plate_dimensions(self, well_ids: Set[str]) -> tuple[int, int]:
         """
@@ -1712,8 +1913,10 @@ class ImageBrowserWidget(QWidget):
 
         # Convert row letters to indices (A=1, B=2, AA=27, etc.)
         row_indices = [
-            sum((ord(c.upper()) - ord('A') + 1) * (26 ** i)
-                for i, c in enumerate(reversed(row)))
+            sum(
+                (ord(c.upper()) - ord("A") + 1) * (26**i)
+                for i, c in enumerate(reversed(row))
+            )
             for row in rows
         ]
 
