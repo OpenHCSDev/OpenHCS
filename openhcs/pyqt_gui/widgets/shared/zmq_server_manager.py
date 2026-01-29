@@ -17,112 +17,27 @@ import logging
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QTreeWidget, QTreeWidgetItem,
-    QPushButton, QGroupBox, QMessageBox, QAbstractItemView
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QPushButton,
+    QGroupBox,
+    QMessageBox,
+    QAbstractItemView,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot, QTimer
 from pyqt_reactive.theming import StyleSheetGenerator
 import threading
+from zmqruntime.viewer_state import ViewerStateManager, ViewerState
 
 logger = logging.getLogger(__name__)
 
 
-# Global registry for launching viewers
-# Format: {port: {'type': 'napari'|'fiji', 'queued_images': int, 'start_time': float}}
-_launching_viewers_lock = threading.Lock()
-_launching_viewers: Dict[int, Dict[str, Any]] = {}
-
-
 # Global reference to active ZMQ server manager widgets (for triggering refreshes)
 _active_managers_lock = threading.Lock()
-_active_managers: List['ZMQServerManagerWidget'] = []
-
-
-def register_launching_viewer(port: int, viewer_type: str, queued_images: int = 0):
-    """Register a viewer that is launching and trigger UI refresh.
-
-    If the viewer is already launching, accumulates the queue count instead of replacing it.
-    """
-    import time
-    with _launching_viewers_lock:
-        if port in _launching_viewers:
-            # Already launching - accumulate queue count
-            _launching_viewers[port]['queued_images'] += queued_images
-            logger.info(f"Updated launching {viewer_type} viewer on port {port}: added {queued_images} images (total: {_launching_viewers[port]['queued_images']})")
-        else:
-            # New launching viewer
-            _launching_viewers[port] = {
-                'type': viewer_type,
-                'queued_images': queued_images,
-                'start_time': time.time()
-            }
-            logger.info(f"Registered launching {viewer_type} viewer on port {port} with {queued_images} queued images")
-
-    # Trigger immediate refresh on all active managers (fast path - no port scan)
-    _trigger_manager_refresh_fast()
-
-
-def update_launching_viewer_queue(port: int, queued_images: int):
-    """Update the queued image count for a launching viewer and trigger UI refresh.
-
-    This SETS the queue count (doesn't accumulate). Use register_launching_viewer() to add images.
-    """
-    with _launching_viewers_lock:
-        if port in _launching_viewers:
-            _launching_viewers[port]['queued_images'] = queued_images
-            logger.debug(f"Updated launching viewer on port {port}: {queued_images} queued images")
-
-    # Trigger immediate refresh on all active managers (fast path - no port scan)
-    _trigger_manager_refresh_fast()
-
-
-def unregister_launching_viewer(port: int):
-    """Remove a viewer from the launching registry (it's now ready) and trigger UI refresh."""
-    with _launching_viewers_lock:
-        if port in _launching_viewers:
-            del _launching_viewers[port]
-            logger.info(f"Unregistered launching viewer on port {port} (now ready)")
-
-    # Trigger full refresh to pick up the now-ready viewer via port scan
-    _trigger_manager_refresh_full()
-
-
-def _trigger_manager_refresh_fast():
-    """Trigger fast refresh (launching viewers only, no port scan) on all active managers."""
-    with _active_managers_lock:
-        for manager in _active_managers:
-            try:
-                # Use QMetaObject to safely call from any thread
-                from PyQt6.QtCore import QMetaObject, Qt
-                QMetaObject.invokeMethod(
-                    manager,
-                    "_refresh_launching_viewers_only",
-                    Qt.ConnectionType.QueuedConnection
-                )
-            except Exception as e:
-                logger.debug(f"Failed to trigger fast refresh on manager: {e}")
-
-
-def _trigger_manager_refresh_full():
-    """Trigger full refresh (port scan + launching viewers) on all active managers."""
-    with _active_managers_lock:
-        for manager in _active_managers:
-            try:
-                # Use QMetaObject to safely call from any thread
-                from PyQt6.QtCore import QMetaObject, Qt
-                QMetaObject.invokeMethod(
-                    manager,
-                    "refresh_servers",
-                    Qt.ConnectionType.QueuedConnection
-                )
-            except Exception as e:
-                logger.debug(f"Failed to trigger full refresh on manager: {e}")
-
-
-def get_launching_viewers() -> Dict[int, Dict[str, Any]]:
-    """Get a copy of the launching viewers registry."""
-    with _launching_viewers_lock:
-        return dict(_launching_viewers)
+_active_managers: List["ZMQServerManagerWidget"] = []
 
 
 class ZMQServerManagerWidget(QWidget):
@@ -137,14 +52,16 @@ class ZMQServerManagerWidget(QWidget):
     server_killed = pyqtSignal(int)  # Emitted when server is killed (port)
     log_file_opened = pyqtSignal(str)  # Emitted when log file is opened (path)
     _scan_complete = pyqtSignal(list)  # Internal signal for async scan completion
-    _kill_complete = pyqtSignal(bool, str)  # Internal signal for async kill completion (success, message)
+    _kill_complete = pyqtSignal(
+        bool, str
+    )  # Internal signal for async kill completion (success, message)
 
     def __init__(
         self,
         ports_to_scan: List[int],
         title: str = "ZMQ Servers",
         style_generator: Optional[StyleSheetGenerator] = None,
-        parent: Optional[QWidget] = None
+        parent: Optional[QWidget] = None,
     ):
         """
         Initialize ZMQ server manager widget.
@@ -168,6 +85,25 @@ class ZMQServerManagerWidget(QWidget):
         with _active_managers_lock:
             _active_managers.append(self)
 
+        # Register a ViewerStateManager callback so the UI updates immediately
+        # when viewer state changes. This is required for the hard migration.
+        def _manager_callback(instance):
+            # Forward to the UI thread using invokeMethod
+            try:
+                from PyQt6.QtCore import QMetaObject, Qt
+
+                QMetaObject.invokeMethod(
+                    self,
+                    "_refresh_launching_viewers_only",
+                    Qt.ConnectionType.QueuedConnection,
+                )
+            except Exception:
+                pass
+
+        mgr = ViewerStateManager.get_instance()
+        mgr.register_state_callback(_manager_callback)
+        self._viewer_state_callback = _manager_callback
+
         # Connect internal signal for async scanning
         self._scan_complete.connect(self._update_server_list)
 
@@ -188,7 +124,7 @@ class ZMQServerManagerWidget(QWidget):
         self._is_cleaning_up = True
 
         # Stop refresh timer first to prevent new refresh calls
-        if hasattr(self, 'refresh_timer') and self.refresh_timer:
+        if hasattr(self, "refresh_timer") and self.refresh_timer:
             self.refresh_timer.stop()
             self.refresh_timer.deleteLater()
             self.refresh_timer = None
@@ -198,15 +134,24 @@ class ZMQServerManagerWidget(QWidget):
             if self in _active_managers:
                 _active_managers.remove(self)
 
+        # Unregister viewer state callback
+        try:
+            mgr = ViewerStateManager.get_instance()
+            if getattr(self, "_viewer_state_callback", None):
+                mgr.unregister_state_callback(self._viewer_state_callback)
+        except Exception:
+            # Hard migration: ViewerStateManager should be present; ignore failures
+            pass
+
         logger.debug("ZMQServerManagerWidget cleanup completed")
 
     def __del__(self):
         """Cleanup when widget is destroyed."""
         self.cleanup()
 
-    def showEvent(self, event):
+    def showEvent(self, a0):
         """Auto-scan for servers when widget is shown."""
-        super().showEvent(event)
+        super().showEvent(a0)
         if not self._is_cleaning_up:
             # Scan for servers on first show
             self.refresh_servers()
@@ -214,18 +159,18 @@ class ZMQServerManagerWidget(QWidget):
             if self.refresh_timer:
                 self.refresh_timer.start(1000)
 
-    def hideEvent(self, event):
+    def hideEvent(self, a0):
         """Stop auto-refresh when widget is hidden."""
-        super().hideEvent(event)
+        super().hideEvent(a0)
         # Stop timer to prevent unnecessary background work
-        if hasattr(self, 'refresh_timer') and self.refresh_timer:
+        if hasattr(self, "refresh_timer") and self.refresh_timer:
             self.refresh_timer.stop()
 
     def setup_ui(self):
         """Setup the user interface."""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        
+
         # Group box
         group_box = QGroupBox(self.title)
         group_layout = QVBoxLayout(group_box)
@@ -234,29 +179,31 @@ class ZMQServerManagerWidget(QWidget):
         # Server tree (hierarchical display with workers as children)
         self.server_tree = QTreeWidget()
         self.server_tree.setHeaderLabels(["Server / Worker", "Status", "Info"])
-        self.server_tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.server_tree.setSelectionMode(
+            QAbstractItemView.SelectionMode.ExtendedSelection
+        )
         self.server_tree.itemDoubleClicked.connect(self._on_item_double_clicked)
         self.server_tree.setColumnWidth(0, 250)
         self.server_tree.setColumnWidth(1, 100)
         group_layout.addWidget(self.server_tree)
-        
+
         # Buttons
         button_layout = QHBoxLayout()
-        
+
         self.refresh_btn = QPushButton("Refresh")
         self.refresh_btn.clicked.connect(self.refresh_servers)
         button_layout.addWidget(self.refresh_btn)
-        
+
         self.quit_btn = QPushButton("Quit")
         self.quit_btn.clicked.connect(self.quit_selected_servers)
         button_layout.addWidget(self.quit_btn)
-        
+
         self.force_kill_btn = QPushButton("Force Kill")
         self.force_kill_btn.clicked.connect(self.force_kill_selected_servers)
         button_layout.addWidget(self.force_kill_btn)
-        
+
         group_layout.addLayout(button_layout)
-        
+
         layout.addWidget(group_box)
 
         # Apply styling
@@ -264,10 +211,14 @@ class ZMQServerManagerWidget(QWidget):
             # Apply button styles
             self.refresh_btn.setStyleSheet(self.style_generator.generate_button_style())
             self.quit_btn.setStyleSheet(self.style_generator.generate_button_style())
-            self.force_kill_btn.setStyleSheet(self.style_generator.generate_button_style())
+            self.force_kill_btn.setStyleSheet(
+                self.style_generator.generate_button_style()
+            )
 
             # Apply tree widget style (uses existing method)
-            self.server_tree.setStyleSheet(self.style_generator.generate_tree_widget_style())
+            self.server_tree.setStyleSheet(
+                self.style_generator.generate_tree_widget_style()
+            )
 
             # Apply group box style
             cs = self.style_generator.color_scheme
@@ -292,7 +243,7 @@ class ZMQServerManagerWidget(QWidget):
         # Connect internal signals
         self._scan_complete.connect(self._update_server_list)
         self._kill_complete.connect(self._on_kill_complete)
-    
+
     def refresh_servers(self):
         """Scan ports and refresh server list (async in background)."""
         # Guard against calls after cleanup
@@ -342,7 +293,10 @@ class ZMQServerManagerWidget(QWidget):
         import pickle
         from openhcs.constants.constants import CONTROL_PORT_OFFSET
         from openhcs.runtime.zmq_config import OPENHCS_ZMQ_CONFIG
-        from zmqruntime.transport import get_zmq_transport_url, get_default_transport_mode
+        from zmqruntime.transport import (
+            get_zmq_transport_url,
+            get_default_transport_mode,
+        )
 
         control_port = port + CONTROL_PORT_OFFSET
         control_context = None
@@ -352,7 +306,9 @@ class ZMQServerManagerWidget(QWidget):
             control_context = zmq.Context()
             control_socket = control_context.socket(zmq.REQ)
             control_socket.setsockopt(zmq.LINGER, 0)
-            control_socket.setsockopt(zmq.RCVTIMEO, 300)  # 300ms timeout for fast scanning
+            control_socket.setsockopt(
+                zmq.RCVTIMEO, 300
+            )  # 300ms timeout for fast scanning
 
             # Use transport mode-aware URL (IPC or TCP)
             transport_mode = get_default_transport_mode()
@@ -365,7 +321,7 @@ class ZMQServerManagerWidget(QWidget):
             control_socket.connect(control_url)
 
             # Send ping
-            ping_message = {'type': 'ping'}
+            ping_message = {"type": "ping"}
             control_socket.send(pickle.dumps(ping_message))
 
             # Wait for pong
@@ -373,7 +329,7 @@ class ZMQServerManagerWidget(QWidget):
             response_data = pickle.loads(response)
 
             # Return server info if valid pong
-            if response_data.get('type') == 'pong':
+            if response_data.get("type") == "pong":
                 return response_data
 
             return None
@@ -416,8 +372,8 @@ class ZMQServerManagerWidget(QWidget):
         selected_ports = set()
         for item in self.server_tree.selectedItems():
             server_data = item.data(0, Qt.ItemDataRole.UserRole)
-            if server_data and 'port' in server_data:
-                selected_ports.add(server_data['port'])
+            if server_data and "port" in server_data:
+                selected_ports.add(server_data["port"])
 
         self.server_tree.clear()
 
@@ -425,22 +381,30 @@ class ZMQServerManagerWidget(QWidget):
         registry = GlobalQueueTrackerRegistry()
 
         # First, add launching viewers
-        launching_viewers = get_launching_viewers()
+        mgr = ViewerStateManager.get_instance()
+        launching_viewers = {
+            v.port: {"type": v.viewer_type, "queued_images": v.queued_images}
+            for v in mgr.list_viewers()
+            if v.state == ViewerState.LAUNCHING
+        }
+
         for port, info in launching_viewers.items():
-            viewer_type = info['type'].capitalize()
-            queued_images = info['queued_images']
+            viewer_type = info["type"].capitalize()
+            queued_images = info["queued_images"]
 
             display_text = f"Port {port} - {viewer_type} Viewer"
             status_text = "🚀 Launching"
-            info_text = f"{queued_images} images queued" if queued_images > 0 else "Starting..."
+            info_text = (
+                f"{queued_images} images queued" if queued_images > 0 else "Starting..."
+            )
 
             item = QTreeWidgetItem([display_text, status_text, info_text])
-            item.setData(0, Qt.ItemDataRole.UserRole, {'port': port, 'launching': True})
+            item.setData(0, Qt.ItemDataRole.UserRole, {"port": port, "launching": True})
             self.server_tree.addTopLevelItem(item)
 
         # Add servers that are processing images (even if they didn't respond to ping)
         # This prevents busy servers from disappearing during image processing
-        scanned_ports = {server.get('port') for server in servers}
+        scanned_ports = {server.get("port") for server in servers}
         for tracker_port, tracker in registry.get_all_trackers().items():
             if tracker_port in scanned_ports or tracker_port in launching_viewers:
                 continue  # Already in the list
@@ -464,10 +428,10 @@ class ZMQServerManagerWidget(QWidget):
 
                 # Create pseudo-server dict for consistency
                 pseudo_server = {
-                    'port': tracker_port,
-                    'server': f'{viewer_type}ViewerServer',
-                    'ready': True,
-                    'busy': True  # Mark as busy
+                    "port": tracker_port,
+                    "server": f"{viewer_type}ViewerServer",
+                    "ready": True,
+                    "busy": True,  # Mark as busy
                 }
 
                 item = QTreeWidgetItem([display_text, status_text, info_text])
@@ -476,14 +440,14 @@ class ZMQServerManagerWidget(QWidget):
 
         # Then add running servers
         for server in servers:
-            port = server.get('port', 'unknown')
+            port = server.get("port", "unknown")
 
             # Skip if this port is in launching registry (shouldn't happen, but be safe)
             if port in launching_viewers:
                 continue
 
-            server_type = server.get('server', 'Unknown')
-            ready = server.get('ready', False)
+            server_type = server.get("server", "Unknown")
+            ready = server.get("ready", False)
 
             # Determine status icon
             if ready:
@@ -492,9 +456,9 @@ class ZMQServerManagerWidget(QWidget):
                 status_icon = "🚀"
 
             # Handle execution servers specially - show workers as children
-            if server_type == 'ZMQExecutionServer':
-                running_executions = server.get('running_executions', [])
-                workers = server.get('workers', [])
+            if server_type == "ZMQExecutionServer":
+                running_executions = server.get("running_executions", [])
+                workers = server.get("workers", [])
 
                 # Create server item
                 if running_executions:
@@ -512,17 +476,23 @@ class ZMQServerManagerWidget(QWidget):
 
                 # Add worker processes as children
                 for worker in workers:
-                    pid = worker.get('pid', 'unknown')
-                    status = worker.get('status', 'unknown')
-                    cpu = worker.get('cpu_percent', 0)
-                    mem_mb = worker.get('memory_mb', 0)
+                    pid = worker.get("pid", "unknown")
+                    status = worker.get("status", "unknown")
+                    cpu = worker.get("cpu_percent", 0)
+                    mem_mb = worker.get("memory_mb", 0)
 
                     worker_text = f"  Worker PID {pid}"
                     worker_status = f"⚙️ {status}"
                     worker_info = f"CPU: {cpu:.1f}% | Mem: {mem_mb:.0f}MB"
 
-                    worker_item = QTreeWidgetItem([worker_text, worker_status, worker_info])
-                    worker_item.setData(0, Qt.ItemDataRole.UserRole, {'type': 'worker', 'pid': pid, 'server': server})
+                    worker_item = QTreeWidgetItem(
+                        [worker_text, worker_status, worker_info]
+                    )
+                    worker_item.setData(
+                        0,
+                        Qt.ItemDataRole.UserRole,
+                        {"type": "worker", "pid": pid, "server": server},
+                    )
                     server_item.addChild(worker_item)
 
                 # Expand server item if it has workers
@@ -556,8 +526,8 @@ class ZMQServerManagerWidget(QWidget):
 
                 # If no processing info, show memory usage
                 if not info_text:
-                    mem_mb = server.get('memory_mb')
-                    cpu_percent = server.get('cpu_percent')
+                    mem_mb = server.get("memory_mb")
+                    cpu_percent = server.get("cpu_percent")
                     if mem_mb is not None:
                         info_text = f"Mem: {mem_mb:.0f}MB"
                         if cpu_percent is not None:
@@ -572,7 +542,7 @@ class ZMQServerManagerWidget(QWidget):
             for i in range(self.server_tree.topLevelItemCount()):
                 item = self.server_tree.topLevelItem(i)
                 server_data = item.data(0, Qt.ItemDataRole.UserRole)
-                if server_data and server_data.get('port') in selected_ports:
+                if server_data and server_data.get("port") in selected_ports:
                     item.setSelected(True)
 
         logger.debug(f"Found {len(servers)} ZMQ servers")
@@ -584,7 +554,7 @@ class ZMQServerManagerWidget(QWidget):
             QMessageBox.warning(self, "Kill Failed", message)
         # Refresh list after kill (quick refresh for better UX)
         QTimer.singleShot(200, self.refresh_servers)
-    
+
     def quit_selected_servers(self):
         """Gracefully quit selected servers (async to avoid blocking UI)."""
         selected_items = self.server_tree.selectedItems()
@@ -597,14 +567,16 @@ class ZMQServerManagerWidget(QWidget):
         for item in selected_items:
             data = item.data(0, Qt.ItemDataRole.UserRole)
             # Skip worker items (they don't have ports)
-            if data and data.get('type') == 'worker':
+            if data and data.get("type") == "worker":
                 continue
-            port = data.get('port') if data else None
+            port = data.get("port") if data else None
             if port:
                 ports_to_kill.append(port)
 
         if not ports_to_kill:
-            QMessageBox.warning(self, "No Servers", "No servers selected (only workers selected).")
+            QMessageBox.warning(
+                self, "No Servers", "No servers selected (only workers selected)."
+            )
             return
 
         # Confirm with user
@@ -614,7 +586,7 @@ class ZMQServerManagerWidget(QWidget):
             f"Gracefully quit {len(ports_to_kill)} server(s)?\n\n"
             "For execution servers: kills workers only, server stays alive.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.Yes
+            QMessageBox.StandardButton.Yes,
         )
 
         if reply != QMessageBox.StandardButton.Yes:
@@ -627,13 +599,16 @@ class ZMQServerManagerWidget(QWidget):
             from openhcs.runtime.zmq_config import OPENHCS_ZMQ_CONFIG
             from zmqruntime.client import ZMQClient
             from zmqruntime.queue_tracker import GlobalQueueTrackerRegistry
+
             failed_ports = []
             registry = GlobalQueueTrackerRegistry()
 
             for port in ports_to_kill:
                 try:
                     logger.info(f"Attempting to quit server on port {port}...")
-                    success = ZMQClient.kill_server_on_port(port, graceful=True, config=OPENHCS_ZMQ_CONFIG)
+                    success = ZMQClient.kill_server_on_port(
+                        port, graceful=True, config=OPENHCS_ZMQ_CONFIG
+                    )
                     if success:
                         logger.info(f"✅ Successfully quit server on port {port}")
                         # Clear queue tracker for this viewer
@@ -641,25 +616,31 @@ class ZMQServerManagerWidget(QWidget):
                         self.server_killed.emit(port)
                     else:
                         failed_ports.append(port)
-                        logger.warning(f"❌ Failed to quit server on port {port} (kill_server_on_port returned False)")
+                        logger.warning(
+                            f"❌ Failed to quit server on port {port} (kill_server_on_port returned False)"
+                        )
                 except Exception as e:
                     failed_ports.append(port)
                     logger.error(f"❌ Error quitting server on port {port}: {e}")
 
             # Emit completion signal
             if failed_ports:
-                self._kill_complete.emit(False, f"Failed to quit servers on ports: {failed_ports}")
+                self._kill_complete.emit(
+                    False, f"Failed to quit servers on ports: {failed_ports}"
+                )
             else:
                 self._kill_complete.emit(True, "All servers quit successfully")
 
         thread = threading.Thread(target=kill_servers, daemon=True)
         thread.start()
-    
+
     def force_kill_selected_servers(self):
         """Force kill selected servers (async to avoid blocking UI)."""
         selected_items = self.server_tree.selectedItems()
         if not selected_items:
-            QMessageBox.warning(self, "No Selection", "Please select servers to force kill.")
+            QMessageBox.warning(
+                self, "No Selection", "Please select servers to force kill."
+            )
             return
 
         # Collect ports to kill BEFORE showing dialog (items may be deleted by auto-refresh)
@@ -667,14 +648,16 @@ class ZMQServerManagerWidget(QWidget):
         for item in selected_items:
             data = item.data(0, Qt.ItemDataRole.UserRole)
             # Skip worker items (they don't have ports)
-            if data and data.get('type') == 'worker':
+            if data and data.get("type") == "worker":
                 continue
-            port = data.get('port') if data else None
+            port = data.get("port") if data else None
             if port:
                 ports_to_kill.append(port)
 
         if not ports_to_kill:
-            QMessageBox.warning(self, "No Servers", "No servers selected (only workers selected).")
+            QMessageBox.warning(
+                self, "No Servers", "No servers selected (only workers selected)."
+            )
             return
 
         # Confirm with user
@@ -685,7 +668,7 @@ class ZMQServerManagerWidget(QWidget):
             "For execution servers: kills workers AND server.\n"
             "For Napari viewers: kills the viewer process.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No
+            QMessageBox.StandardButton.No,
         )
 
         if reply != QMessageBox.StandardButton.Yes:
@@ -698,19 +681,28 @@ class ZMQServerManagerWidget(QWidget):
             from openhcs.runtime.zmq_config import OPENHCS_ZMQ_CONFIG
             from zmqruntime.client import ZMQClient
             from zmqruntime.queue_tracker import GlobalQueueTrackerRegistry
+
             registry = GlobalQueueTrackerRegistry()
 
             for port in ports_to_kill:
                 try:
-                    logger.info(f"🔥 FORCE KILL: Force killing server on port {port} (kills workers AND server)")
+                    logger.info(
+                        f"🔥 FORCE KILL: Force killing server on port {port} (kills workers AND server)"
+                    )
                     # Use kill_server_on_port with graceful=False
                     # This handles both IPC and TCP modes correctly
-                    success = ZMQClient.kill_server_on_port(port, graceful=False, config=OPENHCS_ZMQ_CONFIG)
+                    success = ZMQClient.kill_server_on_port(
+                        port, graceful=False, config=OPENHCS_ZMQ_CONFIG
+                    )
 
                     if success:
-                        logger.info(f"✅ Successfully force killed server on port {port}")
+                        logger.info(
+                            f"✅ Successfully force killed server on port {port}"
+                        )
                     else:
-                        logger.warning(f"⚠️ Force kill returned False for port {port}, but continuing cleanup")
+                        logger.warning(
+                            f"⚠️ Force kill returned False for port {port}, but continuing cleanup"
+                        )
 
                     # Clear queue tracker for this viewer (always, regardless of kill result)
                     registry.remove_tracker(port)
@@ -724,20 +716,22 @@ class ZMQServerManagerWidget(QWidget):
 
             # Always emit success - we've done our best to kill the processes
             # The refresh will remove any dead entries from the list
-            self._kill_complete.emit(True, "Force kill operation completed (list will refresh)")
+            self._kill_complete.emit(
+                True, "Force kill operation completed (list will refresh)"
+            )
 
         thread = threading.Thread(target=kill_servers, daemon=True)
         thread.start()
-    
+
     def _on_item_double_clicked(self, item: QTreeWidgetItem):
         """Handle double-click on tree item - open log file."""
         data = item.data(0, Qt.ItemDataRole.UserRole)
 
         # For worker items, get the server from parent
-        if data and data.get('type') == 'worker':
-            data = data.get('server', {})
+        if data and data.get("type") == "worker":
+            data = data.get("server", {})
 
-        log_file = data.get('log_file_path') if data else None
+        log_file = data.get("log_file_path") if data else None
 
         if log_file and Path(log_file).exists():
             # Emit signal for parent to handle (e.g., open in log viewer)
@@ -747,5 +741,5 @@ class ZMQServerManagerWidget(QWidget):
             QMessageBox.information(
                 self,
                 "No Log File",
-                f"No log file available for this item.\n\nPort: {data.get('port', 'unknown') if data else 'unknown'}"
+                f"No log file available for this item.\n\nPort: {data.get('port', 'unknown') if data else 'unknown'}",
             )
