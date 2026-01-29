@@ -238,8 +238,14 @@ class DualEditorWindow(BaseFormDialog):
         self._pending_function_editor_sync = False
 
         # Scope ID for singleton behavior and border styling
+        import logging
+        logger = logging.getLogger(__name__)
         if getattr(self, "orchestrator", None) and getattr(self, "editing_step", None):
             self.scope_id = self._build_step_scope_id()
+            logger.debug(f"[DUAL_EDITOR] Set scope_id to: {self.scope_id}, calling _init_scope_border()")
+            # CRITICAL: Initialize scope-based border styling BEFORE creating step_editor
+            # This ensures _scope_accent_color is set BEFORE widgets are created
+            self._init_scope_border()
 
     def _update_window_title(self):
         """Update window title with dirty marker and signature diff underline.

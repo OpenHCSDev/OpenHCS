@@ -64,6 +64,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Update submodules to latest
+        run: git submodule update --remote
 
       - name: Setup Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
@@ -156,6 +161,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Update submodules to latest
+        run: git submodule update --remote
 
       - name: Setup Python 3.12
         uses: actions/setup-python@v5
@@ -253,6 +263,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Update submodules to latest
+        run: git submodule update --remote
 
       - name: Setup Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
@@ -304,6 +319,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Update submodules to latest
+        run: git submodule update --remote
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -343,6 +363,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Update submodules to latest
+        run: git submodule update --remote
 
       - name: Setup Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
@@ -406,6 +431,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Update submodules to latest
+        run: git submodule update --remote
 
       - name: Setup Python
         uses: actions/setup-python@v5

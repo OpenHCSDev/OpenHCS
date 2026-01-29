@@ -3,6 +3,7 @@
 Eliminates duplication between Napari and Fiji streaming code by parametrizing
 on viewer_type. All heavy operations run in background threads.
 """
+
 from __future__ import annotations
 
 import logging
@@ -20,16 +21,16 @@ logger = logging.getLogger(__name__)
 # Each image creates a shared memory segment (file descriptor on Linux)
 CHUNK_SIZE = 50
 
-ViewerType = Literal['napari', 'fiji']
+ViewerType = Literal["napari", "fiji"]
 
 
 class StreamingService:
     """Unified service for streaming images/ROIs to viewers.
-    
+
     Handles all viewer communication in background threads.
     Uses callbacks for UI thread communication (status updates, errors).
     """
-    
+
     def __init__(
         self,
         filemanager: FileManager,
@@ -39,12 +40,17 @@ class StreamingService:
         self.filemanager = filemanager
         self.microscope_handler = microscope_handler
         self.plate_path = plate_path
-    
+
     def _get_backend_enum(self, viewer_type: ViewerType):
         """Get the backend enum for the viewer type."""
         from openhcs.constants.constants import Backend as BackendEnum
-        return BackendEnum.NAPARI_STREAM if viewer_type == 'napari' else BackendEnum.FIJI_STREAM
-    
+
+        return (
+            BackendEnum.NAPARI_STREAM
+            if viewer_type == "napari"
+            else BackendEnum.FIJI_STREAM
+        )
+
     def _wait_for_viewer_ready(
         self,
         viewer,
@@ -53,34 +59,45 @@ class StreamingService:
     ) -> None:
         """Wait for viewer to be ready, registering as launching if needed."""
         from openhcs.pyqt_gui.widgets.shared.zmq_server_manager import (
-            register_launching_viewer, unregister_launching_viewer
+            register_launching_viewer,
+            unregister_launching_viewer,
         )
-        
+
         is_already_running = viewer.wait_for_ready(timeout=0.1)
-        
+
         if not is_already_running:
             register_launching_viewer(viewer.port, viewer_type, num_items)
-            logger.info(f"Registered launching {viewer_type} viewer on port {viewer.port}")
-            
+            logger.info(
+                f"Registered launching {viewer_type} viewer on port {viewer.port}"
+            )
+
             if not viewer.wait_for_ready(timeout=15.0):
                 unregister_launching_viewer(viewer.port)
-                raise RuntimeError(f"{viewer_type.capitalize()} viewer on port {viewer.port} failed to become ready")
-            
-            logger.info(f"{viewer_type.capitalize()} viewer on port {viewer.port} is ready")
+                raise RuntimeError(
+                    f"{viewer_type.capitalize()} viewer on port {viewer.port} failed to become ready"
+                )
+
+            logger.info(
+                f"{viewer_type.capitalize()} viewer on port {viewer.port} is ready"
+            )
             unregister_launching_viewer(viewer.port)
         else:
-            logger.info(f"{viewer_type.capitalize()} viewer on port {viewer.port} is already running")
-    
+            logger.info(
+                f"{viewer_type.capitalize()} viewer on port {viewer.port} is already running"
+            )
+
     def _build_metadata(self, viewer, config, source: str) -> dict:
         """Build metadata dict for streaming."""
         return {
-            'port': viewer.port,
-            'display_config': config,
-            'microscope_handler': self.microscope_handler,
-            'plate_path': self.plate_path,
-            'source': source,
+            "port": viewer.port,
+            "host": config.host,
+            "transport_mode": config.transport_mode,
+            "display_config": config,
+            "microscope_handler": self.microscope_handler,
+            "plate_path": self.plate_path,
+            "source": source,
         }
-    
+
     def stream_images_async(
         self,
         viewer,
@@ -93,56 +110,72 @@ class StreamingService:
         error_callback: Callable[[str], None],
     ) -> None:
         """Load and stream images to viewer in background thread.
-        
+
         Uses chunked streaming to prevent file descriptor exhaustion.
         """
         backend_enum = self._get_backend_enum(viewer_type)
-        
+
         def _worker():
             try:
                 self._wait_for_viewer_ready(viewer, viewer_type, len(filenames))
-                
+
                 total_images = len(filenames)
                 num_chunks = (total_images + CHUNK_SIZE - 1) // CHUNK_SIZE
                 logger.info(f"Streaming {total_images} images in {num_chunks} chunks")
-                
+
                 for chunk_idx in range(num_chunks):
                     start_idx = chunk_idx * CHUNK_SIZE
                     end_idx = min(start_idx + CHUNK_SIZE, total_images)
                     chunk_filenames = filenames[start_idx:end_idx]
-                    
-                    status_callback(f"Loading chunk {chunk_idx + 1}/{num_chunks} ({len(chunk_filenames)} images)...")
-                    
+
+                    status_callback(
+                        f"Loading chunk {chunk_idx + 1}/{num_chunks} ({len(chunk_filenames)} images)..."
+                    )
+
                     # Load chunk
                     image_data_list = []
                     file_paths = []
                     for filename in chunk_filenames:
                         image_path = plate_path / filename
-                        image_data = self.filemanager.load(str(image_path), read_backend)
+                        image_data = self.filemanager.load(
+                            str(image_path), read_backend
+                        )
                         image_data_list.append(image_data)
                         file_paths.append(filename)
-                    
-                    logger.info(f"Loaded chunk {chunk_idx + 1}/{num_chunks}: {len(image_data_list)} images")
-                    
-                    source = Path(file_paths[0]).parent.name if file_paths else 'unknown_source'
+
+                    logger.info(
+                        f"Loaded chunk {chunk_idx + 1}/{num_chunks}: {len(image_data_list)} images"
+                    )
+
+                    source = (
+                        Path(file_paths[0]).parent.name
+                        if file_paths
+                        else "unknown_source"
+                    )
                     metadata = self._build_metadata(viewer, config, source)
-                    
+
                     self.filemanager.save_batch(
                         image_data_list, file_paths, backend_enum.value, **metadata
                     )
-                    logger.info(f"Streamed chunk {chunk_idx + 1}/{num_chunks} to {viewer_type}")
-                    
+                    logger.info(
+                        f"Streamed chunk {chunk_idx + 1}/{num_chunks} to {viewer_type}"
+                    )
+
                     if chunk_idx < num_chunks - 1:
                         time.sleep(0.1)
-                
-                logger.info(f"Successfully streamed {total_images} images to {viewer_type}")
-                status_callback(f"Streamed {total_images} images to {viewer_type.capitalize()}")
-                
+
+                logger.info(
+                    f"Successfully streamed {total_images} images to {viewer_type}"
+                )
+                status_callback(
+                    f"Streamed {total_images} images to {viewer_type.capitalize()}"
+                )
+
             except Exception as e:
                 logger.error(f"Failed to stream images to {viewer_type}: {e}")
                 status_callback(f"Error: {e}")
                 error_callback(str(e))
-        
+
         thread = threading.Thread(target=_worker, daemon=True)
         thread.start()
         logger.info(f"Started streaming {len(filenames)} images to {viewer_type}")
@@ -197,9 +230,13 @@ class StreamingService:
                 source = Path(paths[0]).parent.name if paths else "unknown_source"
                 metadata = self._build_metadata(viewer, config, source)
 
-                status_callback(f"Streaming {len(paths)} ROI file(s) to {viewer_type.capitalize()}...")
+                status_callback(
+                    f"Streaming {len(paths)} ROI file(s) to {viewer_type.capitalize()}..."
+                )
 
-                self.filemanager.save_batch(data_list, paths, backend_enum.value, **metadata)
+                self.filemanager.save_batch(
+                    data_list, paths, backend_enum.value, **metadata
+                )
 
                 msg = f"Streamed {len(paths)} ROI file(s) to {viewer_type.capitalize()} on port {viewer.port}"
                 logger.info(msg)

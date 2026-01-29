@@ -51,9 +51,13 @@ class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
 
     Inherits from ScrollableFormMixin to provide scroll-to-section functionality.
     """
-    
+
     # Signals
     step_parameter_changed = pyqtSignal()
+
+    def showEvent(self, event):
+        """Override showEvent to apply initial enabled styling when widget becomes visible."""
+        super().showEvent(event)
     
     def __init__(self, step: FunctionStep, service_adapter=None, color_scheme: Optional[ColorScheme] = None,
                  gui_config: Optional[PyQtGUIConfig] = None, parent=None, pipeline_config=None, scope_id: Optional[str] = None,
@@ -134,10 +138,22 @@ class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
 
         logger.info(f"🔍 STEP_EDITOR: Using REGISTERED ObjectState, params={list(self.state.parameters.keys())}")
 
+        # CRITICAL: Get scope_accent_color from parent window (DualEditorWindow)
+        # StepParameterEditorWidget doesn't inherit from ScopedBorderMixin, so we need
+        # to walk up the parent chain to find the window's _scope_accent_color
+        scope_accent_color = None
+        widget = self
+        while widget is not None and scope_accent_color is None:
+            if hasattr(widget, '_scope_accent_color'):
+                scope_accent_color = widget._scope_accent_color
+                break
+            widget = widget.parent()
+
         config = FormManagerConfig(
             parent=self,                         # Pass self as parent widget
             color_scheme=self.color_scheme,      # Pass color scheme for consistent theming
-            use_scroll_area=False                # Step editor manages its own scroll area
+            use_scroll_area=False,               # Step editor manages its own scroll area
+            scope_accent_color=scope_accent_color,  # Pass scope accent color from parent window
         )
 
         self.form_manager = ParameterFormManager(

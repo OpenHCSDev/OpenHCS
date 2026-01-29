@@ -22,15 +22,16 @@ def create_streaming_config(
     visualizer_module: str,
     visualizer_class_name: str,
     extra_fields: dict = None,
-    preview_label: str = None
+    preview_label: str = None,
+    abbreviation: str = None
 ) -> Type['StreamingConfig']:
     """
     Factory to create streaming config classes with minimal boilerplate.
-    
+
     Eliminates duplication between streaming configs by auto-generating classes
     from declarative specifications. Adding a new streaming backend requires only
     5-10 lines instead of ~50 lines of boilerplate.
-    
+
     Args:
         viewer_name: Viewer identifier ('napari', 'fiji', etc.)
         port: Default port number
@@ -39,10 +40,12 @@ def create_streaming_config(
         visualizer_module: Module path for visualizer class
         visualizer_class_name: Name of visualizer class
         extra_fields: Optional dict of {field_name: (type, default_value)}
-    
+        preview_label: Short label for list item previews (e.g., "NAP", "FIJI")
+        abbreviation: Short abbreviation for config class name in grouped previews (e.g., "nap", "fiji")
+
     Returns:
         Dynamically created streaming config class
-    
+
     Example:
         >>> NapariStreamingConfig = create_streaming_config(
         ...     viewer_name='napari',
@@ -118,8 +121,16 @@ def create_streaming_config(
     
     # Apply decorators
     new_class = dataclass(frozen=True)(new_class)
+
+    # Build decorator kwargs
+    decorator_kwargs = {}
     if preview_label is not None:
-        new_class = global_pipeline_config(preview_label=preview_label)(new_class)
+        decorator_kwargs['preview_label'] = preview_label
+    if abbreviation is not None:
+        decorator_kwargs['abbreviation'] = abbreviation
+
+    if decorator_kwargs:
+        new_class = global_pipeline_config(**decorator_kwargs)(new_class)
     else:
         new_class = global_pipeline_config(new_class)
 
