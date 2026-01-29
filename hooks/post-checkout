@@ -1,5 +1,6 @@
 #!/bin/bash
 # Update submodules individually - update clean ones, skip dirty ones
+# Then checkout the tracking branch to avoid detached HEAD
 
 echo "Checking submodules..."
 
@@ -24,6 +25,15 @@ git submodule status | while IFS= read -r line; do
             new=$(cd "$path" && git rev-parse --short HEAD)
             if [ "$current" != "$new" ]; then
                 echo "Updated: $name ($current → $new)"
+            fi
+        fi
+        
+        # Checkout the tracking branch to avoid detached HEAD
+        branch=$(cd "$path" && git config -f "$toplevel/.gitmodules" submodule."$name".branch 2>/dev/null || echo main)
+        if (cd "$path" && git checkout "$branch" >/dev/null 2>&1); then
+            # Pull latest if we're now on the branch
+            if (cd "$path" && git pull --ff-only >/dev/null 2>&1); then
+                : # Successfully pulled
             fi
         fi
     else
