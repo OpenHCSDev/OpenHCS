@@ -17,7 +17,10 @@ from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt, pyqtSignal
 
 from openhcs.core.config import GlobalPipelineConfig, PipelineConfig
-from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator, OrchestratorState
+from openhcs.core.orchestrator.orchestrator import (
+    PipelineOrchestrator,
+    OrchestratorState,
+)
 from openhcs.core.path_cache import PathCacheKey
 from polystore.filemanager import FileManager
 from polystore.base import _create_storage_registry
@@ -29,7 +32,7 @@ from openhcs.config_framework.lazy_factory import (
 )
 from openhcs.config_framework.global_config import (
     set_global_config_for_editing,
-    get_current_global_config
+    get_current_global_config,
 )
 from openhcs.config_framework.context_manager import config_context
 from openhcs.config_framework.object_state import ObjectState, ObjectStateRegistry
@@ -38,15 +41,24 @@ from openhcs.core.config_cache import _sync_save_config
 from openhcs.core.xdg_paths import get_config_file_path
 import openhcs.serialization.pycodify_formatters  # noqa: F401
 from pycodify import Assignment, BlankLine, CodeBlock, generate_python_source
-from openhcs.processing.backends.analysis.consolidate_analysis_results import consolidate_multi_plate_summaries
+from openhcs.processing.backends.analysis.consolidate_analysis_results import (
+    consolidate_multi_plate_summaries,
+)
 from pyqt_reactive.theming import ColorScheme
 from openhcs.pyqt_gui.windows.config_window import ConfigWindow
 from openhcs.pyqt_gui.windows.plate_viewer_window import PlateViewerWindow
 from pyqt_reactive.widgets.editors.simple_code_editor import SimpleCodeEditorService
-from pyqt_reactive.widgets.shared.abstract_manager_widget import AbstractManagerWidget, ListItemFormat
+from pyqt_reactive.widgets.shared.abstract_manager_widget import (
+    AbstractManagerWidget,
+    ListItemFormat,
+)
 from pyqt_reactive.forms import ParameterFormManager
-from openhcs.pyqt_gui.widgets.shared.services.zmq_execution_service import ZMQExecutionService
-from openhcs.pyqt_gui.widgets.shared.services.compilation_service import CompilationService
+from openhcs.pyqt_gui.widgets.shared.services.zmq_execution_service import (
+    ZMQExecutionService,
+)
+from openhcs.pyqt_gui.widgets.shared.services.compilation_service import (
+    CompilationService,
+)
 from pyqt_reactive.widgets.shared.scope_visual_config import ListItemType
 
 logger = logging.getLogger(__name__)
@@ -68,7 +80,7 @@ class PlateManagerWidget(AbstractManagerWidget):
     """
 
     TITLE = "Plate Manager"
-    BUTTON_GRID_COLUMNS = 4  # 2x4 grid for 8 buttons
+    BUTTON_GRID_COLUMNS = 0  # Single row with all buttons
     ENABLE_STATUS_SCROLLING = True  # Marquee animation for long status messages
     BUTTON_CONFIGS = [
         ("Add", "add_plate", "Add new plate directory"),
@@ -81,22 +93,29 @@ class PlateManagerWidget(AbstractManagerWidget):
         ("Viewer", "view_metadata", "View plate metadata"),
     ]
     ACTION_REGISTRY = {
-        "add_plate": "action_add", "del_plate": "action_delete",
-        "edit_config": "action_edit_config", "init_plate": "action_init_plate",
-        "compile_plate": "action_compile_plate", "code_plate": "action_code_plate",
+        "add_plate": "action_add",
+        "del_plate": "action_delete",
+        "edit_config": "action_edit_config",
+        "init_plate": "action_init_plate",
+        "compile_plate": "action_compile_plate",
+        "code_plate": "action_code_plate",
         "view_metadata": "action_view_metadata",
     }
     DYNAMIC_ACTIONS = {"run_plate": "_resolve_run_action"}
     ITEM_NAME_SINGULAR = "plate"
     ITEM_NAME_PLURAL = "plates"
     ITEM_HOOKS = {
-        'id_accessor': 'path', 'backing_attr': 'plates',
-        'selection_attr': 'selected_plate_path', 'selection_signal': 'plate_selected',
-        'selection_emit_id': True, 'selection_clear_value': '',
-        'items_changed_signal': None, 'list_item_data': 'item',
-        'preserve_selection_pred': lambda self: bool(self.plates),
-        'scope_item_type': ListItemType.ORCHESTRATOR,
-        'scope_id_attr': 'path',
+        "id_accessor": "path",
+        "backing_attr": "plates",
+        "selection_attr": "selected_plate_path",
+        "selection_signal": "plate_selected",
+        "selection_emit_id": True,
+        "selection_clear_value": "",
+        "items_changed_signal": None,
+        "list_item_data": "item",
+        "preserve_selection_pred": lambda self: bool(self.plates),
+        "scope_item_type": ListItemType.ORCHESTRATOR,
+        "scope_id_attr": "path",
     }
 
     # Signals
@@ -115,9 +134,14 @@ class PlateManagerWidget(AbstractManagerWidget):
     execution_error = pyqtSignal(str)
     _execution_complete_signal = pyqtSignal(dict, str)
     _execution_error_signal = pyqtSignal(str)
-    
-    def __init__(self, service_adapter, color_scheme: Optional[ColorScheme] = None,
-                 gui_config=None, parent=None):
+
+    def __init__(
+        self,
+        service_adapter,
+        color_scheme: Optional[ColorScheme] = None,
+        gui_config=None,
+        parent=None,
+    ):
         """
         Initialize the plate manager widget.
 
@@ -138,12 +162,16 @@ class PlateManagerWidget(AbstractManagerWidget):
         self.selected_plate_path: str = ""
         self.plate_configs: Dict[str, Dict] = {}
         self.plate_compiled_data: Dict[str, tuple] = {}  # Store compiled pipeline data
-        self.current_execution_id: Optional[str] = None  # Track current execution ID for cancellation
+        self.current_execution_id: Optional[str] = (
+            None  # Track current execution ID for cancellation
+        )
         self.execution_state = "idle"
 
         # Track per-plate execution state
         self.plate_execution_ids: Dict[str, str] = {}  # plate_path -> execution_id
-        self.plate_execution_states: Dict[str, str] = {}  # plate_path -> "queued" | "running" | "completed" | "failed"
+        self.plate_execution_states: Dict[
+            str, str
+        ] = {}  # plate_path -> "queued" | "running" | "completed" | "failed"
 
         # Extracted services (Phase 1, 2)
         self._zmq_service = ZMQExecutionService(self, port=7777)
@@ -187,8 +215,12 @@ class PlateManagerWidget(AbstractManagerWidget):
         # Log for debugging
         root_state = self._ensure_root_state()
         current_paths = set(root_state.parameters.get("orchestrator_scope_ids") or [])
-        initialized = sum(1 for p in current_paths if ObjectStateRegistry.get_object(p) is not None)
-        logger.info(f"🕰️ Time travel complete: {initialized}/{len(current_paths)} plates initialized")
+        initialized = sum(
+            1 for p in current_paths if ObjectStateRegistry.get_object(p) is not None
+        )
+        logger.info(
+            f"🕰️ Time travel complete: {initialized}/{len(current_paths)} plates initialized"
+        )
 
         # Clear plate configs cache - force reload from ObjectState
         # (PipelineConfig is properly restored by ObjectState time travel)
@@ -228,27 +260,39 @@ class PlateManagerWidget(AbstractManagerWidget):
         root_state = self._ensure_root_state()
         plate_paths = root_state.parameters.get("orchestrator_scope_ids") or []
 
-        return [
-            {
-                'name': Path(path).name,
-                'path': path
-            }
-            for path in plate_paths
-        ]
+        return [{"name": Path(path).name, "path": path} for path in plate_paths]
 
     # ExecutionHost interface
-    def emit_status(self, msg: str) -> None: self.status_message.emit(msg)
-    def emit_error(self, msg: str) -> None: self.execution_error.emit(msg)
-    def emit_orchestrator_state(self, plate_path: str, state: str) -> None: self.orchestrator_state_changed.emit(plate_path, state)
-    def emit_execution_complete(self, result: dict, plate_path: str) -> None: self._execution_complete_signal.emit(result, plate_path)
-    def emit_clear_logs(self) -> None: self.clear_subprocess_logs.emit()
+    def emit_status(self, msg: str) -> None:
+        self.status_message.emit(msg)
+
+    def emit_error(self, msg: str) -> None:
+        self.execution_error.emit(msg)
+
+    def emit_orchestrator_state(self, plate_path: str, state: str) -> None:
+        self.orchestrator_state_changed.emit(plate_path, state)
+
+    def emit_execution_complete(self, result: dict, plate_path: str) -> None:
+        self._execution_complete_signal.emit(result, plate_path)
+
+    def emit_clear_logs(self) -> None:
+        self.clear_subprocess_logs.emit()
 
     # CompilationHost interface
-    def emit_progress_started(self, count: int) -> None: self.progress_started.emit(count)
-    def emit_progress_updated(self, value: int) -> None: self.progress_updated.emit(value)
-    def emit_progress_finished(self) -> None: self.progress_finished.emit()
-    def emit_compilation_error(self, plate_name: str, error: str) -> None: self.compilation_error.emit(plate_name, error)
-    def get_pipeline_definition(self, plate_path: str) -> List: return self._get_current_pipeline_definition(plate_path)
+    def emit_progress_started(self, count: int) -> None:
+        self.progress_started.emit(count)
+
+    def emit_progress_updated(self, value: int) -> None:
+        self.progress_updated.emit(value)
+
+    def emit_progress_finished(self) -> None:
+        self.progress_finished.emit()
+
+    def emit_compilation_error(self, plate_name: str, error: str) -> None:
+        self.compilation_error.emit(plate_name, error)
+
+    def get_pipeline_definition(self, plate_path: str) -> List:
+        return self._get_current_pipeline_definition(plate_path)
 
     def on_plate_completed(self, plate_path: str, status: str, result: dict) -> None:
         self._execution_complete_signal.emit(result, plate_path)
@@ -257,23 +301,32 @@ class PlateManagerWidget(AbstractManagerWidget):
         self._zmq_service.disconnect()
         self.execution_state = "idle"
         self.current_execution_id = None
-        if completed_count > 1 and self.global_config.analysis_consolidation_config.enabled:
+        if (
+            completed_count > 1
+            and self.global_config.analysis_consolidation_config.enabled
+        ):
             try:
                 self._consolidate_multi_plate_results()
-                self.status_message.emit(f"All done: {completed_count} completed, {failed_count} failed. Global summary created.")
+                self.status_message.emit(
+                    f"All done: {completed_count} completed, {failed_count} failed. Global summary created."
+                )
             except Exception as e:
                 logger.error(f"Failed to create global summary: {e}", exc_info=True)
-                self.status_message.emit(f"All done: {completed_count} completed, {failed_count} failed. Global summary failed.")
+                self.status_message.emit(
+                    f"All done: {completed_count} completed, {failed_count} failed. Global summary failed."
+                )
         else:
-            self.status_message.emit(f"All done: {completed_count} completed, {failed_count} failed")
+            self.status_message.emit(
+                f"All done: {completed_count} completed, {failed_count} failed"
+            )
         self.update_button_states()
 
     # Declarative preview field configuration (processed automatically in ABC.__init__)
     # Labels auto-discovered from PREVIEW_LABEL_REGISTRY (set via @global_pipeline_config(preview_label=...))
     PREVIEW_FIELD_CONFIGS = [
-        'napari_streaming_config',       # preview_label='NAP'
-        'fiji_streaming_config',         # preview_label='FIJI'
-        'step_materialization_config',   # preview_label='MAT'
+        "napari_streaming_config",  # preview_label='NAP'
+        "fiji_streaming_config",  # preview_label='FIJI'
+        "step_materialization_config",  # preview_label='MAT'
     ]
 
     # Declarative list item format for PlateManager
@@ -282,13 +335,13 @@ class PlateManagerWidget(AbstractManagerWidget):
     LIST_ITEM_FORMAT = ListItemFormat(
         first_line=(),  # No fields on first line (just name)
         preview_line=(
-            'num_workers',
-            'vfs_config.materialization_backend',
-            'path_planning_config.well_filter',
-            'path_planning_config.output_dir_suffix',
-            'path_planning_config.global_output_folder',
+            "num_workers",
+            "vfs_config.materialization_backend",
+            "path_planning_config.well_filter",
+            "path_planning_config.output_dir_suffix",
+            "path_planning_config.global_output_folder",
         ),
-        detail_line_field='path',  # Show plate path as detail line
+        detail_line_field="path",  # Show plate path as detail line
         show_config_indicators=True,
     )
 
@@ -296,7 +349,9 @@ class PlateManagerWidget(AbstractManagerWidget):
 
     def _handle_full_preview_refresh(self) -> None:
         """Refresh all preview labels."""
-        logger.info("🔄 PlateManager._handle_full_preview_refresh: refreshing preview labels")
+        logger.info(
+            "🔄 PlateManager._handle_full_preview_refresh: refreshing preview labels"
+        )
         self.update_item_list()
 
     def _update_single_plate_item(self, plate_path: str):
@@ -304,15 +359,17 @@ class PlateManagerWidget(AbstractManagerWidget):
         for i in range(self.item_list.count()):
             item = self.item_list.item(i)
             plate_data = item.data(Qt.ItemDataRole.UserRole)
-            if plate_data and plate_data.get('path') == plate_path:
+            if plate_data and plate_data.get("path") == plate_path:
                 display_text = self._format_plate_item_with_preview_text(plate_data)
                 item.setText(display_text)
-                self._set_item_styling_roles(item, display_text, plate_data)  # ABC helper
+                self._set_item_styling_roles(
+                    item, display_text, plate_data
+                )  # ABC helper
                 break
 
     def format_item_for_display(self, item: Dict, live_ctx=None) -> Tuple[str, str]:
         """Format plate item for display with preview (required abstract method)."""
-        return (self._format_plate_item_with_preview_text(item), item['path'])
+        return (self._format_plate_item_with_preview_text(item), item["path"])
 
     def _format_plate_item_with_preview_text(self, plate: Dict):
         """Format plate item with status and config preview labels.
@@ -320,26 +377,31 @@ class PlateManagerWidget(AbstractManagerWidget):
         Uses declarative LIST_ITEM_FORMAT with orchestrator.pipeline_config as config source.
         """
         status_prefix = ""
-        orchestrator = ObjectStateRegistry.get_object(plate['path'])
+        orchestrator = ObjectStateRegistry.get_object(plate["path"])
 
         if orchestrator:
             state_map = {
-                OrchestratorState.READY: "✓ Init", OrchestratorState.COMPILED: "✓ Compiled",
-                OrchestratorState.COMPLETED: "✅ Complete", OrchestratorState.INIT_FAILED: "❌ Init Failed",
-                OrchestratorState.COMPILE_FAILED: "❌ Compile Failed", OrchestratorState.EXEC_FAILED: "❌ Exec Failed",
+                OrchestratorState.READY: "✓ Init",
+                OrchestratorState.COMPILED: "✓ Compiled",
+                OrchestratorState.COMPLETED: "✅ Complete",
+                OrchestratorState.INIT_FAILED: "❌ Init Failed",
+                OrchestratorState.COMPILE_FAILED: "❌ Compile Failed",
+                OrchestratorState.EXEC_FAILED: "❌ Exec Failed",
             }
             if orchestrator.state == OrchestratorState.EXECUTING:
-                exec_state = self.plate_execution_states.get(plate['path'])
-                status_prefix = {"queued": "⏳ Queued", "running": "🔄 Running"}.get(exec_state, "🔄 Executing")
+                exec_state = self.plate_execution_states.get(plate["path"])
+                status_prefix = {"queued": "⏳ Queued", "running": "🔄 Running"}.get(
+                    exec_state, "🔄 Executing"
+                )
             else:
                 status_prefix = state_map.get(orchestrator.state, "")
 
         # Use declarative format with orchestrator.pipeline_config as introspection source
         return self._build_item_display_from_format(
             item=orchestrator,
-            item_name=plate['name'],
+            item_name=plate["name"],
             status_prefix=status_prefix,
-            detail_line=plate['path'],
+            detail_line=plate["path"],
         )
 
     def setup_connections(self):
@@ -356,9 +418,12 @@ class PlateManagerWidget(AbstractManagerWidget):
         self._execution_error_signal.connect(self._on_execution_error)
 
     def _resolve_run_action(self) -> str:
-        """Resolve run/stop action based on current state.
-        """
-        return "action_stop_execution" if self.is_any_plate_running() else "action_run_plate"
+        """Resolve run/stop action based on current state."""
+        return (
+            "action_stop_execution"
+            if self.is_any_plate_running()
+            else "action_run_plate"
+        )
 
     def _update_orchestrator_global_config(self, orchestrator, new_global_config):
         """Update orchestrator global config reference and rebuild pipeline config if needed."""
@@ -368,14 +433,18 @@ class PlateManagerWidget(AbstractManagerWidget):
         orchestrator.pipeline_config = rebuild_lazy_config_with_new_global_reference(
             current_config, new_global_config, GlobalPipelineConfig
         )
-        logger.info(f"Rebuilt orchestrator-specific config for plate: {orchestrator.plate_path}")
+        logger.info(
+            f"Rebuilt orchestrator-specific config for plate: {orchestrator.plate_path}"
+        )
 
         # NOTE: ObjectState now auto-detects delegate changes, so no manual sync needed.
         # When the orchestrator's ObjectState is next accessed, it will automatically
         # detect that pipeline_config has been replaced and re-extract parameters.
 
         effective_config = orchestrator.get_effective_config()
-        self.orchestrator_config_changed.emit(str(orchestrator.plate_path), effective_config)
+        self.orchestrator_config_changed.emit(
+            str(orchestrator.plate_path), effective_config
+        )
 
     # ========== Business Logic Methods ==========
 
@@ -386,12 +455,12 @@ class PlateManagerWidget(AbstractManagerWidget):
             cache_key=PathCacheKey.PLATE_IMPORT,
             title="Select Plate Directory",
             fallback_path=Path.home(),
-            allow_multiple=True
+            allow_multiple=True,
         )
 
         if selected_paths:
             self.add_plate_callback(selected_paths)
-    
+
     def add_plate_callback(self, selected_paths: List[Path]):
         """
         Handle plate directory selection (extracted from Textual version).
@@ -440,7 +509,9 @@ class PlateManagerWidget(AbstractManagerWidget):
                 self.selected_plate_path = last_added_path
                 logger.info(f"🔔 EMITTING plate_selected signal for: {last_added_path}")
                 self.plate_selected.emit(last_added_path)
-            self.status_message.emit(f"Added {len(added_plates)} plate(s): {', '.join(added_plates)}")
+            self.status_message.emit(
+                f"Added {len(added_plates)} plate(s): {', '.join(added_plates)}"
+            )
         else:
             self.status_message.emit("No new plates added (duplicates skipped)")
 
@@ -465,8 +536,7 @@ class PlateManagerWidget(AbstractManagerWidget):
 
         plate_registry = _create_storage_registry()
         orchestrator = PipelineOrchestrator(
-            plate_path=plate_path,
-            storage_registry=plate_registry
+            plate_path=plate_path, storage_registry=plate_registry
         )
 
         # Apply any saved config (e.g., from code loading)
@@ -484,7 +554,9 @@ class PlateManagerWidget(AbstractManagerWidget):
         )
         ObjectStateRegistry.register(orchestrator_state)
 
-        self.orchestrator_state_changed.emit(plate_path, OrchestratorState.CREATED.value)
+        self.orchestrator_state_changed.emit(
+            plate_path, OrchestratorState.CREATED.value
+        )
         logger.info(f"Created orchestrator for plate (CREATED state): {plate_path}")
 
         return orchestrator
@@ -495,26 +567,26 @@ class PlateManagerWidget(AbstractManagerWidget):
         """Unified functional validator for all plate operations with debug logging."""
 
         def _validate_compile(p):
-            orch = ObjectStateRegistry.get_object(p['path'])
+            orch = ObjectStateRegistry.get_object(p["path"])
             if not orch:
                 return False, "no_orchestrator_initialized"
-            pipeline_steps = self._get_current_pipeline_definition(p['path'])
+            pipeline_steps = self._get_current_pipeline_definition(p["path"])
             if not pipeline_steps:
                 return False, "empty_pipeline_definition"
             return True, "ok"
 
         def _validate_run(p):
-            orch = ObjectStateRegistry.get_object(p['path'])
+            orch = ObjectStateRegistry.get_object(p["path"])
             if not orch:
                 return False, "no_orchestrator_initialized"
-            if orch.state not in ['COMPILED', 'COMPLETED']:
+            if orch.state not in ["COMPILED", "COMPLETED"]:
                 return False, f"orchestrator_state_not_runnable:{orch.state}"
             return True, "ok"
 
         validators = {
-            'init': lambda p: (True, "ok"),  # Init can work on any plates
-            'compile': _validate_compile,
-            'run': _validate_run,
+            "init": lambda p: (True, "ok"),  # Init can work on any plates
+            "compile": _validate_compile,
+            "run": _validate_run,
         }
 
         validator = validators.get(operation_type, lambda p: (True, "ok"))
@@ -528,8 +600,8 @@ class PlateManagerWidget(AbstractManagerWidget):
                 logger.info(
                     "PLATE_VALIDATION [%s] plate=%s name=%s reason=%s",
                     operation_type,
-                    plate.get('path'),
-                    plate.get('name'),
+                    plate.get("path"),
+                    plate.get("name"),
                     reason,
                 )
         return invalid
@@ -546,11 +618,11 @@ class PlateManagerWidget(AbstractManagerWidget):
         """
         self._ensure_context()
         selected_items = self.get_selected_items()
-        self._validate_plates_for_operation(selected_items, 'init')
+        self._validate_plates_for_operation(selected_items, "init")
         self.progress_started.emit(len(selected_items))
 
         async def init_single_plate(i, plate):
-            plate_path = plate['path']
+            plate_path = plate["path"]
 
             # Get existing orchestrator (created during add) or create if missing
             orchestrator = ObjectStateRegistry.get_object(plate_path)
@@ -560,8 +632,14 @@ class PlateManagerWidget(AbstractManagerWidget):
                 orchestrator = self._create_orchestrator_for_plate(plate_path)
 
             # Skip if already initialized
-            if orchestrator.state in [OrchestratorState.READY, OrchestratorState.COMPILED, OrchestratorState.COMPLETED]:
-                logger.info(f"Orchestrator already initialized for {plate_path}, skipping")
+            if orchestrator.state in [
+                OrchestratorState.READY,
+                OrchestratorState.COMPILED,
+                OrchestratorState.COMPLETED,
+            ]:
+                logger.info(
+                    f"Orchestrator already initialized for {plate_path}, skipping"
+                )
                 self.progress_updated.emit(i + 1)
                 return
 
@@ -576,45 +654,80 @@ class PlateManagerWidget(AbstractManagerWidget):
                 # If this plate is currently selected, emit signal to update pipeline editor
                 # This ensures pipeline editor gets notified when the selected plate is initialized
                 if plate_path == self.selected_plate_path:
-                    logger.info(f"🔔 EMITTING plate_selected after init for currently selected plate: {plate_path}")
+                    logger.info(
+                        f"🔔 EMITTING plate_selected after init for currently selected plate: {plate_path}"
+                    )
                     self.plate_selected.emit(plate_path)
                 elif not self.selected_plate_path:
                     # If no plate is selected, select this one
                     self.selected_plate_path = plate_path
-                    logger.info(f"🔔 EMITTING plate_selected after init (auto-selecting): {plate_path}")
+                    logger.info(
+                        f"🔔 EMITTING plate_selected after init (auto-selecting): {plate_path}"
+                    )
                     self.plate_selected.emit(plate_path)
             except Exception as e:
-                logger.error(f"Failed to initialize plate {plate_path}: {e}", exc_info=True)
+                logger.error(
+                    f"Failed to initialize plate {plate_path}: {e}", exc_info=True
+                )
                 orchestrator._state = OrchestratorState.INIT_FAILED
-                self.orchestrator_state_changed.emit(plate_path, OrchestratorState.INIT_FAILED.value)
-                self.initialization_error.emit(plate['name'], str(e))
+                self.orchestrator_state_changed.emit(
+                    plate_path, OrchestratorState.INIT_FAILED.value
+                )
+                self.initialization_error.emit(plate["name"], str(e))
 
             self.progress_updated.emit(i + 1)
 
-        await asyncio.gather(*[init_single_plate(i, p) for i, p in enumerate(selected_items)])
+        await asyncio.gather(
+            *[init_single_plate(i, p) for i, p in enumerate(selected_items)]
+        )
 
         self.progress_finished.emit()
 
         # Count successes and failures
-        success_count = len([p for p in selected_items if ObjectStateRegistry.get_object(p['path']) and ObjectStateRegistry.get_object(p['path']).state == OrchestratorState.READY])
-        error_count = len([p for p in selected_items if ObjectStateRegistry.get_object(p['path']) and ObjectStateRegistry.get_object(p['path']).state == OrchestratorState.INIT_FAILED])
+        success_count = len(
+            [
+                p
+                for p in selected_items
+                if ObjectStateRegistry.get_object(p["path"])
+                and ObjectStateRegistry.get_object(p["path"]).state
+                == OrchestratorState.READY
+            ]
+        )
+        error_count = len(
+            [
+                p
+                for p in selected_items
+                if ObjectStateRegistry.get_object(p["path"])
+                and ObjectStateRegistry.get_object(p["path"]).state
+                == OrchestratorState.INIT_FAILED
+            ]
+        )
 
-        msg = f"Successfully initialized {success_count} plate(s)" if error_count == 0 else f"Initialized {success_count} plate(s), {error_count} error(s)"
+        msg = (
+            f"Successfully initialized {success_count} plate(s)"
+            if error_count == 0
+            else f"Initialized {success_count} plate(s), {error_count} error(s)"
+        )
         self.status_message.emit(msg)
 
     def action_edit_config(self):
         """Handle Edit Config button - per-orchestrator PipelineConfig editing."""
         selected_items = self.get_selected_items()
         if not selected_items:
-            self.service_adapter.show_error_dialog("No plates selected for configuration.")
+            self.service_adapter.show_error_dialog(
+                "No plates selected for configuration."
+            )
             return
 
         selected_orchestrators = [
-            ObjectStateRegistry.get_object(item['path']) for item in selected_items
-            if ObjectStateRegistry.get_object(item['path']) is not None
+            ObjectStateRegistry.get_object(item["path"])
+            for item in selected_items
+            if ObjectStateRegistry.get_object(item["path"]) is not None
         ]
         if not selected_orchestrators:
-            self.service_adapter.show_error_dialog("No initialized orchestrators selected.")
+            self.service_adapter.show_error_dialog(
+                "No initialized orchestrators selected."
+            )
             return
 
         representative_orchestrator = selected_orchestrators[0]
@@ -633,11 +746,17 @@ class PlateManagerWidget(AbstractManagerWidget):
                 orchestrator.apply_pipeline_config(new_config)
                 # Emit signal for UI components to refresh
                 effective_config = orchestrator.get_effective_config()
-                self.orchestrator_config_changed.emit(str(orchestrator.plate_path), effective_config)
+                self.orchestrator_config_changed.emit(
+                    str(orchestrator.plate_path), effective_config
+                )
 
             # Auto-sync handles context restoration automatically when pipeline_config is accessed
-            if self.selected_plate_path and ObjectStateRegistry.get_object(self.selected_plate_path):
-                logger.debug(f"Orchestrator context automatically maintained after config save: {self.selected_plate_path}")
+            if self.selected_plate_path and ObjectStateRegistry.get_object(
+                self.selected_plate_path
+            ):
+                logger.debug(
+                    f"Orchestrator context automatically maintained after config save: {self.selected_plate_path}"
+                )
 
             count = len(selected_orchestrators)
             # Success message dialog removed for test automation compatibility
@@ -648,10 +767,12 @@ class PlateManagerWidget(AbstractManagerWidget):
             config_class=PipelineConfig,
             current_config=current_plate_config,
             on_save_callback=handle_config_save,
-            orchestrator=representative_orchestrator  # Pass orchestrator for context persistence
+            orchestrator=representative_orchestrator,  # Pass orchestrator for context persistence
         )
 
-    def _open_config_window(self, config_class, current_config, on_save_callback, orchestrator=None):
+    def _open_config_window(
+        self, config_class, current_config, on_save_callback, orchestrator=None
+    ):
         """Open configuration window with specified config class and current config.
 
         Singleton-per-scope behavior is handled automatically by BaseFormDialog.show().
@@ -667,8 +788,12 @@ class PlateManagerWidget(AbstractManagerWidget):
             scope_id = None
 
         config_window = ConfigWindow(
-            config_class, current_config, on_save_callback,
-            self.color_scheme, self, scope_id=scope_id
+            config_class,
+            current_config,
+            on_save_callback,
+            self.color_scheme,
+            self,
+            scope_id=scope_id,
         )
         # BaseFormDialog.show() handles singleton-per-scope automatically
         config_window.show()
@@ -677,7 +802,9 @@ class PlateManagerWidget(AbstractManagerWidget):
 
     def action_edit_global_config(self):
         """Handle global configuration editing - affects all orchestrators."""
-        current_global_config = self.service_adapter.get_global_config() or GlobalPipelineConfig()
+        current_global_config = (
+            self.service_adapter.get_global_config() or GlobalPipelineConfig()
+        )
 
         def handle_global_config_save(new_config: GlobalPipelineConfig) -> None:
             self.service_adapter.set_global_config(new_config)
@@ -689,15 +816,17 @@ class PlateManagerWidget(AbstractManagerWidget):
             self.global_config = new_config
 
             for plate in self.plates:
-                orchestrator = ObjectStateRegistry.get_object(plate['path'])
+                orchestrator = ObjectStateRegistry.get_object(plate["path"])
                 if orchestrator:
                     self._update_orchestrator_global_config(orchestrator, new_config)
-            self.service_adapter.show_info_dialog("Global configuration applied to all orchestrators")
+            self.service_adapter.show_info_dialog(
+                "Global configuration applied to all orchestrators"
+            )
 
         self._open_config_window(
             config_class=GlobalPipelineConfig,
             current_config=current_global_config,
-            on_save_callback=handle_global_config_save
+            on_save_callback=handle_global_config_save,
         )
 
     def _save_global_config_to_cache(self, config: GlobalPipelineConfig):
@@ -709,7 +838,9 @@ class PlateManagerWidget(AbstractManagerWidget):
             if success:
                 logger.info("Global config saved to cache for session persistence")
             else:
-                logger.error("Failed to save global config to cache - sync save returned False")
+                logger.error(
+                    "Failed to save global config to cache - sync save returned False"
+                )
         except Exception as e:
             logger.error(f"Failed to save global config to cache: {e}")
             # Don't show error dialog as this is not critical for immediate functionality
@@ -723,17 +854,19 @@ class PlateManagerWidget(AbstractManagerWidget):
             return
 
         # Unified validation using functional validator
-        invalid_plates = self._validate_plates_for_operation(selected_items, 'compile')
+        invalid_plates = self._validate_plates_for_operation(selected_items, "compile")
 
         # Let validation failures bubble up as status messages
         if invalid_plates:
-            invalid_names = [p['name'] for p in invalid_plates]
+            invalid_names = [p["name"] for p in invalid_plates]
             logger.info(
                 "PLATE_VALIDATION [compile] blocked %d plate(s): %s",
                 len(invalid_names),
                 ", ".join(invalid_names),
             )
-            self.status_message.emit(f"Cannot compile invalid plates: {', '.join(invalid_names)}")
+            self.status_message.emit(
+                f"Cannot compile invalid plates: {', '.join(invalid_names)}"
+            )
             return
 
         # Delegate to compilation service
@@ -746,9 +879,15 @@ class PlateManagerWidget(AbstractManagerWidget):
             self.execution_error.emit("No plates selected to run.")
             return
 
-        ready_items = [item for item in selected_items if item.get('path') in self.plate_compiled_data]
+        ready_items = [
+            item
+            for item in selected_items
+            if item.get("path") in self.plate_compiled_data
+        ]
         if not ready_items:
-            self.execution_error.emit("Selected plates are not compiled. Please compile first.")
+            self.execution_error.emit(
+                "Selected plates are not compiled. Please compile first."
+            )
             return
 
         await self._zmq_service.run_plates(ready_items)
@@ -756,26 +895,28 @@ class PlateManagerWidget(AbstractManagerWidget):
     def _on_execution_complete(self, result, plate_path):
         """Handle execution completion for a single plate (called from main thread via signal)."""
         try:
-            status = result.get('status')
+            status = result.get("status")
             logger.info(f"Plate {plate_path} completed with status: {status}")
 
             # Update plate state and orchestrator
-            if status == 'complete':
+            if status == "complete":
                 self.plate_execution_states[plate_path] = "completed"
                 self.status_message.emit(f"✓ Completed {plate_path}")
                 new_state = OrchestratorState.COMPLETED
-            elif status == 'cancelled':
+            elif status == "cancelled":
                 self.plate_execution_states[plate_path] = "failed"
                 self.status_message.emit(f"✗ Cancelled {plate_path}")
                 new_state = OrchestratorState.READY
             else:
                 self.plate_execution_states[plate_path] = "failed"
-                error_msg = result.get('message', 'Unknown error')
-                traceback_str = result.get('traceback', '')
+                error_msg = result.get("message", "Unknown error")
+                traceback_str = result.get("traceback", "")
 
                 # Include traceback in error message if available
                 if traceback_str:
-                    full_error = f"Execution failed for {plate_path}:\n\n{traceback_str}"
+                    full_error = (
+                        f"Execution failed for {plate_path}:\n\n{traceback_str}"
+                    )
                 else:
                     full_error = f"Execution failed for {plate_path}: {error_msg}"
 
@@ -806,30 +947,50 @@ class PlateManagerWidget(AbstractManagerWidget):
             if state != "completed":
                 continue
             plate_path = Path(plate_path_str)
-            base = Path(path_config.global_output_folder) if path_config.global_output_folder else plate_path.parent
-            output_plate_root = base / f"{plate_path.name}{path_config.output_dir_suffix}"
+            base = (
+                Path(path_config.global_output_folder)
+                if path_config.global_output_folder
+                else plate_path.parent
+            )
+            output_plate_root = (
+                base / f"{plate_path.name}{path_config.output_dir_suffix}"
+            )
 
             materialization_path = self.global_config.materialization_results_path
-            results_dir = Path(materialization_path) if Path(materialization_path).is_absolute() else output_plate_root / materialization_path
+            results_dir = (
+                Path(materialization_path)
+                if Path(materialization_path).is_absolute()
+                else output_plate_root / materialization_path
+            )
             summary_path = results_dir / analysis_config.output_filename
 
             if summary_path.exists():
                 summary_paths.append(str(summary_path))
                 plate_names.append(output_plate_root.name)
             else:
-                logger.warning(f"No summary found for plate {plate_path} at {summary_path}")
+                logger.warning(
+                    f"No summary found for plate {plate_path} at {summary_path}"
+                )
 
         if len(summary_paths) < 2:
             return
 
-        global_output_dir = Path(path_config.global_output_folder) if path_config.global_output_folder else Path(summary_paths[0]).parent.parent.parent
-        global_summary_path = global_output_dir / analysis_config.global_summary_filename
+        global_output_dir = (
+            Path(path_config.global_output_folder)
+            if path_config.global_output_folder
+            else Path(summary_paths[0]).parent.parent.parent
+        )
+        global_summary_path = (
+            global_output_dir / analysis_config.global_summary_filename
+        )
 
-        logger.info(f"Consolidating {len(summary_paths)} summaries to {global_summary_path}")
+        logger.info(
+            f"Consolidating {len(summary_paths)} summaries to {global_summary_path}"
+        )
         consolidate_multi_plate_summaries(
             summary_paths=summary_paths,
             output_path=str(global_summary_path),
-            plate_names=plate_names
+            plate_names=plate_names,
         )
         logger.info(f"✅ Global summary created: {global_summary_path}")
 
@@ -862,7 +1023,7 @@ class PlateManagerWidget(AbstractManagerWidget):
             QApplication.processEvents()
 
         self._zmq_service.stop_execution(force=is_force_kill)
-    
+
     def action_code_plate(self):
         """Generate Python code for selected plates and their pipelines (Tier 3)."""
         logger.debug("Code button pressed - generating Python code for plates")
@@ -870,10 +1031,14 @@ class PlateManagerWidget(AbstractManagerWidget):
         selected_items = self.get_selected_items()
         if not selected_items:
             if self.plates:
-                logger.info("Code button pressed with no selection, falling back to all plates.")
+                logger.info(
+                    "Code button pressed with no selection, falling back to all plates."
+                )
                 selected_items = list(self.plates)
             else:
-                logger.info("Code button pressed with no plates configured; generating empty template.")
+                logger.info(
+                    "Code button pressed with no plates configured; generating empty template."
+                )
                 selected_items = []
 
         try:
@@ -883,13 +1048,15 @@ class PlateManagerWidget(AbstractManagerWidget):
             per_plate_configs = {}  # Store pipeline config for each plate
 
             for plate_data in selected_items:
-                plate_path = plate_data['path']
+                plate_path = plate_data["path"]
                 plate_paths.append(plate_path)
 
                 # Get pipeline definition for this plate
                 definition_pipeline = self._get_current_pipeline_definition(plate_path)
                 if not definition_pipeline:
-                    logger.warning(f"No pipeline defined for {plate_data['name']}, using empty pipeline")
+                    logger.warning(
+                        f"No pipeline defined for {plate_data['name']}, using empty pipeline"
+                    )
                     definition_pipeline = []
 
                 pipeline_data[plate_path] = definition_pipeline
@@ -924,17 +1091,24 @@ class PlateManagerWidget(AbstractManagerWidget):
             )
 
             editor_service = SimpleCodeEditorService(self)
-            use_external = os.environ.get('OPENHCS_USE_EXTERNAL_EDITOR', '').lower() in ('1', 'true', 'yes')
+            use_external = os.environ.get(
+                "OPENHCS_USE_EXTERNAL_EDITOR", ""
+            ).lower() in ("1", "true", "yes")
             code_data = {
-                'clean_mode': True, 'plate_paths': plate_paths,
-                'pipeline_data': pipeline_data, 'global_config': self.global_config,
-                'per_plate_configs': per_plate_configs,
-                'pipeline_config': pipeline_config,
+                "clean_mode": True,
+                "plate_paths": plate_paths,
+                "pipeline_data": pipeline_data,
+                "global_config": self.global_config,
+                "per_plate_configs": per_plate_configs,
+                "pipeline_config": pipeline_config,
             }
             editor_service.edit_code(
-                initial_content=python_code, title="Edit Orchestrator Configuration",
-                callback=self._handle_edited_code, use_external=use_external,
-                code_type='orchestrator', code_data=code_data
+                initial_content=python_code,
+                title="Edit Orchestrator Configuration",
+                callback=self._handle_edited_code,
+                use_external=use_external,
+                code_type="orchestrator",
+                code_data=code_data,
             )
 
         except Exception as e:
@@ -991,27 +1165,29 @@ class PlateManagerWidget(AbstractManagerWidget):
     def _pre_code_execution(self) -> None:
         """Open pipeline editor window before processing orchestrator code."""
         main_window = self._find_main_window()
-        if main_window and hasattr(main_window, 'show_pipeline_editor'):
+        if main_window and hasattr(main_window, "show_pipeline_editor"):
             main_window.show_pipeline_editor()
 
     def _apply_executed_code(self, namespace: dict) -> bool:
         """Extract orchestrator variables from namespace and apply to widget state."""
-        if 'plate_paths' not in namespace or 'pipeline_data' not in namespace:
+        if "plate_paths" not in namespace or "pipeline_data" not in namespace:
             return False
 
-        new_plate_paths = namespace['plate_paths']
-        new_pipeline_data = namespace['pipeline_data']
+        new_plate_paths = namespace["plate_paths"]
+        new_pipeline_data = namespace["pipeline_data"]
         self._ensure_plate_entries_from_code(new_plate_paths)
 
         # Update global config if present
-        if 'global_config' in namespace:
-            self._apply_global_config_from_code(namespace['global_config'])
+        if "global_config" in namespace:
+            self._apply_global_config_from_code(namespace["global_config"])
 
         # Handle per-plate configs (preferred) or single pipeline_config (legacy)
-        if 'per_plate_configs' in namespace:
-            self._apply_per_plate_configs_from_code(namespace['per_plate_configs'])
-        elif 'pipeline_config' in namespace:
-            self._apply_legacy_pipeline_config_from_code(namespace['pipeline_config'], new_plate_paths)
+        if "per_plate_configs" in namespace:
+            self._apply_per_plate_configs_from_code(namespace["per_plate_configs"])
+        elif "pipeline_config" in namespace:
+            self._apply_legacy_pipeline_config_from_code(
+                namespace["pipeline_config"], new_plate_paths
+            )
 
         # Update pipeline data for ALL affected plates
         self._apply_pipeline_data_from_code(new_pipeline_data)
@@ -1029,7 +1205,7 @@ class PlateManagerWidget(AbstractManagerWidget):
 
         # Apply to all orchestrators
         for plate in self.plates:
-            orchestrator = ObjectStateRegistry.get_object(plate['path'])
+            orchestrator = ObjectStateRegistry.get_object(plate["path"])
             if orchestrator:
                 self._update_orchestrator_global_config(orchestrator, new_global_config)
 
@@ -1038,7 +1214,7 @@ class PlateManagerWidget(AbstractManagerWidget):
         self.global_config_changed.emit()
 
         # Broadcast to event bus
-        self._broadcast_to_event_bus('config', new_global_config)
+        self._broadcast_to_event_bus("config", new_global_config)
 
     def _apply_per_plate_configs_from_code(self, per_plate_configs: dict) -> None:
         """Apply per-plate pipeline configs from executed code."""
@@ -1051,21 +1227,29 @@ class PlateManagerWidget(AbstractManagerWidget):
             if orchestrator:
                 orchestrator.apply_pipeline_config(new_pipeline_config)
                 effective_config = orchestrator.get_effective_config()
-                self.orchestrator_config_changed.emit(str(orchestrator.plate_path), effective_config)
-                logger.debug(f"Applied per-plate pipeline config to orchestrator: {orchestrator.plate_path}")
+                self.orchestrator_config_changed.emit(
+                    str(orchestrator.plate_path), effective_config
+                )
+                logger.debug(
+                    f"Applied per-plate pipeline config to orchestrator: {orchestrator.plate_path}"
+                )
             else:
-                logger.info(f"Stored pipeline config for {plate_key}; will apply when initialized.")
+                logger.info(
+                    f"Stored pipeline config for {plate_key}; will apply when initialized."
+                )
 
             last_pipeline_config = new_pipeline_config
 
         # Broadcast last config to event bus
         if last_pipeline_config:
-            self._broadcast_to_event_bus('config', last_pipeline_config)
+            self._broadcast_to_event_bus("config", last_pipeline_config)
 
-    def _apply_legacy_pipeline_config_from_code(self, new_pipeline_config, plate_paths: list) -> None:
+    def _apply_legacy_pipeline_config_from_code(
+        self, new_pipeline_config, plate_paths: list
+    ) -> None:
         """Apply legacy single pipeline_config to all plates."""
         # Broadcast to event bus
-        self._broadcast_to_event_bus('config', new_pipeline_config)
+        self._broadcast_to_event_bus("config", new_pipeline_config)
 
         # Apply to all affected orchestrators
         for plate_path in plate_paths:
@@ -1074,21 +1258,27 @@ class PlateManagerWidget(AbstractManagerWidget):
                 orchestrator.apply_pipeline_config(new_pipeline_config)
                 effective_config = orchestrator.get_effective_config()
                 self.orchestrator_config_changed.emit(str(plate_path), effective_config)
-                logger.debug(f"Applied tier 3 pipeline config to orchestrator: {plate_path}")
+                logger.debug(
+                    f"Applied tier 3 pipeline config to orchestrator: {plate_path}"
+                )
 
     def _apply_pipeline_data_from_code(self, new_pipeline_data: dict) -> None:
         """Apply pipeline data for ALL affected plates with proper state invalidation."""
-        if not self.pipeline_editor or not hasattr(self.pipeline_editor, '_update_pipeline_steps'):
+        if not self.pipeline_editor or not hasattr(
+            self.pipeline_editor, "_update_pipeline_steps"
+        ):
             logger.warning("No pipeline editor available to update pipeline data")
             self.pipeline_data_changed.emit()
             return
 
-        current_plate = getattr(self.pipeline_editor, 'current_plate', None)
+        current_plate = getattr(self.pipeline_editor, "current_plate", None)
 
         for plate_path, new_steps in new_pipeline_data.items():
             # Update pipeline data via ObjectState (not dict assignment - plate_pipelines is read-only)
             self.pipeline_editor._update_pipeline_steps(plate_path, new_steps)
-            logger.debug(f"Updated pipeline for {plate_path} with {len(new_steps)} steps")
+            logger.debug(
+                f"Updated pipeline for {plate_path} with {len(new_steps)} steps"
+            )
 
             # Invalidate orchestrator state
             self._invalidate_orchestrator_compilation_state(plate_path)
@@ -1098,8 +1288,10 @@ class PlateManagerWidget(AbstractManagerWidget):
                 self.pipeline_editor.pipeline_steps = new_steps
                 self.pipeline_editor.update_item_list()
                 self.pipeline_editor.pipeline_changed.emit(new_steps)
-                self._broadcast_to_event_bus('pipeline', new_steps)
-                logger.debug(f"Triggered UI cascade refresh for current plate: {plate_path}")
+                self._broadcast_to_event_bus("pipeline", new_steps)
+                logger.debug(
+                    f"Triggered UI cascade refresh for current plate: {plate_path}"
+                )
 
         self.pipeline_data_changed.emit()
 
@@ -1133,25 +1325,27 @@ class PlateManagerWidget(AbstractManagerWidget):
             return
 
         for item in selected_items:
-            plate_path = item['path']
+            plate_path = item["path"]
 
             # Check if orchestrator is initialized
             orchestrator = ObjectStateRegistry.get_object(plate_path)
             if not orchestrator:
-                self.service_adapter.show_error_dialog(f"Plate must be initialized to view: {plate_path}")
+                self.service_adapter.show_error_dialog(
+                    f"Plate must be initialized to view: {plate_path}"
+                )
                 continue
 
             try:
                 # Create plate viewer window with tabs (Image Browser + Metadata)
-                viewer = PlateViewerWindow(
-                    orchestrator=orchestrator,
-                    color_scheme=self.color_scheme,
-                    parent=self
-                )
+                viewer = PlateViewerWindow(orchestrator=orchestrator, parent=self)
                 viewer.show()  # Use show() instead of exec() to allow multiple windows
             except Exception as e:
-                logger.error(f"Failed to open plate viewer for {plate_path}: {e}", exc_info=True)
-                self.service_adapter.show_error_dialog(f"Failed to open plate viewer: {str(e)}")
+                logger.error(
+                    f"Failed to open plate viewer for {plate_path}: {e}", exc_info=True
+                )
+                self.service_adapter.show_error_dialog(
+                    f"Failed to open plate viewer: {str(e)}"
+                )
 
     # ========== UI Helper Methods ==========
 
@@ -1172,12 +1366,15 @@ class PlateManagerWidget(AbstractManagerWidget):
         """Update button enabled/disabled states based on selection."""
         selected_plates = self.get_selected_items()
         has_selection = len(selected_plates) > 0
+
         def _plate_is_initialized(plate_dict):
-            orchestrator = ObjectStateRegistry.get_object(plate_dict['path'])
+            orchestrator = ObjectStateRegistry.get_object(plate_dict["path"])
             return orchestrator and orchestrator.state != OrchestratorState.CREATED
 
         has_initialized = any(_plate_is_initialized(plate) for plate in selected_plates)
-        has_compiled = any(plate['path'] in self.plate_compiled_data for plate in selected_plates)
+        has_compiled = any(
+            plate["path"] in self.plate_compiled_data for plate in selected_plates
+        )
         is_running = self.is_any_plate_running()
 
         # Update button states (logic extracted from Textual version)
@@ -1206,7 +1403,7 @@ class PlateManagerWidget(AbstractManagerWidget):
             # Idle state - button is "Run" and enabled if plates are compiled
             self.buttons["run_plate"].setEnabled(has_compiled)
             self.buttons["run_plate"].setText("Run")
-    
+
     def is_any_plate_running(self) -> bool:
         """
         Check if any plate is currently running.
@@ -1216,22 +1413,22 @@ class PlateManagerWidget(AbstractManagerWidget):
         """
         # Consider "running", "stopping", and "force_kill_ready" states as "busy"
         return self.execution_state in ("running", "stopping", "force_kill_ready")
-    
+
     # Event handlers (on_selection_changed, on_plates_reordered, on_item_double_clicked)
     # provided by AbstractManagerWidget base class
     # Plate-specific behavior implemented via abstract hooks below
-    
+
     def on_orchestrator_state_changed(self, plate_path: str, state: str):
         """
         Handle orchestrator state changes.
-        
+
         Args:
             plate_path: Path of the plate
             state: New orchestrator state
         """
         self.update_item_list()
         logger.debug(f"Orchestrator state changed: {plate_path} -> {state}")
-    
+
     def on_config_changed(self, new_config: GlobalPipelineConfig):
         """
         Handle global configuration changes.
@@ -1245,7 +1442,7 @@ class PlateManagerWidget(AbstractManagerWidget):
         # This rebuilds their pipeline configs preserving concrete values
         count = 0
         for plate in self.plates:
-            orchestrator = ObjectStateRegistry.get_object(plate['path'])
+            orchestrator = ObjectStateRegistry.get_object(plate["path"])
             if orchestrator:
                 self._update_orchestrator_global_config(orchestrator, new_config)
                 count += 1
@@ -1276,12 +1473,19 @@ class PlateManagerWidget(AbstractManagerWidget):
             return []
 
         # Get pipeline for specific plate (same logic as Textual TUI)
-        if hasattr(self.pipeline_editor, 'plate_pipelines') and plate_path in self.pipeline_editor.plate_pipelines:
+        if (
+            hasattr(self.pipeline_editor, "plate_pipelines")
+            and plate_path in self.pipeline_editor.plate_pipelines
+        ):
             pipeline_steps = self.pipeline_editor.plate_pipelines[plate_path]
-            logger.debug(f"Found pipeline for plate {plate_path} with {len(pipeline_steps)} steps")
+            logger.debug(
+                f"Found pipeline for plate {plate_path} with {len(pipeline_steps)} steps"
+            )
             return pipeline_steps
         else:
-            logger.debug(f"No pipeline found for plate {plate_path}, using empty pipeline")
+            logger.debug(
+                f"No pipeline found for plate {plate_path}, using empty pipeline"
+            )
             return []
 
     def set_pipeline_editor(self, pipeline_editor):
@@ -1334,7 +1538,7 @@ class PlateManagerWidget(AbstractManagerWidget):
 
     def _perform_delete(self, items: List[Any]) -> None:
         """Remove plates from backing list and cleanup orchestrators (required abstract method)."""
-        paths_to_delete = {plate['path'] for plate in items}
+        paths_to_delete = {plate["path"] for plate in items}
 
         # Remove from root ObjectState
         root_state = self._ensure_root_state()
@@ -1349,7 +1553,9 @@ class PlateManagerWidget(AbstractManagerWidget):
             # Cascade unregister: plate + all steps + all functions (prevents memory leak)
             # This also removes the orchestrator from ObjectState (single source of truth)
             count = ObjectStateRegistry.unregister_scope_and_descendants(path_str)
-            logger.debug(f"Cascade unregistered {count} ObjectState(s) for deleted plate: {path}")
+            logger.debug(
+                f"Cascade unregistered {count} ObjectState(s) for deleted plate: {path}"
+            )
 
             # Delete saved PipelineConfig (prevents resurrection)
             if path_str in self.plate_configs:
@@ -1376,7 +1582,7 @@ class PlateManagerWidget(AbstractManagerWidget):
 
     def _get_list_item_tooltip(self, item: Any) -> str:
         """Get plate tooltip with orchestrator status."""
-        orchestrator = ObjectStateRegistry.get_object(item['path'])
+        orchestrator = ObjectStateRegistry.get_object(item["path"])
         if orchestrator:
             return f"Status: {orchestrator.state.value}"
         return ""
@@ -1392,7 +1598,7 @@ class PlateManagerWidget(AbstractManagerWidget):
         """PlateManager: scope = plate_path (from orchestrator or dict)."""
         if isinstance(item, PipelineOrchestrator):
             return str(item.plate_path)
-        return item.get('path', '') if isinstance(item, dict) else ''
+        return item.get("path", "") if isinstance(item, dict) else ""
 
     # === CrossWindowPreviewMixin Hook ===
 
@@ -1404,11 +1610,15 @@ class PlateManagerWidget(AbstractManagerWidget):
 
     def _handle_compilation_error(self, plate_name: str, error_message: str):
         """Handle compilation error on main thread (slot)."""
-        self.service_adapter.show_error_dialog(f"Compilation failed for {plate_name}: {error_message}")
+        self.service_adapter.show_error_dialog(
+            f"Compilation failed for {plate_name}: {error_message}"
+        )
 
     def _handle_initialization_error(self, plate_name: str, error_message: str):
         """Handle initialization error on main thread (slot)."""
-        self.service_adapter.show_error_dialog(f"Failed to initialize {plate_name}: {error_message}")
+        self.service_adapter.show_error_dialog(
+            f"Failed to initialize {plate_name}: {error_message}"
+        )
 
     def _handle_execution_error(self, error_message: str):
         """Handle execution error on main thread (slot)."""

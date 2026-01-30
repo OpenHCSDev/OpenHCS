@@ -6,7 +6,7 @@ view them in Napari with configurable display settings.
 """
 
 import logging
-from dataclasses import dataclass, field
+import re
 from pathlib import Path
 from typing import Optional, List, Dict, Set, Any
 
@@ -38,25 +38,44 @@ from pyqt_reactive.theming import ColorScheme
 from pyqt_reactive.theming import StyleSheetGenerator
 from pyqt_reactive.widgets.shared.column_filter_widget import MultiColumnFilterPanel
 from pyqt_reactive.widgets.shared.image_table_browser import ImageTableBrowser
+from pyqt_reactive.widgets.shared import TabbedFormWidget, TabConfig, TabbedFormConfig
 from openhcs.config_framework.object_state import ObjectState, ObjectStateRegistry
-from openhcs.core.config import LazyNapariStreamingConfig, LazyFijiStreamingConfig
-
+from openhcs.core.config import StreamingConfig
+from objectstate.lazy_factory import get_base_type_for_lazy
+from pyqt_reactive.forms import ParameterFormManager, FormManagerConfig
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class ImageBrowserConfig:
-    """Namespace container for ImageBrowser's streaming configs.
+def _get_viewer_display_name(field_name: str) -> str:
+    """Get display name for a streaming config field.
 
-    Gives ImageBrowser a single root ObjectState with nested configs via dotted paths.
+    Converts snake_case field name (e.g., napari_streaming_config) to
+    display name (e.g., Napari).
     """
+    # Remove '_streaming_config' suffix and convert to title case
+    viewer_name = field_name.replace('_streaming_config', '')
+    return viewer_name.replace('_', ' ').title()
 
-    napari_config: LazyNapariStreamingConfig = field(
-        default_factory=LazyNapariStreamingConfig
-    )
-    fiji_config: LazyFijiStreamingConfig = field(
-        default_factory=LazyFijiStreamingConfig
-    )
+
+def _create_image_browser_config():
+    """Create ImageBrowser config container with LAZY streaming configs.
+
+    Uses SimpleNamespace with dynamically injected LAZY streaming configs.
+    Lazy configs resolve values from parent_state (plate) through the
+    ObjectState hierarchy, enabling live context updates.
+    """
+    from types import SimpleNamespace
+
+    config = SimpleNamespace()
+
+    # Auto-discover streaming configs from registry
+    # Registry keys are now snake_case field names (e.g., 'napari_streaming_config')
+    for field_name in StreamingConfig.__registry__.keys():
+        lazy_class = StreamingConfig.__registry__[field_name]
+        instance = lazy_class()  # Lazy config resolves from plate via parent_state
+        setattr(config, field_name, instance)
+
+    return config
 
 
 class ImageBrowserWidget(QWidget):
@@ -94,9 +113,9 @@ class ImageBrowserWidget(QWidget):
             f"{orchestrator.plate_path}::image_browser" if orchestrator else None
         )
 
-        # Create root ObjectState from ImageBrowserConfig namespace container
+        # Create root ObjectState from dynamically generated config container
         # This gives us a single registered state with nested configs via dotted paths
-        self.config = ImageBrowserConfig()
+        self.config = _create_image_browser_config()
         parent_state = (
             ObjectStateRegistry.get_by_scope(self.scope_id) if self.scope_id else None
         )
@@ -109,9 +128,12 @@ class ImageBrowserWidget(QWidget):
         if self.scope_id:
             ObjectStateRegistry.register(self.state)
 
-        # PFM widgets (will be created in init_ui)
-        self.napari_config_form = None
-        self.fiji_config_form = None
+        # TabbedFormWidget will be created lazily in _create_right_panel
+        # to avoid heavy initialization during widget construction.
+        self.tabbed_form = None
+
+        # View buttons - dictionary keyed by viewer_type for dynamic handling
+        self.view_buttons: Dict[str, QPushButton] = {}
 
         # File data tracking (images + results)
         self.all_files = {}  # filename -> metadata dict (merged images + results)
@@ -306,174 +328,72 @@ class ImageBrowserWidget(QWidget):
     # Removed _create_results_widget - now using unified file table
 
     def _create_right_panel(self):
-        """Create the right panel with config tabs and instance manager."""
+        """Create the right panel with streaming config forms and instance manager.
+
+        Uses TabbedFormWidget to show each streaming config in its own tab.
+        """
         container = QWidget()
         container.setMinimumWidth(300)  # Prevent clipping of config widgets
         layout = QVBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(5)
 
-        # Tab bar row with view buttons
-        tab_row = QHBoxLayout()
-        tab_row.setContentsMargins(0, 0, 0, 0)
-        tab_row.setSpacing(5)
+        # Vertical splitter: tabbed config form on top, instance manager below
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter.setChildrenCollapsible(True)  # Allow collapsing to 0
 
-        # Tab widget for streaming configs
-        from PyQt6.QtWidgets import QTabWidget
+        # Top panel: Tabbed streaming config forms
+        # Create view buttons for each streaming config (will be added to tab bar row)
+        header_widgets = []
+        for field_name in StreamingConfig.__registry__.keys():
+            display_name = _get_viewer_display_name(field_name)
+            btn = QPushButton(f"View in {display_name}")
+            btn.clicked.connect(
+                lambda checked, fn=field_name: self._view_selected_in_viewer(fn)
+            )
+            btn.setStyleSheet(self.style_gen.generate_button_style())
+            btn.setEnabled(False)
+            self.view_buttons[field_name] = btn
+            header_widgets.append(btn)
 
-        self.streaming_tabs = QTabWidget()
-        self.streaming_tabs.setStyleSheet(self.style_gen.generate_tab_widget_style())
+        # Create a tab for each streaming config type
+        tabs = []
+        for field_name in StreamingConfig.__registry__.keys():
+            display_name = _get_viewer_display_name(field_name)
+            tabs.append(TabConfig(
+                name=display_name,
+                field_ids=[field_name]
+            ))
 
-        # Napari config panel (with enable checkbox)
-        napari_panel = self._create_napari_config_panel()
-        self.napari_tab_index = self.streaming_tabs.addTab(napari_panel, "Napari")
+        tabbed_config = TabbedFormConfig(
+            tabs=tabs,
+            color_scheme=self.color_scheme,
+            use_scroll_area=True,  # Each tab gets its own scroll area
+            header_widgets=header_widgets  # View buttons on same row as tabs
+        )
 
-        # Fiji config panel (with enable checkbox)
-        fiji_panel = self._create_fiji_config_panel()
-        self.fiji_tab_index = self.streaming_tabs.addTab(fiji_panel, "Fiji")
+        self.tabbed_form = TabbedFormWidget(state=self.state, config=tabbed_config)
+        splitter.addWidget(self.tabbed_form)
 
-        # Update tab text when configs are enabled/disabled
-        self._update_tab_labels()
+        # Connect to parameter changes to update view button states
+        self.tabbed_form.parameter_changed.connect(self._on_parameter_changed)
 
-        # Extract tab bar and add to horizontal layout
-        self.tab_bar = self.streaming_tabs.tabBar()
-        self.tab_bar.setExpanding(False)
-        self.tab_bar.setUsesScrollButtons(False)
-        tab_row.addWidget(self.tab_bar, 0)  # No stretch - tabs at natural size
-
-        # View buttons beside tabs
-        self.view_napari_btn = QPushButton("View in Napari")
-        self.view_napari_btn.clicked.connect(self.view_selected_in_napari)
-        self.view_napari_btn.setStyleSheet(self.style_gen.generate_button_style())
-        self.view_napari_btn.setEnabled(False)
-        tab_row.addWidget(self.view_napari_btn, 0)  # No stretch
-
-        self.view_fiji_btn = QPushButton("View in Fiji")
-        self.view_fiji_btn.clicked.connect(self.view_selected_in_fiji)
-        self.view_fiji_btn.setStyleSheet(self.style_gen.generate_button_style())
-        self.view_fiji_btn.setEnabled(False)
-        tab_row.addWidget(self.view_fiji_btn, 0)  # No stretch
-
-        layout.addLayout(tab_row)
-
-        # Vertical splitter for configs and instance manager
-        vertical_splitter = QSplitter(Qt.Orientation.Vertical)
-
-        # Extract the stacked widget (content area) from tab widget and add it to splitter
-        # The tab bar is already in tab_row above
-        from PyQt6.QtWidgets import QStackedWidget
-
-        stacked_widget = self.streaming_tabs.findChild(QStackedWidget)
-        if stacked_widget:
-            stacked_widget.setMinimumWidth(300)  # Prevent clipping of config widgets
-            vertical_splitter.addWidget(stacked_widget)
-
-        # Instance manager panel
+        # Bottom panel: Instance manager (ZMQ server browser)
         instance_panel = self._create_instance_manager_panel()
-        vertical_splitter.addWidget(instance_panel)
+        splitter.addWidget(instance_panel)
 
-        # Set initial sizes (80% configs, 20% instance manager)
-        vertical_splitter.setSizes([400, 100])
+        # Set initial splitter sizes (70% config, 30% instance manager)
+        splitter.setSizes([350, 150])
 
-        layout.addWidget(vertical_splitter)
+        layout.addWidget(splitter, 1)  # stretch factor = 1
 
         return container
-
-    def _create_napari_config_panel(self):
-        """Create the Napari configuration panel with enable checkbox and lazy config widget."""
-        from PyQt6.QtWidgets import QCheckBox
-
-        panel = QGroupBox()
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(5, 5, 5, 5)
-        layout.setSpacing(5)
-
-        # Enable checkbox in header
-        self.napari_enable_checkbox = QCheckBox("Enable Napari Streaming")
-        self.napari_enable_checkbox.setChecked(True)  # Enabled by default
-        self.napari_enable_checkbox.toggled.connect(self._on_napari_enable_toggled)
-        layout.addWidget(self.napari_enable_checkbox)
-
-        # Create PFM scoped to napari_config using field_id
-        from pyqt_reactive.forms import ParameterFormManager, FormManagerConfig
-
-        config = FormManagerConfig(
-            parent=panel,
-            color_scheme=self.color_scheme,
-            field_id="napari_config",  # Scope to napari_config nested dataclass
-        )
-        self.napari_config_form = ParameterFormManager(
-            state=self.state,  # Share root ObjectState
-            config=config,
-        )
-
-        # Wrap in scroll area for long forms (vertical scrolling only)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        scroll.setWidget(self.napari_config_form)
-        layout.addWidget(scroll)
-
-        return panel
-
-    def _create_fiji_config_panel(self):
-        """Create the Fiji configuration panel with enable checkbox and lazy config widget."""
-        from PyQt6.QtWidgets import QCheckBox
-
-        panel = QGroupBox()
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(5, 5, 5, 5)
-        layout.setSpacing(5)
-
-        # Enable checkbox in header
-        self.fiji_enable_checkbox = QCheckBox("Enable Fiji Streaming")
-        self.fiji_enable_checkbox.setChecked(False)  # Disabled by default
-        self.fiji_enable_checkbox.toggled.connect(self._on_fiji_enable_toggled)
-        layout.addWidget(self.fiji_enable_checkbox)
-
-        # Create PFM scoped to fiji_config using field_id
-        from pyqt_reactive.forms import ParameterFormManager, FormManagerConfig
-
-        config = FormManagerConfig(
-            parent=panel,
-            color_scheme=self.color_scheme,
-            field_id="fiji_config",  # Scope to fiji_config nested dataclass
-        )
-        self.fiji_config_form = ParameterFormManager(
-            state=self.state,  # Share root ObjectState
-            config=config,
-        )
-
-        # Wrap in scroll area for long forms (vertical scrolling only)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        scroll.setWidget(self.fiji_config_form)
-        layout.addWidget(scroll)
-
-        # Initially disable the form (checkbox is unchecked by default)
-        self.fiji_config_form.setEnabled(False)
-
-        return panel
-
-    def _update_tab_labels(self):
-        """Update tab labels to show enabled/disabled status."""
-        napari_enabled = self.napari_enable_checkbox.isChecked()
-        fiji_enabled = self.fiji_enable_checkbox.isChecked()
-
-        napari_label = "Napari ✓" if napari_enabled else "Napari"
-        fiji_label = "Fiji ✓" if fiji_enabled else "Fiji"
-
-        self.streaming_tabs.setTabText(self.napari_tab_index, napari_label)
-        self.streaming_tabs.setTabText(self.fiji_tab_index, fiji_label)
 
     def _get_config_values(self, prefix: str) -> Dict[str, Any]:
         """Get current values for a nested config, scoped by prefix.
 
         Args:
-            prefix: The dotted path prefix (e.g., 'napari_config' or 'fiji_config')
+            prefix: The dotted path prefix (e.g., 'napari_streaming_config' or 'fiji_streaming_config')
 
         Returns:
             Dict with prefix stripped from keys, e.g., {'port': 5555, 'host': 'localhost'}
@@ -488,19 +408,31 @@ class ImageBrowserWidget(QWidget):
                     result[remainder] = value
         return result
 
-    def _on_napari_enable_toggled(self, checked: bool):
-        """Handle Napari enable checkbox toggle."""
-        self.napari_config_form.setEnabled(checked)
-        has_selection = len(self.image_table_browser.get_selected_keys()) > 0
-        self.view_napari_btn.setEnabled(checked and has_selection)
-        self._update_tab_labels()
+    def _is_viewer_enabled(self, viewer_type: str) -> bool:
+        """Check if a viewer is enabled by querying its 'enabled' field from ObjectState.
 
-    def _on_fiji_enable_toggled(self, checked: bool):
-        """Handle Fiji enable checkbox toggle."""
-        self.fiji_config_form.setEnabled(checked)
-        has_selection = len(self.image_table_browser.get_selected_keys()) > 0
-        self.view_fiji_btn.setEnabled(checked and has_selection)
-        self._update_tab_labels()
+        Args:
+            viewer_type: The streaming config field name (e.g., 'napari_streaming_config')
+
+        Returns:
+            True if the viewer's streaming config has enabled=True, False otherwise.
+        """
+        # viewer_type is already the field name (e.g., 'napari_streaming_config')
+        enabled_path = f"{viewer_type}.enabled"
+        # Get the resolved value (respects inheritance from parent_state)
+        return self.state.get_resolved_value(enabled_path) is True
+
+    def _get_enabled_viewers(self) -> list:
+        """Get list of all enabled viewer types.
+
+        Returns:
+            List of viewer type strings (e.g., ['napari', 'fiji']) where enabled=True.
+        """
+        return [
+            viewer_type
+            for viewer_type in StreamingConfig.__registry__.keys()
+            if self._is_viewer_enabled(viewer_type)
+        ]
 
     def _create_instance_manager_panel(self):
         """Create the viewer instance manager panel using ZMQServerManagerWidget."""
@@ -547,10 +479,10 @@ class ImageBrowserWidget(QWidget):
         if self.state and orchestrator:
             self.state.context_obj = orchestrator.pipeline_config
             self.state.scope_id = self.scope_id
-            if self.napari_config_form:
-                self.napari_config_form._refresh_all_placeholders()
-            if self.fiji_config_form:
-                self.fiji_config_form._refresh_all_placeholders()
+            # Refresh form placeholders for all PFMs in tabs
+            if self.tabbed_form:
+                for form in self.tabbed_form.get_all_forms():
+                    form._refresh_all_placeholders()
 
         self.load_images()
 
@@ -1051,15 +983,14 @@ class ImageBrowserWidget(QWidget):
         - Spawns background workers that do all heavy ROI loading + streaming.
         """
         try:
-            # Check which viewers are enabled (cheap, safe on UI thread)
-            napari_enabled = self.napari_enable_checkbox.isChecked()
-            fiji_enabled = self.fiji_enable_checkbox.isChecked()
+            # Check which viewers are enabled by querying ObjectState
+            enabled_viewers = self._get_enabled_viewers()
 
-            if not napari_enabled and not fiji_enabled:
+            if not enabled_viewers:
                 QMessageBox.information(
                     self,
                     "No Viewer Enabled",
-                    "Please enable Napari or Fiji streaming to view ROIs.",
+                    "Please enable at least one viewer streaming to view ROIs.",
                 )
                 return
 
@@ -1071,96 +1002,66 @@ class ImageBrowserWidget(QWidget):
                 resolve_lazy_configurations_for_serialization,
             )
             from openhcs.constants.constants import Backend as BackendEnum
+            from openhcs.pyqt_gui.utils.threading_utils import spawn_thread_with_context
 
             # For each enabled viewer, resolve config + viewer on UI thread, then spawn worker
-            if napari_enabled:
-                current_values = self._get_config_values("napari_config")
+            for viewer_type in enabled_viewers:
+                config_key = viewer_type  # viewer_type IS the field name
+                current_values = self._get_config_values(config_key)
+
+                # Dynamically get the lazy config class from registry
+                LazyConfigClass = StreamingConfig.__registry__.get(viewer_type)
+                if not LazyConfigClass:
+                    logger.error(f"Unknown viewer type: {viewer_type}")
+                    continue
+
                 # CRITICAL: Pass None values through for lazy resolution
-                temp_config = LazyNapariStreamingConfig(**current_values)
+                temp_config = LazyConfigClass(**current_values)
 
                 with config_context(self.orchestrator.pipeline_config):
                     with config_context(temp_config):
-                        napari_config = resolve_lazy_configurations_for_serialization(
+                        viewer_config = resolve_lazy_configurations_for_serialization(
                             temp_config
                         )
 
-                # Acquire and stream in background to avoid blocking the UI while
-                # viewer process is spawned. get_or_create_visualizer may
-                # perform a blocking wait_for_ready; run it off the UI thread.
-                from openhcs.pyqt_gui.utils.threading_utils import (
-                    spawn_thread_with_context,
+                # Get the appropriate backend enum
+                backend_enum = getattr(
+                    BackendEnum, f"{viewer_type.upper()}_STREAM", None
                 )
+                if not backend_enum:
+                    logger.error(f"No backend enum for viewer type: {viewer_type}")
+                    continue
 
-                def _acquire_and_stream_napari():
-                    try:
-                        viewer = self.orchestrator.get_or_create_visualizer(
-                            napari_config
-                        )
-                        # _stream_single_roi_async itself starts a worker thread,
-                        # so we call it here to kick off the streaming flow.
-                        self._stream_single_roi_async(
-                            viewer,
-                            roi_zip_path,
-                            napari_config,
-                            BackendEnum.NAPARI_STREAM,
-                            "napari",
-                        )
-                    except Exception as e:
-                        logger.error(
-                            f"Failed to acquire Napari viewer or start streaming: {e}"
-                        )
-                        from PyQt6.QtCore import QTimer
+                # Create closure to capture viewer_config
+                def _make_acquire_and_stream(config, vt):
+                    def _acquire_and_stream():
+                        try:
+                            viewer = self.orchestrator.get_or_create_visualizer(config)
+                            # _stream_single_roi_async itself starts a worker thread,
+                            # so we call it here to kick off the streaming flow.
+                            self._stream_single_roi_async(
+                                viewer, roi_zip_path, config, backend_enum, vt
+                            )
+                        except Exception as e:
+                            logger.error(
+                                f"Failed to acquire {vt} viewer or start streaming: {e}"
+                            )
+                            from PyQt6.QtCore import QTimer
 
-                        QTimer.singleShot(
-                            0,
-                            lambda: QMessageBox.warning(
-                                self, "Error", f"Failed to stream ROI to Napari: {e}"
-                            ),
-                        )
+                            QTimer.singleShot(
+                                0,
+                                lambda vt=vt, e=e: QMessageBox.warning(
+                                    self, "Error", f"Failed to stream ROI to {vt}: {e}"
+                                ),
+                            )
 
+                    return _acquire_and_stream
+
+                # Spawn the thread with captured config
                 spawn_thread_with_context(
-                    _acquire_and_stream_napari, name="acquire_napari"
+                    _make_acquire_and_stream(viewer_config, viewer_type),
+                    name=f"acquire_{viewer_type}",
                 )
-
-            if fiji_enabled:
-                current_values = self._get_config_values("fiji_config")
-                # CRITICAL: Pass None values through for lazy resolution
-                temp_config = LazyFijiStreamingConfig(**current_values)
-
-                with config_context(self.orchestrator.pipeline_config):
-                    with config_context(temp_config):
-                        fiji_config = resolve_lazy_configurations_for_serialization(
-                            temp_config
-                        )
-
-                from openhcs.pyqt_gui.utils.threading_utils import (
-                    spawn_thread_with_context,
-                )
-
-                def _acquire_and_stream_fiji():
-                    try:
-                        viewer = self.orchestrator.get_or_create_visualizer(fiji_config)
-                        self._stream_single_roi_async(
-                            viewer,
-                            roi_zip_path,
-                            fiji_config,
-                            BackendEnum.FIJI_STREAM,
-                            "fiji",
-                        )
-                    except Exception as e:
-                        logger.error(
-                            f"Failed to acquire Fiji viewer or start streaming: {e}"
-                        )
-                        from PyQt6.QtCore import QTimer
-
-                        QTimer.singleShot(
-                            0,
-                            lambda: QMessageBox.warning(
-                                self, "Error", f"Failed to stream ROI to Fiji: {e}"
-                            ),
-                        )
-
-                spawn_thread_with_context(_acquire_and_stream_fiji, name="acquire_fiji")
 
             logger.info(f"Started async streaming of ROI file {roi_zip_path.name}")
 
@@ -1323,16 +1224,48 @@ class ImageBrowserWidget(QWidget):
         if selected_folder is not None:
             self._restore_folder_selection(selected_folder, folder_items)
 
+    def _on_parameter_changed(self, param_name: str, value: object):
+        """Handle parameter changes from the tabbed form.
+
+        Updates view button states when streaming config 'enabled' fields change.
+        """
+        logger.info(f"🔔 ImageBrowser._on_parameter_changed: param_name={param_name}, value={value}")
+
+        # Strip leading dot if present (root PFM with field_id='' emits paths like ".napari_streaming_config.enabled")
+        normalized_param = param_name.lstrip('.')
+
+        # Check if this is an 'enabled' field for any streaming config
+        for viewer_type in self.view_buttons.keys():
+            enabled_path = f"{viewer_type}.enabled"
+            logger.debug(f"  Checking if {normalized_param} == {enabled_path}")
+            if normalized_param == enabled_path:
+                logger.info(f"  ✅ Match! Updating button state for {viewer_type}")
+                # Update the corresponding view button state
+                self._update_view_button_state(viewer_type)
+                break
+
+    def _update_view_button_state(self, viewer_type: str):
+        """Update a single view button's enabled state based on selection and config.
+
+        Args:
+            viewer_type: The viewer type key (e.g., 'napari_streaming_config')
+        """
+        if viewer_type not in self.view_buttons:
+            logger.warning(f"  ⚠️ viewer_type {viewer_type} not in view_buttons")
+            return
+
+        has_selection = len(self.image_table_browser.get_selected_keys()) > 0
+        is_enabled = self._is_viewer_enabled(viewer_type)
+        logger.info(f"  🔘 Updating button for {viewer_type}: has_selection={has_selection}, is_enabled={is_enabled}, final={has_selection and is_enabled}")
+        self.view_buttons[viewer_type].setEnabled(has_selection and is_enabled)
+
     def _on_files_selected(self, keys: list):
         """Handle selection change from ImageTableBrowser."""
         has_selection = len(keys) > 0
-        # Enable buttons based on selection AND checkbox state
-        self.view_napari_btn.setEnabled(
-            has_selection and self.napari_enable_checkbox.isChecked()
-        )
-        self.view_fiji_btn.setEnabled(
-            has_selection and self.fiji_enable_checkbox.isChecked()
-        )
+        # Enable buttons based on selection AND enabled state from ObjectState
+        for viewer_type, view_btn in self.view_buttons.items():
+            is_enabled = self._is_viewer_enabled(viewer_type)
+            view_btn.setEnabled(has_selection and is_enabled)
 
     # Backward compatibility alias
     def on_selection_changed(self):
@@ -1362,26 +1295,19 @@ class ImageBrowserWidget(QWidget):
 
     def _handle_image_double_click(self):
         """Handle double-click on an image - stream to enabled viewer(s)."""
-        napari_enabled = self.napari_enable_checkbox.isChecked()
-        fiji_enabled = self.fiji_enable_checkbox.isChecked()
+        # Find all enabled viewers by querying ObjectState
+        enabled_viewers = self._get_enabled_viewers()
 
         # Stream to whichever viewer(s) are enabled
-        if napari_enabled and fiji_enabled:
-            # Both enabled - stream to both
-            self.view_selected_in_napari()
-            self.view_selected_in_fiji()
-        elif napari_enabled:
-            # Only Napari enabled
-            self.view_selected_in_napari()
-        elif fiji_enabled:
-            # Only Fiji enabled
-            self.view_selected_in_fiji()
+        if enabled_viewers:
+            for viewer_type in enabled_viewers:
+                self._view_selected_in_viewer(viewer_type)
         else:
-            # Neither enabled - show message
+            # No viewers enabled - show message
             QMessageBox.information(
                 self,
                 "No Viewer Enabled",
-                "Please enable Napari or Fiji streaming to view images.",
+                "Please enable at least one viewer streaming to view images.",
             )
 
     def _handle_result_double_click(self, file_info: dict):
@@ -1406,32 +1332,8 @@ class ImageBrowserWidget(QWidget):
 
             subprocess.run(["xdg-open", str(file_path)])
 
-    def view_selected_in_napari(self):
-        """View all selected images in Napari as a batch (builds hyperstack)."""
-        selected_keys = self.image_table_browser.get_selected_keys()
-        if not selected_keys:
-            return
-
-        # Separate ROI files from images
-        image_filenames = [k for k in selected_keys if not k.endswith(".roi.zip")]
-        roi_filenames = [k for k in selected_keys if k.endswith(".roi.zip")]
-
-        from objectstate import spawn_thread_with_context
-
-        def _view_in_napari_async():
-            # Stream ROI files in a batch (get viewer once, stream all ROIs)
-            if roi_filenames:
-                plate_path = Path(self.orchestrator.plate_path)
-                self._stream_roi_batch_to_napari(roi_filenames, plate_path)
-
-            # Stream image files as a batch
-            if image_filenames:
-                self._load_and_stream_batch_to_napari(image_filenames)
-
-        spawn_thread_with_context(_view_in_napari_async, name="view_napari")
-
-    def view_selected_in_fiji(self):
-        """View all selected images in Fiji as a batch (builds hyperstack)."""
+    def _view_selected_in_viewer(self, viewer_type: str):
+        """View all selected images in the specified viewer as a batch (builds hyperstack)."""
         selected_keys = self.image_table_browser.get_selected_keys()
         if not selected_keys:
             return
@@ -1441,27 +1343,28 @@ class ImageBrowserWidget(QWidget):
         roi_filenames = [k for k in selected_keys if k.endswith(".roi.zip")]
 
         logger.info(
-            f"🎯 IMAGE BROWSER: User selected {len(image_filenames)} images and {len(roi_filenames)} ROI files to view in Fiji"
+            f"🎯 IMAGE BROWSER: User selected {len(image_filenames)} images and {len(roi_filenames)} ROI files to view in {viewer_type}"
         )
-        logger.info(
-            f"🎯 IMAGE BROWSER: Image filenames: {image_filenames[:5]}{'...' if len(image_filenames) > 5 else ''}"
-        )
+        if image_filenames:
+            logger.info(
+                f"🎯 IMAGE BROWSER: Image filenames: {image_filenames[:5]}{'...' if len(image_filenames) > 5 else ''}"
+            )
         if roi_filenames:
             logger.info(f"🎯 IMAGE BROWSER: ROI filenames: {roi_filenames}")
 
         from objectstate import spawn_thread_with_context
 
-        def _view_in_fiji_async():
+        def _view_async():
             # Stream ROI files in a batch (get viewer once, stream all ROIs)
             if roi_filenames:
                 plate_path = Path(self.orchestrator.plate_path)
-                self._stream_roi_batch_to_fiji(roi_filenames, plate_path)
+                self._stream_rois_to_viewer(roi_filenames, plate_path, viewer_type)
 
             # Stream image files as a batch
             if image_filenames:
-                self._load_and_stream_batch_to_fiji(image_filenames)
+                self._stream_images_to_viewer(image_filenames, viewer_type)
 
-        spawn_thread_with_context(_view_in_fiji_async, name="view_fiji")
+        spawn_thread_with_context(_view_async, name=f"view_{viewer_type}")
 
     def _prepare_streaming(self, viewer_type: str) -> tuple:
         """Prepare for streaming: resolve config, get viewer, get read backend.
@@ -1484,13 +1387,12 @@ class ImageBrowserWidget(QWidget):
             resolve_lazy_configurations_for_serialization,
         )
 
-        if viewer_type == "napari":
-            config_key = "napari_config"
-            LazyConfigClass = LazyNapariStreamingConfig
-        else:
-            config_key = "fiji_config"
-            LazyConfigClass = LazyFijiStreamingConfig
+        # Dynamically get the lazy config class from StreamingConfig registry
+        LazyConfigClass = StreamingConfig.__registry__.get(viewer_type)
+        if not LazyConfigClass:
+            raise ValueError(f"Unknown viewer type: {viewer_type}")
 
+        config_key = viewer_type  # viewer_type IS the field name
         current_values = self._get_config_values(config_key)
         temp_config = LazyConfigClass(**current_values)
 
@@ -1520,14 +1422,6 @@ class ImageBrowserWidget(QWidget):
             else self._show_fiji_streaming_error(e),
         )
         logger.info(f"Streaming {len(filenames)} images to {viewer_type}...")
-
-    def _load_and_stream_batch_to_napari(self, filenames: list):
-        """Load multiple images and stream as batch to Napari (builds hyperstack)."""
-        self._stream_images_to_viewer(filenames, "napari")
-
-    def _load_and_stream_batch_to_fiji(self, filenames: list):
-        """Load multiple images and stream as batch to Fiji (builds hyperstack)."""
-        self._stream_images_to_viewer(filenames, "fiji")
 
     @pyqtSlot(str)
     def _show_streaming_error(self, error_msg: str):
@@ -1561,14 +1455,6 @@ class ImageBrowserWidget(QWidget):
             else self._show_fiji_streaming_error(e),
         )
         logger.info(f"Streaming {len(roi_filenames)} ROI files to {viewer_type}...")
-
-    def _stream_roi_batch_to_napari(self, roi_filenames: list, plate_path: Path):
-        """Stream a batch of ROI files to Napari asynchronously (never blocks UI)."""
-        self._stream_rois_to_viewer(roi_filenames, plate_path, "napari")
-
-    def _stream_roi_batch_to_fiji(self, roi_filenames: list, plate_path: Path):
-        """Stream a batch of ROI files to Fiji asynchronously (never blocks UI)."""
-        self._stream_rois_to_viewer(roi_filenames, plate_path, "fiji")
 
     def _display_csv_file(self, csv_path: Path):
         """Display CSV file in preview area."""
