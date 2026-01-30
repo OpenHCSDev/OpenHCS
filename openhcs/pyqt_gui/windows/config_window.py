@@ -12,9 +12,22 @@ import os
 from typing import Type, Any, Callable, Optional, Dict
 
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QScrollArea, QWidget, QSplitter, QTreeWidget, QTreeWidgetItem,
-    QLineEdit, QSpinBox, QDoubleSpinBox, QCheckBox, QComboBox, QMessageBox
+    QDialog,
+    QVBoxLayout,
+    QHBoxLayout,
+    QPushButton,
+    QLabel,
+    QScrollArea,
+    QWidget,
+    QSplitter,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QLineEdit,
+    QSpinBox,
+    QDoubleSpinBox,
+    QCheckBox,
+    QComboBox,
+    QMessageBox,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont
@@ -29,7 +42,7 @@ from pyqt_reactive.services.parameter_ops_service import ParameterOpsService
 from pyqt_reactive.widgets.editors.simple_code_editor import SimpleCodeEditorService
 from pyqt_reactive.theming import StyleSheetGenerator
 from pyqt_reactive.theming import ColorScheme
-from openhcs.pyqt_gui.windows.base_form_dialog import BaseFormDialog
+from pyqt_reactive.widgets.shared import BaseFormDialog
 from openhcs.core.config import GlobalPipelineConfig, PipelineConfig
 from openhcs.config_framework import is_global_config_type
 from openhcs.config_framework.global_config import (
@@ -41,6 +54,7 @@ import openhcs.serialization.pycodify_formatters  # noqa: F401
 from pycodify import Assignment, generate_python_source
 from openhcs.ui.shared.code_editor_form_updater import CodeEditorFormUpdater
 from openhcs.config_framework.object_state import ObjectState, ObjectStateRegistry
+
 # ❌ REMOVED: require_config_context decorator - enhanced decorator events system handles context automatically
 from openhcs.core.lazy_placeholder import (
     LazyDefaultPlaceholderService as FullLazyDefaultPlaceholderService,
@@ -48,7 +62,6 @@ from openhcs.core.lazy_placeholder import (
 from openhcs.core.lazy_placeholder_simplified import (
     LazyDefaultPlaceholderService as SimplifiedLazyDefaultPlaceholderService,
 )
-
 
 
 logger = logging.getLogger(__name__)
@@ -76,10 +89,15 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
     config_saved = pyqtSignal(object)  # saved config
     config_cancelled = pyqtSignal()
 
-    def __init__(self, config_class: Type, current_config: Any,
-                 on_save_callback: Optional[Callable] = None,
-                 color_scheme: Optional[ColorScheme] = None, parent=None,
-                 scope_id: Optional[str] = None):
+    def __init__(
+        self,
+        config_class: Type,
+        current_config: Any,
+        on_save_callback: Optional[Callable] = None,
+        color_scheme: Optional[ColorScheme] = None,
+        parent=None,
+        scope_id: Optional[str] = None,
+    ):
         """
         Initialize the configuration window.
 
@@ -111,19 +129,20 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
         self.style_generator = StyleSheetGenerator(self.color_scheme)
         self.tree_helper = ConfigHierarchyTreeHelper()
 
-        # CRITICAL: Initialize scope-based border styling BEFORE creating form_manager
-        # This ensures _scope_accent_color is set BEFORE widgets are created
-        # scope_id must be set before calling this (it is, at line 100)
-        if self.scope_id:
-            self._init_scope_border()
+        # NOTE: _init_scope_border() will be called AFTER setup_ui() creates the widgets
+        # This ensures widgets exist when _apply_scope_accent_styling() tries to style them
 
         # SIMPLIFIED: Use dual-axis resolution
         # Determine placeholder prefix based on actual instance type (not class type)
-        is_lazy_dataclass = FullLazyDefaultPlaceholderService.has_lazy_resolution(type(current_config))
+        is_lazy_dataclass = FullLazyDefaultPlaceholderService.has_lazy_resolution(
+            type(current_config)
+        )
         placeholder_prefix = "Pipeline default" if is_lazy_dataclass else "Default"
 
         # SIMPLIFIED: Use ParameterFormManager with dual-axis resolution
-        root_field_id = type(current_config).__name__  # e.g., "GlobalPipelineConfig" or "PipelineConfig"
+        root_field_id = type(
+            current_config
+        ).__name__  # e.g., "GlobalPipelineConfig" or "PipelineConfig"
         global_config_type = GlobalPipelineConfig  # Always use GlobalPipelineConfig for dual-axis resolution
 
         # CRITICAL FIX: Pipeline Config Editor should NOT use itself as parent context
@@ -144,16 +163,20 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
             parent=None,
             scope_id=self.scope_id,
             color_scheme=self.color_scheme,
-            scope_accent_color=getattr(self, '_scope_accent_color', None),  # Pass scope accent color
+            scope_accent_color=getattr(
+                self, "_scope_accent_color", None
+            ),  # Pass scope accent color
         )
         # Provide canonical dotted `field_id` for this root form
         # Root forms use an empty `field_id` (top-level) so no traversal is attempted
-        config.field_id = ''
+        config.field_id = ""
         self.form_manager = ParameterFormManager(state=self.state, config=config)
 
         if is_global_config_type(self.config_class):
             self._original_global_config_snapshot = copy.deepcopy(current_config)
-            self.form_manager.parameter_changed.connect(self._on_global_config_field_changed)
+            self.form_manager.parameter_changed.connect(
+                self._on_global_config_field_changed
+            )
 
         # No config_editor needed - everything goes through form_manager
         self.config_editor = None
@@ -186,7 +209,7 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
             self.setWindowTitle(self._base_window_title)
 
         # Update header label with both asterisk and underline
-        if hasattr(self, '_header_label'):
+        if hasattr(self, "_header_label"):
             header_text = f"Configure {self.config_class.__name__}"
             if is_dirty:
                 self._header_label.setText(f"* {header_text}")
@@ -202,7 +225,7 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
         self.setModal(False)  # Non-modal like plate manager and pipeline editor
         self.setMinimumSize(600, 400)
         self.resize(800, 600)
-        
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(4)
@@ -214,14 +237,20 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
 
         self._header_label = QLabel(f"Configure {self.config_class.__name__}")
         self._header_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
-        self._header_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_accent)};")
+        self._header_label.setStyleSheet(
+            f"color: {self.color_scheme.to_hex(self.color_scheme.text_accent)};"
+        )
         header_layout.addWidget(self._header_label)
 
         # Add help button for the dataclass itself
         self._help_btn = None
         if dataclasses.is_dataclass(self.config_class):
-            self._help_btn = HelpButton(help_target=self.config_class, text="Help", color_scheme=self.color_scheme,
-                                       scope_accent_color=getattr(self, '_scope_accent_color', None))
+            self._help_btn = HelpButton(
+                help_target=self.config_class,
+                text="Help",
+                color_scheme=self.color_scheme,
+                scope_accent_color=getattr(self, "_scope_accent_color", None),
+            )
             self._help_btn.setMaximumWidth(80)
             header_layout.addWidget(self._help_btn)
 
@@ -277,8 +306,12 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
         # Always use scroll area for consistent navigation behavior
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll_area.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        self.scroll_area.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
         self.scroll_area.setWidget(self.form_manager)
         self.splitter.addWidget(self.scroll_area)
 
@@ -286,7 +319,9 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
         self.splitter.setSizes([300, 700])
 
         # Install collapsible splitter helper for double-click toggle
-        self.splitter_helper = CollapsibleSplitterHelper(self.splitter, left_panel_index=0)
+        self.splitter_helper = CollapsibleSplitterHelper(
+            self.splitter, left_panel_index=0
+        )
         self.splitter_helper.set_initial_size(300)
 
         # Add splitter with stretch factor so it expands to fill available space
@@ -294,9 +329,16 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
 
         # Apply centralized styling (config window style includes tree styling now)
         self.setStyleSheet(
-            self.style_generator.generate_config_window_style() + "\n" +
-            self.style_generator.generate_tree_widget_style()
+            self.style_generator.generate_config_window_style()
+            + "\n"
+            + self.style_generator.generate_tree_widget_style()
         )
+
+        # CRITICAL: Initialize scope-based border styling AFTER widgets are created
+        # This ensures widgets exist when _apply_scope_accent_styling() tries to style them
+        # (mirrors DualEditorWindow pattern which calls _init_scope_border in setup_connections)
+        if self.scope_id:
+            self._init_scope_border()
 
     def _apply_scope_accent_styling(self) -> None:
         """Apply scope accent color to ConfigWindow-specific elements.
@@ -320,18 +362,22 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
             border-radius: 3px;
             padding: 8px;
         """
-        if hasattr(self, '_save_button'):
+        if hasattr(self, "_save_button"):
             self._save_button.setStyleSheet(save_button_style)
 
         # Style header label with scope accent color
-        if hasattr(self, '_header_label'):
+        if hasattr(self, "_header_label"):
             self._header_label.setStyleSheet(f"color: {hex_color};")
 
         # Style tree selection with scope accent
         tree_style = self.get_scope_tree_selection_stylesheet()
-        if tree_style and hasattr(self, 'tree_widget'):
+        if tree_style and hasattr(self, "tree_widget"):
             current_style = self.tree_widget.styleSheet() or ""
             self.tree_widget.setStyleSheet(f"{current_style}\n{tree_style}")
+
+        # Style help button with scope accent color
+        if hasattr(self, "_help_btn") and self._help_btn:
+            self._help_btn.set_scope_accent_color(accent_color)
 
     def _create_inheritance_tree(self) -> QTreeWidget:
         """Create tree widget showing inheritance hierarchy for navigation."""
@@ -339,8 +385,7 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
         # ONE source of truth: form_manager already subscribes to ObjectState.on_resolved_changed
         # Pass state for automatic dirty tracking subscription (handled by helper)
         tree = self.tree_helper.create_tree_widget(
-            flash_manager=self.form_manager,
-            state=self.state
+            flash_manager=self.form_manager, state=self.state
         )
         self.tree_helper.populate_from_root_dataclass(tree, self.config_class)
 
@@ -362,34 +407,42 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
             return
 
         # Check if this item is ui_hidden - if so, ignore the double-click
-        if data.get('ui_hidden', False):
+        if data.get("ui_hidden", False):
             logger.debug("Ignoring double-click on ui_hidden item")
             return
 
-        item_type = data.get('type')
+        item_type = data.get("type")
 
-        if item_type == 'dataclass':
+        if item_type == "dataclass":
             # Navigate to the dataclass section in the form
-            field_path = data.get('field_path') or data.get('field_name')
+            field_path = data.get("field_path") or data.get("field_name")
             if field_path:
                 self._scroll_to_section(field_path)
                 logger.debug(f"Navigating to section: {field_path}")
             else:
-                class_obj = data.get('class')
-                class_name = getattr(class_obj, '__name__', 'Unknown') if class_obj else 'Unknown'
+                class_obj = data.get("class")
+                class_name = (
+                    getattr(class_obj, "__name__", "Unknown")
+                    if class_obj
+                    else "Unknown"
+                )
                 logger.debug(f"Double-clicked on root dataclass: {class_name}")
 
-        elif item_type == 'inheritance_link':
+        elif item_type == "inheritance_link":
             # Navigate to the parent class section in the form
-            target_class = data.get('target_class')
+            target_class = data.get("target_class")
             if target_class:
                 # Find the field that has this type (or its lazy version)
                 field_name = self._find_field_for_class(target_class)
                 if field_name:
                     self._scroll_to_section(field_name)
-                    logger.debug(f"Navigating to inherited section: {field_name} (class: {target_class.__name__})")
+                    logger.debug(
+                        f"Navigating to inherited section: {field_name} (class: {target_class.__name__})"
+                    )
                 else:
-                    logger.warning(f"Could not find field for class {target_class.__name__}")
+                    logger.warning(
+                        f"Could not find field for class {target_class.__name__}"
+                    )
 
     def _find_field_for_class(self, target_class) -> str:
         """Find the field name that has the given class type (or its lazy version)."""
@@ -420,23 +473,17 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
 
     # _scroll_to_section is provided by ScrollableFormMixin
 
-
-    
-
-
-
-    
     def update_widget_value(self, widget: QWidget, value: Any):
         """
         Update widget value without triggering signals.
-        
+
         Args:
             widget: Widget to update
             value: New value
         """
         # Temporarily block signals to avoid recursion
         widget.blockSignals(True)
-        
+
         try:
             if isinstance(widget, QCheckBox):
                 widget.setChecked(bool(value))
@@ -453,7 +500,7 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
                 widget.setText(str(value) if value is not None else "")
         finally:
             widget.blockSignals(False)
-    
+
     def reset_to_defaults(self):
         """Reset all parameters using centralized service with full sophistication."""
         # Service layer now contains ALL the sophisticated logic previously in infrastructure classes
@@ -475,15 +522,21 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
             # CRITICAL: Set flag to prevent refresh_config from recreating the form
             # The window already has the correct data - it just saved it!
             self._saving = True
-            logger.info(f"🔍 SAVE_CONFIG: Set _saving=True before callback (id={id(self)})")
+            logger.info(
+                f"🔍 SAVE_CONFIG: Set _saving=True before callback (id={id(self)})"
+            )
             try:
                 # Emit signal and call callback
                 self.config_saved.emit(new_config)
 
                 if self.on_save_callback:
-                    logger.info(f"🔍 SAVE_CONFIG: Calling on_save_callback (id={id(self)})")
+                    logger.info(
+                        f"🔍 SAVE_CONFIG: Calling on_save_callback (id={id(self)})"
+                    )
                     self.on_save_callback(new_config)
-                    logger.info(f"🔍 SAVE_CONFIG: Returned from on_save_callback (id={id(self)})")
+                    logger.info(
+                        f"🔍 SAVE_CONFIG: Returned from on_save_callback (id={id(self)})"
+                    )
             finally:
                 self._saving = False
                 logger.info(f"🔍 SAVE_CONFIG: Reset _saving=False (id={id(self)})")
@@ -493,13 +546,17 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
                 # Also update LIVE thread-local to match saved
                 set_saved_global_config(self.config_class, new_config)
                 set_live_global_config(self.config_class, new_config)
-                logger.debug(f"Updated SAVED and LIVE thread-local {self.config_class.__name__} on SAVE")
+                logger.debug(
+                    f"Updated SAVED and LIVE thread-local {self.config_class.__name__} on SAVE"
+                )
 
                 # CRITICAL: Invalidate ALL descendant caches so they re-resolve with the new SAVED thread-local
                 # This is necessary when saving None values - descendants must pick up the new None
                 # instead of continuing to use cached values resolved from the old saved thread-local
                 ObjectStateRegistry.increment_token(notify=True)
-                logger.debug(f"Invalidated all descendant caches after updating SAVED thread-local")
+                logger.debug(
+                    f"Invalidated all descendant caches after updating SAVED thread-local"
+                )
 
                 self._original_global_config_snapshot = copy.deepcopy(new_config)
                 self._global_context_dirty = False
@@ -512,8 +569,9 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
 
         except Exception as e:
             logger.error(f"Failed to save configuration: {e}")
-            QMessageBox.critical(self, "Save Error", f"Failed to save configuration:\n{e}")
-    
+            QMessageBox.critical(
+                self, "Save Error", f"Failed to save configuration:\n{e}"
+            )
 
     def _view_code(self):
         """Open code editor to view/edit the configuration as Python code."""
@@ -536,15 +594,17 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
 
             # Launch editor
             editor_service = SimpleCodeEditorService(self)
-            use_external = os.environ.get('OPENHCS_USE_EXTERNAL_EDITOR', '').lower() in ('1', 'true', 'yes')
+            use_external = os.environ.get(
+                "OPENHCS_USE_EXTERNAL_EDITOR", ""
+            ).lower() in ("1", "true", "yes")
 
             editor_service.edit_code(
                 initial_content=python_code,
                 title=f"View/Edit {self.config_class.__name__}",
                 callback=self._handle_edited_config_code,
                 use_external=use_external,
-                code_type='config',
-                code_data={'config_class': self.config_class, 'clean_mode': True}
+                code_type="config",
+                code_data={"config_class": self.config_class, "clean_mode": True},
             )
 
         except Exception as e:
@@ -562,12 +622,14 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
             with CodeEditorFormUpdater.patch_lazy_constructors():
                 exec(edited_code, namespace)
 
-            new_config = namespace.get('config')
+            new_config = namespace.get("config")
             if not new_config:
                 raise ValueError("No 'config' variable found in edited code")
 
             if not isinstance(new_config, self.config_class):
-                raise ValueError(f"Expected {self.config_class.__name__}, got {type(new_config).__name__}")
+                raise ValueError(
+                    f"Expected {self.config_class.__name__}, got {type(new_config).__name__}"
+                )
 
             # Update current config
             self.current_config = new_config
@@ -585,7 +647,9 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
                 if is_global_config_type(self.config_class):
                     # For global configs: Update thread-local context immediately
                     set_global_config_for_editing(self.config_class, new_config)
-                    logger.debug(f"Updated thread-local {self.config_class.__name__} context")
+                    logger.debug(
+                        f"Updated thread-local {self.config_class.__name__} context"
+                    )
                     self._global_context_dirty = True
                 # For PipelineConfig: No context update needed here
                 # The orchestrator.apply_pipeline_config() happens in the save callback
@@ -602,7 +666,9 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
 
         except Exception as e:
             logger.error(f"Failed to apply edited config code: {e}")
-            QMessageBox.critical(self, "Code Edit Error", f"Failed to apply edited code:\n{e}")
+            QMessageBox.critical(
+                self, "Code Edit Error", f"Failed to apply edited code:\n{e}"
+            )
 
     def _on_global_config_field_changed(self, param_name: str, value: Any):
         """Track that global config has unsaved changes.
@@ -628,27 +694,39 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
         )
 
     def reject(self):
-        """Handle dialog rejection (Cancel button)."""
-        if (is_global_config_type(self.config_class) and
-                getattr(self, '_global_context_dirty', False) and
-                self._original_global_config_snapshot is not None):
-            set_global_config_for_editing(self.config_class,
-                                          copy.deepcopy(self._original_global_config_snapshot))
+        """Handle dialog rejection (Cancel button).
+
+        Restores global config context and ObjectState to last saved state.
+        """
+        # Restore global config context if dirty
+        if (
+            is_global_config_type(self.config_class)
+            and getattr(self, "_global_context_dirty", False)
+            and self._original_global_config_snapshot is not None
+        ):
+            set_global_config_for_editing(
+                self.config_class, copy.deepcopy(self._original_global_config_snapshot)
+            )
             self._global_context_dirty = False
             logger.debug(f"Restored {self.config_class.__name__} context after cancel")
 
         self.config_cancelled.emit()
-        super().reject()  # BaseFormDialog handles unregistration
+
+        # CRITICAL: super().reject() calls state.restore_saved() to undo ALL unsaved changes
+        # This restores all parameters (not just global context) to last saved state
+        super().reject()  # BaseFormDialog handles state restoration + unregistration
 
         # CRITICAL: Trigger global refresh AFTER unregistration so other windows
         # re-collect live context without this cancelled window's values
         # This ensures group_by selector and other placeholders sync correctly
         ObjectStateRegistry.increment_token()
-        logger.debug(f"Triggered global refresh after cancelling {self.config_class.__name__} editor")
+        logger.debug(
+            f"Triggered global refresh after cancelling {self.config_class.__name__} editor"
+        )
 
     def _get_form_managers(self):
         """Return list of form managers to unregister (required by BaseFormDialog)."""
-        if hasattr(self, 'form_manager'):
+        if hasattr(self, "form_manager"):
             return [self.form_manager]
         return []
 

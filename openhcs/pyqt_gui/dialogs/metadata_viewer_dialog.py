@@ -17,7 +17,7 @@ from PyQt6.QtCore import Qt
 from openhcs.microscopes.openhcs import OpenHCSMetadata
 from pyqt_reactive.forms import ParameterFormManager
 from pyqt_reactive.theming import ColorScheme
-from openhcs.pyqt_gui.windows.base_form_dialog import BaseFormDialog
+from pyqt_reactive.widgets.shared import BaseFormDialog
 
 logger = logging.getLogger(__name__)
 

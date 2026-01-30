@@ -1,12 +1,11 @@
 """
 OpenHCS PyQt6 Main Window
 
-Main application window implementing QDockWidget system to replace
-textual-window floating windows with native Qt docking.
+Main application window using WindowManager for clean window abstraction.
 """
 
 import logging
-from typing import Optional, Dict
+from typing import Optional, Callable
 from pathlib import Path
 import webbrowser
 
@@ -17,6 +16,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QFileDialog,
     QDialog,
+    QProgressBar,
 )
 from PyQt6.QtCore import Qt, QSettings, QTimer, pyqtSignal, QUrl
 from PyQt6.QtGui import QAction, QKeySequence, QDesktopServices
@@ -26,8 +26,10 @@ from polystore.filemanager import FileManager
 from polystore.base import storage_registry
 
 from openhcs.pyqt_gui.services.service_adapter import PyQtServiceAdapter
+from openhcs.pyqt_gui.services.window_config import WindowSpec
 from pyqt_reactive.animation.flash_overlay_opengl import prewarm_opengl
 from pyqt_reactive.animation import WindowFlashOverlay
+from pyqt_reactive.services.window_manager import WindowManager
 from pyqt_reactive.widgets.log_viewer import LogViewerWindow
 from pyqt_reactive.widgets.system_monitor import SystemMonitorWidget
 from pyqt_reactive.widgets.editors.simple_code_editor import QScintillaCodeEditorDialog
@@ -66,8 +68,8 @@ class OpenHCSMainWindow(QMainWindow):
         # Service adapter for Qt integration
         self.service_adapter = PyQtServiceAdapter(self)
 
-        # Floating windows registry (replaces dock widgets)
-        self.floating_windows: Dict[str, QDialog] = {}
+        # Declarative window specs
+        self.window_specs = self._get_window_specs()
 
         # Settings for window state persistence
         self.settings = QSettings("OpenHCS", "PyQt6GUI")
@@ -77,8 +79,6 @@ class OpenHCSMainWindow(QMainWindow):
 
         # Initialize UI
         self.setup_ui()
-        self.setup_dock_system()
-        self.create_floating_windows()
         self.setup_menu_bar()
         self.setup_status_bar()
         self.setup_connections()
@@ -103,33 +103,162 @@ class OpenHCSMainWindow(QMainWindow):
 
         Note: System monitor is now created during __init__ so startup screen appears immediately
         """
-        # Initialize Log Viewer (hidden) for continuous log monitoring - IMMEDIATE
-        self._initialize_log_viewer()
+        # Initialize log viewer (hidden) for continuous log monitoring - IMMEDIATE
+        self.show_window("log_viewer")
 
         # Show default windows (plate manager and pipeline editor visible by default) - IMMEDIATE
         self.show_default_windows()
 
         logger.info("Deferred initialization complete (UI ready)")
 
+    def _get_window_specs(self) -> dict[str, WindowSpec]:
+        """Return declarative window specifications."""
+        from openhcs.pyqt_gui.windows.managed_windows import (
+            PlateManagerWindow,
+            PipelineEditorWindow,
+            ImageBrowserWindow,
+            LogViewerWindowWrapper,
+            ZMQServerManagerWindow,
+        )
+
+        return {
+            "plate_manager": WindowSpec(
+                window_id="plate_manager",
+                title="Plate Manager",
+                window_class=PlateManagerWindow,
+                initialize_on_startup=True,
+            ),
+            "pipeline_editor": WindowSpec(
+                window_id="pipeline_editor",
+                title="Pipeline Editor",
+                window_class=PipelineEditorWindow,
+            ),
+            "image_browser": WindowSpec(
+                window_id="image_browser",
+                title="Image Browser",
+                window_class=ImageBrowserWindow,
+            ),
+            "log_viewer": WindowSpec(
+                window_id="log_viewer",
+                title="Log Viewer",
+                window_class=LogViewerWindowWrapper,
+                initialize_on_startup=True,
+            ),
+            "zmq_server_manager": WindowSpec(
+                window_id="zmq_server_manager",
+                title="ZMQ Server Manager",
+                window_class=ZMQServerManagerWindow,
+            ),
+        }
+
+    def _create_window_factory(self, window_id: str) -> Callable[[], QDialog]:
+        """Create factory function for a window."""
+        spec = self.window_specs[window_id]
+
+        def factory() -> QDialog:
+            window = spec.window_class(self, self.service_adapter)
+            return window
+
+        return factory
+
+    def show_window(self, window_id: str) -> None:
+        """Show window using WindowManager."""
+        factory = self._create_window_factory(window_id)
+        window = WindowManager.show_or_focus(window_id, factory)
+
+        spec = self.window_specs[window_id]
+        if spec.initialize_on_startup and window_id == "log_viewer":
+            window.hide()
+
+        self._ensure_flash_overlay(window)
+
     def setup_ui(self):
         """Setup basic UI structure."""
         self.setWindowTitle("OpenHCS")
-        self.setMinimumSize(640, 480)
+        self.setMinimumSize(1024, 768)
 
         # Make main window floating (not tiled) like other OpenHCS components
         self.setWindowFlags(Qt.WindowType.Dialog)
 
-        # Central widget with system monitor (shows startup screen immediately)
+        # Central widget with main layout
         central_widget = QWidget()
         central_layout = QVBoxLayout(central_widget)
         central_layout.setContentsMargins(0, 0, 0, 0)
+        central_layout.setSpacing(0)
 
-        # Create system monitor immediately so startup screen shows right away
+        # Top section: System Monitor (fixed height)
         self.system_monitor = SystemMonitorWidget()
         central_layout.addWidget(self.system_monitor)
 
-        # Store layout for potential future use
+        # Bottom section: Main horizontal splitter
+        from PyQt6.QtWidgets import QSplitter
+
+        main_splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        # LEFT SIDE: Vertical splitter with Plate Manager (top) and ZMQ Browser (bottom)
+        left_splitter = QSplitter(Qt.Orientation.Vertical)
+
+        # Plate Manager (top of left side)
+        from openhcs.pyqt_gui.widgets.plate_manager import PlateManagerWidget
+
+        self.plate_manager_widget = PlateManagerWidget(
+            self.service_adapter, self.service_adapter.get_current_color_scheme()
+        )
+        left_splitter.addWidget(self.plate_manager_widget)
+
+        # ZMQ Server Manager (bottom of left side)
+        from openhcs.pyqt_gui.widgets.shared.zmq_server_manager import (
+            ZMQServerManagerWidget,
+        )
+        from openhcs.core.config import get_all_streaming_ports
+
+        ports_to_scan = get_all_streaming_ports(num_ports_per_type=10)
+        self.zmq_manager_widget = ZMQServerManagerWidget(
+            ports_to_scan=ports_to_scan,
+            title="ZMQ Servers",
+            style_generator=self.service_adapter.get_style_generator(),
+        )
+        self.zmq_manager_widget.log_file_opened.connect(self._open_log_file_in_viewer)
+        left_splitter.addWidget(self.zmq_manager_widget)
+
+        # Set sizes for left splitter (70% plate manager, 30% ZMQ)
+        left_splitter.setSizes([350, 150])
+
+        main_splitter.addWidget(left_splitter)
+
+        # RIGHT SIDE: Pipeline Editor
+        from openhcs.pyqt_gui.widgets.pipeline_editor import PipelineEditorWidget
+
+        self.pipeline_editor_widget = PipelineEditorWidget(
+            self.service_adapter, self.service_adapter.get_current_color_scheme()
+        )
+        main_splitter.addWidget(self.pipeline_editor_widget)
+
+        # Connect plate manager to pipeline editor (mirrors Textual TUI and ManagedWindow pattern)
+        self.plate_manager_widget.plate_selected.connect(
+            self.pipeline_editor_widget.set_current_plate
+        )
+        self.plate_manager_widget.orchestrator_config_changed.connect(
+            self.pipeline_editor_widget.on_orchestrator_config_changed
+        )
+        self.plate_manager_widget.set_pipeline_editor(self.pipeline_editor_widget)
+        self.pipeline_editor_widget.plate_manager = self.plate_manager_widget
+
+        # Set current plate if one is already selected
+        if self.plate_manager_widget.selected_plate_path:
+            self.pipeline_editor_widget.set_current_plate(
+                self.plate_manager_widget.selected_plate_path
+            )
+
+        # Set sizes for main splitter (50/50)
+        main_splitter.setSizes([500, 500])
+
+        central_layout.addWidget(main_splitter, 1)  # Stretch to fill remaining space
+
+        # Store references
         self.central_layout = central_layout
+        self.main_splitter = main_splitter
+        self.left_splitter = left_splitter
 
         self.setCentralWidget(central_widget)
 
@@ -176,226 +305,92 @@ class OpenHCSMainWindow(QMainWindow):
 
     def show_default_windows(self):
         """Show plate manager by default."""
-        # Show plate manager by default
-        self.show_plate_manager()
+        # Plate Manager and Pipeline Editor are now embedded in the main window
+        # Just ensure they're visible (in case they were hidden)
+        if hasattr(self, "plate_manager_widget"):
+            self.plate_manager_widget.show()
+        if hasattr(self, "pipeline_editor_widget"):
+            self.pipeline_editor_widget.show()
 
-        # Pipeline editor is NOT shown by default because it imports ALL GPU libraries
-        # (torch, tensorflow, jax, cupy, pyclesperanto) which takes 8+ seconds
-        # User can open it from View menu when needed
+        # Log viewer is still a separate window
+        self.show_log_viewer()
 
     def show_plate_manager(self):
-        """Show plate manager window (mirrors Textual TUI pattern)."""
-        if "plate_manager" not in self.floating_windows:
-            from openhcs.pyqt_gui.widgets.plate_manager import PlateManagerWidget
-
-            # Create floating window
-            window = QDialog(self)
-            window.setWindowTitle("Plate Manager")
-            window.setModal(False)
-            window.resize(600, 400)
-
-            # Add widget to window
-            layout = QVBoxLayout(window)
-            plate_widget = PlateManagerWidget(
-                self.service_adapter, self.service_adapter.get_current_color_scheme()
-            )
-            layout.addWidget(plate_widget)
-
-            self.floating_windows["plate_manager"] = window
-
-            # REACTIVITY: Connect global config changed signal so windows auto-refresh
-            # When PlateManager saves global config, it emits this signal
-            # Main window propagates it to all other windows via on_config_changed
-            plate_widget.global_config_changed.connect(
-                lambda: self.on_config_changed(self.service_adapter.get_global_config())
-            )
-            logger.debug(
-                "Connected PlateManager global_config_changed signal for reactive updates"
-            )
-
-            # Connect progress signals to status bar
-            if hasattr(self, "status_bar") and self.status_bar:
-                # Create progress bar in status bar if it doesn't exist
-                if not hasattr(self, "_status_progress_bar"):
-                    from PyQt6.QtWidgets import QProgressBar
-
-                    self._status_progress_bar = QProgressBar()
-                    self._status_progress_bar.setMaximumWidth(200)
-                    self._status_progress_bar.setVisible(False)
-                    self.status_bar.addPermanentWidget(self._status_progress_bar)
-
-                # Connect progress signals
-                plate_widget.progress_started.connect(
-                    lambda max_val: self._on_plate_progress_started(max_val)
-                )
-                plate_widget.progress_updated.connect(
-                    lambda val: self._on_plate_progress_updated(val)
-                )
-                plate_widget.progress_finished.connect(
-                    lambda: self._on_plate_progress_finished()
-                )
-
-            # Connect to pipeline editor if it exists (mirrors Textual TUI)
-            self._connect_plate_to_pipeline_manager(plate_widget)
-
-        # Show the window and ensure flash overlay is ready
-        self.floating_windows["plate_manager"].show()
-        self._ensure_flash_overlay(self.floating_windows["plate_manager"])
-        self.floating_windows["plate_manager"].raise_()
-        self.floating_windows["plate_manager"].activateWindow()
+        """Show/focus plate manager widget."""
+        if hasattr(self, "plate_manager_widget"):
+            # Bring to front in the splitter
+            self.plate_manager_widget.show()
+            self.plate_manager_widget.raise_()
+            # Maximize plate manager in the left splitter
+            if hasattr(self, "left_splitter"):
+                sizes = self.left_splitter.sizes()
+                if len(sizes) == 2:
+                    # Give plate manager 70% of the left side
+                    total = sum(sizes)
+                    self.left_splitter.setSizes([int(total * 0.7), int(total * 0.3)])
+            # Also maximize left side in main splitter
+            if hasattr(self, "main_splitter"):
+                sizes = self.main_splitter.sizes()
+                if len(sizes) == 2:
+                    # Give left side 60% of main area
+                    total = sum(sizes)
+                    self.main_splitter.setSizes([int(total * 0.6), int(total * 0.4)])
+        else:
+            # Fallback to window mode
+            self.show_window("plate_manager")
 
     def show_pipeline_editor(self):
-        """Show pipeline editor window (mirrors Textual TUI pattern)."""
-        if "pipeline_editor" not in self.floating_windows:
-            from openhcs.pyqt_gui.widgets.pipeline_editor import PipelineEditorWidget
+        """Show/focus pipeline editor widget."""
+        if hasattr(self, "pipeline_editor_widget"):
+            # Bring to front in the splitter
+            self.pipeline_editor_widget.show()
+            self.pipeline_editor_widget.raise_()
+            # Optionally maximize its size in the main splitter
+            if hasattr(self, "main_splitter"):
+                sizes = self.main_splitter.sizes()
+                if len(sizes) == 2:
+                    # Give pipeline editor 60% of the space
+                    total = sum(sizes)
+                    self.main_splitter.setSizes([int(total * 0.4), int(total * 0.6)])
+        else:
+            # Fallback to window mode
+            self.show_window("pipeline_editor")
 
-            # Create floating window
-            window = QDialog(self)
-            window.setWindowTitle("Pipeline Editor")
-            window.setModal(False)
-            window.resize(800, 600)
-
-            # Add widget to window
-            layout = QVBoxLayout(window)
-            pipeline_widget = PipelineEditorWidget(
-                self.service_adapter, self.service_adapter.get_current_color_scheme()
-            )
-            layout.addWidget(pipeline_widget)
-
-            self.floating_windows["pipeline_editor"] = window
-
-            # Connect to plate manager for current plate selection (mirrors Textual TUI)
-            self._connect_pipeline_to_plate_manager(pipeline_widget)
-
-        # Show the window and ensure flash overlay is ready
-        self.floating_windows["pipeline_editor"].show()
-        self._ensure_flash_overlay(self.floating_windows["pipeline_editor"])
-        self.floating_windows["pipeline_editor"].raise_()
-        self.floating_windows["pipeline_editor"].activateWindow()
+    def show_zmq_server_manager(self):
+        """Show/focus ZMQ server manager widget."""
+        if hasattr(self, "zmq_manager_widget"):
+            # Bring to front in the splitter
+            self.zmq_manager_widget.show()
+            self.zmq_manager_widget.raise_()
+            # Maximize ZMQ manager in the left splitter
+            if hasattr(self, "left_splitter"):
+                sizes = self.left_splitter.sizes()
+                if len(sizes) == 2:
+                    # Give ZMQ manager 50% of the left side
+                    total = sum(sizes)
+                    self.left_splitter.setSizes([int(total * 0.5), int(total * 0.5)])
+            # Also maximize left side in main splitter
+            if hasattr(self, "main_splitter"):
+                sizes = self.main_splitter.sizes()
+                if len(sizes) == 2:
+                    # Give left side 60% of main area
+                    total = sum(sizes)
+                    self.main_splitter.setSizes([int(total * 0.6), int(total * 0.4)])
+        else:
+            # Fallback to window mode
+            self.show_window("zmq_server_manager")
 
     def show_image_browser(self):
         """Show image browser window."""
-        if "image_browser" not in self.floating_windows:
-            from openhcs.pyqt_gui.widgets.image_browser import ImageBrowserWidget
-            from openhcs.pyqt_gui.widgets.plate_manager import PlateManagerWidget
-
-            # Create floating window
-            window = QDialog(self)
-            window.setWindowTitle("Image Browser")
-            window.setModal(False)
-            window.resize(900, 600)
-
-            # Add widget to window
-            layout = QVBoxLayout(window)
-            image_browser_widget = ImageBrowserWidget(
-                orchestrator=None,
-                color_scheme=self.service_adapter.get_current_color_scheme(),
-            )
-            layout.addWidget(image_browser_widget)
-
-            self.floating_windows["image_browser"] = window
-
-            # Connect to plate manager to get current orchestrator
-            if "plate_manager" in self.floating_windows:
-                plate_dialog = self.floating_windows["plate_manager"]
-                plate_widget = plate_dialog.findChild(PlateManagerWidget)
-                if plate_widget:
-                    # Connect to plate selection changes
-                    def on_plate_selected():
-                        orchestrator = plate_widget.get_selected_orchestrator()
-                        if orchestrator:
-                            image_browser_widget.set_orchestrator(orchestrator)
-
-                    # Connect to plate selection signal
-                    plate_widget.plate_selected.connect(on_plate_selected)
-
-                    # Set initial orchestrator if available
-                    on_plate_selected()
-
-        # Show the window and ensure flash overlay is ready
-        self.floating_windows["image_browser"].show()
-        self._ensure_flash_overlay(self.floating_windows["image_browser"])
-        self.floating_windows["image_browser"].raise_()
-        self.floating_windows["image_browser"].activateWindow()
-
-    def _initialize_log_viewer(self):
-        """
-        Initialize Log Viewer on startup (hidden) for continuous log monitoring.
-
-        This ensures all server logs are captured regardless of when the
-        Log Viewer window is opened by the user.
-        """
-        # Create floating window (hidden)
-        window = QDialog(self)
-        window.setWindowTitle("Log Viewer")
-        window.setModal(False)
-        window.resize(900, 700)
-
-        # Add widget to window
-        layout = QVBoxLayout(window)
-        log_viewer_widget = LogViewerWindow(self.file_manager, self.service_adapter)
-        layout.addWidget(log_viewer_widget)
-
-        self.floating_windows["log_viewer"] = window
-
-        # Window stays hidden until user opens it
-        logger.info("Log Viewer initialized (hidden) - monitoring for new logs")
+        self.show_window("image_browser")
 
     def show_log_viewer(self):
-        """Show log viewer window (mirrors Textual TUI pattern)."""
-        # Log viewer is already initialized on startup, just show it
-        if "log_viewer" in self.floating_windows:
-            self.floating_windows["log_viewer"].show()
-            self._ensure_flash_overlay(self.floating_windows["log_viewer"])
-            self.floating_windows["log_viewer"].raise_()
-            self.floating_windows["log_viewer"].activateWindow()
-        else:
-            # Fallback: initialize if somehow not created
-            self._initialize_log_viewer()
-            self.show_log_viewer()
+        """Show log viewer window."""
+        self.show_window("log_viewer")
 
     def show_zmq_server_manager(self):
         """Show ZMQ server manager window."""
-        if "zmq_server_manager" not in self.floating_windows:
-            from openhcs.pyqt_gui.widgets.shared.zmq_server_manager import (
-                ZMQServerManagerWidget,
-            )
-
-            # Create floating window
-            window = QDialog(self)
-            window.setWindowTitle("ZMQ Server Manager")
-            window.setModal(False)
-            window.resize(600, 400)
-
-            # Add widget to window
-            layout = QVBoxLayout(window)
-
-            # Scan all streaming ports using current global config
-            # This ensures we find viewers launched with custom ports
-            from openhcs.core.config import get_all_streaming_ports
-
-            ports_to_scan = get_all_streaming_ports(
-                num_ports_per_type=10
-            )  # Uses global config by default
-
-            zmq_manager_widget = ZMQServerManagerWidget(
-                ports_to_scan=ports_to_scan,
-                title="ZMQ Servers (Execution + Napari + Fiji)",
-                style_generator=self.service_adapter.get_style_generator(),
-            )
-
-            # Connect log file opened signal to log viewer
-            zmq_manager_widget.log_file_opened.connect(self._open_log_file_in_viewer)
-
-            layout.addWidget(zmq_manager_widget)
-
-            self.floating_windows["zmq_server_manager"] = window
-
-        # Show window and ensure flash overlay is ready
-        self.floating_windows["zmq_server_manager"].show()
-        self._ensure_flash_overlay(self.floating_windows["zmq_server_manager"])
-        self.floating_windows["zmq_server_manager"].raise_()
-        self.floating_windows["zmq_server_manager"].activateWindow()
+        self.show_window("zmq_server_manager")
 
     def _open_log_file_in_viewer(self, log_file_path: str):
         """
@@ -404,10 +399,13 @@ class OpenHCSMainWindow(QMainWindow):
         Args:
             log_file_path: Path to log file to open
         """
-        # Show log viewer if not already open
         self.show_log_viewer()
 
-        # Switch to the log file
+        window = self._get_managed_window("log_viewer")
+        if window:
+            log_viewer_widget = window.get_widget()
+            log_viewer_widget.switch_to_log(Path(log_file_path))
+            logger.info(f"Switched log viewer to: {log_file_path}")
         if "log_viewer" in self.floating_windows:
             log_dialog = self.floating_windows["log_viewer"]
             log_viewer_widget = log_dialog.findChild(LogViewerWindow)

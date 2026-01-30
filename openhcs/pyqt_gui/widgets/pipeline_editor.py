@@ -902,7 +902,22 @@ class PipelineEditorWidget(AbstractManagerWidget):
         if not self.current_plate:
             return False
 
-        # Get plate manager from main window
+        # Use plate_manager reference if available (set by main window during connection)
+        # This works for both embedded widgets and floating windows
+        if self.plate_manager:
+            from objectstate import ObjectStateRegistry
+            orchestrator = ObjectStateRegistry.get_object(self.current_plate)
+            if orchestrator is None:
+                return False
+
+            # Check if orchestrator is in an initialized state (mirrors Textual TUI logic)
+            is_initialized = orchestrator.state in [OrchestratorState.READY, OrchestratorState.COMPILED,
+                                         OrchestratorState.COMPLETED, OrchestratorState.COMPILE_FAILED,
+                                         OrchestratorState.EXEC_FAILED]
+            logger.debug(f"PipelineEditor: Plate {self.current_plate} orchestrator state: {orchestrator.state}, initialized: {is_initialized}")
+            return is_initialized
+
+        # Fallback: Try to find plate manager from main window (for floating windows)
         main_window = self._find_main_window()
         if not main_window:
             return False

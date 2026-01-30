@@ -30,7 +30,7 @@ from pyqt_reactive.theming import ColorScheme
 from pyqt_reactive.theming import StyleSheetGenerator
 from pyqt_reactive.services.scope_token_service import ScopeTokenService
 from pyqt_reactive.widgets.function_list_editor import FunctionListEditorWidget
-from openhcs.pyqt_gui.windows.base_form_dialog import BaseFormDialog
+from pyqt_reactive.widgets.shared import BaseFormDialog
 from openhcs.config_framework.object_state import ObjectStateRegistry
 from openhcs.introspection import UnifiedParameterAnalyzer
 from openhcs.pyqt_gui.widgets.step_parameter_editor import StepParameterEditorWidget
@@ -103,10 +103,7 @@ class DualEditorWindow(BaseFormDialog):
             self.editing_step = self._create_new_step()
             self.original_step = None
 
-        # Snapshot of last-saved state for change detection
-        self._baseline_snapshot = self._serialize_for_change_detection(self.editing_step)
-        
-        # Change tracking
+        # Change tracking (now uses ObjectState.dirty_fields instead of snapshots)
         self.has_changes = False
         self.current_tab = "step"
         
@@ -118,8 +115,25 @@ class DualEditorWindow(BaseFormDialog):
         # Setup UI
         self.setup_ui()
         self.setup_connections()
-        
+
+        # Connect automatic change detection (BaseManagedWindow feature)
+        # This automatically calls detect_changes() when any parameter changes
+        self._connect_change_detection()
+
         logger.debug(f"Dual editor window initialized (new={is_new})")
+
+    @property
+    def state(self):
+        """Expose step_editor's ObjectState for BaseManagedWindow compatibility.
+
+        This allows BaseManagedWindow.reject() to find and restore the state
+        when the window is cancelled or closed without saving.
+
+        Returns None if step_editor hasn't been created yet.
+        """
+        if hasattr(self, 'step_editor') and self.step_editor:
+            return self.step_editor.state
+        return None
 
     def set_original_step_for_change_detection(self):
         """Set the original step for change detection. Must be called within proper context."""
@@ -349,6 +363,11 @@ class DualEditorWindow(BaseFormDialog):
             if hasattr(self.func_editor, 'header_label') and self.func_editor.header_label:
                 self.func_editor.header_label.setStyleSheet(f"color: {hex_color}; font-weight: bold; font-size: 14px;")
 
+            # Apply scope color scheme to function panes (for enableable styling and colors)
+            # Use inheritance - _scope_color_scheme is set by ScopedBorderMixin._init_scope_border()
+            if self._scope_color_scheme:
+                self.func_editor.set_scope_color_scheme(self._scope_color_scheme)
+
     def _build_step_scope_id(self) -> str:
         return ScopeTokenService.build_scope_id(self.orchestrator.plate_path, self.editing_step)
     
@@ -369,7 +388,9 @@ class DualEditorWindow(BaseFormDialog):
                     scope_id=scope_id
                 )
 
-        # Connect parameter changes - use form manager signal for immediate response
+        # NOTE: parameter_changed connection is now handled automatically by BaseManagedWindow._connect_change_detection()
+        # which is called at the end of __init__. This automatically calls detect_changes() when any parameter changes.
+        # We still need on_form_parameter_changed() for function editor sync, so connect it here.
         self.step_editor.form_manager.parameter_changed.connect(self.on_form_parameter_changed)
 
         # NOTE: context_changed subscription REMOVED - FunctionListEditorWidget now subscribes
@@ -854,14 +875,17 @@ class DualEditorWindow(BaseFormDialog):
             logger.debug(f"Tab changed to: {self.current_tab}")
     
     def detect_changes(self):
-        """Detect if changes have been made."""
-        current_snapshot = self._serialize_current_form_state()
-        baseline_snapshot = getattr(self, '_baseline_snapshot', None)
-        has_changes = current_snapshot != baseline_snapshot
+        """Detect if changes have been made using ObjectState's dirty tracking.
+
+        This replaces the old snapshot-based approach with ObjectState's built-in
+        dirty tracking, which automatically detects changes to any parameter
+        (including nested fields) by comparing current values to saved baseline.
+        """
+        # Use ObjectState's dirty tracking instead of custom snapshot comparison
+        has_changes = bool(self.state.dirty_fields) if self.state else False
 
         logger.debug(f"🔍 DETECT_CHANGES:")
-        logger.debug(f"  current_snapshot={current_snapshot}")
-        logger.debug(f"  baseline_snapshot={baseline_snapshot}")
+        logger.debug(f"  dirty_fields={self.state.dirty_fields if self.state else 'no state'}")
         logger.debug(f"  has_changes={has_changes}")
 
         if has_changes != self.has_changes:
@@ -947,17 +971,18 @@ class DualEditorWindow(BaseFormDialog):
                 logger.info(f"💾 Calling on_save_callback")
                 self.on_save_callback(step_to_save)
 
-            # After a successful save, refresh the baseline snapshot used for change detection.
-            # This ensures Shift+Save (which keeps the window open) clears the "Unsaved changes" label.
+            # After a successful save, update original_step and detect changes
+            # ObjectState.mark_saved() is called by accept() or _mark_saved_and_refresh_all()
             self.original_step = self._clone_step(self.editing_step)
-            self._baseline_snapshot = self._serialize_for_change_detection(self.editing_step)
-            self.detect_changes()
 
             # UNIFIED: Both paths share same logic, differ only in whether to close window
             if close_window:
                 self.accept()  # Marks saved + unregisters + cleans up + closes
             else:
                 self._mark_saved_and_refresh_all()  # Marks saved + refreshes, but stays open
+
+            # Detect changes after marking saved (should show no changes now)
+            self.detect_changes()
             logger.debug(f"Step saved: {getattr(step_to_save, 'name', 'Unknown')}")
 
         except Exception as e:
@@ -993,83 +1018,8 @@ class DualEditorWindow(BaseFormDialog):
         import copy
         return copy.deepcopy(step)
 
-    _CHANGE_DETECTION_EXCLUDE_PARAMS = {'kwargs'}
-
-    def _serialize_for_change_detection(self, step):
-        """Create a normalized snapshot of the step for change detection."""
-        params = UnifiedParameterAnalyzer.analyze(step)
-        snapshot = {}
-        for name, param_info in params.items():
-            if name in self._CHANGE_DETECTION_EXCLUDE_PARAMS:
-                continue
-            current_value = getattr(step, name, param_info.default_value)
-            snapshot[name] = self._normalize_value_for_change_detection(current_value)
-        return snapshot
-
-    def _serialize_current_form_state(self):
-        """Serialize a snapshot of the step using live form values (including nested dataclasses)."""
-        import copy
-
-        temp_step = copy.deepcopy(self.editing_step)
-
-        # NOTE: We DON'T override func from func_editor.current_pattern here because:
-        # 1. current_pattern returns the pattern data structure (list of tuples), not the func value
-        # 2. editing_step.func should already be kept in sync by the function editor's signals
-        # 3. Using current_pattern would cause serialization mismatch with baseline
-
-        for tab_index in range(self.tab_widget.count()):
-            tab_widget = self.tab_widget.widget(tab_index)
-            state = getattr(tab_widget, 'state', None)
-            if not state:
-                continue
-
-            current_values = state.get_current_values()
-            for param_name, value in current_values.items():
-                if hasattr(temp_step, param_name):
-                    setattr(temp_step, param_name, value)
-
-        return self._serialize_for_change_detection(temp_step)
-
-    def _normalize_value_for_change_detection(self, value):
-        """Normalize complex values into comparison-friendly primitives."""
-        if value is None:
-            return None
-
-        if isinstance(value, (str, int, float, bool)):
-            return value
-
-        if isinstance(value, Path):
-            return str(value)
-
-        if isinstance(value, list):
-            return [self._normalize_value_for_change_detection(v) for v in value]
-
-        if isinstance(value, tuple):
-            return tuple(self._normalize_value_for_change_detection(v) for v in value)
-
-        if isinstance(value, dict):
-            return {k: self._normalize_value_for_change_detection(v) for k, v in value.items()}
-
-        if hasattr(value, 'value') and hasattr(value, 'name'):
-            return value.value
-
-        if callable(value):
-            module = getattr(value, '__module__', '')
-            qualname = getattr(value, '__qualname__', getattr(value, '__name__', repr(value)))
-            return f"{module}.{qualname}"
-
-        if is_dataclass(value):
-            is_lazy_dataclass = get_base_type_for_lazy(type(value)) is not None
-            normalized = {}
-            for field in fields(value):
-                if is_lazy_dataclass:
-                    raw_field_value = object.__getattribute__(value, field.name)
-                else:
-                    raw_field_value = getattr(value, field.name)
-                normalized[field.name] = self._normalize_value_for_change_detection(raw_field_value)
-            return normalized
-
-        return repr(value)
+    # NOTE: Snapshot-based change detection removed - now using ObjectState.dirty_fields
+    # This is simpler, more reliable, and automatically handles nested fields
 
     def _create_new_step(self):
         """Create a new empty step."""
@@ -1084,23 +1034,19 @@ class DualEditorWindow(BaseFormDialog):
         self.reject()
 
     def reject(self):
-        """Handle dialog rejection (Cancel button or Escape key)."""
+        """Handle dialog rejection (Cancel button or Escape key).
+
+        Restores ObjectState to last saved state, undoing all unsaved changes.
+        """
         # No confirmation needed - time travel allows recovery of any state
 
         self.step_cancelled.emit()
 
-        # CRITICAL: Before restore_saved() is called by super(), get the saved func value
-        # so we can reset the editing_step and func_editor to match
-        if hasattr(self, 'step_editor') and self.step_editor and hasattr(self.step_editor, 'state'):
-            state = self.step_editor.state
-            if state and 'func' in state._saved_parameters:
-                saved_func = state._saved_parameters['func']
-                # Restore editing_step.func to saved value (undo any live changes)
-                self.editing_step.func = saved_func
-                logger.debug(f"Restored editing_step.func to saved value")
-
         logger.info("🔍 DualEditorWindow: About to call super().reject()")
-        super().reject()  # BaseFormDialog handles unregistration
+
+        # CRITICAL: super().reject() calls state.restore_saved() to undo ALL unsaved changes
+        # This restores all parameters (including func) to last saved state automatically
+        super().reject()  # BaseFormDialog handles state restoration + unregistration
 
         # CRITICAL: Trigger global refresh AFTER unregistration so other windows
         # re-collect live context without this cancelled window's values
