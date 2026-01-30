@@ -223,26 +223,22 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
         """Setup the user interface."""
         self.setWindowTitle(self._base_window_title)
         self.setModal(False)  # Non-modal like plate manager and pipeline editor
-        self.setMinimumSize(600, 400)
-        self.resize(800, 600)
+        self.setMinimumSize(250, 250)  # Ultra minimal
+        self.resize(400, 400)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(4)
 
-        # Header with title, help button, and action buttons
-        header_widget = QWidget()
-        header_layout = QHBoxLayout(header_widget)
-        header_layout.setContentsMargins(4, 2, 4, 2)
-
-        self._header_label = QLabel(f"Configure {self.config_class.__name__}")
-        self._header_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
-        self._header_label.setStyleSheet(
-            f"color: {self.color_scheme.to_hex(self.color_scheme.text_accent)};"
+        # Compact two-row header: title on top, buttons below
+        # This allows the window to be narrower by separating title from buttons
+        title_text = f"Configure {self.config_class.__name__}"
+        title_color = self.color_scheme.to_hex(self.color_scheme.text_accent)
+        self._header_label, button_layout = self._create_compact_header(
+            layout, title_text, title_color
         )
-        header_layout.addWidget(self._header_label)
 
-        # Add help button for the dataclass itself
+        # Add help button for the dataclass itself - place it next to the title
         self._help_btn = None
         if dataclasses.is_dataclass(self.config_class):
             self._help_btn = HelpButton(
@@ -252,11 +248,12 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
                 scope_accent_color=getattr(self, "_scope_accent_color", None),
             )
             self._help_btn.setMaximumWidth(80)
-            header_layout.addWidget(self._help_btn)
+            # Add to title row (before the stretch that pushes title to left)
+            title_row = self._header_label.parent().layout()
+            # Insert after the header label (index 0) but before the stretch (index 1)
+            title_row.insertWidget(1, self._help_btn)
 
-        header_layout.addStretch()
-
-        # Add action buttons to header (top right)
+        # Add action buttons to button row
         button_styles = self.style_generator.generate_config_button_styles()
 
         # View Code button
@@ -265,7 +262,7 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
         view_code_button.setMinimumWidth(80)
         view_code_button.clicked.connect(self._view_code)
         view_code_button.setStyleSheet(button_styles["reset"])
-        header_layout.addWidget(view_code_button)
+        button_layout.addWidget(view_code_button)
 
         # Reset button
         reset_button = QPushButton("Reset to Defaults")
@@ -273,7 +270,7 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
         reset_button.setMinimumWidth(100)
         reset_button.clicked.connect(self.reset_to_defaults)
         reset_button.setStyleSheet(button_styles["reset"])
-        header_layout.addWidget(reset_button)
+        button_layout.addWidget(reset_button)
 
         # Cancel button
         cancel_button = QPushButton("Cancel")
@@ -281,7 +278,7 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
         cancel_button.setMinimumWidth(70)
         cancel_button.clicked.connect(self.reject)
         cancel_button.setStyleSheet(button_styles["cancel"])
-        header_layout.addWidget(cancel_button)
+        button_layout.addWidget(cancel_button)
 
         # Save button
         self._save_button = QPushButton("Save")
@@ -289,9 +286,7 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
         self._save_button.setMinimumWidth(70)
         self._setup_save_button(self._save_button, self.save_config)
         self._save_button.setStyleSheet(button_styles["save"])
-        header_layout.addWidget(self._save_button)
-
-        layout.addWidget(header_widget)
+        button_layout.addWidget(self._save_button)
 
         # Create splitter with tree view on left and form on right
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -690,7 +685,6 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
         CodeEditorFormUpdater.update_form_from_instance(
             self.form_manager,
             new_config,
-            broadcast_callback=self._broadcast_config_changed,
         )
 
     def reject(self):

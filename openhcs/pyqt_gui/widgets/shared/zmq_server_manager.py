@@ -454,7 +454,7 @@ class ZMQServerManagerWidget(QWidget):
                 status_icon = "🚀"
 
             # Handle execution servers specially - show workers as children
-            if server_type == "ZMQExecutionServer":
+            if server_type.endswith("ExecutionServer"):
                 running_executions = server.get("running_executions", [])
                 workers = server.get("workers", [])
 
