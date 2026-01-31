@@ -63,10 +63,10 @@ The lower-bound statement does not address intermediate regimes.
 
 \subsection{Machine-Checked Proofs}
 
-All results are formalized in Lean 4 \cite{moura2021lean4} ($\sim$5,000 lines, 200+ theorems). The formalization verifies the reduction mappings and combinatorial lemmas; complexity class membership follows by composition with TAUTOLOGY and $\exists\forall$-SAT.
+The reduction constructions and key equivalence theorems are machine-checked in Lean 4 \cite{moura2021lean4} ($\sim$5,000 lines, 200+ theorems). The formalization verifies that the TAUTOLOGY reduction correctly maps tautologies to sufficient coordinate sets. Complexity class membership (coNP-completeness, $\Sigma_2^P$-completeness) follows by composition with standard complexity-theoretic results.
 
 \paragraph{What is new.}
-We contribute (i) a reusable Lean 4 framework for polynomial-time reductions with explicit polynomial bounds; (ii) the first machine-checked coNP-completeness proof for a decision-theoretic sufficiency problem; and (iii) a complete complexity landscape for coordinate sufficiency under explicit encoding assumptions. Prior work studies decision complexity in general or feature selection hardness, but does not formalize these reductions or establish this landscape in Lean.
+We contribute (i) formal definitions of decision-theoretic sufficiency in Lean; (ii) machine-checked proofs of reduction correctness for the TAUTOLOGY and $\exists\forall$-SAT reductions; and (iii) a complete complexity landscape for coordinate sufficiency with explicit encoding assumptions. Prior work establishes hardness informally; we formalize the constructions.
 
 \subsection{Paper Structure}
 

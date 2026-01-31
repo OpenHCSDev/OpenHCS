@@ -28,7 +28,7 @@ This paper establishes the computational complexity of coordinate sufficiency pr
 
 These results place the problem of identifying decision-relevant coordinates at the first and second levels of the polynomial hierarchy.
 
-Proofs are machine-checked in Lean 4 (see Appendix~\ref{app:lean} for proof listings). The formalization verifies the reduction mappings and equivalence theorems; complexity classifications follow from standard results (TAUTOLOGY is \coNP-complete, $\exists\forall$-SAT is $\SigmaP{2}$-complete) under the encoding model of Section~\ref{sec:encoding}. In particular, the strengthened gadget showing that non-tautologies yield instances with \emph{all coordinates relevant} (hence $k^*=\Omega(n)$) is also mechanized (see Appendix~\ref{app:lean}).
+The reduction constructions and key equivalence theorems are machine-checked in Lean 4 (see Appendix~\ref{app:lean} for proof listings). The formalization verifies that the TAUTOLOGY reduction correctly maps tautologies to sufficient coordinate sets; complexity classifications (coNP-completeness, $\SigmaP{2}$-completeness) follow by composition with standard complexity-theoretic results (TAUTOLOGY is \coNP-complete, $\exists\forall$-SAT is $\SigmaP{2}$-complete). The strengthened gadget showing that non-tautologies yield instances with \emph{all coordinates relevant} is also formalized.
 
 \subsection*{Complexity Characterization}
 
