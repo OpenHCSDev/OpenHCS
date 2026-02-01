@@ -19,6 +19,7 @@ from polystore.base import storage_registry
 from polystore.filemanager import FileManager
 from objectstate import spawn_thread_with_context
 
+from pyqt_reactive.utils.scroll_filter import install_shift_wheel_scrolling
 from openhcs.pyqt_gui.main import OpenHCSMainWindow
 
 logger = logging.getLogger(__name__)
@@ -68,6 +69,10 @@ class OpenHCSPyQtApp(QApplication):
 
         # Setup application
         self.setup_application()
+
+        # Install global Shift+Wheel horizontal scrolling
+        self._scroll_filter = install_shift_wheel_scrolling(self)
+        logger.debug("Installed global Shift+Wheel horizontal scrolling")
 
         logger.info("OpenHCS PyQt6 application initialized")
 
