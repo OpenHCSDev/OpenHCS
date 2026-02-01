@@ -1244,8 +1244,14 @@ class DualEditorWindow(BaseFormDialog):
 
         from objectstate import ObjectStateRegistry
 
-        state = ObjectStateRegistry.get_by_scope(getattr(self, "scope_id", None))
-        is_step = isinstance(getattr(state, "object_instance", None), FunctionStep)
+        if not self.scope_id:
+            return
+
+        state = ObjectStateRegistry.get_by_scope(self.scope_id)
+        if not state or state.object_instance is None:
+            return
+
+        is_step = isinstance(state.object_instance, FunctionStep)
 
         if is_step and self.step_editor:
             if self.tab_widget:
