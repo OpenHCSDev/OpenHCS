@@ -943,6 +943,8 @@ class OpenHCSMainWindow(QMainWindow):
                 WindowManager.focus_and_navigate(scope_id)
                 # Also select appropriate tab based on what changed
                 self._select_tab_for_time_travel(scope_id, state)
+                # Scroll to the first dirty field (regardless of which tab it's on)
+                self._scroll_to_dirty_field(scope_id, state)
                 continue
 
             # Window not open - create via WindowFactory
@@ -952,6 +954,17 @@ class OpenHCSMainWindow(QMainWindow):
             if window:
                 logger.info(
                     f"⏱️ TIME_TRAVEL: Reopened window for dirty state: {scope_id}"
+                )
+                # After window is created, select tab and scroll to dirty field
+                # Use QTimer.singleShot to ensure window is fully initialized
+                from PyQt6.QtCore import QTimer
+
+                QTimer.singleShot(
+                    100,
+                    lambda sid=scope_id, st=state: (
+                        self._select_tab_for_time_travel(sid, st),
+                        self._scroll_to_dirty_field(sid, st),
+                    ),
                 )
 
     def _select_tab_for_time_travel(self, scope_id: str, state: ObjectState) -> None:
@@ -991,6 +1004,61 @@ class OpenHCSMainWindow(QMainWindow):
             logger.debug(
                 f"[TAB_SELECT] Time-travel: Step Settings tab (no func change)"
             )
+
+    def _scroll_to_dirty_field(self, scope_id: str, state: ObjectState) -> None:
+        """Scroll to the first dirty field in the window after time-travel.
+
+        This ensures the user can see what changed, regardless of which tab it's on.
+        """
+        from pyqt_reactive.services.window_manager import WindowManager
+
+        window = WindowManager.get_window(scope_id)
+        if not window:
+            return
+
+        # Get dirty fields from the state
+        dirty_fields = getattr(state, "dirty_fields", None)
+        if not dirty_fields:
+            logger.debug(f"[SCROLL] No dirty fields for scope: {scope_id}")
+            return
+
+        # Pick the first dirty field to scroll to
+        # Convert set to list and take first item
+        field_list = list(dirty_fields)
+        if not field_list:
+            return
+
+        # Use the first dirty field
+        target_field = field_list[0]
+        logger.debug(
+            f"[SCROLL] Scrolling to dirty field: {target_field} in scope: {scope_id}"
+        )
+
+        # Try to scroll using select_and_scroll_to_field (preferred method)
+        if hasattr(window, "select_and_scroll_to_field"):
+            try:
+                window.select_and_scroll_to_field(target_field)
+                logger.debug(f"[SCROLL] Successfully scrolled to: {target_field}")
+                return
+            except Exception as e:
+                logger.warning(f"[SCROLL] Failed to scroll to {target_field}: {e}")
+
+        # Fallback: try _scroll_to_section
+        if hasattr(window, "_scroll_to_section"):
+            try:
+                window._scroll_to_section(target_field, flash=True)
+                logger.debug(
+                    f"[SCROLL] Successfully scrolled to: {target_field} (fallback)"
+                )
+                return
+            except Exception as e:
+                logger.warning(
+                    f"[SCROLL] Failed to scroll (fallback) to {target_field}: {e}"
+                )
+
+        logger.debug(
+            f"[SCROLL] Window doesn't support scrolling methods for scope: {scope_id}"
+        )
 
     def show_synthetic_plate_generator(self):
         """Show synthetic plate generator window."""
