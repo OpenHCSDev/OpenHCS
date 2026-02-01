@@ -1242,32 +1242,16 @@ class DualEditorWindow(BaseFormDialog):
         if not field_path:
             return
 
-        targets = []
-        if self.step_editor and hasattr(self.step_editor, "select_and_scroll_to_field"):
-            targets.append((self.step_editor, 0))
-        if self.func_editor and hasattr(self.func_editor, "select_and_scroll_to_field"):
-            targets.append((self.func_editor, 1))
+        if self.step_editor:
+            if self.tab_widget:
+                self.tab_widget.setCurrentIndex(0)
+            self.step_editor.select_and_scroll_to_field(field_path)
+            return
 
-        if self.tab_widget:
-            current_widget = self.tab_widget.currentWidget()
-            if current_widget and hasattr(current_widget, "select_and_scroll_to_field"):
-                current_index = self.tab_widget.currentIndex()
-                targets.insert(0, (current_widget, current_index))
-
-        for widget, tab_index in targets:
-            if self.tab_widget and tab_index is not None:
-                if self.tab_widget.currentIndex() != tab_index:
-                    self.tab_widget.setCurrentIndex(tab_index)
-            try:
-                widget.select_and_scroll_to_field(field_path)
-                return
-            except Exception as exc:
-                logger.debug(
-                    "[SCROLL] Failed to scroll field %s in %s: %s",
-                    field_path,
-                    type(widget).__name__,
-                    exc,
-                )
+        if self.func_editor:
+            if self.tab_widget:
+                self.tab_widget.setCurrentIndex(1)
+            self.func_editor.select_and_scroll_to_field(field_path)
 
     def _apply_changes_to_original(self):
         """Apply all changes from editing_step to original_step_reference."""
