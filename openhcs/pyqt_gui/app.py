@@ -11,6 +11,7 @@ from typing import Optional
 from pathlib import Path
 
 from PyQt6.QtWidgets import QApplication, QMessageBox
+from PyQt6.QtCore import qInstallMessageHandler
 from PyQt6.QtGui import QIcon
 
 from openhcs.core.config import GlobalPipelineConfig
@@ -42,6 +43,12 @@ class OpenHCSPyQtApp(QApplication):
             global_config: Global configuration (uses default if None)
         """
         super().__init__(argv)
+
+        def _qt_message_handler(msg_type, context, message):
+            if "QTextCursor::setPosition" in message:
+                logger.warning("Qt: %s", message)
+
+        qInstallMessageHandler(_qt_message_handler)
 
         # Application metadata
         self.setApplicationName("OpenHCS")
@@ -118,7 +125,7 @@ class OpenHCSPyQtApp(QApplication):
             object_instance=self.global_config,
             scope_id="",  # Empty string = global scope
         )
-        ObjectStateRegistry.register(global_state)
+        ObjectStateRegistry.register(global_state, _skip_snapshot=True)
 
         # ARCHITECTURAL FIX: Do NOT set contextvars at app startup
         # contextvars is ONLY for temporary nested contexts (inside with config_context() blocks)

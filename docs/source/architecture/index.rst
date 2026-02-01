@@ -117,7 +117,7 @@ Dynamic code generation and parser systems.
    pattern_detection_system
 
 User Interface Systems
-======================
+=====================
 
 TUI architecture, UI development patterns, and form management systems.
 
@@ -143,6 +143,8 @@ TUI architecture, UI development patterns, and form management systems.
    service-layer-architecture
    gui_performance_patterns
    cross_window_update_optimization
+    scope_window_factory_system
+    service_registry_integration
 
 Development Tools
 =================

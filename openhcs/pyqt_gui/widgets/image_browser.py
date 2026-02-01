@@ -43,6 +43,7 @@ from openhcs.config_framework.object_state import ObjectState, ObjectStateRegist
 from openhcs.core.config import StreamingConfig
 from objectstate.lazy_factory import get_base_type_for_lazy
 from pyqt_reactive.forms import ParameterFormManager, FormManagerConfig
+
 logger = logging.getLogger(__name__)
 
 
@@ -53,8 +54,8 @@ def _get_viewer_display_name(field_name: str) -> str:
     display name (e.g., Napari).
     """
     # Remove '_streaming_config' suffix and convert to title case
-    viewer_name = field_name.replace('_streaming_config', '')
-    return viewer_name.replace('_', ' ').title()
+    viewer_name = field_name.replace("_streaming_config", "")
+    return viewer_name.replace("_", " ").title()
 
 
 def _create_image_browser_config():
@@ -282,8 +283,9 @@ class ImageBrowserWidget(QWidget):
         right_panel = self._create_right_panel()
         main_splitter.addWidget(right_panel)
 
-        # Set initial splitter sizes (20% tree, 50% middle, 30% config)
-        main_splitter.setSizes([200, 500, 300])
+        # Set initial splitter sizes (100px left, flexible middle, 400px right)
+        # Middle uses large value so it takes remaining space proportionally
+        main_splitter.setSizes([100, 2000, 400])
 
         # Add splitter with stretch factor to fill vertical space
         layout.addWidget(main_splitter, 1)
@@ -333,7 +335,9 @@ class ImageBrowserWidget(QWidget):
         Uses TabbedFormWidget to show each streaming config in its own tab.
         """
         container = QWidget()
-        container.setMinimumWidth(300)  # Prevent clipping of config widgets
+        container.setMinimumWidth(
+            360
+        )  # Wider minimum for better config visibility (80% increase from 200)
         layout = QVBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(5)
@@ -360,16 +364,13 @@ class ImageBrowserWidget(QWidget):
         tabs = []
         for field_name in StreamingConfig.__registry__.keys():
             display_name = _get_viewer_display_name(field_name)
-            tabs.append(TabConfig(
-                name=display_name,
-                field_ids=[field_name]
-            ))
+            tabs.append(TabConfig(name=display_name, field_ids=[field_name]))
 
         tabbed_config = TabbedFormConfig(
             tabs=tabs,
             color_scheme=self.color_scheme,
             use_scroll_area=True,  # Each tab gets its own scroll area
-            header_widgets=header_widgets  # View buttons on same row as tabs
+            header_widgets=header_widgets,  # View buttons on same row as tabs
         )
 
         self.tabbed_form = TabbedFormWidget(state=self.state, config=tabbed_config)
@@ -1229,10 +1230,12 @@ class ImageBrowserWidget(QWidget):
 
         Updates view button states when streaming config 'enabled' fields change.
         """
-        logger.info(f"🔔 ImageBrowser._on_parameter_changed: param_name={param_name}, value={value}")
+        logger.info(
+            f"🔔 ImageBrowser._on_parameter_changed: param_name={param_name}, value={value}"
+        )
 
         # Strip leading dot if present (root PFM with field_id='' emits paths like ".napari_streaming_config.enabled")
-        normalized_param = param_name.lstrip('.')
+        normalized_param = param_name.lstrip(".")
 
         # Check if this is an 'enabled' field for any streaming config
         for viewer_type in self.view_buttons.keys():
@@ -1256,7 +1259,9 @@ class ImageBrowserWidget(QWidget):
 
         has_selection = len(self.image_table_browser.get_selected_keys()) > 0
         is_enabled = self._is_viewer_enabled(viewer_type)
-        logger.info(f"  🔘 Updating button for {viewer_type}: has_selection={has_selection}, is_enabled={is_enabled}, final={has_selection and is_enabled}")
+        logger.info(
+            f"  🔘 Updating button for {viewer_type}: has_selection={has_selection}, is_enabled={is_enabled}, final={has_selection and is_enabled}"
+        )
         self.view_buttons[viewer_type].setEnabled(has_selection and is_enabled)
 
     def _on_files_selected(self, keys: list):

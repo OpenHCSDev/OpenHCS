@@ -1,5 +1,5 @@
 Window Manager Usage Guide
-==========================
+=========================
 
 Overview
 --------
@@ -12,6 +12,30 @@ Key features:
 - Auto-cleanup on close (no manual unregistration).
 - Navigation API for focusing and scrolling to fields.
 - Fail-loud on stale references.
+
+ServiceRegistry Integration
+-------------------------
+
+Window handlers use ``ServiceRegistry`` for widget access instead of manual traversal:
+
+.. code-block:: python
+
+    from pyqt_reactive.services import ServiceRegistry
+    from my_widgets import PlateManagerWidget
+
+    def create_plate_config_window(scope_id: str, object_state=None):
+        # Get plate manager from ServiceRegistry
+        plate_manager = ServiceRegistry.get(PlateManagerWidget)
+        if not plate_manager:
+            return None
+
+        window = ConfigWindow(
+            config_class=PipelineConfig,
+            current_config=orchestrator.pipeline_config,
+            scope_id=scope_id,
+        )
+        window.show()
+        return window
 
 Basic Usage
 -----------

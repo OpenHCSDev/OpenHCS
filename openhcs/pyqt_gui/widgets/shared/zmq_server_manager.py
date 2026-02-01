@@ -26,8 +26,12 @@ from PyQt6.QtWidgets import (
     QGroupBox,
     QMessageBox,
     QAbstractItemView,
+    QLabel,
+    QSplitter,
+    QFrame,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot, QTimer
+from PyQt6.QtGui import QFont
 from pyqt_reactive.theming import StyleSheetGenerator
 import threading
 from objectstate import spawn_thread_with_context
@@ -168,16 +172,19 @@ class ZMQServerManagerWidget(QWidget):
             self.refresh_timer.stop()
 
     def setup_ui(self):
-        """Setup the user interface."""
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        """Setup the user interface with AbstractManagerWidget-like styling."""
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(2, 2, 2, 2)
+        main_layout.setSpacing(2)
 
-        # Group box
-        group_box = QGroupBox(self.title)
-        group_layout = QVBoxLayout(group_box)
-        group_layout.setContentsMargins(5, 5, 5, 5)
+        # Header (title + status) - similar to AbstractManagerWidget
+        header = self._create_header()
+        main_layout.addWidget(header)
 
-        # Server tree (hierarchical display with workers as children)
+        # QSplitter: tree widget ABOVE buttons (VERTICAL orientation)
+        splitter = QSplitter(Qt.Orientation.Vertical)
+
+        # Top: server tree
         self.server_tree = QTreeWidget()
         self.server_tree.setHeaderLabels(["Server / Worker", "Status", "Info"])
         self.server_tree.setSelectionMode(
@@ -186,64 +193,90 @@ class ZMQServerManagerWidget(QWidget):
         self.server_tree.itemDoubleClicked.connect(self._on_item_double_clicked)
         self.server_tree.setColumnWidth(0, 250)
         self.server_tree.setColumnWidth(1, 100)
-        group_layout.addWidget(self.server_tree)
+        splitter.addWidget(self.server_tree)
 
-        # Buttons
-        button_layout = QHBoxLayout()
+        # Bottom: button panel
+        button_panel = self._create_button_panel()
+        splitter.addWidget(button_panel)
 
-        self.refresh_btn = QPushButton("Refresh")
-        self.refresh_btn.clicked.connect(self.refresh_servers)
-        button_layout.addWidget(self.refresh_btn)
+        # Set initial sizes: tree takes all space, buttons collapse to minimum height
+        splitter.setSizes([1000, 1])
+        splitter.setStretchFactor(0, 1)  # Tree widget expands
+        splitter.setStretchFactor(1, 0)  # Button panel stays at minimum height
 
-        self.quit_btn = QPushButton("Quit")
-        self.quit_btn.clicked.connect(self.quit_selected_servers)
-        button_layout.addWidget(self.quit_btn)
-
-        self.force_kill_btn = QPushButton("Force Kill")
-        self.force_kill_btn.clicked.connect(self.force_kill_selected_servers)
-        button_layout.addWidget(self.force_kill_btn)
-
-        group_layout.addLayout(button_layout)
-
-        layout.addWidget(group_box)
+        main_layout.addWidget(splitter)
 
         # Apply styling
         if self.style_generator:
-            # Apply button styles
-            self.refresh_btn.setStyleSheet(self.style_generator.generate_button_style())
-            self.quit_btn.setStyleSheet(self.style_generator.generate_button_style())
-            self.force_kill_btn.setStyleSheet(
-                self.style_generator.generate_button_style()
-            )
+            cs = self.style_generator.color_scheme
 
-            # Apply tree widget style (uses existing method)
+            # Apply tree widget style
             self.server_tree.setStyleSheet(
                 self.style_generator.generate_tree_widget_style()
             )
 
-            # Apply group box style
-            cs = self.style_generator.color_scheme
-            group_box.setStyleSheet(f"""
-                QGroupBox {{
-                    background-color: {cs.to_hex(cs.panel_bg)};
-                    border: 1px solid {cs.to_hex(cs.border_color)};
-                    border-radius: 4px;
-                    margin-top: 8px;
-                    padding-top: 8px;
-                    font-weight: bold;
-                    color: {cs.to_hex(cs.text_accent)};
-                }}
-                QGroupBox::title {{
-                    subcontrol-origin: margin;
-                    subcontrol-position: top left;
-                    padding: 2px 5px;
-                    color: {cs.to_hex(cs.text_accent)};
-                }}
-            """)
-
         # Connect internal signals
         self._scan_complete.connect(self._update_server_list)
         self._kill_complete.connect(self._on_kill_complete)
+
+    def _create_header(self) -> QWidget:
+        """Create header with title and status label (similar to AbstractManagerWidget)."""
+        header = QWidget()
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(5, 5, 5, 5)
+
+        # Title label
+        title_label = QLabel(self.title)
+        title_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        if self.style_generator:
+            title_label.setStyleSheet(
+                f"color: {self.style_generator.color_scheme.to_hex(self.style_generator.color_scheme.text_accent)};"
+            )
+        header_layout.addWidget(title_label)
+
+        header_layout.addStretch()
+
+        # Status label
+        self.status_label = QLabel("Ready")
+        if self.style_generator:
+            self.status_label.setStyleSheet(
+                f"color: {self.style_generator.color_scheme.to_hex(self.style_generator.color_scheme.status_success)}; "
+                f"font-weight: bold;"
+            )
+        header_layout.addWidget(self.status_label)
+
+        return header
+
+    def _create_button_panel(self) -> QWidget:
+        """Create button panel with consistent styling."""
+        panel = QWidget()
+        layout = QHBoxLayout(panel)
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(5)
+
+        self.refresh_btn = QPushButton("Refresh")
+        self.refresh_btn.setToolTip("Refresh server list")
+        self.refresh_btn.clicked.connect(self.refresh_servers)
+        layout.addWidget(self.refresh_btn)
+
+        self.quit_btn = QPushButton("Quit")
+        self.quit_btn.setToolTip("Gracefully quit selected servers")
+        self.quit_btn.clicked.connect(self.quit_selected_servers)
+        layout.addWidget(self.quit_btn)
+
+        self.force_kill_btn = QPushButton("Force Kill")
+        self.force_kill_btn.setToolTip("Force kill selected servers")
+        self.force_kill_btn.clicked.connect(self.force_kill_selected_servers)
+        layout.addWidget(self.force_kill_btn)
+
+        # Apply button styles
+        if self.style_generator:
+            button_style = self.style_generator.generate_button_style()
+            self.refresh_btn.setStyleSheet(button_style)
+            self.quit_btn.setStyleSheet(button_style)
+            self.force_kill_btn.setStyleSheet(button_style)
+
+        return panel
 
     def refresh_servers(self):
         """Scan ports and refresh server list (async in background)."""

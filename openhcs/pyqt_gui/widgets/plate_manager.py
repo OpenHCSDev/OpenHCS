@@ -77,6 +77,8 @@ class PlateManagerWidget(AbstractManagerWidget):
 
     Uses CrossWindowPreviewMixin for reactive preview labels showing orchestrator
     config states (num_workers, well_filter, streaming configs, etc.).
+
+    Auto-registers with ServiceRegistry for decoupled lookup by window factory.
     """
 
     TITLE = "Plate Manager"
@@ -247,7 +249,7 @@ class PlateManagerWidget(AbstractManagerWidget):
         if not state:
             root = RootState()
             state = ObjectState(object_instance=root, scope_id=ROOT_SCOPE_ID)
-            ObjectStateRegistry.register(state)
+            ObjectStateRegistry.register(state, _skip_snapshot=True)
         return state
 
     @property
@@ -492,7 +494,7 @@ class PlateManagerWidget(AbstractManagerWidget):
                 continue
 
             # Create orchestrator immediately (in CREATED state, not initialized)
-            self._create_orchestrator_for_plate(plate_path)
+            orchestrator_state = self._create_orchestrator_for_plate(plate_path)
 
             # Add plate path to root ObjectState
             new_paths.append(plate_path)
@@ -501,7 +503,9 @@ class PlateManagerWidget(AbstractManagerWidget):
 
         # Update root ObjectState if any plates were added
         if added_plates:
-            root_state.update_parameter("orchestrator_scope_ids", new_paths)
+            # Atomic: register orchestrator(s) + update orchestrator_scope_ids together
+            with ObjectStateRegistry.atomic("register orchestrators"):
+                root_state.update_parameter("orchestrator_scope_ids", new_paths)
 
             self.update_item_list()
             # Select the last added plate to ensure pipeline assignment works correctly
@@ -515,7 +519,7 @@ class PlateManagerWidget(AbstractManagerWidget):
         else:
             self.status_message.emit("No new plates added (duplicates skipped)")
 
-    def _create_orchestrator_for_plate(self, plate_path: str) -> PipelineOrchestrator:
+    def _create_orchestrator_for_plate(self, plate_path: str) -> ObjectState:
         """
         Create an orchestrator for a plate (in CREATED state, not initialized).
 
@@ -530,9 +534,9 @@ class PlateManagerWidget(AbstractManagerWidget):
             The created PipelineOrchestrator instance
         """
         # Skip if orchestrator already exists
-        existing = ObjectStateRegistry.get_object(plate_path)
-        if existing:
-            return existing
+        existing_state = ObjectStateRegistry.get_by_scope(plate_path)
+        if existing_state:
+            return existing_state
 
         plate_registry = _create_storage_registry()
         orchestrator = PipelineOrchestrator(
@@ -559,7 +563,7 @@ class PlateManagerWidget(AbstractManagerWidget):
         )
         logger.info(f"Created orchestrator for plate (CREATED state): {plate_path}")
 
-        return orchestrator
+        return orchestrator_state
 
     # action_delete_plate() REMOVED - now uses ABC's action_delete() template with _perform_delete() hook
 
@@ -1147,8 +1151,9 @@ class PlateManagerWidget(AbstractManagerWidget):
             logger.info(f"Added plate '{plate_name}' from orchestrator code")
 
         if added_count:
-            # Update root ObjectState
-            root_state.update_parameter("orchestrator_scope_ids", new_paths)
+            # Atomic: register orchestrator(s) + update orchestrator_scope_ids together
+            with ObjectStateRegistry.atomic("register orchestrators"):
+                root_state.update_parameter("orchestrator_scope_ids", new_paths)
 
             if self.item_list:
                 self.update_item_list()
