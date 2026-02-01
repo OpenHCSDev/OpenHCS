@@ -944,11 +944,14 @@ class OpenHCSMainWindow(QMainWindow):
             #   "positions" - simple field
             field_path = None
             if isinstance(state, ObjectState):
-                # Prefer the most recently changed field
-                field_path = state.last_dirty_field
+                # Use last_changed_field - tracks ANY value change (clean->dirty OR dirty->clean)
+                # This shows what changed in the time-travel transition, not just current dirty state
+                field_path = state.last_changed_field
+                logger.debug(
+                    f"⏱️ TIME_TRAVEL_NAV: scope={scope_id} last_changed_field={field_path}"
+                )
                 if not field_path:
-                    # Fallback: choose best field from dirty_fields set
-                    # Sort: non-func first, deepest paths first, alphabetically
+                    # Fallback: use dirty_fields if no changed field recorded
                     dirty_fields = list(state.dirty_fields)
                     if dirty_fields:
                         sorted_fields = sorted(
