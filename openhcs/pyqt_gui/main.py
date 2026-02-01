@@ -937,14 +937,29 @@ class OpenHCSMainWindow(QMainWindow):
         )
 
         for scope_id, state in dirty_states:
-            dirty_fields = list(getattr(state, "dirty_fields", []))
+            # Examples of field_path values:
+            #   "func" - simple field
+            #   "napari_streaming_config.host" - nested field with dot notation
+            #   "step_well_filter_config" - nested dataclass field
+            #   "positions" - simple field
             field_path = None
-            if dirty_fields:
-                sorted_fields = sorted(
-                    dirty_fields,
-                    key=lambda field: (field == "func", -field.count("."), field),
-                )
-                field_path = sorted_fields[0]
+            if isinstance(state, ObjectState):
+                # Prefer the most recently changed field
+                field_path = state.last_dirty_field
+                if not field_path:
+                    # Fallback: choose best field from dirty_fields set
+                    # Sort: non-func first, deepest paths first, alphabetically
+                    dirty_fields = list(state.dirty_fields)
+                    if dirty_fields:
+                        sorted_fields = sorted(
+                            dirty_fields,
+                            key=lambda field: (
+                                field == "func",
+                                -field.count("."),
+                                field,
+                            ),
+                        )
+                        field_path = sorted_fields[0]
 
             if WindowManager.is_open(scope_id):
                 # Window exists - focus and navigate to dirty field
