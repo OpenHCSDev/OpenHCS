@@ -937,14 +937,18 @@ class OpenHCSMainWindow(QMainWindow):
         )
 
         for scope_id, state in dirty_states:
-            # Get first dirty field for scrolling (like provenance navigation)
             dirty_fields = list(getattr(state, "dirty_fields", []))
-            field_path = dirty_fields[0] if dirty_fields else None
+            non_func_fields = [field for field in dirty_fields if field != "func"]
+            field_path = None
+            if non_func_fields:
+                field_path = non_func_fields[0]
+            elif "func" in dirty_fields:
+                field_path = "func"
 
             if WindowManager.is_open(scope_id):
                 # Window exists - focus and navigate to dirty field
                 WindowManager.focus_and_navigate(scope_id, field_path=field_path)
-                self._select_tab_for_time_travel(scope_id, state)
+                self._select_tab_for_time_travel(scope_id, state, field_path)
             else:
                 # Create new window
                 from pyqt_reactive.services import WindowFactory
@@ -966,7 +970,9 @@ class OpenHCSMainWindow(QMainWindow):
                             ),
                         )
 
-    def _select_tab_for_time_travel(self, scope_id: str, state: ObjectState) -> None:
+    def _select_tab_for_time_travel(
+        self, scope_id: str, state: ObjectState, field_path: str | None
+    ) -> None:
         """Select appropriate tab in step editor after time-travel.
 
         If 'func' parameter was modified, switch to Function Pattern tab.
@@ -982,27 +988,13 @@ class OpenHCSMainWindow(QMainWindow):
         if window.tab_widget is None:
             return
 
-        # Check if this is a function scope or if func parameter changed
         is_function_scope = "::func_" in scope_id
-
-        if is_function_scope:
-            # Function scope - select Function Pattern tab
+        if is_function_scope or field_path == "func":
             window.tab_widget.setCurrentIndex(1)
-            logger.debug(
-                f"[TAB_SELECT] Time-travel: Function Pattern tab (function scope)"
-            )
-        elif "func" in state.dirty_fields:
-            # Step scope with func change - select Function Pattern tab
-            window.tab_widget.setCurrentIndex(1)
-            logger.debug(
-                f"[TAB_SELECT] Time-travel: Function Pattern tab (func in dirty_fields)"
-            )
+            logger.debug("[TAB_SELECT] Time-travel: Function Pattern tab")
         else:
-            # Step scope without func change - keep Step Settings tab
             window.tab_widget.setCurrentIndex(0)
-            logger.debug(
-                f"[TAB_SELECT] Time-travel: Step Settings tab (no func change)"
-            )
+            logger.debug("[TAB_SELECT] Time-travel: Step Settings tab")
 
     def show_synthetic_plate_generator(self):
         """Show synthetic plate generator window."""
