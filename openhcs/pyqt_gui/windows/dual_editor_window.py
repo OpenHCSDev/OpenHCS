@@ -1242,7 +1242,12 @@ class DualEditorWindow(BaseFormDialog):
         if not field_path:
             return
 
-        if self.step_editor:
+        from objectstate import ObjectStateRegistry
+
+        state = ObjectStateRegistry.get_by_scope(getattr(self, "scope_id", None))
+        is_step = isinstance(getattr(state, "object_instance", None), FunctionStep)
+
+        if is_step and self.step_editor:
             if self.tab_widget:
                 self.tab_widget.setCurrentIndex(0)
             self.step_editor.select_and_scroll_to_field(field_path)
