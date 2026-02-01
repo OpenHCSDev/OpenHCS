@@ -938,12 +938,13 @@ class OpenHCSMainWindow(QMainWindow):
 
         for scope_id, state in dirty_states:
             dirty_fields = list(getattr(state, "dirty_fields", []))
-            non_func_fields = [field for field in dirty_fields if field != "func"]
             field_path = None
-            if non_func_fields:
-                field_path = non_func_fields[0]
-            elif "func" in dirty_fields:
-                field_path = "func"
+            if dirty_fields:
+                sorted_fields = sorted(
+                    dirty_fields,
+                    key=lambda field: (field == "func", -field.count("."), field),
+                )
+                field_path = sorted_fields[0]
 
             if WindowManager.is_open(scope_id):
                 # Window exists - focus and navigate to dirty field
@@ -989,7 +990,7 @@ class OpenHCSMainWindow(QMainWindow):
             return
 
         is_function_scope = "::func_" in scope_id
-        if is_function_scope or field_path == "func":
+        if is_function_scope or (field_path and field_path.startswith("func")):
             window.tab_widget.setCurrentIndex(1)
             logger.debug("[TAB_SELECT] Time-travel: Function Pattern tab")
         else:
