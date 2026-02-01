@@ -13,6 +13,9 @@ from pyqt_reactive.services import ScopeWindowRegistry
 if TYPE_CHECKING:
     from openhcs.config_framework.object_state import ObjectState
 
+# Import FunctionStep for type checking in tab selection
+from openhcs.core.steps.function_step import FunctionStep
+
 logger = logging.getLogger(__name__)
 
 
@@ -136,26 +139,47 @@ def _create_step_editor_window(
         parent=None,
     )
     if window.tab_widget:
-        logger.debug(
-            f"[TAB_SELECT] scope_id={scope_id}, is_function_scope={is_function_scope}, dirty_fields={getattr(object_state, 'dirty_fields', None)}"
-        )
-        if is_function_scope:
-            # Function scope - always show Function Pattern tab
+        # Determine which tab to show based on the type of object being edited
+        # Look up ObjectState by scope_id to get the actual object instance type
+        state_for_tab_selection = ObjectStateRegistry.get_by_scope(scope_id)
+        if state_for_tab_selection:
+            obj_instance = state_for_tab_selection.object_instance
+            is_function_step = isinstance(obj_instance, FunctionStep)
             logger.debug(
-                f"[TAB_SELECT] Setting Function Pattern tab (index 1) for function scope"
+                f"[TAB_SELECT] scope_id={scope_id}, object_type={type(obj_instance).__name__}, "
+                f"is_function_step={is_function_step}"
             )
-            window.tab_widget.setCurrentIndex(1)
-        elif object_state:
-            # Step scope - check what changed to determine which tab to show
-            # If 'func' parameter changed, show Function Pattern tab, otherwise Step Settings
-            if "func" in object_state.dirty_fields:
+            if is_function_step:
+                # Editing a FunctionStep - show Step Settings tab
                 logger.debug(
-                    f"[TAB_SELECT] Setting Function Pattern tab (index 1) - func in dirty_fields"
+                    f"[TAB_SELECT] Setting Step Settings tab (index 0) - FunctionStep instance"
+                )
+                window.tab_widget.setCurrentIndex(0)
+            else:
+                # Editing something else (e.g., function pattern) - show Function Pattern tab
+                logger.debug(
+                    f"[TAB_SELECT] Setting Function Pattern tab (index 1) - not a FunctionStep"
+                )
+                window.tab_widget.setCurrentIndex(1)
+        else:
+            # Fallback: use old logic if we can't look up the state
+            logger.debug(
+                f"[TAB_SELECT] Fallback: scope_id={scope_id}, is_function_scope={is_function_scope}, "
+                f"dirty_fields={getattr(object_state, 'dirty_fields', None)}"
+            )
+            if is_function_scope:
+                logger.debug(
+                    f"[TAB_SELECT] Setting Function Pattern tab (index 1) for function scope (fallback)"
+                )
+                window.tab_widget.setCurrentIndex(1)
+            elif object_state and "func" in object_state.dirty_fields:
+                logger.debug(
+                    f"[TAB_SELECT] Setting Function Pattern tab (index 1) - func in dirty_fields (fallback)"
                 )
                 window.tab_widget.setCurrentIndex(1)
             else:
                 logger.debug(
-                    f"[TAB_SELECT] Setting Step Settings tab (index 0) - func not in dirty_fields"
+                    f"[TAB_SELECT] Setting Step Settings tab (index 0) - default (fallback)"
                 )
                 window.tab_widget.setCurrentIndex(0)
 
