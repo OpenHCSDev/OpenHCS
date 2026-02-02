@@ -323,23 +323,12 @@ class PipelineCompiler:
                     logger.debug(f"Input conversion to zarr enabled for first step: {first_step.name}")
 
         # The axis_id and base_input_dir are available from the context object.
-        # CRITICAL: Pass merged config (not raw pipeline_config) for proper global config inheritance
-        # This ensures path_planning_config and vfs_config inherit from global config
-        PipelinePathPlanner.prepare_pipeline_paths(
-            context,
-            steps_definition,
-            context.global_config,  # Use merged config from context instead of raw pipeline_config
-            orchestrator=orchestrator
-        )
-
-        # === FUNCTION OBJECT REFRESH ===
-        # CRITICAL FIX: Refresh all function objects to ensure they're picklable
-        # This prevents multiprocessing pickling errors by ensuring clean function objects
-        _refresh_function_objects_in_steps(steps_definition)
-
-        # === RESOLVED STEP RESOLUTION ===
+        
+        # === OBJECTSTATE REGISTRATION ===
         # Auto-register steps in ObjectState under unique compilation scope
         # This ensures proper config inheritance without cross-step pollution
+        # CRITICAL: Must do this BEFORE path planning so PathPlanner
+        # can access resolved configs like step_materialization_config
         from objectstate import ObjectStateRegistry, ObjectState
         import time
         
@@ -381,7 +370,22 @@ class PipelineCompiler:
         
         steps_definition = resolved_steps
         logger.info(f"🔍 COMPILATION: All {len(resolved_steps)} steps resolved under scope: {compilation_id}")
+        
+        # === PATH PLANNING ===
+        # CRITICAL: Pass merged config (not raw pipeline_config) for proper global config inheritance
+        # This ensures path_planning_config and vfs_config inherit from global config
+        PipelinePathPlanner.prepare_pipeline_paths(
+            context,
+            steps_definition,
+            context.global_config,  # Use merged config from context instead of raw pipeline_config
+            orchestrator=orchestrator
+        )
 
+        # === FUNCTION OBJECT REFRESH ===
+        # CRITICAL FIX: Refresh all function objects to ensure they're picklable
+        # This prevents multiprocessing pickling errors by ensuring clean function objects
+        _refresh_function_objects_in_steps(steps_definition)
+        
         # Loop to supplement step_plans with non-I/O, non-path attributes
         # after PipelinePathPlanner has fully populated them with I/O info.
         for step_index, step in enumerate(steps_definition):
