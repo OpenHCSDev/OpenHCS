@@ -47,6 +47,7 @@ from openhcs.core.pipeline.gpu_memory_validator import \
 from openhcs.core.steps.abstract import AbstractStep
 from openhcs.core.steps.function_step import FunctionStep # Used for isinstance check
 from dataclasses import dataclass
+from python_introspect import Enableable
 logger = logging.getLogger(__name__)
 
 
@@ -352,23 +353,51 @@ class PipelineCompiler:
         # This prevents multiprocessing pickling errors by ensuring clean function objects
         _refresh_function_objects_in_steps(steps_definition)
 
-        # === LAZY CONFIG RESOLUTION ===
-        # Resolve each step's lazy configs with proper nested context
-        # This ensures step-level configs inherit from pipeline-level configs
-        # Architecture: GlobalPipelineConfig -> PipelineConfig -> Step (same as UI)
-
-        from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization
-        from openhcs.config_framework.context_manager import config_context
-
-        # Resolve each step individually with nested context (pipeline -> step)
-        # NOTE: The caller has already set up config_context(orchestrator.pipeline_config, use_live_global=False)
-        # We add step-level context on top for each step
+        # === RESOLVED STEP RESOLUTION ===
+        # Auto-register steps in ObjectState under unique compilation scope
+        # This ensures proper config inheritance without cross-step pollution
+        from objectstate import ObjectStateRegistry, ObjectState
+        from pyqt_reactive.services.scope_token_service import ScopeTokenService
+        import time
+        
+        # Generate unique compilation scope to isolate this compilation
+        compilation_id = f"compile_{int(time.time() * 1000)}"
+        
+        # Register orchestrator with PipelineConfig as parent for config inheritance
+        # The orchestrator provides pipeline-level config (streaming_defaults, etc.)
+        orch_scope_id = f"{compilation_id}::{plate_path}::orchestrator"
+        orch_state = ObjectState(
+            object_instance=orchestrator,
+            scope_id=orch_scope_id,
+            parent_state=None  # Top level - inherits from global context
+        )
+        ObjectStateRegistry.register(orch_state)
+        logger.info(f"🔍 COMPILATION: Registered orchestrator at scope: {orch_scope_id}")
+        
+        # Register each step with orchestrator as parent
+        # Each step only sees: itself → orchestrator → global (NOT other steps)
+        step_state_map = {}  # Map step index to step_state for later lookup
+        for step_index, step in enumerate(steps_definition):
+            step_scope_id = f"{compilation_id}::{plate_path}::step_{step_index}"
+            step_state = ObjectState(
+                object_instance=step,
+                scope_id=step_scope_id,
+                parent_state=orch_state
+            )
+            ObjectStateRegistry.register(step_state)
+            step_state_map[step_index] = step_state
+            logger.debug(f"🔍 COMPILATION: Registered step {step_index} ('{step.name}') at scope: {step_scope_id}")
+        
+        # Now resolve all steps using their ObjectStates
         resolved_steps = []
-        for step in steps_definition:
-            with config_context(step, use_live_global=False):  # Step-level context on top of pipeline context
-                resolved_step = resolve_lazy_configurations_for_serialization(step)
-                resolved_steps.append(resolved_step)
+        for step_index, step in enumerate(steps_definition):
+            step_state = step_state_map[step_index]
+            logger.info(f"🔍 STEP RESOLUTION: Resolving step {step_index} ('{step.name}') from ObjectState...")
+            resolved_step = step_state.to_object()
+            resolved_steps.append(resolved_step)
+        
         steps_definition = resolved_steps
+        logger.info(f"🔍 COMPILATION: All {len(resolved_steps)} steps resolved under scope: {compilation_id}")
 
         # Loop to supplement step_plans with non-I/O, non-path attributes
         # after PipelinePathPlanner has fully populated them with I/O info.
@@ -461,6 +490,7 @@ class PipelineCompiler:
             if step.name == "Image Enhancement Processing":
                 logger.debug(f"All attributes for {step.name}: {[attr for attr in dir(resolved_step) if not attr.startswith('_')]}")
 
+            logger.info(f"🔍 STREAMING CHECK: Processing step '{step.name}' - checking all config attributes")
             for attr_name in dir(resolved_step):
                 if not attr_name.startswith('_'):
                     config = getattr(resolved_step, attr_name, None)
@@ -470,10 +500,45 @@ class PipelineCompiler:
                     # Skip None configs
                     if config is None:
                         continue
+                    
+                    # Log all config-like attributes for debugging
+                    if 'config' in attr_name.lower() or 'streaming' in attr_name.lower():
+                        logger.info(f"🔍 STREAMING CHECK: Step '{step.name}' - attr_name={attr_name}, type={type(config).__name__}")
+                        if hasattr(config, 'enabled'):
+                            logger.info(f"🔍 STREAMING CHECK: Step '{step.name}' - {attr_name}.enabled = {config.enabled}")
+                        if isinstance(config, Enableable):
+                            logger.info(f"🔍 STREAMING CHECK: Step '{step.name}' - {attr_name} is Enableable")
+                        if isinstance(config, StreamingConfig):
+                            logger.info(f"🔍 STREAMING CHECK: Step '{step.name}' - {attr_name} is StreamingConfig")
 
                     # CRITICAL: Check enabled field first (fail-fast for disabled configs)
-                    if hasattr(config, 'enabled') and not config.enabled:
-                        continue
+                    # Check enabled field - only inherit from this step's own streaming_defaults
+                    if isinstance(config, Enableable):
+                        enabled_path = f"{attr_name}.enabled"
+                        # Get the step's ObjectState from the map using step_index
+                        current_step_state = step_state_map.get(step_index)
+                        if current_step_state is None:
+                            logger.warning(f"🔍 STREAMING CHECK: Step {step_index} ('{step.name}') - No ObjectState found, skipping {attr_name}")
+                            continue
+                        
+                        # Check this step's own parameter value
+                        own_value = current_step_state.parameters.get(enabled_path)
+                        
+                        if own_value is True:
+                            # Explicitly enabled on this config
+                            logger.info(f"🔍 STREAMING CHECK: Step {step_index} ('{step.name}') - {attr_name} explicitly enabled=True")
+                        elif own_value is False:
+                            # Explicitly disabled
+                            logger.info(f"🔍 STREAMING CHECK: Step {step_index} ('{step.name}') - {attr_name} explicitly disabled, skipping")
+                            continue
+                        elif own_value is None:
+                            # Inherit from this step's own streaming_defaults
+                            parent_value = current_step_state.parameters.get('streaming_defaults.enabled')
+                            if parent_value is True:
+                                logger.info(f"🔍 STREAMING CHECK: Step {step_index} ('{step.name}') - {attr_name} inherited enabled=True from streaming_defaults")
+                            else:
+                                logger.info(f"🔍 STREAMING CHECK: Step {step_index} ('{step.name}') - {attr_name} not enabled (streaming_defaults.enabled={parent_value}), skipping")
+                                continue
 
                     # Check well filter matching (only for WellFilterConfig instances)
                     include_config = True
@@ -521,6 +586,7 @@ class PipelineCompiler:
                                             continue  # Skip this streaming config
 
                                 has_streaming = True
+                                logger.info(f"🔍 STREAMING CHECK: Step '{step.name}' - {attr_name} added to plan as streaming config (backend={config.backend.name})")
                                 # Collect visualizer info
                                 visualizer_info = {
                                     'backend': config.backend.name,

@@ -317,7 +317,7 @@ class PipelineEditorWidget(AbstractManagerWidget):
         for scope_id in step_scope_ids:
             step_state = ObjectStateRegistry.get_by_scope(scope_id)
             if step_state:
-                steps.append(step_state.object_instance)
+                steps.append(step_state.to_object())
 
         return steps
 
