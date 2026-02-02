@@ -437,6 +437,9 @@ class PipelineCompiler:
                 else:
                     logger.warning(f"Step '{step.name}' has empty variable_components; compiler applying default")
                 proc_cfg = replace(proc_cfg, variable_components=[VariableComponents.SITE])
+                # CRITICAL: Update the step's processing_config with the corrected value
+                # so that downstream validation sees the default value, not None
+                step = replace(step, processing_config=proc_cfg)
 
             current_plan["variable_components"] = proc_cfg.variable_components
             current_plan["group_by"] = proc_cfg.group_by
@@ -445,7 +448,7 @@ class PipelineCompiler:
             # Add full processing config for sequential processing
             current_plan["sequential_processing"] = proc_cfg
 
-            # Lazy configs were already resolved at the beginning of compilation
+            # Step now has corrected processing_config with defaults applied
             resolved_step = step
 
             # DEBUG: Check what the resolved napari config actually has
