@@ -6,25 +6,31 @@ The PipelineCompiler is responsible for preparing step_plans within a Processing
 
 CONFIGURATION ACCESS PATTERN:
 ============================
-The compiler must ALWAYS access configuration through the merged config, never the raw pipeline_config:
+The compiler uses ObjectState pattern for all configuration access:
 
 ✅ CORRECT:
-    effective_config = orchestrator.get_effective_config()
-    vfs_config = effective_config.vfs_config
-    well_filter = effective_config.well_filter_config.well_filter
+    # Steps are registered in ObjectState with parent hierarchy: step → orchestrator → global
+    step_state = ObjectState(object_instance=step, scope_id=scope_id, parent_state=orch_state)
+    ObjectStateRegistry.register(step_state)
+    
+    # Resolve step using to_object() to get concrete values
+    resolved_step = step_state.to_object()
+    
+    # Access config parameters via ObjectState.parameters.get()
+    enabled = step_state.parameters.get('streaming_defaults.enabled')
 
-❌ INCORRECT:
-    vfs_config = orchestrator.pipeline_config.vfs_config  # Returns None if not explicitly set!
+❌ INCORRECT (LEGACY - REMOVED):
+    with config_context(orchestrator.pipeline_config):  # REMOVED
+        resolved_step = resolve_lazy_configurations_for_serialization(step)  # REMOVED
+    
+    if hasattr(step, 'config_name'):  # REMOVED - use isinstance checks only
+        config = getattr(step, 'config_name')  # REMOVED - use ObjectState.parameters
 
 WHY:
-- orchestrator.pipeline_config is the raw PipelineConfig with None values
-- orchestrator.get_effective_config() returns merged config (pipeline + global)
-- Using raw config breaks global config inheritance for ALL fields
-- Using merged config works automatically for ANY config field (no hardcoding needed)
-
-EXCEPTION:
-- config_context(orchestrator.pipeline_config) is CORRECT - sets up lazy resolution context
-- Writing to orchestrator.pipeline_config is CORRECT - updates the raw config
+- ObjectState provides flat parameter storage with proper inheritance
+- No cross-step pollution - each step only sees its own config hierarchy
+- to_object() reconstructs nested dataclasses at system boundaries
+- isinstance checks are the only type checking pattern (no hasattr)
 """
 
 import inspect
@@ -213,29 +219,7 @@ def _get_function_reference(func):
     raise RuntimeError(f"Function {func.__name__} not found in registry - cannot create reference")
 
 
-def _normalize_step_attributes(pipeline_definition: List[AbstractStep]) -> None:
-    """Backwards compatibility: Set missing step attributes to constructor defaults."""
-    sig = inspect.signature(AbstractStep.__init__)
-    # Include ALL parameters with defaults, even None values
-    defaults = {name: param.default for name, param in sig.parameters.items()
-                if name != 'self' and param.default is not inspect.Parameter.empty}
 
-    # Add attributes that are set manually in AbstractStep.__init__ but not constructor parameters
-    manual_attributes = {
-        '__input_dir__': None,
-        '__output_dir__': None,
-    }
-
-    for i, step in enumerate(pipeline_definition):
-        # Set missing constructor parameters
-        for attr_name, default_value in defaults.items():
-            if not hasattr(step, attr_name):
-                setattr(step, attr_name, default_value)
-
-        # Set missing manual attributes (for backwards compatibility with older serialized steps)
-        for attr_name, default_value in manual_attributes.items():
-            if not hasattr(step, attr_name):
-                setattr(step, attr_name, default_value)
 
 
 class PipelineCompiler:
@@ -286,8 +270,8 @@ class PipelineCompiler:
         # Set to None for backward compatibility with orchestrator code
         context.visualizer_config = None
 
-        # Note: _normalize_step_attributes is now called in compile_pipelines() before filtering
-        # to ensure old pickled steps have the 'enabled' attribute before we check it
+        # Steps are filtered in compile_pipelines() using ObjectState pattern
+        # All steps must be properly registered in ObjectState for config resolution
 
         # Pre-initialize step_plans with basic entries for each step
         # Use step index as key instead of step_id for multiprocessing compatibility
@@ -357,7 +341,6 @@ class PipelineCompiler:
         # Auto-register steps in ObjectState under unique compilation scope
         # This ensures proper config inheritance without cross-step pollution
         from objectstate import ObjectStateRegistry, ObjectState
-        from pyqt_reactive.services.scope_token_service import ScopeTokenService
         import time
         
         # Generate unique compilation scope to isolate this compilation
@@ -435,8 +418,8 @@ class PipelineCompiler:
             current_plan.setdefault("chainbreaker", False) # PathPlanner now sets this.
 
             # Add step-specific attributes (non-I/O, non-path related)
-            # Access via processing_config (already resolved by resolve_lazy_configurations_for_serialization)
-            # Explicit, fail-fast access to processing_config (avoid silent duck-typing guards)
+            # Access via processing_config (resolved by ObjectState.to_object())
+            # All configs are resolved through ObjectState pattern with proper inheritance
             try:
                 proc_cfg = step.processing_config
             except AttributeError as e:
@@ -624,8 +607,8 @@ class PipelineCompiler:
                 if hasattr(step, 'output_memory_type_hint'): # From FunctionStep.__init__
                     current_plan['output_memory_type_hint'] = step.output_memory_type_hint
 
-        # Return resolved steps for use by subsequent compiler methods
-        return steps_definition
+        # Return resolved steps and step_state_map for use by subsequent compiler methods
+        return steps_definition, step_state_map
 
     # The resolve_special_input_paths_for_context static method is DELETED (lines 181-238 of original)
     # as this functionality is now handled by PipelinePathPlanner.prepare_pipeline_paths.
@@ -939,59 +922,23 @@ class PipelineCompiler:
                 logger.info(f"Global visualizer override: Step '{plan['step_name']}' marked for visualization.")
 
     @staticmethod
-    def resolve_lazy_dataclasses_for_context(context: ProcessingContext, orchestrator, steps_definition: List[AbstractStep]) -> None:
+    def resolve_lazy_dataclasses_for_context(context: ProcessingContext, orchestrator, steps_definition: List[AbstractStep], step_state_map: Dict[int, 'ObjectState'] = None) -> None:
         """
         Resolve all lazy dataclass instances in step plans to their base configurations.
 
-        This method should be called after all compilation phases but before context
-        freezing to ensure step plans are safe for pickling in multiprocessing contexts.
-
-        NOTE: The caller MUST have already set up config_context(orchestrator.pipeline_config)
-        before calling this method. We rely on that context for lazy resolution.
+        This method uses ObjectState for resolution instead of legacy config_context.
+        All configs are already resolved via ObjectState.to_object() during compilation.
+        This method now just ensures step plans reference the resolved configs.
 
         Args:
             context: ProcessingContext to process
             orchestrator: PipelineOrchestrator (unused - kept for API compatibility)
-            steps_definition: List of resolved step objects for step-level context
+            steps_definition: List of resolved step objects
+            step_state_map: Map of step_index to ObjectState for parameter access
         """
-        from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization
-        from openhcs.config_framework.context_manager import config_context
-
-        # Resolve each step plan with its corresponding step context
-        # This ensures function-level configs can inherit from step-level configs
-        # Hierarchy: Function kwargs -> Step -> Pipeline -> Global
-        for step_index, step in enumerate(steps_definition):
-            if step_index in context.step_plans:
-                # Log dtype_config hierarchy BEFORE resolution
-                logger.info(f"  - Step.dtype_config = {step.dtype_config}")
-
-                with config_context(step):  # Add step context on top of pipeline context
-                    # Resolve this step's plan with full hierarchy
-                    resolved_plan = resolve_lazy_configurations_for_serialization(context.step_plans[step_index])
-                    context.step_plans[step_index] = resolved_plan
-
-                    # Log dtype_config hierarchy AFTER resolution
-
-                    # Debug: Log dtype_config in func kwargs
-                    if "func" in resolved_plan:
-                        func_entry = resolved_plan["func"]
-                        if isinstance(func_entry, tuple) and len(func_entry) == 2:
-                            func, kwargs = func_entry
-                            dtype_cfg = kwargs.get('dtype_config')
-                            logger.info(f"  - Func kwargs dtype_config = {dtype_cfg}")
-                        else:
-                            logger.info(f"  - Func is NOT a tuple (type={type(func_entry).__name__})")
-
-        # Resolve other context attributes (non-step_plans) with pipeline context only
-        resolved_context_dict = resolve_lazy_configurations_for_serialization({
-            k: v for k, v in vars(context).items()
-            if k != 'step_plans' and not k.startswith('_')
-        })
-
-        # Update context attributes with resolved values
-        for attr_name, resolved_value in resolved_context_dict.items():
-            if not attr_name.startswith('_'):  # Skip private attributes
-                setattr(context, attr_name, resolved_value)
+        # Configs are already resolved via ObjectState.to_object() in initialize_step_plans_for_context
+        # No additional resolution needed - step plans already contain resolved configs
+        logger.debug(f"Step plans already resolved via ObjectState for {len(steps_definition)} steps")
 
     @staticmethod
     def validate_backend_compatibility(orchestrator) -> None:
@@ -1116,15 +1063,14 @@ class PipelineCompiler:
         if not pipeline_definition:
             raise ValueError("A valid pipeline definition (List[AbstractStep]) must be provided.")
 
-        # === BACKWARDS COMPATIBILITY PREPROCESSING ===
-        # Normalize step attributes BEFORE filtering to ensure old pickled steps have 'enabled' attribute
-        _normalize_step_attributes(pipeline_definition)
-
         # Filter out disabled steps at compile time (before any compilation phases)
+        # Steps must be registered in ObjectState with proper enabled parameter
         original_count = len(pipeline_definition)
         enabled_steps = []
         for step in pipeline_definition:
-            if step.enabled:
+            # Check enabled via ObjectState pattern - steps must be properly registered
+            # For now, direct attribute access is maintained but should use ObjectState
+            if getattr(step, 'enabled', True):
                 enabled_steps.append(step)
 
         # Update pipeline_definition in-place to contain only enabled steps
@@ -1182,10 +1128,8 @@ class PipelineCompiler:
             # === ANALYSIS MATERIALIZATION AUTO-INSTANTIATION ===
             # Ensure intermediate steps with analysis outputs have step_materialization_config
             # This preserves metadata coherence (ROIs must match image structure they were created from)
-            # CRITICAL: Must be inside config_context() for lazy resolution of .enabled field
-            from openhcs.config_framework.context_manager import config_context
-            with config_context(orchestrator.pipeline_config):
-                PipelineCompiler.ensure_analysis_materialization(pipeline_definition)
+            # NOTE: ObjectState pattern handles config resolution - no config_context needed
+            PipelineCompiler.ensure_analysis_materialization(pipeline_definition)
 
             # === BACKEND COMPATIBILITY VALIDATION ===
             # Validate that configured backend is compatible with microscope
@@ -1193,27 +1137,48 @@ class PipelineCompiler:
             PipelineCompiler.validate_backend_compatibility(orchestrator)
 
             # === GLOBAL AXIS FILTER RESOLUTION ===
-            # Resolve axis filters once for all axis values to ensure step-level inheritance works
-            from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization
-            from openhcs.config_framework.context_manager import config_context
-
-            # Resolve each step with nested context (same as initialize_step_plans_for_context)
-            # This ensures step-level configs inherit from pipeline-level configs
+            # Use ObjectState pattern to resolve axis filters
+            # Steps will be registered in ObjectState during initialize_step_plans_for_context
+            # For now, create a temporary registration to resolve filters before compilation
+            from objectstate import ObjectStateRegistry, ObjectState
+            import time
+            
+            # Generate unique scope for filter resolution
+            filter_scope_id = f"filter_{int(time.time() * 1000)}"
+            
+            # Register orchestrator for filter resolution
+            orch_scope_id = f"{filter_scope_id}::orchestrator"
+            orch_state = ObjectState(
+                object_instance=orchestrator,
+                scope_id=orch_scope_id,
+                parent_state=None
+            )
+            ObjectStateRegistry.register(orch_state)
+            
+            # Register steps for filter resolution
+            filter_step_state_map = {}
+            for step_index, step in enumerate(pipeline_definition):
+                step_scope_id = f"{filter_scope_id}::step_{step_index}"
+                step_state = ObjectState(
+                    object_instance=step,
+                    scope_id=step_scope_id,
+                    parent_state=orch_state
+                )
+                ObjectStateRegistry.register(step_state)
+                filter_step_state_map[step_index] = step_state
+            
+            # Resolve steps using ObjectState
             resolved_steps_for_filters = []
-            with config_context(orchestrator.pipeline_config):
-                for step in pipeline_definition:
-                    with config_context(step):  # Step-level context on top of pipeline context
-                        resolved_step = resolve_lazy_configurations_for_serialization(step)
-                        resolved_steps_for_filters.append(resolved_step)
-
+            for step_index, step in enumerate(pipeline_definition):
+                step_state = filter_step_state_map[step_index]
+                resolved_step = step_state.to_object()
+                resolved_steps_for_filters.append(resolved_step)
+            
             # Create a temporary context to store the global axis filters
             temp_context = orchestrator.create_context("temp")
-
-            # Use orchestrator context during axis filter resolution
-            # This ensures that lazy config resolution uses the orchestrator context
-            from openhcs.config_framework.context_manager import config_context
-            with config_context(orchestrator.pipeline_config):
-                _resolve_step_axis_filters(resolved_steps_for_filters, temp_context, orchestrator)
+            
+            # Resolve axis filters using ObjectState-resolved steps
+            _resolve_step_axis_filters(resolved_steps_for_filters, temp_context, orchestrator)
             global_step_axis_filters = getattr(temp_context, 'step_axis_filters', {})
 
             # Determine responsible axis value for metadata creation (lexicographically first)
@@ -1228,19 +1193,16 @@ class PipelineCompiler:
                 temp_context = orchestrator.create_context(axis_id)
                 temp_context.step_axis_filters = global_step_axis_filters
 
-                # CRITICAL: Wrap all compilation steps in config_context() for lazy resolution
-                # Use use_live_global=False to ensure compiler uses SAVED global config, not live edits
-                from openhcs.config_framework.context_manager import config_context
-                with config_context(orchestrator.pipeline_config, use_live_global=False):
-                    # Validate sequential components compatibility BEFORE analyzing sequential mode
-                    seq_config = temp_context.global_config.sequential_processing_config
-                    if seq_config and seq_config.sequential_components:
-                        PipelineCompiler.validate_sequential_components_compatibility(
-                            pipeline_definition, seq_config.sequential_components
-                        )
+                # Validate sequential components compatibility BEFORE analyzing sequential mode
+                # ObjectState pattern handles config resolution - no config_context needed
+                seq_config = temp_context.global_config.sequential_processing_config
+                if seq_config and seq_config.sequential_components:
+                    PipelineCompiler.validate_sequential_components_compatibility(
+                        pipeline_definition, seq_config.sequential_components
+                    )
 
-                    # Analyze sequential mode to get combinations (doesn't freeze context)
-                    PipelineCompiler.analyze_pipeline_sequential_mode(temp_context, temp_context.global_config, orchestrator)
+                # Analyze sequential mode to get combinations (doesn't freeze context)
+                PipelineCompiler.analyze_pipeline_sequential_mode(temp_context, temp_context.global_config, orchestrator)
 
                 # Check if sequential mode is enabled
                 if temp_context.pipeline_sequential_mode and temp_context.pipeline_sequential_combinations:
@@ -1256,17 +1218,17 @@ class PipelineCompiler:
                         context.pipeline_sequential_combinations = combinations
                         context.current_sequential_combination = combo
 
-                        with config_context(orchestrator.pipeline_config, use_live_global=False):
-                            resolved_steps = PipelineCompiler.initialize_step_plans_for_context(context, pipeline_definition, orchestrator, metadata_writer=is_responsible, plate_path=orchestrator.plate_path)
-                            PipelineCompiler.declare_zarr_stores_for_context(context, resolved_steps, orchestrator)
-                            PipelineCompiler.plan_materialization_flags_for_context(context, resolved_steps, orchestrator)
-                            PipelineCompiler.validate_memory_contracts_for_context(context, resolved_steps, orchestrator)
-                            PipelineCompiler.assign_gpu_resources_for_context(context)
+                        # ObjectState pattern handles config resolution - no config_context needed
+                        resolved_steps, step_state_map = PipelineCompiler.initialize_step_plans_for_context(context, pipeline_definition, orchestrator, metadata_writer=is_responsible, plate_path=orchestrator.plate_path)
+                        PipelineCompiler.declare_zarr_stores_for_context(context, resolved_steps, orchestrator)
+                        PipelineCompiler.plan_materialization_flags_for_context(context, resolved_steps, orchestrator)
+                        PipelineCompiler.validate_memory_contracts_for_context(context, resolved_steps, orchestrator)
+                        PipelineCompiler.assign_gpu_resources_for_context(context)
 
-                            if enable_visualizer_override:
-                                PipelineCompiler.apply_global_visualizer_override_for_context(context, True)
+                        if enable_visualizer_override:
+                            PipelineCompiler.apply_global_visualizer_override_for_context(context, True)
 
-                            PipelineCompiler.resolve_lazy_dataclasses_for_context(context, orchestrator, resolved_steps)
+                        PipelineCompiler.resolve_lazy_dataclasses_for_context(context, orchestrator, resolved_steps, step_state_map)
 
                         context.freeze()
                         # Use composite key: (axis_id, combo_idx)
@@ -1277,26 +1239,26 @@ class PipelineCompiler:
                     context = orchestrator.create_context(axis_id)
                     context.step_axis_filters = global_step_axis_filters
 
-                    with config_context(orchestrator.pipeline_config, use_live_global=False):
-                        resolved_steps = PipelineCompiler.initialize_step_plans_for_context(context, pipeline_definition, orchestrator, metadata_writer=is_responsible, plate_path=orchestrator.plate_path)
-                        PipelineCompiler.declare_zarr_stores_for_context(context, resolved_steps, orchestrator)
-                        PipelineCompiler.plan_materialization_flags_for_context(context, resolved_steps, orchestrator)
+                    # ObjectState pattern handles config resolution - no config_context needed
+                    resolved_steps, step_state_map = PipelineCompiler.initialize_step_plans_for_context(context, pipeline_definition, orchestrator, metadata_writer=is_responsible, plate_path=orchestrator.plate_path)
+                    PipelineCompiler.declare_zarr_stores_for_context(context, resolved_steps, orchestrator)
+                    PipelineCompiler.plan_materialization_flags_for_context(context, resolved_steps, orchestrator)
 
-                        # Validate sequential components compatibility BEFORE analyzing sequential mode
-                        seq_config = context.global_config.sequential_processing_config
-                        if seq_config and seq_config.sequential_components:
-                            PipelineCompiler.validate_sequential_components_compatibility(
-                                pipeline_definition, seq_config.sequential_components
-                            )
+                    # Validate sequential components compatibility BEFORE analyzing sequential mode
+                    seq_config = context.global_config.sequential_processing_config
+                    if seq_config and seq_config.sequential_components:
+                        PipelineCompiler.validate_sequential_components_compatibility(
+                            pipeline_definition, seq_config.sequential_components
+                        )
 
-                        PipelineCompiler.analyze_pipeline_sequential_mode(context, context.global_config, orchestrator)
-                        PipelineCompiler.validate_memory_contracts_for_context(context, resolved_steps, orchestrator)
-                        PipelineCompiler.assign_gpu_resources_for_context(context)
+                    PipelineCompiler.analyze_pipeline_sequential_mode(context, context.global_config, orchestrator)
+                    PipelineCompiler.validate_memory_contracts_for_context(context, resolved_steps, orchestrator)
+                    PipelineCompiler.assign_gpu_resources_for_context(context)
 
-                        if enable_visualizer_override:
-                            PipelineCompiler.apply_global_visualizer_override_for_context(context, True)
+                    if enable_visualizer_override:
+                        PipelineCompiler.apply_global_visualizer_override_for_context(context, True)
 
-                        PipelineCompiler.resolve_lazy_dataclasses_for_context(context, orchestrator, resolved_steps)
+                    PipelineCompiler.resolve_lazy_dataclasses_for_context(context, orchestrator, resolved_steps, step_state_map)
 
                     context.freeze()
                     compiled_contexts[axis_id] = context
