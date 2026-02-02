@@ -439,7 +439,7 @@ class PipelineCompiler:
                 proc_cfg = replace(proc_cfg, variable_components=[VariableComponents.SITE])
                 # CRITICAL: Update the step's processing_config with the corrected value
                 # so that downstream validation sees the default value, not None
-                step = replace(step, processing_config=proc_cfg)
+                step.processing_config = proc_cfg
 
             current_plan["variable_components"] = proc_cfg.variable_components
             current_plan["group_by"] = proc_cfg.group_by
