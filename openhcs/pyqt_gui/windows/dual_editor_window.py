@@ -1239,7 +1239,9 @@ class DualEditorWindow(BaseFormDialog):
             QMessageBox.critical(self, "Save Error", f"Failed to save step:\n{e}")
 
     def select_and_scroll_to_field(self, field_path: str) -> None:
+        logger.debug(f"[SCROLL] select_and_scroll_to_field called with: {field_path!r}")
         if not field_path:
+            logger.debug("[SCROLL] field_path is falsy, returning early")
             return
 
         from objectstate import ObjectStateRegistry
