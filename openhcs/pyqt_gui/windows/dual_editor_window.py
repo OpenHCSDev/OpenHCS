@@ -1124,7 +1124,7 @@ class DualEditorWindow(BaseFormDialog):
         (including nested fields) by comparing current values to saved baseline.
         """
         # Use ObjectState's dirty tracking instead of custom snapshot comparison
-        has_changes = bool(self.state.dirty_fields) if self.state else False
+        has_changes = bool(self.state.is_raw_dirty) if self.state else False
 
         logger.debug(f"🔍 DETECT_CHANGES:")
         logger.debug(

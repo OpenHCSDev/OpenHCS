@@ -197,6 +197,7 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
     # Signals
     config_saved = pyqtSignal(object)  # saved config
     config_cancelled = pyqtSignal()
+    changes_detected = pyqtSignal(bool)  # has_changes
 
     def __init__(
         self,
@@ -232,6 +233,9 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
         self._saving = False
         self._suppress_global_context_sync = False
         self._needs_global_context_resync = False
+
+        # Change tracking
+        self.has_changes = False
 
         # Initialize color scheme and style generator
         self.color_scheme = color_scheme or ColorScheme()
@@ -295,9 +299,19 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
         self._dirty_title_callback = self._update_window_title_dirty_marker
         self.state.on_state_changed(self._dirty_title_callback)
 
+        # Change detection
+        self.changes_detected.connect(self.on_changes_detected)
+
         # Setup UI
         self._default_size_applied = False
         self.setup_ui()
+
+        # Connect automatic change detection (BaseManagedWindow feature)
+        # This automatically calls detect_changes() when any parameter changes
+        self._connect_change_detection()
+
+        # Initialize save button state
+        self.detect_changes()
 
         logger.debug(f"Config window initialized for {config_class.__name__}")
 
@@ -328,6 +342,25 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
             font = self._header_label.font()
             font.setUnderline(has_sig_diff)
             self._header_label.setFont(font)
+
+    def detect_changes(self):
+        """Detect if changes have been made using ObjectState's dirty tracking.
+
+        This replaces old snapshot-based approach with ObjectState's built-in
+        dirty tracking, which automatically detects changes to any parameter
+        (including nested fields) by comparing current values to saved baseline.
+        """
+        # Use ObjectState's dirty tracking instead of custom snapshot comparison
+        has_changes = bool(self.state.is_raw_dirty) if self.state else False
+
+        if has_changes != self.has_changes:
+            self.has_changes = has_changes
+            self.changes_detected.emit(has_changes)
+
+    def on_changes_detected(self, has_changes: bool):
+        """Handle changes detection."""
+        # Enable/disable save button based on changes
+        self._save_button.setEnabled(has_changes)
 
     def setup_ui(self):
         """Setup the user interface."""

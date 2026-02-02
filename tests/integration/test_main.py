@@ -7,6 +7,7 @@ Refactored using Systematic Code Refactoring Framework:
 - Converted to modern Python patterns with dataclasses
 - Reduced verbosity and defensive programming patterns
 """
+
 import json
 import os
 import pytest
@@ -17,11 +18,24 @@ from typing import Dict, List, Union
 from openhcs.constants.constants import VariableComponents, SequentialComponents
 from openhcs.constants.input_source import InputSource
 from openhcs.core.config import (
-    GlobalPipelineConfig, MaterializationBackend,
-    PathPlanningConfig, StepWellFilterConfig, VFSConfig, ZarrConfig,
-    NapariVariableSizeHandling
+    GlobalPipelineConfig,
+    MaterializationBackend,
+    PathPlanningConfig,
+    StepWellFilterConfig,
+    VFSConfig,
+    Backend,
+    ZarrConfig,
+    NapariVariableSizeHandling,
 )
-from openhcs.core.config import LazyStepMaterializationConfig, LazyNapariStreamingConfig, LazyFijiStreamingConfig, LazyStepWellFilterConfig, LazyPathPlanningConfig, LazyProcessingConfig, LazySequentialProcessingConfig
+from openhcs.core.config import (
+    LazyStepMaterializationConfig,
+    LazyNapariStreamingConfig,
+    LazyFijiStreamingConfig,
+    LazyStepWellFilterConfig,
+    LazyPathPlanningConfig,
+    LazyProcessingConfig,
+    LazySequentialProcessingConfig,
+)
 from openhcs.core.orchestrator.gpu_scheduler import setup_global_gpu_registry
 from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
 from openhcs.core.pipeline import Pipeline
@@ -29,18 +43,31 @@ from openhcs.core.steps import FunctionStep as Step
 
 # Processing functions
 from openhcs.processing.backends.assemblers.assemble_stack_cpu import assemble_stack_cpu
-from openhcs.processing.backends.pos_gen.ashlar_main_cpu import ashlar_compute_tile_positions_cpu
-from openhcs.processing.backends.processors.numpy_processor import (
-    create_composite, create_projection, stack_percentile_normalize
+from openhcs.processing.backends.pos_gen.ashlar_main_cpu import (
+    ashlar_compute_tile_positions_cpu,
 )
-from openhcs.processing.backends.analysis.cell_counting_cpu import count_cells_single_channel, DetectionMethod
+from openhcs.processing.backends.processors.numpy_processor import (
+    create_composite,
+    create_projection,
+    stack_percentile_normalize,
+)
+from openhcs.processing.backends.analysis.cell_counting_cpu import (
+    count_cells_single_channel,
+    DetectionMethod,
+)
 from openhcs.core.memory import DtypeConversion
 
 # Test utilities and fixtures
 from tests.integration.helpers.fixture_utils import (
-    backend_config, base_test_dir, data_type_config, execution_mode,
-    microscope_config, plate_dir, test_params, print_thread_activity_report,
-    zmq_execution_mode
+    backend_config,
+    base_test_dir,
+    data_type_config,
+    execution_mode,
+    microscope_config,
+    plate_dir,
+    test_params,
+    print_thread_activity_report,
+    zmq_execution_mode,
 )
 
 from openhcs.config_framework.lazy_factory import ensure_global_config_context
@@ -71,20 +98,22 @@ class TestConstants:
     SUBDIRECTORIES_FIELD: str = "subdirectories"
     MIN_METADATA_ENTRIES: int = 1
 
-
-
     # Required metadata fields
     REQUIRED_FIELDS: List[str] = None
 
     def __post_init__(self):
         # Use object.__setattr__ for frozen dataclass
-        object.__setattr__(self, 'REQUIRED_FIELDS',
-                          ["image_files", "available_backends", "microscope_handler_name"])
+        object.__setattr__(
+            self,
+            "REQUIRED_FIELDS",
+            ["image_files", "available_backends", "microscope_handler_name"],
+        )
 
 
 @dataclass
 class TestConfig:
     """Configuration for test execution."""
+
     plate_dir: Union[Path, int]  # Path for disk-based, int (plate_id) for OMERO
     backend_config: str
     execution_mode: str
@@ -116,19 +145,21 @@ def _gpu_available() -> bool:
     - cupy device count
     """
     # Respect visibility first
-    cuda_vis = os.getenv('CUDA_VISIBLE_DEVICES')
-    if cuda_vis is not None and (cuda_vis == '' or cuda_vis == '-1'):
+    cuda_vis = os.getenv("CUDA_VISIBLE_DEVICES")
+    if cuda_vis is not None and (cuda_vis == "" or cuda_vis == "-1"):
         return False
     # Torch
     try:
         import torch  # type: ignore
-        if hasattr(torch, 'cuda') and torch.cuda.is_available():
+
+        if hasattr(torch, "cuda") and torch.cuda.is_available():
             return True
     except Exception:
         pass
     # CuPy
     try:
         import cupy  # type: ignore
+
         try:
             return cupy.cuda.runtime.getDeviceCount() > 0
         except Exception:
@@ -137,10 +168,10 @@ def _gpu_available() -> bool:
         pass
     return False
 
-# Auto-enable CPU-only if no GPU is available (and not explicitly forced on)
-if os.getenv('OPENHCS_CPU_ONLY', 'false').lower() != 'true' and not _gpu_available():
-    os.environ['OPENHCS_CPU_ONLY'] = 'true'
 
+# Auto-enable CPU-only if no GPU is available (and not explicitly forced on)
+if os.getenv("OPENHCS_CPU_ONLY", "false").lower() != "true" and not _gpu_available():
+    os.environ["OPENHCS_CPU_ONLY"] = "true"
 
 
 def _headless_mode() -> bool:
@@ -150,9 +181,9 @@ def _headless_mode() -> bool:
     Only CI or explicit OPENHCS_HEADLESS flag triggers headless mode.
     """
     try:
-        if os.getenv('CI', '').lower() == 'true':
+        if os.getenv("CI", "").lower() == "true":
             return True
-        if os.getenv('OPENHCS_HEADLESS', '').lower() == 'true':
+        if os.getenv("OPENHCS_HEADLESS", "").lower() == "true":
             return True
     except Exception:
         pass
@@ -163,24 +194,30 @@ def _napari_enabled() -> bool:
     """Check if Napari streaming should be enabled."""
     if _headless_mode():
         return False
-    return os.getenv('OPENHCS_DISABLE_NAPARI', 'false').lower() != 'true'
+    return os.getenv("OPENHCS_DISABLE_NAPARI", "false").lower() != "true"
 
 
 def _fiji_enabled() -> bool:
     """Check if Fiji streaming should be enabled."""
     if _headless_mode():
         return False
-    return os.getenv('OPENHCS_DISABLE_FIJI', 'false').lower() != 'true'
+    return os.getenv("OPENHCS_DISABLE_FIJI", "false").lower() != "true"
+
 
 @pytest.fixture
 def test_function_dir(base_test_dir, microscope_config, request):
     """Create test directory for a specific test function."""
-    test_name = request.node.originalname or request.node.name.split('[')[0]
+    test_name = request.node.originalname or request.node.name.split("[")[0]
     test_dir = base_test_dir / f"{test_name}[{microscope_config['format']}]"
     test_dir.mkdir(parents=True, exist_ok=True)
     yield test_dir
 
-def create_test_pipeline(enable_napari: bool = False, enable_fiji: bool = False, sequential_config: dict = None) -> Pipeline:
+
+def create_test_pipeline(
+    enable_napari: bool = False,
+    enable_fiji: bool = False,
+    sequential_config: dict = None,
+) -> Pipeline:
     """Create test pipeline with materialization configuration.
 
     Args:
@@ -194,84 +231,115 @@ def create_test_pipeline(enable_napari: bool = False, enable_fiji: bool = False,
     Note: sequential_config is NOT used in this function - it should be set in PipelineConfig instead.
     This parameter is kept for backward compatibility but is ignored.
     """
-    cpu_only_mode = os.getenv('OPENHCS_CPU_ONLY', 'false').lower() == 'true'
+    cpu_only_mode = os.getenv("OPENHCS_CPU_ONLY", "false").lower() == "true"
     if cpu_only_mode:
         position_func = ashlar_compute_tile_positions_cpu
     else:
         try:
-            from openhcs.processing.backends.pos_gen.ashlar_main_gpu import ashlar_compute_tile_positions_gpu
+            from openhcs.processing.backends.pos_gen.ashlar_main_gpu import (
+                ashlar_compute_tile_positions_gpu,
+            )
+
             position_func = ashlar_compute_tile_positions_gpu
         except Exception:
             # Fallback cleanly to CPU if GPU path is unavailable
-            os.environ['OPENHCS_CPU_ONLY'] = 'true'
+            os.environ["OPENHCS_CPU_ONLY"] = "true"
             position_func = ashlar_compute_tile_positions_cpu
 
     return Pipeline(
         steps=[
             Step(
                 name="Image Enhancement Processing",
-                func=[(stack_percentile_normalize, {'low_percentile': 0.5, 'high_percentile': 99.5})],
-                step_well_filter_config=LazyStepWellFilterConfig(well_filter=CONSTANTS.STEP_WELL_FILTER_TEST),
+                func=[
+                    (
+                        stack_percentile_normalize,
+                        {"low_percentile": 0.5, "high_percentile": 99.5},
+                    )
+                ],
+                step_well_filter_config=LazyStepWellFilterConfig(
+                    well_filter=CONSTANTS.STEP_WELL_FILTER_TEST
+                ),
                 step_materialization_config=LazyStepMaterializationConfig(),
-                napari_streaming_config=LazyNapariStreamingConfig(port=5555) if enable_napari else None,
-                fiji_streaming_config=LazyFijiStreamingConfig() if enable_fiji else None
+                napari_streaming_config=LazyNapariStreamingConfig(
+                    port=5555, enabled=enable_napari
+                ),
+                fiji_streaming_config=LazyFijiStreamingConfig(enabled=enable_fiji),
             ),
             Step(
                 func=create_composite,
                 processing_config=LazyProcessingConfig(
                     variable_components=[VariableComponents.CHANNEL]
                 ),
-                napari_streaming_config=LazyNapariStreamingConfig(port=5557) if enable_napari else None,
-                fiji_streaming_config=LazyFijiStreamingConfig(port=5556) if enable_fiji else None
+                napari_streaming_config=LazyNapariStreamingConfig(
+                    port=5557, enabled=enable_napari
+                ),
+                fiji_streaming_config=LazyFijiStreamingConfig(
+                    port=5556, enabled=enable_fiji
+                ),
             ),
             Step(
                 name="Z-Stack Flattening",
-                func=(create_projection, {'method': 'max_projection'}),
-                processing_config=LazyProcessingConfig(variable_components=[VariableComponents.Z_INDEX]),
-                step_materialization_config=LazyStepMaterializationConfig()
+                func=(create_projection, {"method": "max_projection"}),
+                processing_config=LazyProcessingConfig(
+                    variable_components=[VariableComponents.Z_INDEX]
+                ),
+                step_materialization_config=LazyStepMaterializationConfig(),
             ),
             Step(name="Position Computation", func=position_func),
             Step(
                 name="Secondary Enhancement",
-                func=[(stack_percentile_normalize, {'low_percentile': 0.5, 'high_percentile': 99.5})],
-                processing_config=LazyProcessingConfig(input_source=InputSource.PIPELINE_START),
+                func=[
+                    (
+                        stack_percentile_normalize,
+                        {"low_percentile": 0.5, "high_percentile": 99.5},
+                    )
+                ],
+                processing_config=LazyProcessingConfig(
+                    input_source=InputSource.PIPELINE_START
+                ),
             ),
             Step(name="CPU Assembly", func=assemble_stack_cpu),
             Step(
                 name="Z-Stack Flattening",
-                func=(create_projection, {'method': 'max_projection'}),
-                processing_config=LazyProcessingConfig(variable_components=[VariableComponents.Z_INDEX]),
+                func=(create_projection, {"method": "max_projection"}),
+                processing_config=LazyProcessingConfig(
+                    variable_components=[VariableComponents.Z_INDEX]
+                ),
             ),
-            Step(name="Cell Counting",
-                func=({'1':
-                    (
-                    count_cells_single_channel, {
-                        'min_cell_area': 40,
-                        'max_cell_area': 200,
-                        'enable_preprocessing': False,
-                        'detection_method': DetectionMethod.WATERSHED,
-                        'dtype_conversion': DtypeConversion.UINT8,
-                        'return_segmentation_mask': True
-                        }
-                    ),
-                    '2':
-                    (
-                    count_cells_single_channel, {
-                        'min_cell_area': 40,
-                        'max_cell_area': 200,
-                        'enable_preprocessing': False,
-                        'detection_method': DetectionMethod.WATERSHED,
-                        'dtype_conversion': DtypeConversion.UINT8,
-                        'return_segmentation_mask': True
-                        }
-                    )
+            Step(
+                name="Cell Counting",
+                func=(
+                    {
+                        "1": (
+                            count_cells_single_channel,
+                            {
+                                "min_cell_area": 40,
+                                "max_cell_area": 200,
+                                "enable_preprocessing": False,
+                                "detection_method": DetectionMethod.WATERSHED,
+                                "dtype_conversion": DtypeConversion.UINT8,
+                                "return_segmentation_mask": True,
+                            },
+                        ),
+                        "2": (
+                            count_cells_single_channel,
+                            {
+                                "min_cell_area": 40,
+                                "max_cell_area": 200,
+                                "enable_preprocessing": False,
+                                "detection_method": DetectionMethod.WATERSHED,
+                                "dtype_conversion": DtypeConversion.UINT8,
+                                "return_segmentation_mask": True,
+                            },
+                        ),
                     }
                 ),
                 napari_streaming_config=LazyNapariStreamingConfig(
                     port=5559,
-                    variable_size_handling=NapariVariableSizeHandling.PAD_TO_MAX
-                ) if enable_napari else None,
-                fiji_streaming_config=LazyFijiStreamingConfig() if enable_fiji else None
+                    variable_size_handling=NapariVariableSizeHandling.PAD_TO_MAX,
+                    enabled=enable_napari,
+                ),
+                fiji_streaming_config=LazyFijiStreamingConfig(enabled=enable_fiji),
             ),
         ],
         name=f"Multi-Subdirectory Test Pipeline{' (CPU-Only)' if cpu_only_mode else ''}",
@@ -284,14 +352,16 @@ def _load_metadata(output_dir: Path) -> Dict:
     if not metadata_file.exists():
         raise FileNotFoundError(f"Metadata file not found: {metadata_file}")
 
-    with open(metadata_file, 'r') as f:
+    with open(metadata_file, "r") as f:
         return json.load(f)
 
 
 def _validate_metadata_structure(metadata: Dict) -> List[str]:
     """Validate metadata structure and return subdirectory list."""
     if CONSTANTS.SUBDIRECTORIES_FIELD not in metadata:
-        raise ValueError(f"Missing '{CONSTANTS.SUBDIRECTORIES_FIELD}' field in metadata")
+        raise ValueError(
+            f"Missing '{CONSTANTS.SUBDIRECTORIES_FIELD}' field in metadata"
+        )
 
     subdirs = list(metadata[CONSTANTS.SUBDIRECTORIES_FIELD].keys())
 
@@ -307,6 +377,7 @@ def _validate_metadata_structure(metadata: Dict) -> List[str]:
 def _get_materialization_subdir() -> str:
     """Get the actual subdirectory name used by LazyStepMaterializationConfig."""
     from openhcs.core.config import StepMaterializationConfig
+
     return StepMaterializationConfig().sub_dir
 
 
@@ -314,16 +385,22 @@ def _validate_subdirectory_fields(metadata: Dict) -> None:
     """Validate required fields in each subdirectory metadata."""
     materialization_subdir = _get_materialization_subdir()
 
-    for subdir_name, subdir_metadata in metadata[CONSTANTS.SUBDIRECTORIES_FIELD].items():
+    for subdir_name, subdir_metadata in metadata[
+        CONSTANTS.SUBDIRECTORIES_FIELD
+    ].items():
         missing_fields = [
-            field for field in CONSTANTS.REQUIRED_FIELDS
-            if field not in subdir_metadata
+            field for field in CONSTANTS.REQUIRED_FIELDS if field not in subdir_metadata
         ]
         if missing_fields:
-            raise ValueError(f"Subdirectory '{subdir_name}' missing fields: {missing_fields}")
+            raise ValueError(
+                f"Subdirectory '{subdir_name}' missing fields: {missing_fields}"
+            )
 
         # Validate image_files (allow empty for materialization subdirectory)
-        if not subdir_metadata.get("image_files") and subdir_name != materialization_subdir:
+        if (
+            not subdir_metadata.get("image_files")
+            and subdir_name != materialization_subdir
+        ):
             raise ValueError(f"Subdirectory '{subdir_name}' has empty image_files list")
 
 
@@ -334,15 +411,18 @@ def validate_separate_materialization(plate_dir: Path) -> None:
     if not (output_dir.exists() and output_dir.is_dir()):
         raise FileNotFoundError(f"Output directory not found: {output_dir}")
 
-    print(f"{CONSTANTS.VALIDATION_INDICATOR} Validating materialization in: {output_dir}")
+    print(
+        f"{CONSTANTS.VALIDATION_INDICATOR} Validating materialization in: {output_dir}"
+    )
 
     metadata = _load_metadata(output_dir)
     subdirs = _validate_metadata_structure(metadata)
     _validate_subdirectory_fields(metadata)
 
     print(f"{CONSTANTS.VALIDATION_INDICATOR} Subdirectories: {sorted(subdirs)}")
-    print(f"{CONSTANTS.SUCCESS_CHECK} Materialization validation successful: {len(subdirs)} entries")
-
+    print(
+        f"{CONSTANTS.SUCCESS_CHECK} Materialization validation successful: {len(subdirs)} entries"
+    )
 
 
 def _create_pipeline_config(test_config: TestConfig) -> GlobalPipelineConfig:
@@ -350,12 +430,16 @@ def _create_pipeline_config(test_config: TestConfig) -> GlobalPipelineConfig:
     from openhcs.constants import Microscope
 
     # Set microscope type from config
-    microscope = Microscope[test_config.microscope_type.upper()] if test_config.microscope_type != "auto" else Microscope.AUTO
+    microscope = (
+        Microscope[test_config.microscope_type.upper()]
+        if test_config.microscope_type != "auto"
+        else Microscope.AUTO
+    )
 
     # For OMERO tests, use omero_local backend for materialization
     # For other tests, use the configured backend
     if test_config.is_omero:
-        materialization_backend = MaterializationBackend('omero_local')
+        materialization_backend = MaterializationBackend("omero_local")
     else:
         materialization_backend = MaterializationBackend(test_config.backend_config)
 
@@ -363,19 +447,23 @@ def _create_pipeline_config(test_config: TestConfig) -> GlobalPipelineConfig:
         num_workers=CONSTANTS.DEFAULT_WORKERS,
         microscope=microscope,
         path_planning_config=PathPlanningConfig(
-            sub_dir=CONSTANTS.DEFAULT_SUB_DIR,
-            output_dir_suffix=CONSTANTS.OUTPUT_SUFFIX
+            sub_dir=CONSTANTS.DEFAULT_SUB_DIR, output_dir_suffix=CONSTANTS.OUTPUT_SUFFIX
         ),
         vfs_config=VFSConfig(materialization_backend=materialization_backend),
         zarr_config=ZarrConfig(),
-        step_well_filter_config=StepWellFilterConfig(well_filter=CONSTANTS.GLOBAL_STEP_WELL_FILTER_TEST),
-        use_threading=test_config.use_threading
+        step_well_filter_config=StepWellFilterConfig(
+            well_filter=CONSTANTS.GLOBAL_STEP_WELL_FILTER_TEST
+        ),
+        use_threading=test_config.use_threading,
     )
 
 
-def _initialize_orchestrator(test_config: TestConfig, sequential_config=None) -> PipelineOrchestrator:
+def _initialize_orchestrator(
+    test_config: TestConfig, sequential_config=None
+) -> PipelineOrchestrator:
     """Initialize and configure the pipeline orchestrator."""
     from polystore.base import reset_memory_backend
+
     reset_memory_backend()
 
     setup_global_gpu_registry()
@@ -402,7 +490,7 @@ def _initialize_orchestrator(test_config: TestConfig, sequential_config=None) ->
 
         # Register OMERO backend with connection in global storage registry
         omero_backend = OMEROLocalBackend(omero_conn=omero_manager.conn)
-        storage_registry['omero_local'] = omero_backend
+        storage_registry["omero_local"] = omero_backend
 
     # Convert sequential component names to SequentialComponents enum
     sequential_components = []
@@ -410,19 +498,26 @@ def _initialize_orchestrator(test_config: TestConfig, sequential_config=None) ->
         for comp_name in sequential_config["sequential_components"]:
             sequential_components.append(SequentialComponents[comp_name])
 
+    # Determine materialization backend for OMERO tests
+    # For OMERO tests, use omero_local backend for materialization
+    # For other tests, use the configured backend
+    if test_config.is_omero:
+        materialization_backend = MaterializationBackend("omero_local")
+    else:
+        materialization_backend = MaterializationBackend(test_config.backend_config)
+
     # Create PipelineConfig with lazy configs for proper hierarchical inheritance
-    # CRITICAL: Explicitly set vfs_config=None to inherit from global config
-    # Without this, PipelineConfig auto-creates a VFSConfig with default values (materialization_backend=DISK)
-    # which overrides the global config's omero_local backend for OMERO tests
     pipeline_config = PipelineConfig(
         path_planning_config=LazyPathPlanningConfig(
             output_dir_suffix=CONSTANTS.OUTPUT_SUFFIX
         ),
-        step_well_filter_config=LazyStepWellFilterConfig(well_filter=CONSTANTS.PIPELINE_STEP_WELL_FILTER_TEST),
+        step_well_filter_config=LazyStepWellFilterConfig(
+            well_filter=CONSTANTS.PIPELINE_STEP_WELL_FILTER_TEST
+        ),
         sequential_processing_config=LazySequentialProcessingConfig(
-            sequential_components=sequential_components
-        ) if sequential_components else None,
-        vfs_config=None,  # Inherit from global config
+            sequential_components=sequential_components if sequential_components else []
+        ),
+        vfs_config=VFSConfig(materialization_backend=materialization_backend),
     )
 
     # Convert plate_dir to Path - for OMERO, format as /omero/plate_{id}
@@ -455,49 +550,52 @@ def _export_pipeline_to_file(pipeline: Pipeline, plate_dir: Path) -> None:
 
     # Wrap in a complete script with header and main block
     lines = []
-    lines.append('#!/usr/bin/env python3')
+    lines.append("#!/usr/bin/env python3")
     lines.append('"""')
-    lines.append(f'OpenHCS Pipeline Script - {pipeline.name}')
-    lines.append(f'Generated: {datetime.now()}')
+    lines.append(f"OpenHCS Pipeline Script - {pipeline.name}")
+    lines.append(f"Generated: {datetime.now()}")
     lines.append('"""')
-    lines.append('')
-    lines.append('from openhcs.core.pipeline import Pipeline')
-    lines.append('')
-    lines.append('')
-    lines.append('def create_pipeline():')
+    lines.append("")
+    lines.append("from openhcs.core.pipeline import Pipeline")
+    lines.append("")
+    lines.append("")
+    lines.append("def create_pipeline():")
     lines.append('    """Create and return the pipeline."""')
-    lines.append('')
+    lines.append("")
 
     # Indent the generated pipeline steps code
-    for line in python_code.split('\n'):
-        if line.strip() and not line.startswith('#'):
-            lines.append(f'    {line}')
-        elif line.strip().startswith('#'):
-            lines.append(f'    {line}')
+    for line in python_code.split("\n"):
+        if line.strip() and not line.startswith("#"):
+            lines.append(f"    {line}")
+        elif line.strip().startswith("#"):
+            lines.append(f"    {line}")
 
-    lines.append('')
-    lines.append(f'    return Pipeline(')
-    lines.append(f'        steps=pipeline_steps,')
-    lines.append(f'        name={repr(pipeline.name)}')
-    lines.append(f'    )')
-    lines.append('')
-    lines.append('')
-    lines.append('pipeline_steps = create_pipeline()')
-    lines.append('')
+    lines.append("")
+    lines.append(f"    return Pipeline(")
+    lines.append(f"        steps=pipeline_steps,")
+    lines.append(f"        name={repr(pipeline.name)}")
+    lines.append(f"    )")
+    lines.append("")
+    lines.append("")
+    lines.append("pipeline_steps = create_pipeline()")
+    lines.append("")
 
     # Write to file
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(output_path, 'w') as f:
-        f.write('\n'.join(lines))
+    with open(output_path, "w") as f:
+        f.write("\n".join(lines))
 
     print(f"📝 Pipeline exported to: {output_path}")
 
 
-def _execute_pipeline_phases(orchestrator: PipelineOrchestrator, pipeline: Pipeline) -> Dict:
+def _execute_pipeline_phases(
+    orchestrator: PipelineOrchestrator, pipeline: Pipeline
+) -> Dict:
     """Execute compilation and execution phases of the pipeline (direct mode)."""
     from openhcs.constants import MULTIPROCESSING_AXIS
     from openhcs.core.orchestrator.execution_result import ExecutionResult
     import logging
+
     logger = logging.getLogger(__name__)
 
     wells = orchestrator.get_component_keys(MULTIPROCESSING_AXIS)
@@ -506,15 +604,16 @@ def _execute_pipeline_phases(orchestrator: PipelineOrchestrator, pipeline: Pipel
 
     # Compilation phase
     compilation_result = orchestrator.compile_pipelines(
-        pipeline_definition=pipeline.steps,
-        well_filter=wells
+        pipeline_definition=pipeline.steps, well_filter=wells
     )
 
     # Extract compiled_contexts from the result dict
-    compiled_contexts = compilation_result['compiled_contexts']
+    compiled_contexts = compilation_result["compiled_contexts"]
 
     if len(compiled_contexts) != len(wells):
-        raise RuntimeError(f"Compilation failed: expected {len(wells)} contexts, got {len(compiled_contexts)}")
+        raise RuntimeError(
+            f"Compilation failed: expected {len(wells)} contexts, got {len(compiled_contexts)}"
+        )
 
     # DEBUG: Log Napari streaming configs
     logger.info("=" * 80)
@@ -522,8 +621,8 @@ def _execute_pipeline_phases(orchestrator: PipelineOrchestrator, pipeline: Pipel
     for well_id, ctx in compiled_contexts.items():
         logger.info(f"Well {well_id}: {len(ctx.required_visualizers)} visualizers")
         for i, vis_info in enumerate(ctx.required_visualizers):
-            config = vis_info['config']
-            if hasattr(config, 'port'):
+            config = vis_info["config"]
+            if hasattr(config, "port"):
                 logger.info(f"  Visualizer {i}: Napari port {config.port}")
             else:
                 logger.info(f"  Visualizer {i}: {type(config).__name__}")
@@ -531,17 +630,17 @@ def _execute_pipeline_phases(orchestrator: PipelineOrchestrator, pipeline: Pipel
 
     # Execution phase
     results = orchestrator.execute_compiled_plate(
-        pipeline_definition=pipeline.steps,
-        compiled_contexts=compiled_contexts
+        pipeline_definition=pipeline.steps, compiled_contexts=compiled_contexts
     )
 
     if len(results) != len(wells):
-        raise RuntimeError(f"Execution failed: expected {len(wells)} results, got {len(results)}")
+        raise RuntimeError(
+            f"Execution failed: expected {len(wells)} results, got {len(results)}"
+        )
 
     # Validate all wells succeeded
     failed_wells = [
-        well_id for well_id, result in results.items()
-        if not result.is_success()
+        well_id for well_id, result in results.items() if not result.is_success()
     ]
     if failed_wells:
         raise RuntimeError(f"Wells failed execution: {failed_wells}")
@@ -549,10 +648,16 @@ def _execute_pipeline_phases(orchestrator: PipelineOrchestrator, pipeline: Pipel
     return results
 
 
-def _execute_pipeline_zmq(test_config: TestConfig, pipeline: Pipeline, global_config: GlobalPipelineConfig, pipeline_config: PipelineConfig) -> Dict:
+def _execute_pipeline_zmq(
+    test_config: TestConfig,
+    pipeline: Pipeline,
+    global_config: GlobalPipelineConfig,
+    pipeline_config: PipelineConfig,
+) -> Dict:
     """Execute pipeline using ZMQ execution client."""
     from openhcs.runtime.zmq_execution_client import ZMQExecutionClient
     import logging
+
     logger = logging.getLogger(__name__)
 
     logger.info("🔌 Executing pipeline via ZMQ execution client")
@@ -571,12 +676,12 @@ def _execute_pipeline_zmq(test_config: TestConfig, pipeline: Pipeline, global_co
             plate_id=str(test_config.plate_dir),
             pipeline_steps=pipeline.steps,
             global_config=global_config,
-            pipeline_config=pipeline_config
+            pipeline_config=pipeline_config,
         )
 
         # Check response
-        if response.get('status') == 'error':
-            error_msg = response.get('message', 'Unknown error')
+        if response.get("status") == "error":
+            error_msg = response.get("message", "Unknown error")
             raise RuntimeError(f"ZMQ execution failed: {error_msg}")
 
         logger.info(f"✅ ZMQ execution completed: {response.get('status')}")
@@ -584,7 +689,7 @@ def _execute_pipeline_zmq(test_config: TestConfig, pipeline: Pipeline, global_co
         # Convert response to results format expected by tests
         # ZMQ returns {'status': 'complete', 'execution_id': '...', 'result': {...}}
         # We need to return the result dict
-        return response.get('result', {})
+        return response.get("result", {})
 
     finally:
         # Cleanup
@@ -592,7 +697,9 @@ def _execute_pipeline_zmq(test_config: TestConfig, pipeline: Pipeline, global_co
         logger.info("🔌 Disconnected from ZMQ execution server")
 
 
-def _execute_pipeline_with_mode(test_config: TestConfig, pipeline: Pipeline, zmq_mode: str, sequential_config=None) -> Dict:
+def _execute_pipeline_with_mode(
+    test_config: TestConfig, pipeline: Pipeline, zmq_mode: str, sequential_config=None
+) -> Dict:
     """
     Execute pipeline using either direct orchestrator or ZMQ client based on mode.
 
@@ -605,6 +712,7 @@ def _execute_pipeline_with_mode(test_config: TestConfig, pipeline: Pipeline, zmq
         Execution results dict
     """
     import logging
+
     logger = logging.getLogger(__name__)
 
     if zmq_mode == "zmq":
@@ -619,49 +727,92 @@ def _execute_pipeline_with_mode(test_config: TestConfig, pipeline: Pipeline, zmq
             for comp_name in sequential_config["sequential_components"]:
                 sequential_components.append(SequentialComponents[comp_name])
 
+        # Determine materialization backend for OMERO tests
+        # For OMERO tests, use omero_local backend for materialization
+        # For other tests, use the configured backend
+        if test_config.is_omero:
+            materialization_backend = MaterializationBackend("omero_local")
+        else:
+            materialization_backend = MaterializationBackend(test_config.backend_config)
+
         # Create pipeline config with lazy configs
-        # NOTE: No need to set vfs_config explicitly - the compiler will automatically
-        # validate and correct the backend based on microscope compatibility
-        from openhcs.core.config import LazyPathPlanningConfig, LazyStepWellFilterConfig, LazySequentialProcessingConfig
+        from openhcs.core.config import (
+            LazyPathPlanningConfig,
+            LazyStepWellFilterConfig,
+            LazySequentialProcessingConfig,
+        )
+
         pipeline_config = PipelineConfig(
             path_planning_config=LazyPathPlanningConfig(
                 output_dir_suffix=CONSTANTS.OUTPUT_SUFFIX
             ),
-            step_well_filter_config=LazyStepWellFilterConfig(well_filter=CONSTANTS.PIPELINE_STEP_WELL_FILTER_TEST),
+            step_well_filter_config=LazyStepWellFilterConfig(
+                well_filter=CONSTANTS.PIPELINE_STEP_WELL_FILTER_TEST
+            ),
             sequential_processing_config=LazySequentialProcessingConfig(
                 sequential_components=sequential_components
-            ) if sequential_components else None,
+                if sequential_components
+                else []
+            ),
+            vfs_config=VFSConfig(materialization_backend=materialization_backend),
         )
 
-        return _execute_pipeline_zmq(test_config, pipeline, global_config, pipeline_config)
+        return _execute_pipeline_zmq(
+            test_config, pipeline, global_config, pipeline_config
+        )
     else:
         logger.info("🔧 Using direct orchestrator mode")
         orchestrator = _initialize_orchestrator(test_config, sequential_config)
         return _execute_pipeline_phases(orchestrator, pipeline)
 
 
-def test_main(plate_dir: Union[Path, str, int], backend_config: str, data_type_config: Dict, execution_mode: str, zmq_execution_mode: str, microscope_config: Dict, enable_napari: bool, enable_fiji: bool, sequential_config: Dict):
+def test_main(
+    plate_dir: Union[Path, str, int],
+    backend_config: str,
+    data_type_config: Dict,
+    execution_mode: str,
+    zmq_execution_mode: str,
+    microscope_config: Dict,
+    enable_napari: bool,
+    enable_fiji: bool,
+    sequential_config: Dict,
+):
     """Unified test for all combinations of microscope types, backends, data types, execution modes, and sequential processing."""
     # Handle both Path and int (OMERO plate_id)
     if isinstance(plate_dir, int):
-        test_config = TestConfig(plate_dir, backend_config, execution_mode, microscope_config)
+        test_config = TestConfig(
+            plate_dir, backend_config, execution_mode, microscope_config
+        )
     else:
-        test_config = TestConfig(Path(plate_dir), backend_config, execution_mode, microscope_config)
+        test_config = TestConfig(
+            Path(plate_dir), backend_config, execution_mode, microscope_config
+        )
 
     # For OMERO tests, connect to OMERO (automatically starts if needed)
     if test_config.is_omero:
         from openhcs.runtime.omero_instance_manager import OMEROInstanceManager
+
         print("� Connecting to OMERO (will auto-start if needed)...")
         omero_manager = OMEROInstanceManager()
-        if not omero_manager.connect(timeout=120):  # Increased timeout for docker startup
-            pytest.skip("OMERO server not available and could not be started automatically. Check Docker installation.")
+        if not omero_manager.connect(
+            timeout=120
+        ):  # Increased timeout for docker startup
+            pytest.skip(
+                "OMERO server not available and could not be started automatically. Check Docker installation."
+            )
         omero_manager.close()
         print("✅ OMERO server is ready")
 
-    print(f"{CONSTANTS.START_INDICATOR} with plate: {plate_dir}, backend: {backend_config}, microscope: {microscope_config['format']}, mode: {execution_mode}, zmq: {zmq_execution_mode}, sequential: {sequential_config['name']}")
+    print(
+        f"{CONSTANTS.START_INDICATOR} with plate: {plate_dir}, backend: {backend_config}, microscope: {microscope_config['format']}, mode: {execution_mode}, zmq: {zmq_execution_mode}, sequential: {sequential_config['name']}"
+    )
 
     # Create pipeline with sequential configuration
-    pipeline = create_test_pipeline(enable_napari=enable_napari, enable_fiji=enable_fiji, sequential_config=sequential_config)
+    pipeline = create_test_pipeline(
+        enable_napari=enable_napari,
+        enable_fiji=enable_fiji,
+        sequential_config=sequential_config,
+    )
 
     # If this configuration should fail validation, expect ValueError during compilation
     if sequential_config.get("should_fail", False):
@@ -671,12 +822,18 @@ def test_main(plate_dir: Union[Path, str, int], backend_config: str, data_type_c
                 _export_pipeline_to_file(pipeline, test_config.plate_dir)
 
             # Execute using the specified mode (direct or zmq) - should fail during compilation
-            _execute_pipeline_with_mode(test_config, pipeline, zmq_execution_mode, sequential_config)
+            _execute_pipeline_with_mode(
+                test_config, pipeline, zmq_execution_mode, sequential_config
+            )
 
         # Verify the error message contains the expected substring
         expected_error = sequential_config.get("expected_error", "")
-        assert expected_error in str(exc_info.value), f"Expected error message to contain '{expected_error}', but got: {exc_info.value}"
-        print(f"✅ Validation correctly rejected invalid configuration: {exc_info.value}")
+        assert expected_error in str(exc_info.value), (
+            f"Expected error message to contain '{expected_error}', but got: {exc_info.value}"
+        )
+        print(
+            f"✅ Validation correctly rejected invalid configuration: {exc_info.value}"
+        )
         return  # Test passed - invalid config was rejected as expected
 
     # Valid configuration - should succeed
@@ -685,7 +842,9 @@ def test_main(plate_dir: Union[Path, str, int], backend_config: str, data_type_c
         _export_pipeline_to_file(pipeline, test_config.plate_dir)
 
     # Execute using the specified mode (direct or zmq)
-    results = _execute_pipeline_with_mode(test_config, pipeline, zmq_execution_mode, sequential_config)
+    results = _execute_pipeline_with_mode(
+        test_config, pipeline, zmq_execution_mode, sequential_config
+    )
 
     # Validate materialization (skip for OMERO - different validation needed)
     if not test_config.is_omero:
@@ -696,13 +855,13 @@ def test_main(plate_dir: Union[Path, str, int], backend_config: str, data_type_c
         import webbrowser
 
         # Get OMERO web URL from config
-        omero_web_host = os.getenv('OMERO_WEB_HOST', 'localhost')
-        omero_web_port = os.getenv('OMERO_WEB_PORT', '4080')
+        omero_web_host = os.getenv("OMERO_WEB_HOST", "localhost")
+        omero_web_port = os.getenv("OMERO_WEB_PORT", "4080")
         plate_url = f"http://{omero_web_host}:{omero_web_port}/webclient/?show=plate-{plate_dir}"
 
-        print(f"\n{'='*80}")
+        print(f"\n{'=' * 80}")
         print(f"OMERO Plate URL: {plate_url}")
-        print(f"{'='*80}\n")
+        print(f"{'=' * 80}\n")
 
         # Open browser
         webbrowser.open(plate_url)
@@ -711,7 +870,14 @@ def test_main(plate_dir: Union[Path, str, int], backend_config: str, data_type_c
     print(f"{CONSTANTS.SUCCESS_INDICATOR} ({len(results)} wells processed)")
 
 
-def _test_main_with_code_serialization(plate_dir: Union[Path, str, int], backend_config: str, data_type_config: Dict, execution_mode: str, zmq_execution_mode: str, microscope_config: Dict):
+def _test_main_with_code_serialization(
+    plate_dir: Union[Path, str, int],
+    backend_config: str,
+    data_type_config: Dict,
+    execution_mode: str,
+    zmq_execution_mode: str,
+    microscope_config: Dict,
+):
     """
     DISABLED: Code serialization test (not run as pytest test).
 
@@ -730,14 +896,21 @@ def _test_main_with_code_serialization(plate_dir: Union[Path, str, int], backend
     """
     # Handle both Path and int (OMERO plate_id)
     if isinstance(plate_dir, int):
-        test_config = TestConfig(plate_dir, backend_config, execution_mode, microscope_config)
+        test_config = TestConfig(
+            plate_dir, backend_config, execution_mode, microscope_config
+        )
     else:
-        test_config = TestConfig(Path(plate_dir), backend_config, execution_mode, microscope_config)
+        test_config = TestConfig(
+            Path(plate_dir), backend_config, execution_mode, microscope_config
+        )
 
-    print(f"{CONSTANTS.START_INDICATOR} [CODE SERIALIZATION TEST] with plate: {plate_dir}, backend: {backend_config}, mode: {execution_mode}, zmq: {zmq_execution_mode}")
+    print(
+        f"{CONSTANTS.START_INDICATOR} [CODE SERIALIZATION TEST] with plate: {plate_dir}, backend: {backend_config}, mode: {execution_mode}, zmq: {zmq_execution_mode}"
+    )
 
     # Step 1: Create objects normally
     from polystore.base import reset_memory_backend
+
     reset_memory_backend()
     setup_global_gpu_registry()
 
@@ -748,7 +921,9 @@ def _test_main_with_code_serialization(plate_dir: Union[Path, str, int], backend
         path_planning_config=LazyPathPlanningConfig(
             output_dir_suffix=CONSTANTS.OUTPUT_SUFFIX
         ),
-        step_well_filter_config=LazyStepWellFilterConfig(well_filter=CONSTANTS.PIPELINE_STEP_WELL_FILTER_TEST),
+        step_well_filter_config=LazyStepWellFilterConfig(
+            well_filter=CONSTANTS.PIPELINE_STEP_WELL_FILTER_TEST
+        ),
     )
 
     pipeline = create_test_pipeline()
@@ -805,19 +980,21 @@ def _test_main_with_code_serialization(plate_dir: Union[Path, str, int], backend
     # Recreate GlobalPipelineConfig
     global_config_namespace = {}
     exec(global_config_code, global_config_namespace)
-    recreated_global_config = global_config_namespace['config']
+    recreated_global_config = global_config_namespace["config"]
 
     # Recreate PipelineConfig
     pipeline_config_namespace = {}
     exec(pipeline_config_code, pipeline_config_namespace)
-    recreated_pipeline_config = pipeline_config_namespace['config']
+    recreated_pipeline_config = pipeline_config_namespace["config"]
 
     # Recreate Pipeline steps
     pipeline_steps_namespace = {}
     exec(pipeline_steps_code, pipeline_steps_namespace)
-    recreated_pipeline_steps = pipeline_steps_namespace['pipeline_steps']
+    recreated_pipeline_steps = pipeline_steps_namespace["pipeline_steps"]
 
-    print(f"   - Recreated GlobalPipelineConfig: {type(recreated_global_config).__name__}")
+    print(
+        f"   - Recreated GlobalPipelineConfig: {type(recreated_global_config).__name__}"
+    )
     print(f"   - Recreated PipelineConfig: {type(recreated_pipeline_config).__name__}")
     print(f"   - Recreated Pipeline steps: {len(recreated_pipeline_steps)} steps")
 
@@ -835,7 +1012,9 @@ def _test_main_with_code_serialization(plate_dir: Union[Path, str, int], backend
 
     # Check Pipeline steps
     assert len(recreated_pipeline_steps) == len(pipeline.steps)
-    for i, (orig_step, recreated_step) in enumerate(zip(pipeline.steps, recreated_pipeline_steps)):
+    for i, (orig_step, recreated_step) in enumerate(
+        zip(pipeline.steps, recreated_pipeline_steps)
+    ):
         assert type(orig_step) == type(recreated_step)
         assert orig_step.name == recreated_step.name
     print(f"   ✅ Pipeline steps match ({len(recreated_pipeline_steps)} steps)")
@@ -844,25 +1023,33 @@ def _test_main_with_code_serialization(plate_dir: Union[Path, str, int], backend
     print("\n🚀 Step 5: Executing pipeline with recreated objects...")
 
     # Create Pipeline object from recreated steps
-    recreated_pipeline = Pipeline(
-        steps=recreated_pipeline_steps,
-        name=pipeline.name
-    )
+    recreated_pipeline = Pipeline(steps=recreated_pipeline_steps, name=pipeline.name)
 
     # Execute using the specified mode (direct or zmq)
     if zmq_execution_mode == "zmq":
         # For ZMQ mode, use the recreated configs directly
-        results = _execute_pipeline_zmq(test_config, recreated_pipeline, recreated_global_config, recreated_pipeline_config)
+        results = _execute_pipeline_zmq(
+            test_config,
+            recreated_pipeline,
+            recreated_global_config,
+            recreated_pipeline_config,
+        )
     else:
         # For direct mode, set up global context and use orchestrator
         ensure_global_config_context(GlobalPipelineConfig, recreated_global_config)
-        orchestrator = PipelineOrchestrator(test_config.plate_dir, pipeline_config=recreated_pipeline_config)
+        orchestrator = PipelineOrchestrator(
+            test_config.plate_dir, pipeline_config=recreated_pipeline_config
+        )
         orchestrator.initialize()
         results = _execute_pipeline_phases(orchestrator, recreated_pipeline)
 
     validate_separate_materialization(test_config.plate_dir)
 
     print_thread_activity_report()
-    print(f"\n{CONSTANTS.SUCCESS_INDICATOR} [CODE SERIALIZATION TEST] ({len(results)} wells processed)")
+    print(
+        f"\n{CONSTANTS.SUCCESS_INDICATOR} [CODE SERIALIZATION TEST] ({len(results)} wells processed)"
+    )
     print("✅ Code-based serialization works perfectly!")
-    print("   This proves we can use Python code instead of pickling for remote execution.")
+    print(
+        "   This proves we can use Python code instead of pickling for remote execution."
+    )
