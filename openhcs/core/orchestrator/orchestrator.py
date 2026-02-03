@@ -734,6 +734,23 @@ class PipelineOrchestrator:
             self.input_dir = Path(actual_image_dir)
             logger.info(f"Set input directory to: {self.input_dir}")
 
+            # Log effective backend intent early for debugging test/UI differences
+            try:
+                vfs_cfg = (
+                    self.get_effective_config().vfs_config
+                    if self.pipeline_config
+                    else None
+                )
+                if vfs_cfg is not None:
+                    logger.info(
+                        "VFS config at init: read_backend=%s intermediate_backend=%s materialization_backend=%s",
+                        getattr(vfs_cfg, "read_backend", None),
+                        getattr(vfs_cfg, "intermediate_backend", None),
+                        getattr(vfs_cfg, "materialization_backend", None),
+                    )
+            except Exception:
+                logger.debug("Could not log VFS config at init", exc_info=True)
+
             # Set workspace_path based on what the handler returned
             if actual_image_dir != self.plate_path:
                 # Handler created a workspace (or virtual path for OMERO)
@@ -1595,14 +1612,33 @@ class PipelineOrchestrator:
             backend_to_use = self.microscope_handler.get_primary_backend(
                 self.input_dir, self.filemanager
             )
-            logger.debug(
-                f"Using backend '{backend_to_use}' for file listing based on available backends"
+            logger.info(
+                "Component key discovery: input_dir=%s backend_to_use=%s microscope=%s parser=%s",
+                self.input_dir,
+                backend_to_use,
+                getattr(self.microscope_handler, "microscope_type", None),
+                getattr(
+                    getattr(self.microscope_handler, "parser", None),
+                    "__class__",
+                    type(None),
+                ).__name__,
             )
 
             filenames = self.filemanager.list_files(
                 str(self.input_dir), backend_to_use, extensions=DEFAULT_IMAGE_EXTENSIONS
             )
-            logger.debug(f"Parsing {len(filenames)} filenames in single pass...")
+            logger.info(
+                "Component key discovery: listed %d files (extensions=%s)",
+                len(filenames),
+                DEFAULT_IMAGE_EXTENSIONS,
+            )
+            if filenames:
+                preview = [str(p) for p in filenames[:10]]
+                logger.debug(
+                    "Component key discovery: first %d files: %s",
+                    len(preview),
+                    preview,
+                )
 
             for filename in filenames:
                 parsed_info = self.microscope_handler.parser.parse_filename(
@@ -1618,7 +1654,12 @@ class PipelineOrchestrator:
                         ):
                             component_sets[component].add(parsed_info[component_name])
                 else:
-                    logger.warning(f"Could not parse filename: {filename}")
+                    logger.warning(
+                        "Could not parse filename: %s (backend=%s input_dir=%s)",
+                        filename,
+                        backend_to_use,
+                        self.input_dir,
+                    )
 
         except Exception as e:
             logger.error(

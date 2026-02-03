@@ -42,6 +42,7 @@ WHY:
 
 import inspect
 import logging
+import os
 import dataclasses
 import time
 from pathlib import Path
@@ -95,6 +96,20 @@ from dataclasses import dataclass
 from python_introspect import Enableable
 
 logger = logging.getLogger(__name__)
+
+
+def _should_unregister_compiler_objectstates() -> bool:
+    """Unregister compiler-created ObjectStates only in ZMQ server.
+
+    UI/editor mode keeps these states registered for live resolution.
+    """
+
+    return os.environ.get("OPENHCS_ZMQ_EXECUTION_SERVER", "").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 
 @dataclass(frozen=True)
@@ -369,8 +384,12 @@ class PipelineCompiler:
                         scope_id="",
                         parent_state=None,
                     )
-                    ObjectStateRegistry.register(global_config_state, _skip_snapshot=True)
-                    logger.info("🔍 IPC: Registered global config at scope '' (initialize_step_plans)")
+                    ObjectStateRegistry.register(
+                        global_config_state, _skip_snapshot=True
+                    )
+                    logger.info(
+                        "🔍 IPC: Registered global config at scope '' (initialize_step_plans)"
+                    )
 
             # Register orchestrator with PipelineConfig as parent for config inheritance
             # The orchestrator provides pipeline-level config (streaming_defaults, etc.)
@@ -408,10 +427,14 @@ class PipelineCompiler:
                 resolved_step = step_state.to_object()
                 resolved_steps.append(resolved_step)
 
-            # Cleanup compiler-created ObjectStates (prevents memory leaks and time-travel snapshots)
-            ObjectStateRegistry.unregister(orch_state, _skip_snapshot=True)
-            for step_index, step_state in step_state_map.items():
-                ObjectStateRegistry.unregister(step_state, _skip_snapshot=True)
+            # Cleanup compiler-created ObjectStates.
+            # IMPORTANT:
+            # - UI/editor mode: do NOT unregister (GUI relies on these registered states).
+            # - ZMQ execution server: DO unregister to free RAM.
+            if _should_unregister_compiler_objectstates():
+                ObjectStateRegistry.unregister(orch_state, _skip_snapshot=True)
+                for step_index, step_state in step_state_map.items():
+                    ObjectStateRegistry.unregister(step_state, _skip_snapshot=True)
 
             steps_definition = resolved_steps
             logger.info(
@@ -630,8 +653,6 @@ class PipelineCompiler:
                     f"{field_name}.enabled"
                 )
                 enabled = True if defaults_enabled is True else per_stream_enabled
-
-
 
                 if enabled is True:
                     base_cls = get_base_type_for_lazy(
@@ -1038,36 +1059,56 @@ class PipelineCompiler:
     @staticmethod
     def validate_backend_compatibility(orchestrator) -> None:
         """
-        Validate and auto-correct materialization backend for microscopes with single compatible backend.
+        Validate configured read backend against microscope support.
 
-        For microscopes with only one compatible backend (e.g., OMERO → OMERO_LOCAL),
-        automatically corrects the backend if misconfigured. For microscopes with multiple
-        compatible backends, the configured backend must be explicitly compatible.
+        Materialization backend selection is always allowed at compile time (e.g. materialize
+        to Zarr even when source data is read from disk). What must be compatible with the
+        selected microscope is the backend used for reading input images.
 
         Args:
             orchestrator: PipelineOrchestrator instance with initialized microscope_handler
         """
 
         microscope_handler = orchestrator.microscope_handler
-        required_backend = microscope_handler.get_required_backend()
 
-        if required_backend:
-            # Microscope has single compatible backend - auto-correct if needed
-            # Access from merged config for proper inheritance
+        # Read saved resolved vfs_config.read_backend from ObjectState (not live UI edits)
+        plate_scope_id = str(orchestrator.plate_path)
+        pipeline_config_state = ObjectStateRegistry.get_by_scope(plate_scope_id)
+        if pipeline_config_state is not None:
+            configured_read_backend = pipeline_config_state.get_saved_resolved_value(
+                "vfs_config.read_backend"
+            )
+        else:
+            # Fallback: if no ObjectState exists (unexpected in compiler path),
+            # use the effective merged config.
             vfs_config = orchestrator.get_effective_config().vfs_config or VFSConfig()
+            configured_read_backend = vfs_config.read_backend
 
-            if vfs_config.materialization_backend != required_backend:
-                logger.warning(
-                    f"{microscope_handler.microscope_type} requires {required_backend.value} backend. "
-                    f"Auto-correcting from {vfs_config.materialization_backend.value}."
+        # AUTO/None means "let the microscope handler decide".
+        if configured_read_backend in (None, Backend.AUTO):
+            return
+
+        # Normalize to Backend enum
+        if isinstance(configured_read_backend, Backend):
+            read_backend = configured_read_backend
+        else:
+            try:
+                read_backend = Backend(str(configured_read_backend))
+            except Exception:
+                raise ValueError(
+                    f"Invalid vfs_config.read_backend={configured_read_backend!r}. "
+                    f"Expected one of: {[b.value for b in Backend]}."
                 )
-                new_vfs_config = replace(
-                    vfs_config, materialization_backend=required_backend
-                )
-                # Update the raw pipeline_config (this is a write operation, not a read)
-                orchestrator.pipeline_config = replace(
-                    orchestrator.pipeline_config, vfs_config=new_vfs_config
-                )
+
+        available_backends = microscope_handler.get_available_backends(
+            orchestrator.input_dir or orchestrator.plate_path
+        )
+        if read_backend not in available_backends:
+            raise ValueError(
+                f"{microscope_handler.microscope_type} does not support read_backend={read_backend.value}. "
+                f"Supported backends for this plate: {[b.value for b in available_backends]}. "
+                "Update vfs_config.read_backend (or set it to 'auto') and recompile."
+            )
 
     @staticmethod
     def compile_pipelines(
@@ -1194,14 +1235,18 @@ class PipelineCompiler:
             # Register global config at scope "" if not already registered (IPC case)
             global_config_state = ObjectStateRegistry.get_by_scope("")
             if global_config_state is None:
-                global_config = get_current_global_config(GlobalPipelineConfig, use_live=False)
+                global_config = get_current_global_config(
+                    GlobalPipelineConfig, use_live=False
+                )
                 if global_config:
                     global_config_state = ObjectState(
                         object_instance=global_config,
                         scope_id="",
                         parent_state=None,
                     )
-                    ObjectStateRegistry.register(global_config_state, _skip_snapshot=True)
+                    ObjectStateRegistry.register(
+                        global_config_state, _skip_snapshot=True
+                    )
                     logger.debug("IPC: Registered global config at scope ''")
 
             # Register the orchestrator's pipeline_config at plate_path scope
@@ -1214,7 +1259,9 @@ class PipelineCompiler:
                     parent_state=global_config_state,
                 )
                 ObjectStateRegistry.register(plate_orch_state, _skip_snapshot=True)
-                logger.debug(f"IPC: Registered pipeline_config at scope '{plate_path_str}'")
+                logger.debug(
+                    f"IPC: Registered pipeline_config at scope '{plate_path_str}'"
+                )
 
             # Register orchestrator ObjectState (for delegation pattern)
             # Use proper scope hierarchy: plate_path::orchestrator
@@ -1297,10 +1344,14 @@ class PipelineCompiler:
                 resolved_step = step_state.to_object()
                 resolved_steps_for_filters.append(resolved_step)
 
-            # Cleanup compiler-created ObjectStates (prevents memory leaks and time-travel snapshots)
-            ObjectStateRegistry.unregister(orch_state, _skip_snapshot=True)
-            for step_index, step_state in filter_step_state_map.items():
-                ObjectStateRegistry.unregister(step_state, _skip_snapshot=True)
+            # Cleanup compiler-created ObjectStates.
+            # IMPORTANT:
+            # - UI/editor mode: do NOT unregister (GUI relies on these registered states).
+            # - ZMQ execution server: DO unregister to free RAM.
+            if _should_unregister_compiler_objectstates():
+                ObjectStateRegistry.unregister(orch_state, _skip_snapshot=True)
+                for step_index, step_state in filter_step_state_map.items():
+                    ObjectStateRegistry.unregister(step_state, _skip_snapshot=True)
 
             # Create a temporary context to store the global axis filters
             temp_context = orchestrator.create_context("temp")
@@ -1486,7 +1537,9 @@ class PipelineCompiler:
             ObjectStateRegistry.unregister_scope_and_descendants(
                 orch_scope_id, _skip_snapshot=True
             )
-            logger.debug(f"Cleaned up compilation ObjectStates for scope: {orch_scope_id}")
+            logger.debug(
+                f"Cleaned up compilation ObjectStates for scope: {orch_scope_id}"
+            )
 
             logger.info("Stripping attributes from pipeline definition steps.")
             StepAttributeStripper.strip_step_attributes(pipeline_definition, {})

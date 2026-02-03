@@ -1,7 +1,9 @@
 """OpenHCS execution server built on zmqruntime ExecutionServer."""
+
 from __future__ import annotations
 
 import logging
+import os
 import time
 from typing import Any
 
@@ -19,7 +21,17 @@ class OpenHCSExecutionServer(ExecutionServer):
 
     _server_type = "execution"
 
-    def __init__(self, port: int | None = None, host: str = "*", log_file_path: str | None = None, transport_mode=None):
+    def __init__(
+        self,
+        port: int | None = None,
+        host: str = "*",
+        log_file_path: str | None = None,
+        transport_mode=None,
+    ):
+        # Mark this process as the ZMQ execution server.
+        # Compiler uses this to decide whether to unregister compiler-created ObjectStates
+        # at the end of resolution (free RAM in server; keep in UI/editor).
+        os.environ.setdefault("OPENHCS_ZMQ_EXECUTION_SERVER", "1")
         super().__init__(
             port=port or OPENHCS_ZMQ_CONFIG.default_port,
             host=host,
@@ -55,12 +67,21 @@ class OpenHCSExecutionServer(ExecutionServer):
         logger.info("[%s] Starting plate %s", execution_id, plate_id)
 
         import openhcs.processing.func_registry as func_registry_module
-        logger.info("[%s] Registry initialized status BEFORE check: %s", execution_id, func_registry_module._registry_initialized)
+
+        logger.info(
+            "[%s] Registry initialized status BEFORE check: %s",
+            execution_id,
+            func_registry_module._registry_initialized,
+        )
         with func_registry_module._registry_lock:
             if not func_registry_module._registry_initialized:
                 logger.info("[%s] Initializing registry...", execution_id)
                 func_registry_module._auto_initialize_registry()
-                logger.info("[%s] Registry initialized status AFTER init: %s", execution_id, func_registry_module._registry_initialized)
+                logger.info(
+                    "[%s] Registry initialized status AFTER init: %s",
+                    execution_id,
+                    func_registry_module._registry_initialized,
+                )
             else:
                 logger.info("[%s] Registry already initialized, skipping", execution_id)
 
@@ -70,8 +91,15 @@ class OpenHCSExecutionServer(ExecutionServer):
             raise ValueError("Code must define 'pipeline_steps'")
 
         if config_code:
-            is_empty = "GlobalPipelineConfig(\n\n)" in config_code or "GlobalPipelineConfig()" in config_code
-            global_config = GlobalPipelineConfig() if is_empty else (exec(config_code, ns := {}) or ns.get("config"))
+            is_empty = (
+                "GlobalPipelineConfig(\n\n)" in config_code
+                or "GlobalPipelineConfig()" in config_code
+            )
+            global_config = (
+                GlobalPipelineConfig()
+                if is_empty
+                else (exec(config_code, ns := {}) or ns.get("config"))
+            )
             if not global_config:
                 raise ValueError("config_code must define 'config'")
             pipeline_config = (
@@ -82,7 +110,9 @@ class OpenHCSExecutionServer(ExecutionServer):
             if pipeline_config_code and not pipeline_config:
                 raise ValueError("pipeline_config_code must define 'config'")
         elif config_params:
-            global_config, pipeline_config = self._build_config_from_params(config_params)
+            global_config, pipeline_config = self._build_config_from_params(
+                config_params
+            )
         else:
             raise ValueError("Either config_params or config_code required")
 
@@ -108,23 +138,42 @@ class OpenHCSExecutionServer(ExecutionServer):
         return (
             GlobalPipelineConfig(
                 num_workers=p.get("num_workers", 4),
-                path_planning_config=PathPlanningConfig(output_dir_suffix=p.get("output_dir_suffix", "_output")),
-                vfs_config=VFSConfig(
-                    materialization_backend=MaterializationBackend(p.get("materialization_backend", "disk"))
+                path_planning_config=PathPlanningConfig(
+                    output_dir_suffix=p.get("output_dir_suffix", "_output")
                 ),
-                step_well_filter_config=StepWellFilterConfig(well_filter=p.get("well_filter")),
+                vfs_config=VFSConfig(
+                    materialization_backend=MaterializationBackend(
+                        p.get("materialization_backend", "disk")
+                    )
+                ),
+                step_well_filter_config=StepWellFilterConfig(
+                    well_filter=p.get("well_filter")
+                ),
                 use_threading=p.get("use_threading", False),
             ),
             PipelineConfig(),
         )
 
-    def _execute_with_orchestrator(self, execution_id, plate_id, pipeline_steps, global_config, pipeline_config, config_params):
+    def _execute_with_orchestrator(
+        self,
+        execution_id,
+        plate_id,
+        pipeline_steps,
+        global_config,
+        pipeline_config,
+        config_params,
+    ):
         from pathlib import Path
         import multiprocessing
         from openhcs.config_framework.lazy_factory import ensure_global_config_context
         from openhcs.core.orchestrator.gpu_scheduler import setup_global_gpu_registry
         from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
-        from openhcs.constants import AllComponents, VariableComponents, GroupBy, MULTIPROCESSING_AXIS
+        from openhcs.constants import (
+            AllComponents,
+            VariableComponents,
+            GroupBy,
+            MULTIPROCESSING_AXIS,
+        )
         from polystore.base import reset_memory_backend, storage_registry
 
         try:
@@ -140,7 +189,9 @@ class OpenHCSExecutionServer(ExecutionServer):
 
             cleanup_all_gpu_frameworks()
         except Exception as cleanup_error:
-            logger.warning("[%s] Failed to trigger GPU cleanup: %s", execution_id, cleanup_error)
+            logger.warning(
+                "[%s] Failed to trigger GPU cleanup: %s", execution_id, cleanup_error
+            )
 
         setup_global_gpu_registry(global_config=global_config)
         ensure_global_config_context(type(global_config), global_config)
@@ -161,7 +212,7 @@ class OpenHCSExecutionServer(ExecutionServer):
             from openhcs.runtime.omero_instance_manager import OMEROInstanceManager
             from openhcs.microscopes import omero  # noqa: F401 - Import OMERO parsers to register them
             from polystore.omero_local import OMEROLocalBackend
-            
+
             omero_manager = OMEROInstanceManager()
             if not omero_manager.connect(timeout=60):
                 raise RuntimeError("OMERO server not available")
@@ -182,22 +233,44 @@ class OpenHCSExecutionServer(ExecutionServer):
         orchestrator.initialize()
         self.active_executions[execution_id]["orchestrator"] = orchestrator
 
-        if self.active_executions[execution_id][MessageFields.STATUS] == ExecutionStatus.CANCELLED.value:
-            logger.info("[%s] Execution cancelled after initialization, aborting", execution_id)
+        if (
+            self.active_executions[execution_id][MessageFields.STATUS]
+            == ExecutionStatus.CANCELLED.value
+        ):
+            logger.info(
+                "[%s] Execution cancelled after initialization, aborting", execution_id
+            )
             raise RuntimeError("Execution cancelled by user")
 
-        wells = config_params.get("well_filter") if config_params else orchestrator.get_component_keys(MULTIPROCESSING_AXIS)
-        compilation = orchestrator.compile_pipelines(pipeline_definition=pipeline_steps, well_filter=wells)
+        wells = (
+            config_params.get("well_filter")
+            if config_params
+            else orchestrator.get_component_keys(MULTIPROCESSING_AXIS)
+        )
+        compilation = orchestrator.compile_pipelines(
+            pipeline_definition=pipeline_steps, well_filter=wells
+        )
 
-        if self.active_executions[execution_id][MessageFields.STATUS] == ExecutionStatus.CANCELLED.value:
-            logger.info("[%s] Execution cancelled after compilation, aborting", execution_id)
+        if (
+            self.active_executions[execution_id][MessageFields.STATUS]
+            == ExecutionStatus.CANCELLED.value
+        ):
+            logger.info(
+                "[%s] Execution cancelled after compilation, aborting", execution_id
+            )
             raise RuntimeError("Execution cancelled by user")
 
         log_dir = Path.home() / ".local" / "share" / "openhcs" / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
 
-        if self.active_executions[execution_id][MessageFields.STATUS] == ExecutionStatus.CANCELLED.value:
-            logger.info("[%s] Execution cancelled before starting workers, aborting", execution_id)
+        if (
+            self.active_executions[execution_id][MessageFields.STATUS]
+            == ExecutionStatus.CANCELLED.value
+        ):
+            logger.info(
+                "[%s] Execution cancelled before starting workers, aborting",
+                execution_id,
+            )
             raise RuntimeError("Execution cancelled by user")
 
         return orchestrator.execute_compiled_plate(
