@@ -176,29 +176,31 @@ class TimeTravelWidget(QWidget):
         self.slider.setEnabled(True)
         self.slider.setMaximum(len(history) - 1)
 
-        # Find current position
-        current_idx = next(
-            (h["index"] for h in history if h["is_current"]), len(history) - 1
+        # Find current position within the filtered list.
+        # NOTE: history entries include a global "index" which is not guaranteed to be
+        # contiguous after filtering; using it as a list index will crash.
+        current_pos = next(
+            (i for i, h in enumerate(history) if h["is_current"]), len(history) - 1
         )
         self.slider.blockSignals(True)
-        self.slider.setValue(current_idx)
+        self.slider.setValue(current_pos)
         self.slider.blockSignals(False)
 
         # Update status
-        current = history[current_idx]
+        current = history[current_pos]
         is_traveling = ObjectStateRegistry.is_time_traveling()
 
         status = f"{current['timestamp']} | {current['label'][:30]}"
         if is_traveling:
-            status += f" ({current_idx + 1}/{len(history)})"
+            status += f" ({current_pos + 1}/{len(history)})"
         else:
             status += " (HEAD)"
 
         self.status_label.setText(status)
 
         # Enable/disable buttons (back = toward 0, forward = toward len-1)
-        self.back_btn.setEnabled(current_idx > 0)
-        self.forward_btn.setEnabled(current_idx < len(history) - 1)
+        self.back_btn.setEnabled(current_pos > 0)
+        self.forward_btn.setEnabled(current_pos < len(history) - 1)
         self.head_btn.setEnabled(is_traveling)
 
         # Visual indicator when time-traveling
@@ -228,7 +230,13 @@ class TimeTravelWidget(QWidget):
 
     def _on_slider_changed(self, value: int):
         """Handle slider value change. Direct mapping: slider value = history index."""
-        ObjectStateRegistry.time_travel_to(value)
+        history = ObjectStateRegistry.get_history_info(
+            filter_fn=lambda scope_id: scope_id not in self._HIDDEN_SCOPES
+        )
+        if value < 0 or value >= len(history):
+            return
+
+        ObjectStateRegistry.time_travel_to(history[value]["index"])
         self._update_ui()
         self.position_changed.emit(value)
 
@@ -236,32 +244,32 @@ class TimeTravelWidget(QWidget):
         """Check if a snapshot label represents a save operation."""
         return label.startswith("save") or label.startswith("init")
 
-    def _find_next_save_index(self, current_idx: int, direction: int) -> int:
+    def _find_next_save_index(
+        self, history: List[Dict[str, Any]], current_pos: int, direction: int
+    ) -> int:
         """Find next save snapshot in given direction.
 
         Args:
-            current_idx: Current history index (0 = oldest, len-1 = head)
+            history: Filtered history list.
+            current_pos: Current position in the filtered list (0 = oldest, len-1 = head)
             direction: -1 for back (toward older), +1 for forward (toward newer)
 
         Returns:
             Index of next save snapshot, or current if none found
         """
-        history = ObjectStateRegistry.get_history_info(
-            filter_fn=lambda scope_id: scope_id not in self._HIDDEN_SCOPES
-        )
         if not history:
-            return current_idx
+            return current_pos
 
-        search_idx = current_idx + direction
-        while 0 <= search_idx < len(history):
-            if self._is_save_snapshot(history[search_idx]["label"]):
-                return search_idx
-            search_idx += direction
+        search_pos = current_pos + direction
+        while 0 <= search_pos < len(history):
+            if self._is_save_snapshot(history[search_pos]["label"]):
+                return search_pos
+            search_pos += direction
 
         # No save found - stay at current or go to boundary
         if direction > 0:
             return len(history) - 1  # Go to head
-        return current_idx
+        return current_pos
 
     def _on_back(self):
         """Step back in history (toward older = lower index)."""
@@ -270,12 +278,13 @@ class TimeTravelWidget(QWidget):
                 filter_fn=lambda scope_id: scope_id not in self._HIDDEN_SCOPES
             )
             if history:
-                current_idx = next(
-                    (h["index"] for h in history if h["is_current"]), len(history) - 1
+                current_pos = next(
+                    (i for i, h in enumerate(history) if h["is_current"]),
+                    len(history) - 1,
                 )
-                target_idx = self._find_next_save_index(current_idx, -1)
-                if target_idx != current_idx:
-                    ObjectStateRegistry.time_travel_to(target_idx)
+                target_pos = self._find_next_save_index(history, current_pos, -1)
+                if target_pos != current_pos:
+                    ObjectStateRegistry.time_travel_to(history[target_pos]["index"])
         else:
             ObjectStateRegistry.time_travel_back()
         self._update_ui()
@@ -287,12 +296,13 @@ class TimeTravelWidget(QWidget):
                 filter_fn=lambda scope_id: scope_id not in self._HIDDEN_SCOPES
             )
             if history:
-                current_idx = next(
-                    (h["index"] for h in history if h["is_current"]), len(history) - 1
+                current_pos = next(
+                    (i for i, h in enumerate(history) if h["is_current"]),
+                    len(history) - 1,
                 )
-                target_idx = self._find_next_save_index(current_idx, +1)
-                if target_idx != current_idx:
-                    ObjectStateRegistry.time_travel_to(target_idx)
+                target_pos = self._find_next_save_index(history, current_pos, +1)
+                if target_pos != current_pos:
+                    ObjectStateRegistry.time_travel_to(history[target_pos]["index"])
         else:
             ObjectStateRegistry.time_travel_forward()
         self._update_ui()
