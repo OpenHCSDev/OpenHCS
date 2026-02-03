@@ -42,7 +42,6 @@ WHY:
 
 import inspect
 import logging
-import os
 import dataclasses
 import time
 from pathlib import Path
@@ -96,20 +95,6 @@ from dataclasses import dataclass
 from python_introspect import Enableable
 
 logger = logging.getLogger(__name__)
-
-
-def _should_unregister_compiler_objectstates() -> bool:
-    """Unregister compiler-created ObjectStates only in ZMQ server.
-
-    UI/editor mode keeps these states registered for live resolution.
-    """
-
-    return os.environ.get("OPENHCS_ZMQ_EXECUTION_SERVER", "").lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
 
 
 @dataclass(frozen=True)
@@ -319,6 +304,7 @@ class PipelineCompiler:
         plate_path: Optional[Path] = None,
         step_state_map: Dict[int, "ObjectState"] = None,
         steps_already_resolved: bool = True,
+        is_zmq_execution: bool = False,
         # base_input_dir and axis_id parameters removed, will use from context
     ) -> Tuple[List[AbstractStep], Dict[int, "ObjectState"]]:
         """
@@ -431,7 +417,7 @@ class PipelineCompiler:
             # IMPORTANT:
             # - UI/editor mode: do NOT unregister (GUI relies on these registered states).
             # - ZMQ execution server: DO unregister to free RAM.
-            if _should_unregister_compiler_objectstates():
+            if is_zmq_execution:
                 ObjectStateRegistry.unregister(orch_state, _skip_snapshot=True)
                 for step_index, step_state in step_state_map.items():
                     ObjectStateRegistry.unregister(step_state, _skip_snapshot=True)
@@ -1116,6 +1102,7 @@ class PipelineCompiler:
         pipeline_definition: List[AbstractStep],
         axis_filter: Optional[List[str]] = None,
         enable_visualizer_override: bool = False,
+        is_zmq_execution: bool = False,
     ) -> Dict[str, ProcessingContext]:
         """
         Compile-all phase: Prepares frozen ProcessingContexts for each axis value.
@@ -1132,6 +1119,8 @@ class PipelineCompiler:
             axis_filter: Optional list of axis values to process. If None, processes all found axis values.
             enable_visualizer_override: If True, all steps in all compiled contexts
                                         will have their 'visualize' flag set to True.
+            is_zmq_execution: If True, compiler-created ObjectStates will be unregistered
+                              after resolution to free RAM (for ZMQ server mode).
 
         Returns:
             A dictionary mapping axis values to their compiled and frozen ProcessingContexts.
@@ -1348,7 +1337,7 @@ class PipelineCompiler:
             # IMPORTANT:
             # - UI/editor mode: do NOT unregister (GUI relies on these registered states).
             # - ZMQ execution server: DO unregister to free RAM.
-            if _should_unregister_compiler_objectstates():
+            if is_zmq_execution:
                 ObjectStateRegistry.unregister(orch_state, _skip_snapshot=True)
                 for step_index, step_state in filter_step_state_map.items():
                     ObjectStateRegistry.unregister(step_state, _skip_snapshot=True)
@@ -1389,6 +1378,7 @@ class PipelineCompiler:
                         plate_path=orchestrator.plate_path,
                         step_state_map=step_state_map,
                         steps_already_resolved=True,
+                        is_zmq_execution=is_zmq_execution,
                     )
                 )
 
@@ -1431,6 +1421,7 @@ class PipelineCompiler:
                                 plate_path=orchestrator.plate_path,
                                 step_state_map=step_state_map,
                                 steps_already_resolved=True,
+                                is_zmq_execution=is_zmq_execution,
                             )
                         )
                         PipelineCompiler.declare_zarr_stores_for_context(
@@ -1472,6 +1463,7 @@ class PipelineCompiler:
                             plate_path=orchestrator.plate_path,
                             step_state_map=step_state_map,
                             steps_already_resolved=True,
+                            is_zmq_execution=is_zmq_execution,
                         )
                     )
                     PipelineCompiler.declare_zarr_stores_for_context(

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import time
 from typing import Any
 
@@ -28,10 +27,6 @@ class OpenHCSExecutionServer(ExecutionServer):
         log_file_path: str | None = None,
         transport_mode=None,
     ):
-        # Mark this process as the ZMQ execution server.
-        # Compiler uses this to decide whether to unregister compiler-created ObjectStates
-        # at the end of resolution (free RAM in server; keep in UI/editor).
-        os.environ.setdefault("OPENHCS_ZMQ_EXECUTION_SERVER", "1")
         super().__init__(
             port=port or OPENHCS_ZMQ_CONFIG.default_port,
             host=host,
@@ -248,7 +243,7 @@ class OpenHCSExecutionServer(ExecutionServer):
             else orchestrator.get_component_keys(MULTIPROCESSING_AXIS)
         )
         compilation = orchestrator.compile_pipelines(
-            pipeline_definition=pipeline_steps, well_filter=wells
+            pipeline_definition=pipeline_steps, well_filter=wells, is_zmq_execution=True
         )
 
         if (

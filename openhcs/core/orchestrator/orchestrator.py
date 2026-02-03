@@ -904,6 +904,7 @@ class PipelineOrchestrator:
         pipeline_definition: List[AbstractStep],
         well_filter: Optional[List[str]] = None,
         enable_visualizer_override: bool = False,
+        is_zmq_execution: bool = False,
     ) -> Dict[str, ProcessingContext]:
         """Compile pipelines for axis values (well_filter name preserved for UI compatibility)."""
         return PipelineCompiler.compile_pipelines(
@@ -911,6 +912,7 @@ class PipelineOrchestrator:
             pipeline_definition=pipeline_definition,
             axis_filter=well_filter,  # Translate well_filter to axis_filter for generic backend
             enable_visualizer_override=enable_visualizer_override,
+            is_zmq_execution=is_zmq_execution,
         )
 
     def _execute_single_axis(
