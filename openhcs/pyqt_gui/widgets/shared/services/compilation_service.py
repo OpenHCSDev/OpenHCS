@@ -3,14 +3,15 @@ Compilation service for plate pipeline compilation.
 
 Extracts compilation logic from PlateManagerWidget into a reusable service.
 """
-import copy
+
 import asyncio
 import logging
 from typing import Dict, List, Any, Protocol, runtime_checkable
 
-from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
-from openhcs.core.pipeline import Pipeline
-from openhcs.constants.constants import VariableComponents
+from openhcs.pyqt_gui.widgets.shared.services.zmq_client_service import (
+    ZMQClientService,
+)
+from openhcs.core.orchestrator.orchestrator import OrchestratorState
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,11 @@ class CompilationHost(Protocol):
     # NOTE: orchestrators now accessed via ObjectStateRegistry.get_object(plate_path)
     plate_configs: Dict[str, Dict]
     plate_compiled_data: Dict[str, Any]
-    
+
+    # Execution state is used to decide whether we should disconnect the shared
+    # ZMQ client after compilation.
+    execution_state: str
+
     # Methods the service calls back to
     def emit_progress_started(self, count: int) -> None: ...
     def emit_progress_updated(self, value: int) -> None: ...
@@ -39,174 +44,141 @@ class CompilationHost(Protocol):
 class CompilationService:
     """
     Service for compiling plate pipelines.
-    
+
     Handles:
     - Orchestrator initialization
     - Pipeline compilation with context setup
     - Progress reporting via host callbacks
     """
-    
-    def __init__(self, host: CompilationHost):
+
+    def __init__(
+        self, host: CompilationHost, client_service: ZMQClientService | None = None
+    ):
         self.host = host
-    
+        self.client_service = client_service or ZMQClientService()
+
     async def compile_plates(self, selected_items: List[Dict]) -> None:
         """
         Compile pipelines for selected plates.
-        
+
         Args:
             selected_items: List of plate data dicts with 'path' and 'name' keys
         """
-        # Set up global context in worker thread
-        from openhcs.config_framework.lazy_factory import ensure_global_config_context
-        from openhcs.core.config import GlobalPipelineConfig
-        ensure_global_config_context(GlobalPipelineConfig, self.host.global_config)
-        
         self.host.emit_progress_started(len(selected_items))
-        
-        for i, plate_data in enumerate(selected_items):
-            plate_path = plate_data['path']
-            
-            # Get definition pipeline
-            definition_pipeline = self.host.get_pipeline_definition(plate_path)
-            if not definition_pipeline:
-                logger.warning(f"No pipeline defined for {plate_data['name']}, using empty pipeline")
-                definition_pipeline = []
-            
-            # Validate func attributes
-            self._validate_pipeline_steps(definition_pipeline)
-            
-            try:
-                # Get or create orchestrator
-                orchestrator = await self._get_or_create_orchestrator(plate_path)
-                
-                # Make fresh copy for compilation
-                execution_pipeline = copy.deepcopy(definition_pipeline)
-                self._fix_step_ids(execution_pipeline)
-                
-                # Compile
-                compiled_data = await self._compile_pipeline(
-                    orchestrator, definition_pipeline, execution_pipeline
-                )
-                
-                # Store results
-                self.host.plate_compiled_data[plate_path] = compiled_data
-                logger.info(f"Successfully compiled {plate_path}")
-                self.host.emit_orchestrator_state(plate_path, "COMPILED")
-                
-            except Exception as e:
-                logger.error(f"COMPILATION ERROR: {plate_path}: {e}", exc_info=True)
-                plate_data['error'] = str(e)
-                self.host.emit_orchestrator_state(plate_path, "COMPILE_FAILED")
-                self.host.emit_compilation_error(plate_data['name'], str(e))
-            
-            self.host.emit_progress_updated(i + 1)
-        
+        loop = asyncio.get_event_loop()
+        zmq_client = None
+
+        try:
+            zmq_client = await self.client_service.connect(persistent=True, timeout=15)
+
+            for i, plate_data in enumerate(selected_items):
+                plate_path = plate_data["path"]
+
+                # Get definition pipeline
+                definition_pipeline = self.host.get_pipeline_definition(plate_path)
+                if not definition_pipeline:
+                    logger.warning(
+                        f"No pipeline defined for {plate_data['name']}, using empty pipeline"
+                    )
+                    definition_pipeline = []
+
+                # Validate func attributes
+                self._validate_pipeline_steps(definition_pipeline)
+
+                try:
+                    pipeline_config = self._get_pipeline_config(plate_path)
+                    response = await loop.run_in_executor(
+                        None,
+                        lambda: zmq_client.submit_compile(
+                            plate_id=str(plate_path),
+                            pipeline_steps=definition_pipeline,
+                            global_config=self.host.global_config,
+                            pipeline_config=pipeline_config,
+                        ),
+                    )
+                    status = response.get("status")
+                    if status != "accepted":
+                        error_msg = response.get("message", "Unknown error")
+                        raise RuntimeError(
+                            f"Compilation submission failed: {error_msg}"
+                        )
+
+                    execution_id = response.get("execution_id")
+                    if not execution_id:
+                        raise RuntimeError("Compilation did not return an execution_id")
+
+                    result = await loop.run_in_executor(
+                        None, lambda: zmq_client.wait_for_completion(execution_id)
+                    )
+                    if result.get("status") != "complete":
+                        error_msg = result.get("message", "Compilation failed")
+                        raise RuntimeError(error_msg)
+
+                    # Store results (compile success marker for UI/run button)
+                    self.host.plate_compiled_data[plate_path] = {
+                        "definition_pipeline": definition_pipeline,
+                    }
+                    self._set_orchestrator_state(plate_path, OrchestratorState.COMPILED)
+                    logger.info(f"Successfully compiled {plate_path}")
+                    self.host.emit_orchestrator_state(plate_path, "COMPILED")
+
+                except Exception as e:
+                    logger.error(f"COMPILATION ERROR: {plate_path}: {e}", exc_info=True)
+                    plate_data["error"] = str(e)
+                    self._set_orchestrator_state(
+                        plate_path, OrchestratorState.COMPILE_FAILED
+                    )
+                    self.host.emit_orchestrator_state(plate_path, "COMPILE_FAILED")
+                    self.host.emit_compilation_error(plate_data["name"], str(e))
+
+                self.host.emit_progress_updated(i + 1)
+        finally:
+            if self.host.execution_state != "running":
+                await self.client_service.disconnect()
+
         self.host.emit_progress_finished()
-        self.host.emit_status(f"Compilation completed for {len(selected_items)} plate(s)")
+        self.host.emit_status(
+            f"Compilation completed for {len(selected_items)} plate(s)"
+        )
         self.host.update_button_states()
-    
+
     def _validate_pipeline_steps(self, pipeline: List) -> None:
         """Validate that steps have required func attribute."""
         for i, step in enumerate(pipeline):
-            if not hasattr(step, 'func'):
+            if not hasattr(step, "func"):
                 raise AttributeError(
                     f"Step '{step.name}' is missing 'func' attribute. "
                     "This usually means the pipeline was loaded from a compiled state."
                 )
 
-    async def _get_or_create_orchestrator(self, plate_path: str) -> PipelineOrchestrator:
-        """Get existing orchestrator or create and initialize a new one."""
-        from openhcs.config_framework.lazy_factory import ensure_global_config_context
-        from openhcs.core.config import GlobalPipelineConfig
-        from objectstate import ObjectStateRegistry, ObjectState
+    def _get_pipeline_config(self, plate_path: str):
+        """Resolve pipeline config for a plate without local compilation."""
+        from objectstate import ObjectStateRegistry
+        from openhcs.core.config import PipelineConfig
+
+        # IMPORTANT: read the per-plate PipelineConfig from ObjectState (saved+resolved)
+        # rather than from the live orchestrator instance.
+        state = ObjectStateRegistry.get_by_scope(plate_path)
+        if state is not None:
+            return state.to_object(update_delegate=False)
 
         orchestrator = ObjectStateRegistry.get_object(plate_path)
         if orchestrator is not None:
-            if not orchestrator.is_initialized():
-                def initialize_with_context():
-                    ensure_global_config_context(GlobalPipelineConfig, self.host.global_config)
-                    return orchestrator.initialize()
+            return orchestrator.pipeline_config
 
-                loop = asyncio.get_event_loop()
-                await loop.run_in_executor(None, initialize_with_context)
-        else:
-            # Create new orchestrator with isolated registry
-            from polystore.base import _create_storage_registry
-            plate_registry = _create_storage_registry()
+        saved_config = self.host.plate_configs.get(str(plate_path))
+        if saved_config:
+            return saved_config
 
-            orchestrator = PipelineOrchestrator(
-                plate_path=plate_path,
-                storage_registry=plate_registry
-            )
+        return PipelineConfig()
 
-            saved_config = self.host.plate_configs.get(str(plate_path))
-            if saved_config:
-                orchestrator.apply_pipeline_config(saved_config)
+    def _set_orchestrator_state(
+        self, plate_path: str, state: OrchestratorState
+    ) -> None:
+        from objectstate import ObjectStateRegistry
 
-            def initialize_with_context():
-                ensure_global_config_context(GlobalPipelineConfig, self.host.global_config)
-                return orchestrator.initialize()
+        orchestrator = ObjectStateRegistry.get_object(plate_path)
+        if orchestrator is not None:
+            orchestrator._state = state
 
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, initialize_with_context)
-
-            # Register orchestrator in ObjectState (single source of truth)
-            orchestrator_state = ObjectState(
-                object_instance=orchestrator,
-                scope_id=str(plate_path),
-                parent_state=ObjectStateRegistry.get_by_scope(""),
-            )
-            ObjectStateRegistry.register(orchestrator_state)
-
-        return orchestrator
-
-    def _fix_step_ids(self, pipeline: List) -> None:
-        """Fix step IDs after deep copy and ensure variable_components."""
-        from dataclasses import replace
-
-        for step in pipeline:
-            step.step_id = str(id(step))
-
-            # Ensure variable_components is never None
-            if step.processing_config.variable_components is None or not step.processing_config.variable_components:
-                if step.processing_config.variable_components is None:
-                    logger.warning(f"Step '{step.name}' has None variable_components, setting default")
-                step.processing_config = replace(
-                    step.processing_config,
-                    variable_components=[VariableComponents.SITE]
-                )
-
-    async def _compile_pipeline(
-        self,
-        orchestrator: PipelineOrchestrator,
-        definition_pipeline: List,
-        execution_pipeline: List
-    ) -> Dict:
-        """Compile pipeline and return compiled data dict."""
-        from openhcs.config_framework.lazy_factory import ensure_global_config_context
-        from openhcs.core.config import GlobalPipelineConfig
-        from openhcs.constants import MULTIPROCESSING_AXIS
-
-        pipeline_obj = Pipeline(steps=execution_pipeline)
-        loop = asyncio.get_event_loop()
-
-        # Get wells
-        wells = await loop.run_in_executor(
-            None,
-            lambda: orchestrator.get_component_keys(MULTIPROCESSING_AXIS)
-        )
-
-        # Compile with context
-        def compile_with_context():
-            ensure_global_config_context(GlobalPipelineConfig, self.host.global_config)
-            return orchestrator.compile_pipelines(pipeline_obj.steps, wells)
-
-        compilation_result = await loop.run_in_executor(None, compile_with_context)
-        compiled_contexts = compilation_result['compiled_contexts']
-
-        return {
-            'definition_pipeline': definition_pipeline,
-            'execution_pipeline': execution_pipeline,
-            'compiled_contexts': compiled_contexts
-        }
-
+    # Local compilation removed: compile now validates via ZMQ execution server

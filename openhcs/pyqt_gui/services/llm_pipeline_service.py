@@ -58,7 +58,9 @@ class LLMPipelineService:
     containing OpenHCS API documentation and examples.
     """
 
-    def __init__(self, api_endpoint: str = DEFAULT_OLLAMA_ENDPOINT, model: str = None):
+    def __init__(
+        self, api_endpoint: str = DEFAULT_OLLAMA_ENDPOINT, model: Optional[str] = None
+    ):
         """
         Initialize LLM service.
 
@@ -79,6 +81,12 @@ class LLMPipelineService:
     def system_prompt(self) -> str:
         """Default system prompt (pipeline) for backward compatibility."""
         return self._system_prompts.get("pipeline", "")
+
+    def get_system_prompt(self, code_type: str = "pipeline") -> str:
+        """Return the runtime-generated system prompt for a given context."""
+        if code_type == "function":
+            return self._system_prompts.get("function", self.system_prompt)
+        return self._system_prompts.get("pipeline", self.system_prompt)
 
     def _derive_base_url(self, endpoint: str) -> str:
         """Extract base URL from endpoint."""
@@ -261,10 +269,12 @@ Generate COMPLETE, RUNNABLE Python code. Include ALL imports at the top.
 
 === CRITICAL RULES ===
 1. Include ALL imports (dataclass, typing, numpy, etc.)
-2. First parameter MUST be named 'image' (3D array: channels, height, width)
-3. Return a 3D array, OR tuple (image, output1, output2, ...) with @special_outputs
+2. First parameter MUST be named 'image' (3D array: (C, Y, X) a.k.a. (Z, Y, X))
+3. Input/Output backend types are declared by the memory decorator (e.g. @numpy / @cupy / @pyclesperanto). Your function must accept the decorator's declared input type and return the declared output type.
 4. DO NOT write FunctionStep or pipeline code - just the function
 5. Output ONLY Python code, no explanations
+6. Do NOT manually convert between array backends inside the function (no cp.asnumpy(), no cle.pull(), etc.). OpenHCS handles cross-step conversions.
+7. The decorator adds keyword-only args like slice_by_slice and dtype_conversion. dtype_conversion defaults to preserving the input dtype for the main output.
 
 {imports_section}
 
@@ -444,9 +454,9 @@ def count_cells_gpu(
             total_area=total_area,
             mean_intensity=mean_int
         ))
-        masks.append(cle.pull(labels))  # Pull labeled mask for ROI output
+        masks.append(labels)
 
-    return cle.pull(image), stats_list, masks
+    return image, stats_list, masks
 ```
 
 Key pyclesperanto functions:
@@ -513,9 +523,9 @@ def count_cells_cupy(
             total_area=float(cp.sum(areas[valid_mask])),
             mean_intensity=float(cp.mean(props['mean_intensity'][valid_mask])) if cp.any(valid_mask) else 0.0
         ))
-        masks.append(cp.asnumpy(labeled))  # Convert to numpy for ROI output
+        masks.append(labeled)
 
-    return cp.asnumpy(image), stats_list, masks
+    return image, stats_list, masks
 ```
 
 Key cucim.skimage modules (same API as skimage, but GPU):
@@ -525,7 +535,7 @@ Key cucim.skimage modules (same API as skimage, but GPU):
 - cucim.skimage.segmentation: watershed, clear_border
 - cucim.skimage.exposure: equalize_adapthist, rescale_intensity
 
-IMPORTANT: Use cp.asnumpy() to convert cupy arrays to numpy for output.
+IMPORTANT: Do not convert arrays between backends on return.
 
 === SPECIAL INPUTS (consume data from previous steps) ===
 ```python
@@ -627,7 +637,7 @@ MaterializationSpec(CsvOptions(...), JsonOptions(...))"""
     def _get_pyclesperanto_function_docs(self) -> str:
         """Get pyclesperanto functions dynamically if available."""
         try:
-            import pyclesperanto as cle
+            import pyclesperanto as cle  # type: ignore[import-not-found]
 
             # Get commonly used functions that actually exist
             key_funcs = []

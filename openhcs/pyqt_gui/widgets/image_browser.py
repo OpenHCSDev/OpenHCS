@@ -6,6 +6,7 @@ view them in Napari with configurable display settings.
 """
 
 import logging
+import time
 import re
 from pathlib import Path
 from typing import Optional, List, Dict, Set, Any
@@ -29,7 +30,7 @@ from PyQt6.QtWidgets import (
     QTabWidget,
     QTextEdit,
 )
-from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot
+from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot, QTimer
 
 from openhcs.constants.constants import Backend
 from polystore.filemanager import FileManager
@@ -144,6 +145,7 @@ class ImageBrowserWidget(QWidget):
         self.filtered_files = {}  # filename -> metadata dict (after search/filter)
         self.selected_wells = set()  # Selected wells for filtering
         self.metadata_keys = []  # Column names from parser metadata (union of all keys)
+        self._metadata_display_cache = {}  # (metadata_key, value_str) -> display value
 
         # Plate view widget (will be created in init_ui)
         self.plate_view_widget = None
@@ -177,7 +179,7 @@ class ImageBrowserWidget(QWidget):
 
         # Load images if orchestrator is provided
         if self.orchestrator:
-            self.load_images()
+            QTimer.singleShot(0, self.load_images)
 
     def init_ui(self):
         """Initialize the user interface."""
@@ -588,6 +590,10 @@ class ImageBrowserWidget(QWidget):
 
         # Convert to string for lookup
         value_str = str(raw_value)
+        cache_key = (metadata_key, value_str)
+        cached_value = self._metadata_display_cache.get(cache_key)
+        if cached_value is not None:
+            return cached_value
 
         # Try to get metadata display name from cache
         if self.orchestrator:
@@ -608,21 +614,25 @@ class ImageBrowserWidget(QWidget):
                     metadata_name = self.orchestrator._metadata_cache_service.get_component_metadata(
                         component, value_str
                     )
-                    if metadata_name:
+                    if metadata_name and metadata_name != "None":
                         # Format like TUI: "Channel 1 | HOECHST 33342"
                         # But for table cells, just show "1 | W1" (more compact)
-                        return f"{value_str} | {metadata_name}"
-                    else:
-                        logger.debug(
-                            f"No metadata name found for {metadata_key} {value_str}"
-                        )
+                        display_value = f"{value_str} | {metadata_name}"
+                        self._metadata_display_cache[cache_key] = display_value
+                        return display_value
+                    logger.debug(
+                        f"No metadata name found for {metadata_key} {value_str}"
+                    )
             except Exception as e:
                 logger.warning(
                     f"Could not get metadata for {metadata_key} {value_str}: {e}",
                     exc_info=True,
                 )
+                self._metadata_display_cache[cache_key] = value_str
+                return value_str
 
         # Fallback to raw value only
+        self._metadata_display_cache[cache_key] = value_str
         return value_str
 
     def _build_column_filters(self):
@@ -719,6 +729,7 @@ class ImageBrowserWidget(QWidget):
             return
 
         try:
+            self._metadata_display_cache.clear()
             logger.info("IMAGE BROWSER: Starting load_images()")
             # Get metadata handler from orchestrator
             handler = self.orchestrator.microscope_handler
@@ -800,13 +811,31 @@ class ImageBrowserWidget(QWidget):
         self.filtered_files = self.all_files.copy()
 
         # Build folder tree from file paths
+        folder_start = time.perf_counter()
         self._build_folder_tree()
+        logger.info(
+            "IMAGE BROWSER: Built folder tree in %.3fs",
+            time.perf_counter() - folder_start,
+        )
 
-        # Build column filters from metadata
-        self._build_column_filters()
-
-        # Populate table
+        # Populate table first to keep UI responsive
+        populate_start = time.perf_counter()
         self._populate_table(self.filtered_files)
+        logger.info(
+            "IMAGE BROWSER: Populated table in %.3fs",
+            time.perf_counter() - populate_start,
+        )
+
+        # Build column filters after initial render
+        def _build_filters_later():
+            filters_start = time.perf_counter()
+            self._build_column_filters()
+            logger.info(
+                "IMAGE BROWSER: Built column filters in %.3fs",
+                time.perf_counter() - filters_start,
+            )
+
+        QTimer.singleShot(0, _build_filters_later)
 
         # Update info label
         total_files = len(self.all_files)

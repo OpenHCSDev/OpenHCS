@@ -1430,8 +1430,12 @@ class PipelineOrchestrator:
                 )
 
             # Run automatic analysis consolidation if enabled
-            shared_context = get_current_global_config(GlobalPipelineConfig)
-            if shared_context.analysis_consolidation_config.enabled:
+            # Get the consolidation config from the first compiled context (captured at compile time)
+            first_context = next(iter(compiled_contexts.values()))
+            analysis_consolidation_config = getattr(
+                first_context, "analysis_consolidation_config", None
+            )
+            if analysis_consolidation_config and analysis_consolidation_config.enabled:
                 try:
                     # Get results directory from compiled contexts (path planner already determined it)
                     results_dir = None
@@ -1460,11 +1464,17 @@ class PipelineOrchestrator:
                             axis_ids = list(compiled_contexts.keys())
 
                             consolidate_fn = _get_consolidate_analysis_results()
+                            # Get plate_metadata_config from the context's global_config
+                            plate_metadata_config = (
+                                first_context.global_config.plate_metadata_config
+                                if first_context.global_config
+                                else None
+                            )
                             consolidate_fn(
                                 results_directory=str(results_dir),
                                 well_ids=axis_ids,
-                                consolidation_config=shared_context.analysis_consolidation_config,
-                                plate_metadata_config=shared_context.plate_metadata_config,
+                                consolidation_config=analysis_consolidation_config,
+                                plate_metadata_config=plate_metadata_config,
                             )
                             logger.info("✅ CONSOLIDATION: Completed successfully")
                         else:

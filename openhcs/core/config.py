@@ -176,6 +176,13 @@ class GlobalPipelineConfig:
     )
     """Use ThreadPoolExecutor instead of ProcessPoolExecutor for debugging. Reads from OPENHCS_USE_THREADING environment variable."""
 
+    auto_add_output_plate_to_plate_manager: Annotated[
+        bool, abbreviation("auto_add_output_plate")
+    ] = False
+    """If True, when a plate run completes successfully, the computed output plate root
+    (from path planning) is automatically added to Plate Manager as a new orchestrator
+    if it is not already present."""
+
     # Future extension point:
     # logging_config: Optional[Dict[str, Any]] = None # For configuring logging levels, handlers
     # plugin_settings: Dict[str, Any] = field(default_factory=dict) # For plugin-specific settings

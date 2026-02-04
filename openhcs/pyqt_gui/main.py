@@ -936,23 +936,61 @@ class OpenHCSMainWindow(QMainWindow):
             f"⏱️ TIME_TRAVEL_CALLBACK: triggering_scope={triggering_scope!r} dirty_count={len(dirty_states)}"
         )
 
+        from objectstate import ObjectStateRegistry
+
+        # Consolidate navigation requests:
+        # - Function ObjectStates (step_scope::func_N) should focus the parent step window
+        # - Prefer Function Pattern tab when any function scope is involved
+        pending: dict[str, tuple[ObjectState, str | None]] = {}
+        func_token_hint: dict[str, str] = {}
+        # Dict-pattern channel selection is driven by ObjectState.metadata
+        # (saved in snapshots) and applied by the FunctionListEditorWidget.
+
         for scope_id, state in dirty_states:
+            use_scope_id = scope_id
+            use_state = state
             # Examples of field_path values:
             #   "func" - simple field
             #   "napari_streaming_config.host" - nested field with dot notation
             #   "step_well_filter_config" - nested dataclass field
             #   "positions" - simple field
-            field_path = None
-            if isinstance(state, ObjectState):
+            field_path: str | None = None
+
+            # If this is a function ObjectState, map to parent step scope and
+            # force Function Pattern tab.
+            scope_str = str(scope_id)
+            parts = scope_str.split("::")
+            if len(parts) >= 3 and parts[1].startswith("functionstep_"):
+                use_scope_id = f"{parts[0]}::{parts[1]}"
+                func_token_hint[use_scope_id] = parts[2]
+                parent_state = ObjectStateRegistry.get_by_scope(use_scope_id)
+                if isinstance(parent_state, ObjectState):
+                    use_state = parent_state
+                field_path = "func"
+
+            if field_path is None and isinstance(use_state, ObjectState):
                 # Use last_changed_field - tracks ANY value change (clean->dirty OR dirty->clean)
                 # This shows what changed in the time-travel transition, not just current dirty state
-                field_path = state.last_changed_field
+                field_path = use_state.last_changed_field
                 logger.debug(
-                    f"⏱️ TIME_TRAVEL_NAV: scope={scope_id} last_changed_field={field_path}"
+                    f"⏱️ TIME_TRAVEL_NAV: scope={use_scope_id} last_changed_field={field_path}"
                 )
+
+                # Metadata-only changes (e.g., dict-pattern key selection) don't touch
+                # parameters, so last_changed_field can be None. Promote known UI
+                # metadata changes to a concrete navigation target.
+                if not field_path:
+                    from pyqt_reactive.services.pattern_data_manager import (
+                        FUNC_EDITOR_SELECTED_PATTERN_KEY_META_KEY,
+                    )
+
+                    meta_keys = getattr(use_state, "_last_changed_meta_keys", set())
+                    if FUNC_EDITOR_SELECTED_PATTERN_KEY_META_KEY in meta_keys:
+                        field_path = "func"
+
                 if not field_path:
                     # Fallback: use dirty_fields if no changed field recorded
-                    dirty_fields = list(state.dirty_fields)
+                    dirty_fields = list(use_state.dirty_fields)
                     if dirty_fields:
                         sorted_fields = sorted(
                             dirty_fields,
@@ -964,10 +1002,41 @@ class OpenHCSMainWindow(QMainWindow):
                         )
                         field_path = sorted_fields[0]
 
+            existing = pending.get(use_scope_id)
+            if existing is None:
+                pending[use_scope_id] = (use_state, field_path)
+            else:
+                existing_state, existing_field = existing
+                # Prefer func tab when present
+                if existing_field != "func" and field_path == "func":
+                    pending[use_scope_id] = (use_state, field_path)
+                elif existing_field is None and field_path is not None:
+                    pending[use_scope_id] = (use_state, field_path)
+
+        def _apply_dual_editor_focus(
+            scope_key: str, state_obj: ObjectState, fp: str | None
+        ) -> None:
+            # Select the right tab first.
+            self._select_tab_for_time_travel(scope_key, state_obj, fp)
+
+            window = WindowManager.get_window(scope_key)
+            from openhcs.pyqt_gui.windows.dual_editor_window import DualEditorWindow
+
+            if not isinstance(window, DualEditorWindow):
+                return
+            if window.func_editor is None:
+                return
+
+            # If we have a specific function scope hint, use it for precise channel selection.
+            token = func_token_hint.get(scope_key)
+            if isinstance(token, str) and token:
+                window.func_editor.select_pattern_key_for_function_token(token)
+
+        for scope_id, (state, field_path) in pending.items():
             if WindowManager.is_open(scope_id):
                 # Window exists - focus and navigate to dirty field
                 WindowManager.focus_and_navigate(scope_id, field_path=field_path)
-                self._select_tab_for_time_travel(scope_id, state, field_path)
+                _apply_dual_editor_focus(scope_id, state, field_path)
             else:
                 # Create new window
                 from pyqt_reactive.services import WindowFactory
@@ -977,16 +1046,10 @@ class OpenHCSMainWindow(QMainWindow):
                     logger.info(
                         f"⏱️ TIME_TRAVEL: Reopened window for dirty state: {scope_id}"
                     )
-                    # Scroll to dirty field after window is ready (like provenance)
+                    _apply_dual_editor_focus(scope_id, state, field_path)
                     if field_path:
-                        from PyQt6.QtCore import QTimer
-
-                        QTimer.singleShot(
-                            100,
-                            lambda sid=scope_id,
-                            fp=field_path: WindowManager.focus_and_navigate(
-                                sid, field_path=fp
-                            ),
+                        WindowManager.focus_and_navigate(
+                            scope_id, field_path=field_path
                         )
 
     def _select_tab_for_time_travel(

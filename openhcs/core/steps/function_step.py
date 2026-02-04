@@ -527,6 +527,13 @@ def _execute_chain_core(
             else:
                 raise TypeError(f"Invalid function in tuple: {func_or_ref}")
             base_kwargs_for_item = kwargs
+            # Strip UI-only metadata keys (never passed to runtime callables)
+            if isinstance(base_kwargs_for_item, dict) and "__pyqt_reactive_scope_token__" in base_kwargs_for_item:
+                base_kwargs_for_item = {
+                    k: v
+                    for k, v in base_kwargs_for_item.items()
+                    if k != "__pyqt_reactive_scope_token__"
+                }
         elif callable(func_item):
             actual_callable = func_item
         else:

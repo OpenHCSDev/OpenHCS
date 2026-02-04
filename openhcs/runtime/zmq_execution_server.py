@@ -7,7 +7,14 @@ import time
 from typing import Any
 
 from zmqruntime.execution import ExecutionServer
-from zmqruntime.messages import ExecuteRequest, ExecutionStatus, MessageFields
+from zmqruntime.messages import (
+    ExecuteRequest,
+    ExecuteResponse,
+    ExecutionStatus,
+    MessageFields,
+    ResponseType,
+    StatusRequest,
+)
 
 from zmqruntime.transport import coerce_transport_mode
 from openhcs.runtime.zmq_config import OPENHCS_ZMQ_CONFIG
@@ -34,6 +41,128 @@ class OpenHCSExecutionServer(ExecutionServer):
             transport_mode=coerce_transport_mode(transport_mode),
             config=OPENHCS_ZMQ_CONFIG,
         )
+        self._compile_status: str | None = None
+        self._compile_message: str | None = None
+        self._compile_status_expires_at: float | None = None
+
+    def _set_compile_status(
+        self, status: str, message: str | None = None, ttl_seconds: float = 4.0
+    ) -> None:
+        self._compile_status = status
+        self._compile_message = message
+        self._compile_status_expires_at = time.time() + ttl_seconds
+
+    def _get_compile_status(self) -> tuple[str | None, str | None]:
+        if self._compile_status_expires_at is None:
+            return None, None
+        if time.time() > self._compile_status_expires_at:
+            self._compile_status = None
+            self._compile_message = None
+            self._compile_status_expires_at = None
+            return None, None
+        return self._compile_status, self._compile_message
+
+    def _create_pong_response(self):
+        response = super()._create_pong_response()
+        compile_status, compile_message = self._get_compile_status()
+        if compile_status is not None:
+            response[MessageFields.COMPILE_STATUS] = compile_status
+        if compile_message is not None:
+            response[MessageFields.COMPILE_MESSAGE] = compile_message
+        return response
+
+    def _run_execution(self, execution_id, request, record):
+        """Run an execution and enrich results_summary with output plate path.
+
+        The base zmqruntime ExecutionServer only populates well_count/wells in
+        results_summary. OpenHCS needs the final output plate root (computed by
+        path planning during compilation) so the UI can optionally auto-add it
+        as a new orchestrator in Plate Manager.
+        """
+        super()._run_execution(execution_id, request, record)
+
+        try:
+            if record.get(MessageFields.STATUS) != ExecutionStatus.COMPLETE.value:
+                logger.info(
+                    "[%s] Skipping results_summary attach (status=%s)",
+                    execution_id,
+                    record.get(MessageFields.STATUS),
+                )
+                return
+
+            output_plate_root = record.get("output_plate_root")
+            auto_add_output_plate = record.get("auto_add_output_plate")
+
+            summary = record.get(MessageFields.RESULTS_SUMMARY)
+            if not isinstance(summary, dict):
+                summary = {}
+                record[MessageFields.RESULTS_SUMMARY] = summary
+            if output_plate_root:
+                summary["output_plate_root"] = str(output_plate_root)
+            if auto_add_output_plate is not None:
+                summary["auto_add_output_plate_to_plate_manager"] = bool(
+                    auto_add_output_plate
+                )
+
+            logger.info(
+                "[%s] Attached results_summary extras: output_plate_root=%s auto_add=%s",
+                execution_id,
+                summary.get("output_plate_root"),
+                summary.get("auto_add_output_plate_to_plate_manager"),
+            )
+        except Exception as e:
+            logger.warning(
+                "[%s] Failed to attach output_plate_root to results_summary: %s",
+                execution_id,
+                e,
+            )
+
+    def _handle_status(self, msg):
+        execution_id = StatusRequest.from_dict(msg).execution_id
+        if execution_id:
+            if execution_id not in self.active_executions:
+                return ExecuteResponse(
+                    ResponseType.ERROR,
+                    error=f"Execution {execution_id} not found",
+                ).to_dict()
+            record = self.active_executions[execution_id]
+            if record.get(MessageFields.STATUS) == ExecutionStatus.COMPLETE.value:
+                summary = record.get(MessageFields.RESULTS_SUMMARY)
+                if not isinstance(summary, dict):
+                    summary = {}
+                    record[MessageFields.RESULTS_SUMMARY] = summary
+                output_plate_root = record.get("output_plate_root")
+                auto_add_output_plate = record.get("auto_add_output_plate")
+                if output_plate_root:
+                    summary["output_plate_root"] = str(output_plate_root)
+                if auto_add_output_plate is not None:
+                    summary["auto_add_output_plate_to_plate_manager"] = bool(
+                        auto_add_output_plate
+                    )
+
+            return {
+                MessageFields.STATUS: ResponseType.OK.value,
+                "execution": {
+                    k: record.get(k)
+                    for k in [
+                        MessageFields.EXECUTION_ID,
+                        MessageFields.PLATE_ID,
+                        MessageFields.STATUS,
+                        MessageFields.START_TIME,
+                        MessageFields.END_TIME,
+                        MessageFields.ERROR,
+                        MessageFields.RESULTS_SUMMARY,
+                    ]
+                },
+            }
+        return {
+            MessageFields.STATUS: ResponseType.OK.value,
+            MessageFields.ACTIVE_EXECUTIONS: len(self.active_executions),
+            MessageFields.UPTIME: time.time() - self.start_time
+            if self.start_time
+            else 0,
+            MessageFields.EXECUTIONS: list(self.active_executions.keys()),
+        }
 
     def execute_task(self, execution_id: str, request: ExecuteRequest) -> Any:
         return self._execute_pipeline(
@@ -44,6 +173,7 @@ class OpenHCSExecutionServer(ExecutionServer):
             request.config_code,
             request.pipeline_config_code,
             request.client_address,
+            request.compile_only,
         )
 
     def _execute_pipeline(
@@ -55,6 +185,7 @@ class OpenHCSExecutionServer(ExecutionServer):
         config_code,
         pipeline_config_code,
         client_address=None,
+        compile_only: bool = False,
     ):
         from openhcs.constants import AllComponents, VariableComponents, GroupBy
         from openhcs.core.config import GlobalPipelineConfig, PipelineConfig
@@ -111,14 +242,20 @@ class OpenHCSExecutionServer(ExecutionServer):
         else:
             raise ValueError("Either config_params or config_code required")
 
-        return self._execute_with_orchestrator(
-            execution_id,
-            plate_id,
-            pipeline_steps,
-            global_config,
-            pipeline_config,
-            config_params,
-        )
+        try:
+            return self._execute_with_orchestrator(
+                execution_id,
+                plate_id,
+                pipeline_steps,
+                global_config,
+                pipeline_config,
+                config_params,
+                compile_only=compile_only,
+            )
+        except Exception as e:
+            if compile_only:
+                self._set_compile_status("compiled failed", str(e))
+            raise
 
     def _build_config_from_params(self, p):
         from openhcs.core.config import (
@@ -157,6 +294,7 @@ class OpenHCSExecutionServer(ExecutionServer):
         global_config,
         pipeline_config,
         config_params,
+        compile_only: bool = False,
     ):
         from pathlib import Path
         import multiprocessing
@@ -246,6 +384,45 @@ class OpenHCSExecutionServer(ExecutionServer):
             pipeline_definition=pipeline_steps, well_filter=wells, is_zmq_execution=True
         )
 
+        # Persist the final output plate root computed by the path planner so the
+        # client can retrieve it from status/results_summary on completion.
+        try:
+            compiled_contexts = (
+                compilation.get("compiled_contexts")
+                if isinstance(compilation, dict)
+                else None
+            )
+            if compiled_contexts:
+                first_context = next(iter(compiled_contexts.values()))
+                output_plate_root = getattr(first_context, "output_plate_root", None)
+                if output_plate_root:
+                    self.active_executions[execution_id]["output_plate_root"] = str(
+                        output_plate_root
+                    )
+                auto_add_output_plate = (
+                    first_context.auto_add_output_plate_to_plate_manager
+                )
+                self.active_executions[execution_id]["auto_add_output_plate"] = bool(
+                    auto_add_output_plate
+                )
+                logger.info(
+                    "[%s] Captured auto_add_output_plate=%s output_plate_root=%s",
+                    execution_id,
+                    bool(auto_add_output_plate),
+                    output_plate_root,
+                )
+            else:
+                logger.warning(
+                    "[%s] No compiled_contexts; cannot capture auto_add_output_plate",
+                    execution_id,
+                )
+        except Exception as e:
+            logger.warning(
+                "[%s] Failed to capture output_plate_root during compilation: %s",
+                execution_id,
+                e,
+            )
+
         if (
             self.active_executions[execution_id][MessageFields.STATUS]
             == ExecutionStatus.CANCELLED.value
@@ -254,6 +431,11 @@ class OpenHCSExecutionServer(ExecutionServer):
                 "[%s] Execution cancelled after compilation, aborting", execution_id
             )
             raise RuntimeError("Execution cancelled by user")
+
+        if compile_only:
+            logger.info("[%s] Compilation-only request completed", execution_id)
+            self._set_compile_status("compiled success")
+            return compilation["compiled_contexts"]
 
         log_dir = Path.home() / ".local" / "share" / "openhcs" / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)

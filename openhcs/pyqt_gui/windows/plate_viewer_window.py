@@ -195,9 +195,13 @@ class PlateViewerWindow(BaseFormDialog):
         self.image_browser_tab = self._create_image_browser_tab()
         self.tab_widget.addTab(self.image_browser_tab, "Image Browser")
 
-        # Tab 2: Metadata Viewer
-        self.metadata_viewer_tab = self._create_metadata_viewer_tab()
-        self.tab_widget.addTab(self.metadata_viewer_tab, "Metadata")
+        # Tab 2: Metadata Viewer (lazy-loaded to avoid slow startup)
+        self.metadata_viewer_tab = self._create_metadata_placeholder_tab()
+        self._metadata_viewer_loaded = False
+        self._metadata_tab_index = self.tab_widget.addTab(
+            self.metadata_viewer_tab, "Metadata"
+        )
+        self.tab_widget.currentChanged.connect(self._on_tab_changed)
 
         # Add the tab widget's content area (stacked widget) below the tab row
         # The tab bar is already in tab_row, so we only add the content pane here
@@ -229,10 +233,37 @@ class PlateViewerWindow(BaseFormDialog):
 
         return browser
 
+    def _create_metadata_placeholder_tab(self) -> QWidget:
+        """Create a lightweight placeholder for lazy metadata loading."""
+        placeholder = QWidget()
+        layout = QVBoxLayout(placeholder)
+        layout.setContentsMargins(10, 10, 10, 10)
+        label = QLabel("Open this tab to load metadata...")
+        layout.addWidget(label)
+        layout.addStretch()
+        return placeholder
+
+    def _on_tab_changed(self, index: int) -> None:
+        """Lazy-load metadata viewer when the Metadata tab is opened."""
+        if getattr(self, "_metadata_viewer_loaded", False):
+            return
+        if index != getattr(self, "_metadata_tab_index", -1):
+            return
+
+        from PyQt6.QtCore import QSignalBlocker
+
+        self._metadata_viewer_loaded = True
+        metadata_viewer = self._create_metadata_viewer_tab()
+        with QSignalBlocker(self.tab_widget):
+            self.tab_widget.removeTab(index)
+            self.tab_widget.insertTab(index, metadata_viewer, "Metadata")
+            self.tab_widget.setCurrentIndex(index)
+        self.metadata_viewer_tab = metadata_viewer
+
     def _create_metadata_viewer_tab(self) -> QWidget:
         """Create the metadata viewer tab."""
         # Create scroll area for metadata content
-        from PyQt6.QtWidgets import QScrollArea
+        from PyQt6.QtWidgets import QScrollArea, QComboBox, QHBoxLayout
 
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
@@ -259,22 +290,51 @@ class PlateViewerWindow(BaseFormDialog):
                 if not subdirs_dict:
                     raise ValueError("No subdirectories found in metadata")
 
-                # Convert raw dicts to OpenHCSMetadata instances
-                subdirs_instances = {}
-                for subdir_name, subdir_data in subdirs_dict.items():
-                    # Ensure all optional fields have explicit None if missing
-                    # (OpenHCSMetadata requires all fields to be provided, even if Optional)
+                def ensure_optional_fields(subdir_data):
                     subdir_data.setdefault("timepoints", None)
                     subdir_data.setdefault("channels", None)
                     subdir_data.setdefault("wells", None)
                     subdir_data.setdefault("sites", None)
                     subdir_data.setdefault("z_indexes", None)
 
-                    # Create OpenHCSMetadata from the subdirectory data
-                    subdirs_instances[subdir_name] = OpenHCSMetadata(**subdir_data)
+                if len(subdirs_dict) == 1:
+                    subdir_name = next(iter(subdirs_dict.keys()))
+                    subdir_data = subdirs_dict[subdir_name]
+                    ensure_optional_fields(subdir_data)
+                    metadata_instance = OpenHCSMetadata(**subdir_data)
+                    self._create_single_metadata_form(layout, metadata_instance)
+                else:
+                    selector_row = QHBoxLayout()
+                    selector_label = QLabel("Subdirectory:")
+                    selector = QComboBox()
+                    selector.addItems(sorted(subdirs_dict.keys()))
+                    selector_row.addWidget(selector_label)
+                    selector_row.addWidget(selector, 1)
+                    layout.addLayout(selector_row)
 
-                # Create forms for each subdirectory
-                self._create_multi_subdirectory_forms(layout, subdirs_instances)
+                    form_container = QWidget()
+                    form_layout = QVBoxLayout(form_container)
+                    form_layout.setContentsMargins(0, 0, 0, 0)
+                    layout.addWidget(form_container)
+
+                    def clear_layout(target_layout):
+                        while target_layout.count():
+                            item = target_layout.takeAt(0)
+                            widget = item.widget()
+                            if widget is not None:
+                                widget.deleteLater()
+
+                    def render_selected(subdir_name):
+                        clear_layout(form_layout)
+                        subdir_data = subdirs_dict[subdir_name]
+                        ensure_optional_fields(subdir_data)
+                        metadata_instance = OpenHCSMetadata(**subdir_data)
+                        self._create_single_metadata_form(
+                            form_layout, metadata_instance
+                        )
+
+                    selector.currentTextChanged.connect(render_selected)
+                    render_selected(selector.currentText())
             else:
                 # Other microscope formats (ImageXpress, Opera Phenix, etc.)
                 from openhcs.microscopes.openhcs import OpenHCSMetadata
@@ -327,6 +387,10 @@ class PlateViewerWindow(BaseFormDialog):
         from pyqt_reactive.forms import ParameterFormManager, FormManagerConfig
         from openhcs.config_framework.object_state import ObjectState
 
+        image_files = getattr(metadata_instance, "image_files", None)
+        if image_files is not None:
+            layout.addWidget(QLabel(f"Image files: {len(image_files)} (hidden)"))
+
         # Create local ObjectState for metadata viewer using plate scope for correct accent color
         state = ObjectState(
             object_instance=metadata_instance,
@@ -336,7 +400,10 @@ class PlateViewerWindow(BaseFormDialog):
         metadata_form = ParameterFormManager(
             state=state,
             config=FormManagerConfig(
-                parent=None, read_only=True, color_scheme=self.color_scheme
+                parent=None,
+                read_only=True,
+                color_scheme=self.color_scheme,
+                exclude_params=["image_files", "workspace_mapping"],
             ),
         )
         layout.addWidget(metadata_form)
@@ -351,6 +418,12 @@ class PlateViewerWindow(BaseFormDialog):
             group_box = QGroupBox(f"Subdirectory: {subdir_name}")
             group_layout = QVBoxLayout(group_box)
 
+            image_files = getattr(metadata_instance, "image_files", None)
+            if image_files is not None:
+                group_layout.addWidget(
+                    QLabel(f"Image files: {len(image_files)} (hidden)")
+                )
+
             # Create local ObjectState for this subdirectory's metadata using plate scope
             state = ObjectState(
                 object_instance=metadata_instance,
@@ -360,7 +433,10 @@ class PlateViewerWindow(BaseFormDialog):
             metadata_form = ParameterFormManager(
                 state=state,
                 config=FormManagerConfig(
-                    parent=None, read_only=True, color_scheme=self.color_scheme
+                    parent=None,
+                    read_only=True,
+                    color_scheme=self.color_scheme,
+                    exclude_params=["image_files", "workspace_mapping"],
                 ),
             )
             group_layout.addWidget(metadata_form)

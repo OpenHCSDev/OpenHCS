@@ -59,6 +59,9 @@ from openhcs.pyqt_gui.widgets.shared.services.zmq_execution_service import (
 from openhcs.pyqt_gui.widgets.shared.services.compilation_service import (
     CompilationService,
 )
+from openhcs.pyqt_gui.widgets.shared.services.zmq_client_service import (
+    ZMQClientService,
+)
 from pyqt_reactive.widgets.shared.scope_visual_config import ListItemType
 
 logger = logging.getLogger(__name__)
@@ -176,8 +179,13 @@ class PlateManagerWidget(AbstractManagerWidget):
         ] = {}  # plate_path -> "queued" | "running" | "completed" | "failed"
 
         # Extracted services (Phase 1, 2)
-        self._zmq_service = ZMQExecutionService(self, port=7777)
-        self._compilation_service = CompilationService(self)
+        self._zmq_client_service = ZMQClientService(port=7777)
+        self._zmq_service = ZMQExecutionService(
+            self, port=7777, client_service=self._zmq_client_service
+        )
+        self._compilation_service = CompilationService(
+            self, client_service=self._zmq_client_service
+        )
 
         # Initialize base class (creates style_generator, event_bus, item_list, buttons, status_label internally)
         # Also auto-processes PREVIEW_FIELD_CONFIGS declaratively
@@ -896,6 +904,68 @@ class PlateManagerWidget(AbstractManagerWidget):
 
         await self._zmq_service.run_plates(ready_items)
 
+    def _maybe_auto_add_output_plate_orchestrator(
+        self, source_plate_path: str, result: dict
+    ) -> None:
+        """Optionally add the computed output plate root as a new orchestrator.
+
+        The ZMQ execution server attaches `output_plate_root` to the completion
+        payload (computed by the compiler/path planner). If enabled via global
+        config, we add that path to Plate Manager when the run completes.
+        """
+        auto_add_value = (result or {}).get("auto_add_output_plate_to_plate_manager")
+        if auto_add_value is None:
+            raise RuntimeError(
+                "Missing auto-add flag in completion result; expected from compile context."
+            )
+
+        auto_add = bool(auto_add_value)
+
+        if not auto_add:
+            return
+
+        output_plate_root = (result or {}).get("output_plate_root")
+        if not output_plate_root:
+            return
+
+        output_plate_root = str(output_plate_root)
+
+        root_state = self._ensure_root_state()
+        current_paths = root_state.parameters.get("orchestrator_scope_ids") or []
+        if output_plate_root in current_paths:
+            return
+
+        # PipelineOrchestrator requires a real directory for non-OMERO paths.
+        # Ensure it exists so we can register an orchestrator.
+        if not output_plate_root.startswith("/omero/"):
+            out_path = Path(output_plate_root)
+            try:
+                out_path.mkdir(parents=True, exist_ok=True)
+            except Exception as e:
+                raise RuntimeError(
+                    f"Auto-add output plate skipped (mkdir failed): {output_plate_root} ({e})"
+                )
+
+            if not out_path.is_dir():
+                raise RuntimeError(
+                    f"Auto-add output plate skipped (not a dir): {output_plate_root}"
+                )
+
+        # Create orchestrator and add to root scope list (do not change selection)
+        self._create_orchestrator_for_plate(output_plate_root)
+        new_paths = list(current_paths)
+        new_paths.append(output_plate_root)
+
+        with ObjectStateRegistry.atomic("auto-add output plate"):
+            root_state.update_parameter("orchestrator_scope_ids", new_paths)
+
+        self.update_item_list()
+        logger.info(
+            "Auto-added output plate orchestrator: %s (from %s)",
+            output_plate_root,
+            source_plate_path,
+        )
+
     def _on_execution_complete(self, result, plate_path):
         """Handle execution completion for a single plate (called from main thread via signal)."""
         try:
@@ -907,6 +977,15 @@ class PlateManagerWidget(AbstractManagerWidget):
                 self.plate_execution_states[plate_path] = "completed"
                 self.status_message.emit(f"✓ Completed {plate_path}")
                 new_state = OrchestratorState.COMPLETED
+
+                # Optionally auto-add the output plate orchestrator (from server-calculated path)
+                if self.execution_state == "running":
+                    self._maybe_auto_add_output_plate_orchestrator(plate_path, result)
+                else:
+                    logger.info(
+                        "Skipping auto-add output plate (execution_state=%s)",
+                        self.execution_state,
+                    )
             elif status == "cancelled":
                 self.plate_execution_states[plate_path] = "failed"
                 self.status_message.emit(f"✗ Cancelled {plate_path}")
@@ -940,6 +1019,17 @@ class PlateManagerWidget(AbstractManagerWidget):
 
         except Exception as e:
             logger.error(f"Error handling execution completion: {e}", exc_info=True)
+            self.plate_execution_states[plate_path] = "failed"
+            self.execution_error.emit(str(e))
+            orchestrator = ObjectStateRegistry.get_object(plate_path)
+            if orchestrator:
+                orchestrator._state = OrchestratorState.EXEC_FAILED
+                self.orchestrator_state_changed.emit(
+                    plate_path, OrchestratorState.EXEC_FAILED.value
+                )
+            self.execution_state = "idle"
+            self.current_execution_id = None
+            self.update_button_states()
 
     def _consolidate_multi_plate_results(self):
         """Consolidate results from multiple completed plates into a global summary."""
@@ -1012,10 +1102,6 @@ class PlateManagerWidget(AbstractManagerWidget):
         Second click: Force shutdown
         """
         logger.info("🛑 action_stop_execution CALLED")
-
-        if self._zmq_service.zmq_client is None:
-            logger.warning("No active ZMQ execution to stop")
-            return
 
         is_force_kill = self.buttons["run_plate"].text() == "Force Kill"
 

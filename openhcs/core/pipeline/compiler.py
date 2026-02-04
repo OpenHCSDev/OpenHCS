@@ -1292,6 +1292,32 @@ class PipelineCompiler:
             # === END ONE-TIME STEP RESOLUTION ===
             # NOTE: ObjectStates remain registered for use by streaming config resolution
 
+            # Capture config values at compile time from PipelineConfig scope
+            pipeline_config_state = ObjectStateRegistry.get_by_scope(plate_path_str)
+            if pipeline_config_state is None:
+                raise RuntimeError(
+                    "Missing ObjectState for plate; cannot resolve pipeline config."
+                )
+
+            # Get the complete resolved AnalysisConsolidationConfig with all fields populated
+            # get_saved_resolved_value() automatically reconstructs dataclass containers
+            lazy_analysis_config = pipeline_config_state.get_saved_resolved_value(
+                "analysis_consolidation_config"
+            )
+            # Convert lazy config to base type for pickling in multiprocessing
+            from objectstate.lazy_factory import LazyDataclass
+
+            analysis_consolidation_config = (
+                lazy_analysis_config.to_base_config()
+                if isinstance(lazy_analysis_config, LazyDataclass)
+                else lazy_analysis_config
+            )
+
+            # Get auto_add_output_plate flag directly (it's a top-level field, not a dataclass)
+            auto_add_output_plate = pipeline_config_state.get_saved_resolved_value(
+                "auto_add_output_plate_to_plate_manager"
+            )
+
             # === BACKEND COMPATIBILITY VALIDATION ===
             # Validate that configured backend is compatible with microscope
             # For microscopes with only one compatible backend (e.g., OMERO), auto-set it
@@ -1406,6 +1432,14 @@ class PipelineCompiler:
                         context = orchestrator.create_context(axis_id)
                         context.step_axis_filters = global_step_axis_filters
 
+                        # Store compile-time captured config values in context
+                        context.analysis_consolidation_config = (
+                            analysis_consolidation_config
+                        )
+                        context.auto_add_output_plate_to_plate_manager = (
+                            auto_add_output_plate
+                        )
+
                         # Set the current combination BEFORE freezing
                         context.pipeline_sequential_mode = True
                         context.pipeline_sequential_combinations = combinations
@@ -1452,6 +1486,14 @@ class PipelineCompiler:
                     # No sequential mode - compile single context as before
                     context = orchestrator.create_context(axis_id)
                     context.step_axis_filters = global_step_axis_filters
+
+                    # Store compile-time captured config values in context
+                    context.analysis_consolidation_config = (
+                        analysis_consolidation_config
+                    )
+                    context.auto_add_output_plate_to_plate_manager = (
+                        auto_add_output_plate
+                    )
 
                     # Use pre-resolved steps and step_state_map for performance
                     resolved_steps, step_state_map = (

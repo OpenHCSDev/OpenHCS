@@ -73,23 +73,37 @@ call back for status updates:
 Using the Service
 -----------------
 
-The pattern mirrors ``CompilationService``. Create the service with a host reference,
-then call async methods to trigger execution:
+The pattern mirrors ``CompilationService``. Create the service with a host reference
+and optional shared ``ZMQClientService``, then call async methods to trigger execution:
 
 .. code-block:: python
 
     from openhcs.pyqt_gui.widgets.shared.services.zmq_execution_service import (
         ZMQExecutionService, ExecutionHost
     )
+    from openhcs.pyqt_gui.widgets.shared.services.zmq_client_service import (
+        ZMQClientService
+    )
 
     class MyWidget(QWidget, ExecutionHost):
         def __init__(self):
             super().__init__()
-            self.execution_service = ZMQExecutionService(host=self, port=7777)
+            # Create shared client service (recommended for compile/run workflows)
+            self._zmq_client_service = ZMQClientService(port=7777)
+            
+            self.execution_service = ZMQExecutionService(
+                host=self,
+                port=7777,
+                client_service=self._zmq_client_service
+            )
 
         async def run_selected(self):
             ready = self._get_ready_plates()
             await self.execution_service.run_plates(ready)
+
+**Note**: When using both ``CompilationService`` and ``ZMQExecutionService``, share
+the same ``ZMQClientService`` instance to ensure consistent connection state and
+avoid resource conflicts.
 
 The Three Core Methods
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -107,6 +121,20 @@ execution scenarios:
 
     async def shutdown(self) -> None:
         """Cleanup and disconnect ZMQ client."""
+        
+    def __init__(
+        self,
+        host: ExecutionHost,
+        port: int = 7777,
+        client_service: Optional[ZMQClientService] = None
+    ) -> None:
+        """Initialize execution service.
+        
+        Args:
+            host: Widget implementing ExecutionHost protocol
+            port: ZMQ server port (default: 7777)
+            client_service: Optional shared ZMQClientService instance
+        """
 
 Execution Flow
 --------------
@@ -185,25 +213,60 @@ Shutdown Handling
 Integration with PlateManager
 -----------------------------
 
+When using both compilation and execution services, share the same ``ZMQClientService``:
+
 .. code-block:: python
+
+    from openhcs.pyqt_gui.widgets.shared.services.zmq_client_service import (
+        ZMQClientService
+    )
+    from openhcs.pyqt_gui.widgets.shared.services.compilation_service import (
+        CompilationService
+    )
 
     class PlateManagerWidget(AbstractManagerWidget, ExecutionHost):
         def __init__(self):
             super().__init__()
-            self._execution_service = ZMQExecutionService(host=self)
+            # Create shared client service for both compilation and execution
+            self._zmq_client_service = ZMQClientService(port=7777)
+            
+            # Initialize both services with shared client
+            self._compilation_service = CompilationService(
+                host=self,
+                client_service=self._zmq_client_service
+            )
+            self._execution_service = ZMQExecutionService(
+                host=self,
+                port=7777,
+                client_service=self._zmq_client_service
+            )
         
         # ExecutionHost protocol implementation
         def on_plate_completed(self, plate_path: str, status: str, result: dict):
             self._update_plate_status(plate_path, status)
             self.update_item_list()
+            
+            # Handle auto-add output plate if enabled
+            auto_add = result.get('auto_add_output_plate_to_plate_manager', False)
+            if auto_add and status == 'completed':
+                output_path = result.get('output_plate_root')
+                if output_path:
+                    self._add_orchestrator_for_plate(output_path)
         
         async def action_run(self):
             ready = self._get_ready_plates()
             await self._execution_service.run_plates(ready)
 
+**Benefits of Shared Client Service**:
+
+1. **Consistent Connection State** - Both services use the same ZMQ connection
+2. **Resource Efficiency** - Avoids creating multiple client instances
+3. **Compile/Run Workflow** - Seamless transition from compilation to execution
+4. **Simplified Cleanup** - Single disconnect call cleans up both services
+
 See Also
 --------
 
-- :doc:`compilation_service` - Compilation service for preparing pipelines
+- :doc:`compilation_service` - Compilation service for preparing pipelines (shares ZMQClientService)
 - :doc:`abstract_manager_widget` - ABC that PlateManager inherits from
 - :doc:`plate_manager_services` - Other PlateManager service extractions

@@ -271,6 +271,17 @@ class ConfigWindow(ScrollableFormMixin, BaseFormDialog):
                 scope_id=self.scope_id,
             )
 
+        # When editing per-orchestrator PipelineConfig we typically reuse the orchestrator's
+        # ObjectState (delegated to pipeline_config) under the plate scope_id.
+        # On Cancel/close we want to restore the PipelineConfig fields, but NOT restore
+        # descendant step ObjectStates (which can clear the visible pipeline).
+        if (
+            self.config_class is PipelineConfig
+            and self.scope_id not in (None, "")
+            and getattr(self.state, "_delegate_attr", None) is not None
+        ):
+            self._restore_descendants_on_close = False
+
         # CRITICAL: Config window manages its own scroll area, so tell form_manager NOT to create one
         config = FormManagerConfig(
             parent=None,

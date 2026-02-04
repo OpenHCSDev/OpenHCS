@@ -236,15 +236,6 @@ class SyntheticPlateGeneratorWindow(QDialog):
             # Add output_dir to params
             params["output_dir"] = output_dir
 
-            # Show progress message
-            QMessageBox.information(
-                self,
-                "Generating Plate",
-                f"Generating synthetic plate at:\n{output_dir}\n\n"
-                f"This may take a moment...",
-                QMessageBox.StandardButton.Ok,
-            )
-
             # Create generator and generate dataset
             logger.info(f"Generating synthetic plate with params: {params}")
             generator = SyntheticMicroscopyGenerator(**params)
@@ -260,25 +251,11 @@ class SyntheticPlateGeneratorWindow(QDialog):
             # Emit signal with output directory and pipeline path
             self.plate_generated.emit(output_dir, str(pipeline_path))
 
-            # Show success message
-            QMessageBox.information(
-                self,
-                "Success",
-                f"Synthetic plate generated successfully!\n\nLocation: {output_dir}",
-                QMessageBox.StandardButton.Ok,
-            )
-
             # Close dialog
             self.accept()
 
         except Exception as e:
             logger.error(f"Failed to generate synthetic plate: {e}", exc_info=True)
-            QMessageBox.critical(
-                self,
-                "Generation Failed",
-                f"Failed to generate synthetic plate:\n\n{str(e)}",
-                QMessageBox.StandardButton.Ok,
-            )
 
     def reject(self):
         """Handle dialog rejection (Cancel button)."""

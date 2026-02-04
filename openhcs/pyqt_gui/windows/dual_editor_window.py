@@ -125,6 +125,9 @@ class DualEditorWindow(BaseFormDialog):
         self.has_changes = False
         self.current_tab = "step"
 
+        # Change detection callback (ObjectState.on_state_changed expects a no-arg callable)
+        self._dirty_detect_callback = lambda: self.detect_changes()
+
         # UI components
         self.tab_widget: Optional[QTabWidget] = None
         self.parameter_editors: Dict[
@@ -143,6 +146,10 @@ class DualEditorWindow(BaseFormDialog):
         # Setup UI
         self.setup_ui()
         self.setup_connections()
+
+        # Ensure the initial save button state reflects current ObjectState.
+        # setup_ui() may call detect_changes() before changes_detected is connected.
+        self.detect_changes()
 
         # Connect automatic change detection (BaseManagedWindow feature)
         # This automatically calls detect_changes() when any parameter changes
@@ -254,6 +261,10 @@ class DualEditorWindow(BaseFormDialog):
         )
         self.save_button.setStyleSheet(self._save_button_base_style)
         self._title_header.add_right_widget(self.save_button)
+
+        # Connect change detection BEFORE tabs are created.
+        # create_step_tab() can call detect_changes() during setup.
+        self.changes_detected.connect(self.on_changes_detected)
 
         layout.addWidget(self._title_header)
 
@@ -517,6 +528,9 @@ class DualEditorWindow(BaseFormDialog):
                     f"color: {hex_color}; font-weight: bold; font-size: 14px;"
                 )
 
+            if self._scope_color_scheme:
+                self.step_editor.apply_scope_color_scheme(self._scope_color_scheme)
+
         # Style func_editor elements (Function Pattern tab)
         if self.func_editor:
             # "Functions" header label (may be None if render_header=False)
@@ -559,6 +573,7 @@ class DualEditorWindow(BaseFormDialog):
                     color_scheme=self.color_scheme,
                     pipeline_config=self.orchestrator.pipeline_config,
                     scope_id=scope_id,  # Same hierarchical scope_id as step editor
+                    step_index=self._step_index,  # Align scope styling with pipeline order
                     render_header=False,  # Don't render header - buttons will be managed externally
                     button_style="compact",  # Borderless compact style to match function editor
                 )
@@ -577,7 +592,7 @@ class DualEditorWindow(BaseFormDialog):
         # Subscribe to state changes for window title updates
         self._dirty_title_callback = self._update_window_title
         self.step_editor.state.on_state_changed(self._dirty_title_callback)
-        self.step_editor.state.on_state_changed(lambda _: self.detect_changes())
+        self.step_editor.state.on_state_changed(self._dirty_detect_callback)
 
         def _update_title_on_resolved_changed(_: set) -> None:
             self._update_window_title()
@@ -611,6 +626,7 @@ class DualEditorWindow(BaseFormDialog):
             scope_id=scope_id,  # Same hierarchical scope_id as step editor
             render_header=False,
             button_style="compact",  # Borderless compact style for tab row
+            step_index=self._step_index,  # Align scope styling with pipeline order
         )
 
         # Store main window reference for orchestrator access (find it through parent chain)
@@ -620,6 +636,9 @@ class DualEditorWindow(BaseFormDialog):
 
         # SINGLE SOURCE OF TRUTH: Initialize function editor state from step
         self._sync_function_editor_from_step()
+
+        # Restore last selected dict-pattern key (persisted in ObjectState.metadata)
+        self.func_editor.apply_selected_pattern_key_from_state()
 
         # Connect function pattern changes
         # Use DirectConnection to keep execution synchronous within atomic context
@@ -738,6 +757,10 @@ class DualEditorWindow(BaseFormDialog):
                 f"Step moved from index {self._step_index} to {new_index} - refreshing scope border"
             )
             self._step_index = new_index
+            if self.step_editor:
+                self.step_editor.step_index = new_index
+            if self.func_editor:
+                self.func_editor.set_step_index(new_index)
             self._refresh_scope_border()
 
         # Only refresh data if the step OBJECT was replaced in the pipeline
@@ -808,9 +831,6 @@ class DualEditorWindow(BaseFormDialog):
         """Setup signal/slot connections."""
         # Tab change tracking
         self.tab_widget.currentChanged.connect(self.on_tab_changed)
-
-        # Change detection
-        self.changes_detected.connect(self.on_changes_detected)
 
         # CRITICAL: Connect to global event bus for cross-window updates
         # This is the OpenHCS "set and forget" pattern - one connection handles ALL sources
@@ -1255,6 +1275,15 @@ class DualEditorWindow(BaseFormDialog):
 
         is_step = isinstance(state.object_instance, FunctionStep)
 
+        # If the navigation target is the function pattern, use the function tab.
+        # This avoids fighting tab selection done by time-travel navigation.
+        if field_path == "func" or field_path.startswith("func"):
+            if self.func_editor and self.tab_widget:
+                self.tab_widget.setCurrentIndex(1)
+            self.func_editor.apply_selected_pattern_key_from_state()
+            self.func_editor.select_and_scroll_to_field(field_path)
+            return
+
         if is_step and self.step_editor:
             if self.tab_widget:
                 self.tab_widget.setCurrentIndex(0)
@@ -1341,9 +1370,9 @@ class DualEditorWindow(BaseFormDialog):
         # No confirmation needed - time travel allows recovery of any state
 
         # Cleanup tree helper subscriptions to prevent memory leaks
-        if self.step_editor is not None:
-            self.step_editor.tree_helper.cleanup_subscriptions()
-            self.step_editor.state.off_state_changed(self._dirty_title_callback)
+        self.step_editor.tree_helper.cleanup_subscriptions()
+        self.step_editor.state.off_state_changed(self._dirty_title_callback)
+        self.step_editor.state.off_state_changed(self._dirty_detect_callback)
 
         super().closeEvent(event)  # BaseFormDialog handles unregistration
 

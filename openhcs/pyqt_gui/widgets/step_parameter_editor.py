@@ -210,6 +210,7 @@ class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
             color_scheme=self.color_scheme,  # Pass color scheme for consistent theming
             use_scroll_area=False,  # Step editor manages its own scroll area
             scope_accent_color=scope_accent_color,  # Pass scope accent color from parent window
+            scope_step_index=self.step_index,  # Align scope styling with pipeline order
         )
 
         self.form_manager = ParameterFormManager(
@@ -231,6 +232,47 @@ class StepParameterEditorWidget(ScrollableFormMixin, QWidget):
         logger.debug(
             f"Step parameter editor initialized for step: {getattr(step, 'name', 'Unknown')}"
         )
+
+    def apply_scope_color_scheme(self, scheme) -> None:
+        """Apply scope styling to groupboxes and help widgets in this editor."""
+        if not scheme or not self.form_manager:
+            return
+
+        self._scope_color_scheme = scheme
+
+        def _apply_now():
+            from pyqt_reactive.widgets.shared.clickable_help_components import (
+                HelpButton,
+                HelpIndicator,
+                GroupBoxWithHelp,
+            )
+            from pyqt_reactive.widgets.shared.scope_color_utils import (
+                tint_color_perceptual,
+            )
+
+            layers = getattr(scheme, "step_border_layers", None)
+            if layers:
+                _, tint_idx, _ = (layers[0] + ("solid",))[:3]
+                accent_color = tint_color_perceptual(
+                    scheme.base_color_rgb, tint_idx
+                ).darker(120)
+            else:
+                accent_color = tint_color_perceptual(scheme.base_color_rgb, 0).darker(
+                    120
+                )
+
+            for help_btn in self.form_manager.findChildren(HelpButton):
+                help_btn.set_scope_accent_color(accent_color)
+
+            for help_indicator in self.form_manager.findChildren(HelpIndicator):
+                help_indicator.set_scope_accent_color(accent_color)
+
+            for groupbox in self.form_manager.findChildren(GroupBoxWithHelp):
+                groupbox.set_scope_color_scheme(scheme)
+
+        _apply_now()
+
+        self.form_manager._on_build_complete_callbacks.append(lambda: _apply_now())
 
     def _is_optional_lazy_dataclass_in_pipeline(self, param_type, param_name):
         """

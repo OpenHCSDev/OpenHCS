@@ -490,12 +490,23 @@ class ZMQServerManagerWidget(QWidget):
             if server_type.endswith("ExecutionServer"):
                 running_executions = server.get("running_executions", [])
                 workers = server.get("workers", [])
+                compile_status = server.get("compile_status")
+                compile_message = server.get("compile_message")
 
                 # Create server item
                 if running_executions:
                     server_text = f"Port {port} - Execution Server"
                     status_text = f"{status_icon} {len(running_executions)} exec"
                     info_text = f"{len(workers)} workers"
+                elif compile_status:
+                    server_text = f"Port {port} - Execution Server"
+                    if "success" in compile_status:
+                        status_text = "✅ Compiled"
+                    elif "failed" in compile_status:
+                        status_text = "❌ Compile failed"
+                    else:
+                        status_text = f"ℹ️ {compile_status}"
+                    info_text = compile_message or ""
                 else:
                     server_text = f"Port {port} - Execution Server"
                     status_text = f"{status_icon} Idle"
