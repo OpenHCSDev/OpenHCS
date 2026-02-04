@@ -5,18 +5,41 @@ This directory contains scripts for generating various figures, plots, and visua
 ## Scripts
 
 ### `generate_xy_xz_composite_figures.py`
-Creates side-by-side composite figures showing XY and XZ max projections for each well.
+Creates composite figures showing XY, XZ, and YZ max projections for each well.
 
 **Features:**
-- Pairs XY and XZ max projection images
-- Creates figures with two panels side by side
+- Pairs XY, XZ, and YZ max projection images
+- Creates figures with a two-column layout (XY left, XZ/YZ stacked right)
 - Includes well identification in titles
+- Optional metadata mapping to append labels to titles
+- Automatic column labels (HA-OXIME/matrigel with Time A/B/C)
+- Optional well notation toggle for titles/filenames (R##C## or A01)
+- Optional tiled mosaic output aligned by well position
+- Output filenames include group labels when available
 
 **Usage:**
 ```bash
 python scripts/figures/generate_xy_xz_composite_figures.py \
     --input-dir /path/to/max_project \
     --output-dir /path/to/output
+
+# Optional metadata mapping
+python scripts/figures/generate_xy_xz_composite_figures.py \
+    --input-dir /path/to/max_project \
+    --output-dir /path/to/output \
+    --metadata-csv /path/to/metadata.csv
+
+# Optional tiled mosaic output
+python scripts/figures/generate_xy_xz_composite_figures.py \
+    --input-dir /path/to/max_project \
+    --output-dir /path/to/output \
+    --mosaic-output /path/to/output/mosaic.png
+
+# Optional well notation toggle
+python scripts/figures/generate_xy_xz_composite_figures.py \
+    --input-dir /path/to/max_project \
+    --output-dir /path/to/output \
+    --well-format a01
 ```
 
 ---
