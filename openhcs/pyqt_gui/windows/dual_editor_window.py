@@ -134,6 +134,12 @@ class DualEditorWindow(BaseFormDialog):
             str, QWidget
         ] = {}  # Map tab titles to editor widgets
         self.class_hierarchy: List = []  # Store inheritance hierarchy info
+
+        # Editors are created during setup_ui(); initialize here so scope styling
+        # hooks can run during _init_scope_border() without attribute errors.
+        self.step_editor = None
+        self.func_editor = None
+
         self._flash_overlay = None  # Window flash overlay for visual feedback
         self._flash_overlay_cleaned = False  # Track if overlay was cleaned up
         self._step_buttons_widget: Optional[QWidget] = (
@@ -308,9 +314,29 @@ class DualEditorWindow(BaseFormDialog):
 
         layout.addWidget(self._tab_row)
 
+        # Scope ID for singleton behavior and border styling.
+        # Must be initialized BEFORE creating editors so scope accent color is available.
+        if self.orchestrator is None:
+            raise RuntimeError(
+                "DualEditorWindow requires orchestrator to build scope styling"
+            )
+        if self.editing_step is None:
+            raise RuntimeError(
+                "DualEditorWindow requires editing_step to build scope styling"
+            )
+        self.scope_id = self._build_step_scope_id()
+        logger.debug(
+            "[DUAL_EDITOR] Set scope_id to: %s, calling _init_scope_border()",
+            self.scope_id,
+        )
+        self._init_scope_border()
+
         # Create tabs (this adds content to the tab widget)
         self.create_step_tab()
         self.create_function_tab()
+
+        # Editors now exist; apply scope styling to their widget trees.
+        self._apply_scope_accent_styling()
 
         # Add the tab widget's content area (stacked widget) below the tab row
         # The tab bar is already in tab_row, so we only add the content pane here
@@ -337,16 +363,6 @@ class DualEditorWindow(BaseFormDialog):
         self._function_sync_timer.setSingleShot(True)
         self._function_sync_timer.timeout.connect(self._flush_function_editor_sync)
         self._pending_function_editor_sync = False
-
-        # Scope ID for singleton behavior and border styling
-        if getattr(self, "orchestrator", None) and getattr(self, "editing_step", None):
-            self.scope_id = self._build_step_scope_id()
-            logger.debug(
-                f"[DUAL_EDITOR] Set scope_id to: {self.scope_id}, calling _init_scope_border()"
-            )
-        # CRITICAL: Initialize scope-based border styling BEFORE creating step_editor
-        # This ensures _scope_accent_color is set BEFORE widgets are created
-        self._init_scope_border()
 
         # Update title now that header_label exists
         self._update_window_title()
@@ -462,8 +478,13 @@ class DualEditorWindow(BaseFormDialog):
         - Window flash overlay
         """
         accent_color = self.get_scope_accent_color()
-        if not accent_color:
-            return
+        if accent_color is None:
+            raise RuntimeError(
+                "Scope accent color is missing; call _init_scope_border() after setting scope_id"
+            )
+
+        # Store for child widgets that need the computed accent.
+        self._scope_accent_color = accent_color
 
         hex_color = accent_color.name()
 
