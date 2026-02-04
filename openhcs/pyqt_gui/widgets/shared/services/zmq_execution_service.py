@@ -12,7 +12,7 @@ The service handles:
 import logging
 import threading
 import asyncio
-from typing import Dict, Optional, Callable, Any, Protocol, List
+from typing import Dict, Optional, Callable, Any, List
 
 from openhcs.core.orchestrator.orchestrator import OrchestratorState
 from openhcs.pyqt_gui.widgets.shared.services.zmq_client_service import (
@@ -20,36 +20,6 @@ from openhcs.pyqt_gui.widgets.shared.services.zmq_client_service import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-class ExecutionHost(Protocol):
-    """Protocol for the widget that hosts ZMQ execution."""
-
-    # State attributes
-    execution_state: str
-    plate_execution_ids: Dict[str, str]
-    plate_execution_states: Dict[str, str]
-    # NOTE: orchestrators now accessed via ObjectStateRegistry.get_object(plate_path)
-    plate_compiled_data: Dict[str, Any]
-    global_config: Any
-    current_execution_id: Optional[str]
-
-    # Signal emission methods
-    def emit_status(self, msg: str) -> None: ...
-    def emit_error(self, msg: str) -> None: ...
-    def emit_orchestrator_state(self, plate_path: str, state: str) -> None: ...
-    def emit_execution_complete(self, result: dict, plate_path: str) -> None: ...
-    def emit_clear_logs(self) -> None: ...
-    def update_button_states(self) -> None: ...
-    def update_item_list(self) -> None: ...
-
-    # Execution completion hooks
-    def on_plate_completed(
-        self, plate_path: str, status: str, result: dict
-    ) -> None: ...
-    def on_all_plates_completed(
-        self, completed_count: int, failed_count: int
-    ) -> None: ...
 
 
 class ZMQExecutionService:
@@ -62,7 +32,7 @@ class ZMQExecutionService:
 
     def __init__(
         self,
-        host: ExecutionHost,
+        host,
         port: int = 7777,
         client_service: ZMQClientService | None = None,
     ):
@@ -74,7 +44,7 @@ class ZMQExecutionService:
         """Run plates using ZMQ execution client."""
         loop = asyncio.get_event_loop()
         try:
-            plate_paths = [item["path"] for item in ready_items]
+            plate_paths = [str(item["path"]) for item in ready_items]
             logger.info(f"Starting ZMQ execution for {len(plate_paths)} plates")
 
             self.host.emit_clear_logs()
@@ -89,11 +59,12 @@ class ZMQExecutionService:
             # Initialize execution tracking
             self.host.plate_execution_ids.clear()
             self.host.plate_execution_states.clear()
+            self.host.plate_progress.clear()
 
             from objectstate import ObjectStateRegistry
 
             for item in ready_items:
-                plate_path = item["path"]
+                plate_path = str(item["path"])
                 self.host.plate_execution_states[plate_path] = "queued"
                 orchestrator = ObjectStateRegistry.get_object(plate_path)
                 if orchestrator is not None:
@@ -128,6 +99,7 @@ class ZMQExecutionService:
 
     async def _submit_plate(self, plate_path: str, loop) -> None:
         """Submit a single plate for execution."""
+        plate_path = str(plate_path)
         compiled_data = self.host.plate_compiled_data[plate_path]
         definition_pipeline = compiled_data["definition_pipeline"]
 
@@ -353,13 +325,24 @@ class ZMQExecutionService:
 
     def _on_progress(self, message: dict) -> None:
         """Handle progress updates from ZMQ execution server."""
-        try:
-            well_id = message.get("well_id", "unknown")
-            step = message.get("step", "unknown")
-            status = message.get("status", "unknown")
-            self.host.emit_status(f"[{well_id}] {step}: {status}")
-        except Exception as e:
-            logger.warning(f"Failed to handle progress update: {e}")
+        plate_id = str(message["plate_id"])
+        axis_id = message["axis_id"]
+        step_name = message["step_name"]
+        phase = message["phase"]
+        status = message["status"]
+        percent = message["percent"]
+
+        self.host.plate_progress[plate_id] = {
+            "axis_id": axis_id,
+            "step_name": step_name,
+            "phase": phase,
+            "status": status,
+            "percent": percent,
+        }
+        self.host.emit_status(
+            f"{plate_id} [{axis_id}] {step_name} {percent:.0f}% {phase}"
+        )
+        self.host.update_item_list()
 
     def _check_all_completed(self) -> None:
         """Check if all plates are completed and call host hook if so."""

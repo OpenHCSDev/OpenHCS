@@ -32,6 +32,7 @@ from openhcs.core.pipeline.compiler import PipelineCompiler
 from openhcs.core.steps.abstract import AbstractStep
 from openhcs.core.components.validation import convert_enum_by_value
 from openhcs.core.orchestrator.execution_result import ExecutionResult, ExecutionStatus
+from openhcs.core.progress_reporter import emit_progress
 from polystore.filemanager import FileManager
 
 # Zarr backend is CPU-only; always import it (even in subprocess/no-GPU mode)
@@ -222,6 +223,21 @@ def _execute_axis_with_sequential_combinations(
     # Extract axis_id from first context
     first_context_key, first_context = axis_contexts[0]
     axis_id = first_context.axis_id
+    total_steps = len(pipeline_definition)
+
+    emit_progress(
+        {
+            "axis_id": axis_id,
+            "step_name": "pipeline",
+            "step_index": -1,
+            "total_steps": total_steps,
+            "phase": "axis_started",
+            "status": "started",
+            "completed": 0,
+            "total": total_steps,
+            "percent": 0.0,
+        }
+    )
 
     for combo_idx, (context_key, frozen_context) in enumerate(axis_contexts):
         # Execute this combination
@@ -244,12 +260,39 @@ def _execute_axis_with_sequential_combinations(
             logger.error(
                 f"🔄 WORKER: Combination {context_key} failed for axis {axis_id}"
             )
+            emit_progress(
+                {
+                    "axis_id": axis_id,
+                    "step_name": "pipeline",
+                    "step_index": -1,
+                    "total_steps": total_steps,
+                    "phase": "axis_error",
+                    "status": "error",
+                    "completed": 0,
+                    "total": total_steps,
+                    "percent": 0.0,
+                    "message": result.error_message,
+                }
+            )
             return ExecutionResult.error(
                 axis_id=axis_id,
                 failed_combination=context_key,
                 error_message=result.error_message,
             )
 
+    emit_progress(
+        {
+            "axis_id": axis_id,
+            "step_name": "pipeline",
+            "step_index": -1,
+            "total_steps": total_steps,
+            "phase": "axis_completed",
+            "status": "completed",
+            "completed": total_steps,
+            "total": total_steps,
+            "percent": 100.0,
+        }
+    )
     return ExecutionResult.success(axis_id=axis_id)
 
 
@@ -273,6 +316,7 @@ def _execute_single_axis_static(
         ExecutionResult with status for this axis
     """
     axis_id = frozen_context.axis_id
+    total_steps = len(pipeline_definition)
 
     # NUCLEAR VALIDATION
     if not frozen_context.is_frozen():
@@ -289,17 +333,36 @@ def _execute_single_axis_static(
     for step_index, step in enumerate(pipeline_definition):
         step_name = frozen_context.step_plans[step_index]["step_name"]
 
-        # Verify step has process method (should always be true for AbstractStep subclasses)
-        # This check is acceptable because AbstractStep is an abstract base class
-        if not hasattr(step, "process"):
-            error_msg = (
-                f"Step {step_index + 1} missing process method for axis {axis_id}"
-            )
-            logger.error(error_msg)
-            raise RuntimeError(error_msg)
+        emit_progress(
+            {
+                "axis_id": axis_id,
+                "step_name": step_name,
+                "step_index": step_index,
+                "total_steps": total_steps,
+                "phase": "step_started",
+                "status": "started",
+                "completed": step_index,
+                "total": total_steps,
+                "percent": (step_index / total_steps) * 100.0,
+            }
+        )
 
         # Call process method on step instance
         step.process(frozen_context, step_index)
+
+        emit_progress(
+            {
+                "axis_id": axis_id,
+                "step_name": step_name,
+                "step_index": step_index,
+                "total_steps": total_steps,
+                "phase": "step_completed",
+                "status": "completed",
+                "completed": step_index + 1,
+                "total": total_steps,
+                "percent": ((step_index + 1) / total_steps) * 100.0,
+            }
+        )
 
         # Handle visualization if requested
         if visualizer:
@@ -372,7 +435,12 @@ def _configure_worker_logging(log_file_base: str):
     worker_logger = logging.getLogger("openhcs.worker")
 
 
-def _configure_worker_with_gpu(log_file_base: str, global_config_dict: dict):
+def _configure_worker_with_gpu(
+    log_file_base: str,
+    global_config_dict: dict,
+    progress_queue=None,
+    progress_context=None,
+):
     """
     Configure logging, function registry, and GPU registry for worker process.
 
@@ -431,6 +499,11 @@ def _configure_worker_with_gpu(log_file_base: str, global_config_dict: dict):
         # Don't raise - let worker continue without GPU if needed
         pass
 
+    if progress_queue is not None and progress_context is not None:
+        from openhcs.core.progress_reporter import set_progress_emitter
+
+        set_progress_emitter(progress_queue.put, progress_context)
+
 
 # Global variable to store log file base for worker processes
 _worker_log_file_base = None
@@ -461,9 +534,7 @@ class PipelineOrchestrator:
         *,
         pipeline_config: Optional["PipelineConfig"] = None,
         storage_registry: Optional[Any] = None,
-        progress_callback: Optional[
-            Callable[[str, str, str, Dict[str, Any]], None]
-        ] = None,
+        progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
     ):
         # Lock removed - was orphaned code never used
 
@@ -923,20 +994,22 @@ class PipelineOrchestrator:
     ) -> Dict[str, Any]:
         """Executes the pipeline for a single well using its frozen context."""
         axis_id = frozen_context.axis_id
+        total_steps = len(pipeline_definition)
 
         # Send progress: axis started
-        if self.progress_callback:
-            try:
-                self.progress_callback(
-                    axis_id,
-                    "pipeline",
-                    "started",
-                    {"total_steps": len(pipeline_definition)},
-                )
-            except Exception as e:
-                logger.warning(
-                    f"Progress_callback failed for axis {axis_id} start: {e}"
-                )
+        emit_progress(
+            {
+                "axis_id": axis_id,
+                "step_name": "pipeline",
+                "step_index": -1,
+                "total_steps": total_steps,
+                "phase": "axis_started",
+                "status": "started",
+                "completed": 0,
+                "total": total_steps,
+                "percent": 0.0,
+            }
+        )
 
         # NUCLEAR VALIDATION
         if not frozen_context.is_frozen():
@@ -965,52 +1038,43 @@ class PipelineOrchestrator:
     ) -> Dict[str, Any]:
         """Execute pipeline with step-wide sequential processing (current behavior)."""
         axis_id = frozen_context.axis_id
+        total_steps = len(pipeline_definition)
 
         for step_index, step in enumerate(pipeline_definition):
             step_name = frozen_context.step_plans[step_index]["step_name"]
 
             # Send progress: step started
-            if self.progress_callback:
-                try:
-                    self.progress_callback(
-                        axis_id,
-                        step_name,
-                        "started",
-                        {
-                            "step_index": step_index,
-                            "total_steps": len(pipeline_definition),
-                        },
-                    )
-                except Exception as e:
-                    logger.warning(
-                        f"Progress callback failed for axis {axis_id} step {step_name} start: {e}"
-                    )
-
-            # Verify step has process method
-            if not hasattr(step, "process"):
-                error_msg = f"🔥 SINGLE_AXIS ERROR: Step {step_index + 1} missing process method for axis {axis_id}"
-                logger.error(error_msg)
-                raise RuntimeError(error_msg)
+            emit_progress(
+                {
+                    "axis_id": axis_id,
+                    "step_name": step_name,
+                    "step_index": step_index,
+                    "total_steps": total_steps,
+                    "phase": "step_started",
+                    "status": "started",
+                    "completed": step_index,
+                    "total": total_steps,
+                    "percent": (step_index / total_steps) * 100.0,
+                }
+            )
 
             # Call process method on step instance
             step.process(frozen_context, step_index)
 
             # Send progress: step completed
-            if self.progress_callback:
-                try:
-                    self.progress_callback(
-                        axis_id,
-                        step_name,
-                        "completed",
-                        {
-                            "step_index": step_index,
-                            "total_steps": len(pipeline_definition),
-                        },
-                    )
-                except Exception as e:
-                    logger.warning(
-                        f"Progress callback failed for axis {axis_id} step {step_name} completion: {e}"
-                    )
+            emit_progress(
+                {
+                    "axis_id": axis_id,
+                    "step_name": step_name,
+                    "step_index": step_index,
+                    "total_steps": total_steps,
+                    "phase": "step_completed",
+                    "status": "completed",
+                    "completed": step_index + 1,
+                    "total": total_steps,
+                    "percent": ((step_index + 1) / total_steps) * 100.0,
+                }
+            )
 
             if visualizer:
                 step_plan = frozen_context.step_plans[step_index]
@@ -1033,18 +1097,19 @@ class PipelineOrchestrator:
                         )
 
         # Send progress: axis completed
-        if self.progress_callback:
-            try:
-                self.progress_callback(
-                    axis_id,
-                    "pipeline",
-                    "completed",
-                    {"total_steps": len(pipeline_definition)},
-                )
-            except Exception as e:
-                logger.warning(
-                    f"Progress callback failed for axis {axis_id} completion: {e}"
-                )
+        emit_progress(
+            {
+                "axis_id": axis_id,
+                "step_name": "pipeline",
+                "step_index": -1,
+                "total_steps": total_steps,
+                "phase": "axis_completed",
+                "status": "completed",
+                "completed": total_steps,
+                "total": total_steps,
+                "percent": 100.0,
+            }
+        )
 
         return {"status": "success", "axis_id": axis_id}
 
@@ -1061,6 +1126,7 @@ class PipelineOrchestrator:
         VFS is cleared between combinations to prevent memory accumulation.
         """
         axis_id = frozen_context.axis_id
+        total_steps = len(pipeline_definition)
 
         # Combinations were precomputed at compile time
         combinations = frozen_context.pipeline_sequential_combinations or []
@@ -1095,16 +1161,19 @@ class PipelineOrchestrator:
 
         frozen_context.current_sequential_combination = None
 
-        if self.progress_callback:
-            try:
-                self.progress_callback(
-                    axis_id,
-                    "pipeline",
-                    "completed",
-                    {"total_steps": len(pipeline_definition)},
-                )
-            except Exception as e:
-                logger.warning(f"Progress callback failed: {e}")
+        emit_progress(
+            {
+                "axis_id": axis_id,
+                "step_name": "pipeline",
+                "step_index": -1,
+                "total_steps": total_steps,
+                "phase": "axis_completed",
+                "status": "completed",
+                "completed": total_steps,
+                "total": total_steps,
+                "percent": 100.0,
+            }
+        )
 
         return {"status": "success", "axis_id": axis_id}
 
@@ -1131,6 +1200,8 @@ class PipelineOrchestrator:
         max_workers: Optional[int] = None,
         visualizer: Optional[NapariVisualizerType] = None,
         log_file_base: Optional[str] = None,
+        progress_queue=None,
+        progress_context=None,
     ) -> Dict[str, Dict[str, Any]]:
         """
         Execute-all phase: Runs the stateless pipeline against compiled contexts.
@@ -1274,7 +1345,12 @@ class PipelineOrchestrator:
                     executor = concurrent.futures.ProcessPoolExecutor(
                         max_workers=actual_max_workers,
                         initializer=_configure_worker_with_gpu,
-                        initargs=(log_file_base, global_config_dict),
+                        initargs=(
+                            log_file_base,
+                            global_config_dict,
+                            progress_queue,
+                            progress_context,
+                        ),
                     )
                 else:
                     executor = concurrent.futures.ProcessPoolExecutor(
@@ -1283,6 +1359,8 @@ class PipelineOrchestrator:
                         initargs=(
                             "",
                             global_config_dict,
+                            progress_queue,
+                            progress_context,
                         ),  # Empty string for no logging
                     )
 
@@ -1371,22 +1449,21 @@ class PipelineOrchestrator:
                                 f"🔥 ORCHESTRATOR FULL TRACEBACK for {axis_name} {axis_id}:\n{full_traceback}"
                             )
 
-                            # Send error to UI immediately via progress callback
-                            if self.progress_callback:
-                                try:
-                                    self.progress_callback(
-                                        axis_id,
-                                        "pipeline",
-                                        "error",
-                                        {
-                                            "error_message": str(exc),
-                                            "traceback": full_traceback,
-                                        },
-                                    )
-                                except Exception as cb_error:
-                                    logger.warning(
-                                        f"Progress callback failed for error reporting: {cb_error}"
-                                    )
+                            emit_progress(
+                                {
+                                    "axis_id": axis_id,
+                                    "step_name": "pipeline",
+                                    "step_index": -1,
+                                    "total_steps": len(pipeline_definition),
+                                    "phase": "axis_error",
+                                    "status": "error",
+                                    "completed": 0,
+                                    "total": len(pipeline_definition),
+                                    "percent": 0.0,
+                                    "error": str(exc),
+                                    "traceback": full_traceback,
+                                }
+                            )
 
                             # FAIL-FAST: Re-raise immediately instead of storing error
                             raise

@@ -177,6 +177,9 @@ class PlateManagerWidget(AbstractManagerWidget):
         self.plate_execution_states: Dict[
             str, str
         ] = {}  # plate_path -> "queued" | "running" | "completed" | "failed"
+        self.plate_progress: Dict[str, Dict] = {}
+        self.plate_init_pending = set()
+        self.plate_compile_pending = set()
 
         # Extracted services (Phase 1, 2)
         self._zmq_client_service = ZMQClientService(port=7777)
@@ -387,9 +390,15 @@ class PlateManagerWidget(AbstractManagerWidget):
         Uses declarative LIST_ITEM_FORMAT with orchestrator.pipeline_config as config source.
         """
         status_prefix = ""
-        orchestrator = ObjectStateRegistry.get_object(plate["path"])
+        plate_path = plate["path"]
+        plate_key = str(plate_path)
+        orchestrator = ObjectStateRegistry.get_object(plate_path)
 
-        if orchestrator:
+        if plate_key in self.plate_init_pending:
+            status_prefix = "⏳ Init"
+        elif plate_key in self.plate_compile_pending:
+            status_prefix = "⏳ Compile"
+        elif orchestrator:
             state_map = {
                 OrchestratorState.READY: "✓ Init",
                 OrchestratorState.COMPILED: "✓ Compiled",
@@ -399,10 +408,15 @@ class PlateManagerWidget(AbstractManagerWidget):
                 OrchestratorState.EXEC_FAILED: "❌ Exec Failed",
             }
             if orchestrator.state == OrchestratorState.EXECUTING:
-                exec_state = self.plate_execution_states.get(plate["path"])
-                status_prefix = {"queued": "⏳ Queued", "running": "🔄 Running"}.get(
-                    exec_state, "🔄 Executing"
-                )
+                exec_state = self.plate_execution_states.get(plate_key)
+                progress = self.plate_progress.get(plate_key)
+                if exec_state == "running" and progress:
+                    status_prefix = f"🔄 {progress['axis_id']} {progress['step_name']} {progress['percent']:.0f}%"
+                else:
+                    status_prefix = {
+                        "queued": "⏳ Queued",
+                        "running": "🔄 Running",
+                    }.get(exec_state, "🔄 Executing")
             else:
                 status_prefix = state_map.get(orchestrator.state, "")
 
@@ -634,7 +648,7 @@ class PlateManagerWidget(AbstractManagerWidget):
         self.progress_started.emit(len(selected_items))
 
         async def init_single_plate(i, plate):
-            plate_path = plate["path"]
+            plate_path = str(plate["path"])
 
             # Get existing orchestrator (created during add) or create if missing
             orchestrator = ObjectStateRegistry.get_object(plate_path)
@@ -655,12 +669,17 @@ class PlateManagerWidget(AbstractManagerWidget):
                 self.progress_updated.emit(i + 1)
                 return
 
+            self.plate_init_pending.add(plate_path)
+            self.update_item_list()
+
             def do_init():
                 self._ensure_context()
                 return orchestrator.initialize()
 
             try:
                 await asyncio.get_event_loop().run_in_executor(None, do_init)
+                self.plate_init_pending.remove(plate_path)
+                self.update_item_list()
                 self.orchestrator_state_changed.emit(plate_path, "READY")
 
                 # If this plate is currently selected, emit signal to update pipeline editor
@@ -682,6 +701,8 @@ class PlateManagerWidget(AbstractManagerWidget):
                     f"Failed to initialize plate {plate_path}: {e}", exc_info=True
                 )
                 orchestrator._state = OrchestratorState.INIT_FAILED
+                self.plate_init_pending.remove(plate_path)
+                self.update_item_list()
                 self.orchestrator_state_changed.emit(
                     plate_path, OrchestratorState.INIT_FAILED.value
                 )
@@ -971,6 +992,9 @@ class PlateManagerWidget(AbstractManagerWidget):
         try:
             status = result.get("status")
             logger.info(f"Plate {plate_path} completed with status: {status}")
+
+            if plate_path in self.plate_progress:
+                del self.plate_progress[plate_path]
 
             # Update plate state and orchestrator
             if status == "complete":

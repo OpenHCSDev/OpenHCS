@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+import threading
 from typing import Any
 
 from zmqruntime.execution import ExecutionServer
@@ -70,6 +71,16 @@ class OpenHCSExecutionServer(ExecutionServer):
         if compile_message is not None:
             response[MessageFields.COMPILE_MESSAGE] = compile_message
         return response
+
+    def _enqueue_progress(self, progress_update: dict) -> None:
+        self.progress_queue.put(progress_update)
+
+    def _forward_worker_progress(self, worker_queue) -> None:
+        while True:
+            progress_update = worker_queue.get()
+            if progress_update is None:
+                break
+            self.progress_queue.put(progress_update)
 
     def _run_execution(self, execution_id, request, record):
         """Run an execution and enrich results_summary with output plate path.
@@ -358,103 +369,196 @@ class OpenHCSExecutionServer(ExecutionServer):
             if not plate_path_str.startswith("/omero/"):
                 plate_path_str = f"/omero/plate_{plate_path_str}"
 
-        orchestrator = PipelineOrchestrator(
-            plate_path=Path(plate_path_str),
-            pipeline_config=pipeline_config,
-            progress_callback=None,
-        )
-        orchestrator.initialize()
-        self.active_executions[execution_id]["orchestrator"] = orchestrator
-
-        if (
-            self.active_executions[execution_id][MessageFields.STATUS]
-            == ExecutionStatus.CANCELLED.value
-        ):
-            logger.info(
-                "[%s] Execution cancelled after initialization, aborting", execution_id
-            )
-            raise RuntimeError("Execution cancelled by user")
-
-        wells = (
-            config_params.get("well_filter")
-            if config_params
-            else orchestrator.get_component_keys(MULTIPROCESSING_AXIS)
-        )
-        compilation = orchestrator.compile_pipelines(
-            pipeline_definition=pipeline_steps, well_filter=wells, is_zmq_execution=True
+        from openhcs.core.progress_reporter import (
+            set_progress_emitter,
+            clear_progress_emitter,
+            emit_progress,
         )
 
-        # Persist the final output plate root computed by the path planner so the
-        # client can retrieve it from status/results_summary on completion.
+        progress_context = {
+            MessageFields.EXECUTION_ID: execution_id,
+            MessageFields.PLATE_ID: plate_id,
+        }
+        worker_progress_queue = None
+        progress_forwarder = None
+        set_progress_emitter(self._enqueue_progress, progress_context)
+
         try:
-            compiled_contexts = (
-                compilation.get("compiled_contexts")
-                if isinstance(compilation, dict)
-                else None
+            emit_progress(
+                {
+                    "axis_id": "",
+                    "step_name": "pipeline",
+                    "step_index": -1,
+                    "total_steps": len(pipeline_steps),
+                    "phase": "init",
+                    "status": "started",
+                    "completed": 0,
+                    "total": 1,
+                    "percent": 0.0,
+                }
             )
-            if compiled_contexts:
-                first_context = next(iter(compiled_contexts.values()))
-                output_plate_root = getattr(first_context, "output_plate_root", None)
-                if output_plate_root:
-                    self.active_executions[execution_id]["output_plate_root"] = str(
-                        output_plate_root
-                    )
-                auto_add_output_plate = (
-                    first_context.auto_add_output_plate_to_plate_manager
-                )
-                self.active_executions[execution_id]["auto_add_output_plate"] = bool(
-                    auto_add_output_plate
-                )
+
+            orchestrator = PipelineOrchestrator(
+                plate_path=Path(plate_path_str),
+                pipeline_config=pipeline_config,
+                progress_callback=None,
+            )
+            orchestrator.initialize()
+            self.active_executions[execution_id]["orchestrator"] = orchestrator
+
+            emit_progress(
+                {
+                    "axis_id": "",
+                    "step_name": "pipeline",
+                    "step_index": -1,
+                    "total_steps": len(pipeline_steps),
+                    "phase": "init",
+                    "status": "completed",
+                    "completed": 1,
+                    "total": 1,
+                    "percent": 100.0,
+                }
+            )
+
+            if (
+                self.active_executions[execution_id][MessageFields.STATUS]
+                == ExecutionStatus.CANCELLED.value
+            ):
                 logger.info(
-                    "[%s] Captured auto_add_output_plate=%s output_plate_root=%s",
+                    "[%s] Execution cancelled after initialization, aborting",
                     execution_id,
-                    bool(auto_add_output_plate),
-                    output_plate_root,
                 )
-            else:
+                raise RuntimeError("Execution cancelled by user")
+
+            wells = (
+                config_params.get("well_filter")
+                if config_params
+                else orchestrator.get_component_keys(MULTIPROCESSING_AXIS)
+            )
+            emit_progress(
+                {
+                    "axis_id": "",
+                    "step_name": "pipeline",
+                    "step_index": -1,
+                    "total_steps": len(pipeline_steps),
+                    "phase": "compile",
+                    "status": "started",
+                    "completed": 0,
+                    "total": 1,
+                    "percent": 0.0,
+                }
+            )
+
+            compilation = orchestrator.compile_pipelines(
+                pipeline_definition=pipeline_steps,
+                well_filter=wells,
+                is_zmq_execution=True,
+            )
+
+            emit_progress(
+                {
+                    "axis_id": "",
+                    "step_name": "pipeline",
+                    "step_index": -1,
+                    "total_steps": len(pipeline_steps),
+                    "phase": "compile",
+                    "status": "completed",
+                    "completed": 1,
+                    "total": 1,
+                    "percent": 100.0,
+                }
+            )
+
+            # Persist the final output plate root computed by the path planner so the
+            # client can retrieve it from status/results_summary on completion.
+            try:
+                compiled_contexts = (
+                    compilation.get("compiled_contexts")
+                    if isinstance(compilation, dict)
+                    else None
+                )
+                if compiled_contexts:
+                    first_context = next(iter(compiled_contexts.values()))
+                    output_plate_root = getattr(
+                        first_context, "output_plate_root", None
+                    )
+                    if output_plate_root:
+                        self.active_executions[execution_id]["output_plate_root"] = str(
+                            output_plate_root
+                        )
+                    auto_add_output_plate = (
+                        first_context.auto_add_output_plate_to_plate_manager
+                    )
+                    self.active_executions[execution_id]["auto_add_output_plate"] = (
+                        bool(auto_add_output_plate)
+                    )
+                    logger.info(
+                        "[%s] Captured auto_add_output_plate=%s output_plate_root=%s",
+                        execution_id,
+                        bool(auto_add_output_plate),
+                        output_plate_root,
+                    )
+                else:
+                    logger.warning(
+                        "[%s] No compiled_contexts; cannot capture auto_add_output_plate",
+                        execution_id,
+                    )
+            except Exception as e:
                 logger.warning(
-                    "[%s] No compiled_contexts; cannot capture auto_add_output_plate",
+                    "[%s] Failed to capture output_plate_root during compilation: %s",
+                    execution_id,
+                    e,
+                )
+
+            if (
+                self.active_executions[execution_id][MessageFields.STATUS]
+                == ExecutionStatus.CANCELLED.value
+            ):
+                logger.info(
+                    "[%s] Execution cancelled after compilation, aborting",
                     execution_id,
                 )
-        except Exception as e:
-            logger.warning(
-                "[%s] Failed to capture output_plate_root during compilation: %s",
-                execution_id,
-                e,
+                raise RuntimeError("Execution cancelled by user")
+
+            if compile_only:
+                logger.info("[%s] Compilation-only request completed", execution_id)
+                self._set_compile_status("compiled success")
+                return compilation["compiled_contexts"]
+
+            log_dir = Path.home() / ".local" / "share" / "openhcs" / "logs"
+            log_dir.mkdir(parents=True, exist_ok=True)
+
+            worker_progress_queue = multiprocessing.Queue()
+            progress_forwarder = threading.Thread(
+                target=self._forward_worker_progress,
+                args=(worker_progress_queue,),
+                daemon=True,
             )
+            progress_forwarder.start()
 
-        if (
-            self.active_executions[execution_id][MessageFields.STATUS]
-            == ExecutionStatus.CANCELLED.value
-        ):
-            logger.info(
-                "[%s] Execution cancelled after compilation, aborting", execution_id
+            if (
+                self.active_executions[execution_id][MessageFields.STATUS]
+                == ExecutionStatus.CANCELLED.value
+            ):
+                logger.info(
+                    "[%s] Execution cancelled before starting workers, aborting",
+                    execution_id,
+                )
+                raise RuntimeError("Execution cancelled by user")
+
+            return orchestrator.execute_compiled_plate(
+                pipeline_definition=pipeline_steps,
+                compiled_contexts=compilation["compiled_contexts"],
+                log_file_base=str(log_dir / f"zmq_worker_exec_{execution_id}"),
+                progress_queue=worker_progress_queue,
+                progress_context=progress_context,
             )
-            raise RuntimeError("Execution cancelled by user")
-
-        if compile_only:
-            logger.info("[%s] Compilation-only request completed", execution_id)
-            self._set_compile_status("compiled success")
-            return compilation["compiled_contexts"]
-
-        log_dir = Path.home() / ".local" / "share" / "openhcs" / "logs"
-        log_dir.mkdir(parents=True, exist_ok=True)
-
-        if (
-            self.active_executions[execution_id][MessageFields.STATUS]
-            == ExecutionStatus.CANCELLED.value
-        ):
-            logger.info(
-                "[%s] Execution cancelled before starting workers, aborting",
-                execution_id,
-            )
-            raise RuntimeError("Execution cancelled by user")
-
-        return orchestrator.execute_compiled_plate(
-            pipeline_definition=pipeline_steps,
-            compiled_contexts=compilation["compiled_contexts"],
-            log_file_base=str(log_dir / f"zmq_worker_exec_{execution_id}"),
-        )
+        finally:
+            if worker_progress_queue is not None:
+                worker_progress_queue.put(None)
+            if progress_forwarder is not None:
+                progress_forwarder.join()
+            clear_progress_emitter()
 
     def _kill_worker_processes(self) -> int:
         """OpenHCS-specific worker cleanup (graceful cancellation + kill)."""

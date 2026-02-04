@@ -536,36 +536,50 @@ class ImageBrowserWidget(QWidget):
 
         # Apply well filter if wells are selected
         if self.selected_wells:
+            logger.info(f"[FILTER] Applying well filter with {len(self.selected_wells)} wells: {self.selected_wells}")
+            logger.info(f"[FILTER] Files before well filter: {len(result)}")
             result = {
                 filename: metadata
                 for filename, metadata in result.items()
                 if self._matches_wells(filename, metadata)
             }
+            logger.info(f"[FILTER] Files after well filter: {len(result)}")
 
-        # Apply column filters
+        # Apply column filters (except Well if plate view is filtering wells)
         if self.column_filter_panel:
             active_filters = self.column_filter_panel.get_active_filters()
             if active_filters:
-                # Filter with AND logic across columns
-                filtered_result = {}
-                for filename, metadata in result.items():
-                    matches = True
-                    for column_name, selected_values in active_filters.items():
-                        # Get the metadata key (lowercase with underscores)
-                        metadata_key = column_name.lower().replace(" ", "_")
-                        raw_value = metadata.get(metadata_key, "")
-                        # Get display value for comparison (metadata name if available)
-                        item_value = self._get_metadata_display_value(
-                            metadata_key, raw_value
-                        )
-                        if item_value not in selected_values:
-                            matches = False
-                            break
-                    if matches:
-                        filtered_result[filename] = metadata
-                result = filtered_result
+                # Skip Well filter if plate view is already filtering by wells
+                # The plate view selection takes precedence and syncs to the well filter
+                if self.selected_wells and "Well" in active_filters:
+                    active_filters = {k: v for k, v in active_filters.items() if k != "Well"}
+                    logger.debug("[FILTER] Skipping Well column filter (plate view is filtering)")
+
+                if active_filters:
+                    logger.info(f"[FILTER] Applying column filters: {list(active_filters.keys())}")
+                    logger.info(f"[FILTER] Files before column filter: {len(result)}")
+                    # Filter with AND logic across columns
+                    filtered_result = {}
+                    for filename, metadata in result.items():
+                        matches = True
+                        for column_name, selected_values in active_filters.items():
+                            # Get the metadata key (lowercase with underscores)
+                            metadata_key = column_name.lower().replace(" ", "_")
+                            raw_value = metadata.get(metadata_key, "")
+                            # Get display value for comparison (metadata name if available)
+                            item_value = self._get_metadata_display_value(
+                                metadata_key, raw_value
+                            )
+                            if item_value not in selected_values:
+                                matches = False
+                                break
+                        if matches:
+                            filtered_result[filename] = metadata
+                    result = filtered_result
+                    logger.info(f"[FILTER] Files after column filter: {len(result)}")
 
         # Update table with combined filters
+        logger.info(f"[FILTER] Populating table with {len(result)} files")
         self._populate_table(result)
         logger.debug(f"Combined filters: {len(result)} images shown")
 
@@ -1649,6 +1663,7 @@ class ImageBrowserWidget(QWidget):
 
     def _on_wells_selected(self, well_ids: Set[str]):
         """Handle well selection from plate view."""
+        logger.info(f"[WELLS_SELECTED] Received {len(well_ids)} wells: {well_ids}")
         self.selected_wells = well_ids
         self._apply_combined_filters()
 
@@ -1694,9 +1709,13 @@ class ImageBrowserWidget(QWidget):
         """Check if image matches selected wells."""
         try:
             well_id = self._extract_well_id(metadata)
-            return well_id in self.selected_wells
-        except (KeyError, ValueError):
+            matches = well_id in self.selected_wells
+            if not matches:
+                logger.debug(f"[MATCH] Well {well_id} not in selected_wells")
+            return matches
+        except (KeyError, ValueError) as e:
             # Image has no well metadata, doesn't match well filter
+            logger.debug(f"[MATCH] No well metadata for {filename}: {e}")
             return False
 
     def _get_current_folder(self) -> Optional[str]:

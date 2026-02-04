@@ -6,7 +6,7 @@ Extracts compilation logic from PlateManagerWidget into a reusable service.
 
 import asyncio
 import logging
-from typing import Dict, List, Any, Protocol, runtime_checkable
+from typing import Dict, List, Any
 
 from openhcs.pyqt_gui.widgets.shared.services.zmq_client_service import (
     ZMQClientService,
@@ -14,31 +14,6 @@ from openhcs.pyqt_gui.widgets.shared.services.zmq_client_service import (
 from openhcs.core.orchestrator.orchestrator import OrchestratorState
 
 logger = logging.getLogger(__name__)
-
-
-@runtime_checkable
-class CompilationHost(Protocol):
-    """Protocol for widgets that host the compilation service."""
-
-    # State attributes the service needs access to
-    global_config: Any
-    # NOTE: orchestrators now accessed via ObjectStateRegistry.get_object(plate_path)
-    plate_configs: Dict[str, Dict]
-    plate_compiled_data: Dict[str, Any]
-
-    # Execution state is used to decide whether we should disconnect the shared
-    # ZMQ client after compilation.
-    execution_state: str
-
-    # Methods the service calls back to
-    def emit_progress_started(self, count: int) -> None: ...
-    def emit_progress_updated(self, value: int) -> None: ...
-    def emit_progress_finished(self) -> None: ...
-    def emit_orchestrator_state(self, plate_path: str, state: str) -> None: ...
-    def emit_compilation_error(self, plate_name: str, error: str) -> None: ...
-    def emit_status(self, msg: str) -> None: ...
-    def get_pipeline_definition(self, plate_path: str) -> List: ...
-    def update_button_states(self) -> None: ...
 
 
 class CompilationService:
@@ -51,9 +26,7 @@ class CompilationService:
     - Progress reporting via host callbacks
     """
 
-    def __init__(
-        self, host: CompilationHost, client_service: ZMQClientService | None = None
-    ):
+    def __init__(self, host, client_service: ZMQClientService | None = None):
         self.host = host
         self.client_service = client_service or ZMQClientService()
 
@@ -72,7 +45,7 @@ class CompilationService:
             zmq_client = await self.client_service.connect(persistent=True, timeout=15)
 
             for i, plate_data in enumerate(selected_items):
-                plate_path = plate_data["path"]
+                plate_path = str(plate_data["path"])
 
                 # Get definition pipeline
                 definition_pipeline = self.host.get_pipeline_definition(plate_path)
@@ -86,6 +59,8 @@ class CompilationService:
                 self._validate_pipeline_steps(definition_pipeline)
 
                 try:
+                    self.host.plate_compile_pending.add(plate_path)
+                    self.host.update_item_list()
                     pipeline_config = self._get_pipeline_config(plate_path)
                     response = await loop.run_in_executor(
                         None,
@@ -119,6 +94,8 @@ class CompilationService:
                         "definition_pipeline": definition_pipeline,
                     }
                     self._set_orchestrator_state(plate_path, OrchestratorState.COMPILED)
+                    self.host.plate_compile_pending.remove(plate_path)
+                    self.host.update_item_list()
                     logger.info(f"Successfully compiled {plate_path}")
                     self.host.emit_orchestrator_state(plate_path, "COMPILED")
 
@@ -128,6 +105,8 @@ class CompilationService:
                     self._set_orchestrator_state(
                         plate_path, OrchestratorState.COMPILE_FAILED
                     )
+                    self.host.plate_compile_pending.remove(plate_path)
+                    self.host.update_item_list()
                     self.host.emit_orchestrator_state(plate_path, "COMPILE_FAILED")
                     self.host.emit_compilation_error(plate_data["name"], str(e))
 
