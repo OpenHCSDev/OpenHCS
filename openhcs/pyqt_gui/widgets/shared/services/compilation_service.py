@@ -145,9 +145,10 @@ class CompilationService:
     def _validate_pipeline_steps(self, pipeline: List) -> None:
         """Validate that steps have required func attribute."""
         for i, step in enumerate(pipeline):
-            if not hasattr(step, "func"):
+            func = step.func
+            if func is None:
                 raise AttributeError(
-                    f"Step '{step.name}' is missing 'func' attribute. "
+                    f"Step '{step.name}' has func=None. "
                     "This usually means the pipeline was loaded from a compiled state."
                 )
 

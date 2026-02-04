@@ -574,6 +574,7 @@ class DualEditorWindow(BaseFormDialog):
                     pipeline_config=self.orchestrator.pipeline_config,
                     scope_id=scope_id,  # Same hierarchical scope_id as step editor
                     step_index=self._step_index,  # Align scope styling with pipeline order
+                    scope_accent_color=self._scope_accent_color,
                     render_header=False,  # Don't render header - buttons will be managed externally
                     button_style="compact",  # Borderless compact style to match function editor
                 )
