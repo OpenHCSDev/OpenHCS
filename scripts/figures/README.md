@@ -98,3 +98,7 @@ All scripts require:
 - pandas (for automated plots)
 - scipy (for statistical tests)
 - openhcs package (for ROI handling)
+
+## Related
+
+See also `../napari-plugins/` for napari plugins for creating orthogonal projections and exporting layers directly from napari.
