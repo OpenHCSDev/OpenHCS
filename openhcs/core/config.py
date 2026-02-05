@@ -627,6 +627,13 @@ class StreamingDefaults(Enableable, StepWellFilterConfig):
     enabled: Annotated[bool, abbreviation("enabled")] = False
     """Whether this streaming config is enabled. When False, config exists but streaming is disabled."""
 
+    batch_size: Annotated[Optional[int], abbreviation("batch")] = None
+    """Number of images to batch before displaying.
+    
+    None = wait for all images in the current operation, then display once (fastest, default).
+    N = show incrementally every N images (provides visual feedback but slower).
+    """
+
 
 @abbreviation("stream_cfg")
 @global_pipeline_config(ui_hidden=True)
@@ -642,8 +649,14 @@ class StreamingConfig(StreamingDefaults, ABC, metaclass=StreamingConfigMeta):
 
     # AutoRegisterMeta configuration - subclasses auto-register by snake_case class name
     __registry_key__ = "_streaming_config_key"
-    __key_extractor__ = lambda class_name, cls: __import__('re').sub(r"(?<!^)(?=[A-Z])", "_", class_name).lower()
-    _streaming_config_key = None  # Will be set by AutoRegisterMeta to snake_case class name
+    __key_extractor__ = (
+        lambda class_name, cls: __import__("re")
+        .sub(r"(?<!^)(?=[A-Z])", "_", class_name)
+        .lower()
+    )
+    _streaming_config_key = (
+        None  # Will be set by AutoRegisterMeta to snake_case class name
+    )
 
     @property
     @abstractmethod

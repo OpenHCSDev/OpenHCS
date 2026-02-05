@@ -324,25 +324,60 @@ class ZMQExecutionService:
         thread.start()
 
     def _on_progress(self, message: dict) -> None:
-        """Handle progress updates from ZMQ execution server."""
-        plate_id = str(message["plate_id"])
-        axis_id = message["axis_id"]
-        step_name = message["step_name"]
-        phase = message["phase"]
-        status = message["status"]
-        percent = message["percent"]
+        """Handle progress updates from ZMQ execution server.
 
-        self.host.plate_progress[plate_id] = {
-            "axis_id": axis_id,
-            "step_name": step_name,
-            "phase": phase,
-            "status": status,
-            "percent": percent,
-        }
-        self.host.emit_status(
-            f"{plate_id} [{axis_id}] {step_name} {percent:.0f}% {phase}"
-        )
+        Uses shared ExecutionProgressTracker (same as ZMQ server browser).
+        """
+        # Store in shared tracker
+        self.host._progress_tracker.add_message(message)
+
+        # NOTE: cleanup_old_executions() is handled by ZMQServerManagerWidget._periodic_cleanup()
+        # No need to call it on every progress message (redundant and causes excessive logging)
+
+        # Emit consolidated execution server status
+        self._emit_execution_server_status()
+
         self.host.update_item_list()
+
+    def _emit_execution_server_status(self) -> None:
+        """Emit consolidated status for all active executions."""
+        executions = self.host._progress_tracker.executions
+
+        if not executions:
+            self.host.emit_status("Ready")
+            return
+
+        # Count compiling vs executing across all executions
+        total_compiling = 0
+        total_executing = 0
+        plate_count = 0
+
+        for exec_obj in executions.values():
+            for plate in exec_obj.plates.values():
+                plate_count += 1
+                axes = plate.get_sorted_axes()
+                if not axes:
+                    continue
+
+                has_workers = any(ax.pid is not None for ax in axes)
+                if has_workers:
+                    total_executing += 1
+                else:
+                    total_compiling += 1
+
+        # Build consolidated status message
+        status_parts = []
+        if total_compiling > 0:
+            status_parts.append(f"⏳ {total_compiling} compiling")
+        if total_executing > 0:
+            status_parts.append(f"⚙️ {total_executing} executing")
+
+        if status_parts:
+            self.host.emit_status(
+                f"Server: {', '.join(status_parts)} | {plate_count} plates"
+            )
+        else:
+            self.host.emit_status(f"{plate_count} plates idle")
 
     def _check_all_completed(self) -> None:
         """Check if all plates are completed and call host hook if so."""

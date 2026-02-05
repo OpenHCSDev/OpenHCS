@@ -177,7 +177,15 @@ class PlateManagerWidget(AbstractManagerWidget):
         self.plate_execution_states: Dict[
             str, str
         ] = {}  # plate_path -> "queued" | "running" | "completed" | "failed"
-        self.plate_progress: Dict[str, Dict] = {}
+
+        # Use shared ExecutionProgressTracker singleton (same instance as ZMQ server browser)
+        # This ensures both UI components show the same progress data
+        from openhcs.pyqt_gui.widgets.shared.progress_state import (
+            ExecutionProgressTracker,
+            AxisProgress,
+        )
+        self._progress_tracker = ExecutionProgressTracker.get_instance()
+        self.plate_progress: Dict[str, Dict] = {}  # Deprecated, kept for compatibility
         self.plate_init_pending = set()
         self.plate_compile_pending = set()
 
@@ -191,7 +199,6 @@ class PlateManagerWidget(AbstractManagerWidget):
         )
 
         # Initialize base class (creates style_generator, event_bus, item_list, buttons, status_label internally)
-        # Also auto-processes PREVIEW_FIELD_CONFIGS declaratively
         super().__init__(service_adapter, color_scheme, gui_config, parent)
 
         # Setup UI (after base and subclass state is ready)
@@ -209,6 +216,11 @@ class PlateManagerWidget(AbstractManagerWidget):
         """Cleanup resources before widget destruction."""
         logger.info("🧹 Cleaning up PlateManagerWidget resources...")
         self._zmq_service.disconnect()
+
+        # Cleanup progress tracker
+        if hasattr(self, '_progress_tracker'):
+            self._progress_tracker.clear()
+
         logger.info("✅ PlateManagerWidget cleanup completed")
 
     def _on_time_travel_complete(self, dirty_states, triggering_scope):
@@ -334,17 +346,10 @@ class PlateManagerWidget(AbstractManagerWidget):
             )
         self.update_button_states()
 
-    # Declarative preview field configuration (processed automatically in ABC.__init__)
-    # Labels auto-discovered from PREVIEW_LABEL_REGISTRY (set via @global_pipeline_config(preview_label=...))
-    PREVIEW_FIELD_CONFIGS = [
-        "napari_streaming_config",  # preview_label='NAP'
-        "fiji_streaming_config",  # preview_label='FIJI'
-        "step_materialization_config",  # preview_label='MAT'
-    ]
-
     # Declarative list item format for PlateManager
     # The config source is orchestrator.pipeline_config
     # Field abbreviations are declared on config classes via @global_pipeline_config(field_abbreviations=...)
+    # Config indicators (NAP, FIJI, MAT) are auto-discovered via always_viewable_fields
     LIST_ITEM_FORMAT = ListItemFormat(
         first_line=(),  # No fields on first line (just name)
         preview_line=(
@@ -355,7 +360,6 @@ class PlateManagerWidget(AbstractManagerWidget):
             "path_planning_config.global_output_folder",
         ),
         detail_line_field="path",  # Show plate path as detail line
-        show_config_indicators=True,
     )
 
     # ========== CrossWindowPreviewMixin Hooks ==========
@@ -409,9 +413,26 @@ class PlateManagerWidget(AbstractManagerWidget):
             }
             if orchestrator.state == OrchestratorState.EXECUTING:
                 exec_state = self.plate_execution_states.get(plate_key)
-                progress = self.plate_progress.get(plate_key)
-                if exec_state == "running" and progress:
-                    status_prefix = f"🔄 {progress['axis_id']} {progress['step_name']} {progress['percent']:.0f}%"
+
+                # Use shared progress tracker to get ALL axes for this plate
+                all_progress = self._progress_tracker.get_all_progress()
+                plate_axes = [p for p in all_progress if p.plate_id == plate_key]
+
+                if exec_state == "running" and plate_axes:
+                    # Show all axes progress: "🔄 A01,B03: Step 50% | D02: Other 25%"
+                    if len(plate_axes) == 1:
+                        p = plate_axes[0]
+                        status_prefix = f"🔄 [{p.axis_id}] {p.step_name} {p.percent:.0f}%"
+                    else:
+                        # Multiple axes - show first 2 with step names
+                        active = [p for p in plate_axes if not p.is_complete()]
+                        if len(active) <= 2:
+                            axis_str = ",".join(f"{p.axis_id}:{p.percent:.0f}%" for p in active)
+                            status_prefix = f"🔄 {axis_str}"
+                        else:
+                            # More than 2 active - show summary
+                            avg = sum(p.percent for p in active) / len(active)
+                            status_prefix = f"🔄 {len(active)} axes {avg:.0f}%"
                 else:
                     status_prefix = {
                         "queued": "⏳ Queued",

@@ -112,15 +112,8 @@ class PipelineEditorWidget(AbstractManagerWidget):
         "scope_id_builder": lambda item, idx, w: w._build_step_scope_id(item),
     }
 
-    # Declarative preview field configuration (processed automatically in ABC.__init__)
-    # Labels auto-discovered from PREVIEW_LABEL_REGISTRY (set via @global_pipeline_config(preview_label=...))
-    PREVIEW_FIELD_CONFIGS = [
-        "napari_streaming_config",  # preview_label='NAP'
-        "fiji_streaming_config",  # preview_label='FIJI'
-        "step_materialization_config",  # preview_label='MAT'
-    ]
-
     # Declarative list item format (replaces imperative format_item_for_display logic)
+    # Config indicators (NAP, FIJI, MAT) are auto-discovered via always_viewable_fields
     LIST_ITEM_FORMAT = ListItemFormat(
         first_line=("func",),  # func= shown after step name
         preview_line=(
@@ -128,7 +121,6 @@ class PipelineEditorWidget(AbstractManagerWidget):
             "processing_config.group_by",
             "processing_config.input_source",
         ),
-        show_config_indicators=True,
         formatters={
             "func": "_format_func_preview",  # Method name for complex formatting
             "processing_config.input_source": "_format_input_source_preview",

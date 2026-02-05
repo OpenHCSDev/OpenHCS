@@ -1,14 +1,8 @@
 """
-Napari-based real-time visualization module for OpenHCS.
+Napari-based real-time visualization module.
 
 This module provides the NapariStreamVisualizer class for real-time
 visualization of tensors during pipeline execution.
-
-Doctrinal Clauses:
-- Clause 65 — No Fallback Logic
-- Clause 66 — Immutability After Construction
-- Clause 88 — No Inferred Capabilities
-- Clause 368 — Visualization Must Be Observer-Only
 """
 
 import logging
@@ -24,14 +18,8 @@ import numpy as np
 from typing import Any, Dict, Optional
 from qtpy.QtCore import QTimer
 
-from polystore.filemanager import FileManager
-from openhcs.utils.import_utils import optional_import
-from openhcs.core.config import (
-    TransportMode as OpenHCSTransportMode,
-    NapariStreamingConfig,
-)
-from openhcs.runtime.zmq_config import OPENHCS_ZMQ_CONFIG
-from zmqruntime.config import TransportMode as ZMQTransportMode
+from zmqruntime.config import TransportMode, ZMQConfig
+from zmqruntime.streaming_types import StreamingDataType
 from zmqruntime.streaming import StreamingVisualizerServer, VisualizerProcessManager
 from zmqruntime.transport import (
     coerce_transport_mode,
@@ -43,7 +31,11 @@ from zmqruntime.transport import (
 )
 
 # Optional napari import - this module should only be imported if napari is available
-napari = optional_import("napari")
+try:
+    import napari
+except ImportError:
+    napari = None
+
 if napari is None:
     raise ImportError(
         "napari is required for NapariStreamVisualizer. "
@@ -86,6 +78,9 @@ def _cleanup_global_viewer() -> None:
                 _global_viewer_process.join(timeout=1)
 
             _global_viewer_process = None
+
+
+register_cleanup_callback(_cleanup_global_viewer)
 
 
 def _parse_component_info_from_path(path_str: str):
@@ -134,7 +129,7 @@ def _build_nd_shapes(layer_items, stack_components):
     Returns:
         Tuple of (all_shapes_nd, all_shape_types, all_properties)
     """
-    from openhcs.runtime.roi_converters import NapariROIConverter
+    from polystore.roi_converters import NapariROIConverter
 
     all_shapes_nd = []
     all_shape_types = []
@@ -418,7 +413,7 @@ def _create_or_update_points_layer(viewer, layers, layer_name, points_data, prop
 
 
 # Populate registry now that helper functions are defined
-from openhcs.constants.streaming import StreamingDataType
+from zmqruntime.streaming_types import StreamingDataType
 
 _DATA_TYPE_HANDLERS = {
     StreamingDataType.IMAGE: {
@@ -469,28 +464,22 @@ def _handle_component_aware_display(
             raise ValueError(f"No component metadata available for path: {path}")
         component_info = component_metadata
 
-        # Build component_modes and component_order from config (dict or object)
-        component_modes = None
-        component_order = None
-
+        # Build component_modes and component_order from config
         if isinstance(display_config, dict):
-            cm = display_config.get("component_modes") or display_config.get(
-                "componentModes"
-            )
-            if isinstance(cm, dict) and cm:
-                component_modes = cm
+            # Dict config - assume it has expected keys
+            component_modes = display_config.get(
+                "component_modes"
+            ) or display_config.get("componentModes", {})
             component_order = display_config["component_order"]
         else:
-            # Handle object-like config (NapariDisplayConfig)
+            # Object config - assume it has expected attributes
             component_order = display_config.COMPONENT_ORDER
-            component_modes = {}
-            for component in component_order:
-                mode_field = f"{component}_mode"
-                if hasattr(display_config, mode_field):
-                    mode_value = getattr(display_config, mode_field)
-                    component_modes[component] = getattr(
-                        mode_value, "value", str(mode_value)
-                    )
+            component_modes = {
+                component: str(
+                    getattr(display_config, f"{component}_mode", "stack")
+                ).lower()
+                for component in component_order
+            }
 
         # Generic layer naming - iterate over components in canonical order
         # Components in SLICE mode create separate layers
@@ -682,11 +671,39 @@ class NapariViewerServer(StreamingVisualizerServer):
         self.pending_updates = {}  # layer_key -> QTimer (debounce)
         self.update_delay_ms = 1000  # Wait 200ms for more items before rebuilding
 
+        # Batch processors for efficient accumulation and display
+        # Uses batch_size from config if available (defaults to None = wait for all)
+        self._batch_processors = {}  # layer_key -> NapariBatchProcessor
+        self._batch_processor_lock = threading.Lock()
+
         # Ack socket handled by StreamingVisualizerServer
 
     def _setup_ack_socket(self):
         """Setup PUSH socket for sending acknowledgments."""
         super()._setup_ack_socket()
+
+    def _get_or_create_batch_processor(
+        self, layer_key: str, batch_size: Optional[int] = None
+    ):
+        """Get or create a batch processor for the given layer key."""
+        with self._batch_processor_lock:
+            if layer_key not in self._batch_processors:
+                # Import here to avoid circular imports
+                from polystore.streaming.receivers.napari import NapariBatchProcessor
+
+                processor = NapariBatchProcessor(
+                    napari_server=self,
+                    batch_size=batch_size,
+                    debounce_delay_ms=self.update_delay_ms,
+                    max_debounce_wait_ms=5000,  # 5 second max wait
+                )
+                self._batch_processors[layer_key] = processor
+                logger.info(
+                    f"NapariViewerServer: Created batch processor for layer '{layer_key}' "
+                    f"with batch_size={batch_size}"
+                )
+
+            return self._batch_processors[layer_key]
 
     def _update_global_component_values(self, stack_components, layer_items):
         """
@@ -802,70 +819,36 @@ class NapariViewerServer(StreamingVisualizerServer):
         """
         Execute the actual layer update after debounce delay.
 
-        Uses a lock to prevent concurrent updates to different layers.
+        Uses batch processor for efficient accumulation and display.
         """
         # Remove timer
         self.pending_updates.pop(layer_key, None)
 
-        # Acquire lock to prevent concurrent updates
-        with self.layer_update_lock:
-            logger.info(
-                f"🔬 NAPARI PROCESS: Executing debounced update for {layer_key}"
+        # Get current items for this layer
+        layer_items = self.component_groups.get(layer_key, [])
+        if not layer_items:
+            logger.warning(
+                f"🔬 NAPARI PROCESS: No items found for {layer_key}, skipping update"
             )
+            return
 
-            # Get current items for this layer
-            layer_items = self.component_groups.get(layer_key, [])
-            if not layer_items:
-                logger.warning(
-                    f"🔬 NAPARI PROCESS: No items found for {layer_key}, skipping update"
-                )
-                return
+        # Log layer composition
+        wells_in_layer = set(
+            item["components"].get("well", "unknown") for item in layer_items
+        )
+        logger.info(
+            f"🔬 NAPARI PROCESS: layer_key='{layer_key}' has {len(layer_items)} items from wells: {sorted(wells_in_layer)}"
+        )
 
-            # Log layer composition
-            wells_in_layer = set(
-                item["components"].get("well", "unknown") for item in layer_items
-            )
-            logger.info(
-                f"🔬 NAPARI PROCESS: layer_key='{layer_key}' has {len(layer_items)} items from wells: {sorted(wells_in_layer)}"
-            )
-
-            # Determine stack components (axes) to use
-            first_item = layer_items[0]
-            component_info = first_item["components"]
-            stack_components = [
-                comp
-                for comp, mode in component_modes.items()
-                if mode == "stack" and comp in component_info
-            ]
-
-            logger.info(
-                f"🔬 NAPARI PROCESS: Using stack components: {stack_components}"
-            )
-
-            # Build and update the layer based on data type
-            try:
-                if data_type == StreamingDataType.IMAGE:
-                    self._update_image_layer(
-                        layer_key, layer_items, stack_components, component_modes
-                    )
-                elif data_type == StreamingDataType.SHAPES:
-                    self._update_shapes_layer(
-                        layer_key, layer_items, stack_components, component_modes
-                    )
-                elif data_type == StreamingDataType.POINTS:
-                    self._update_points_layer(
-                        layer_key, layer_items, stack_components, component_modes
-                    )
-                else:
-                    logger.warning(
-                        f"🔬 NAPARI PROCESS: Unknown data type {data_type} for {layer_key}"
-                    )
-            except Exception as e:
-                logger.error(
-                    f"🔬 NAPARI PROCESS: Failed to update layer {layer_key}: {e}",
-                    exc_info=True,
-                )
-                # Continue running - don't crash the viewer
+        # Use batch processor for efficient accumulation and display
+        # This avoids recreating layers from scratch on every update
+        batch_processor = self._get_or_create_batch_processor(layer_key)
+        batch_processor.add_items(
+            layer_key=layer_key,
+            items=layer_items,
+            display_config={"component_modes": component_modes},
+            component_names_metadata=self.component_metadata,
+        )
 
     def _setup_dimension_label_handler(self, layer_key, stack_components):
         """
@@ -1740,632 +1723,3 @@ except Exception as e:
     except Exception as e:
         logger.error(f"🔬 VISUALIZER: Failed to spawn detached napari process: {e}")
         raise e
-
-
-class NapariStreamVisualizer(VisualizerProcessManager):
-    """
-    Manages a Napari viewer instance for real-time visualization of tensors
-    streamed from the OpenHCS pipeline. Runs napari in a separate process
-    for Qt compatibility and true persistence across pipeline runs.
-    """
-
-    def __init__(
-        self,
-        filemanager: FileManager,
-        visualizer_config,
-        viewer_title: str = "OpenHCS Real-Time Visualization",
-        persistent: bool = True,
-        port: int = None,
-        replace_layers: bool = False,
-        display_config=None,
-        transport_mode: OpenHCSTransportMode = OpenHCSTransportMode.IPC,
-    ):
-        self.filemanager = filemanager
-        self.viewer_title = viewer_title
-        self.persistent = (
-            persistent  # If True, viewer process stays alive after pipeline completion
-        )
-        self.visualizer_config = visualizer_config
-        # Use config class default if not specified
-        self.port = (
-            port
-            if port is not None
-            else NapariStreamingConfig.__dataclass_fields__["port"].default
-        )
-        super().__init__(port=self.port)
-        self.replace_layers = (
-            replace_layers  # If True, replace existing layers; if False, add new layers
-        )
-        self.display_config = display_config  # Configuration for display behavior
-        self.transport_mode = (
-            coerce_transport_mode(transport_mode) or ZMQTransportMode.IPC
-        )  # ZMQ transport mode (IPC or TCP)
-        self.process: Optional[multiprocessing.Process] = None
-        self.zmq_context: Optional[zmq.Context] = None
-        self.zmq_socket: Optional[zmq.Socket] = None
-        self._is_running = False  # Internal flag, use is_running property instead
-        self._connected_to_existing = (
-            False  # True if connected to viewer we didn't create
-        )
-        self._lock = threading.Lock()
-
-        # Clause 368: Visualization must be observer-only.
-        # This class will only read data and display it.
-
-    @property
-    def is_running(self) -> bool:
-        """
-        Check if the napari viewer is actually running.
-
-        This property checks the actual process state, not just a cached flag.
-        Returns True only if the process exists and is alive.
-        """
-        if not self._is_running:
-            return False
-
-        # If we connected to an existing viewer, verify it's still responsive
-        if self._connected_to_existing:
-            # Quick ping check to verify viewer is still alive
-            if not self._quick_ping_check():
-                logger.debug(
-                    f"🔬 VISUALIZER: Connected viewer on port {self.port} is no longer responsive"
-                )
-                self._is_running = False
-                self._connected_to_existing = False
-                return False
-            return True
-
-        if self.process is None:
-            self._is_running = False
-            return False
-
-        # Check if process is actually alive
-        try:
-            if hasattr(self.process, "is_alive"):
-                # multiprocessing.Process
-                alive = self.process.is_alive()
-            else:
-                # subprocess.Popen
-                alive = self.process.poll() is None
-
-            if not alive:
-                logger.debug(
-                    f"🔬 VISUALIZER: Napari process on port {self.port} is no longer alive"
-                )
-                self._is_running = False
-
-            return alive
-        except Exception as e:
-            logger.warning(f"🔬 VISUALIZER: Error checking process status: {e}")
-            self._is_running = False
-            return False
-
-    def _quick_ping_check(self) -> bool:
-        """Quick ping check to verify viewer is responsive (for connected viewers)."""
-        import zmq
-        import pickle
-        from openhcs.constants.constants import CONTROL_PORT_OFFSET
-
-        try:
-            control_port = self.port + CONTROL_PORT_OFFSET
-            control_url = get_zmq_transport_url(
-                control_port,
-                host="localhost",
-                mode=self.transport_mode,
-                config=OPENHCS_ZMQ_CONFIG,
-            )
-
-            ctx = zmq.Context()
-            sock = ctx.socket(zmq.REQ)
-            sock.setsockopt(zmq.LINGER, 0)
-            sock.setsockopt(zmq.RCVTIMEO, 200)  # 200ms timeout for quick check
-            sock.connect(control_url)
-            sock.send(pickle.dumps({"type": "ping"}))
-            response = pickle.loads(sock.recv())
-            sock.close()
-            ctx.term()
-            return response.get("type") == "pong"
-        except:
-            return False
-
-    def wait_for_ready(self, timeout: float = 10.0) -> bool:
-        """
-        Wait for the viewer to be ready to receive images.
-
-        This method blocks until the viewer is responsive or the timeout expires.
-        Should be called after start_viewer() when using async_mode=True.
-
-        Args:
-            timeout: Maximum time to wait in seconds
-
-        Returns:
-            True if viewer is ready, False if timeout
-        """
-        return self._wait_for_viewer_ready(timeout=timeout)
-
-    def _find_free_port(self) -> int:
-        """Find a free port for ZeroMQ communication."""
-        import socket
-
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.bind(("", 0))
-            return s.getsockname()[1]
-
-    def start_viewer(self, async_mode: bool = True):
-        """
-        Starts the Napari viewer in a separate process.
-
-        Args:
-            async_mode: If True, start viewer asynchronously in background thread.
-                       If False, wait for viewer to be ready before returning (legacy behavior).
-        """
-        if async_mode:
-            # Start viewer asynchronously in background thread
-            thread = threading.Thread(target=self._start_viewer_sync, daemon=True)
-            thread.start()
-            logger.info(
-                f"🔬 VISUALIZER: Starting napari viewer asynchronously on port {self.port}"
-            )
-        else:
-            # Legacy synchronous mode
-            self._start_viewer_sync()
-
-    def _start_viewer_sync(self):
-        """Internal synchronous viewer startup (called by start_viewer)."""
-        global _global_viewer_process, _global_viewer_port
-
-        with self._lock:
-            # Check if there's already a napari viewer running on the configured port
-            port_in_use = is_port_in_use(
-                self.port, self.transport_mode, config=OPENHCS_ZMQ_CONFIG
-            )
-            logger.info(f"🔬 VISUALIZER: Port {self.port} in use: {port_in_use}")
-
-            if port_in_use:
-                # Try to connect to existing viewer first before killing it
-                logger.info(
-                    f"🔬 VISUALIZER: Port {self.port} is in use, attempting to connect to existing viewer..."
-                )
-                if self._try_connect_to_existing_viewer(self.port):
-                    logger.info(
-                        f"🔬 VISUALIZER: Successfully connected to existing viewer on port {self.port}"
-                    )
-                    self._is_running = True
-                    self._connected_to_existing = (
-                        True  # Mark that we connected to existing viewer
-                    )
-                    return
-                else:
-                    # Existing viewer is unresponsive - kill it and start fresh
-                    logger.info(
-                        f"🔬 VISUALIZER: Existing viewer on port {self.port} is unresponsive, killing and restarting..."
-                    )
-                    # Use shared method from ZMQServer ABC
-                    from zmqruntime.server import ZMQServer
-                    from openhcs.constants.constants import CONTROL_PORT_OFFSET
-
-                    ZMQServer.kill_processes_on_port(self.port)
-                    ZMQServer.kill_processes_on_port(self.port + CONTROL_PORT_OFFSET)
-                    # Wait a moment for ports to be freed
-                    import time
-
-                    time.sleep(0.5)
-
-            if self._is_running:
-                logger.warning("Napari viewer is already running.")
-                return
-
-            # Port is already set in __init__
-            logger.info(
-                f"🔬 VISUALIZER: Starting napari viewer process on port {self.port}"
-            )
-
-            # ALL viewers (persistent and non-persistent) should be detached subprocess
-            # so they don't block parent process exit. The difference is only whether
-            # we terminate them during cleanup.
-            logger.info(
-                f"🔬 VISUALIZER: Creating {'persistent' if self.persistent else 'non-persistent'} napari viewer (detached)"
-            )
-            self.process = _spawn_detached_napari_process(
-                self.port, self.viewer_title, self.replace_layers, self.transport_mode
-            )
-
-            # Only track non-persistent viewers in global variable for test cleanup
-            if not self.persistent:
-                with _global_process_lock:
-                    _global_viewer_process = self.process
-                    _global_viewer_port = self.port
-
-            # Wait for napari viewer to be ready before setting up ZMQ
-            self._wait_for_viewer_ready()
-
-            # Set up ZeroMQ client
-            self._setup_zmq_client()
-
-            # Check if process is running (different methods for subprocess vs multiprocessing)
-            if hasattr(self.process, "is_alive"):
-                # multiprocessing.Process
-                process_alive = self.process.is_alive()
-            else:
-                # subprocess.Popen
-                process_alive = self.process.poll() is None
-
-            if process_alive:
-                self._is_running = True
-                logger.info(
-                    f"🔬 VISUALIZER: Napari viewer process started successfully (PID: {self.process.pid})"
-                )
-            else:
-                logger.error("🔬 VISUALIZER: Failed to start napari viewer process")
-
-    def _try_connect_to_existing_viewer(self, port: int) -> bool:
-        """
-        Try to connect to an existing napari viewer and verify it's responsive.
-
-        Returns True only if we can successfully handshake with the viewer.
-        """
-        try:
-            if ping_control_port(
-                port,
-                self.transport_mode,
-                host="localhost",
-                config=OPENHCS_ZMQ_CONFIG,
-                timeout_ms=500,
-                require_ready=True,
-            ):
-                self._setup_zmq_client()
-                return True
-            return False
-        except Exception as e:
-            logger.debug(f"Failed to connect to existing viewer on port {port}: {e}")
-            return False
-
-    def _wait_for_viewer_ready(self, timeout: float = 10.0) -> bool:
-        """Wait for the napari viewer to be ready using handshake protocol."""
-        logger.info(
-            f"🔬 VISUALIZER: Waiting for napari viewer to be ready on port {self.port}..."
-        )
-        ready = wait_for_server_ready(
-            self.port,
-            self.transport_mode,
-            host="localhost",
-            config=OPENHCS_ZMQ_CONFIG,
-            timeout=timeout,
-            require_ready=True,
-        )
-        if ready:
-            logger.info(f"🔬 VISUALIZER: Napari viewer is ready on port {self.port}")
-            return True
-
-        logger.warning("🔬 VISUALIZER: Timeout waiting for napari viewer handshake")
-        return False
-
-    def _setup_zmq_client(self):
-        """Set up ZeroMQ client to send data to viewer process."""
-        if self.port is None:
-            raise RuntimeError("Port not set - call start_viewer() first")
-
-        data_url = get_zmq_transport_url(
-            self.port,
-            host="localhost",
-            mode=self.transport_mode,
-            config=OPENHCS_ZMQ_CONFIG,
-        )
-
-        self.zmq_context = zmq.Context()
-        self.zmq_socket = self.zmq_context.socket(zmq.PUB)
-        self.zmq_socket.connect(data_url)
-
-        # Brief delay for ZMQ connection to establish
-        time.sleep(ZMQ_CONNECTION_DELAY_MS / 1000.0)
-        logger.info(f"🔬 VISUALIZER: ZMQ client connected to {data_url}")
-
-    def send_control_message(self, message_type: str, timeout: float = 2.0) -> bool:
-        """
-        Send a control message to the viewer.
-
-        Args:
-            message_type: Type of control message ('clear_state', 'shutdown', etc.)
-            timeout: Timeout in seconds for waiting for response
-
-        Returns:
-            True if message was sent and acknowledged, False otherwise
-        """
-        if not self.is_running or self.port is None:
-            logger.warning(
-                f"🔬 VISUALIZER: Cannot send {message_type} - viewer not running"
-            )
-            return False
-
-        control_url = get_control_url(
-            self.port,
-            self.transport_mode,
-            host="localhost",
-            config=OPENHCS_ZMQ_CONFIG,
-        )
-        control_context = None
-        control_socket = None
-
-        try:
-            control_context = zmq.Context()
-            control_socket = control_context.socket(zmq.REQ)
-            control_socket.setsockopt(zmq.LINGER, 0)
-            control_socket.setsockopt(zmq.RCVTIMEO, int(timeout * 1000))
-            control_socket.connect(control_url)
-
-            # Send control message
-            message = {"type": message_type}
-            control_socket.send(pickle.dumps(message))
-
-            # Wait for acknowledgment
-            response = control_socket.recv()
-            response_data = pickle.loads(response)
-
-            if response_data.get("status") == "success":
-                logger.info(f"🔬 VISUALIZER: {message_type} acknowledged by viewer")
-                return True
-            else:
-                logger.warning(f"🔬 VISUALIZER: {message_type} failed: {response_data}")
-                return False
-
-        except zmq.Again:
-            logger.warning(
-                f"🔬 VISUALIZER: Timeout waiting for {message_type} acknowledgment"
-            )
-            return False
-        except Exception as e:
-            logger.warning(f"🔬 VISUALIZER: Failed to send {message_type}: {e}")
-            return False
-        finally:
-            if control_socket:
-                try:
-                    control_socket.close()
-                except Exception as e:
-                    logger.debug(f"Failed to close control socket: {e}")
-            if control_context:
-                try:
-                    control_context.term()
-                except Exception as e:
-                    logger.debug(f"Failed to terminate control context: {e}")
-
-    def clear_viewer_state(self) -> bool:
-        """
-        Clear accumulated viewer state (component groups) for a new pipeline run.
-
-        Returns:
-            True if state was cleared successfully, False otherwise
-        """
-        return self.send_control_message("clear_state")
-
-    def send_image_data(
-        self, step_id: str, image_data: np.ndarray, axis_id: str = "unknown"
-    ):
-        """
-        DISABLED: This method bypasses component-aware stacking.
-        All visualization must go through the streaming backend.
-        """
-        raise RuntimeError(
-            f"send_image_data() is disabled. Use streaming backend for component-aware display. "
-            f"step_id: {step_id}, axis_id: {axis_id}, shape: {image_data.shape}"
-        )
-
-    def stop_viewer(self):
-        """Stop the napari viewer process (only if not persistent)."""
-        with self._lock:
-            if not self.persistent:
-                logger.info("🔬 VISUALIZER: Stopping non-persistent napari viewer")
-                self._cleanup_zmq()
-                if self.process:
-                    # Handle both subprocess and multiprocessing process types
-                    if hasattr(self.process, "is_alive"):
-                        # multiprocessing.Process
-                        if self.process.is_alive():
-                            self.process.terminate()
-                            self.process.join(timeout=5)
-                            if self.process.is_alive():
-                                logger.warning(
-                                    "🔬 VISUALIZER: Force killing napari viewer process"
-                                )
-                                self.process.kill()
-                    else:
-                        # subprocess.Popen
-                        if self.process.poll() is None:  # Still running
-                            self.process.terminate()
-                            try:
-                                self.process.wait(timeout=5)
-                            except subprocess.TimeoutExpired:
-                                logger.warning(
-                                    "🔬 VISUALIZER: Force killing napari viewer process"
-                                )
-                                self.process.kill()
-                self._is_running = False
-            else:
-                logger.info("🔬 VISUALIZER: Keeping persistent napari viewer alive")
-                # Just cleanup our ZMQ connection, leave process running
-                self._cleanup_zmq()
-                # DON'T set is_running = False for persistent viewers!
-                # The process is still alive and should be reusable
-
-    def _cleanup_zmq(self):
-        """Clean up ZeroMQ resources."""
-        if self.zmq_socket:
-            self.zmq_socket.close()
-            self.zmq_socket = None
-        if self.zmq_context:
-            self.zmq_context.term()
-            self.zmq_context = None
-
-    def visualize_path(
-        self, step_id: str, path: str, backend: str, axis_id: Optional[str] = None
-    ):
-        """
-        DISABLED: This method bypasses component-aware stacking.
-        All visualization must go through the streaming backend.
-        """
-        raise RuntimeError(
-            f"visualize_path() is disabled. Use streaming backend for component-aware display. "
-            f"Path: {path}, step_id: {step_id}, axis_id: {axis_id}"
-        )
-
-    def _prepare_data_for_display(
-        self, data: Any, step_id_for_log: str, display_config=None
-    ) -> Optional[np.ndarray]:
-        """Converts loaded data to a displayable NumPy array (slice or stack based on config)."""
-        cpu_tensor: Optional[np.ndarray] = None
-        try:
-            # GPU to CPU conversion logic
-            if hasattr(data, "is_cuda") and data.is_cuda:  # PyTorch
-                cpu_tensor = data.cpu().numpy()
-            elif (
-                hasattr(data, "device") and "cuda" in str(data.device).lower()
-            ):  # Check for device attribute
-                if hasattr(data, "get"):  # CuPy
-                    cpu_tensor = data.get()
-                elif hasattr(
-                    data, "numpy"
-                ):  # JAX on GPU might have .numpy() after host transfer
-                    cpu_tensor = np.asarray(
-                        data
-                    )  # JAX arrays might need explicit conversion
-                else:  # Fallback for other GPU array types if possible
-                    logger.warning(
-                        f"Unknown GPU array type for step '{step_id_for_log}'. Attempting .numpy()."
-                    )
-                    if hasattr(data, "numpy"):
-                        cpu_tensor = data.numpy()
-                    else:
-                        logger.error(
-                            f"Cannot convert GPU tensor of type {type(data)} for step '{step_id_for_log}'."
-                        )
-                        return None
-            elif isinstance(data, np.ndarray):
-                cpu_tensor = data
-            else:
-                # Attempt to convert to numpy array if it's some other array-like structure
-                try:
-                    cpu_tensor = np.asarray(data)
-                    logger.debug(
-                        f"Converted data of type {type(data)} to numpy array for step '{step_id_for_log}'."
-                    )
-                except Exception as e_conv:
-                    logger.warning(
-                        f"Unsupported data type for step '{step_id_for_log}': {type(data)}. Error: {e_conv}"
-                    )
-                    return None
-
-            if cpu_tensor is None:  # Should not happen if logic above is correct
-                return None
-
-            # Determine display mode based on configuration
-            # Default behavior: show as stack unless config specifies otherwise
-            should_slice = False
-
-            if display_config:
-                # Check if any component mode is set to SLICE
-                from openhcs.core.config import NapariDimensionMode
-                from openhcs.constants import AllComponents
-
-                # Check individual component mode fields for all dimensions
-                for component in AllComponents:
-                    field_name = f"{component.value}_mode"
-                    if hasattr(display_config, field_name):
-                        mode = getattr(display_config, field_name)
-                        if mode == NapariDimensionMode.SLICE:
-                            should_slice = True
-                            break
-            else:
-                # Default: slice for backward compatibility
-                should_slice = True
-
-            # Slicing/stacking logic
-            display_data: Optional[np.ndarray] = None
-
-            if should_slice:
-                # Original slicing behavior
-                if cpu_tensor.ndim == 3:  # ZYX
-                    display_data = cpu_tensor[cpu_tensor.shape[0] // 2, :, :]
-                elif cpu_tensor.ndim == 2:  # YX
-                    display_data = cpu_tensor
-                elif cpu_tensor.ndim > 3:  # e.g. CZYX or TZYX
-                    logger.debug(
-                        f"Tensor for step '{step_id_for_log}' has ndim > 3 ({cpu_tensor.ndim}). Taking a slice."
-                    )
-                    slicer = [0] * (cpu_tensor.ndim - 2)  # Slice first channels/times
-                    slicer[-1] = cpu_tensor.shape[-3] // 2  # Middle Z
-                    try:
-                        display_data = cpu_tensor[tuple(slicer)]
-                    except IndexError:  # Handle cases where slicing might fail (e.g. very small dimensions)
-                        logger.error(
-                            f"Slicing failed for tensor with shape {cpu_tensor.shape} for step '{step_id_for_log}'.",
-                            exc_info=True,
-                        )
-                        display_data = None
-                else:
-                    logger.warning(
-                        f"Tensor for step '{step_id_for_log}' has unsupported ndim for slicing: {cpu_tensor.ndim}."
-                    )
-                    return None
-            else:
-                # Stack mode: send the full data to napari (napari can handle 3D+ data)
-                if cpu_tensor.ndim >= 2:
-                    display_data = cpu_tensor
-                    logger.debug(
-                        f"Sending {cpu_tensor.ndim}D stack to napari for step '{step_id_for_log}' (shape: {cpu_tensor.shape})"
-                    )
-                else:
-                    logger.warning(
-                        f"Tensor for step '{step_id_for_log}' has unsupported ndim for stacking: {cpu_tensor.ndim}."
-                    )
-                    return None
-
-            return display_data.copy() if display_data is not None else None
-
-        except Exception as e:
-            logger.error(
-                f"Error preparing data from step '{step_id_for_log}' for display: {e}",
-                exc_info=True,
-            )
-            return None
-
-    def get_launch_command(self) -> list[str]:
-        import os
-        import sys
-
-        current_dir = os.getcwd()
-        log_dir = os.path.expanduser("~/.local/share/openhcs/logs")
-        os.makedirs(log_dir, exist_ok=True)
-        log_file = os.path.join(log_dir, f"napari_detached_port_{self.port}.log")
-
-        python_code = f"""
-import sys
-import os
-sys.path.insert(0, {repr(current_dir)})
-from openhcs.runtime.napari_stream_visualizer import _napari_viewer_process
-from openhcs.core.config import TransportMode
-transport_mode = TransportMode.{self.transport_mode.name}
-_napari_viewer_process({self.port}, {repr(self.viewer_title)}, {self.replace_layers}, {repr(log_file)}, transport_mode)
-"""
-
-        return [sys.executable, "-c", python_code]
-
-    def get_launch_env(self) -> dict:
-        import os
-        import platform
-
-        env = os.environ.copy()
-        if "QT_QPA_PLATFORM" not in env:
-            if platform.system() == "Darwin":
-                env["QT_QPA_PLATFORM"] = "cocoa"
-            elif platform.system() == "Linux":
-                env["QT_QPA_PLATFORM"] = "xcb"
-                env["QT_X11_NO_MITSHM"] = "1"
-        elif platform.system() == "Linux":
-            env["QT_X11_NO_MITSHM"] = "1"
-        return env
-
-    def start(self, detached: bool = True):
-        self.start_viewer(async_mode=False)
-        return self.process
-
-    def stop(self, timeout: float = 5.0):
-        self.stop_viewer()

@@ -1254,6 +1254,10 @@ class FunctionStep(AbstractStep):
             for pattern_list in grouped_patterns.values():
                 total_groups += len(pattern_list)
             completed_groups = 0
+            if total_groups == 0:
+                raise ValueError(
+                    f"No pattern groups found for step {step_index} ({step_name}) in well {axis_id}"
+                )
 
             # Sequential filtering now happens BEFORE prepare_patterns_and_functions() above
             # This ensures it works correctly when sequential_components != group_by
@@ -1340,7 +1344,7 @@ class FunctionStep(AbstractStep):
                     emit_progress(
                         {
                             "axis_id": axis_id,
-                            "step_name": step_name,
+                            "step": step_name,
                             "step_index": step_index,
                             "total_steps": total_steps,
                             "phase": "pattern_group",

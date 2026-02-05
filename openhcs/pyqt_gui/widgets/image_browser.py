@@ -392,25 +392,6 @@ class ImageBrowserWidget(QWidget):
 
         return container
 
-    def _get_config_values(self, prefix: str) -> Dict[str, Any]:
-        """Get current values for a nested config, scoped by prefix.
-
-        Args:
-            prefix: The dotted path prefix (e.g., 'napari_streaming_config' or 'fiji_streaming_config')
-
-        Returns:
-            Dict with prefix stripped from keys, e.g., {'port': 5555, 'host': 'localhost'}
-        """
-        prefix_dot = f"{prefix}."
-        result = {}
-        for path, value in self.state.parameters.items():
-            if path.startswith(prefix_dot):
-                remainder = path[len(prefix_dot) :]
-                # Only direct children (no nested dots in remainder)
-                if "." not in remainder:
-                    result[remainder] = value
-        return result
-
     def _is_viewer_enabled(self, viewer_type: str) -> bool:
         """Check if a viewer is enabled by querying its 'enabled' field from ObjectState.
 
@@ -510,86 +491,88 @@ class ImageBrowserWidget(QWidget):
             self._update_plate_view()
 
     def _apply_combined_filters(self):
-        """Apply search, folder, well, and column filters together."""
-        # Start with search-filtered files
-        result = self.filtered_files.copy()
-
-        # Apply folder filter if a folder is selected
+        """Apply search, folder, well, and column filters together in single pass."""
+        # Get folder filter if selected
         selected_items = self.folder_tree.selectedItems()
+        folder_path = None
+        results_folder_path = None
         if selected_items:
             folder_path = selected_items[0].data(0, Qt.ItemDataRole.UserRole)
-            if folder_path:  # Not root
-                # Filter by folder - include both the selected folder AND its associated results folder
-                # e.g., if "images" is selected, also include "images_results"
+            if folder_path:
                 results_folder_path = f"{folder_path}_results"
 
-                result = {
-                    filename: metadata
-                    for filename, metadata in result.items()
-                    if (
-                        str(Path(filename).parent) == folder_path
-                        or filename.startswith(folder_path + "/")
-                        or str(Path(filename).parent) == results_folder_path
-                        or filename.startswith(results_folder_path + "/")
-                    )
-                }
-
-        # Apply well filter if wells are selected
-        if self.selected_wells:
-            logger.info(f"[FILTER] Applying well filter with {len(self.selected_wells)} wells: {self.selected_wells}")
-            logger.info(f"[FILTER] Files before well filter: {len(result)}")
-            result = {
-                filename: metadata
-                for filename, metadata in result.items()
-                if self._matches_wells(filename, metadata)
-            }
-            logger.info(f"[FILTER] Files after well filter: {len(result)}")
-
-        # Apply column filters (except Well if plate view is filtering wells)
+        # Get active column filters (except Well if plate view is filtering)
+        active_filters = None
         if self.column_filter_panel:
             active_filters = self.column_filter_panel.get_active_filters()
-            if active_filters:
-                # Skip Well filter if plate view is already filtering by wells
-                # The plate view selection takes precedence and syncs to the well filter
-                if self.selected_wells and "Well" in active_filters:
-                    active_filters = {k: v for k, v in active_filters.items() if k != "Well"}
-                    logger.debug("[FILTER] Skipping Well column filter (plate view is filtering)")
+            if active_filters and self.selected_wells and "Well" in active_filters:
+                active_filters = {
+                    k: v for k, v in active_filters.items() if k != "Well"
+                }
+                logger.debug(
+                    "[FILTER] Skipping Well column filter (plate view is filtering)"
+                )
 
-                if active_filters:
-                    logger.info(f"[FILTER] Applying column filters: {list(active_filters.keys())}")
-                    logger.info(f"[FILTER] Files before column filter: {len(result)}")
-                    # Filter with AND logic across columns
-                    filtered_result = {}
-                    for filename, metadata in result.items():
-                        matches = True
-                        for column_name, selected_values in active_filters.items():
-                            # Get the metadata key (lowercase with underscores)
-                            metadata_key = column_name.lower().replace(" ", "_")
-                            raw_value = metadata.get(metadata_key, "")
-                            # Get display value for comparison (metadata name if available)
-                            item_value = self._get_metadata_display_value(
-                                metadata_key, raw_value
-                            )
-                            if item_value not in selected_values:
-                                matches = False
-                                break
-                        if matches:
-                            filtered_result[filename] = metadata
-                    result = filtered_result
-                    logger.info(f"[FILTER] Files after column filter: {len(result)}")
+        # Single-pass filtering: check all conditions for each file
+        result = {}
+        for filename, metadata in self.filtered_files.items():
+            include = True
 
-        # Update table with combined filters
-        logger.info(f"[FILTER] Populating table with {len(result)} files")
-        self._populate_table(result)
+            # Folder filter
+            if folder_path and include:
+                include = (
+                    str(Path(filename).parent) == folder_path
+                    or filename.startswith(folder_path + "/")
+                    or str(Path(filename).parent) == results_folder_path
+                    or filename.startswith(results_folder_path + "/")
+                )
+
+            # Well filter
+            if self.selected_wells and include:
+                include = self._matches_wells(filename, metadata)
+
+            # Column filters (using pre-computed display values for speed)
+            if active_filters and include:
+                for column_name, selected_values in active_filters.items():
+                    metadata_key = column_name.lower().replace(" ", "_")
+                    # Use pre-computed display value directly from metadata
+                    item_value = metadata.get(f"_display_{metadata_key}", "")
+                    if item_value not in selected_values:
+                        include = False
+                        break
+
+            if include:
+                result[filename] = metadata
+
+        # Update table with filtered results
+        self._update_table_with_filtered_items(result)
         logger.debug(f"Combined filters: {len(result)} images shown")
+
+    def _precompute_display_values(self):
+        """Pre-compute display values for all metadata keys in all files.
+
+        This pre-computes values like "1 | W1" (raw | display_name) during load
+        to avoid repeated lookups during filtering. Store as "_display_{key}" in metadata.
+        """
+        for metadata in self.all_files.values():
+            for metadata_key in self.metadata_keys:
+                raw_value = metadata.get(metadata_key)
+                if raw_value is not None:
+                    display_value = self._get_metadata_display_value_impl(
+                        metadata_key, str(raw_value), (metadata_key, str(raw_value))
+                    )
+                    metadata[f"_display_{metadata_key}"] = display_value
 
     def _get_metadata_display_value(self, metadata_key: str, raw_value: Any) -> str:
         """
-        Get display value for metadata, using metadata cache if available.
+        Get display value for metadata, using pre-computed values from metadata dict.
 
         For components like channel, this returns "1 | W1" format (raw key | metadata name)
         to preserve both the number and the metadata name. This handles cases where
         different subdirectories might have the same channel number mapped to different names.
+
+        First checks for pre-computed "_display_{key}" in metadata (fast path during filtering),
+        otherwise computes and caches the value.
 
         Args:
             metadata_key: Metadata key (e.g., "channel", "site", "well")
@@ -604,11 +587,23 @@ class ImageBrowserWidget(QWidget):
 
         # Convert to string for lookup
         value_str = str(raw_value)
+
+        # First check cache from pre-computed values (fast path during filtering)
         cache_key = (metadata_key, value_str)
         cached_value = self._metadata_display_cache.get(cache_key)
         if cached_value is not None:
             return cached_value
 
+        # Compute and cache value
+        display_value = self._get_metadata_display_value_impl(
+            metadata_key, value_str, cache_key
+        )
+        return display_value
+
+    def _get_metadata_display_value_impl(
+        self, metadata_key: str, value_str: str, cache_key: tuple
+    ) -> str:
+        """Implementation of metadata display value computation."""
         # Try to get metadata display name from cache
         if self.orchestrator:
             try:
@@ -820,6 +815,9 @@ class ImageBrowserWidget(QWidget):
 
         # Configure ImageTableBrowser with dynamic columns
         self.image_table_browser.set_metadata_keys(self.metadata_keys)
+
+        # Pre-compute display values for fast filtering
+        self._precompute_display_values()
 
         # Initialize filtered files to all files
         self.filtered_files = self.all_files.copy()
@@ -1041,32 +1039,13 @@ class ImageBrowserWidget(QWidget):
             if not self.orchestrator:
                 raise RuntimeError("No orchestrator set")
 
-            from openhcs.config_framework.context_manager import config_context
-            from openhcs.config_framework.lazy_factory import (
-                resolve_lazy_configurations_for_serialization,
-            )
             from openhcs.constants.constants import Backend as BackendEnum
             from openhcs.pyqt_gui.utils.threading_utils import spawn_thread_with_context
 
             # For each enabled viewer, resolve config + viewer on UI thread, then spawn worker
             for viewer_type in enabled_viewers:
-                config_key = viewer_type  # viewer_type IS the field name
-                current_values = self._get_config_values(config_key)
-
-                # Dynamically get the lazy config class from registry
-                LazyConfigClass = StreamingConfig.__registry__.get(viewer_type)
-                if not LazyConfigClass:
-                    logger.error(f"Unknown viewer type: {viewer_type}")
-                    continue
-
-                # CRITICAL: Pass None values through for lazy resolution
-                temp_config = LazyConfigClass(**current_values)
-
-                with config_context(self.orchestrator.pipeline_config):
-                    with config_context(temp_config):
-                        viewer_config = resolve_lazy_configurations_for_serialization(
-                            temp_config
-                        )
+                # Get fully resolved streaming config from ObjectState (includes inheritance)
+                config = self.state.get_resolved_value(viewer_type)
 
                 # Get the appropriate backend enum
                 backend_enum = getattr(
@@ -1077,14 +1056,14 @@ class ImageBrowserWidget(QWidget):
                     continue
 
                 # Create closure to capture viewer_config
-                def _make_acquire_and_stream(config, vt):
+                def _make_acquire_and_stream(cfg, vt):
                     def _acquire_and_stream():
                         try:
-                            viewer = self.orchestrator.get_or_create_visualizer(config)
+                            viewer = self.orchestrator.get_or_create_visualizer(cfg)
                             # _stream_single_roi_async itself starts a worker thread,
                             # so we call it here to kick off the streaming flow.
                             self._stream_single_roi_async(
-                                viewer, roi_zip_path, config, backend_enum, vt
+                                viewer, roi_zip_path, cfg, backend_enum, vt
                             )
                         except Exception as e:
                             logger.error(
@@ -1103,7 +1082,7 @@ class ImageBrowserWidget(QWidget):
 
                 # Spawn the thread with captured config
                 spawn_thread_with_context(
-                    _make_acquire_and_stream(viewer_config, viewer_type),
+                    _make_acquire_and_stream(config, viewer_type),
                     name=f"acquire_{viewer_type}",
                 )
 
@@ -1208,6 +1187,19 @@ class ImageBrowserWidget(QWidget):
     def _populate_table(self, files_dict: Dict[str, Dict]):
         """Populate table with files (images + results) using ImageTableBrowser."""
         self.image_table_browser.set_items(files_dict)
+
+        # Update status label with file counts
+        total = len(self.all_files)
+        filtered = len(files_dict)
+        self.image_table_browser.status_label.setText(f"Files: {filtered}/{total}")
+
+    def _update_table_with_filtered_items(self, files_dict: Dict[str, Dict]):
+        """Update table with filtered items without rebuilding SearchService.
+
+        Use this when all_files has not changed, only filter criteria changed.
+        Much faster than _populate_table() for checkbox filter updates.
+        """
+        self.image_table_browser.set_filtered_items(files_dict)
 
         # Update status label with file counts
         total = len(self.all_files)
@@ -1429,29 +1421,12 @@ class ImageBrowserWidget(QWidget):
             plate_path, self.orchestrator.filemanager
         )
 
-        # Resolve streaming config
-        from openhcs.config_framework.context_manager import config_context
-        from openhcs.config_framework.lazy_factory import (
-            resolve_lazy_configurations_for_serialization,
-        )
+        # Get fully resolved streaming config from ObjectState (includes inheritance)
+        # get_resolved_value now returns reconstructed dataclass with all sub-fields populated
+        config = self.state.get_resolved_value(viewer_type)
 
-        # Dynamically get the lazy config class from StreamingConfig registry
-        LazyConfigClass = StreamingConfig.__registry__.get(viewer_type)
-        if not LazyConfigClass:
-            raise ValueError(f"Unknown viewer type: {viewer_type}")
-
-        config_key = viewer_type  # viewer_type IS the field name
-        current_values = self._get_config_values(config_key)
-        temp_config = LazyConfigClass(**current_values)
-
-        with config_context(self.orchestrator.pipeline_config):
-            with config_context(temp_config):
-                resolved_config = resolve_lazy_configurations_for_serialization(
-                    temp_config
-                )
-
-        viewer = self.orchestrator.get_or_create_visualizer(resolved_config)
-        return viewer, plate_path, read_backend, resolved_config
+        viewer = self.orchestrator.get_or_create_visualizer(config)
+        return viewer, plate_path, read_backend, config
 
     def _stream_images_to_viewer(self, filenames: list, viewer_type: str):
         """Load and stream images to specified viewer type."""

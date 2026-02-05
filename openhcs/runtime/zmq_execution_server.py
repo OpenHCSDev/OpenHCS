@@ -46,6 +46,36 @@ class OpenHCSExecutionServer(ExecutionServer):
         self._compile_message: str | None = None
         self._compile_status_expires_at: float | None = None
 
+    def _flush_progress_only(self) -> None:
+        """Flush only progress messages to ZMQ, without processing control messages.
+
+        This is called during synchronous execution when we can't receive from
+        the control socket (would block or fail with NOBLOCK).
+        """
+        if not self.data_socket:
+            return
+        import json
+        import queue
+
+        logger = logging.getLogger(__name__)
+        count = 0
+        while True:
+            try:
+                progress_update = self.progress_queue.get_nowait()
+            except queue.Empty:
+                if count > 0:
+                    logger.info(f"Flushed {count} progress update(s) to ZMQ")
+                break
+            logger.info(
+                f"Flushing to ZMQ: step={progress_update.get('step')!r}, "
+                f"axis={progress_update.get('axis_id')!r}, plate_id={progress_update.get('plate_id')!r}, "
+                f"percent={progress_update.get('percent')!r}, total_wells={progress_update.get('total_wells')!r}"
+            )
+            json_str = json.dumps(progress_update)
+            logger.info(f"Full JSON being sent: {json_str[:300]}")
+            self.data_socket.send_string(json_str)
+            count += 1
+
     def _set_compile_status(
         self, status: str, message: str | None = None, ttl_seconds: float = 4.0
     ) -> None:
@@ -65,22 +95,57 @@ class OpenHCSExecutionServer(ExecutionServer):
 
     def _create_pong_response(self):
         response = super()._create_pong_response()
+
+        # Add OpenHCS-specific compile status
         compile_status, compile_message = self._get_compile_status()
         if compile_status is not None:
             response[MessageFields.COMPILE_STATUS] = compile_status
         if compile_message is not None:
             response[MessageFields.COMPILE_MESSAGE] = compile_message
+
+        # Filter out compile-only executions from running_executions
+        # Compile-only executions should be shown via compile_status, not as running executions
+        running_executions = response.get("running_executions", [])
+        filtered_running = [
+            exec_info
+            for exec_info in running_executions
+            if not self.active_executions.get(
+                exec_info.get(MessageFields.EXECUTION_ID, ""), {}
+            ).get(MessageFields.COMPILE_ONLY, False)
+        ]
+        response["running_executions"] = filtered_running
+
         return response
 
     def _enqueue_progress(self, progress_update: dict) -> None:
+        # DEBUG: Log what's being enqueued
+        if "total_wells" in progress_update:
+            logger.info(
+                f"_enqueue_progress: total_wells={progress_update.get('total_wells')}, keys={list(progress_update.keys())}, step={progress_update.get('step')}"
+            )
         self.progress_queue.put(progress_update)
 
     def _forward_worker_progress(self, worker_queue) -> None:
+        import logging
+
+        logger = logging.getLogger(__name__)
         while True:
             progress_update = worker_queue.get()
             if progress_update is None:
+                logger.info("Progress forwarder received None, exiting")
                 break
+            logger.info(
+                f"Forwarding progress: pid={progress_update.get('pid')}, axis={progress_update.get('axis_id')}, step={progress_update.get('step')}"
+            )
             self.progress_queue.put(progress_update)
+
+    def _get_worker_info(self):
+        """Return raw worker info (no enrichment).
+
+        Worker axis_id comes from progress tracker, not from ping responses.
+        Ping is for process tracking (CPU, memory), not application state.
+        """
+        return super()._get_worker_info()
 
     def _run_execution(self, execution_id, request, record):
         """Run an execution and enrich results_summary with output plate path.
@@ -378,6 +443,7 @@ class OpenHCSExecutionServer(ExecutionServer):
         progress_context = {
             MessageFields.EXECUTION_ID: execution_id,
             MessageFields.PLATE_ID: plate_id,
+            MessageFields.AXIS_ID: "",
         }
         worker_progress_queue = None
         progress_forwarder = None
@@ -387,7 +453,7 @@ class OpenHCSExecutionServer(ExecutionServer):
             emit_progress(
                 {
                     "axis_id": "",
-                    "step_name": "pipeline",
+                    "step": "pipeline",
                     "step_index": -1,
                     "total_steps": len(pipeline_steps),
                     "phase": "init",
@@ -409,11 +475,11 @@ class OpenHCSExecutionServer(ExecutionServer):
             emit_progress(
                 {
                     "axis_id": "",
-                    "step_name": "pipeline",
+                    "step": "pipeline",
                     "step_index": -1,
                     "total_steps": len(pipeline_steps),
                     "phase": "init",
-                    "status": "completed",
+                    "status": "success",
                     "completed": 1,
                     "total": 1,
                     "percent": 100.0,
@@ -435,10 +501,26 @@ class OpenHCSExecutionServer(ExecutionServer):
                 if config_params
                 else orchestrator.get_component_keys(MULTIPROCESSING_AXIS)
             )
+
+            # Emit total_wells FIRST - before compilation starts
+            # This allows the client to track all wells (queued, running, completed) from the beginning
+            emit_progress(
+                {
+                    "axis_id": "",  # Empty axis_id indicates pipeline-level message
+                    "step": "",  # Empty step indicates pipeline-level message
+                    "phase": "init",
+                    "status": "started",
+                    "percent": 0.0,
+                    "completed": 0,
+                    "total": 1,
+                    "total_wells": wells,
+                }
+            )
+
             emit_progress(
                 {
                     "axis_id": "",
-                    "step_name": "pipeline",
+                    "step": "pipeline",
                     "step_index": -1,
                     "total_steps": len(pipeline_steps),
                     "phase": "compile",
@@ -455,22 +537,82 @@ class OpenHCSExecutionServer(ExecutionServer):
                 is_zmq_execution=True,
             )
 
-            emit_progress(
-                {
-                    "axis_id": "",
-                    "step_name": "pipeline",
-                    "step_index": -1,
-                    "total_steps": len(pipeline_steps),
-                    "phase": "compile",
-                    "status": "completed",
-                    "completed": 1,
-                    "total": 1,
-                    "percent": 100.0,
-                }
-            )
+            # Emit total_wells immediately after compilation completes
+            # This allows the client to track all wells (queued, running, completed)
+            if isinstance(compilation, dict):
+                compiled_contexts = compilation.get("compiled_contexts")
+                if compiled_contexts:
+                    total_wells = list(compiled_contexts.keys())
+                    emit_progress(
+                        {
+                            "axis_id": "",
+                            "step": "pipeline",
+                            "step_index": -1,
+                            "total_steps": len(pipeline_steps),
+                            "phase": "compile",
+                            "status": "success",
+                            "completed": 1,
+                            "total": 1,
+                            "percent": 100.0,
+                            "total_wells": total_wells,
+                        }
+                    )
+                    logger.info(
+                        "[%s] Emitted total_wells after compilation: %s",
+                        execution_id,
+                        total_wells,
+                    )
+            else:
+                emit_progress(
+                    {
+                        "axis_id": "",
+                        "step": "pipeline",
+                        "step_index": -1,
+                        "total_steps": len(pipeline_steps),
+                        "phase": "compile",
+                        "status": "success",
+                        "completed": 1,
+                        "total": 1,
+                        "percent": 100.0,
+                    }
+                )
 
-            # Persist the final output plate root computed by the path planner so the
-            # client can retrieve it from status/results_summary on completion.
+            # Flush compilation progress immediately to ZMQ
+            # Compilation happens synchronously, blocking the server loop, so we need
+            # to explicitly flush queued progress messages now
+            self._flush_progress_only()
+
+            # IMPORTANT: Emit final 100% completion for ALL compiled axes
+            # The compilation loop only emits cumulative progress (25%, 50%, etc.)
+            # so each axis ends with different percentages. We need to mark all as 100%.
+            try:
+                if isinstance(compilation, dict):
+                    compiled_contexts = compilation.get("compiled_contexts")
+                    if compiled_contexts:
+                        for axis_id in compiled_contexts.keys():
+                            emit_progress(
+                                {
+                                    "axis_id": axis_id,
+                                    "step": "compilation",
+                                    "step_index": 0,
+                                    "total_steps": 1,
+                                    "phase": "compile",
+                                    "status": "success",
+                                    "completed": 1,
+                                    "total": 1,
+                                    "percent": 100.0,
+                                }
+                            )
+            except Exception as e:
+                logger.warning(f"Failed to emit final 100%% compilation progress: {e}")
+
+            # Flush again to send the 100% updates
+            self._flush_progress_only()
+
+            # NOTE: Compilation axes clearing moved to GUI process (zmq_server_manager.py)
+            # Runtime and GUI are separate processes with different ExecutionProgressTracker instances
+            # GUI clears axes when it detects workers (execution phase has started)
+
             try:
                 compiled_contexts = (
                     compilation.get("compiled_contexts")

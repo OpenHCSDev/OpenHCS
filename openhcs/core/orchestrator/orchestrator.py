@@ -228,7 +228,7 @@ def _execute_axis_with_sequential_combinations(
     emit_progress(
         {
             "axis_id": axis_id,
-            "step_name": "pipeline",
+            "step": "pipeline",
             "step_index": -1,
             "total_steps": total_steps,
             "phase": "axis_started",
@@ -263,7 +263,7 @@ def _execute_axis_with_sequential_combinations(
             emit_progress(
                 {
                     "axis_id": axis_id,
-                    "step_name": "pipeline",
+                    "step": "pipeline",
                     "step_index": -1,
                     "total_steps": total_steps,
                     "phase": "axis_error",
@@ -283,7 +283,7 @@ def _execute_axis_with_sequential_combinations(
     emit_progress(
         {
             "axis_id": axis_id,
-            "step_name": "pipeline",
+            "step": "pipeline",
             "step_index": -1,
             "total_steps": total_steps,
             "phase": "axis_completed",
@@ -336,7 +336,7 @@ def _execute_single_axis_static(
         emit_progress(
             {
                 "axis_id": axis_id,
-                "step_name": step_name,
+                "step": step_name,
                 "step_index": step_index,
                 "total_steps": total_steps,
                 "phase": "step_started",
@@ -353,7 +353,7 @@ def _execute_single_axis_static(
         emit_progress(
             {
                 "axis_id": axis_id,
-                "step_name": step_name,
+                "step": step_name,
                 "step_index": step_index,
                 "total_steps": total_steps,
                 "phase": "step_completed",
@@ -1000,7 +1000,7 @@ class PipelineOrchestrator:
         emit_progress(
             {
                 "axis_id": axis_id,
-                "step_name": "pipeline",
+                "step": "pipeline",
                 "step_index": -1,
                 "total_steps": total_steps,
                 "phase": "axis_started",
@@ -1047,7 +1047,7 @@ class PipelineOrchestrator:
             emit_progress(
                 {
                     "axis_id": axis_id,
-                    "step_name": step_name,
+                    "step": step_name,
                     "step_index": step_index,
                     "total_steps": total_steps,
                     "phase": "step_started",
@@ -1065,7 +1065,7 @@ class PipelineOrchestrator:
             emit_progress(
                 {
                     "axis_id": axis_id,
-                    "step_name": step_name,
+                    "step": step_name,
                     "step_index": step_index,
                     "total_steps": total_steps,
                     "phase": "step_completed",
@@ -1100,7 +1100,7 @@ class PipelineOrchestrator:
         emit_progress(
             {
                 "axis_id": axis_id,
-                "step_name": "pipeline",
+                "step": "pipeline",
                 "step_index": -1,
                 "total_steps": total_steps,
                 "phase": "axis_completed",
@@ -1164,7 +1164,7 @@ class PipelineOrchestrator:
         emit_progress(
             {
                 "axis_id": axis_id,
-                "step_name": "pipeline",
+                "step": "pipeline",
                 "step_index": -1,
                 "total_steps": total_steps,
                 "phase": "axis_completed",
@@ -1452,7 +1452,7 @@ class PipelineOrchestrator:
                             emit_progress(
                                 {
                                     "axis_id": axis_id,
-                                    "step_name": "pipeline",
+                                    "step": "pipeline",
                                     "step_index": -1,
                                     "total_steps": len(pipeline_definition),
                                     "phase": "axis_error",

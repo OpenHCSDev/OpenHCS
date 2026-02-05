@@ -1213,6 +1213,9 @@ class PipelineCompiler:
                 f"Starting compilation for axis values: {', '.join(axis_values_to_process)}"
             )
 
+            # Import progress reporter for compilation progress updates
+            from openhcs.core.progress_reporter import emit_progress
+
             # === ONE-TIME STEP RESOLUTION ===
             # Resolve steps ONCE per pipeline, not once per well.
             # Register persistent ObjectStates for the entire compilation.
@@ -1385,6 +1388,10 @@ class PipelineCompiler:
                 sorted(axis_values_to_process)[0] if axis_values_to_process else None
             )
 
+            # Track compilation progress
+            total_axis_values = len(axis_values_to_process)
+            completed_axis_values = 0
+
             for axis_id in axis_values_to_process:
                 # Determine if this axis value is responsible for metadata creation
                 is_responsible = axis_id == responsible_axis_value
@@ -1543,6 +1550,22 @@ class PipelineCompiler:
 
                     context.freeze()
                     compiled_contexts[axis_id] = context
+
+                # Emit progress after each axis is compiled (applies to both sequential and non-sequential)
+                completed_axis_values += 1
+                emit_progress(
+                    {
+                        "axis_id": axis_id,
+                        "step": "compilation",  # Changed from step_name
+                        "step_index": completed_axis_values - 1,
+                        "total_steps": total_axis_values,
+                        "phase": "compile",
+                        "status": "running",
+                        "completed": completed_axis_values,
+                        "total": total_axis_values,
+                        "percent": (completed_axis_values / total_axis_values) * 100.0,
+                    }
+                )
 
             # Log path planning summary once per plate
             if compiled_contexts:
