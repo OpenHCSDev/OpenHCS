@@ -772,7 +772,7 @@ class PipelineOrchestrator:
                 port=config.port,
                 factory=lambda: config.create_visualizer(self.filemanager, vis_config),
                 wait_for_ready=True,
-                ready_timeout=10.0,
+                ready_timeout=30.0,
             )
 
             # Keep a reference for backward compatibility

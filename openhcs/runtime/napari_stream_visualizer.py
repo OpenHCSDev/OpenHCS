@@ -1944,10 +1944,9 @@ class NapariStreamVisualizer(VisualizerProcessManager):
                     _global_viewer_process = self.process
                     _global_viewer_port = self.port
 
-            # Wait for napari viewer to be ready before setting up ZMQ
-            self._wait_for_viewer_ready()
-
-            # Set up ZeroMQ client
+            # Set up ZeroMQ client immediately after process spawn.
+            # Readiness is owned by ViewerStateManager.wait_for_ready() to avoid
+            # duplicate/competing wait loops with conflicting timeout behavior.
             self._setup_zmq_client()
 
             # Check if process is running (different methods for subprocess vs multiprocessing)
