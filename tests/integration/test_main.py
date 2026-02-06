@@ -592,7 +592,10 @@ def _execute_pipeline_phases(
     orchestrator: PipelineOrchestrator, pipeline: Pipeline
 ) -> Dict:
     """Execute compilation and execution phases of the pipeline (direct mode)."""
+    import multiprocessing
+    import time
     from openhcs.constants import MULTIPROCESSING_AXIS
+    from openhcs.core.progress import set_progress_queue
     from openhcs.core.orchestrator.execution_result import ExecutionResult
     import logging
 
@@ -602,50 +605,69 @@ def _execute_pipeline_phases(
     if not wells:
         raise RuntimeError("No wells found for processing")
 
-    # Compilation phase
-    compilation_result = orchestrator.compile_pipelines(
-        pipeline_definition=pipeline.steps, well_filter=wells
-    )
+    # Invariant path: explicit progress queue for both compile and execute phases.
+    progress_queue = multiprocessing.Queue()
+    progress_context = {
+        "execution_id": f"direct::{int(time.time() * 1_000_000)}",
+        "plate_id": str(orchestrator.plate_path),
+        "axis_id": "",
+    }
 
-    # Extract compiled_contexts from the result dict
-    compiled_contexts = compilation_result["compiled_contexts"]
+    try:
+        # Compilation phase
+        set_progress_queue(progress_queue)
+        try:
+            compilation_result = orchestrator.compile_pipelines(
+                pipeline_definition=pipeline.steps, well_filter=wells
+            )
+        finally:
+            set_progress_queue(None)
 
-    if len(compiled_contexts) != len(wells):
-        raise RuntimeError(
-            f"Compilation failed: expected {len(wells)} contexts, got {len(compiled_contexts)}"
+        # Extract compiled_contexts from the result dict
+        compiled_contexts = compilation_result["compiled_contexts"]
+
+        if len(compiled_contexts) != len(wells):
+            raise RuntimeError(
+                f"Compilation failed: expected {len(wells)} contexts, got {len(compiled_contexts)}"
+            )
+
+        # DEBUG: Log Napari streaming configs
+        logger.info("=" * 80)
+        logger.info("DEBUG: Checking Napari streaming configurations")
+        for well_id, ctx in compiled_contexts.items():
+            logger.info(f"Well {well_id}: {len(ctx.required_visualizers)} visualizers")
+            for i, vis_info in enumerate(ctx.required_visualizers):
+                config = vis_info["config"]
+                if hasattr(config, "port"):
+                    logger.info(f"  Visualizer {i}: Napari port {config.port}")
+                else:
+                    logger.info(f"  Visualizer {i}: {type(config).__name__}")
+        logger.info("=" * 80)
+
+        # Execution phase
+        results = orchestrator.execute_compiled_plate(
+            pipeline_definition=pipeline.steps,
+            compiled_contexts=compiled_contexts,
+            progress_queue=progress_queue,
+            progress_context=progress_context,
         )
 
-    # DEBUG: Log Napari streaming configs
-    logger.info("=" * 80)
-    logger.info("DEBUG: Checking Napari streaming configurations")
-    for well_id, ctx in compiled_contexts.items():
-        logger.info(f"Well {well_id}: {len(ctx.required_visualizers)} visualizers")
-        for i, vis_info in enumerate(ctx.required_visualizers):
-            config = vis_info["config"]
-            if hasattr(config, "port"):
-                logger.info(f"  Visualizer {i}: Napari port {config.port}")
-            else:
-                logger.info(f"  Visualizer {i}: {type(config).__name__}")
-    logger.info("=" * 80)
+        if len(results) != len(wells):
+            raise RuntimeError(
+                f"Execution failed: expected {len(wells)} results, got {len(results)}"
+            )
 
-    # Execution phase
-    results = orchestrator.execute_compiled_plate(
-        pipeline_definition=pipeline.steps, compiled_contexts=compiled_contexts
-    )
+        # Validate all wells succeeded
+        failed_wells = [
+            well_id for well_id, result in results.items() if not result.is_success()
+        ]
+        if failed_wells:
+            raise RuntimeError(f"Wells failed execution: {failed_wells}")
 
-    if len(results) != len(wells):
-        raise RuntimeError(
-            f"Execution failed: expected {len(wells)} results, got {len(results)}"
-        )
-
-    # Validate all wells succeeded
-    failed_wells = [
-        well_id for well_id, result in results.items() if not result.is_success()
-    ]
-    if failed_wells:
-        raise RuntimeError(f"Wells failed execution: {failed_wells}")
-
-    return results
+        return results
+    finally:
+        progress_queue.close()
+        progress_queue.join_thread()
 
 
 def _execute_pipeline_zmq(
