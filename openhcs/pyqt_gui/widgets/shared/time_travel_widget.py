@@ -15,7 +15,6 @@ from PyQt6.QtWidgets import (
     QLabel,
     QPushButton,
     QToolTip,
-    QFrame,
     QCheckBox,
     QSizePolicy,
     QComboBox,
@@ -112,14 +111,6 @@ class TimeTravelWidget(QWidget):
         self.head_btn.clicked.connect(self._on_head)
         layout.addWidget(self.head_btn)
 
-        # Status label
-        self.status_label = QLabel("No history")
-        self.status_label.setMinimumWidth(180)
-        font = QFont()
-        font.setPointSize(9)
-        self.status_label.setFont(font)
-        layout.addWidget(self.status_label)
-
         # Branch dropdown (auto-hides when only one branch)
         self.branch_combo = QComboBox()
         self.branch_combo.setSizeAdjustPolicy(
@@ -143,11 +134,18 @@ class TimeTravelWidget(QWidget):
             self.browse_btn.clicked.connect(self._on_browse)
             layout.addWidget(self.browse_btn)
 
-            # Separator (only needed if browse button shown)
-            separator = QFrame()
-            separator.setFrameShape(QFrame.Shape.VLine)
-            separator.setFrameShadow(QFrame.Shadow.Sunken)
-            layout.addWidget(separator)
+        # Status label: right-most widget, text left-aligned
+        self.status_label = QLabel("No history")
+        self.status_label.setMinimumWidth(180)
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.status_label.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Preferred,
+        )
+        font = QFont()
+        font.setPointSize(9)
+        self.status_label.setFont(font)
+        layout.addWidget(self.status_label)
 
         # Apply button styling
         self.setStyleSheet(self.style_gen.generate_button_style())
