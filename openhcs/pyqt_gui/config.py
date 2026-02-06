@@ -275,6 +275,24 @@ class LoggingConfig:
 
 
 @dataclass(frozen=True)
+class ProgressUIConfig:
+    """Configuration for progress UI update coalescing."""
+
+    update_fps: float = 30.0
+    """Maximum progress UI update rate in frames per second.
+
+    Background threads set a dirty flag on each progress message;
+    a QTimer fires at this rate and performs the actual UI update.
+    Higher values give smoother progress display but use more CPU.
+    """
+
+    @property
+    def update_interval_ms(self) -> int:
+        """Timer interval in milliseconds derived from update_fps."""
+        return max(1, int(1000.0 / self.update_fps))
+
+
+@dataclass(frozen=True)
 class PyQtGUIConfig:
     """
     Root configuration object for the PyQt GUI application.
@@ -288,6 +306,9 @@ class PyQtGUIConfig:
         default_factory=PerformanceMonitorConfig
     )
     """Configuration for the system performance monitor."""
+
+    progress: ProgressUIConfig = field(default_factory=ProgressUIConfig)
+    """Configuration for progress UI update coalescing."""
 
     window: WindowConfig = field(default_factory=WindowConfig)
     """Configuration for main window behavior."""
@@ -391,6 +412,9 @@ def create_low_resource_config() -> PyQtGUIConfig:
             gpu_temperature_monitoring=False,
             cpu_frequency_monitoring=False,
             detailed_memory_info=False,
+        ),
+        progress=ProgressUIConfig(
+            update_fps=10.0,  # Lower progress update rate to save CPU
         ),
         logging=LoggingConfig(
             max_log_entries=100,  # Fewer log entries

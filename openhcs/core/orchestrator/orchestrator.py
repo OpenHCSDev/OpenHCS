@@ -32,7 +32,7 @@ from openhcs.core.pipeline.compiler import PipelineCompiler
 from openhcs.core.steps.abstract import AbstractStep
 from openhcs.core.components.validation import convert_enum_by_value
 from openhcs.core.orchestrator.execution_result import ExecutionResult, ExecutionStatus
-from openhcs.core.progress_reporter import emit_progress
+from openhcs.core.progress import emit, set_progress_queue, ProgressPhase, ProgressStatus
 from polystore.filemanager import FileManager
 
 # Zarr backend is CPU-only; always import it (even in subprocess/no-GPU mode)
@@ -199,6 +199,10 @@ def _execute_axis_with_sequential_combinations(
     pipeline_definition: List[AbstractStep],
     axis_contexts: List[tuple],  # List of (context_key, frozen_context) tuples
     visualizer: Optional["NapariVisualizerType"],
+    execution_id: str,
+    plate_id: str,
+    worker_slot: str,
+    owned_wells: List[str],
 ) -> ExecutionResult:
     """
     Execute all sequential combinations for a single axis in order.
@@ -210,6 +214,8 @@ def _execute_axis_with_sequential_combinations(
         pipeline_definition: List of pipeline steps to execute
         axis_contexts: List of (context_key, frozen_context) tuples for this axis
         visualizer: Optional Napari visualizer (not used in multiprocessing)
+        execution_id: Unique identifier for this execution
+        plate_id: Path or identifier for plate being processed
 
     Returns:
         ExecutionResult with status for the entire axis (all combinations)
@@ -225,24 +231,30 @@ def _execute_axis_with_sequential_combinations(
     axis_id = first_context.axis_id
     total_steps = len(pipeline_definition)
 
-    emit_progress(
-        {
-            "axis_id": axis_id,
-            "step": "pipeline",
-            "step_index": -1,
-            "total_steps": total_steps,
-            "phase": "axis_started",
-            "status": "started",
-            "completed": 0,
-            "total": total_steps,
-            "percent": 0.0,
-        }
+    emit(
+        execution_id=execution_id,
+        plate_id=plate_id,
+        axis_id=axis_id,
+        step_name="pipeline",
+        phase=ProgressPhase.AXIS_STARTED,
+        status=ProgressStatus.STARTED,
+        completed=0,
+        total=total_steps,
+        percent=0.0,
+        worker_slot=worker_slot,
+        owned_wells=owned_wells,
     )
 
     for combo_idx, (context_key, frozen_context) in enumerate(axis_contexts):
         # Execute this combination
         result = _execute_single_axis_static(
-            pipeline_definition, frozen_context, visualizer
+            pipeline_definition,
+            frozen_context,
+            visualizer,
+            execution_id,
+            plate_id,
+            worker_slot,
+            owned_wells,
         )
 
         # Clear VFS after each combination to prevent memory accumulation
@@ -260,19 +272,19 @@ def _execute_axis_with_sequential_combinations(
             logger.error(
                 f"🔄 WORKER: Combination {context_key} failed for axis {axis_id}"
             )
-            emit_progress(
-                {
-                    "axis_id": axis_id,
-                    "step": "pipeline",
-                    "step_index": -1,
-                    "total_steps": total_steps,
-                    "phase": "axis_error",
-                    "status": "error",
-                    "completed": 0,
-                    "total": total_steps,
-                    "percent": 0.0,
-                    "message": result.error_message,
-                }
+            emit(
+                execution_id=execution_id,
+                plate_id=plate_id,
+                axis_id=axis_id,
+                step_name="pipeline",
+                phase=ProgressPhase.AXIS_ERROR,
+                status=ProgressStatus.ERROR,
+                completed=0,
+                total=total_steps,
+                percent=0.0,
+                message=result.error_message,
+                worker_slot=worker_slot,
+                owned_wells=owned_wells,
             )
             return ExecutionResult.error(
                 axis_id=axis_id,
@@ -280,18 +292,18 @@ def _execute_axis_with_sequential_combinations(
                 error_message=result.error_message,
             )
 
-    emit_progress(
-        {
-            "axis_id": axis_id,
-            "step": "pipeline",
-            "step_index": -1,
-            "total_steps": total_steps,
-            "phase": "axis_completed",
-            "status": "completed",
-            "completed": total_steps,
-            "total": total_steps,
-            "percent": 100.0,
-        }
+    emit(
+        execution_id=execution_id,
+        plate_id=plate_id,
+        axis_id=axis_id,
+        step_name="pipeline",
+        phase=ProgressPhase.AXIS_COMPLETED,
+        status=ProgressStatus.SUCCESS,
+        completed=total_steps,
+        total=total_steps,
+        percent=100.0,
+        worker_slot=worker_slot,
+        owned_wells=owned_wells,
     )
     return ExecutionResult.success(axis_id=axis_id)
 
@@ -300,6 +312,10 @@ def _execute_single_axis_static(
     pipeline_definition: List[AbstractStep],
     frozen_context: "ProcessingContext",
     visualizer: Optional["NapariVisualizerType"],
+    execution_id: str,
+    plate_id: str,
+    worker_slot: str,
+    owned_wells: List[str],
 ) -> ExecutionResult:
     """
     Static version of _execute_single_axis for multiprocessing compatibility.
@@ -311,6 +327,8 @@ def _execute_single_axis_static(
         pipeline_definition: List of pipeline steps to execute
         frozen_context: Frozen processing context for this axis
         visualizer: Optional Napari visualizer (not used in multiprocessing)
+        execution_id: Unique identifier for this execution
+        plate_id: Path or identifier for plate being processed
 
     Returns:
         ExecutionResult with status for this axis
@@ -329,39 +347,46 @@ def _execute_single_axis_static(
         logger.error(error_msg)
         raise RuntimeError(error_msg)
 
+    # Set execution tracking fields on context (these are allowed even when frozen)
+    # These fields are set at execution time, not compilation time
+    object.__setattr__(frozen_context, "execution_id", execution_id)
+    object.__setattr__(frozen_context, "plate_id", plate_id)
+    object.__setattr__(frozen_context, "worker_slot", worker_slot)
+    object.__setattr__(frozen_context, "owned_wells", owned_wells)
+
     # Execute each step in the pipeline
     for step_index, step in enumerate(pipeline_definition):
         step_name = frozen_context.step_plans[step_index]["step_name"]
 
-        emit_progress(
-            {
-                "axis_id": axis_id,
-                "step": step_name,
-                "step_index": step_index,
-                "total_steps": total_steps,
-                "phase": "step_started",
-                "status": "started",
-                "completed": step_index,
-                "total": total_steps,
-                "percent": (step_index / total_steps) * 100.0,
-            }
+        emit(
+            execution_id=execution_id,
+            plate_id=plate_id,
+            axis_id=axis_id,
+            step_name=step_name,
+            phase=ProgressPhase.STEP_STARTED,
+            status=ProgressStatus.STARTED,
+            completed=step_index,
+            total=total_steps,
+            percent=(step_index / total_steps) * 100.0,
+            worker_slot=worker_slot,
+            owned_wells=owned_wells,
         )
 
         # Call process method on step instance
         step.process(frozen_context, step_index)
 
-        emit_progress(
-            {
-                "axis_id": axis_id,
-                "step": step_name,
-                "step_index": step_index,
-                "total_steps": total_steps,
-                "phase": "step_completed",
-                "status": "completed",
-                "completed": step_index + 1,
-                "total": total_steps,
-                "percent": ((step_index + 1) / total_steps) * 100.0,
-            }
+        emit(
+            execution_id=execution_id,
+            plate_id=plate_id,
+            axis_id=axis_id,
+            step_name=step_name,
+            phase=ProgressPhase.STEP_COMPLETED,
+            status=ProgressStatus.SUCCESS,
+            completed=step_index + 1,
+            total=total_steps,
+            percent=((step_index + 1) / total_steps) * 100.0,
+            worker_slot=worker_slot,
+            owned_wells=owned_wells,
         )
 
         # Handle visualization if requested
@@ -386,6 +411,30 @@ def _execute_single_axis_static(
                     )
 
     return ExecutionResult.success(axis_id=axis_id)
+
+
+def _execute_worker_lane_static(
+    pipeline_definition: List[AbstractStep],
+    lane_axis_contexts: List[tuple[str, List[tuple]]],
+    visualizer: Optional["NapariVisualizerType"],
+    execution_id: str,
+    plate_id: str,
+    worker_slot: str,
+    owned_wells: List[str],
+) -> Dict[str, ExecutionResult]:
+    """Execute a deterministic worker lane: wells sequentially within one slot."""
+    lane_results: Dict[str, ExecutionResult] = {}
+    for axis_id, axis_contexts in lane_axis_contexts:
+        lane_results[axis_id] = _execute_axis_with_sequential_combinations(
+            pipeline_definition=pipeline_definition,
+            axis_contexts=axis_contexts,
+            visualizer=visualizer,
+            execution_id=execution_id,
+            plate_id=plate_id,
+            worker_slot=worker_slot,
+            owned_wells=owned_wells,
+        )
+    return lane_results
 
 
 def _configure_worker_logging(log_file_base: str):
@@ -500,9 +549,10 @@ def _configure_worker_with_gpu(
         pass
 
     if progress_queue is not None and progress_context is not None:
-        from openhcs.core.progress_reporter import set_progress_emitter
+        from openhcs.core.progress import set_progress_queue
 
-        set_progress_emitter(progress_queue.put, progress_context)
+        # Set progress queue for worker processes
+        set_progress_queue(progress_queue)
 
 
 # Global variable to store log file base for worker processes
@@ -548,6 +598,7 @@ class PipelineOrchestrator:
         # Track executor for cancellation support
         self._executor = None
         self._cancelled = False  # Track cancellation requests
+        self.execution_id = f"local::{plate_path}"
 
         # Initialize auto-sync control for pipeline config
         self._pipeline_config = None
@@ -986,197 +1037,6 @@ class PipelineOrchestrator:
             is_zmq_execution=is_zmq_execution,
         )
 
-    def _execute_single_axis(
-        self,
-        pipeline_definition: List[AbstractStep],
-        frozen_context: ProcessingContext,
-        visualizer: Optional[NapariVisualizerType],
-    ) -> Dict[str, Any]:
-        """Executes the pipeline for a single well using its frozen context."""
-        axis_id = frozen_context.axis_id
-        total_steps = len(pipeline_definition)
-
-        # Send progress: axis started
-        emit_progress(
-            {
-                "axis_id": axis_id,
-                "step": "pipeline",
-                "step_index": -1,
-                "total_steps": total_steps,
-                "phase": "axis_started",
-                "status": "started",
-                "completed": 0,
-                "total": total_steps,
-                "percent": 0.0,
-            }
-        )
-
-        # NUCLEAR VALIDATION
-        if not frozen_context.is_frozen():
-            error_msg = f"🔥 SINGLE_AXIS ERROR: Context for axis {axis_id} is not frozen before execution"
-            logger.error(error_msg)
-            raise RuntimeError(error_msg)
-
-        if not pipeline_definition:
-            error_msg = (
-                f"🔥 SINGLE_AXIS ERROR: Empty pipeline_definition for axis {axis_id}"
-            )
-            logger.error(error_msg)
-            raise RuntimeError(error_msg)
-
-        # All execution goes through step-sequential now
-        # Sequential combinations are handled by compiling separate contexts
-        return self._execute_step_sequential(
-            pipeline_definition, frozen_context, visualizer
-        )
-
-    def _execute_step_sequential(
-        self,
-        pipeline_definition: List[AbstractStep],
-        frozen_context: ProcessingContext,
-        visualizer: Optional[NapariVisualizerType],
-    ) -> Dict[str, Any]:
-        """Execute pipeline with step-wide sequential processing (current behavior)."""
-        axis_id = frozen_context.axis_id
-        total_steps = len(pipeline_definition)
-
-        for step_index, step in enumerate(pipeline_definition):
-            step_name = frozen_context.step_plans[step_index]["step_name"]
-
-            # Send progress: step started
-            emit_progress(
-                {
-                    "axis_id": axis_id,
-                    "step": step_name,
-                    "step_index": step_index,
-                    "total_steps": total_steps,
-                    "phase": "step_started",
-                    "status": "started",
-                    "completed": step_index,
-                    "total": total_steps,
-                    "percent": (step_index / total_steps) * 100.0,
-                }
-            )
-
-            # Call process method on step instance
-            step.process(frozen_context, step_index)
-
-            # Send progress: step completed
-            emit_progress(
-                {
-                    "axis_id": axis_id,
-                    "step": step_name,
-                    "step_index": step_index,
-                    "total_steps": total_steps,
-                    "phase": "step_completed",
-                    "status": "completed",
-                    "completed": step_index + 1,
-                    "total": total_steps,
-                    "percent": ((step_index + 1) / total_steps) * 100.0,
-                }
-            )
-
-            if visualizer:
-                step_plan = frozen_context.step_plans[step_index]
-                if step_plan["visualize"]:
-                    output_dir = step_plan["output_dir"]
-                    write_backend = step_plan["write_backend"]
-                    if output_dir:
-                        logger.debug(
-                            f"Visualizing output for step {step_index} from path {output_dir} (backend: {write_backend}) for axis {axis_id}"
-                        )
-                        visualizer.visualize_path(
-                            step_id=f"step_{step_index}",
-                            path=str(output_dir),
-                            backend=write_backend,
-                            axis_id=axis_id,
-                        )
-                    else:
-                        logger.warning(
-                            f"Step {step_index} in axis {axis_id} flagged for visualization but 'output_dir' is missing in its plan."
-                        )
-
-        # Send progress: axis completed
-        emit_progress(
-            {
-                "axis_id": axis_id,
-                "step": "pipeline",
-                "step_index": -1,
-                "total_steps": total_steps,
-                "phase": "axis_completed",
-                "status": "completed",
-                "completed": total_steps,
-                "total": total_steps,
-                "percent": 100.0,
-            }
-        )
-
-        return {"status": "success", "axis_id": axis_id}
-
-    def _execute_pipeline_sequential(
-        self,
-        pipeline_definition: List[AbstractStep],
-        frozen_context: ProcessingContext,
-        visualizer: Optional[NapariVisualizerType],
-    ) -> Dict[str, Any]:
-        """Execute pipeline with pipeline-wide sequential processing.
-
-        Combinations are precomputed at compile time and stored in context.pipeline_sequential_combinations.
-        Loop: combinations → steps (process one combo through all steps before moving to next).
-        VFS is cleared between combinations to prevent memory accumulation.
-        """
-        axis_id = frozen_context.axis_id
-        total_steps = len(pipeline_definition)
-
-        # Combinations were precomputed at compile time
-        combinations = frozen_context.pipeline_sequential_combinations or []
-
-        if not combinations:
-            logger.warning(
-                f"Pipeline sequential mode enabled but no combinations found for axis {axis_id}"
-            )
-            # Fallback to normal execution
-            for step_index, step in enumerate(pipeline_definition):
-                step.process(frozen_context, step_index)
-        else:
-            # Loop: combinations → steps
-            for combo_idx, combo in enumerate(combinations):
-                frozen_context.current_sequential_combination = combo
-
-                # Process all steps for this combination
-                for step_index, step in enumerate(pipeline_definition):
-                    step.process(frozen_context, step_index)
-
-                # Clear VFS after each combination to prevent memory accumulation
-                try:
-                    from polystore.base import reset_memory_backend
-                    from openhcs.core.memory import cleanup_all_gpu_frameworks
-
-                    reset_memory_backend()
-                    cleanup_all_gpu_frameworks()
-                except Exception as e:
-                    logger.warning(
-                        f"Failed to clear VFS after combination {combo}: {e}"
-                    )
-
-        frozen_context.current_sequential_combination = None
-
-        emit_progress(
-            {
-                "axis_id": axis_id,
-                "step": "pipeline",
-                "step_index": -1,
-                "total_steps": total_steps,
-                "phase": "axis_completed",
-                "status": "completed",
-                "completed": total_steps,
-                "total": total_steps,
-                "percent": 100.0,
-            }
-        )
-
-        return {"status": "success", "axis_id": axis_id}
-
     def cancel_execution(self):
         """
         Cancel ongoing execution by shutting down the executor.
@@ -1202,6 +1062,7 @@ class PipelineOrchestrator:
         log_file_base: Optional[str] = None,
         progress_queue=None,
         progress_context=None,
+        worker_assignments: Optional[Dict[str, List[str]]] = None,
     ) -> Dict[str, Dict[str, Any]]:
         """
         Execute-all phase: Runs the stateless pipeline against compiled contexts.
@@ -1222,7 +1083,7 @@ class PipelineOrchestrator:
 
         # CRITICAL FIX: Use resolved pipeline definition from compilation if available
         # For subprocess runner, use the parameter directly since it receives pre-compiled contexts
-        resolved_pipeline = getattr(self, "_resolved_pipeline_definition", None)
+        resolved_pipeline = self.__dict__.get("_resolved_pipeline_definition")
         if resolved_pipeline is not None:
             pipeline_definition = resolved_pipeline
 
@@ -1235,6 +1096,16 @@ class PipelineOrchestrator:
         if not compiled_contexts:
             logger.warning("No compiled contexts provided for execution.")
             return {}
+        if progress_queue is None:
+            raise ValueError(
+                "progress_queue is required for execute_compiled_plate invariant path"
+            )
+        if progress_context is None:
+            raise ValueError(
+                "progress_context is required for execute_compiled_plate invariant path"
+            )
+        execution_id = progress_context["execution_id"]
+        plate_id = progress_context["plate_id"]
 
         # Access num_workers from effective config (merged pipeline + global config)
         actual_max_workers = max_workers or self.get_effective_config().num_workers
@@ -1299,15 +1170,16 @@ class PipelineOrchestrator:
             # For backwards compatibility, set visualizer to the first one
             visualizer = visualizers[0] if visualizers else None
 
-        # Reset cancellation flag at start of execution
-        self._cancelled = False
-
-        self._state = OrchestratorState.EXECUTING
-        logger.info(
-            f"Starting execution for {len(compiled_contexts)} axis values with max_workers={actual_max_workers}."
-        )
-
+        set_progress_queue(progress_queue)
         try:
+            # Reset cancellation flag at start of execution
+            self._cancelled = False
+
+            self._state = OrchestratorState.EXECUTING
+            logger.info(
+                f"Starting execution for {len(compiled_contexts)} axis values with max_workers={actual_max_workers}."
+            )
+
             execution_results: Dict[str, ExecutionResult] = {}
 
             # CUDA COMPATIBILITY: Set spawn method for multiprocessing to support CUDA
@@ -1381,7 +1253,7 @@ class PipelineOrchestrator:
                         contexts_snapshot
                     )
 
-                    future_to_axis_id = {}
+                    future_to_worker_slot = {}
                     config = get_openhcs_config()
                     if not config:
                         raise RuntimeError(
@@ -1401,7 +1273,41 @@ class PipelineOrchestrator:
                         else:
                             contexts_by_axis[context_key].append((context_key, context))
 
-                    # Submit one task per axis (each task handles its own sequential combinations)
+                    if worker_assignments is None:
+                        generated: Dict[str, List[str]] = {
+                            f"worker_{idx}": [] for idx in range(actual_max_workers)
+                        }
+                        for idx, axis_id in enumerate(sorted(contexts_by_axis.keys())):
+                            generated[f"worker_{idx % actual_max_workers}"].append(axis_id)
+                        worker_assignments = {
+                            worker_slot: owned
+                            for worker_slot, owned in generated.items()
+                            if owned
+                        }
+
+                    # Validate worker ownership map against compiled axis ids.
+                    expected_axis_ids = set(contexts_by_axis.keys())
+                    all_assigned_axis_ids: list[str] = []
+                    for owned in worker_assignments.values():
+                        all_assigned_axis_ids.extend(owned)
+                    if len(all_assigned_axis_ids) != len(set(all_assigned_axis_ids)):
+                        raise RuntimeError(
+                            f"Duplicate axis ownership detected in worker_assignments: {worker_assignments}"
+                        )
+                    if set(all_assigned_axis_ids) != expected_axis_ids:
+                        raise RuntimeError(
+                            f"worker_assignments mismatch. expected={sorted(expected_axis_ids)}, got={sorted(all_assigned_axis_ids)}"
+                        )
+
+                    axis_to_worker: Dict[str, str] = {}
+                    for worker_slot, owned in worker_assignments.items():
+                        for axis_id in owned:
+                            axis_to_worker[axis_id] = worker_slot
+
+                    lane_axis_contexts: Dict[str, List[tuple[str, List[tuple]]]] = {
+                        worker_slot: [] for worker_slot in worker_assignments.keys()
+                    }
+
                     for axis_id, axis_contexts in contexts_by_axis.items():
                         try:
                             # Resolve all contexts for this axis
@@ -1415,54 +1321,70 @@ class PipelineOrchestrator:
                                 for context_key, context in axis_contexts
                             ]
 
-                            # Submit task that will handle all combinations for this axis sequentially
-                            future = executor.submit(
-                                _execute_axis_with_sequential_combinations,
-                                pipeline_definition,
-                                resolved_axis_contexts,
-                                None,  # visualizer
+                            worker_slot = axis_to_worker[axis_id]
+                            lane_axis_contexts[worker_slot].append(
+                                (axis_id, resolved_axis_contexts)
                             )
-                            future_to_axis_id[future] = axis_id
                         except Exception as submit_error:
                             error_msg = f"🔥 ORCHESTRATOR ERROR: Failed to submit task for {axis_name} {axis_id}: {submit_error}"
                             logger.error(error_msg, exc_info=True)
                             # FAIL-FAST: Re-raise task submission errors immediately
                             raise
 
-                    completed_count = 0
-                    for future in concurrent.futures.as_completed(future_to_axis_id):
-                        axis_id = future_to_axis_id[future]
-                        completed_count += 1
+                    for worker_slot, lane_contexts in lane_axis_contexts.items():
+                        if not lane_contexts:
+                            continue
+                        owned_wells = list(worker_assignments[worker_slot])
+                        try:
+                            future = executor.submit(
+                                _execute_worker_lane_static,
+                                pipeline_definition,
+                                lane_contexts,
+                                None,  # visualizer
+                                execution_id,
+                                plate_id,
+                                worker_slot,
+                                owned_wells,
+                            )
+                            future_to_worker_slot[future] = (worker_slot, owned_wells)
+                        except Exception as submit_error:
+                            error_msg = f"🔥 ORCHESTRATOR ERROR: Failed to submit lane {worker_slot}: {submit_error}"
+                            logger.error(error_msg, exc_info=True)
+                            raise
+
+                    for future in concurrent.futures.as_completed(future_to_worker_slot):
+                        worker_slot, owned_wells = future_to_worker_slot[future]
 
                         try:
-                            result = future.result()
-                            execution_results[axis_id] = result
+                            lane_results = future.result()
+                            execution_results.update(lane_results)
                         except Exception as exc:
                             import traceback
 
                             full_traceback = traceback.format_exc()
-                            error_msg = f"{axis_name.title()} {axis_id} generated an exception during execution: {exc}"
+                            error_msg = f"Worker lane {worker_slot} generated an exception during execution: {exc}"
                             logger.error(
                                 f"🔥 ORCHESTRATOR ERROR: {error_msg}", exc_info=True
                             )
                             logger.error(
-                                f"🔥 ORCHESTRATOR FULL TRACEBACK for {axis_name} {axis_id}:\n{full_traceback}"
+                                f"🔥 ORCHESTRATOR FULL TRACEBACK for worker lane {worker_slot}:\n{full_traceback}"
                             )
+                            failing_axis_id = owned_wells[0] if owned_wells else ""
 
-                            emit_progress(
-                                {
-                                    "axis_id": axis_id,
-                                    "step": "pipeline",
-                                    "step_index": -1,
-                                    "total_steps": len(pipeline_definition),
-                                    "phase": "axis_error",
-                                    "status": "error",
-                                    "completed": 0,
-                                    "total": len(pipeline_definition),
-                                    "percent": 0.0,
-                                    "error": str(exc),
-                                    "traceback": full_traceback,
-                                }
+                            emit(
+                                execution_id=execution_id,
+                                plate_id=plate_id,
+                                axis_id=failing_axis_id,
+                                step_name="pipeline",
+                                phase=ProgressPhase.AXIS_ERROR,
+                                status=ProgressStatus.ERROR,
+                                completed=0,
+                                total=len(pipeline_definition),
+                                percent=0.0,
+                                error=str(exc),
+                                traceback=full_traceback,
+                                worker_slot=worker_slot,
+                                owned_wells=owned_wells,
                             )
 
                             # FAIL-FAST: Re-raise immediately instead of storing error
@@ -1586,6 +1508,8 @@ class PipelineOrchestrator:
             self._state = OrchestratorState.EXEC_FAILED
             logger.error(f"Failed to execute compiled plate: {e}")
             raise
+        finally:
+            set_progress_queue(None)
 
     def get_component_keys(
         self,

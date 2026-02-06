@@ -34,7 +34,7 @@ from openhcs.constants.constants import (
 )
 from openhcs.core.context.processing_context import ProcessingContext
 from openhcs.core.steps.abstract import AbstractStep
-from openhcs.core.progress_reporter import emit_progress
+from openhcs.core.progress import emit, ProgressPhase, ProgressStatus
 from openhcs.formats.func_arg_prep import prepare_patterns_and_functions
 from openhcs.core.memory import stack_slices, unstack_slices
 # OpenHCS imports moved to local imports to avoid circular dependencies
@@ -1341,20 +1341,20 @@ class FunctionStep(AbstractStep):
                         step_index,
                     )
                     completed_groups += 1
-                    emit_progress(
-                        {
-                            "axis_id": axis_id,
-                            "step": step_name,
-                            "step_index": step_index,
-                            "total_steps": total_steps,
-                            "phase": "pattern_group",
-                            "status": "running",
-                            "completed": completed_groups,
-                            "total": total_groups,
-                            "percent": (completed_groups / total_groups) * 100.0,
-                            "component": str(comp_val),
-                            "pattern": str(pattern_item),
-                        }
+                    emit(
+                        execution_id=context.execution_id,
+                        plate_id=context.plate_id,
+                        axis_id=axis_id,
+                        step_name=step_name,
+                        phase=ProgressPhase.PATTERN_GROUP,
+                        status=ProgressStatus.RUNNING,
+                        completed=completed_groups,
+                        total=total_groups,
+                        percent=(completed_groups / total_groups) * 100.0,
+                        component=str(comp_val),
+                        pattern=str(pattern_item),
+                        worker_slot=context.worker_slot,
+                        owned_wells=context.owned_wells,
                     )
 
             logger.info(

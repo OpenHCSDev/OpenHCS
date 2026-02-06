@@ -1470,6 +1470,12 @@ class OpenHCSMainWindow(QMainWindow):
         self.global_config = new_config
         self.service_adapter.set_global_config(new_config)
 
+        # Propagate to embedded core widgets that cache global config locally.
+        # Without this, batch compile/execute can keep using stale values
+        # (for example num_workers) even after global config edits.
+        self.plate_manager_widget.on_config_changed(new_config)
+        self.pipeline_editor_widget.on_config_changed(new_config)
+
         # Notify all floating windows of config change
         for window in self.floating_windows.values():
             # Get the widget from the window's layout

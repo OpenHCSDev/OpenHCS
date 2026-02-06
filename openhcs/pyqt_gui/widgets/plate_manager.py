@@ -53,16 +53,20 @@ from pyqt_reactive.widgets.shared.abstract_manager_widget import (
     ListItemFormat,
 )
 from pyqt_reactive.forms import ParameterFormManager
-from openhcs.pyqt_gui.widgets.shared.services.zmq_execution_service import (
-    ZMQExecutionService,
-)
-from openhcs.pyqt_gui.widgets.shared.services.compilation_service import (
-    CompilationService,
+from pyqt_reactive.services import ExecutionServerInfo
+from openhcs.pyqt_gui.widgets.shared.services.batch_workflow_service import (
+    BatchWorkflowService,
 )
 from openhcs.pyqt_gui.widgets.shared.services.zmq_client_service import (
     ZMQClientService,
 )
 from pyqt_reactive.widgets.shared.scope_visual_config import ListItemType
+from openhcs.core.progress import registry
+from openhcs.core.progress.projection import (
+    ExecutionRuntimeProjection,
+    PlateRuntimeProjection,
+    PlateRuntimeState,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -180,21 +184,16 @@ class PlateManagerWidget(AbstractManagerWidget):
 
         # Use shared ExecutionProgressTracker singleton (same instance as ZMQ server browser)
         # This ensures both UI components show the same progress data
-        from openhcs.pyqt_gui.widgets.shared.progress_state import (
-            ExecutionProgressTracker,
-            AxisProgress,
-        )
-        self._progress_tracker = ExecutionProgressTracker.get_instance()
+        self._progress_tracker = registry()
         self.plate_progress: Dict[str, Dict] = {}  # Deprecated, kept for compatibility
         self.plate_init_pending = set()
         self.plate_compile_pending = set()
+        self._runtime_progress_projection = ExecutionRuntimeProjection()
+        self._execution_server_info: ExecutionServerInfo | None = None
 
-        # Extracted services (Phase 1, 2)
+        # Unified batch workflow service
         self._zmq_client_service = ZMQClientService(port=7777)
-        self._zmq_service = ZMQExecutionService(
-            self, port=7777, client_service=self._zmq_client_service
-        )
-        self._compilation_service = CompilationService(
+        self._batch_workflow_service = BatchWorkflowService(
             self, client_service=self._zmq_client_service
         )
 
@@ -215,11 +214,8 @@ class PlateManagerWidget(AbstractManagerWidget):
     def cleanup(self):
         """Cleanup resources before widget destruction."""
         logger.info("🧹 Cleaning up PlateManagerWidget resources...")
-        self._zmq_service.disconnect()
-
-        # Cleanup progress tracker
-        if hasattr(self, '_progress_tracker'):
-            self._progress_tracker.clear()
+        self._batch_workflow_service.cleanup()
+        self._batch_workflow_service.disconnect()
 
         logger.info("✅ PlateManagerWidget cleanup completed")
 
@@ -291,6 +287,14 @@ class PlateManagerWidget(AbstractManagerWidget):
     def emit_status(self, msg: str) -> None:
         self.status_message.emit(msg)
 
+    def set_runtime_progress_projection(
+        self, projection: ExecutionRuntimeProjection
+    ) -> None:
+        self._runtime_progress_projection = projection
+
+    def set_execution_server_info(self, info: ExecutionServerInfo | None) -> None:
+        self._execution_server_info = info
+
     def emit_error(self, msg: str) -> None:
         self.execution_error.emit(msg)
 
@@ -323,7 +327,7 @@ class PlateManagerWidget(AbstractManagerWidget):
         self._execution_complete_signal.emit(result, plate_path)
 
     def on_all_plates_completed(self, completed_count: int, failed_count: int) -> None:
-        self._zmq_service.disconnect()
+        self._batch_workflow_service.disconnect()
         self.execution_state = "idle"
         self.current_execution_id = None
         if (
@@ -397,11 +401,20 @@ class PlateManagerWidget(AbstractManagerWidget):
         plate_path = plate["path"]
         plate_key = str(plate_path)
         orchestrator = ObjectStateRegistry.get_object(plate_path)
+        execution_id = self.plate_execution_ids.get(plate_key)
+        runtime_projection = self._runtime_progress_projection.get_plate(
+            plate_id=plate_key,
+            execution_id=execution_id,
+        )
 
         if plate_key in self.plate_init_pending:
             status_prefix = "⏳ Init"
         elif plate_key in self.plate_compile_pending:
             status_prefix = "⏳ Compile"
+        elif (queue_position := self._queued_execution_position_for_plate(plate_key)) is not None:
+            status_prefix = f"⏳ Queued 0.0% (q#{queue_position})"
+        elif runtime_projection is not None:
+            status_prefix = self._format_runtime_plate_status(runtime_projection)
         elif orchestrator:
             state_map = {
                 OrchestratorState.READY: "✓ Init",
@@ -410,36 +423,9 @@ class PlateManagerWidget(AbstractManagerWidget):
                 OrchestratorState.INIT_FAILED: "❌ Init Failed",
                 OrchestratorState.COMPILE_FAILED: "❌ Compile Failed",
                 OrchestratorState.EXEC_FAILED: "❌ Exec Failed",
+                OrchestratorState.EXECUTING: "🔄 Executing",
             }
-            if orchestrator.state == OrchestratorState.EXECUTING:
-                exec_state = self.plate_execution_states.get(plate_key)
-
-                # Use shared progress tracker to get ALL axes for this plate
-                all_progress = self._progress_tracker.get_all_progress()
-                plate_axes = [p for p in all_progress if p.plate_id == plate_key]
-
-                if exec_state == "running" and plate_axes:
-                    # Show all axes progress: "🔄 A01,B03: Step 50% | D02: Other 25%"
-                    if len(plate_axes) == 1:
-                        p = plate_axes[0]
-                        status_prefix = f"🔄 [{p.axis_id}] {p.step_name} {p.percent:.0f}%"
-                    else:
-                        # Multiple axes - show first 2 with step names
-                        active = [p for p in plate_axes if not p.is_complete()]
-                        if len(active) <= 2:
-                            axis_str = ",".join(f"{p.axis_id}:{p.percent:.0f}%" for p in active)
-                            status_prefix = f"🔄 {axis_str}"
-                        else:
-                            # More than 2 active - show summary
-                            avg = sum(p.percent for p in active) / len(active)
-                            status_prefix = f"🔄 {len(active)} axes {avg:.0f}%"
-                else:
-                    status_prefix = {
-                        "queued": "⏳ Queued",
-                        "running": "🔄 Running",
-                    }.get(exec_state, "🔄 Executing")
-            else:
-                status_prefix = state_map.get(orchestrator.state, "")
+            status_prefix = state_map.get(orchestrator.state, "")
 
         # Use declarative format with orchestrator.pipeline_config as introspection source
         return self._build_item_display_from_format(
@@ -448,6 +434,32 @@ class PlateManagerWidget(AbstractManagerWidget):
             status_prefix=status_prefix,
             detail_line=plate["path"],
         )
+
+    def _queued_execution_position_for_plate(self, plate_id: str) -> Optional[int]:
+        """Return queue position from latest execution server snapshot for this plate."""
+        server_info = self._execution_server_info
+        if server_info is None:
+            return None
+
+        for queued in server_info.queued_execution_entries:
+            if queued.plate_id != plate_id:
+                continue
+            return queued.queue_position
+        return None
+
+    @staticmethod
+    def _format_runtime_plate_status(plate: PlateRuntimeProjection) -> str:
+        if plate.state == PlateRuntimeState.COMPILING:
+            return f"⏳ Compiling {plate.percent:.1f}%"
+        if plate.state == PlateRuntimeState.COMPILED:
+            return f"✅ Compiled {plate.percent:.1f}%"
+        if plate.state == PlateRuntimeState.FAILED:
+            return f"❌ Failed {plate.percent:.1f}%"
+        if plate.state == PlateRuntimeState.COMPLETE:
+            return f"✅ Complete {plate.percent:.1f}%"
+        if plate.state == PlateRuntimeState.EXECUTING:
+            return f"⚙️ Executing {plate.percent:.1f}%"
+        return ""
 
     def setup_connections(self):
         """Setup signal/slot connections (base class + plate-specific)."""
@@ -459,8 +471,6 @@ class PlateManagerWidget(AbstractManagerWidget):
         self.compilation_error.connect(self._handle_compilation_error)
         self.initialization_error.connect(self._handle_initialization_error)
         self.execution_error.connect(self._handle_execution_error)
-        self._execution_complete_signal.connect(self._on_execution_complete)
-        self._execution_error_signal.connect(self._on_execution_error)
 
     def _resolve_run_action(self) -> str:
         """Resolve run/stop action based on current state."""
@@ -924,7 +934,7 @@ class PlateManagerWidget(AbstractManagerWidget):
             return
 
         # Delegate to compilation service
-        await self._compilation_service.compile_plates(selected_items)
+        await self._batch_workflow_service.compile_plates(selected_items)
 
     async def action_run_plate(self):
         """Handle Run Plate button - execute compiled plates using ZMQ."""
@@ -944,7 +954,7 @@ class PlateManagerWidget(AbstractManagerWidget):
             )
             return
 
-        await self._zmq_service.run_plates(ready_items)
+        await self._batch_workflow_service.run_plates(ready_items)
 
     def _maybe_auto_add_output_plate_orchestrator(
         self, source_plate_path: str, result: dict
@@ -1157,7 +1167,7 @@ class PlateManagerWidget(AbstractManagerWidget):
             self.update_button_states()
             QApplication.processEvents()
 
-        self._zmq_service.stop_execution(force=is_force_kill)
+        self._batch_workflow_service.stop_execution(force=is_force_kill)
 
     def action_code_plate(self):
         """Generate Python code for selected plates and their pipelines (Tier 3)."""

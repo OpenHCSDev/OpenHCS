@@ -91,6 +91,7 @@ from openhcs.core.utils import WellFilterProcessor
 from objectstate import ObjectState, ObjectStateRegistry
 from objectstate.lazy_factory import get_base_type_for_lazy
 from openhcs.core.steps.function_step import FunctionStep  # Used for isinstance check
+from openhcs.core.progress import emit, ProgressPhase, ProgressStatus
 from dataclasses import dataclass
 from python_introspect import Enableable
 
@@ -1213,9 +1214,6 @@ class PipelineCompiler:
                 f"Starting compilation for axis values: {', '.join(axis_values_to_process)}"
             )
 
-            # Import progress reporter for compilation progress updates
-            from openhcs.core.progress_reporter import emit_progress
-
             # === ONE-TIME STEP RESOLUTION ===
             # Resolve steps ONCE per pipeline, not once per well.
             # Register persistent ObjectStates for the entire compilation.
@@ -1553,18 +1551,16 @@ class PipelineCompiler:
 
                 # Emit progress after each axis is compiled (applies to both sequential and non-sequential)
                 completed_axis_values += 1
-                emit_progress(
-                    {
-                        "axis_id": axis_id,
-                        "step": "compilation",  # Changed from step_name
-                        "step_index": completed_axis_values - 1,
-                        "total_steps": total_axis_values,
-                        "phase": "compile",
-                        "status": "running",
-                        "completed": completed_axis_values,
-                        "total": total_axis_values,
-                        "percent": (completed_axis_values / total_axis_values) * 100.0,
-                    }
+                emit(
+                    execution_id=orchestrator.execution_id,
+                    plate_id=str(orchestrator.plate_path),
+                    axis_id=axis_id,
+                    step_name="compilation",
+                    phase=ProgressPhase.COMPILE,
+                    status=ProgressStatus.RUNNING,
+                    completed=completed_axis_values,
+                    total=total_axis_values,
+                    percent=(completed_axis_values / total_axis_values) * 100.0,
                 )
 
             # Log path planning summary once per plate

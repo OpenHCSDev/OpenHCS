@@ -18,7 +18,7 @@ from openhcs.runtime.zmq_config import OPENHCS_ZMQ_CONFIG
 logger = logging.getLogger(__name__)
 
 
-class OpenHCSExecutionClient(ExecutionClient):
+class ZMQExecutionClient(ExecutionClient):
     """ZMQ client for OpenHCS pipeline execution with progress streaming."""
 
     def __init__(
@@ -49,6 +49,7 @@ class OpenHCSExecutionClient(ExecutionClient):
         pipeline_config = task.get("pipeline_config")
         config_params = task.get("config_params")
         compile_only = task.get("compile_only", False)
+        compile_artifact_id = task.get("compile_artifact_id")
 
         pipeline_code = generate_python_source(
             Assignment("pipeline_steps", pipeline_steps),
@@ -62,6 +63,8 @@ class OpenHCSExecutionClient(ExecutionClient):
         }
         if compile_only:
             request["compile_only"] = True
+        if compile_artifact_id:
+            request["compile_artifact_id"] = str(compile_artifact_id)
         if config_params:
             request["config_params"] = config_params
         else:
@@ -85,6 +88,7 @@ class OpenHCSExecutionClient(ExecutionClient):
         global_config,
         pipeline_config=None,
         config_params=None,
+        compile_artifact_id=None,
     ):
         task = {
             "plate_id": plate_id,
@@ -92,6 +96,7 @@ class OpenHCSExecutionClient(ExecutionClient):
             "global_config": global_config,
             "pipeline_config": pipeline_config,
             "config_params": config_params,
+            "compile_artifact_id": compile_artifact_id,
         }
         return self.submit_execution(task)
 
@@ -192,6 +197,3 @@ class OpenHCSExecutionClient(ExecutionClient):
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.disconnect()
-
-
-ZMQExecutionClient = OpenHCSExecutionClient

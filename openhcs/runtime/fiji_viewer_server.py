@@ -10,7 +10,11 @@ import time
 import threading
 from typing import Dict, Any, List
 
-from openhcs.constants.streaming import StreamingDataType
+from polystore.streaming_constants import StreamingDataType
+from polystore.streaming.receivers.core import (
+    DebouncedBatchEngine,
+    group_items_by_component_modes,
+)
 from openhcs.core.config import TransportMode as OpenHCSTransportMode
 from openhcs.runtime.zmq_config import OPENHCS_ZMQ_CONFIG
 from zmqruntime.transport import coerce_transport_mode
@@ -97,21 +101,16 @@ class FijiViewerServer(StreamingVisualizerServer):
         self.window_key_to_group_id = {}  # Map window_key strings to integer group IDs
         self._next_group_id = 1  # Counter for assigning group IDs
         self.window_dimension_values = {}  # Store dimension values (channel/slice/frame) per window
+        self.window_fixed_labels = {}  # Store fixed window-component labels per window
 
         # Ack socket handled by StreamingVisualizerServer
 
-        # Debouncing for batched processing
-        self._pending_items = []  # Queue of copied items waiting to be processed
-        self._pending_display_config = None  # Display config for pending batch
-        self._pending_images_dir = None  # Images dir for pending batch
-        self._pending_component_names_metadata = {}  # Component names metadata for dimension labels
-        self._debounce_timer = None  # Timer for debounced processing
-        self._debounce_lock = threading.Lock()  # Lock for pending queue
-        self._debounce_delay = self.DEBOUNCE_DELAY_MS / 1000.0  # Convert ms to seconds
-        self._max_debounce_wait = (
-            self.MAX_DEBOUNCE_WAIT_MS / 1000.0
-        )  # Convert ms to seconds
-        self._first_message_time = None  # Track when first message in batch arrived
+        # Debouncing for batched processing (shared core)
+        self._batch_engine = DebouncedBatchEngine(
+            process_fn=self._process_items_from_batch_with_context,
+            debounce_delay_ms=self.DEBOUNCE_DELAY_MS,
+            max_debounce_wait_ms=self.MAX_DEBOUNCE_WAIT_MS,
+        )
 
         # Lock for hyperstack operations to prevent concurrent batch processing from
         # overwriting each other's hyperstacks (race condition in fast sequential mode)
@@ -271,6 +270,7 @@ class FijiViewerServer(StreamingVisualizerServer):
             # Clear only dimension values - this prevents dimension accumulation
             # while allowing image replacement at same coordinates
             self.window_dimension_values.clear()
+            self.window_fixed_labels.clear()
             # Note: self.hyperstacks and self.hyperstack_metadata are NOT cleared
             # This allows the rebuild logic to replace images at same CZT coordinates
 
@@ -367,74 +367,35 @@ class FijiViewerServer(StreamingVisualizerServer):
             images_dir: Source image subdirectory
             component_names_metadata: Component name mappings for dimension labels
         """
-        with self._debounce_lock:
-            # Add items to pending queue
-            self._pending_items.extend(items)
-            self._pending_display_config = display_config_dict
-            self._pending_images_dir = images_dir
-            self._pending_component_names_metadata = component_names_metadata or {}
-
-            # Track first message time for max wait enforcement
-            if self._first_message_time is None:
-                self._first_message_time = time.time()
-
-            # Cancel existing timer if any
-            if self._debounce_timer is not None:
-                self._debounce_timer.cancel()
-
-            # Check if we've exceeded max wait time
-            elapsed = time.time() - self._first_message_time
-            if elapsed >= self._max_debounce_wait:
-                # Process immediately, don't wait any longer
-                logger.info(
-                    f"⏱️  FIJI SERVER: Max debounce wait ({self._max_debounce_wait}s) exceeded, processing {len(self._pending_items)} items immediately"
-                )
-                self._process_pending_batch()
-            else:
-                # Start new debounce timer
-                remaining_wait = min(
-                    self._debounce_delay, self._max_debounce_wait - elapsed
-                )
-                logger.debug(
-                    f"⏱️  FIJI SERVER: Debouncing {len(self._pending_items)} items for {remaining_wait:.3f}s"
-                )
-                self._debounce_timer = threading.Timer(
-                    remaining_wait, self._process_pending_batch
-                )
-                self._debounce_timer.start()
+        self._batch_engine.enqueue(
+            items=items,
+            context={
+                "display_config_dict": display_config_dict,
+                "images_dir": images_dir,
+                "component_names_metadata": component_names_metadata or {},
+            },
+        )
 
     def _process_pending_batch(self):
-        """Process all pending items as a batch (called by debounce timer)."""
-        with self._debounce_lock:
-            if not self._pending_items:
-                return
+        """Process any pending items immediately."""
+        self._batch_engine.flush()
 
-            items = self._pending_items
-            display_config_dict = self._pending_display_config
-            images_dir = self._pending_images_dir
-            component_names_metadata = self._pending_component_names_metadata
-
-            # Clear pending queue
-            self._pending_items = []
-            self._pending_display_config = None
-            self._pending_images_dir = None
-            self._pending_component_names_metadata = {}
-            self._debounce_timer = None
-            self._first_message_time = None
-
-            logger.info(
-                f"🔄 FIJI SERVER: Processing debounced batch of {len(items)} items"
-            )
-
-        # Process batch (outside lock to avoid blocking new messages)
-        try:
-            self._process_items_from_batch(
-                items, display_config_dict, images_dir, component_names_metadata
-            )
-        except Exception as e:
-            logger.error(
-                f"🔄 FIJI SERVER: Error processing debounced batch: {e}", exc_info=True
-            )
+    def _process_items_from_batch_with_context(
+        self, items: List[Dict[str, Any]], context: Dict[str, Any]
+    ) -> None:
+        """Batch-engine callback that unpacks context into canonical arguments."""
+        if not items:
+            return
+        display_config_dict = context["display_config_dict"]
+        images_dir = context.get("images_dir")
+        component_names_metadata = context.get("component_names_metadata", {})
+        logger.info(f"🔄 FIJI SERVER: Processing debounced batch of {len(items)} items")
+        self._process_items_from_batch(
+            items,
+            display_config_dict,
+            images_dir,
+            component_names_metadata,
+        )
 
     def process_image_message(self, message: bytes) -> dict:
         """
@@ -548,21 +509,17 @@ class FijiViewerServer(StreamingVisualizerServer):
             f"🔍 FIJI SERVER: Component cardinality: {[(c, len(v)) for c, v in component_unique_values.items()]}"
         )
 
-        # STEP 3: SHARED - Organize components by mode using component_modes directly
-        # For Fiji, we don't use cardinality filtering - component_modes define the mapping
-        # This ensures consistent CZT coordinate mapping regardless of batch size
-        result = {"window": [], "channel": [], "slice": [], "frame": []}
-
-        for comp_name in component_order:
-            mode = component_modes[comp_name]
-            result[mode].append(comp_name)
-
-        organized = result
-
-        window_components = organized["window"]
-        channel_components = organized["channel"]
-        slice_components = organized["slice"]
-        frame_components = organized["frame"]
+        # STEP 3: SHARED - Generic projection/grouping via polystore receiver core
+        projection = group_items_by_component_modes(
+            items,
+            component_modes=component_modes,
+            component_order=component_order,
+            images_dir=images_dir,
+        )
+        window_components = projection.window_components
+        channel_components = projection.channel_components
+        slice_components = projection.slice_components
+        frame_components = projection.frame_components
 
         logger.info(f"🗂️  FIJI SERVER: Dimension mapping:")
         logger.info(f"  WINDOW: {window_components}")
@@ -570,45 +527,17 @@ class FijiViewerServer(StreamingVisualizerServer):
         logger.info(f"  SLICE: {slice_components}")
         logger.info(f"  FRAME: {frame_components}")
 
-        # STEP 4: SHARED - Group items by window components
-        windows = {}
-        for item in items:
-            meta = item.get("metadata", {})
-            data_type_str = item.get("data_type")
-
-            # Build window key from window components
-            # Note: 'source' now represents step_name during pipeline execution,
-            # so images and ROIs from the same step automatically have matching source values
-            window_key_parts = []
-            for comp in window_components:
-                if comp in meta:
-                    value = meta[comp]
-                    # Legacy ROI normalization: only needed when loading from disk (image viewer context)
-                    # During pipeline execution, source=step_name for both images and ROIs, so they match
-                    if comp == "source" and images_dir and data_type_str == "rois":
-                        # Check if source looks like a subdirectory (not a step name)
-                        # Step names don't contain path separators or end with '_results'
-                        if "_results" in str(value) or "/" in str(value):
-                            from pathlib import Path
-
-                            value = Path(
-                                images_dir
-                            ).name  # Extract subdirectory name from full path
-                    window_key_parts.append(f"{comp}_{value}")
-            window_key = (
-                "_".join(window_key_parts) if window_key_parts else "default_window"
-            )
-
-            if window_key not in windows:
-                windows[window_key] = []
-            windows[window_key].append(item)
-
-        # STEP 5: Process each window group
-        for window_key, window_items in windows.items():
+        # STEP 4: Process each window group
+        for window_key, window_items in projection.windows.items():
+            if window_key in projection.fixed_window_labels:
+                self.window_fixed_labels[window_key] = projection.fixed_window_labels[
+                    window_key
+                ]
             self._process_window_group(
                 window_key,
                 window_items,
                 display_config_dict,
+                window_components,
                 channel_components,
                 slice_components,
                 frame_components,
@@ -620,6 +549,7 @@ class FijiViewerServer(StreamingVisualizerServer):
         window_key: str,
         items: List[Dict[str, Any]],
         display_config_dict: Dict[str, Any],
+        window_components: List[str],
         channel_components: List[str],
         slice_components: List[str],
         frame_components: List[str],
@@ -646,6 +576,7 @@ class FijiViewerServer(StreamingVisualizerServer):
                 window_key,
                 items,
                 display_config_dict,
+                window_components,
                 channel_components,
                 slice_components,
                 frame_components,
@@ -657,6 +588,7 @@ class FijiViewerServer(StreamingVisualizerServer):
         window_key: str,
         items: List[Dict[str, Any]],
         display_config_dict: Dict[str, Any],
+        window_components: List[str],
         channel_components: List[str],
         slice_components: List[str],
         frame_components: List[str],
@@ -723,6 +655,12 @@ class FijiViewerServer(StreamingVisualizerServer):
                 f"🔬 FIJI SERVER: First batch for window '{window_key}': "
                 f"{len(channel_values)}C x {len(slice_values)}Z x {len(frame_values)}T"
             )
+
+        # Fixed labels for window-level components (constant within this window)
+        first_meta = items[0].get("metadata", {}) if items else {}
+        self.window_fixed_labels[window_key] = [
+            (comp, first_meta[comp]) for comp in window_components if comp in first_meta
+        ]
 
         # Store merged values for future batches
         self.window_dimension_values[window_key] = {
@@ -883,13 +821,6 @@ class FijiViewerServer(StreamingVisualizerServer):
 
         This avoids the expensive min/max recalculation that happens when rebuilding.
         """
-        import numpy as np
-        from multiprocessing import shared_memory
-        import scyjava as sj
-
-        # Import ImageJ classes
-        ShortProcessor = sj.jimport("ij.process.ShortProcessor")
-
         # Get existing metadata
         existing_images = self.hyperstack_metadata[window_key]
 
@@ -917,6 +848,8 @@ class FijiViewerServer(StreamingVisualizerServer):
 
         # Get existing stack and dimensions
         stack = existing_imp.getStack()
+        stack_width = stack.getWidth()
+        stack_height = stack.getHeight()
         old_nChannels = existing_imp.getNChannels()
         old_nSlices = existing_imp.getNSlices()
         old_nFrames = existing_imp.getNFrames()
@@ -967,6 +900,7 @@ class FijiViewerServer(StreamingVisualizerServer):
         # NEW LOGIC: Check if any coordinate has a dimension value not in existing dimension values
         # This is more accurate than checking if coordinates exist in existing_lookup
         dimensions_changed = False
+        spatial_dimensions_changed = False
         for coord in new_coords_added:
             c_key, z_key, t_key = coord
             if c_key and c_key not in existing_channel_values:
@@ -980,11 +914,17 @@ class FijiViewerServer(StreamingVisualizerServer):
                 break
 
         if not dimensions_changed:
+            for img_data in new_images:
+                np_data = self._extract_2d_plane(img_data["data"])
+                height, width = np_data.shape[-2:]
+                if height > stack_height or width > stack_width:
+                    spatial_dimensions_changed = True
+                    break
+
+        if not dimensions_changed and not spatial_dimensions_changed:
             # OPTIMIZATION: Only slice replacements - do INCREMENTAL UPDATE
             # Replace only changed slices in existing ImageStack WITHOUT rebuilding
             # This avoids recalculating contrast for ALL images
-            import numpy as np
-
             logger.info(
                 f"🔬 FIJI SERVER: ⚡ INCREMENTAL: Replacing {len(new_images)} slices in '{window_key}' (no rebuild, no recalc)"
             )
@@ -992,9 +932,8 @@ class FijiViewerServer(StreamingVisualizerServer):
             # Map of new pixel data to replace
             new_pixel_data = {}
             for img_data in new_images:
-                np_data = img_data["data"]
-                if np_data.ndim == 3:
-                    np_data = np_data[np_data.shape[0] // 2]
+                np_data = self._extract_2d_plane(img_data["data"])
+                np_data = self._pad_plane_to_shape(np_data, stack_height, stack_width)
 
                 meta = img_data["metadata"]
                 c_key = (
@@ -1045,77 +984,15 @@ class FijiViewerServer(StreamingVisualizerServer):
             logger.info(
                 f"🔬 FIJI SERVER: ✅ Incremental update complete for '{window_key}'"
             )
-
-            # Update only changed slices directly in existing ImageStack
-            # CRITICAL: Do NOT call setPixels() for each image - that's what triggers min/max!
-            # Instead, collect ALL new pixels and update ONCE
-
-            import numpy as np
-
-            # Map of new pixel data to replace
-            new_pixel_data = {}
-            for img_data in new_images:
-                np_data = img_data["data"]
-                if np_data.ndim == 3:
-                    np_data = np_data[np_data.shape[0] // 2]
-
-                meta = img_data["metadata"]
-                c_key = (
-                    tuple(meta[comp] for comp in channel_components)
-                    if channel_components
-                    else ()
-                )
-                z_key = (
-                    tuple(meta[comp] for comp in slice_components)
-                    if slice_components
-                    else ()
-                )
-                t_key = (
-                    tuple(meta[comp] for comp in frame_components)
-                    if frame_components
-                    else ()
-                )
-
-                coord = (c_key, z_key, t_key)
-
-                # Calculate slice index in ImageJ CZT order
-                c_idx = channel_values.index(c_key) if c_key else 0
-                z_idx = slice_values.index(z_key) if z_key else 0
-                t_idx = frame_values.index(t_key) if t_key else 0
-
-                nChannels = len(channel_values) if channel_values else 1
-                nSlices = len(slice_values) if slice_values else 1
-                nFrames = len(frame_values) if frame_values else 1
-
-                slice_idx = (t_idx * nSlices * nChannels) + (z_idx * nChannels) + c_idx
-
-                new_pixel_data[slice_idx] = np_data
-
-            # CRITICAL: Replace ALL changed slices in ONE call to avoid repeated min/max recalc
-            # This is the key to avoiding fibonacci performance
-            for slice_idx, np_data in new_pixel_data.items():
-                stack.setPixels(slice_idx, np_data)
-
-            # Update metadata
-            self.hyperstack_metadata[window_key] = list(existing_lookup.values())
-
-            # CRITICAL: Do NOT apply auto-contrast during incremental updates!
-            # Only repaint window - auto-contrast will be applied on FINAL batch
-            # This avoids O(n) auto-contrast for every single slice
-            # Also use updateAndDraw() which is faster and doesn't recalc min/max
-            imp = existing_imp
-            imp.updateAndDraw()
-
-            logger.info(
-                f"🔬 FIJI SERVER: ✅ Incremental update complete for '{window_key}' (no min/max recalc)"
-            )
         else:
             # Dimensions changed - need FULL REBUILD
-            # ImageJ hyperstacks have fixed dimensions
+            # ImageJ hyperstacks have fixed dimensions (C/Z/T and spatial width/height)
             # Preserve display ranges to avoid expensive min/max recalculation
             all_images = list(existing_lookup.values())
             logger.info(
-                f"🔬 FIJI SERVER: 🔄 REBUILDING: Merging {len(new_images)} new images into '{window_key}' (total: {len(all_images)} images, existing had {len(existing_images)})"
+                f"🔬 FIJI SERVER: 🔄 REBUILDING: Merging {len(new_images)} new images into "
+                f"'{window_key}' (total: {len(all_images)} images, existing had {len(existing_images)}, "
+                f"spatial_changed={spatial_dimensions_changed}, coord_changed={dimensions_changed})"
             )
 
             # Store display range before rebuilding
@@ -1265,6 +1142,41 @@ class FijiViewerServer(StreamingVisualizerServer):
             image_lookup[(c_key, z_key, t_key)] = img_data["data"]
         return image_lookup
 
+    def _extract_2d_plane(self, np_data):
+        """Extract a 2D plane using the canonical Fiji rule for 3D payloads."""
+        if np_data.ndim == 3:
+            return np_data[np_data.shape[0] // 2]
+        return np_data
+
+    def _pad_plane_to_shape(self, np_data, target_height: int, target_width: int):
+        """Pad a 2D plane to target spatial shape using zero fill."""
+        import numpy as np
+
+        current_height, current_width = np_data.shape[-2:]
+        if current_height == target_height and current_width == target_width:
+            return np_data
+
+        if current_height > target_height or current_width > target_width:
+            raise ValueError(
+                f"Cannot pad plane {(current_height, current_width)} "
+                f"to smaller target {(target_height, target_width)}"
+            )
+
+        padded = np.zeros((target_height, target_width), dtype=np_data.dtype)
+        padded[:current_height, :current_width] = np_data
+        return padded
+
+    def _compute_target_spatial_shape(self, all_images: List[Dict[str, Any]]) -> tuple:
+        """Compute target (height, width) as max spatial shape across all images."""
+        max_height = 0
+        max_width = 0
+        for img_data in all_images:
+            plane = self._extract_2d_plane(img_data["data"])
+            height, width = plane.shape[-2:]
+            max_height = max(max_height, height)
+            max_width = max(max_width, width)
+        return max_height, max_width
+
     def _create_imagestack_from_images(
         self,
         image_lookup,
@@ -1300,11 +1212,8 @@ class FijiViewerServer(StreamingVisualizerServer):
                     key = (c_key, z_key, t_key)
 
                     if key in image_lookup:
-                        np_data = image_lookup[key]
-
-                        # Handle 3D data (take middle slice)
-                        if np_data.ndim == 3:
-                            np_data = np_data[np_data.shape[0] // 2]
+                        np_data = self._extract_2d_plane(image_lookup[key])
+                        np_data = self._pad_plane_to_shape(np_data, height, width)
 
                         # CRITICAL: Create processor directly using JPype array conversion
                         # Avoid to_imageplus() which triggers min/max calculation for EACH slice
@@ -1393,6 +1302,7 @@ class FijiViewerServer(StreamingVisualizerServer):
     def _apply_display_settings(
         self,
         imp,
+        window_key: str,
         lut_name,
         auto_contrast,
         nChannels,
@@ -1403,6 +1313,7 @@ class FijiViewerServer(StreamingVisualizerServer):
 
         Args:
             imp: ImagePlus to modify
+            window_key: Hyperstack window key (for logging)
             lut_name: LUT name to apply
             auto_contrast: Whether to apply auto-contrast
             nChannels: Number of channels
@@ -1433,7 +1344,7 @@ class FijiViewerServer(StreamingVisualizerServer):
                     self.ij.IJ.run(imp, "Enhance Contrast", "saturated=0.35")
                     logger.info(
                         f"🔬 FIJI SERVER: ✅ Applied auto-contrast to '{window_key}' "
-                        f"(nChannels={nChannels}, nSlices={nFrames if nChannels == 1 else 'N/A'})"
+                        f"(nChannels={nChannels})"
                     )
                 except Exception as e:
                     logger.warning(
@@ -1442,6 +1353,7 @@ class FijiViewerServer(StreamingVisualizerServer):
 
     def _create_dimension_label_overlay(
         self,
+        window_key: str,
         imp,
         channel_components: List[str],
         slice_components: List[str],
@@ -1458,6 +1370,7 @@ class FijiViewerServer(StreamingVisualizerServer):
         matching napari's behavior.
 
         Args:
+            window_key: Window key for fixed window-component labels
             imp: ImagePlus instance
             channel_components: Components mapped to Channel dimension
             slice_components: Components mapped to Slice dimension
@@ -1500,6 +1413,10 @@ class FijiViewerServer(StreamingVisualizerServer):
                     # No metadata - use abbreviated component name + index
                     abbrev = COMPONENT_ABBREV.get(comp_name, comp_name)
                     label_parts.append(f"{abbrev} {comp_value}")
+
+            # Window-level fixed labels (e.g., Well when mapped to window mode)
+            for comp_name, comp_value in self.window_fixed_labels.get(window_key, []):
+                add_component_label(comp_name, comp_value)
 
             # Channel dimension - show actual channel component values
             if channel_components and channel_values:
@@ -1576,6 +1493,7 @@ class FijiViewerServer(StreamingVisualizerServer):
 
             # Add listener to update overlay when hyperstack position changes
             self._add_dimension_change_listener(
+                window_key,
                 imp,
                 channel_components,
                 slice_components,
@@ -1594,6 +1512,7 @@ class FijiViewerServer(StreamingVisualizerServer):
 
     def _add_dimension_change_listener(
         self,
+        window_key: str,
         imp,
         channel_components: List[str],
         slice_components: List[str],
@@ -1642,6 +1561,10 @@ class FijiViewerServer(StreamingVisualizerServer):
                         # No metadata - use abbreviated component name + index
                         abbrev = COMPONENT_ABBREV.get(comp_name, comp_name)
                         label_parts.append(f"{abbrev} {comp_value}")
+
+                # Window-level fixed labels (e.g., Well when mapped to window mode)
+                for comp_name, comp_value in self.window_fixed_labels.get(window_key, []):
+                    add_component_label(comp_name, comp_value)
 
                 # Channel
                 if channel_components and channel_values:
@@ -1927,9 +1850,11 @@ class FijiViewerServer(StreamingVisualizerServer):
             logger.error(f"🔬 FIJI SERVER: No images provided for '{window_key}'")
             return
 
-        # Get spatial dimensions
-        first_img = all_images[0]["data"]
-        height, width = first_img.shape[-2:]
+        # Get target spatial dimensions (mixed shapes allowed by zero-padding smaller planes)
+        height, width = self._compute_target_spatial_shape(all_images)
+        logger.info(
+            f"🔬 FIJI SERVER: Target stack shape for '{window_key}' is {height}x{width}"
+        )
 
         # Build image lookup
         image_lookup = self._build_image_lookup(
@@ -1943,9 +1868,7 @@ class FijiViewerServer(StreamingVisualizerServer):
         global_min = float('inf')
         global_max = float('-inf')
         for img_data in all_images:
-            np_data = img_data["data"]
-            if np_data.ndim == 3:
-                np_data = np_data[np_data.shape[0] // 2]
+            np_data = self._extract_2d_plane(img_data["data"])
             img_min = float(np.min(np_data))
             img_max = float(np.max(np_data))
             global_min = min(global_min, img_min)
@@ -2023,22 +1946,6 @@ class FijiViewerServer(StreamingVisualizerServer):
         if title_suffix:
             imp.setTitle(f"{window_key}{title_suffix}")
 
-            # Apply display settings
-        lut_name = display_config_dict.get("lut", "Grays")
-        auto_contrast = display_config_dict.get("auto_contrast", True)
-        # Only apply auto-contrast for NEW hyperstacks; for updates, use preserved ranges
-        # This avoids expensive O(n²) recalculation when adding slices incrementally
-        # CRITICAL: For rebuilds with preserved ranges, SKIP auto-contrast to avoid O(n) recalc
-        # Auto-contrast will be applied once on final batch via manual trigger or new hyperstack
-        self._apply_display_settings(
-            imp,
-            lut_name,
-            auto_contrast if is_new else False,
-            nChannels,
-            preserved_ranges=None if is_new else preserved_display_ranges,
-            skip_auto_contrast=(not is_new) and (preserved_display_ranges is not None),
-        )
-
         # Close old hyperstack if rebuilding
         if window_key in self.hyperstacks:
             self.hyperstacks[window_key].close()
@@ -2051,6 +1958,20 @@ class FijiViewerServer(StreamingVisualizerServer):
         # Show after storing (imp.show() may be async on Swing thread)
         imp.show()
 
+        # Apply display settings after the window is shown.
+        # This keeps auto-contrast off the per-slice update path.
+        lut_name = display_config_dict.get("lut", "Grays")
+        auto_contrast = display_config_dict.get("auto_contrast", True)
+        self._apply_display_settings(
+            imp,
+            window_key,
+            lut_name,
+            auto_contrast if is_new else False,
+            nChannels,
+            preserved_ranges=None if is_new else preserved_display_ranges,
+            skip_auto_contrast=(not is_new) and (preserved_display_ranges is not None),
+        )
+
         logger.info(
             f"🔬 FIJI SERVER: Displayed hyperstack '{window_key}' with {stack.getSize()} slices"
         )
@@ -2060,6 +1981,7 @@ class FijiViewerServer(StreamingVisualizerServer):
             f"🏷️  FIJI SERVER: Creating dimension label overlay for {window_key}"
         )
         self._create_dimension_label_overlay(
+            window_key,
             imp,
             channel_components,
             slice_components,

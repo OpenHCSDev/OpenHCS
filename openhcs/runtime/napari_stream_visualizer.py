@@ -418,7 +418,11 @@ def _create_or_update_points_layer(viewer, layers, layer_name, points_data, prop
 
 
 # Populate registry now that helper functions are defined
-from openhcs.constants.streaming import StreamingDataType
+from polystore.streaming_constants import StreamingDataType
+from polystore.streaming.receivers.napari import (
+    normalize_component_layout,
+    build_layer_key,
+)
 
 _DATA_TYPE_HANDLERS = {
     StreamingDataType.IMAGE: {
@@ -469,54 +473,18 @@ def _handle_component_aware_display(
             raise ValueError(f"No component metadata available for path: {path}")
         component_info = component_metadata
 
-        # Build component_modes and component_order from config (dict or object)
-        component_modes = None
-        component_order = None
-
-        if isinstance(display_config, dict):
-            cm = display_config.get("component_modes") or display_config.get(
-                "componentModes"
-            )
-            if isinstance(cm, dict) and cm:
-                component_modes = cm
-            component_order = display_config["component_order"]
-        else:
-            # Handle object-like config (NapariDisplayConfig)
-            component_order = display_config.COMPONENT_ORDER
-            component_modes = {}
-            for component in component_order:
-                mode_field = f"{component}_mode"
-                if hasattr(display_config, mode_field):
-                    mode_value = getattr(display_config, mode_field)
-                    component_modes[component] = getattr(
-                        mode_value, "value", str(mode_value)
-                    )
-
-        # Generic layer naming - iterate over components in canonical order
-        # Components in SLICE mode create separate layers
-        # Components in STACK mode are combined into the same layer
-
-        layer_key_parts = []
-        for component in component_order:
-            mode = component_modes.get(component)
-            if mode == "slice" and component in component_info:
-                value = component_info[component]
-                layer_key_parts.append(f"{component}_{value}")
-
-        layer_key = "_".join(layer_key_parts) if layer_key_parts else "default_layer"
+        component_modes, component_order = normalize_component_layout(display_config)
+        layer_key = build_layer_key(
+            component_info=component_info,
+            component_modes=component_modes,
+            component_order=component_order,
+            data_type=data_type,
+        )
 
         # Log component modes for debugging
         logger.info(
             f"🔍 NAPARI PROCESS: component_modes={component_modes}, layer_key='{layer_key}'"
         )
-
-        # Add "_shapes" suffix for shapes layers to distinguish from image layers
-        # Add "_points" suffix for points layers to distinguish from image layers
-        # MUST happen BEFORE reconciliation so we check the correct layer name
-        if data_type == StreamingDataType.SHAPES:
-            layer_key = f"{layer_key}_shapes"
-        elif data_type == StreamingDataType.POINTS:
-            layer_key = f"{layer_key}_points"
 
         # Log layer key and component info for debugging
         logger.info(

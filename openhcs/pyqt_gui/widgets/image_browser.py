@@ -1317,12 +1317,14 @@ class ImageBrowserWidget(QWidget):
         """Handle double-click from ImageTableBrowser."""
         file_info = self.all_files[key]
 
-        # Check if this is a result file (has 'type' field) or an image
-        if "type" in file_info:
+        # Check if this is a result file (ROI, CSV, JSON) or an image
+        # Result files are stored in result_full_paths, images are not
+        filename = file_info["filename"]
+        if filename in self.result_full_paths:
             # This is a result file (ROI, CSV, JSON)
             self._handle_result_double_click(file_info)
         else:
-            # This is an image file (no 'type' field)
+            # This is an image file
             self._handle_image_double_click()
 
     # Backward compatibility alias

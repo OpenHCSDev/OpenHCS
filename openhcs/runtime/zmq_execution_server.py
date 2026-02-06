@@ -5,12 +5,13 @@ from __future__ import annotations
 import logging
 import time
 import threading
+import hashlib
+import json
 from typing import Any
 
 from zmqruntime.execution import ExecutionServer
 from zmqruntime.messages import (
     ExecuteRequest,
-    ExecuteResponse,
     ExecutionStatus,
     MessageFields,
     ResponseType,
@@ -19,11 +20,26 @@ from zmqruntime.messages import (
 
 from zmqruntime.transport import coerce_transport_mode
 from openhcs.runtime.zmq_config import OPENHCS_ZMQ_CONFIG
+from openhcs.core.progress import ProgressPhase, ProgressStatus, ProgressEvent
+
 
 logger = logging.getLogger(__name__)
 
 
-class OpenHCSExecutionServer(ExecutionServer):
+def _emit_zmq_progress(enqueue_fn, **kwargs) -> None:
+    """Helper to emit progress to ZMQ queue using new schema.
+
+    All fields are explicit on ProgressEvent - just pass kwargs directly.
+    """
+    import time
+    import os
+
+    # Create event - all fields are explicit, just pass kwargs directly
+    event = ProgressEvent(timestamp=time.time(), pid=os.getpid(), **kwargs)
+    enqueue_fn(event.to_dict())
+
+
+class ZMQExecutionServer(ExecutionServer):
     """OpenHCS-specific execution server."""
 
     _server_type = "execution"
@@ -45,6 +61,40 @@ class OpenHCSExecutionServer(ExecutionServer):
         self._compile_status: str | None = None
         self._compile_message: str | None = None
         self._compile_status_expires_at: float | None = None
+        self._worker_assignments_by_execution: dict[str, dict[str, list[str]]] = {}
+        self._compiled_artifacts: dict[str, dict[str, Any]] = {}
+        self._compiled_artifact_ttl_seconds: float = 30.0 * 60.0
+
+    @staticmethod
+    def _build_worker_assignments(
+        wells: list[str], num_workers: int
+    ) -> dict[str, list[str]]:
+        if num_workers <= 0:
+            raise ValueError(f"num_workers must be >= 1, got {num_workers}")
+        if len(set(wells)) != len(wells):
+            raise ValueError(f"Duplicate well IDs detected: {wells}")
+
+        slots = {f"worker_{idx}": [] for idx in range(num_workers)}
+        for idx, axis_id in enumerate(sorted(wells)):
+            slot = f"worker_{idx % num_workers}"
+            slots[slot].append(axis_id)
+        return {slot: owned for slot, owned in slots.items() if owned}
+
+    @staticmethod
+    def _validate_worker_claim(
+        worker_slot: str,
+        owned_wells: list[str],
+        assignments: dict[str, list[str]],
+    ) -> None:
+        if worker_slot not in assignments:
+            raise ValueError(
+                f"Unknown worker_slot '{worker_slot}'. Expected one of: {list(assignments.keys())}"
+            )
+        expected = assignments[worker_slot]
+        if sorted(owned_wells) != sorted(expected):
+            raise ValueError(
+                f"Invalid worker claim for {worker_slot}: expected={expected}, got={owned_wells}"
+            )
 
     def _flush_progress_only(self) -> None:
         """Flush only progress messages to ZMQ, without processing control messages.
@@ -67,7 +117,7 @@ class OpenHCSExecutionServer(ExecutionServer):
                     logger.info(f"Flushed {count} progress update(s) to ZMQ")
                 break
             logger.info(
-                f"Flushing to ZMQ: step={progress_update.get('step')!r}, "
+                f"Flushing to ZMQ: step_name={progress_update.get('step_name')!r}, "
                 f"axis={progress_update.get('axis_id')!r}, plate_id={progress_update.get('plate_id')!r}, "
                 f"percent={progress_update.get('percent')!r}, total_wells={progress_update.get('total_wells')!r}"
             )
@@ -93,7 +143,38 @@ class OpenHCSExecutionServer(ExecutionServer):
             return None, None
         return self._compile_status, self._compile_message
 
+    @staticmethod
+    def _build_request_signature(
+        plate_id: str,
+        pipeline_code: str,
+        config_params: dict | None,
+        config_code: str | None,
+        pipeline_config_code: str | None,
+    ) -> str:
+        payload = {
+            MessageFields.PLATE_ID: plate_id,
+            MessageFields.PIPELINE_CODE: pipeline_code,
+            MessageFields.CONFIG_PARAMS: config_params,
+            MessageFields.CONFIG_CODE: config_code,
+            MessageFields.PIPELINE_CONFIG_CODE: pipeline_config_code,
+        }
+        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    def _cleanup_compiled_artifacts(self) -> None:
+        now = time.time()
+        expired_ids = [
+            artifact_id
+            for artifact_id, artifact in self._compiled_artifacts.items()
+            if now - artifact["created_at"] > self._compiled_artifact_ttl_seconds
+        ]
+        for artifact_id in expired_ids:
+            del self._compiled_artifacts[artifact_id]
+        if expired_ids:
+            logger.info("Cleaned up %d expired compile artifact(s)", len(expired_ids))
+
     def _create_pong_response(self):
+        self._cleanup_compiled_artifacts()
         response = super()._create_pong_response()
 
         # Add OpenHCS-specific compile status
@@ -103,17 +184,19 @@ class OpenHCSExecutionServer(ExecutionServer):
         if compile_message is not None:
             response[MessageFields.COMPILE_MESSAGE] = compile_message
 
-        # Filter out compile-only executions from running_executions
-        # Compile-only executions should be shown via compile_status, not as running executions
-        running_executions = response.get("running_executions", [])
-        filtered_running = [
-            exec_info
-            for exec_info in running_executions
-            if not self.active_executions.get(
-                exec_info.get(MessageFields.EXECUTION_ID, ""), {}
-            ).get(MessageFields.COMPILE_ONLY, False)
+        queued = [
+            (execution_id, record)
+            for execution_id, record in self.active_executions.items()
+            if record.status == ExecutionStatus.QUEUED.value
         ]
-        response["running_executions"] = filtered_running
+        response["queued_executions"] = [
+            {
+                MessageFields.EXECUTION_ID: execution_id,
+                MessageFields.PLATE_ID: str(record.plate_id),
+                "queue_position": index + 1,
+            }
+            for index, (execution_id, record) in enumerate(queued)
+        ]
 
         return response
 
@@ -121,7 +204,7 @@ class OpenHCSExecutionServer(ExecutionServer):
         # DEBUG: Log what's being enqueued
         if "total_wells" in progress_update:
             logger.info(
-                f"_enqueue_progress: total_wells={progress_update.get('total_wells')}, keys={list(progress_update.keys())}, step={progress_update.get('step')}"
+                f"_enqueue_progress: total_wells={progress_update.get('total_wells')}, keys={list(progress_update.keys())}, step_name={progress_update.get('step_name')}"
             )
         self.progress_queue.put(progress_update)
 
@@ -134,8 +217,26 @@ class OpenHCSExecutionServer(ExecutionServer):
             if progress_update is None:
                 logger.info("Progress forwarder received None, exiting")
                 break
+            execution_id = progress_update.get("execution_id")
+            if not execution_id:
+                raise ValueError(
+                    f"Worker progress missing execution_id: {progress_update}"
+                )
+            assignments = self._worker_assignments_by_execution.get(execution_id)
+            if assignments is None:
+                raise ValueError(
+                    f"Missing worker assignments for execution_id={execution_id}"
+                )
+
+            worker_slot = progress_update.get("worker_slot")
+            owned_wells = progress_update.get("owned_wells")
+            if not worker_slot or owned_wells is None:
+                raise ValueError(
+                    f"Worker progress missing claim fields: worker_slot={worker_slot}, owned_wells={owned_wells}"
+                )
+            self._validate_worker_claim(worker_slot, owned_wells, assignments)
             logger.info(
-                f"Forwarding progress: pid={progress_update.get('pid')}, axis={progress_update.get('axis_id')}, step={progress_update.get('step')}"
+                f"Forwarding progress: pid={progress_update.get('pid')}, axis={progress_update.get('axis_id')}, step_name={progress_update.get('step_name')}, worker_slot={worker_slot}"
             )
             self.progress_queue.put(progress_update)
 
@@ -146,6 +247,36 @@ class OpenHCSExecutionServer(ExecutionServer):
         Ping is for process tracking (CPU, memory), not application state.
         """
         return super()._get_worker_info()
+
+    def _attach_results_summary_extras(
+        self, execution_id: str, record, execution_payload: dict | None = None
+    ) -> None:
+        if record.status != ExecutionStatus.COMPLETE.value:
+            return
+
+        summary = record.results_summary
+        if not isinstance(summary, dict):
+            summary = {}
+            record.results_summary = summary
+
+        output_plate_root = record.get_extra("output_plate_root")
+        auto_add_output_plate = record.get_extra("auto_add_output_plate")
+        if output_plate_root:
+            summary["output_plate_root"] = str(output_plate_root)
+        if auto_add_output_plate is not None:
+            summary["auto_add_output_plate_to_plate_manager"] = bool(
+                auto_add_output_plate
+            )
+
+        if isinstance(execution_payload, dict):
+            execution_payload[MessageFields.RESULTS_SUMMARY] = summary
+
+        logger.info(
+            "[%s] Attached results_summary extras: output_plate_root=%s auto_add=%s",
+            execution_id,
+            summary.get("output_plate_root"),
+            summary.get("auto_add_output_plate_to_plate_manager"),
+        )
 
     def _run_execution(self, execution_id, request, record):
         """Run an execution and enrich results_summary with output plate path.
@@ -158,34 +289,7 @@ class OpenHCSExecutionServer(ExecutionServer):
         super()._run_execution(execution_id, request, record)
 
         try:
-            if record.get(MessageFields.STATUS) != ExecutionStatus.COMPLETE.value:
-                logger.info(
-                    "[%s] Skipping results_summary attach (status=%s)",
-                    execution_id,
-                    record.get(MessageFields.STATUS),
-                )
-                return
-
-            output_plate_root = record.get("output_plate_root")
-            auto_add_output_plate = record.get("auto_add_output_plate")
-
-            summary = record.get(MessageFields.RESULTS_SUMMARY)
-            if not isinstance(summary, dict):
-                summary = {}
-                record[MessageFields.RESULTS_SUMMARY] = summary
-            if output_plate_root:
-                summary["output_plate_root"] = str(output_plate_root)
-            if auto_add_output_plate is not None:
-                summary["auto_add_output_plate_to_plate_manager"] = bool(
-                    auto_add_output_plate
-                )
-
-            logger.info(
-                "[%s] Attached results_summary extras: output_plate_root=%s auto_add=%s",
-                execution_id,
-                summary.get("output_plate_root"),
-                summary.get("auto_add_output_plate_to_plate_manager"),
-            )
+            self._attach_results_summary_extras(execution_id=execution_id, record=record)
         except Exception as e:
             logger.warning(
                 "[%s] Failed to attach output_plate_root to results_summary: %s",
@@ -194,51 +298,25 @@ class OpenHCSExecutionServer(ExecutionServer):
             )
 
     def _handle_status(self, msg):
-        execution_id = StatusRequest.from_dict(msg).execution_id
-        if execution_id:
-            if execution_id not in self.active_executions:
-                return ExecuteResponse(
-                    ResponseType.ERROR,
-                    error=f"Execution {execution_id} not found",
-                ).to_dict()
-            record = self.active_executions[execution_id]
-            if record.get(MessageFields.STATUS) == ExecutionStatus.COMPLETE.value:
-                summary = record.get(MessageFields.RESULTS_SUMMARY)
-                if not isinstance(summary, dict):
-                    summary = {}
-                    record[MessageFields.RESULTS_SUMMARY] = summary
-                output_plate_root = record.get("output_plate_root")
-                auto_add_output_plate = record.get("auto_add_output_plate")
-                if output_plate_root:
-                    summary["output_plate_root"] = str(output_plate_root)
-                if auto_add_output_plate is not None:
-                    summary["auto_add_output_plate_to_plate_manager"] = bool(
-                        auto_add_output_plate
-                    )
+        response = super()._handle_status(msg)
+        if response.get(MessageFields.STATUS) != ResponseType.OK.value:
+            return response
 
-            return {
-                MessageFields.STATUS: ResponseType.OK.value,
-                "execution": {
-                    k: record.get(k)
-                    for k in [
-                        MessageFields.EXECUTION_ID,
-                        MessageFields.PLATE_ID,
-                        MessageFields.STATUS,
-                        MessageFields.START_TIME,
-                        MessageFields.END_TIME,
-                        MessageFields.ERROR,
-                        MessageFields.RESULTS_SUMMARY,
-                    ]
-                },
-            }
-        return {
-            MessageFields.STATUS: ResponseType.OK.value,
-            MessageFields.ACTIVE_EXECUTIONS: len(self.active_executions),
-            MessageFields.UPTIME: time.time() - self.start_time
-            if self.start_time
-            else 0,
-            MessageFields.EXECUTIONS: list(self.active_executions.keys()),
-        }
+        execution_id = StatusRequest.from_dict(msg).execution_id
+        if not execution_id:
+            return response
+
+        record = self.active_executions[execution_id]
+        if record.status != ExecutionStatus.COMPLETE.value:
+            return response
+
+        execution_payload = response.get(MessageFields.EXECUTION)
+        self._attach_results_summary_extras(
+            execution_id=execution_id,
+            record=record,
+            execution_payload=execution_payload if isinstance(execution_payload, dict) else None,
+        )
+        return response
 
     def execute_task(self, execution_id: str, request: ExecuteRequest) -> Any:
         return self._execute_pipeline(
@@ -250,6 +328,7 @@ class OpenHCSExecutionServer(ExecutionServer):
             request.pipeline_config_code,
             request.client_address,
             request.compile_only,
+            request.compile_artifact_id,
         )
 
     def _execute_pipeline(
@@ -262,6 +341,7 @@ class OpenHCSExecutionServer(ExecutionServer):
         pipeline_config_code,
         client_address=None,
         compile_only: bool = False,
+        compile_artifact_id: str | None = None,
     ):
         from openhcs.constants import AllComponents, VariableComponents, GroupBy
         from openhcs.core.config import GlobalPipelineConfig, PipelineConfig
@@ -286,6 +366,21 @@ class OpenHCSExecutionServer(ExecutionServer):
                 )
             else:
                 logger.info("[%s] Registry already initialized, skipping", execution_id)
+
+        self._cleanup_compiled_artifacts()
+
+        if compile_only and compile_artifact_id:
+            raise ValueError(
+                "compile_only and compile_artifact_id cannot both be set"
+            )
+
+        request_signature = self._build_request_signature(
+            plate_id=plate_id,
+            pipeline_code=pipeline_code,
+            config_params=config_params,
+            config_code=config_code,
+            pipeline_config_code=pipeline_config_code,
+        )
 
         namespace = {}
         exec(pipeline_code, namespace)
@@ -327,6 +422,8 @@ class OpenHCSExecutionServer(ExecutionServer):
                 pipeline_config,
                 config_params,
                 compile_only=compile_only,
+                compile_artifact_id=compile_artifact_id,
+                request_signature=request_signature,
             )
         except Exception as e:
             if compile_only:
@@ -371,10 +468,13 @@ class OpenHCSExecutionServer(ExecutionServer):
         pipeline_config,
         config_params,
         compile_only: bool = False,
+        compile_artifact_id: str | None = None,
+        request_signature: str | None = None,
     ):
         from pathlib import Path
         import multiprocessing
         from openhcs.config_framework.lazy_factory import ensure_global_config_context
+        from openhcs.core.config import GlobalPipelineConfig
         from openhcs.core.orchestrator.gpu_scheduler import setup_global_gpu_registry
         from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
         from openhcs.constants import (
@@ -402,8 +502,13 @@ class OpenHCSExecutionServer(ExecutionServer):
                 "[%s] Failed to trigger GPU cleanup: %s", execution_id, cleanup_error
             )
 
+        if not isinstance(global_config, GlobalPipelineConfig):
+            raise TypeError(
+                f"Expected GlobalPipelineConfig, got {type(global_config).__name__}"
+            )
+
         setup_global_gpu_registry(global_config=global_config)
-        ensure_global_config_context(type(global_config), global_config)
+        ensure_global_config_context(GlobalPipelineConfig, global_config)
 
         plate_path_str = str(plate_id)
         is_omero_plate_id = False
@@ -434,12 +539,6 @@ class OpenHCSExecutionServer(ExecutionServer):
             if not plate_path_str.startswith("/omero/"):
                 plate_path_str = f"/omero/plate_{plate_path_str}"
 
-        from openhcs.core.progress_reporter import (
-            set_progress_emitter,
-            clear_progress_emitter,
-            emit_progress,
-        )
-
         progress_context = {
             MessageFields.EXECUTION_ID: execution_id,
             MessageFields.PLATE_ID: plate_id,
@@ -447,21 +546,20 @@ class OpenHCSExecutionServer(ExecutionServer):
         }
         worker_progress_queue = None
         progress_forwarder = None
-        set_progress_emitter(self._enqueue_progress, progress_context)
+        compiled_contexts: dict[str, Any] | None = None
 
         try:
-            emit_progress(
-                {
-                    "axis_id": "",
-                    "step": "pipeline",
-                    "step_index": -1,
-                    "total_steps": len(pipeline_steps),
-                    "phase": "init",
-                    "status": "started",
-                    "completed": 0,
-                    "total": 1,
-                    "percent": 0.0,
-                }
+            _emit_zmq_progress(
+                self._enqueue_progress,
+                execution_id=execution_id,
+                plate_id=plate_id,
+                axis_id="",
+                step_name="pipeline",
+                total=len(pipeline_steps),
+                phase=ProgressPhase.INIT,
+                status=ProgressStatus.STARTED,
+                completed=0,
+                percent=0.0,
             )
 
             orchestrator = PipelineOrchestrator(
@@ -469,193 +567,184 @@ class OpenHCSExecutionServer(ExecutionServer):
                 pipeline_config=pipeline_config,
                 progress_callback=None,
             )
+            orchestrator.execution_id = execution_id
             orchestrator.initialize()
-            self.active_executions[execution_id]["orchestrator"] = orchestrator
+            self.active_executions[execution_id].set_extra("orchestrator", orchestrator)
 
-            emit_progress(
-                {
-                    "axis_id": "",
-                    "step": "pipeline",
-                    "step_index": -1,
-                    "total_steps": len(pipeline_steps),
-                    "phase": "init",
-                    "status": "success",
-                    "completed": 1,
-                    "total": 1,
-                    "percent": 100.0,
-                }
+            _emit_zmq_progress(
+                self._enqueue_progress,
+                execution_id=execution_id,
+                plate_id=plate_id,
+                axis_id="",
+                step_name="pipeline",
+                total=len(pipeline_steps),
+                phase=ProgressPhase.INIT,
+                status=ProgressStatus.SUCCESS,
+                completed=1,
+                percent=100.0,
             )
 
-            if (
-                self.active_executions[execution_id][MessageFields.STATUS]
-                == ExecutionStatus.CANCELLED.value
-            ):
+            if self.active_executions[execution_id].status == ExecutionStatus.CANCELLED.value:
                 logger.info(
                     "[%s] Execution cancelled after initialization, aborting",
                     execution_id,
                 )
                 raise RuntimeError("Execution cancelled by user")
 
-            wells = (
-                config_params.get("well_filter")
-                if config_params
-                else orchestrator.get_component_keys(MULTIPROCESSING_AXIS)
+            if config_params and config_params.get("well_filter"):
+                wells = list(config_params["well_filter"])
+            else:
+                wells = orchestrator.get_component_keys(MULTIPROCESSING_AXIS)
+            worker_assignments = self._build_worker_assignments(
+                wells=wells,
+                num_workers=global_config.num_workers,
             )
+            self._worker_assignments_by_execution[execution_id] = worker_assignments
 
             # Emit total_wells FIRST - before compilation starts
             # This allows the client to track all wells (queued, running, completed) from the beginning
-            emit_progress(
-                {
-                    "axis_id": "",  # Empty axis_id indicates pipeline-level message
-                    "step": "",  # Empty step indicates pipeline-level message
-                    "phase": "init",
-                    "status": "started",
-                    "percent": 0.0,
-                    "completed": 0,
-                    "total": 1,
-                    "total_wells": wells,
-                }
+            _emit_zmq_progress(
+                self._enqueue_progress,
+                execution_id=execution_id,
+                plate_id=plate_id,
+                axis_id="",  # Empty axis_id indicates pipeline-level message
+                step_name="",  # Empty step indicates pipeline-level message
+                phase=ProgressPhase.INIT,
+                status=ProgressStatus.STARTED,
+                percent=0.0,
+                completed=0,
+                total=1,  # Metadata announcement (1 item)
+                total_wells=wells,
+                worker_assignments=worker_assignments,
             )
 
-            emit_progress(
-                {
-                    "axis_id": "",
-                    "step": "pipeline",
-                    "step_index": -1,
-                    "total_steps": len(pipeline_steps),
-                    "phase": "compile",
-                    "status": "started",
-                    "completed": 0,
-                    "total": 1,
-                    "percent": 0.0,
-                }
-            )
+            if compile_artifact_id is None:
+                _emit_zmq_progress(
+                    self._enqueue_progress,
+                    execution_id=execution_id,
+                    plate_id=plate_id,
+                    axis_id="",
+                    step_name="pipeline",
+                    total=len(pipeline_steps),
+                    phase=ProgressPhase.COMPILE,
+                    status=ProgressStatus.STARTED,
+                    completed=0,
+                    percent=0.0,
+                )
 
-            compilation = orchestrator.compile_pipelines(
-                pipeline_definition=pipeline_steps,
-                well_filter=wells,
-                is_zmq_execution=True,
-            )
-
-            # Emit total_wells immediately after compilation completes
-            # This allows the client to track all wells (queued, running, completed)
-            if isinstance(compilation, dict):
-                compiled_contexts = compilation.get("compiled_contexts")
-                if compiled_contexts:
-                    total_wells = list(compiled_contexts.keys())
-                    emit_progress(
-                        {
-                            "axis_id": "",
-                            "step": "pipeline",
-                            "step_index": -1,
-                            "total_steps": len(pipeline_steps),
-                            "phase": "compile",
-                            "status": "success",
-                            "completed": 1,
-                            "total": 1,
-                            "percent": 100.0,
-                            "total_wells": total_wells,
-                        }
+            if compile_artifact_id is not None:
+                self._cleanup_compiled_artifacts()
+                artifact = self._compiled_artifacts.pop(compile_artifact_id, None)
+                if artifact is None:
+                    raise ValueError(
+                        f"Missing compile artifact '{compile_artifact_id}'. "
+                        "Re-run compilation before execution."
                     )
-                    logger.info(
-                        "[%s] Emitted total_wells after compilation: %s",
-                        execution_id,
-                        total_wells,
+                if request_signature is None:
+                    raise ValueError("Missing request signature for artifact validation")
+                if artifact["request_signature"] != request_signature:
+                    raise ValueError(
+                        f"Compile artifact '{compile_artifact_id}' does not match execution request"
+                    )
+                if artifact[MessageFields.PLATE_ID] != str(plate_id):
+                    raise ValueError(
+                        f"Compile artifact '{compile_artifact_id}' is for plate "
+                        f"{artifact[MessageFields.PLATE_ID]}, not {plate_id}"
+                    )
+
+                compiled_contexts = artifact["compiled_contexts"]
+                worker_assignments = artifact["worker_assignments"]
+                self._worker_assignments_by_execution[execution_id] = worker_assignments
+
+                logger.info(
+                    "[%s] Reused compile artifact %s for plate %s",
+                    execution_id,
+                    compile_artifact_id,
+                    plate_id,
+                )
+
+                output_plate_root = artifact.get("output_plate_root")
+                if output_plate_root:
+                    self.active_executions[execution_id].set_extra(
+                        "output_plate_root",
+                        str(output_plate_root),
+                    )
+                if artifact.get("auto_add_output_plate") is not None:
+                    self.active_executions[execution_id].set_extra(
+                        "auto_add_output_plate", bool(artifact["auto_add_output_plate"])
                     )
             else:
-                emit_progress(
-                    {
-                        "axis_id": "",
-                        "step": "pipeline",
-                        "step_index": -1,
-                        "total_steps": len(pipeline_steps),
-                        "phase": "compile",
-                        "status": "success",
-                        "completed": 1,
-                        "total": 1,
-                        "percent": 100.0,
-                    }
+                # Compilation runs in THIS process (queue worker thread), not a
+                # separate worker process. Point _progress_queue at the server queue
+                # so compile events stream through the same channel.
+                from openhcs.core.progress import set_progress_queue
+
+                set_progress_queue(self.progress_queue)
+                try:
+                    compilation = orchestrator.compile_pipelines(
+                        pipeline_definition=pipeline_steps,
+                        well_filter=wells,
+                        is_zmq_execution=True,
+                    )
+                finally:
+                    set_progress_queue(None)
+
+                if not isinstance(compilation, dict) or "compiled_contexts" not in compilation:
+                    raise ValueError("Compilation did not return compiled_contexts")
+                compiled_contexts = compilation["compiled_contexts"]
+                if not compiled_contexts:
+                    raise ValueError("Compilation produced no compiled contexts")
+
+                _emit_zmq_progress(
+                    self._enqueue_progress,
+                    execution_id=execution_id,
+                    plate_id=plate_id,
+                    axis_id="",
+                    step_name="pipeline",
+                    total=len(pipeline_steps),
+                    phase=ProgressPhase.COMPILE,
+                    status=ProgressStatus.SUCCESS,
+                    completed=1,
+                    percent=100.0,
+                    total_wells=list(compiled_contexts.keys()),
+                    worker_assignments=worker_assignments,
                 )
+                self._flush_progress_only()
 
-            # Flush compilation progress immediately to ZMQ
-            # Compilation happens synchronously, blocking the server loop, so we need
-            # to explicitly flush queued progress messages now
-            self._flush_progress_only()
+                for axis_id in compiled_contexts.keys():
+                    _emit_zmq_progress(
+                        self._enqueue_progress,
+                        execution_id=execution_id,
+                        plate_id=plate_id,
+                        axis_id=axis_id,
+                        step_name="compilation",
+                        phase=ProgressPhase.COMPILE,
+                        status=ProgressStatus.SUCCESS,
+                        completed=1,
+                        total=1,
+                        percent=100.0,
+                    )
+                self._flush_progress_only()
 
-            # IMPORTANT: Emit final 100% completion for ALL compiled axes
-            # The compilation loop only emits cumulative progress (25%, 50%, etc.)
-            # so each axis ends with different percentages. We need to mark all as 100%.
-            try:
-                if isinstance(compilation, dict):
-                    compiled_contexts = compilation.get("compiled_contexts")
-                    if compiled_contexts:
-                        for axis_id in compiled_contexts.keys():
-                            emit_progress(
-                                {
-                                    "axis_id": axis_id,
-                                    "step": "compilation",
-                                    "step_index": 0,
-                                    "total_steps": 1,
-                                    "phase": "compile",
-                                    "status": "success",
-                                    "completed": 1,
-                                    "total": 1,
-                                    "percent": 100.0,
-                                }
-                            )
-            except Exception as e:
-                logger.warning(f"Failed to emit final 100%% compilation progress: {e}")
-
-            # Flush again to send the 100% updates
-            self._flush_progress_only()
-
-            # NOTE: Compilation axes clearing moved to GUI process (zmq_server_manager.py)
-            # Runtime and GUI are separate processes with different ExecutionProgressTracker instances
-            # GUI clears axes when it detects workers (execution phase has started)
-
-            try:
-                compiled_contexts = (
-                    compilation.get("compiled_contexts")
-                    if isinstance(compilation, dict)
-                    else None
+                first_context = next(iter(compiled_contexts.values()))
+                output_plate_root = first_context.output_plate_root
+                if output_plate_root:
+                    self.active_executions[execution_id].set_extra(
+                        "output_plate_root",
+                        str(output_plate_root),
+                    )
+                self.active_executions[execution_id].set_extra(
+                    "auto_add_output_plate",
+                    bool(first_context.auto_add_output_plate_to_plate_manager),
                 )
-                if compiled_contexts:
-                    first_context = next(iter(compiled_contexts.values()))
-                    output_plate_root = getattr(
-                        first_context, "output_plate_root", None
-                    )
-                    if output_plate_root:
-                        self.active_executions[execution_id]["output_plate_root"] = str(
-                            output_plate_root
-                        )
-                    auto_add_output_plate = (
-                        first_context.auto_add_output_plate_to_plate_manager
-                    )
-                    self.active_executions[execution_id]["auto_add_output_plate"] = (
-                        bool(auto_add_output_plate)
-                    )
-                    logger.info(
-                        "[%s] Captured auto_add_output_plate=%s output_plate_root=%s",
-                        execution_id,
-                        bool(auto_add_output_plate),
-                        output_plate_root,
-                    )
-                else:
-                    logger.warning(
-                        "[%s] No compiled_contexts; cannot capture auto_add_output_plate",
-                        execution_id,
-                    )
-            except Exception as e:
-                logger.warning(
-                    "[%s] Failed to capture output_plate_root during compilation: %s",
+                logger.info(
+                    "[%s] Captured auto_add_output_plate=%s output_plate_root=%s",
                     execution_id,
-                    e,
+                    bool(first_context.auto_add_output_plate_to_plate_manager),
+                    output_plate_root,
                 )
 
-            if (
-                self.active_executions[execution_id][MessageFields.STATUS]
-                == ExecutionStatus.CANCELLED.value
-            ):
+            if self.active_executions[execution_id].status == ExecutionStatus.CANCELLED.value:
                 logger.info(
                     "[%s] Execution cancelled after compilation, aborting",
                     execution_id,
@@ -663,9 +752,26 @@ class OpenHCSExecutionServer(ExecutionServer):
                 raise RuntimeError("Execution cancelled by user")
 
             if compile_only:
+                if request_signature is None:
+                    raise ValueError(
+                        "Missing request signature for compile artifact storage"
+                    )
+                self._compiled_artifacts[execution_id] = {
+                    "created_at": time.time(),
+                    "request_signature": request_signature,
+                    MessageFields.PLATE_ID: str(plate_id),
+                    "compiled_contexts": compiled_contexts,
+                    "worker_assignments": worker_assignments,
+                    "output_plate_root": self.active_executions[execution_id].get_extra(
+                        "output_plate_root"
+                    ),
+                    "auto_add_output_plate": self.active_executions[
+                        execution_id
+                    ].get_extra("auto_add_output_plate"),
+                }
                 logger.info("[%s] Compilation-only request completed", execution_id)
                 self._set_compile_status("compiled success")
-                return compilation["compiled_contexts"]
+                return compiled_contexts
 
             log_dir = Path.home() / ".local" / "share" / "openhcs" / "logs"
             log_dir.mkdir(parents=True, exist_ok=True)
@@ -678,10 +784,7 @@ class OpenHCSExecutionServer(ExecutionServer):
             )
             progress_forwarder.start()
 
-            if (
-                self.active_executions[execution_id][MessageFields.STATUS]
-                == ExecutionStatus.CANCELLED.value
-            ):
+            if self.active_executions[execution_id].status == ExecutionStatus.CANCELLED.value:
                 logger.info(
                     "[%s] Execution cancelled before starting workers, aborting",
                     execution_id,
@@ -690,29 +793,27 @@ class OpenHCSExecutionServer(ExecutionServer):
 
             return orchestrator.execute_compiled_plate(
                 pipeline_definition=pipeline_steps,
-                compiled_contexts=compilation["compiled_contexts"],
+                compiled_contexts=compiled_contexts,
                 log_file_base=str(log_dir / f"zmq_worker_exec_{execution_id}"),
                 progress_queue=worker_progress_queue,
                 progress_context=progress_context,
+                worker_assignments=worker_assignments,
             )
         finally:
             if worker_progress_queue is not None:
                 worker_progress_queue.put(None)
             if progress_forwarder is not None:
                 progress_forwarder.join()
-            clear_progress_emitter()
+            self._worker_assignments_by_execution.pop(execution_id, None)
 
     def _kill_worker_processes(self) -> int:
         """OpenHCS-specific worker cleanup (graceful cancellation + kill)."""
-        for eid, r in self.active_executions.items():
-            if "orchestrator" in r:
+        for eid, record in self.active_executions.items():
+            orchestrator = record.get_extra("orchestrator")
+            if orchestrator is not None:
                 try:
                     logger.info("[%s] Requesting graceful cancellation...", eid)
-                    r["orchestrator"].cancel_execution()
+                    orchestrator.cancel_execution()
                 except Exception as e:
                     logger.warning("[%s] Graceful cancellation failed: %s", eid, e)
         return super()._kill_worker_processes()
-
-
-# Backwards-compatible alias
-ZMQExecutionServer = OpenHCSExecutionServer
