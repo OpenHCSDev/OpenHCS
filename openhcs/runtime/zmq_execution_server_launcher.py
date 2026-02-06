@@ -12,7 +12,7 @@ from zmqruntime.config import TransportMode
 from zmqruntime.transport import get_default_transport_mode
 from zmqruntime.runner import serve_forever
 
-from openhcs.runtime.zmq_execution_server import OpenHCSExecutionServer
+from openhcs.runtime.zmq_execution_server import ZMQExecutionServer
 
 # Set up logging
 logging.basicConfig(
@@ -62,7 +62,7 @@ def main():
         logger.info("Log file: %s", args.log_file_path)
     logger.info("=" * 60)
 
-    server = OpenHCSExecutionServer(
+    server = ZMQExecutionServer(
         port=args.port,
         host=args.host,
         log_file_path=args.log_file_path,
