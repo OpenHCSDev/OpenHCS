@@ -776,7 +776,7 @@ class ZMQExecutionServer(ExecutionServer):
             log_dir = Path.home() / ".local" / "share" / "openhcs" / "logs"
             log_dir.mkdir(parents=True, exist_ok=True)
 
-            worker_progress_queue = multiprocessing.Queue()
+            worker_progress_queue = multiprocessing.get_context("spawn").Queue()
             progress_forwarder = threading.Thread(
                 target=self._forward_worker_progress,
                 args=(worker_progress_queue,),

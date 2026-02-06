@@ -606,7 +606,8 @@ def _execute_pipeline_phases(
         raise RuntimeError("No wells found for processing")
 
     # Invariant path: explicit progress queue for both compile and execute phases.
-    progress_queue = multiprocessing.Queue()
+    mp_ctx = multiprocessing.get_context("spawn")
+    progress_queue = mp_ctx.Queue()
     progress_context = {
         "execution_id": f"direct::{int(time.time() * 1_000_000)}",
         "plate_id": str(orchestrator.plate_path),
