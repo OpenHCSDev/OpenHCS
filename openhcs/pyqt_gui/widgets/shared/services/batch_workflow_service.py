@@ -490,8 +490,14 @@ class BatchWorkflowService:
 
     def _build_run_spec(self, plate_path: str) -> Dict[str, Any]:
         plate_path = str(plate_path)
-        compiled_data = self.host.plate_compiled_data[plate_path]
-        definition_pipeline = compiled_data["definition_pipeline"]
+        definition_pipeline = self.host.get_pipeline_definition(plate_path)
+        if not definition_pipeline:
+            logger.warning(
+                "No pipeline defined for %s, using empty pipeline",
+                plate_path,
+            )
+            definition_pipeline = []
+        self._validate_pipeline_steps(definition_pipeline)
         pipeline_config = resolve_pipeline_config_for_plate(self.host, plate_path)
         return {
             "plate_path": plate_path,
