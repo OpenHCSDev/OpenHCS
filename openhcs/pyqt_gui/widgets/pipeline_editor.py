@@ -817,6 +817,12 @@ class PipelineEditorWidget(AbstractManagerWidget):
         self._update_pipeline_steps(plate_path, pipeline)
         logger.debug(f"Updated Pipeline ObjectState for plate: {plate_path}")
 
+    def get_pipeline_for_plate(self, plate_path: str) -> List[FunctionStep]:
+        """Return the current pipeline definition from Pipeline ObjectState."""
+        if not plate_path:
+            return []
+        return self._get_steps_from_pipeline_state(plate_path)
+
     def set_current_plate(self, plate_path: str):
         """
         Set current plate and load its pipeline (extracted from Textual version).
