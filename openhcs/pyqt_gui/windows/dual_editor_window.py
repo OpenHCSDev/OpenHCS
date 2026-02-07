@@ -37,6 +37,7 @@ from openhcs.ui.shared.pattern_data_manager import PatternDataManager
 from pyqt_reactive.theming import ColorScheme
 from pyqt_reactive.theming import StyleSheetGenerator
 from pyqt_reactive.services.scope_token_service import ScopeTokenService
+from pyqt_reactive.services.function_navigation import is_function_field_path
 from pyqt_reactive.widgets.function_list_editor import FunctionListEditorWidget
 from pyqt_reactive.forms.layout_constants import CURRENT_LAYOUT
 from pyqt_reactive.widgets.shared import BaseFormDialog, ResponsiveTwoRowWidget
@@ -642,13 +643,12 @@ class DualEditorWindow(BaseFormDialog):
 
         self.func_editor = FunctionListEditorWidget(
             initial_functions=initial_functions,
-            step_identifier=step_name,
+            context_identifier=step_name,
             service_adapter=None,
-            step_instance=self.editing_step,  # Pass step for lazy resolution context
             scope_id=scope_id,  # Same hierarchical scope_id as step editor
             render_header=False,
             button_style="compact",  # Borderless compact style for tab row
-            step_index=self._step_index,  # Align scope styling with pipeline order
+            scope_index=self._step_index,  # Align scope styling with pipeline order
         )
 
         # Store main window reference for orchestrator access (find it through parent chain)
@@ -693,14 +693,25 @@ class DualEditorWindow(BaseFormDialog):
         # ATOMIC: Coalesce function parameter change + step func update into single undo
         # Without this, editing a function parameter creates two undo entries:
         # one for the function parameter and one for the step's func pattern
+        state = self.step_editor.state if self.step_editor else None
+        state_func = (
+            state.parameters.get("func")
+            if state is not None and "func" in state.parameters
+            else None
+        )
+        step_func = getattr(self.editing_step, "func", None)
+        if state_func == current_pattern and step_func == current_pattern:
+            logger.debug("[FUNC_PATTERN] Ignoring no-op function pattern update")
+            return
+
         with ObjectStateRegistry.atomic("edit func"):
-            self.editing_step.func = current_pattern
+            if step_func != current_pattern:
+                self.editing_step.func = current_pattern
 
             # CRITICAL: Also update ObjectState so list item preview updates in real-time
             # The step_editor's state tracks 'func' parameter - update it with the new pattern
-            if self.step_editor and self.step_editor.state:
-                state = self.step_editor.state
-                if state and "func" in state.parameters:
+            if state is not None:
+                if "func" in state.parameters and state_func != current_pattern:
                     state.update_parameter("func", current_pattern)
                     logger.debug(
                         f"Updated ObjectState 'func' parameter for real-time preview"
@@ -782,7 +793,7 @@ class DualEditorWindow(BaseFormDialog):
             if self.step_editor:
                 self.step_editor.step_index = new_index
             if self.func_editor:
-                self.func_editor.set_step_index(new_index)
+                self.func_editor.set_scope_index(new_index)
             self._refresh_scope_border()
 
         # Only refresh data if the step OBJECT was replaced in the pipeline
@@ -908,13 +919,10 @@ class DualEditorWindow(BaseFormDialog):
             logger.debug("⏭️  Function editor doesn't exist yet, skipping sync")
             return
 
-        # CRITICAL: The function editor already has access to step_instance and can resolve
-        # group_by using the same lazy resolution pattern as the function panes.
-        # Just trigger a refresh - the function editor will read from step_instance.processing_config.group_by
-        # with proper context resolution (including live context from other open windows).
-        self.func_editor.refresh_from_step_context()
+        # Trigger a refresh from the editor's authoritative ObjectState context.
+        self.func_editor.refresh_from_context()
 
-        logger.debug(f"✅ Triggered function editor refresh from step context")
+        logger.debug("✅ Triggered function editor refresh from context")
 
     def _find_main_window(self):
         """Find the main window through the parent chain."""
@@ -1299,10 +1307,11 @@ class DualEditorWindow(BaseFormDialog):
 
         # If the navigation target is the function pattern, use the function tab.
         # This avoids fighting tab selection done by time-travel navigation.
-        if field_path == "func" or field_path.startswith("func"):
-            if self.func_editor and self.tab_widget:
+        if is_function_field_path(field_path):
+            if self.func_editor is None:
+                return
+            if self.tab_widget:
                 self.tab_widget.setCurrentIndex(1)
-            self.func_editor.apply_selected_pattern_key_from_state()
             self.func_editor.select_and_scroll_to_field(field_path)
             return
 
