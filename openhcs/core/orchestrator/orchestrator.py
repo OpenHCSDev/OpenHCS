@@ -32,7 +32,7 @@ from openhcs.core.pipeline.compiler import PipelineCompiler
 from openhcs.core.steps.abstract import AbstractStep
 from openhcs.core.components.validation import convert_enum_by_value
 from openhcs.core.orchestrator.execution_result import ExecutionResult, ExecutionStatus
-from openhcs.core.progress import emit, set_progress_queue, ProgressPhase, ProgressStatus
+from openhcs.core.progress import emit, set_progress_queue, ProgressPhase, ProgressStatus, create_event
 from polystore.filemanager import FileManager
 
 # Zarr backend is CPU-only; always import it (even in subprocess/no-GPU mode)
@@ -1130,8 +1130,23 @@ class PipelineOrchestrator:
                     if key not in unique_configs:
                         unique_configs[key] = (config, ctx.visualizer_config)
 
-            # Create visualizers
-            for config, vis_config in unique_configs.values():
+            # Create visualizers — emit progress for each launch
+            for key, (config, vis_config) in unique_configs.items():
+                viewer_name = key[0] if key else type(config).__name__
+                viewer_port = key[1] if len(key) > 1 else None
+                port_info = f" on port {viewer_port}" if viewer_port else ""
+                progress_queue.put(
+                    create_event(
+                        execution_id=execution_id,
+                        plate_id=plate_id,
+                        axis_id="",
+                        step_name="",
+                        phase=ProgressPhase.INIT,
+                        status=ProgressStatus.STARTED,
+                        percent=0.0,
+                        message=f"Launching {viewer_name} viewer{port_info}",
+                    ).to_dict()
+                )
                 visualizers.append(self.get_or_create_visualizer(config, vis_config))
 
             # Wait for all streaming viewers to be ready before starting pipeline
@@ -1149,6 +1164,18 @@ class PipelineOrchestrator:
 
                     all_ready = all(v.is_running for v in visualizers)
                     if all_ready:
+                        progress_queue.put(
+                            create_event(
+                                execution_id=execution_id,
+                                plate_id=plate_id,
+                                axis_id="",
+                                step_name="",
+                                phase=ProgressPhase.INIT,
+                                status=ProgressStatus.RUNNING,
+                                percent=0.0,
+                                message="All streaming viewers ready",
+                            ).to_dict()
+                        )
                         break
                     time.sleep(0.2)  # Check every 200ms
                 else:
@@ -1156,6 +1183,18 @@ class PipelineOrchestrator:
                     not_ready = [v.port for v in visualizers if not v.is_running]
                     logger.warning(
                         f"🔬 ORCHESTRATOR: Timeout waiting for streaming viewers. Not ready: {not_ready}"
+                    )
+                    progress_queue.put(
+                        create_event(
+                            execution_id=execution_id,
+                            plate_id=plate_id,
+                            axis_id="",
+                            step_name="",
+                            phase=ProgressPhase.INIT,
+                            status=ProgressStatus.RUNNING,
+                            percent=0.0,
+                            message=f"Timeout waiting for streaming viewers. Not ready: {not_ready}",
+                        ).to_dict()
                     )
 
                 # Clear viewer state for new pipeline run to prevent accumulation
@@ -1335,6 +1374,23 @@ class PipelineOrchestrator:
                         if not lane_contexts:
                             continue
                         owned_wells = list(worker_assignments[worker_slot])
+
+                        # DEBUG: Log what's being pickled
+                        logger.info(f"DEBUG: Submitting worker {worker_slot}")
+                        logger.info(f"DEBUG: pipeline_definition has {len(pipeline_definition)} steps")
+                        for i, step in enumerate(pipeline_definition):
+                            func_attr = getattr(step, 'func', None)
+                            logger.info(f"DEBUG: step[{i}].func = {type(func_attr).__name__ if func_attr else 'None'}")
+                        logger.info(f"DEBUG: lane_contexts has {len(lane_contexts)} axes")
+                        for axis_id, axis_contexts in lane_contexts:
+                            logger.info(f"DEBUG: axis {axis_id} has {len(axis_contexts)} contexts")
+                            for ctx_key, ctx in axis_contexts[:1]:  # Just check first context
+                                if hasattr(ctx, 'step_plans'):
+                                    for step_idx, plan in list(ctx.step_plans.items())[:2]:  # Just check first 2
+                                        if 'func' in plan:
+                                            func_val = plan['func']
+                                            logger.info(f"DEBUG: context step_plans[{step_idx}]['func'] = {type(func_val).__name__}")
+
                         try:
                             future = executor.submit(
                                 _execute_worker_lane_static,
