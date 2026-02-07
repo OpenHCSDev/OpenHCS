@@ -8,6 +8,11 @@ The Special I/O system enables sophisticated data exchange between pipeline step
 
 **System Evolution**: Originally designed for simple single-function steps, the system was extended to handle dict patterns (multiple functions per step) through sophisticated namespacing and scope promotion rules, similar to symbol resolution in programming language compilers.
 
+.. seealso::
+
+   :doc:`pattern_grouping_and_special_outputs`
+      Comprehensive guide to pattern grouping, special output path resolution, and debugging path collisions
+
 Architectural Evolution
 -----------------------
 

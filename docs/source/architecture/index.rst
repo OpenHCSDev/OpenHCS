@@ -22,6 +22,7 @@ Fundamental systems that define OpenHCS architecture.
    custom_function_registration_system
    pipeline_compilation_system
    special_io_system
+   pattern_grouping_and_special_outputs
    roi_system
    analysis_consolidation_system
    experimental_analysis_system
