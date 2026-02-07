@@ -183,6 +183,12 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1-mesa-glx libxkbcommon-x11-0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-xinerama0 libxcb-xfixes0 xvfb
+
       - name: Install local external modules (submodule mode)
         if: env.OPENHCS_CI_DEP_SOURCE == 'submodules'
         run: |
