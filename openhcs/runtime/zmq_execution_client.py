@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import subprocess
 import sys
@@ -61,6 +62,7 @@ class ZMQExecutionClient(ExecutionClient):
             "plate_id": str(plate_id),
             "pipeline_code": pipeline_code,
         }
+        pipeline_sha = hashlib.sha256(pipeline_code.encode("utf-8")).hexdigest()[:12]
         if compile_only:
             request["compile_only"] = True
         if compile_artifact_id:
@@ -68,17 +70,38 @@ class ZMQExecutionClient(ExecutionClient):
         if config_params:
             request["config_params"] = config_params
         else:
-            request["config_code"] = generate_python_source(
+            config_code = generate_python_source(
                 Assignment("config", global_config),
                 header="# Configuration Code",
                 clean_mode=True,
             )
+            request["config_code"] = config_code
+            config_sha = hashlib.sha256(config_code.encode("utf-8")).hexdigest()[:12]
             if pipeline_config:
-                request["pipeline_config_code"] = generate_python_source(
+                pipeline_config_code = generate_python_source(
                     Assignment("config", pipeline_config),
                     header="# Configuration Code",
                     clean_mode=True,
                 )
+                request["pipeline_config_code"] = pipeline_config_code
+                pipeline_config_sha = hashlib.sha256(
+                    pipeline_config_code.encode("utf-8")
+                ).hexdigest()[:12]
+            else:
+                pipeline_config_sha = "-"
+        if config_params:
+            config_sha = "params"
+            pipeline_config_sha = "params"
+        logger.info(
+            "Serialize task: plate=%s compile_only=%s artifact_id=%s step_count=%s pipeline_sha=%s config_sha=%s pipeline_config_sha=%s",
+            plate_id,
+            bool(compile_only),
+            compile_artifact_id,
+            len(pipeline_steps) if isinstance(pipeline_steps, list) else "?",
+            pipeline_sha,
+            config_sha,
+            pipeline_config_sha,
+        )
         return request
 
     def submit_pipeline(
@@ -140,6 +163,7 @@ class ZMQExecutionClient(ExecutionClient):
     def _spawn_server_process(self):
         import os
         import glob
+        import logging
 
         log_dir = Path.home() / ".local" / "share" / "openhcs" / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
@@ -158,6 +182,18 @@ class ZMQExecutionClient(ExecutionClient):
             cmd.append("--persistent")
         cmd.extend(["--log-file-path", str(log_file_path)])
         cmd.extend(["--transport-mode", self.transport_mode.value])
+
+        # Pass the current process's logging level to the server
+        # Get the root logger's effective level
+        root_logger = logging.getLogger()
+        current_log_level = root_logger.getEffectiveLevel()
+        log_level_name = logging.getLevelName(current_log_level)
+
+        # Log what we're passing to help debug
+        logger = logging.getLogger(__name__)
+        logger.debug(f"Spawning ZMQ server with log level: {log_level_name} (numeric: {current_log_level})")
+
+        cmd.extend(["--log-level", log_level_name])
 
         env = os.environ.copy()
         site_packages = (
