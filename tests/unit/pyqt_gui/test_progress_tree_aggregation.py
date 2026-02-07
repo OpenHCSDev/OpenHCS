@@ -250,17 +250,210 @@ def test_running_plate_is_injected_without_progress_events(monkeypatch):
     manager = ZMQServerManagerWidget.__new__(ZMQServerManagerWidget)
     manager._progress_tree_builder = ProgressTreeBuilder()
     manager._get_plate_name = lambda plate_id, exec_id=None: (
-        f"{plate_id.split('/')[-1]} ({exec_id[:8]})" if exec_id else plate_id.split("/")[-1]
+        f"{plate_id.split('/')[-1]} ({exec_id[:8]})"
+        if exec_id
+        else plate_id.split("/")[-1]
     )
 
     merged = manager._merge_server_snapshot_nodes(
         [],
         _execution_server_info(
-            running=[{"execution_id": "exec-run", "plate_id": "/tmp/plate_a"}],
-            compile_status="compiling",
+            running=[
+                {
+                    "execution_id": "exec-run",
+                    "plate_id": "/tmp/plate_a",
+                    "compile_only": True,
+                }
+            ],
         ),
     )
 
     assert len(merged) == 1
     assert merged[0].status == "⏳ Compiling"
     assert merged[0].percent == 0.0
+
+
+def test_running_snapshot_without_progress_defaults_to_executing(monkeypatch):
+    monkeypatch.setattr(ZMQServerManagerWidget, "__del__", lambda self: None)
+    manager = ZMQServerManagerWidget.__new__(ZMQServerManagerWidget)
+    manager._progress_tree_builder = ProgressTreeBuilder()
+    manager._get_plate_name = lambda plate_id, exec_id=None: plate_id.split("/")[-1]
+
+    merged = manager._merge_server_snapshot_nodes(
+        [],
+        _execution_server_info(
+            running=[{"execution_id": "exec-run", "plate_id": "/tmp/plate_a"}],
+            compile_status="compiled success",
+        ),
+    )
+
+    assert len(merged) == 1
+    assert merged[0].status == "⚙️ Executing"
+    assert merged[0].percent == 0.0
+
+
+def test_running_compile_only_snapshot_without_compile_status_is_compiling(monkeypatch):
+    monkeypatch.setattr(ZMQServerManagerWidget, "__del__", lambda self: None)
+    manager = ZMQServerManagerWidget.__new__(ZMQServerManagerWidget)
+    manager._progress_tree_builder = ProgressTreeBuilder()
+    manager._get_plate_name = lambda plate_id, exec_id=None: plate_id.split("/")[-1]
+
+    merged = manager._merge_server_snapshot_nodes(
+        [],
+        _execution_server_info(
+            running=[
+                {
+                    "execution_id": "exec-compile",
+                    "plate_id": "/tmp/plate_a",
+                    "compile_only": True,
+                }
+            ],
+        ),
+    )
+
+    assert len(merged) == 1
+    assert merged[0].status == "⏳ Compiling"
+    assert merged[0].percent == 0.0
+
+
+def test_progress_client_connection_tracks_execution_server_presence(monkeypatch):
+    monkeypatch.setattr(ZMQServerManagerWidget, "__del__", lambda self: None)
+    manager = ZMQServerManagerWidget.__new__(ZMQServerManagerWidget)
+
+    class _DummyClient:
+        def __init__(self) -> None:
+            self.disconnected = False
+
+        def is_connected(self) -> bool:
+            return True
+
+        def disconnect(self) -> None:
+            self.disconnected = True
+
+    calls = {"setup": 0}
+    manager._zmq_client = None
+
+    def _setup() -> None:
+        calls["setup"] += 1
+        manager._zmq_client = _DummyClient()
+
+    manager._setup_progress_client = _setup
+
+    manager._sync_progress_client_connection(
+        [_execution_server_info(running=[], queued=[])]
+    )
+    assert calls["setup"] == 1
+    assert manager._zmq_client is not None
+
+    manager._sync_progress_client_connection(
+        [_execution_server_info(running=[], queued=[])]
+    )
+    assert calls["setup"] == 1
+
+    client = manager._zmq_client
+    manager._sync_progress_client_connection([])
+    assert manager._zmq_client is None
+    assert client.disconnected is True
+
+
+def test_init_only_execution_with_assignments_renders_as_queued_not_compiling(
+    monkeypatch,
+):
+    monkeypatch.setattr(ZMQServerManagerWidget, "__del__", lambda self: None)
+    manager = ZMQServerManagerWidget.__new__(ZMQServerManagerWidget)
+    manager._progress_tree_builder = ProgressTreeBuilder()
+    manager._worker_assignments = {("exec-run", "/tmp/plate"): {"worker_0": ["A01"]}}
+    manager._known_wells = {("exec-run", "/tmp/plate"): ["A01"]}
+
+    init_event = _event(
+        execution_id="exec-run",
+        phase=ProgressPhase.INIT,
+        status=ProgressStatus.RUNNING,
+        percent=0.0,
+        axis_id="",
+        step_name="init",
+    )
+
+    nodes = manager._build_progress_tree({"exec-run": [init_event]})
+
+    assert len(nodes) == 1
+    plate = nodes[0]
+    assert plate.status == "⏳ Queued"
+    assert plate.percent == 0.0
+    # Worker shows "⚙️ Starting" because execution has started (INIT phase)
+    # Wells still show "⏳ Queued" until they receive individual progress events
+    assert plate.children[0].status == "⚙️ Starting"
+    assert plate.children[0].children[0].status == "⏳ Queued"
+
+
+def test_running_snapshot_does_not_override_progress_queued_node(monkeypatch):
+    monkeypatch.setattr(ZMQServerManagerWidget, "__del__", lambda self: None)
+    manager = ZMQServerManagerWidget.__new__(ZMQServerManagerWidget)
+    manager._progress_tree_builder = ProgressTreeBuilder()
+    manager._get_plate_name = lambda plate_id, exec_id=None: plate_id.split("/")[-1]
+    manager._worker_assignments = {("exec-run", "/tmp/plate"): {"worker_0": ["A01"]}}
+    manager._known_wells = {("exec-run", "/tmp/plate"): ["A01"]}
+
+    queued_plate = manager._build_progress_tree(
+        {
+            "exec-run": [
+                _event(
+                    execution_id="exec-run",
+                    phase=ProgressPhase.INIT,
+                    status=ProgressStatus.RUNNING,
+                    percent=0.0,
+                    plate_id="/tmp/plate",
+                    axis_id="",
+                    step_name="init",
+                )
+            ]
+        }
+    )[0]
+    assert queued_plate.status == "⏳ Queued"
+
+    merged = manager._merge_server_snapshot_nodes(
+        [queued_plate],
+        _execution_server_info(
+            running=[{"execution_id": "exec-run", "plate_id": "/tmp/plate"}],
+            compile_status="compiling",
+        ),
+    )
+
+    assert len(merged) == 1
+    assert merged[0].status == "⏳ Queued"
+
+
+def test_compile_events_with_worker_assignments_stay_in_compile_mode(monkeypatch):
+    monkeypatch.setattr(ZMQServerManagerWidget, "__del__", lambda self: None)
+    manager = ZMQServerManagerWidget.__new__(ZMQServerManagerWidget)
+    manager._progress_tree_builder = ProgressTreeBuilder()
+    manager._worker_assignments = {
+        ("exec-compile", "/tmp/plate"): {"worker_0": ["A01"]}
+    }
+    manager._known_wells = {("exec-compile", "/tmp/plate"): ["A01"]}
+
+    compile_event = _event(
+        execution_id="exec-compile",
+        phase=ProgressPhase.COMPILE,
+        status=ProgressStatus.SUCCESS,
+        percent=100.0,
+        plate_id="/tmp/plate",
+        axis_id="A01",
+        step_name="compilation",
+    )
+    init_event = _event(
+        execution_id="exec-compile",
+        phase=ProgressPhase.INIT,
+        status=ProgressStatus.RUNNING,
+        percent=0.0,
+        plate_id="/tmp/plate",
+        axis_id="",
+        step_name="init",
+    )
+
+    nodes = manager._build_progress_tree({"exec-compile": [init_event, compile_event]})
+
+    assert len(nodes) == 1
+    plate = nodes[0]
+    assert plate.status == "✅ Compiled"
+    assert plate.children[0].node_type == "compilation"

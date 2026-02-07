@@ -6,7 +6,6 @@ from openhcs.core.progress.projection import (
 from openhcs.pyqt_gui.widgets.shared.services.execution_server_status_presenter import (
     ExecutionServerStatusPresenter,
 )
-from pyqt_reactive.services import DefaultServerInfoParser
 
 
 def test_execution_server_status_presenter_returns_ready_when_no_plates():
@@ -21,7 +20,7 @@ def test_execution_server_status_presenter_returns_ready_when_no_plates():
     assert view.text == "Ready"
 
 
-def test_execution_server_status_presenter_includes_projection_and_server_counts():
+def test_execution_server_status_presenter_includes_projection_counts():
     presenter = ExecutionServerStatusPresenter()
     plate_one = PlateRuntimeProjection(
         execution_id="exec-1",
@@ -47,28 +46,14 @@ def test_execution_server_status_presenter_includes_projection_and_server_counts
         complete_count=0,
         overall_percent=62.5,
     )
-    snapshot = {
-        "port": 7777,
-        "ready": True,
-        "server": "OpenHCSExecutionServer",
-        "workers": [],
-        "running_executions": [{"execution_id": "exec-1", "plate_id": "/tmp/p1"}],
-        "queued_executions": [
-            {"execution_id": "exec-2", "plate_id": "/tmp/p2", "queue_position": 1}
-        ],
-        "compile_status": "compiled success",
-        "compile_message": "ok",
-    }
-    server_info = DefaultServerInfoParser().parse(snapshot)
-
     view = presenter.build_status_text(
         projection=projection,
-        server_info=server_info,
+        server_info=None,
     )
 
     assert (
         view.text
-        == "Server: ⏳ 1 compiling, ⚙️ 1 executing, srv:compiled success, srv_run:1, srv_q:1 | 2 plates | avg 62.5%"
+        == "Server: ⏳ 1 compiling, ⚙️ 1 executing | 2 plates | avg 62.5%"
     )
 
 

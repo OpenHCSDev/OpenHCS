@@ -23,7 +23,11 @@ def test_execution_server_payload_parses_to_typed_info():
             }
         ],
         "running_executions": [
-            {"execution_id": "exec-1", "plate_id": "/tmp/p1"},
+            {
+                "execution_id": "exec-1",
+                "plate_id": "/tmp/p1",
+                "compile_only": True,
+            },
         ],
         "queued_executions": [
             {"execution_id": "exec-2", "plate_id": "/tmp/p2", "queue_position": 1},
@@ -41,6 +45,7 @@ def test_execution_server_payload_parses_to_typed_info():
     assert info.running_executions == ("exec-1",)
     assert info.queued_executions == ("exec-2",)
     assert info.running_execution_entries[0].plate_id == "/tmp/p1"
+    assert info.running_execution_entries[0].compile_only is True
     assert info.queued_execution_entries[0].queue_position == 1
     assert info.compile_status is not None
     assert info.compile_status.status_text == "compiled success"
