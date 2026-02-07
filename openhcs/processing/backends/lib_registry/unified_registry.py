@@ -240,10 +240,17 @@ class LibraryRegistryBase(ABC, metaclass=AutoRegisterMeta):
         # Create wrapper
         @wraps(func)
         def wrapper(image, *args, **kwargs):
+            # Extract injectable params and set them as attributes on func
             for param_name, _, _ in injectable_params:
                 if param_name in kwargs:
                     setattr(func, param_name, kwargs[param_name])
-            return contract.execute(self, func, image, *args, **kwargs)
+
+            # Remove injectable params from kwargs before passing to contract.execute
+            # This prevents them from being passed to the original function
+            filtered_kwargs = {k: v for k, v in kwargs.items()
+                             if k not in {name for name, _, _ in injectable_params}}
+
+            return contract.execute(self, func, image, *args, **filtered_kwargs)
 
         # Set defaults and signature
         for param_name, default_value, _ in injectable_params:
