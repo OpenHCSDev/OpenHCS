@@ -57,6 +57,18 @@ from pyqt_reactive.services import ExecutionServerInfo
 from openhcs.pyqt_gui.widgets.shared.services.batch_workflow_service import (
     BatchWorkflowService,
 )
+from openhcs.pyqt_gui.widgets.shared.services.plate_status_presenter import (
+    PlateStatusPresenter,
+)
+from openhcs.pyqt_gui.widgets.shared.services.execution_state import (
+    BUSY_MANAGER_STATES,
+    ExecutionBatchRuntime,
+    ManagerExecutionState,
+    STOP_PENDING_MANAGER_STATES,
+    TerminalExecutionStatus,
+    parse_terminal_status,
+    terminal_ui_policy,
+)
 from openhcs.pyqt_gui.widgets.shared.services.zmq_client_service import (
     ZMQClientService,
 )
@@ -64,8 +76,6 @@ from pyqt_reactive.widgets.shared.scope_visual_config import ListItemType
 from openhcs.core.progress import registry
 from openhcs.core.progress.projection import (
     ExecutionRuntimeProjection,
-    PlateRuntimeProjection,
-    PlateRuntimeState,
 )
 
 logger = logging.getLogger(__name__)
@@ -126,7 +136,6 @@ class PlateManagerWidget(AbstractManagerWidget):
         "scope_item_type": ListItemType.ORCHESTRATOR,
         "scope_id_attr": "path",
     }
-
     # Signals
     plate_selected = pyqtSignal(str)
     status_message = pyqtSignal(str)
@@ -143,6 +152,7 @@ class PlateManagerWidget(AbstractManagerWidget):
     execution_error = pyqtSignal(str)
     _execution_complete_signal = pyqtSignal(dict, str)
     _execution_error_signal = pyqtSignal(str)
+    _all_plates_completed_signal = pyqtSignal(int, int)
 
     def __init__(
         self,
@@ -174,13 +184,11 @@ class PlateManagerWidget(AbstractManagerWidget):
         self.current_execution_id: Optional[str] = (
             None  # Track current execution ID for cancellation
         )
-        self.execution_state = "idle"
+        self.execution_state = ManagerExecutionState.IDLE
 
         # Track per-plate execution state
         self.plate_execution_ids: Dict[str, str] = {}  # plate_path -> execution_id
-        self.plate_execution_states: Dict[
-            str, str
-        ] = {}  # plate_path -> "queued" | "running" | "completed" | "failed"
+        self.execution_runtime = ExecutionBatchRuntime()
 
         # Use shared ExecutionProgressTracker singleton (same instance as ZMQ server browser)
         # This ensures both UI components show the same progress data
@@ -190,6 +198,7 @@ class PlateManagerWidget(AbstractManagerWidget):
         self.plate_compile_pending = set()
         self._runtime_progress_projection = ExecutionRuntimeProjection()
         self._execution_server_info: ExecutionServerInfo | None = None
+        self._plate_status_presenter = PlateStatusPresenter()
 
         # Unified batch workflow service
         self._zmq_client_service = ZMQClientService(port=7777)
@@ -208,6 +217,9 @@ class PlateManagerWidget(AbstractManagerWidget):
         # Connect internal signals for thread-safe completion handling
         self._execution_complete_signal.connect(self._on_execution_complete)
         self._execution_error_signal.connect(self._on_execution_error)
+        self._all_plates_completed_signal.connect(
+            self._finalize_all_plates_completed_ui
+        )
 
         logger.debug("Plate manager widget initialized")
 
@@ -323,12 +335,23 @@ class PlateManagerWidget(AbstractManagerWidget):
     def get_pipeline_definition(self, plate_path: str) -> List:
         return self._get_current_pipeline_definition(plate_path)
 
-    def on_plate_completed(self, plate_path: str, status: str, result: dict) -> None:
+    def notify_plate_completed(
+        self, plate_path: str, status: str, result: dict
+    ) -> None:
+        if "status" not in result:
+            result["status"] = status
         self._execution_complete_signal.emit(result, plate_path)
 
-    def on_all_plates_completed(self, completed_count: int, failed_count: int) -> None:
-        self._batch_workflow_service.disconnect()
-        self.execution_state = "idle"
+    def notify_all_plates_completed(
+        self, completed_count: int, failed_count: int
+    ) -> None:
+        self._all_plates_completed_signal.emit(completed_count, failed_count)
+
+    def _finalize_all_plates_completed_ui(
+        self, completed_count: int, failed_count: int
+    ) -> None:
+        self._batch_workflow_service.disconnect_async()
+        self.execution_state = ManagerExecutionState.IDLE
         self.current_execution_id = None
         if (
             completed_count > 1
@@ -348,7 +371,7 @@ class PlateManagerWidget(AbstractManagerWidget):
             self.status_message.emit(
                 f"All done: {completed_count} completed, {failed_count} failed"
             )
-        self.update_button_states()
+        self.refresh_execution_ui()
 
     # Declarative list item format for PlateManager
     # The config source is orchestrator.pipeline_config
@@ -401,31 +424,25 @@ class PlateManagerWidget(AbstractManagerWidget):
         plate_path = plate["path"]
         plate_key = str(plate_path)
         orchestrator = ObjectStateRegistry.get_object(plate_path)
+        terminal_status = self.execution_runtime.terminal_status(plate_key)
         execution_id = self.plate_execution_ids.get(plate_key)
         runtime_projection = self._runtime_progress_projection.get_plate(
             plate_id=plate_key,
             execution_id=execution_id,
         )
+        is_active_execution = self.execution_runtime.is_active(plate_key) or (
+            runtime_projection is not None
+        )
 
-        if plate_key in self.plate_init_pending:
-            status_prefix = "⏳ Init"
-        elif plate_key in self.plate_compile_pending:
-            status_prefix = "⏳ Compile"
-        elif (queue_position := self._queued_execution_position_for_plate(plate_key)) is not None:
-            status_prefix = f"⏳ Queued 0.0% (q#{queue_position})"
-        elif runtime_projection is not None:
-            status_prefix = self._format_runtime_plate_status(runtime_projection)
-        elif orchestrator:
-            state_map = {
-                OrchestratorState.READY: "✓ Init",
-                OrchestratorState.COMPILED: "✓ Compiled",
-                OrchestratorState.COMPLETED: "✅ Complete",
-                OrchestratorState.INIT_FAILED: "❌ Init Failed",
-                OrchestratorState.COMPILE_FAILED: "❌ Compile Failed",
-                OrchestratorState.EXEC_FAILED: "❌ Exec Failed",
-                OrchestratorState.EXECUTING: "🔄 Executing",
-            }
-            status_prefix = state_map.get(orchestrator.state, "")
+        status_prefix = self._plate_status_presenter.build_status_prefix(
+            orchestrator_state=orchestrator.state if orchestrator else None,
+            is_init_pending=plate_key in self.plate_init_pending,
+            is_compile_pending=plate_key in self.plate_compile_pending,
+            is_execution_active=is_active_execution,
+            terminal_status=terminal_status,
+            queue_position=self._queued_execution_position_for_plate(plate_key),
+            runtime_projection=runtime_projection,
+        )
 
         # Use declarative format with orchestrator.pipeline_config as introspection source
         return self._build_item_display_from_format(
@@ -446,20 +463,6 @@ class PlateManagerWidget(AbstractManagerWidget):
                 continue
             return queued.queue_position
         return None
-
-    @staticmethod
-    def _format_runtime_plate_status(plate: PlateRuntimeProjection) -> str:
-        if plate.state == PlateRuntimeState.COMPILING:
-            return f"⏳ Compiling {plate.percent:.1f}%"
-        if plate.state == PlateRuntimeState.COMPILED:
-            return f"✅ Compiled {plate.percent:.1f}%"
-        if plate.state == PlateRuntimeState.FAILED:
-            return f"❌ Failed {plate.percent:.1f}%"
-        if plate.state == PlateRuntimeState.COMPLETE:
-            return f"✅ Complete {plate.percent:.1f}%"
-        if plate.state == PlateRuntimeState.EXECUTING:
-            return f"⚙️ Executing {plate.percent:.1f}%"
-        return ""
 
     def setup_connections(self):
         """Setup signal/slot connections (base class + plate-specific)."""
@@ -1020,71 +1023,67 @@ class PlateManagerWidget(AbstractManagerWidget):
 
     def _on_execution_complete(self, result, plate_path):
         """Handle execution completion for a single plate (called from main thread via signal)."""
-        try:
-            status = result.get("status")
-            logger.info(f"Plate {plate_path} completed with status: {status}")
+        status = parse_terminal_status(result.get("status"))
+        logger.info("Plate %s completed with status: %s", plate_path, status.value)
 
-            if plate_path in self.plate_progress:
-                del self.plate_progress[plate_path]
+        self.plate_progress.pop(plate_path, None)
 
-            # Update plate state and orchestrator
-            if status == "complete":
-                self.plate_execution_states[plate_path] = "completed"
-                self.status_message.emit(f"✓ Completed {plate_path}")
-                new_state = OrchestratorState.COMPLETED
+        policy = terminal_ui_policy(status)
+        self.execution_runtime.mark_terminal(plate_path, status)
 
-                # Optionally auto-add the output plate orchestrator (from server-calculated path)
-                if self.execution_state == "running":
-                    self._maybe_auto_add_output_plate_orchestrator(plate_path, result)
-                else:
-                    logger.info(
-                        "Skipping auto-add output plate (execution_state=%s)",
-                        self.execution_state,
-                    )
-            elif status == "cancelled":
-                self.plate_execution_states[plate_path] = "failed"
-                self.status_message.emit(f"✗ Cancelled {plate_path}")
-                new_state = OrchestratorState.READY
-            else:
-                self.plate_execution_states[plate_path] = "failed"
-                error_msg = result.get("message", "Unknown error")
-                traceback_str = result.get("traceback", "")
+        if policy.status_prefix:
+            self.status_message.emit(f"{policy.status_prefix} {plate_path}")
+        if policy.emit_failure:
+            self.execution_error.emit(
+                self._build_execution_failure_message(plate_path, result)
+            )
+        if (
+            policy.auto_add_output_plate
+            and self.execution_state == ManagerExecutionState.RUNNING
+        ):
+            self._maybe_auto_add_output_plate_orchestrator(plate_path, result)
+        elif policy.auto_add_output_plate:
+            logger.info(
+                "Skipping auto-add output plate (execution_state=%s)",
+                self.execution_state,
+            )
 
-                # Include traceback in error message if available
-                if traceback_str:
-                    full_error = (
-                        f"Execution failed for {plate_path}:\n\n{traceback_str}"
-                    )
-                else:
-                    full_error = f"Execution failed for {plate_path}: {error_msg}"
+        new_state = policy.orchestrator_state
 
-                self.execution_error.emit(full_error)
-                new_state = OrchestratorState.EXEC_FAILED
+        orchestrator = ObjectStateRegistry.get_object(plate_path)
+        if orchestrator:
+            orchestrator._state = new_state
+            self.orchestrator_state_changed.emit(plate_path, new_state.value)
 
-            orchestrator = ObjectStateRegistry.get_object(plate_path)
-            if orchestrator:
-                orchestrator._state = new_state
-                self.orchestrator_state_changed.emit(plate_path, new_state.value)
+        self.clear_plate_execution_tracking(plate_path, clear_terminal=False)
+        self._maybe_reset_execution_state_after_stop()
+        self.refresh_execution_ui()
 
-            # Reset execution state to idle and update button states
-            # This ensures Stop/Force Kill button returns to "Run" state
-            self.execution_state = "idle"
-            self.current_execution_id = None
-            self.update_button_states()
+    @staticmethod
+    def _build_execution_failure_message(plate_path: str, result: dict) -> str:
+        traceback_str = result.get("traceback", "")
+        if traceback_str:
+            return f"Execution failed for {plate_path}:\n\n{traceback_str}"
+        error_msg = result.get("message", "Unknown error")
+        return f"Execution failed for {plate_path}: {error_msg}"
 
-        except Exception as e:
-            logger.error(f"Error handling execution completion: {e}", exc_info=True)
-            self.plate_execution_states[plate_path] = "failed"
-            self.execution_error.emit(str(e))
-            orchestrator = ObjectStateRegistry.get_object(plate_path)
-            if orchestrator:
-                orchestrator._state = OrchestratorState.EXEC_FAILED
-                self.orchestrator_state_changed.emit(
-                    plate_path, OrchestratorState.EXEC_FAILED.value
-                )
-            self.execution_state = "idle"
-            self.current_execution_id = None
-            self.update_button_states()
+    def _maybe_reset_execution_state_after_stop(self) -> None:
+        """Reset run/stop UI once all plates are terminal after a stop request."""
+        if self.execution_state not in STOP_PENDING_MANAGER_STATES:
+            return
+
+        if not self.execution_runtime.all_batch_terminal():
+            return
+
+        server_info = self._execution_server_info
+        if server_info is not None and (
+            server_info.running_execution_entries
+            or server_info.queued_execution_entries
+        ):
+            return
+
+        self.execution_state = ManagerExecutionState.IDLE
+        self.current_execution_id = None
 
     def _consolidate_multi_plate_results(self):
         """Consolidate results from multiple completed plates into a global summary."""
@@ -1092,8 +1091,11 @@ class PlateManagerWidget(AbstractManagerWidget):
         path_config = self.global_config.path_planning_config
         analysis_config = self.global_config.analysis_consolidation_config
 
-        for plate_path_str, state in self.plate_execution_states.items():
-            if state != "completed":
+        for (
+            plate_path_str,
+            terminal_status,
+        ) in self.execution_runtime.terminal_status_by_plate.items():
+            if terminal_status != TerminalExecutionStatus.COMPLETE:
                 continue
             plate_path = Path(plate_path_str)
             base = (
@@ -1146,9 +1148,9 @@ class PlateManagerWidget(AbstractManagerWidget):
     def _on_execution_error(self, error_msg):
         """Handle execution error (called from main thread via signal)."""
         self.execution_error.emit(f"Execution error: {error_msg}")
-        self.execution_state = "idle"
+        self.execution_state = ManagerExecutionState.IDLE
         self.current_execution_id = None
-        self.update_button_states()
+        self.refresh_execution_ui()
 
     def action_stop_execution(self):
         """Handle Stop Execution via ZMQ.
@@ -1163,9 +1165,14 @@ class PlateManagerWidget(AbstractManagerWidget):
         # Change button to "Force Kill" IMMEDIATELY (before any async operations)
         if not is_force_kill:
             logger.info("🛑 Stop button pressed - changing to Force Kill")
-            self.execution_state = "force_kill_ready"
+            self.execution_state = ManagerExecutionState.FORCE_KILL_READY
             self.update_button_states()
             QApplication.processEvents()
+        else:
+            # Force-kill requested: immediately disable stop interactions while
+            # cancellation propagates from background threads.
+            self.execution_state = ManagerExecutionState.STOPPING
+            self.update_button_states()
 
         self._batch_workflow_service.stop_execution(force=is_force_kill)
 
@@ -1533,11 +1540,11 @@ class PlateManagerWidget(AbstractManagerWidget):
         self.buttons["view_metadata"].setEnabled(has_initialized and not is_running)
 
         # Run button - enabled if plates are compiled or if currently running (for stop)
-        if self.execution_state == "stopping":
+        if self.execution_state == ManagerExecutionState.STOPPING:
             # Stopping state - keep button as "Stop" but disable it
             self.buttons["run_plate"].setEnabled(False)
             self.buttons["run_plate"].setText("Stop")
-        elif self.execution_state == "force_kill_ready":
+        elif self.execution_state == ManagerExecutionState.FORCE_KILL_READY:
             # Force kill ready state - button is "Force Kill" and enabled
             self.buttons["run_plate"].setEnabled(True)
             self.buttons["run_plate"].setText("Force Kill")
@@ -1550,6 +1557,24 @@ class PlateManagerWidget(AbstractManagerWidget):
             self.buttons["run_plate"].setEnabled(has_compiled)
             self.buttons["run_plate"].setText("Run")
 
+    def refresh_execution_ui(self) -> None:
+        """Refresh list row statuses and action buttons after execution state changes."""
+        self.update_item_list()
+        self.update_button_states()
+
+    def clear_plate_execution_tracking(
+        self, plate_path: str, *, clear_terminal: bool = True
+    ) -> None:
+        """Clear per-plate execution runtime tracking.
+
+        By default this also clears terminal execution status; pass ``clear_terminal=False``
+        to preserve a terminal outcome label until the next explicit operation.
+        """
+        execution_id = self.plate_execution_ids.pop(plate_path, None)
+        self.execution_runtime.clear_plate(plate_path, clear_terminal=clear_terminal)
+        if execution_id:
+            self._progress_tracker.clear_execution(execution_id)
+
     def is_any_plate_running(self) -> bool:
         """
         Check if any plate is currently running.
@@ -1557,8 +1582,7 @@ class PlateManagerWidget(AbstractManagerWidget):
         Returns:
             True if any plate is running, False otherwise
         """
-        # Consider "running", "stopping", and "force_kill_ready" states as "busy"
-        return self.execution_state in ("running", "stopping", "force_kill_ready")
+        return self.execution_state in BUSY_MANAGER_STATES
 
     # Event handlers (on_selection_changed, on_plates_reordered, on_item_double_clicked)
     # provided by AbstractManagerWidget base class
@@ -1617,22 +1641,13 @@ class PlateManagerWidget(AbstractManagerWidget):
         if not self.pipeline_editor:
             logger.warning("No pipeline editor reference - using empty pipeline")
             return []
-
-        # Get pipeline for specific plate (same logic as Textual TUI)
-        if (
-            hasattr(self.pipeline_editor, "plate_pipelines")
-            and plate_path in self.pipeline_editor.plate_pipelines
-        ):
-            pipeline_steps = self.pipeline_editor.plate_pipelines[plate_path]
-            logger.debug(
-                f"Found pipeline for plate {plate_path} with {len(pipeline_steps)} steps"
-            )
-            return pipeline_steps
-        else:
-            logger.debug(
-                f"No pipeline found for plate {plate_path}, using empty pipeline"
-            )
-            return []
+        pipeline_steps = self.pipeline_editor.get_pipeline_for_plate(plate_path)
+        logger.debug(
+            "Loaded pipeline for plate %s from ObjectState with %d steps",
+            plate_path,
+            len(pipeline_steps),
+        )
+        return pipeline_steps
 
     def set_pipeline_editor(self, pipeline_editor):
         """

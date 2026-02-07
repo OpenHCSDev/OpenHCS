@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
-import os
 import threading
-import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Callable, Optional, TypeVar
 
+from PyQt6.QtCore import QEventLoop
+from PyQt6.QtWidgets import QApplication
+
 from openhcs.core.orchestrator.orchestrator import OrchestratorState
-from openhcs.core.progress import ProgressEvent, ProgressPhase, ProgressStatus
+from openhcs.core.progress import ProgressEvent
 from openhcs.core.progress.projection import (
     ExecutionRuntimeProjection,
     build_execution_runtime_projection_from_registry,
@@ -24,6 +26,12 @@ from openhcs.pyqt_gui.widgets.shared.services.progress_batch_reset import (
 )
 from openhcs.pyqt_gui.widgets.shared.services.execution_server_status_presenter import (
     ExecutionServerStatusPresenter,
+)
+from openhcs.pyqt_gui.widgets.shared.services.execution_state import (
+    STOP_PENDING_MANAGER_STATES,
+    ManagerExecutionState,
+    TerminalExecutionStatus,
+    parse_terminal_status,
 )
 from openhcs.pyqt_gui.widgets.shared.server_browser import (
     ServerKillPlan,
@@ -113,7 +121,9 @@ class BatchWorkflowService:
         self._cleaned_up = True
 
         if self._registry_listener_registered:
-            removed = self.host._progress_tracker.remove_listener(self._registry_listener)
+            removed = self.host._progress_tracker.remove_listener(
+                self._registry_listener
+            )
             if not removed:
                 raise RuntimeError(
                     "BatchWorkflowService listener removal failed: listener not registered"
@@ -127,13 +137,20 @@ class BatchWorkflowService:
 
     async def compile_plates(self, selected_items: List[Dict]) -> None:
         """Compile pipelines for selected plates."""
+        self._flush_pending_ui_edits()
         reset_progress_views_for_new_batch(self.host)
         self.host.emit_progress_started(len(selected_items))
         loop = asyncio.get_event_loop()
 
         try:
-            zmq_client = await self.client_service.connect(persistent=True, timeout=15)
+            zmq_client = await self.client_service.connect(
+                progress_callback=self._on_progress,
+                persistent=True,
+                timeout=15,
+            )
             plate_paths = [str(item["path"]) for item in selected_items]
+            for plate_path in plate_paths:
+                self.host.clear_plate_execution_tracking(plate_path)
             self.host.plate_compile_pending.update(plate_paths)
             self.host.update_item_list()
             self.host.emit_status(
@@ -161,6 +178,7 @@ class BatchWorkflowService:
                 self.host.plate_compiled_data[job.plate_path] = {
                     "definition_pipeline": job.definition_pipeline,
                 }
+                self.host.clear_plate_execution_tracking(job.plate_path)
                 self._set_orchestrator_state(job.plate_path, OrchestratorState.COMPILED)
                 self.host.emit_orchestrator_state(job.plate_path, "COMPILED")
                 logger.info("Successfully compiled %s", job.plate_path)
@@ -172,9 +190,7 @@ class BatchWorkflowService:
                     {"name": job.plate_name}, job.plate_path, error
                 )
 
-            def _on_wait_start(
-                _job: CompileJob, _idx: int, total: int
-            ) -> None:
+            def _on_wait_start(_job: CompileJob, _idx: int, total: int) -> None:
                 nonlocal waiting_announced
                 if waiting_announced:
                     return
@@ -183,9 +199,7 @@ class BatchWorkflowService:
                     f"Queued {total} compilation job(s). Waiting for completion..."
                 )
 
-            def _on_wait_finally(
-                job: CompileJob, _idx: int, _total: int
-            ) -> None:
+            def _on_wait_finally(job: CompileJob, _idx: int, _total: int) -> None:
                 nonlocal completed_count
                 self.host.plate_compile_pending.discard(job.plate_path)
                 self.host.update_item_list()
@@ -197,7 +211,10 @@ class BatchWorkflowService:
                 loop=loop,
                 fail_fast_submit=False,
                 fail_fast_wait=False,
-                on_submit_error=lambda job, error, _idx, _total: self._handle_compile_failure(
+                on_submit_error=lambda job,
+                error,
+                _idx,
+                _total: self._handle_compile_failure(
                     {"name": job.plate_name}, job.plate_path, error
                 ),
                 on_wait_start=_on_wait_start,
@@ -207,7 +224,7 @@ class BatchWorkflowService:
             )
             await self._compile_batch_engine.run(compile_jobs, compile_policy)
         finally:
-            if self.host.execution_state != "running":
+            if self.host.execution_state != ManagerExecutionState.RUNNING:
                 await self.client_service.disconnect()
 
         self.host.emit_progress_finished()
@@ -218,6 +235,7 @@ class BatchWorkflowService:
 
     async def run_plates(self, ready_items: List[Dict]) -> None:
         """Run selected plates using compile-all then execute-all workflow."""
+        self._flush_pending_ui_edits()
         loop = asyncio.get_event_loop()
         try:
             plate_paths = [str(item["path"]) for item in ready_items]
@@ -226,20 +244,18 @@ class BatchWorkflowService:
             self._reset_progress_for_new_batch()
             self.host.emit_clear_logs()
 
-            await self.client_service.disconnect()
             await self.client_service.connect(
                 progress_callback=self._on_progress, persistent=True, timeout=15
             )
 
             self.host.plate_execution_ids.clear()
-            self.host.plate_execution_states.clear()
+            self.host.execution_runtime.begin_batch(plate_paths)
             self.host.plate_progress.clear()
 
             from objectstate import ObjectStateRegistry
 
             for item in ready_items:
                 plate_path = str(item["path"])
-                self.host.plate_execution_states[plate_path] = "queued"
                 orchestrator = ObjectStateRegistry.get_object(plate_path)
                 if orchestrator is not None:
                     orchestrator._state = OrchestratorState.EXECUTING
@@ -247,7 +263,7 @@ class BatchWorkflowService:
                         plate_path, OrchestratorState.EXECUTING.value
                     )
 
-            self.host.execution_state = "running"
+            self.host.execution_state = ManagerExecutionState.RUNNING
             self.host.emit_status(
                 f"Compiling {len(ready_items)} plate(s) before execution..."
             )
@@ -295,13 +311,11 @@ class BatchWorkflowService:
                 self.host.emit_status(
                     f"Queued {len(compile_jobs)} compile job(s) before execution. Waiting for completion..."
                 )
-            self.host.plate_execution_states[job.plate_path] = "compiling"
             self.host.update_item_list()
 
         def _on_wait_success(
             job: CompileJob, _execution_id: str, index: int, total: int
         ) -> None:
-            self.host.plate_execution_states[job.plate_path] = "queued"
             self.host.emit_status(f"Compiled {index}/{total}: {job.plate_path}")
             self.host.update_item_list()
 
@@ -315,9 +329,10 @@ class BatchWorkflowService:
             loop=loop,
             fail_fast_submit=True,
             fail_fast_wait=True,
-            on_submit_error=lambda job, error, _idx, _total: self._mark_execution_compile_failed(
-                job.plate_path, error
-            ),
+            on_submit_error=lambda job,
+            error,
+            _idx,
+            _total: self._mark_execution_compile_failed(job.plate_path, error),
             on_wait_start=_on_wait_start,
             on_wait_success=_on_wait_success,
             on_wait_error=_on_wait_error,
@@ -327,7 +342,9 @@ class BatchWorkflowService:
         )
         return compile_artifacts
 
-    def _build_compile_job_from_plate_data(self, plate_data: Dict[str, Any]) -> CompileJob:
+    def _build_compile_job_from_plate_data(
+        self, plate_data: Dict[str, Any]
+    ) -> CompileJob:
         plate_path = str(plate_data["path"])
         definition_pipeline = self.host.get_pipeline_definition(plate_path)
         if not definition_pipeline:
@@ -339,6 +356,13 @@ class BatchWorkflowService:
 
         self._validate_pipeline_steps(definition_pipeline)
         pipeline_config = resolve_pipeline_config_for_plate(self.host, plate_path)
+        logger.info(
+            "Compile snapshot: plate=%s steps=%d fingerprint=%s step_names=%s",
+            plate_path,
+            len(definition_pipeline),
+            self._pipeline_fingerprint(definition_pipeline),
+            self._pipeline_step_names(definition_pipeline),
+        )
         return CompileJob(
             plate_path=plate_path,
             plate_name=str(plate_data["name"]),
@@ -349,10 +373,18 @@ class BatchWorkflowService:
     @staticmethod
     def _build_compile_job_from_run_spec(run_spec: Dict[str, Any]) -> CompileJob:
         plate_path = str(run_spec["plate_path"])
+        definition_pipeline = run_spec["definition_pipeline"]
+        logger.info(
+            "Compile-before-run snapshot: plate=%s steps=%d fingerprint=%s step_names=%s",
+            plate_path,
+            len(definition_pipeline),
+            BatchWorkflowService._pipeline_fingerprint(definition_pipeline),
+            BatchWorkflowService._pipeline_step_names(definition_pipeline),
+        )
         return CompileJob(
             plate_path=plate_path,
             plate_name=plate_path,
-            definition_pipeline=run_spec["definition_pipeline"],
+            definition_pipeline=definition_pipeline,
             pipeline_config=run_spec["pipeline_config"],
         )
 
@@ -363,7 +395,8 @@ class BatchWorkflowService:
         loop,
         fail_fast_submit: bool,
         fail_fast_wait: bool,
-        on_submit_error: Callable[[CompileJob, Exception, int, int], None] | None = None,
+        on_submit_error: Callable[[CompileJob, Exception, int, int], None]
+        | None = None,
         on_wait_start: Callable[[CompileJob, int, int], None] | None = None,
         on_wait_success: Callable[[CompileJob, str, int, int], None] | None = None,
         on_wait_error: Callable[[CompileJob, Exception, int, int], None] | None = None,
@@ -399,12 +432,7 @@ class BatchWorkflowService:
             definition_pipeline=job.definition_pipeline,
             pipeline_config=job.pipeline_config,
         )
-        execution_id = response["execution_id"]
-        self._register_compile_submission_placeholder(
-            execution_id=execution_id,
-            plate_id=job.plate_path,
-        )
-        return execution_id
+        return response["execution_id"]
 
     async def _wait_compile_job(
         self, *, submission_id: str, job: CompileJob, zmq_client, loop
@@ -418,29 +446,16 @@ class BatchWorkflowService:
 
     def _mark_execution_compile_failed(self, plate_path: str, error: Exception) -> None:
         logger.error(
-            "Compile-before-execution failed for %s: %s", plate_path, error, exc_info=True
+            "Compile-before-execution failed for %s: %s",
+            plate_path,
+            error,
+            exc_info=True,
         )
-        self.host.plate_execution_states[plate_path] = "failed"
+        self.host.execution_runtime.mark_terminal(
+            plate_path, TerminalExecutionStatus.FAILED
+        )
         self.host.emit_error(f"Compile failed for {plate_path}: {error}")
         self.host.update_item_list()
-
-    def _register_compile_submission_placeholder(
-        self, *, execution_id: str, plate_id: str
-    ) -> None:
-        event = ProgressEvent(
-            execution_id=execution_id,
-            plate_id=plate_id,
-            axis_id="",
-            step_name="compilation",
-            phase=ProgressPhase.COMPILE,
-            status=ProgressStatus.RUNNING,
-            percent=0.0,
-            completed=0,
-            total=1,
-            timestamp=time.time(),
-            pid=os.getpid(),
-        )
-        self.host._progress_tracker.register_event(execution_id, event)
 
     async def _submit_compile_request(
         self,
@@ -452,6 +467,12 @@ class BatchWorkflowService:
         pipeline_config,
     ) -> Dict[str, Any]:
         def _submit_compile() -> Dict[str, Any]:
+            logger.info(
+                "Submit compile: plate=%s steps=%d fingerprint=%s",
+                plate_path,
+                len(definition_pipeline),
+                self._pipeline_fingerprint(definition_pipeline),
+            )
             return zmq_client.submit_compile(
                 plate_id=plate_path,
                 pipeline_steps=definition_pipeline,
@@ -467,7 +488,9 @@ class BatchWorkflowService:
             )
         execution_id = response.get("execution_id")
         if not execution_id:
-            raise RuntimeError(f"Compile submission missing execution_id for {plate_path}")
+            raise RuntimeError(
+                f"Compile submission missing execution_id for {plate_path}"
+            )
         return {"execution_id": execution_id, "response": response}
 
     async def _wait_for_compile_completion(
@@ -512,12 +535,20 @@ class BatchWorkflowService:
         if self.client_service.zmq_client is None:
             raise RuntimeError("ZMQ client is not connected")
         plate_path = run_spec["plate_path"]
+        definition_pipeline = run_spec["definition_pipeline"]
         logger.info("Executing plate: %s", plate_path)
+        logger.info(
+            "Submit run: plate=%s artifact_id=%s steps=%d fingerprint=%s",
+            plate_path,
+            compile_artifact_id,
+            len(definition_pipeline),
+            self._pipeline_fingerprint(definition_pipeline),
+        )
 
         def _submit() -> Dict[str, Any]:
             return self.client_service.zmq_client.submit_pipeline(
                 plate_id=plate_path,
-                pipeline_steps=run_spec["definition_pipeline"],
+                pipeline_steps=definition_pipeline,
                 global_config=run_spec["global_config"],
                 pipeline_config=run_spec["pipeline_config"],
                 compile_artifact_id=compile_artifact_id,
@@ -540,7 +571,9 @@ class BatchWorkflowService:
         error_msg = response.get("message", "Unknown error")
         logger.error("Plate %s submission failed: %s", plate_path, error_msg)
         self.host.emit_error(f"Submission failed for {plate_path}: {error_msg}")
-        self.host.plate_execution_states[plate_path] = "failed"
+        self.host.execution_runtime.mark_terminal(
+            plate_path, TerminalExecutionStatus.FAILED
+        )
         from objectstate import ObjectStateRegistry
 
         orchestrator = ObjectStateRegistry.get_object(plate_path)
@@ -553,8 +586,10 @@ class BatchWorkflowService:
     async def _handle_execution_failure(self, loop) -> None:
         from objectstate import ObjectStateRegistry
 
-        for plate_path in self.host.plate_execution_states.keys():
-            self.host.plate_execution_states[plate_path] = "failed"
+        for plate_path in tuple(self.host.execution_runtime.active_plates):
+            self.host.execution_runtime.mark_terminal(
+                plate_path, TerminalExecutionStatus.FAILED
+            )
             orchestrator = ObjectStateRegistry.get_object(plate_path)
             if orchestrator is not None:
                 orchestrator._state = OrchestratorState.EXEC_FAILED
@@ -562,10 +597,10 @@ class BatchWorkflowService:
                     plate_path, OrchestratorState.EXEC_FAILED.value
                 )
 
-        self.host.execution_state = "idle"
+        self.host.execution_state = ManagerExecutionState.IDLE
         await self._disconnect_client(loop)
         self.host.current_execution_id = None
-        self.host.update_button_states()
+        self._refresh_host_execution_ui()
 
     async def _disconnect_client(self, loop) -> None:
         if self.client_service.zmq_client is None:
@@ -579,6 +614,33 @@ class BatchWorkflowService:
     async def _run_blocking(loop, func: Callable[[], T]) -> T:
         return await loop.run_in_executor(None, func)
 
+    @staticmethod
+    def _pipeline_fingerprint(definition_pipeline: List) -> str:
+        import openhcs.serialization.pycodify_formatters  # noqa: F401
+        from pycodify import Assignment, generate_python_source
+
+        pipeline_code = generate_python_source(
+            Assignment("pipeline_steps", definition_pipeline),
+            header="# Edit this pipeline and save to apply changes",
+            clean_mode=True,
+        )
+        return hashlib.sha256(pipeline_code.encode("utf-8")).hexdigest()[:12]
+
+    @staticmethod
+    def _pipeline_step_names(definition_pipeline: List) -> List[str]:
+        return [str(getattr(step, "name", "<unnamed>")) for step in definition_pipeline]
+
+    @staticmethod
+    def _flush_pending_ui_edits() -> None:
+        """Commit pending editor widget state before reading pipeline definitions."""
+        app = QApplication.instance()
+        if app is None:
+            return
+        focus_widget = app.focusWidget()
+        if focus_widget is not None:
+            focus_widget.clearFocus()
+        app.processEvents(QEventLoop.ProcessEventsFlag.AllEvents)
+
     def _start_completion_poller(self, execution_id: str, plate_path: str) -> None:
         class _ClientDisconnected(RuntimeError):
             pass
@@ -589,28 +651,55 @@ class BatchWorkflowService:
             return self.client_service.zmq_client.get_status(polled_execution_id)
 
         def _on_running(_execution_id: str, _execution_payload: Dict[str, Any]) -> None:
-            self.host.plate_execution_states[plate_path] = "running"
             self.host.update_item_list()
             self.host.emit_status(f"▶️ Running {plate_path}")
 
         def _on_terminal(
             _execution_id: str, terminal_status: str, execution_payload: Dict[str, Any]
         ) -> None:
+            current_execution_id = self.host.plate_execution_ids.get(plate_path)
+            if current_execution_id != _execution_id:
+                logger.info(
+                    "Ignoring stale terminal status for %s: execution_id=%s current=%s",
+                    plate_path,
+                    _execution_id,
+                    current_execution_id,
+                )
+                return
+            parsed_terminal_status = parse_terminal_status(terminal_status)
+
+            self.host.execution_runtime.mark_terminal(
+                plate_path, parsed_terminal_status
+            )
             result = self._build_terminal_result(
-                terminal_status=terminal_status,
-                execution_id=execution_id,
+                terminal_status=parsed_terminal_status.value,
+                execution_id=_execution_id,
                 execution_payload=execution_payload,
             )
-            self.host.on_plate_completed(plate_path, terminal_status, result)
+            self.host.notify_plate_completed(
+                plate_path, parsed_terminal_status.value, result
+            )
             self._check_all_completed()
 
         def _on_status_error(_execution_id: str, message: str) -> None:
-            self.host.on_plate_completed(
+            current_execution_id = self.host.plate_execution_ids.get(plate_path)
+            if current_execution_id != _execution_id:
+                logger.info(
+                    "Ignoring stale status error for %s: execution_id=%s current=%s",
+                    plate_path,
+                    _execution_id,
+                    current_execution_id,
+                )
+                return
+            self.host.execution_runtime.mark_terminal(
+                plate_path, TerminalExecutionStatus.FAILED
+            )
+            self.host.notify_plate_completed(
                 plate_path,
-                "failed",
+                TerminalExecutionStatus.FAILED.value,
                 {
-                    "status": "failed",
-                    "execution_id": execution_id,
+                    "status": TerminalExecutionStatus.FAILED.value,
+                    "execution_id": _execution_id,
                     "message": message,
                 },
             )
@@ -636,7 +725,10 @@ class BatchWorkflowService:
                 self._execution_status_poller.run(execution_id, policy)
             except Exception as error:
                 logger.error(
-                    "Error in completion poller for %s: %s", plate_path, error, exc_info=True
+                    "Error in completion poller for %s: %s",
+                    plate_path,
+                    error,
+                    exc_info=True,
                 )
                 self.host.emit_error(f"{plate_path}: {error}")
 
@@ -649,36 +741,62 @@ class BatchWorkflowService:
         execution_id: str,
         execution_payload: Dict[str, Any],
     ) -> Dict[str, Any]:
-        if terminal_status == "complete":
-            results_summary = execution_payload.get("results_summary", {}) or {}
-            output_plate_root = None
-            auto_add_output_plate = None
-            if isinstance(results_summary, dict):
-                output_plate_root = results_summary.get("output_plate_root")
-                auto_add_output_plate = results_summary.get(
-                    "auto_add_output_plate_to_plate_manager"
+        status = parse_terminal_status(terminal_status)
+        match status:
+            case TerminalExecutionStatus.COMPLETE:
+                return BatchWorkflowService._build_complete_terminal_result(
+                    execution_id, execution_payload
                 )
-            return {
-                "status": "complete",
-                "execution_id": execution_id,
-                "results": results_summary,
-                "output_plate_root": output_plate_root,
-                "auto_add_output_plate_to_plate_manager": auto_add_output_plate,
-            }
-        if terminal_status == "failed":
-            return {
-                "status": "error",
-                "execution_id": execution_id,
-                "message": execution_payload.get("error", "Unknown error"),
-                "traceback": execution_payload.get("traceback", ""),
-            }
-        if terminal_status == "cancelled":
-            return {
-                "status": "cancelled",
-                "execution_id": execution_id,
-                "message": "Execution was cancelled",
-            }
-        raise ValueError(f"Unknown terminal status '{terminal_status}'")
+            case TerminalExecutionStatus.FAILED:
+                return BatchWorkflowService._build_failed_terminal_result(
+                    execution_id, execution_payload
+                )
+            case TerminalExecutionStatus.CANCELLED:
+                return BatchWorkflowService._build_cancelled_terminal_result(
+                    execution_id, execution_payload
+                )
+        raise ValueError(f"Unsupported terminal status '{status}'")
+
+    @staticmethod
+    def _build_complete_terminal_result(
+        execution_id: str, execution_payload: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        results_summary = execution_payload.get("results_summary", {}) or {}
+        output_plate_root = None
+        auto_add_output_plate = None
+        if isinstance(results_summary, dict):
+            output_plate_root = results_summary.get("output_plate_root")
+            auto_add_output_plate = results_summary.get(
+                "auto_add_output_plate_to_plate_manager"
+            )
+        return {
+            "status": TerminalExecutionStatus.COMPLETE.value,
+            "execution_id": execution_id,
+            "results": results_summary,
+            "output_plate_root": output_plate_root,
+            "auto_add_output_plate_to_plate_manager": auto_add_output_plate,
+        }
+
+    @staticmethod
+    def _build_failed_terminal_result(
+        execution_id: str, execution_payload: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        return {
+            "status": TerminalExecutionStatus.FAILED.value,
+            "execution_id": execution_id,
+            "message": execution_payload.get("error", "Unknown error"),
+            "traceback": execution_payload.get("traceback", ""),
+        }
+
+    @staticmethod
+    def _build_cancelled_terminal_result(
+        execution_id: str, _execution_payload: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        return {
+            "status": TerminalExecutionStatus.CANCELLED.value,
+            "execution_id": execution_id,
+            "message": "Execution was cancelled",
+        }
 
     def _coalesced_progress_update(self) -> None:
         if self.client_service.zmq_client is not None:
@@ -732,29 +850,27 @@ class BatchWorkflowService:
         self._progress_dirty = True
 
     def _check_all_completed(self) -> None:
-        all_done = all(
-            state in ("completed", "failed")
-            for state in self.host.plate_execution_states.values()
-        )
-        if not all_done:
+        if self.host.execution_state not in (
+            ManagerExecutionState.RUNNING,
+            *STOP_PENDING_MANAGER_STATES,
+        ):
             return
-        completed = sum(
-            1 for state in self.host.plate_execution_states.values() if state == "completed"
-        )
-        failed = sum(
-            1 for state in self.host.plate_execution_states.values() if state == "failed"
-        )
-        self.host.on_all_plates_completed(completed, failed)
+        if not self.host.execution_runtime.all_batch_terminal():
+            return
+        completed, failed = self.host.execution_runtime.terminal_counts()
+        self.host.notify_all_plates_completed(completed, failed)
 
     def stop_execution(self, force: bool = False) -> None:
         port = self.port
 
         def kill_server() -> None:
             try:
+                # Force-kill is best-effort: the server may already be gone if a graceful
+                # stop just completed, so treat "not found" style outcomes as success.
                 plan = ServerKillPlan(
                     graceful=not force,
-                    strict_failures=True,
-                    emit_signal_on_failure=False,
+                    strict_failures=not force,
+                    emit_signal_on_failure=force,
                     success_message=f"Stopped execution server on port {port}",
                 )
                 success, message = self._server_kill_service.kill_ports(
@@ -766,6 +882,17 @@ class BatchWorkflowService:
                     log_error=logger.error,
                 )
                 if not success:
+                    if self.host.execution_state in (
+                        ManagerExecutionState.STOPPING,
+                        ManagerExecutionState.FORCE_KILL_READY,
+                        ManagerExecutionState.IDLE,
+                    ):
+                        logger.info(
+                            "Suppressing stale stop failure while stop is already terminalizing: %s",
+                            message,
+                        )
+                        self._emit_cancelled_for_all_plates()
+                        return
                     self.host.emit_error(message)
                     return
             except Exception as error:
@@ -774,9 +901,17 @@ class BatchWorkflowService:
 
         threading.Thread(target=kill_server, daemon=True).start()
 
+        if force:
+            # Keep UI responsive on force-kill: mark plates cancelled immediately on the
+            # caller thread while kill work continues in the background.
+            self._emit_cancelled_for_all_plates()
+            self.disconnect_async()
+
     def _emit_cancelled_for_all_plates(self) -> None:
-        for plate_path in list(self.host.plate_execution_states.keys()):
-            self.host.emit_execution_complete({"status": "cancelled"}, plate_path)
+        for plate_path in self.host.execution_runtime.cancellable_plates():
+            self.host.emit_execution_complete(
+                {"status": TerminalExecutionStatus.CANCELLED.value}, plate_path
+            )
 
     def disconnect(self) -> None:
         if self.client_service.zmq_client is None:
@@ -785,6 +920,22 @@ class BatchWorkflowService:
             self.client_service.disconnect_sync()
         except Exception as error:
             logger.warning("Error disconnecting ZMQ client: %s", error)
+
+    def disconnect_async(self) -> None:
+        """Disconnect client on a background thread to avoid UI stalls."""
+
+        def _disconnect() -> None:
+            self.disconnect()
+
+        threading.Thread(target=_disconnect, daemon=True).start()
+
+    def _refresh_host_execution_ui(self) -> None:
+        refresh_fn = getattr(self.host, "refresh_execution_ui", None)
+        if callable(refresh_fn):
+            refresh_fn()
+            return
+        self.host.update_item_list()
+        self.host.update_button_states()
 
     def _validate_pipeline_steps(self, pipeline: List) -> None:
         for step in pipeline:
@@ -807,6 +958,7 @@ class BatchWorkflowService:
     ) -> None:
         logger.error("COMPILATION ERROR: %s: %s", plate_path, error, exc_info=True)
         plate_data["error"] = str(error)
+        self.host.clear_plate_execution_tracking(plate_path)
         self._set_orchestrator_state(plate_path, OrchestratorState.COMPILE_FAILED)
         self.host.plate_compile_pending.discard(plate_path)
         self.host.update_item_list()
