@@ -786,6 +786,14 @@ def _process_single_pattern_group(
         # Get step function from step plan
         step_func = context.step_plans[step_index]["func"]
 
+        # DEBUG: Log component_key and available groups
+        logger.info(f"🔍 COMPONENT_KEY: component_value={component_value}, component_key={component_key}")
+        special_outputs_by_group = context.step_plans[step_index].get("special_outputs_by_group")
+        if special_outputs_by_group:
+            logger.info(f"🔍 AVAILABLE_GROUPS: {list(special_outputs_by_group.keys())}")
+        else:
+            logger.info(f"🔍 NO special_outputs_by_group in step plan")
+
         if isinstance(step_func, dict):
             dict_key_for_funcplan = (
                 component_key  # Use actual dict key for dict patterns
@@ -802,6 +810,9 @@ def _process_single_pattern_group(
             component_key,
             special_outputs_map,
         )
+
+        # DEBUG: Log selected special outputs
+        logger.info(f"🔍 SELECTED_OUTPUTS: {special_outputs_for_component}")
 
         # Resolve FunctionReference if needed
         from openhcs.core.pipeline.compiler import FunctionReference

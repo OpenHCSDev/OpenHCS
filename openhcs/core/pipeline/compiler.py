@@ -114,36 +114,45 @@ class FunctionReference:
     registry_name: str
     memory_type: str  # The memory type for get_function_by_name() (e.g., "numpy", "pyclesperanto")
     composite_key: str  # The full registry key (e.g., "pyclesperanto:gaussian_blur")
-    preserved_attrs: dict  # All dunder attributes from the original function
+    original_module: str  # The original module path (e.g., "skimage.filters.edges")
+    preserved_attrs: dict  # All dunder attributes from the original function (except __name__ and __module__)
 
     def __getattr__(self, name: str):
         """Allow access to preserved dunder attributes as if they were on the function."""
         # Use object.__getattribute__ to avoid infinite recursion
         preserved = object.__getattribute__(self, "preserved_attrs")
+
+        # Handle special case: __name__ maps to function_name
+        if name == "__name__":
+            return object.__getattribute__(self, "function_name")
+
+        # Handle special case: __module__ maps to original_module
+        if name == "__module__":
+            return object.__getattribute__(self, "original_module")
+
         if name in preserved:
             return preserved[name]
         raise AttributeError(f"FunctionReference has no attribute '{name}'")
 
     def resolve(self) -> Callable:
-        """Resolve this reference to the actual decorated function from registry."""
-        if self.registry_name == "openhcs":
-            # For OpenHCS functions, use RegistryService directly with composite key
-            from openhcs.processing.backends.lib_registry.registry_service import (
-                RegistryService,
-            )
+        """Resolve this reference to the actual decorated function from the registry.
 
-            all_functions = RegistryService.get_all_functions_with_metadata()
-            if self.composite_key in all_functions:
-                return all_functions[self.composite_key].func
-            else:
-                raise RuntimeError(
-                    f"OpenHCS function {self.composite_key} not found in registry"
-                )
-        else:
-            # For external library functions, use the memory type for lookup
-            from openhcs.processing.func_registry import get_function_by_name
+        Always resolves through RegistryService to get the fully decorated function
+        with all wrapper layers (memory type, slice-by-slice, dtype conversion, etc.).
+        This should only be called in worker processes during execution, never during
+        compilation (use preserved_attrs via __getattr__ instead).
+        """
+        from openhcs.processing.backends.lib_registry.registry_service import (
+            RegistryService,
+        )
 
-            return get_function_by_name(self.function_name, self.memory_type)
+        all_functions = RegistryService.get_all_functions_with_metadata()
+        if self.composite_key in all_functions:
+            return all_functions[self.composite_key].func
+        raise RuntimeError(
+            f"Function {self.composite_key} not found in registry. "
+            f"Ensure the function registry is initialized in this process."
+        )
 
 
 def _refresh_function_objects_in_steps(pipeline_definition: List[AbstractStep]) -> None:
@@ -153,9 +162,30 @@ def _refresh_function_objects_in_steps(pipeline_definition: List[AbstractStep]) 
     This recreates function objects by importing them fresh from their original modules,
     similar to how code mode works, which avoids unpicklable closures from registry wrapping.
     """
-    for step in pipeline_definition:
-        if isinstance(step, FunctionStep) and step.func is not None:
-            step.func = _refresh_function_object(step.func)
+    logger.debug(f"🔄 FUNCTION REFRESH: Processing {len(pipeline_definition)} steps")
+    for step_idx, step in enumerate(pipeline_definition):
+        if isinstance(step, FunctionStep):
+            if hasattr(step, 'func') and step.func is not None:
+                old_type = type(step.func).__name__
+                step.func = _refresh_function_object(step.func)
+                new_type = type(step.func).__name__
+
+                # Log what's inside containers
+                if isinstance(step.func, list) and step.func:
+                    first_item = step.func[0]
+                    first_item_type = type(first_item).__name__
+                    if isinstance(first_item, tuple) and len(first_item) == 2:
+                        inner_func_type = type(first_item[0]).__name__
+                        logger.debug(f"🔄 FUNCTION REFRESH: Step {step_idx} ({step.name}): {old_type} → {new_type} (first item: {first_item_type}, inner func: {inner_func_type})")
+                    else:
+                        logger.debug(f"🔄 FUNCTION REFRESH: Step {step_idx} ({step.name}): {old_type} → {new_type} (first item: {first_item_type})")
+                elif isinstance(step.func, tuple) and len(step.func) == 2:
+                    func_type = type(step.func[0]).__name__
+                    logger.debug(f"🔄 FUNCTION REFRESH: Step {step_idx} ({step.name}): {old_type} → {new_type} (func: {func_type})")
+                else:
+                    logger.debug(f"🔄 FUNCTION REFRESH: Step {step_idx} ({step.name}): {old_type} → {new_type}")
+            else:
+                logger.debug(f"🔄 FUNCTION REFRESH: Step {step_idx} ({step.name}): No func attribute")
 
 
 def _refresh_function_object(func_value):
@@ -163,58 +193,36 @@ def _refresh_function_object(func_value):
 
     Also filters out functions with enabled=False at compile time.
     """
-    try:
-        if callable(func_value) and hasattr(func_value, "__module__"):
-            # Single function → FunctionReference
-            return _get_function_reference(func_value)
+    if callable(func_value) and hasattr(func_value, "__module__"):
+        return _get_function_reference(func_value)
 
-        elif isinstance(func_value, tuple) and len(func_value) == 2:
-            # Function with parameters tuple → (FunctionReference, params)
-            func, params = func_value
+    elif isinstance(func_value, tuple) and len(func_value) == 2:
+        func, params = func_value
 
-            # Check if function is disabled via enabled parameter
-            if isinstance(params, dict) and params.get("enabled", True) is False:
-                import logging
+        if isinstance(params, dict) and params.get("enabled", True) is False:
+            return None
 
-                logger = logging.getLogger(__name__)
-                func_name = getattr(func, "__name__", str(func))
-                return None  # Mark for removal
+        if isinstance(params, dict) and "enabled" in params:
+            params = {k: v for k, v in params.items() if k != "enabled"}
 
-            # Remove 'enabled' from params since it's compile-time only, not a runtime parameter
-            if isinstance(params, dict) and "enabled" in params:
-                params = {k: v for k, v in params.items() if k != "enabled"}
+        if isinstance(params, dict) and "dtype_config" in params:
+            params = {k: v for k, v in params.items() if k != "dtype_config"}
 
-            # Remove dtype_config after it's been resolved into the funcplan/step context
-            if isinstance(params, dict) and "dtype_config" in params:
-                params = {k: v for k, v in params.items() if k != "dtype_config"}
+        if callable(func):
+            func_ref = _refresh_function_object(func)
+            return (func_ref, params)
+        else:
+            return (func, params)
 
-            if callable(func):
-                func_ref = _refresh_function_object(func)
-                return (func_ref, params)
-            else:
-                # func is already a FunctionReference or other non-callable
-                return (func, params)
+    elif isinstance(func_value, list):
+        refreshed = [_refresh_function_object(item) for item in func_value]
+        return [item for item in refreshed if item is not None]
 
-        elif isinstance(func_value, list):
-            # List of functions → List of FunctionReferences (filter out None)
-            refreshed = [_refresh_function_object(item) for item in func_value]
-            return [item for item in refreshed if item is not None]
-
-        elif isinstance(func_value, dict):
-            # Dict of functions → Dict of FunctionReferences (filter out None values)
-            refreshed = {
-                key: _refresh_function_object(value)
-                for key, value in func_value.items()
-            }
-            return {key: value for key, value in refreshed.items() if value is not None}
-
-    except Exception as e:
-        import logging
-
-        logger = logging.getLogger(__name__)
-        logger.warning(f"Failed to create function reference for {func_value}: {e}")
-        # If we can't create a reference, return original (may fail later)
-        return func_value
+    elif isinstance(func_value, dict):
+        refreshed = {
+            key: _refresh_function_object(value) for key, value in func_value.items()
+        }
+        return {key: value for key, value in refreshed.items() if value is not None}
 
     return func_value
 
@@ -225,63 +233,56 @@ def _get_function_reference(func):
     Preserves custom attributes (like __special_inputs__, __special_outputs__)
     so they can be accessed during compilation without resolving the function.
 
-    Note: These use double underscores which violates Python convention (should be single
-    underscore for private attributes). This is technical debt to be fixed later.
+    Compares unwrapped original functions to handle wrapper functions that may be
+    different Python objects but wrap the same underlying callable.
     """
-    try:
-        from openhcs.processing.backends.lib_registry.registry_service import (
-            RegistryService,
-        )
+    from openhcs.processing.backends.lib_registry.registry_service import (
+        RegistryService,
+    )
 
-        # Get all function metadata to find this function
-        all_functions = RegistryService.get_all_functions_with_metadata()
+    def _get_original_func(f):
+        unwrapped = getattr(f, "__wrapped__", None)
+        if unwrapped is not None:
+            return _get_original_func(unwrapped)
+        return f
 
-        # Find the metadata for this function by matching name and module
-        for composite_key, metadata in all_functions.items():
-            if (
-                metadata.func.__name__ == func.__name__
-                and metadata.func.__module__ == func.__module__
-            ):
-                # Preserve only the specific attributes we need during compilation
-                # This is much faster than iterating through all attributes
-                # Note: __special_* use double underscores which violates Python convention (should be single
-                # underscore for private attributes). This is technical debt to be fixed later.
-                preserved_attrs = {}
-                for attr in [
-                    "__special_inputs__",
-                    "__special_outputs__",
-                    "__materialization_specs__",
-                    "input_memory_type",
-                    "output_memory_type",
-                    "__name__",
-                    "__module__",
-                ]:
-                    if hasattr(func, attr):
-                        try:
-                            preserved_attrs[attr] = getattr(func, attr)
-                        except Exception:
-                            # Skip attributes that can't be accessed
-                            pass
+    original_func = _get_original_func(func)
+    original_name = original_func.__name__
+    original_module = getattr(original_func, "__module__", "")
 
-                # Create a picklable reference instead of the function object
-                return FunctionReference(
-                    function_name=func.__name__,
-                    registry_name=metadata.registry.library_name,
-                    memory_type=metadata.registry.MEMORY_TYPE,
-                    composite_key=composite_key,
-                    preserved_attrs=preserved_attrs,
-                )
+    all_functions = RegistryService.get_all_functions_with_metadata()
 
-    except Exception as e:
-        import logging
+    for composite_key, metadata in all_functions.items():
+        registry_original = _get_original_func(metadata.func)
+        if (
+            registry_original.__name__ == original_name
+            and getattr(registry_original, "__module__", "") == original_module
+        ):
+            preserved_attrs = {}
+            for attr in [
+                "__special_inputs__",
+                "__special_outputs__",
+                "__materialization_specs__",
+                "input_memory_type",
+                "output_memory_type",
+            ]:
+                if hasattr(func, attr):
+                    try:
+                        preserved_attrs[attr] = getattr(func, attr)
+                    except Exception:
+                        pass
 
-        logger = logging.getLogger(__name__)
-        logger.warning(f"Failed to create function reference for {func.__name__}: {e}")
+            return FunctionReference(
+                function_name=original_name,
+                registry_name=metadata.registry.library_name,
+                memory_type=metadata.registry.MEMORY_TYPE,
+                composite_key=composite_key,
+                original_module=original_module,
+                preserved_attrs=preserved_attrs,
+            )
 
-    # If we can't create a reference, this function isn't in the registry
-    # This should not happen for properly registered functions
     raise RuntimeError(
-        f"Function {func.__name__} not found in registry - cannot create reference"
+        f"Function {original_name} (module: {original_module}) not found in registry - cannot create reference"
     )
 
 
@@ -494,17 +495,19 @@ class PipelineCompiler:
         # === PATH PLANNING ===
         # CRITICAL: Pass merged config (not raw pipeline_config) for proper global config inheritance
         # This ensures path_planning_config and vfs_config inherit from global config
+        # CRITICAL: Pass step_state_map so path planner can resolve lazy dataclass attributes via ObjectState
         PipelinePathPlanner.prepare_pipeline_paths(
             context,
             steps_definition,
             context.global_config,  # Use merged config from context instead of raw pipeline_config
             orchestrator=orchestrator,
+            step_state_map=step_state_map,  # Pass step_state_map for ObjectState resolution
         )
 
-        # === FUNCTION OBJECT REFRESH ===
-        # CRITICAL FIX: Refresh all function objects to ensure they're picklable
-        # This prevents multiprocessing pickling errors by ensuring clean function objects
-        _refresh_function_objects_in_steps(steps_definition)
+        # NOTE: Function object refresh is now done ONCE at the top level after resolving steps
+        # (see compile_pipelines_for_plate() line ~1310)
+        # This ensures ObjectState.to_object() restored functions are converted to FunctionReference
+        # before any per-well compilation, avoiding redundant conversions
 
         # Loop to supplement step_plans with non-I/O, non-path attributes
         # after PipelinePathPlanner has fully populated them with I/O info.
@@ -640,6 +643,15 @@ class PipelineCompiler:
                     f"{field_name}.enabled"
                 )
                 enabled = True if defaults_enabled is True else per_stream_enabled
+                if is_zmq_execution:
+                    logger.info(
+                        "🔍 STREAMING RESOLUTION: step=%s field=%s defaults_enabled=%r per_stream_enabled=%r effective_enabled=%r",
+                        step_index,
+                        field_name,
+                        defaults_enabled,
+                        per_stream_enabled,
+                        enabled,
+                    )
 
                 if enabled is True:
                     base_cls = get_base_type_for_lazy(
@@ -1222,9 +1234,12 @@ class PipelineCompiler:
             from objectstate import get_current_global_config
             from openhcs.core.config import GlobalPipelineConfig
 
-            # Register global config at scope "" if not already registered (IPC case)
+            # In ZMQ execution mode, always overwrite compile-time ObjectStates from the
+            # current request to prevent stale pipeline/config reuse across requests.
+            force_fresh_compile_states = bool(is_zmq_execution)
+
             global_config_state = ObjectStateRegistry.get_by_scope("")
-            if global_config_state is None:
+            if force_fresh_compile_states or global_config_state is None:
                 global_config = get_current_global_config(
                     GlobalPipelineConfig, use_live=False
                 )
@@ -1237,27 +1252,27 @@ class PipelineCompiler:
                     ObjectStateRegistry.register(
                         global_config_state, _skip_snapshot=True
                     )
-                    logger.debug("IPC: Registered global config at scope ''")
+                    logger.debug("Registered global config at scope ''")
 
             # Register the orchestrator's pipeline_config at plate_path scope
             plate_path_str = str(orchestrator.plate_path)
             plate_orch_state = ObjectStateRegistry.get_by_scope(plate_path_str)
-            if plate_orch_state is None and orchestrator.pipeline_config:
+            if (
+                force_fresh_compile_states or plate_orch_state is None
+            ) and orchestrator.pipeline_config:
                 plate_orch_state = ObjectState(
                     object_instance=orchestrator.pipeline_config,
                     scope_id=plate_path_str,
                     parent_state=global_config_state,
                 )
                 ObjectStateRegistry.register(plate_orch_state, _skip_snapshot=True)
-                logger.debug(
-                    f"IPC: Registered pipeline_config at scope '{plate_path_str}'"
-                )
+                logger.debug(f"Registered pipeline_config at scope '{plate_path_str}'")
 
             # Register orchestrator ObjectState (for delegation pattern)
             # Use proper scope hierarchy: plate_path::orchestrator
             orch_scope_id = f"{plate_path_str}::orchestrator"
             orch_state = ObjectStateRegistry.get_by_scope(orch_scope_id)
-            if orch_state is None:
+            if force_fresh_compile_states or orch_state is None:
                 orch_state = ObjectState(
                     object_instance=orchestrator,
                     scope_id=orch_scope_id,
@@ -1271,7 +1286,7 @@ class PipelineCompiler:
             for step_index, step in enumerate(pipeline_definition):
                 step_scope_id = f"{plate_path_str}::step_{step_index}"
                 step_state = ObjectStateRegistry.get_by_scope(step_scope_id)
-                if step_state is None:
+                if force_fresh_compile_states or step_state is None:
                     step_state = ObjectState(
                         object_instance=step,
                         scope_id=step_scope_id,
@@ -1281,15 +1296,25 @@ class PipelineCompiler:
                 step_state_map[step_index] = step_state
 
             # Resolve steps ONCE using their ObjectStates
-            resolved_pipeline_definition = []
-            for step_index, step in enumerate(pipeline_definition):
-                step_state = step_state_map[step_index]
+            # ARCHITECTURAL FIX: Replace pipeline_definition in-place with resolved steps
+            # This ensures there's only ONE list of steps used throughout compilation
+            pipeline_definition.clear()
+            for step_index, step_state in step_state_map.items():
                 resolved_step = step_state.to_object()
-                resolved_pipeline_definition.append(resolved_step)
+                pipeline_definition.append(resolved_step)
 
             logger.debug(
-                f"Resolved {len(resolved_pipeline_definition)} steps once per pipeline"
+                f"Resolved {len(pipeline_definition)} steps once per pipeline (replaced original list in-place)"
             )
+
+            # CRITICAL: Refresh function objects immediately after resolving steps
+            # ObjectState.to_object() restores original .func attributes (raw functions)
+            # We must convert them to FunctionReference BEFORE any per-well compilation
+            _refresh_function_objects_in_steps(pipeline_definition)
+            logger.debug(
+                f"Refreshed function objects in {len(pipeline_definition)} steps (converted to FunctionReference)"
+            )
+
             # === END ONE-TIME STEP RESOLUTION ===
             # NOTE: ObjectStates remain registered for use by streaming config resolution
 
@@ -1403,7 +1428,7 @@ class PipelineCompiler:
                 resolved_steps, step_state_map = (
                     PipelineCompiler.initialize_step_plans_for_context(
                         temp_context,
-                        resolved_pipeline_definition,
+                        pipeline_definition,  # Now using the in-place replaced list
                         orchestrator,
                         metadata_writer=is_responsible,
                         plate_path=orchestrator.plate_path,
@@ -1454,7 +1479,7 @@ class PipelineCompiler:
                         resolved_steps, step_state_map = (
                             PipelineCompiler.initialize_step_plans_for_context(
                                 context,
-                                resolved_pipeline_definition,
+                                pipeline_definition,  # Now using the in-place replaced list
                                 orchestrator,
                                 metadata_writer=is_responsible,
                                 plate_path=orchestrator.plate_path,
@@ -1504,7 +1529,7 @@ class PipelineCompiler:
                     resolved_steps, step_state_map = (
                         PipelineCompiler.initialize_step_plans_for_context(
                             context,
-                            resolved_pipeline_definition,
+                            pipeline_definition,  # Now using the in-place replaced list
                             orchestrator,
                             metadata_writer=is_responsible,
                             plate_path=orchestrator.plate_path,
@@ -1608,6 +1633,13 @@ class PipelineCompiler:
             logger.info(
                 f"🏁 COMPILATION COMPLETE: {len(compiled_contexts)} wells compiled successfully"
             )
+
+            # DEBUG: Log what we're returning
+            logger.debug("📦 COMPILER RETURN: Checking pipeline_definition before return")
+            for i, step in enumerate(pipeline_definition):
+                func_attr = getattr(step, 'func', None)
+                func_type = type(func_attr).__name__ if func_attr else 'None'
+                logger.debug(f"📦 COMPILER RETURN: step[{i}].func = {func_type}")
 
             # Return expected structure with both pipeline_definition and compiled_contexts
             return {

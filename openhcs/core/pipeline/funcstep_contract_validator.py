@@ -761,10 +761,7 @@ class FuncStepContractValidator:
 
     @staticmethod
     def _resolve_function_reference(func_or_ref):
-        """Resolve a FunctionReference to an actual function, or return the original."""
-        from openhcs.core.pipeline.compiler import FunctionReference
-        if isinstance(func_or_ref, FunctionReference):
-            return func_or_ref.resolve()
+        """Return a FunctionReference as-is (it proxies attrs via __getattr__), or return the original callable."""
         return func_or_ref
 
     @staticmethod
@@ -794,11 +791,10 @@ class FuncStepContractValidator:
         """
         functions = []
 
-        # Case 1: Direct FunctionReference
+        # Case 1: Direct FunctionReference — don't resolve, it proxies attrs via __getattr__
         from openhcs.core.pipeline.compiler import FunctionReference
         if isinstance(func, FunctionReference):
-            resolved_func = func.resolve()
-            functions.append(resolved_func)
+            functions.append(func)
             return functions
 
         # Case 2: Direct callable
@@ -808,12 +804,12 @@ class FuncStepContractValidator:
 
         # Case 3: Tuple of (callable/FunctionReference, kwargs)
         if isinstance(func, tuple) and len(func) == 2 and isinstance(func[1], dict):
-            # Resolve the first element if it's a FunctionReference
-            resolved_first = FuncStepContractValidator._resolve_function_reference(func[0])
-            if callable(resolved_first) and not isinstance(resolved_first, type):
-                # The kwargs dict is optional - if provided, it will be used during execution
-                # No need to validate required args here as the execution logic handles this gracefully
-                functions.append(resolved_first)
+            first = func[0]
+            if isinstance(first, FunctionReference):
+                # Don't resolve — FunctionReference proxies attrs via __getattr__
+                functions.append(first)
+            elif callable(first) and not isinstance(first, type):
+                functions.append(first)
             return functions
 
         # Case 4: List of patterns
