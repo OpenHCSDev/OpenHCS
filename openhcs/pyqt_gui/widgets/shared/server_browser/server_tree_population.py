@@ -9,13 +9,11 @@ from zmqruntime.viewer_state import ViewerStateManager, ViewerState
 
 from pyqt_reactive.services import (
     BaseServerInfo,
-    ExecutionServerInfo,
-    ServerInfoParserABC,
 )
 
 
 class ServerTreePopulation:
-    """Builds top-level server rows and fallback busy rows."""
+    """Builds top-level server rows and launching/busy viewer pseudo-rows."""
 
     def __init__(
         self,
@@ -23,24 +21,12 @@ class ServerTreePopulation:
         create_tree_item: Callable[[str, str, str, dict], QTreeWidgetItem],
         render_server: Callable[[BaseServerInfo, str], QTreeWidgetItem],
         populate_server_children: Callable[[BaseServerInfo, QTreeWidgetItem], bool],
-        server_info_parser: ServerInfoParserABC,
-        ping_server: Callable[[int], dict | None],
-        progress_tracker,
-        ports_to_scan: List[int],
-        last_known_servers: Dict[int, Dict],
         log_info: Callable[..., None],
-        log_debug: Callable[..., None],
     ) -> None:
         self._create_tree_item = create_tree_item
         self._render_server = render_server
         self._populate_server_children = populate_server_children
-        self._server_info_parser = server_info_parser
-        self._ping_server = ping_server
-        self._progress_tracker = progress_tracker
-        self._ports_to_scan = ports_to_scan
-        self._last_known_servers = last_known_servers
         self._log_info = log_info
-        self._log_debug = log_debug
 
     def populate_tree(
         self,
@@ -58,11 +44,6 @@ class ServerTreePopulation:
         self._add_busy_viewers_to_tree(
             tree=tree,
             registry=registry,
-            scanned_ports=scanned_ports,
-            launching_viewer_ports=set(launching_viewers.keys()),
-        )
-        self._add_busy_execution_servers_from_cache(
-            tree=tree,
             scanned_ports=scanned_ports,
             launching_viewer_ports=set(launching_viewers.keys()),
         )
@@ -136,59 +117,6 @@ class ServerTreePopulation:
                 status_text,
                 info_text,
                 pseudo_server,
-            )
-            tree.addTopLevelItem(item)
-
-    def _has_progress_events(self) -> bool:
-        for execution_id in self._progress_tracker.get_execution_ids():
-            if self._progress_tracker.get_events(execution_id):
-                return True
-        return False
-
-    def _add_busy_execution_servers_from_cache(
-        self,
-        *,
-        tree: QTreeWidget,
-        scanned_ports: Set[int],
-        launching_viewer_ports: Set[int],
-    ) -> None:
-        if not self._has_progress_events():
-            return
-
-        self._log_info(
-            "Checking for busy execution servers from cache... _last_known_servers=%s",
-            list(self._last_known_servers.keys()),
-        )
-        for port in self._ports_to_scan:
-            if port in scanned_ports or port in launching_viewer_ports:
-                continue
-            if port not in self._last_known_servers:
-                continue
-
-            cached_server_info = self._server_info_parser.parse(
-                self._last_known_servers[port]
-            )
-            if not isinstance(cached_server_info, ExecutionServerInfo):
-                continue
-
-            ping_response = self._ping_server(port)
-            if ping_response is None:
-                continue
-
-            ping_info = self._server_info_parser.parse(ping_response)
-            if not ping_info.ready:
-                self._log_debug(
-                    "Skipping busy execution server on port %s - not ready yet", port
-                )
-                continue
-
-            busy_server = dict(cached_server_info.raw)
-            busy_server["busy"] = True
-            item = self._create_tree_item(
-                f"Port {port} - Execution Server",
-                "⚙️ Busy",
-                "Executing pipeline...",
-                busy_server,
             )
             tree.addTopLevelItem(item)
 

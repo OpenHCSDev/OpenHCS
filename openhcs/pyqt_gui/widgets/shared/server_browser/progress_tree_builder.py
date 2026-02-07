@@ -30,6 +30,7 @@ class ProgressNode:
     label: str
     status: str
     info: str
+    execution_id: str | None = None
     percent: float = 0.0
     aggregation_policy_id: str = "mean"
     children: List["ProgressNode"] = field(default_factory=list)
@@ -77,10 +78,11 @@ class ProgressTreeBuilder:
                 continue
             latest_timestamp = max((event.timestamp for event in events), default=0.0)
             plate_name = get_plate_name(plate_id, exec_id)
-            is_executing = any(
-                phase_channel(event.phase) in {ProgressChannel.PIPELINE, ProgressChannel.STEP}
-                and bool(event.axis_id)
-                for event in events
+            is_executing = self._is_execution_mode(
+                execution_id=exec_id,
+                plate_id=plate_id,
+                events=events,
+                worker_assignments=worker_assignments,
             )
             if is_executing:
                 children = self._build_worker_children(
@@ -103,16 +105,19 @@ class ProgressTreeBuilder:
                 label=f"📋 {plate_name}",
                 status="⚙️ Executing" if is_executing else "⏳ Compiling",
                 info="",
+                execution_id=exec_id,
                 children=children,
             )
             self._aggregate_percent_recursive(plate_node)
             if is_executing:
                 if self._has_failed_descendant(plate_node):
                     plate_node.status = "❌ Failed"
+                elif plate_node.percent >= 100.0:
+                    plate_node.status = "✅ Complete"
+                elif self._all_leaves_queued(plate_node):
+                    plate_node.status = "⏳ Queued"
                 else:
-                    plate_node.status = (
-                        "✅ Complete" if plate_node.percent >= 100.0 else "⚙️ Executing"
-                    )
+                    plate_node.status = "⚙️ Executing"
             else:
                 if self._has_failed_descendant(plate_node):
                     plate_node.status = "❌ Compile Failed"
@@ -124,6 +129,24 @@ class ProgressTreeBuilder:
             existing = nodes_by_plate.get(plate_id)
             if existing is None or latest_timestamp > existing[0]:
                 nodes_by_plate[plate_id] = (latest_timestamp, plate_node)
+
+        # Promote compile-only plates to "✅ Complete" when their execution-
+        # mode sibling was already cleaned up from the tracker.  The topology
+        # state still holds worker_assignments for the removed execution, so
+        # we can detect that an execution run existed.  Clear the stale
+        # compilation children so the tree doesn't regress to "Compiling".
+        # Only promote when the compile itself is finished ("✅ Compiled") —
+        # a fresh compile still in progress must not be overridden.
+        for plate_id, (_ts, node) in nodes_by_plate.items():
+            if node.status == "✅ Compiled":
+                had_execution_sibling = any(
+                    exec_id not in executions
+                    for (exec_id, p_id) in worker_assignments
+                    if p_id == plate_id
+                )
+                if had_execution_sibling:
+                    node.status = "✅ Complete"
+                    node.children = []
 
         return sorted(
             (pair[1] for pair in nodes_by_plate.values()), key=lambda node: node.node_id
@@ -156,6 +179,9 @@ class ProgressTreeBuilder:
         }
 
         worker_nodes: List[ProgressNode] = []
+        execution_started = any(
+            phase_channel(event.phase) == ProgressChannel.INIT for event in events
+        )
         for worker_slot, axis_ids in sorted(assignments.items()):
             well_nodes = [
                 self._build_well_node(
@@ -166,12 +192,19 @@ class ProgressTreeBuilder:
                 for axis_id in axis_ids
             ]
             failed_count = sum(1 for node in well_nodes if node.status == "❌ Failed")
-            complete_count = sum(1 for node in well_nodes if node.status == "✅ Complete")
-            active_count = len(well_nodes) - failed_count - complete_count
+            complete_count = sum(
+                1 for node in well_nodes if node.status == "✅ Complete"
+            )
+            queued_count = sum(1 for node in well_nodes if node.status == "⏳ Queued")
+            active_count = (
+                len(well_nodes) - failed_count - complete_count - queued_count
+            )
             if failed_count > 0:
                 worker_status = f"❌ {failed_count} failed"
-            elif active_count == 0:
+            elif complete_count == len(well_nodes):
                 worker_status = "✅ Complete"
+            elif queued_count == len(well_nodes):
+                worker_status = "⚙️ Starting" if execution_started else "⏳ Queued"
             else:
                 worker_status = f"⚙️ {active_count} active"
             worker_nodes.append(
@@ -202,7 +235,9 @@ class ProgressTreeBuilder:
         }
         known_axis_ids = list(known_wells.get((execution_id, plate_id), []))
         axis_ids = known_axis_ids if known_axis_ids else sorted(compile_by_axis.keys())
-        extra_axis_ids = [axis_id for axis_id in compile_by_axis if axis_id not in axis_ids]
+        extra_axis_ids = [
+            axis_id for axis_id in compile_by_axis if axis_id not in axis_ids
+        ]
         axis_ids.extend(sorted(extra_axis_ids))
 
         compilation_nodes: List[ProgressNode] = []
@@ -214,9 +249,12 @@ class ProgressTreeBuilder:
             elif self._is_failure_event(compile_event):
                 status = "❌ Failed"
                 percent = compile_event.percent
-            else:
+            elif self._is_success_terminal_event(compile_event):
                 status = "✅ Compiled"
-                percent = 100.0
+                percent = compile_event.percent
+            else:
+                status = "⏳ Compiling"
+                percent = compile_event.percent
 
             compilation_nodes.append(
                 ProgressNode(
@@ -297,7 +335,9 @@ class ProgressTreeBuilder:
     def _aggregate_percent_recursive(self, node: ProgressNode) -> float:
         if not node.children:
             return node.percent
-        child_values = [self._aggregate_percent_recursive(child) for child in node.children]
+        child_values = [
+            self._aggregate_percent_recursive(child) for child in node.children
+        ]
         expected_policy = _NODE_AGGREGATION_POLICY_BY_TYPE.get(node.node_type)
         if expected_policy is None:
             raise ValueError(f"No aggregation policy for node_type '{node.node_type}'")
@@ -328,10 +368,58 @@ class ProgressTreeBuilder:
         return is_success_terminal_event(event)
 
     @staticmethod
+    def _is_execution_mode(
+        *,
+        execution_id: str,
+        plate_id: str,
+        events: List[ProgressEvent],
+        worker_assignments: Dict[tuple[str, str], Dict[str, List[str]]],
+    ) -> bool:
+        # Phase channels are authoritative for mode selection:
+        # compile-channel presence means compilation view, unless we also
+        # have real axis-scoped pipeline/step execution events.
+        has_compile_events = any(
+            phase_channel(event.phase) == ProgressChannel.COMPILE for event in events
+        )
+        has_axis_execution_events = any(
+            phase_channel(event.phase)
+            in {ProgressChannel.PIPELINE, ProgressChannel.STEP}
+            and bool(event.axis_id)
+            for event in events
+        )
+        if has_compile_events and not has_axis_execution_events:
+            return False
+
+        topology_key = (execution_id, plate_id)
+        if topology_key in worker_assignments:
+            return True
+        return has_axis_execution_events
+
+    @staticmethod
+    def _all_leaves_queued(node: ProgressNode) -> bool:
+        """Return True only when *every* leaf descendant has '⏳ Queued' status."""
+        if not node.children:
+            return node.status == "⏳ Queued"
+        return all(
+            ProgressTreeBuilder._all_leaves_queued(child) for child in node.children
+        )
+
+    @staticmethod
+    def _has_status_descendant(node: ProgressNode, status: str) -> bool:
+        if node.status == status:
+            return True
+        return any(
+            ProgressTreeBuilder._has_status_descendant(child, status)
+            for child in node.children
+        )
+
+    @staticmethod
     def _has_failed_descendant(node: ProgressNode) -> bool:
         if node.status.startswith("❌"):
             return True
-        return any(ProgressTreeBuilder._has_failed_descendant(child) for child in node.children)
+        return any(
+            ProgressTreeBuilder._has_failed_descendant(child) for child in node.children
+        )
 
     @staticmethod
     def to_tree_node(node: ProgressNode) -> TreeNode:
@@ -341,7 +429,9 @@ class ProgressTreeBuilder:
             label=node.label,
             status=node.status,
             info=node.info,
-            children=[ProgressTreeBuilder.to_tree_node(child) for child in node.children],
+            children=[
+                ProgressTreeBuilder.to_tree_node(child) for child in node.children
+            ],
         )
 
     @staticmethod

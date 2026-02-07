@@ -26,7 +26,11 @@ class ZMQClientService:
         """Create a client and connect to the execution server."""
         from openhcs.runtime.zmq_execution_client import ZMQExecutionClient
 
-        await self.disconnect()
+        if self.zmq_client is not None and self.zmq_client.is_connected():
+            existing_callback = self.zmq_client.progress_callback
+            if existing_callback is progress_callback:
+                return self.zmq_client
+            await self.disconnect()
         loop = asyncio.get_event_loop()
         self.zmq_client = ZMQExecutionClient(
             port=self.port,
