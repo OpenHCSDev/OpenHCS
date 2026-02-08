@@ -589,15 +589,27 @@ def _export_pipeline_to_file(pipeline: Pipeline, plate_dir: Path) -> None:
     print(f"📝 Pipeline exported to: {output_path}")
 
 
+def _drain_progress_queue(q):
+    """Consumer thread that drains the progress queue to prevent pipe buffer deadlock.
+
+    Without a consumer, worker processes' feeder threads block when the pipe
+    buffer fills up. This prevents workers from exiting, which causes
+    ProcessPoolExecutor.shutdown(wait=True) to deadlock.
+    """
+    while True:
+        item = q.get()  # blocking get
+        if item is None:  # sentinel to stop
+            break
+
+
 def _execute_pipeline_phases(
     orchestrator: PipelineOrchestrator, pipeline: Pipeline
 ) -> Dict:
     """Execute compilation and execution phases of the pipeline (direct mode)."""
     import multiprocessing
-    import time
+    import threading
     from openhcs.constants import MULTIPROCESSING_AXIS
     from openhcs.core.progress import set_progress_queue
-    from openhcs.core.orchestrator.execution_result import ExecutionResult
     import logging
 
     logger = logging.getLogger(__name__)
@@ -606,24 +618,21 @@ def _execute_pipeline_phases(
     if not wells:
         raise RuntimeError("No wells found for processing")
 
-    # Invariant path: explicit progress queue for both compile and execute phases.
     mp_ctx = multiprocessing.get_context("spawn")
     progress_queue = mp_ctx.Queue()
-    progress_context = {
-        "execution_id": f"direct::{int(time.time() * 1_000_000)}",
-        "plate_id": str(orchestrator.plate_path),
-        "axis_id": "",
-    }
+
+    # Start a consumer thread to drain progress messages and prevent pipe
+    # buffer deadlock.  This mirrors the pattern used by zmq_execution_server.
+    consumer = threading.Thread(
+        target=_drain_progress_queue, args=(progress_queue,), daemon=True
+    )
+    consumer.start()
 
     try:
-        # Compilation phase
         set_progress_queue(progress_queue)
-        try:
-            compilation_result = orchestrator.compile_pipelines(
-                pipeline_definition=pipeline.steps, well_filter=wells
-            )
-        finally:
-            set_progress_queue(None)
+        compilation_result = orchestrator.compile_pipelines(
+            pipeline_definition=pipeline.steps, well_filter=wells
+        )
 
         # Extract compiled_contexts from the result dict
         compiled_contexts = compilation_result["compiled_contexts"]
@@ -646,7 +655,14 @@ def _execute_pipeline_phases(
                     logger.info(f"  Visualizer {i}: {type(config).__name__}")
         logger.info("=" * 80)
 
-        # Execution phase
+        # Execution phase - pass the progress queue
+        import time
+        progress_context = {
+            "execution_id": f"direct::{int(time.time() * 1_000_000)}",
+            "plate_id": str(orchestrator.plate_path),
+            "axis_id": "",
+        }
+
         results = orchestrator.execute_compiled_plate(
             pipeline_definition=pipeline.steps,
             compiled_contexts=compiled_contexts,
@@ -656,7 +672,7 @@ def _execute_pipeline_phases(
 
         if len(results) != len(wells):
             raise RuntimeError(
-                f"Execution failed: expected {len(wells)} results, got {len(results)}"
+                f"Execution failed: expected {len(results)} results, got {len(results)}"
             )
 
         # Validate all wells succeeded
@@ -668,6 +684,10 @@ def _execute_pipeline_phases(
 
         return results
     finally:
+        set_progress_queue(None)
+        # Send sentinel to stop the consumer thread, then wait for it
+        progress_queue.put(None)
+        consumer.join(timeout=10)
         progress_queue.close()
         progress_queue.join_thread()
 
