@@ -245,10 +245,10 @@ class LibraryRegistryBase(ABC, metaclass=AutoRegisterMeta):
                 if param_name in kwargs:
                     setattr(func, param_name, kwargs[param_name])
 
-            # Remove injectable params from kwargs before passing to contract.execute
-            # This prevents them from being passed to the original function
-            filtered_kwargs = {k: v for k, v in kwargs.items()
-                             if k not in {name for name, _, _ in injectable_params}}
+            # Filter injectable params from kwargs, EXCEPT dtype_config which needs to
+            # flow through to ArrayBridge's dtype_wrapper for conversion logic
+            params_to_filter = {name for name, _, _ in injectable_params if name != 'dtype_config'}
+            filtered_kwargs = {k: v for k, v in kwargs.items() if k not in params_to_filter}
 
             return contract.execute(self, func, image, *args, **filtered_kwargs)
 
