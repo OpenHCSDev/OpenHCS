@@ -673,9 +673,18 @@ class RuntimeTestingRegistryBase(LibraryRegistryBase):
         # Get original signature to preserve it
         original_sig = inspect.signature(original_func)
 
+        # Wrap external library functions with ArrayBridge decorator for dtype handling
+        arraybridge_wrapped_func = original_func
+        if self.MEMORY_TYPE is not None:
+            from arraybridge.decorators import _create_dtype_wrapper
+            from arraybridge.types import MemoryType as ABMemoryType
+            # Map memory type string to ArrayBridge MemoryType enum
+            mem_type = ABMemoryType(self.MEMORY_TYPE)
+            arraybridge_wrapped_func = _create_dtype_wrapper(original_func, mem_type, func_name)
+
         def adapter(image, *args, **kwargs):
             processed_image = self._preprocess_input(image, func_name)
-            result = contract.execute(self, original_func, processed_image, *args, **kwargs)
+            result = contract.execute(self, arraybridge_wrapped_func, processed_image, *args, **kwargs)
             return self._postprocess_output(result, image, func_name)
 
         # Apply wraps and preserve signature
