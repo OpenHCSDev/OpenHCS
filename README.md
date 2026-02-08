@@ -1,13 +1,14 @@
 <div align="center">
 
-```
+<pre>
   ___                    _   _  ___  _____
- / _ \ _ __  ___  _ ___ | | | |/ __\/ ___/ 
-| | | | '_ \/ _ \| '_  \| |_| | |   \___ \ 
+ / _ \ _ __  ___  _ ___ | | | |/ __\/ ___/
+| | | | '_ \/ _ \| '_  \| |_| | |   \___ \
 | |_| | |_||| __/| | | ||  _  | |__  __/ |
- \___/| .__/\___||_| |_||_| |_|\___/\____/ 
-      |_|           High-Content Screening                   
-```
+ \___/| .__/\___||_| |_||_| |_|\___/\____/
+      |_|           High-Content Screening
+</pre>
+
 **Bioimage analysis platform for high-content screening**\
 **Compile-time validation · Bidirectional GUI↔Code · Multi-GPU · LLM pipeline generation · 574+ functions**
 
