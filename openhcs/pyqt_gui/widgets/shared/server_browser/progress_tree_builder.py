@@ -39,7 +39,7 @@ class ProgressNode:
 _NODE_AGGREGATION_POLICY_BY_TYPE: Dict[str, str] = {
     "plate": "mean",
     "worker": "mean",
-    "well": "explicit",
+    "well": "mean",
     "step": "explicit",
     "compilation": "explicit",
 }
@@ -61,6 +61,7 @@ class ProgressTreeBuilder:
         executions: Dict[str, List[ProgressEvent]],
         worker_assignments: Dict[tuple[str, str], Dict[str, List[str]]],
         known_wells: Dict[tuple[str, str], List[str]],
+        step_names: Dict[tuple[str, str, str], Dict[int, str]],
         get_plate_name: Callable[[str, str | None], str],
     ) -> List[ProgressNode]:
         plates: Dict[tuple[str, str], Dict[str, List[ProgressEvent]]] = {}
@@ -90,6 +91,7 @@ class ProgressTreeBuilder:
                     plate_id=plate_id,
                     events=events,
                     worker_assignments=worker_assignments,
+                    step_names=step_names,
                 )
             else:
                 children = self._build_compilation_children(
@@ -159,6 +161,7 @@ class ProgressTreeBuilder:
         plate_id: str,
         events: List[ProgressEvent],
         worker_assignments: Dict[tuple[str, str], Dict[str, List[str]]],
+        step_names: Dict[tuple[str, str, str], Dict[int, str]],
     ) -> List[ProgressNode]:
         assignments = worker_assignments.get((execution_id, plate_id))
         if assignments is None:
@@ -188,6 +191,7 @@ class ProgressTreeBuilder:
                     axis_id=axis_id,
                     pipeline_event=pipeline_by_axis.get(axis_id),
                     step_event=step_by_axis.get(axis_id),
+                    step_names=step_names.get((execution_id, plate_id, axis_id), {}),
                 )
                 for axis_id in axis_ids
             ]
@@ -283,12 +287,13 @@ class ProgressTreeBuilder:
             partitioned[phase_channel(event.phase).value].append(event)
         return partitioned
 
-    @staticmethod
     def _build_well_node(
+        self,
         *,
         axis_id: str,
         pipeline_event: Optional[ProgressEvent],
         step_event: Optional[ProgressEvent],
+        step_names: Dict[int, str],
     ) -> ProgressNode:
         if pipeline_event is None:
             status = "⏳ Queued"
@@ -303,23 +308,76 @@ class ProgressTreeBuilder:
             status = f"⚙️ {pipeline_event.step_name}"
             percent = pipeline_event.percent
 
+        # Build step nodes for ALL steps (completed + current + future)
+        # This ensures the mean aggregation calculates overall progress correctly
         children: List[ProgressNode] = []
-        if step_event is not None:
-            if ProgressTreeBuilder._is_failure_event(step_event):
-                step_status = "❌ Failed"
-            else:
-                step_status = f"{step_event.completed}/{step_event.total} groups"
-            children.append(
-                ProgressNode(
-                    node_id=f"{axis_id}_step",
-                    node_type="step",
-                    label=f"🔧 {step_event.step_name}",
-                    status=step_status,
-                    info=f"{step_event.percent:.1f}%",
-                    percent=step_event.percent,
-                    aggregation_policy_id="explicit",
+        if pipeline_event is not None and pipeline_event.total > 0:
+            current_step_idx = pipeline_event.completed
+            total_steps = pipeline_event.total
+
+            # Add completed steps at 100%
+            for step_idx in range(current_step_idx):
+                step_name = step_names.get(step_idx, f"Step {step_idx + 1}")
+                children.append(
+                    ProgressNode(
+                        node_id=f"{axis_id}_step_{step_idx}",
+                        node_type="step",
+                        label=f"🔧 {step_idx + 1} - {step_name}",
+                        status="✅ Complete",
+                        info="100.0%",
+                        percent=100.0,
+                        aggregation_policy_id="explicit",
+                    )
                 )
-            )
+
+            # Add current step with actual progress
+            if current_step_idx < total_steps:
+                step_name = step_names.get(
+                    current_step_idx, f"Step {current_step_idx + 1}"
+                )
+                if (
+                    step_event is not None
+                    and step_event.step_name == pipeline_event.step_name
+                ):
+                    if ProgressTreeBuilder._is_failure_event(step_event):
+                        step_status = "❌ Failed"
+                        step_percent = step_event.percent
+                    else:
+                        step_status = (
+                            f"{step_event.completed}/{step_event.total} groups"
+                        )
+                        step_percent = step_event.percent
+                else:
+                    # Step event not yet available for current step
+                    step_status = "⏳ Starting"
+                    step_percent = 0.0
+
+                children.append(
+                    ProgressNode(
+                        node_id=f"{axis_id}_step_{current_step_idx}",
+                        node_type="step",
+                        label=f"🔧 {current_step_idx + 1} - {step_name}",
+                        status=step_status,
+                        info=f"{step_percent:.1f}%",
+                        percent=step_percent,
+                        aggregation_policy_id="explicit",
+                    )
+                )
+
+            # Add future steps at 0% to ensure proper average calculation
+            for step_idx in range(current_step_idx + 1, total_steps):
+                step_name = step_names.get(step_idx, f"Step {step_idx + 1}")
+                children.append(
+                    ProgressNode(
+                        node_id=f"{axis_id}_step_{step_idx}",
+                        node_type="step",
+                        label=f"🔧 {step_idx + 1} - {step_name}",
+                        status="⏳ Pending",
+                        info="0.0%",
+                        percent=0.0,
+                        aggregation_policy_id="explicit",
+                    )
+                )
 
         return ProgressNode(
             node_id=axis_id,
@@ -328,7 +386,7 @@ class ProgressTreeBuilder:
             status=status,
             info="",
             percent=percent,
-            aggregation_policy_id="explicit",
+            aggregation_policy_id="mean",
             children=children,
         )
 
@@ -346,8 +404,10 @@ class ProgressTreeBuilder:
                 f"Aggregation policy mismatch for node_type '{node.node_type}': "
                 f"expected '{expected_policy}', got '{node.aggregation_policy_id}'"
             )
+        # When node has children, aggregate only children (ignore explicit percent)
+        # Explicit percent is only used when there are no children
         node.percent = _TREE_AGGREGATION_REGISTRY.aggregate(
-            node.aggregation_policy_id, node.percent, child_values
+            node.aggregation_policy_id, 0.0, child_values
         )
         return node.percent
 

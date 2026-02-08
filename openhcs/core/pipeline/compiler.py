@@ -165,7 +165,7 @@ def _refresh_function_objects_in_steps(pipeline_definition: List[AbstractStep]) 
     logger.debug(f"🔄 FUNCTION REFRESH: Processing {len(pipeline_definition)} steps")
     for step_idx, step in enumerate(pipeline_definition):
         if isinstance(step, FunctionStep):
-            if hasattr(step, 'func') and step.func is not None:
+            if hasattr(step, "func") and step.func is not None:
                 old_type = type(step.func).__name__
                 step.func = _refresh_function_object(step.func)
                 new_type = type(step.func).__name__
@@ -176,16 +176,26 @@ def _refresh_function_objects_in_steps(pipeline_definition: List[AbstractStep]) 
                     first_item_type = type(first_item).__name__
                     if isinstance(first_item, tuple) and len(first_item) == 2:
                         inner_func_type = type(first_item[0]).__name__
-                        logger.debug(f"🔄 FUNCTION REFRESH: Step {step_idx} ({step.name}): {old_type} → {new_type} (first item: {first_item_type}, inner func: {inner_func_type})")
+                        logger.debug(
+                            f"🔄 FUNCTION REFRESH: Step {step_idx} ({step.name}): {old_type} → {new_type} (first item: {first_item_type}, inner func: {inner_func_type})"
+                        )
                     else:
-                        logger.debug(f"🔄 FUNCTION REFRESH: Step {step_idx} ({step.name}): {old_type} → {new_type} (first item: {first_item_type})")
+                        logger.debug(
+                            f"🔄 FUNCTION REFRESH: Step {step_idx} ({step.name}): {old_type} → {new_type} (first item: {first_item_type})"
+                        )
                 elif isinstance(step.func, tuple) and len(step.func) == 2:
                     func_type = type(step.func[0]).__name__
-                    logger.debug(f"🔄 FUNCTION REFRESH: Step {step_idx} ({step.name}): {old_type} → {new_type} (func: {func_type})")
+                    logger.debug(
+                        f"🔄 FUNCTION REFRESH: Step {step_idx} ({step.name}): {old_type} → {new_type} (func: {func_type})"
+                    )
                 else:
-                    logger.debug(f"🔄 FUNCTION REFRESH: Step {step_idx} ({step.name}): {old_type} → {new_type}")
+                    logger.debug(
+                        f"🔄 FUNCTION REFRESH: Step {step_idx} ({step.name}): {old_type} → {new_type}"
+                    )
             else:
-                logger.debug(f"🔄 FUNCTION REFRESH: Step {step_idx} ({step.name}): No func attribute")
+                logger.debug(
+                    f"🔄 FUNCTION REFRESH: Step {step_idx} ({step.name}): No func attribute"
+                )
 
 
 def _refresh_function_object(func_value):
@@ -1635,10 +1645,12 @@ class PipelineCompiler:
             )
 
             # DEBUG: Log what we're returning
-            logger.debug("📦 COMPILER RETURN: Checking pipeline_definition before return")
+            logger.debug(
+                "📦 COMPILER RETURN: Checking pipeline_definition before return"
+            )
             for i, step in enumerate(pipeline_definition):
-                func_attr = getattr(step, 'func', None)
-                func_type = type(func_attr).__name__ if func_attr else 'None'
+                func_attr = getattr(step, "func", None)
+                func_type = type(func_attr).__name__ if func_attr else "None"
                 logger.debug(f"📦 COMPILER RETURN: step[{i}].func = {func_type}")
 
             # Return expected structure with both pipeline_definition and compiled_contexts

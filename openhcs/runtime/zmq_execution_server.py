@@ -339,7 +339,9 @@ class ZMQExecutionServer(ExecutionServer):
         super()._run_execution(execution_id, request, record)
 
         try:
-            self._attach_results_summary_extras(execution_id=execution_id, record=record)
+            self._attach_results_summary_extras(
+                execution_id=execution_id, record=record
+            )
         except Exception as e:
             logger.warning(
                 "[%s] Failed to attach output_plate_root to results_summary: %s",
@@ -364,7 +366,9 @@ class ZMQExecutionServer(ExecutionServer):
         self._attach_results_summary_extras(
             execution_id=execution_id,
             record=record,
-            execution_payload=execution_payload if isinstance(execution_payload, dict) else None,
+            execution_payload=execution_payload
+            if isinstance(execution_payload, dict)
+            else None,
         )
         return response
 
@@ -420,9 +424,7 @@ class ZMQExecutionServer(ExecutionServer):
         self._cleanup_compiled_artifacts()
 
         if compile_only and compile_artifact_id:
-            raise ValueError(
-                "compile_only and compile_artifact_id cannot both be set"
-            )
+            raise ValueError("compile_only and compile_artifact_id cannot both be set")
 
         request_signature = self._build_request_signature(
             plate_id=plate_id,
@@ -632,7 +634,10 @@ class ZMQExecutionServer(ExecutionServer):
             orchestrator.initialize()
             self.active_executions[execution_id].set_extra("orchestrator", orchestrator)
 
-            if self.active_executions[execution_id].status == ExecutionStatus.CANCELLED.value:
+            if (
+                self.active_executions[execution_id].status
+                == ExecutionStatus.CANCELLED.value
+            ):
                 logger.info(
                     "[%s] Execution cancelled after initialization, aborting",
                     execution_id,
@@ -656,6 +661,8 @@ class ZMQExecutionServer(ExecutionServer):
                 planned_metadata = {"total_wells": sorted(wells)}
                 if not compile_only:
                     planned_metadata["worker_assignments"] = worker_assignments
+                step_names = [step.name for step in pipeline_steps]
+                planned_metadata["step_names"] = step_names
                 _emit_zmq_progress(
                     self._enqueue_progress,
                     execution_id=execution_id,
@@ -679,7 +686,9 @@ class ZMQExecutionServer(ExecutionServer):
                         "Re-run compilation before execution."
                     )
                 if request_signature is None:
-                    raise ValueError("Missing request signature for artifact validation")
+                    raise ValueError(
+                        "Missing request signature for artifact validation"
+                    )
                 if artifact["request_signature"] != request_signature:
                     logger.error(
                         "[%s] Compile artifact signature mismatch: artifact_id=%s artifact_sig=%s request_sig=%s",
@@ -698,7 +707,9 @@ class ZMQExecutionServer(ExecutionServer):
                     )
 
                 compiled_contexts = artifact["compiled_contexts"]
-                compiled_pipeline_definition = artifact.get("compiled_pipeline_definition")  # Get the stripped pipeline_definition from artifact
+                compiled_pipeline_definition = artifact.get(
+                    "compiled_pipeline_definition"
+                )  # Get the stripped pipeline_definition from artifact
                 worker_assignments = artifact["worker_assignments"]
                 compiled_axis_ids = self._extract_compiled_axis_ids(compiled_contexts)
                 normalized_assignments = self._build_worker_assignments(
@@ -716,6 +727,7 @@ class ZMQExecutionServer(ExecutionServer):
                 self._worker_assignments_by_execution[execution_id] = worker_assignments
 
                 # Emit filtered metadata for this execution id.
+                step_names = [step.name for step in pipeline_steps]
                 _emit_zmq_progress(
                     self._enqueue_progress,
                     execution_id=execution_id,
@@ -729,6 +741,7 @@ class ZMQExecutionServer(ExecutionServer):
                     total=1,
                     total_wells=compiled_axis_ids,
                     worker_assignments=worker_assignments,
+                    step_names=step_names,
                 )
 
                 logger.info(
@@ -765,18 +778,29 @@ class ZMQExecutionServer(ExecutionServer):
                 finally:
                     set_progress_queue(None)
 
-                if not isinstance(compilation, dict) or "compiled_contexts" not in compilation:
+                if (
+                    not isinstance(compilation, dict)
+                    or "compiled_contexts" not in compilation
+                ):
                     raise ValueError("Compilation did not return compiled_contexts")
                 compiled_contexts = compilation["compiled_contexts"]
                 # CRITICAL: Use the returned pipeline_definition, not the original pipeline_steps
                 # The compiler modifies pipeline_definition in-place (converts functions to FunctionReference)
                 # and returns the modified version
-                compiled_pipeline_definition = compilation.get("pipeline_definition", pipeline_steps)
+                compiled_pipeline_definition = compilation.get(
+                    "pipeline_definition", pipeline_steps
+                )
 
                 # DEBUG: Check if they're the same object
-                logger.info(f"🔍 ZMQ: pipeline_steps is compiled_pipeline_definition? {pipeline_steps is compiled_pipeline_definition}")
-                logger.info(f"🔍 ZMQ: pipeline_steps[0].func = {type(getattr(pipeline_steps[0], 'func', None)).__name__ if getattr(pipeline_steps[0], 'func', None) else 'None'}")
-                logger.info(f"🔍 ZMQ: compiled_pipeline_definition[0].func = {type(getattr(compiled_pipeline_definition[0], 'func', None)).__name__ if getattr(compiled_pipeline_definition[0], 'func', None) else 'None'}")
+                logger.info(
+                    f"🔍 ZMQ: pipeline_steps is compiled_pipeline_definition? {pipeline_steps is compiled_pipeline_definition}"
+                )
+                logger.info(
+                    f"🔍 ZMQ: pipeline_steps[0].func = {type(getattr(pipeline_steps[0], 'func', None)).__name__ if getattr(pipeline_steps[0], 'func', None) else 'None'}"
+                )
+                logger.info(
+                    f"🔍 ZMQ: compiled_pipeline_definition[0].func = {type(getattr(compiled_pipeline_definition[0], 'func', None)).__name__ if getattr(compiled_pipeline_definition[0], 'func', None) else 'None'}"
+                )
                 if not compiled_contexts:
                     raise ValueError("Compilation produced no compiled contexts")
                 compiled_axis_ids = self._extract_compiled_axis_ids(compiled_contexts)
@@ -859,7 +883,10 @@ class ZMQExecutionServer(ExecutionServer):
                     output_plate_root,
                 )
 
-            if self.active_executions[execution_id].status == ExecutionStatus.CANCELLED.value:
+            if (
+                self.active_executions[execution_id].status
+                == ExecutionStatus.CANCELLED.value
+            ):
                 logger.info(
                     "[%s] Execution cancelled after compilation, aborting",
                     execution_id,
@@ -905,7 +932,10 @@ class ZMQExecutionServer(ExecutionServer):
             )
             progress_forwarder.start()
 
-            if self.active_executions[execution_id].status == ExecutionStatus.CANCELLED.value:
+            if (
+                self.active_executions[execution_id].status
+                == ExecutionStatus.CANCELLED.value
+            ):
                 logger.info(
                     "[%s] Execution cancelled before starting workers, aborting",
                     execution_id,
@@ -913,22 +943,34 @@ class ZMQExecutionServer(ExecutionServer):
                 raise RuntimeError("Execution cancelled by user")
 
             # DEBUG: Check steps right before execution
-            logger.info(f"🔍 PRE-EXEC: compiled_pipeline_definition is None? {compiled_pipeline_definition is None}")
+            logger.info(
+                f"🔍 PRE-EXEC: compiled_pipeline_definition is None? {compiled_pipeline_definition is None}"
+            )
             if compiled_pipeline_definition is not None:
-                logger.info(f"🔍 PRE-EXEC: compiled_pipeline_definition[0].func = {type(getattr(compiled_pipeline_definition[0], 'func', None)).__name__ if getattr(compiled_pipeline_definition[0], 'func', None) else 'None'}")
-            logger.info(f"🔍 PRE-EXEC: pipeline_steps[0].func = {type(getattr(pipeline_steps[0], 'func', None)).__name__ if getattr(pipeline_steps[0], 'func', None) else 'None'}")
+                logger.info(
+                    f"🔍 PRE-EXEC: compiled_pipeline_definition[0].func = {type(getattr(compiled_pipeline_definition[0], 'func', None)).__name__ if getattr(compiled_pipeline_definition[0], 'func', None) else 'None'}"
+                )
+            logger.info(
+                f"🔍 PRE-EXEC: pipeline_steps[0].func = {type(getattr(pipeline_steps[0], 'func', None)).__name__ if getattr(pipeline_steps[0], 'func', None) else 'None'}"
+            )
 
             # Use compiled pipeline_definition if available (from fresh compilation),
             # otherwise use original pipeline_steps (from artifact reuse)
             # NOTE: For artifact reuse, we don't have the compiled pipeline_definition,
             # so we use the original pipeline_steps (functions will be resolved from context)
-            steps_to_execute = compiled_pipeline_definition if compiled_pipeline_definition is not None else pipeline_steps
+            steps_to_execute = (
+                compiled_pipeline_definition
+                if compiled_pipeline_definition is not None
+                else pipeline_steps
+            )
 
             # DEBUG: Log what we're passing to execution
-            logger.info(f"🚀 ZMQ SERVER: Passing {len(steps_to_execute)} steps to execution")
+            logger.info(
+                f"🚀 ZMQ SERVER: Passing {len(steps_to_execute)} steps to execution"
+            )
             for i, step in enumerate(steps_to_execute):
-                func_attr = getattr(step, 'func', None)
-                func_type = type(func_attr).__name__ if func_attr else 'None'
+                func_attr = getattr(step, "func", None)
+                func_type = type(func_attr).__name__ if func_attr else "None"
                 logger.info(f"🚀 ZMQ SERVER: step[{i}].func = {func_type}")
 
             return orchestrator.execute_compiled_plate(

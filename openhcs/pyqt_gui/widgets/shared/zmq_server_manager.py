@@ -138,6 +138,24 @@ class ZMQServerManagerWidget(ZMQServerBrowserWidgetABC):
             if port in scanned_ports:
                 continue
 
+            # Check if server has active executions before removing
+            last_known = self._last_known_servers.get(port, {})
+            running_execs = last_known.get("running_executions", [])
+            active_execution_ids = [
+                str(exec_info.get("execution_id"))
+                for exec_info in running_execs
+                if exec_info.get("execution_id")
+            ]
+            tracker_exec_ids = set(self._progress_tracker.get_execution_ids())
+            has_active_executions = any(
+                exec_id in tracker_exec_ids for exec_id in active_execution_ids
+            )
+
+            if has_active_executions:
+                # Server is busy with active executions, don't remove it
+                self._missing_port_counts.pop(port, None)
+                continue
+
             misses = self._missing_port_counts.get(port, 0) + 1
             self._missing_port_counts[port] = misses
             if misses < 2:
@@ -339,6 +357,7 @@ class ZMQServerManagerWidget(ZMQServerBrowserWidgetABC):
             executions=executions,
             worker_assignments=self._worker_assignments,
             known_wells=self._known_wells,
+            step_names=self._topology_state.step_names,
             get_plate_name=self._get_plate_name,
         )
 

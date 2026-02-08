@@ -232,6 +232,8 @@ class ProgressEvent:
     message: Optional[str] = None  # General message field (e.g., error messages)
     component: Optional[str] = None  # Component value for pattern group progress
     pattern: Optional[str] = None  # Pattern value for pattern group progress
+    context: Optional[Dict[str, Any]] = None  # Generic context for arbitrary data
+    step_names: Optional[List[str]] = None  # Step names for the pipeline
 
     def __post_init__(self):
         """Validate invariants (fail-loud principle)."""
@@ -327,6 +329,8 @@ class ProgressEvent:
             message=data.get("message"),
             component=data.get("component"),
             pattern=data.get("pattern"),
+            context=data.get("context"),
+            step_names=data.get("step_names"),
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -371,6 +375,10 @@ class ProgressEvent:
             result["component"] = self.component
         if self.pattern is not None:
             result["pattern"] = self.pattern
+        if self.context is not None:
+            result["context"] = self.context
+        if self.step_names is not None:
+            result["step_names"] = self.step_names
 
         return result
 

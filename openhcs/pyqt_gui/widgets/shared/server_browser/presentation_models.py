@@ -26,6 +26,8 @@ class ProgressTopologyState:
         self.known_wells: Dict[tuple[str, str], List[str]] = {}
         self.worker_assignments: Dict[tuple[str, str], Dict[str, List[str]]] = {}
         self.seen_execution_ids: set[str] = set()
+        # Track step names per well: {(exec_id, plate_id, axis_id): {step_index: step_name}}
+        self.step_names: Dict[tuple[str, str, str], Dict[int, str]] = {}
 
     def register_event(self, event: ProgressEvent) -> None:
         execution_id = event.execution_id
@@ -38,6 +40,20 @@ class ProgressTopologyState:
             self.known_wells[topology_key] = list(event.total_wells)
         if event.worker_assignments is not None:
             self.worker_assignments[topology_key] = event.worker_assignments
+
+        # Capture step names from INIT event (emitted once per execution)
+        if (
+            event.step_name == ""
+            and event.phase.value == "init"
+            and event.axis_id == ""
+        ):
+            if event.step_names:
+                # step_names applies to all wells in this execution
+                for well_id in self.known_wells.get(topology_key, []):
+                    well_key = (execution_id, plate_id, well_id)
+                    self.step_names[well_key] = {
+                        i: name for i, name in enumerate(event.step_names)
+                    }
 
         event_channel = phase_channel(event.phase)
         if (
@@ -136,9 +152,7 @@ class ServerRowPresenter:
         self._log_warning = log_warning
 
     @singledispatchmethod
-    def render_server(
-        self, info: BaseServerInfo, status_icon: str
-    ) -> QTreeWidgetItem:
+    def render_server(self, info: BaseServerInfo, status_icon: str) -> QTreeWidgetItem:
         raise NotImplementedError(f"No render for {type(info).__name__}")
 
     @render_server.register

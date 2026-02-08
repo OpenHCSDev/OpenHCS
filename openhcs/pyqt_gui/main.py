@@ -352,68 +352,53 @@ class OpenHCSMainWindow(QMainWindow):
         # Log viewer is still a separate window (on-demand)
 
     def show_plate_manager(self):
-        """Show/focus plate manager widget."""
+        """Show plate manager widget if not already visible."""
         if hasattr(self, "plate_manager_widget"):
-            # Bring to front in the splitter
-            self.plate_manager_widget.show()
-            self.plate_manager_widget.raise_()
-            # Maximize plate manager in the left splitter
-            if hasattr(self, "left_splitter"):
-                sizes = self.left_splitter.sizes()
-                if len(sizes) == 2:
-                    # Give plate manager 70% of the left side
-                    total = sum(sizes)
-                    self.left_splitter.setSizes([int(total * 0.7), int(total * 0.3)])
-            # Also maximize left side in main splitter
-            if hasattr(self, "main_splitter"):
-                sizes = self.main_splitter.sizes()
-                if len(sizes) == 2:
-                    # Give left side 60% of main area
-                    total = sum(sizes)
-                    self.main_splitter.setSizes([int(total * 0.6), int(total * 0.4)])
+            if not self.plate_manager_widget.isVisible():
+                self.plate_manager_widget.show()
+                # Only resize on first show
+                if hasattr(self, "left_splitter"):
+                    sizes = self.left_splitter.sizes()
+                    if len(sizes) == 2:
+                        total = sum(sizes)
+                        self.left_splitter.setSizes([int(total * 0.7), int(total * 0.3)])
+                if hasattr(self, "main_splitter"):
+                    sizes = self.main_splitter.sizes()
+                    if len(sizes) == 2:
+                        total = sum(sizes)
+                        self.main_splitter.setSizes([int(total * 0.6), int(total * 0.4)])
         else:
-            # Fallback to window mode
             self.show_window("plate_manager")
 
     def show_pipeline_editor(self):
-        """Show/focus pipeline editor widget."""
+        """Show pipeline editor widget if not already visible."""
         if hasattr(self, "pipeline_editor_widget"):
-            # Bring to front in the splitter
-            self.pipeline_editor_widget.show()
-            self.pipeline_editor_widget.raise_()
-            # Optionally maximize its size in the main splitter
-            if hasattr(self, "main_splitter"):
-                sizes = self.main_splitter.sizes()
-                if len(sizes) == 2:
-                    # Give pipeline editor 60% of the space
-                    total = sum(sizes)
-                    self.main_splitter.setSizes([int(total * 0.4), int(total * 0.6)])
+            if not self.pipeline_editor_widget.isVisible():
+                self.pipeline_editor_widget.show()
+                if hasattr(self, "main_splitter"):
+                    sizes = self.main_splitter.sizes()
+                    if len(sizes) == 2:
+                        total = sum(sizes)
+                        self.main_splitter.setSizes([int(total * 0.4), int(total * 0.6)])
         else:
-            # Fallback to window mode
             self.show_window("pipeline_editor")
 
     def show_zmq_server_manager(self):
-        """Show/focus ZMQ server manager widget."""
+        """Show ZMQ server manager widget if not already visible."""
         if hasattr(self, "zmq_manager_widget"):
-            # Bring to front in the splitter
-            self.zmq_manager_widget.show()
-            self.zmq_manager_widget.raise_()
-            # Maximize ZMQ manager in the left splitter
-            if hasattr(self, "left_splitter"):
-                sizes = self.left_splitter.sizes()
-                if len(sizes) == 2:
-                    # Give ZMQ manager 50% of the left side
-                    total = sum(sizes)
-                    self.left_splitter.setSizes([int(total * 0.5), int(total * 0.5)])
-            # Also maximize left side in main splitter
-            if hasattr(self, "main_splitter"):
-                sizes = self.main_splitter.sizes()
-                if len(sizes) == 2:
-                    # Give left side 60% of main area
-                    total = sum(sizes)
-                    self.main_splitter.setSizes([int(total * 0.6), int(total * 0.4)])
+            if not self.zmq_manager_widget.isVisible():
+                self.zmq_manager_widget.show()
+                if hasattr(self, "left_splitter"):
+                    sizes = self.left_splitter.sizes()
+                    if len(sizes) == 2:
+                        total = sum(sizes)
+                        self.left_splitter.setSizes([int(total * 0.5), int(total * 0.5)])
+                if hasattr(self, "main_splitter"):
+                    sizes = self.main_splitter.sizes()
+                    if len(sizes) == 2:
+                        total = sum(sizes)
+                        self.main_splitter.setSizes([int(total * 0.6), int(total * 0.4)])
         else:
-            # Fallback to window mode
             self.show_window("zmq_server_manager")
 
     def show_image_browser(self):
