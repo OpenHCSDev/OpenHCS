@@ -245,6 +245,17 @@ class LibraryRegistryBase(ABC, metaclass=AutoRegisterMeta):
                 if param_name in kwargs:
                     setattr(func, param_name, kwargs[param_name])
 
+            # Populate missing injectable params with their defaults from the signature
+            # This is critical for internal calls between OpenHCS functions where
+            # injectable params may not be explicitly passed (e.g., create_projection calling max_projection)
+            from python_introspect import SignatureAnalyzer
+            sig_params = SignatureAnalyzer.analyze(wrapper)
+            for param_name, _, _ in injectable_params:
+                if param_name not in kwargs and param_name in sig_params:
+                    default_value = sig_params[param_name].default_value
+                    if default_value is not inspect.Parameter.empty:
+                        kwargs[param_name] = default_value
+
             # Filter injectable params from kwargs, EXCEPT dtype_config which needs to
             # flow through to ArrayBridge's dtype_wrapper for conversion logic
             params_to_filter = {name for name, _, _ in injectable_params if name != 'dtype_config'}
