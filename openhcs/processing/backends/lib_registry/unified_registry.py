@@ -113,6 +113,19 @@ class FunctionMetadata:
         """
         return self.registry.library_name
 
+    def get(self, key: str, default=None):
+        """
+        Dict-like get method for compatibility with code expecting dict-like access.
+
+        Args:
+            key: Attribute name to retrieve
+            default: Default value if attribute doesn't exist
+
+        Returns:
+            Attribute value or default
+        """
+        return getattr(self, key, default)
+
 
 
 
