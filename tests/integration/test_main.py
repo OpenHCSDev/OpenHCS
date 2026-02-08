@@ -56,6 +56,7 @@ from openhcs.processing.backends.analysis.cell_counting_cpu import (
     DetectionMethod,
 )
 from openhcs.core.memory import DtypeConversion
+from openhcs.core.config import DtypeConfig
 
 # Test utilities and fixtures
 from tests.integration.helpers.fixture_utils import (
@@ -317,7 +318,7 @@ def create_test_pipeline(
                                 "max_cell_area": 200,
                                 "enable_preprocessing": False,
                                 "detection_method": DetectionMethod.WATERSHED,
-                                "dtype_conversion": DtypeConversion.UINT8,
+                                "dtype_config": DtypeConfig(default_dtype_conversion=DtypeConversion.UINT8),
                                 "return_segmentation_mask": True,
                             },
                         ),
@@ -328,7 +329,7 @@ def create_test_pipeline(
                                 "max_cell_area": 200,
                                 "enable_preprocessing": False,
                                 "detection_method": DetectionMethod.WATERSHED,
-                                "dtype_conversion": DtypeConversion.UINT8,
+                                "dtype_config": DtypeConfig(default_dtype_conversion=DtypeConversion.UINT8),
                                 "return_segmentation_mask": True,
                             },
                         ),
