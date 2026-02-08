@@ -731,6 +731,21 @@ class OpenHCSMainWindow(QMainWindow):
                     if key_str:
                         full_key = mod_str + key_str
                         if full_key in filter_self.main_window._time_travel_actions:
+                            # Check if focused widget is a code editor - let it handle Ctrl+Z/Y
+                            from PyQt6.QtWidgets import QApplication
+                            from PyQt6.Qsci import QsciScintilla
+
+                            focused = QApplication.focusWidget()
+                            if focused is not None:
+                                # Check if focused widget or its parent is a QsciScintilla editor
+                                widget = focused
+                                while widget is not None:
+                                    if isinstance(widget, QsciScintilla):
+                                        # Let code editor handle Ctrl+Z/Y for text undo/redo
+                                        return False
+                                    widget = widget.parentWidget()
+
+                            # Not in a code editor - handle time travel
                             filter_self.main_window._time_travel_actions[full_key]()
                             return True  # Consume event - don't pass to widget
 
