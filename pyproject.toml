@@ -67,6 +67,7 @@ dependencies = [
 
     # Core utilities
     "setuptools",
+    "packaging>=21.0",  # For version parsing (replaces deprecated pkg_resources)
     "watchdog>=6.0.0",
     "portalocker>=2.8.2",  # Cross-platform file locking (Windows compatibility for fcntl)
     "requests>=2.31.0",  # HTTP library for LLM service communication
