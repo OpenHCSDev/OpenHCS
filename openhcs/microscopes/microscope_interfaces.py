@@ -60,7 +60,6 @@ class FilenameParser(GenericFilenameParser, metaclass=AutoRegisterMeta):
             dict or None: Dictionary with extracted components or None if parsing fails.
             The dictionary should contain keys matching VariableComponents enum values plus 'extension'.
         """
-        # Check cache first to avoid re-parsing same filenames
         if filename in self._parse_cache:
             return self._parse_cache[filename]
 
