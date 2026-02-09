@@ -25,14 +25,12 @@ class FilenameParser(GenericFilenameParser, metaclass=AutoRegisterMeta):
     """
 
     # Registry configuration for AutoRegisterMeta
-    __registry_key__ = "__name__"  # Use class name as registration key
-    __registry_name__ = "filename parser"  # Human-readable name for logging
+    __registry_key__ = '__name__'  # Use class name as registration key
+    __registry_name__ = 'filename parser'  # Human-readable name for logging
 
     def __init__(self):
         """Initialize the parser with AllComponents enum."""
         super().__init__(AllComponents)
-        # Cache for parsed filename results to avoid re-parsing same filenames
-        self._parse_cache: Dict[str, Optional[Dict[str, Any]]] = {}
 
     @classmethod
     @abstractmethod
@@ -48,10 +46,10 @@ class FilenameParser(GenericFilenameParser, metaclass=AutoRegisterMeta):
         """
         pass
 
+    @abstractmethod
     def parse_filename(self, filename: str) -> Optional[Dict[str, Any]]:
         """
         Parse a microscopy image filename to extract all components.
-        Results are cached to avoid re-parsing the same filename.
 
         Args:
             filename (str): Filename to parse
@@ -59,26 +57,6 @@ class FilenameParser(GenericFilenameParser, metaclass=AutoRegisterMeta):
         Returns:
             dict or None: Dictionary with extracted components or None if parsing fails.
             The dictionary should contain keys matching VariableComponents enum values plus 'extension'.
-        """
-        if filename in self._parse_cache:
-            return self._parse_cache[filename]
-
-        # Parse and cache result
-        result = self._parse_filename(filename)
-        self._parse_cache[filename] = result
-        return result
-
-    @abstractmethod
-    def _parse_filename(self, filename: str) -> Optional[Dict[str, Any]]:
-        """
-        Internal method to parse a microscopy image filename.
-        Subclasses must implement this method.
-
-        Args:
-            filename (str): Filename to parse
-
-        Returns:
-            dict or None: Dictionary with extracted components or None if parsing fails.
         """
         pass
 
@@ -99,7 +77,7 @@ class FilenameParser(GenericFilenameParser, metaclass=AutoRegisterMeta):
         pass
 
     @abstractmethod
-    def construct_filename(self, extension: str = ".tif", **component_values) -> str:
+    def construct_filename(self, extension: str = '.tif', **component_values) -> str:
         """
         Construct a filename from component values.
 
@@ -132,8 +110,8 @@ class MetadataHandler(ABC):
     """
 
     FALLBACK_VALUES = {
-        "pixel_size": DEFAULT_PIXEL_SIZE,  # Default pixel size in micrometers
-        "grid_dimensions": (1, 1),  # Default grid dimensions (1x1) when not available
+        'pixel_size': DEFAULT_PIXEL_SIZE,  # Default pixel size in micrometers
+        'grid_dimensions': (1, 1),  # Default grid dimensions (1x1) when not available
     }
 
     def __init__(self):
@@ -144,7 +122,7 @@ class MetadataHandler(ABC):
         try:
             return getattr(self, method_name)(*args, **kwargs)
         except Exception:
-            key = method_name.replace("get_", "")
+            key = method_name.replace('get_', '')
             return self.FALLBACK_VALUES[key]
 
     @abstractmethod
@@ -201,9 +179,7 @@ class MetadataHandler(ABC):
         pass
 
     @abstractmethod
-    def get_channel_values(
-        self, plate_path: Union[str, Path]
-    ) -> Optional[Dict[str, Optional[str]]]:
+    def get_channel_values(self, plate_path: Union[str, Path]) -> Optional[Dict[str, Optional[str]]]:
         """
         Get channel key→name mapping from metadata.
 
@@ -217,9 +193,7 @@ class MetadataHandler(ABC):
         pass
 
     @abstractmethod
-    def get_well_values(
-        self, plate_path: Union[str, Path]
-    ) -> Optional[Dict[str, Optional[str]]]:
+    def get_well_values(self, plate_path: Union[str, Path]) -> Optional[Dict[str, Optional[str]]]:
         """
         Get well key→name mapping from metadata.
 
@@ -233,9 +207,7 @@ class MetadataHandler(ABC):
         pass
 
     @abstractmethod
-    def get_site_values(
-        self, plate_path: Union[str, Path]
-    ) -> Optional[Dict[str, Optional[str]]]:
+    def get_site_values(self, plate_path: Union[str, Path]) -> Optional[Dict[str, Optional[str]]]:
         """
         Get site key→name mapping from metadata.
 
@@ -249,9 +221,7 @@ class MetadataHandler(ABC):
         pass
 
     @abstractmethod
-    def get_z_index_values(
-        self, plate_path: Union[str, Path]
-    ) -> Optional[Dict[str, Optional[str]]]:
+    def get_z_index_values(self, plate_path: Union[str, Path]) -> Optional[Dict[str, Optional[str]]]:
         """
         Get z_index key→name mapping from metadata.
 
@@ -264,9 +234,7 @@ class MetadataHandler(ABC):
         """
         pass
 
-    def get_image_files(
-        self, plate_path: Union[str, Path], all_subdirs: bool = False
-    ) -> list[str]:
+    def get_image_files(self, plate_path: Union[str, Path], all_subdirs: bool = False) -> list[str]:
         """
         Get list of image files from OpenHCS metadata.
 
@@ -301,7 +269,6 @@ class MetadataHandler(ABC):
         # Read from OpenHCS metadata (unified approach for all microscopes)
         from openhcs.microscopes.openhcs import OpenHCSMetadataHandler
         import logging
-
         logger = logging.getLogger(__name__)
 
         openhcs_handler = OpenHCSMetadataHandler(self.filemanager)
@@ -323,45 +290,33 @@ class MetadataHandler(ABC):
                         image_files = subdir_data.get("image_files", [])
                         all_files.extend(image_files)
 
-                logger.info(
-                    f"get_image_files: Returning {len(all_files)} files from {len(subdirs)} subdirectories"
-                )
+                logger.info(f"get_image_files: Returning {len(all_files)} files from {len(subdirs)} subdirectories")
                 return all_files
             else:
                 # Return only main subdirectory files (default behavior)
                 # Find main subdirectory
-                main_subdir_key = next(
-                    (key for key, data in subdirs.items() if data.get("main")), None
-                )
+                main_subdir_key = next((key for key, data in subdirs.items() if data.get("main")), None)
                 if not main_subdir_key:
                     main_subdir_key = next(iter(subdirs.keys()))
 
-                logger.info(
-                    f"get_image_files: Using main subdirectory '{main_subdir_key}'"
-                )
+                logger.info(f"get_image_files: Using main subdirectory '{main_subdir_key}'")
                 subdir_data = subdirs[main_subdir_key]
 
                 # Prefer workspace_mapping keys (virtual paths) if available
                 if workspace_mapping := subdir_data.get("workspace_mapping"):
-                    logger.info(
-                        f"get_image_files: Returning {len(workspace_mapping)} files from workspace_mapping"
-                    )
+                    logger.info(f"get_image_files: Returning {len(workspace_mapping)} files from workspace_mapping")
                     return list(workspace_mapping.keys())
 
                 # Otherwise use image_files list
                 image_files = subdir_data.get("image_files", [])
-                logger.info(
-                    f"get_image_files: Returning {len(image_files)} files from image_files list"
-                )
+                logger.info(f"get_image_files: Returning {len(image_files)} files from image_files list")
                 return image_files
 
         except Exception:
             # Fallback: no metadata yet, return empty list
             return []
 
-    def parse_metadata(
-        self, plate_path: Union[str, Path]
-    ) -> Dict[str, Dict[str, Optional[str]]]:
+    def parse_metadata(self, plate_path: Union[str, Path]) -> Dict[str, Dict[str, Optional[str]]]:
         """
         Parse all metadata using dynamic method resolution.
 
