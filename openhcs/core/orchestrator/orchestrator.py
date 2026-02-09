@@ -99,27 +99,9 @@ def _find_locks(obj, path="", seen=None):
 
 
 from openhcs.microscopes.microscope_base import MicroscopeHandler
-
-
-# Lazy import of consolidate_analysis_results to avoid blocking GUI startup
-# This function imports GPU libraries, so we defer it until first use
-def _get_consolidate_analysis_results():
-    """Lazy import of consolidate_analysis_results function."""
-    if os.getenv("OPENHCS_SUBPROCESS_NO_GPU") == "1":
-        # Subprocess runner mode - create placeholder
-        def consolidate_analysis_results(*args, **kwargs):
-            """Placeholder for subprocess runner mode."""
-            raise RuntimeError(
-                "Analysis consolidation not available in subprocess runner mode"
-            )
-
-        return consolidate_analysis_results
-    else:
-        from openhcs.processing.backends.analysis.consolidate_analysis_results import (
-            consolidate_analysis_results,
-        )
-
-        return consolidate_analysis_results
+from openhcs.processing.backends.analysis.consolidate_analysis_results import (
+    consolidate_results_directories,
+)
 
 
 # Import generic component system - required for orchestrator functionality
@@ -1579,58 +1561,46 @@ class PipelineOrchestrator:
             analysis_consolidation_config = getattr(
                 first_context, "analysis_consolidation_config", None
             )
-            if analysis_consolidation_config and analysis_consolidation_config.enabled:
+
+            # Debug logging for consolidation troubleshooting
+            if not analysis_consolidation_config.enabled:
+                logger.info("⏭️ CONSOLIDATION: Disabled")
+            else:
                 try:
-                    # Get results directory from compiled contexts (path planner already determined it)
-                    results_dir = None
-                    for axis_id, context in compiled_contexts.items():
-                        # Check if context has step plans with special outputs
+                    # Collect all unique results directories from step plans
+                    results_dirs = set()
+                    for context in compiled_contexts.values():
                         for step_plan in context.step_plans.values():
-                            special_outputs = step_plan.get("special_outputs", {})
-                            if special_outputs:
-                                # Extract results directory from first special output path
-                                first_output = next(iter(special_outputs.values()))
-                                output_path = Path(first_output["path"])
-                                potential_results_dir = output_path.parent
+                            if "analysis_results_dir" in step_plan:
+                                results_dirs.add(
+                                    Path(step_plan["analysis_results_dir"])
+                                )
+                            if "materialized_analysis_results_dir" in step_plan:
+                                results_dirs.add(
+                                    Path(step_plan["materialized_analysis_results_dir"])
+                                )
 
-                                if potential_results_dir.exists():
-                                    results_dir = potential_results_dir
-                                    break
-
-                        if results_dir:
-                            break
-
-                    if results_dir and results_dir.exists():
-                        # Check if there are actually CSV files (materialized results)
-                        csv_files = list(results_dir.glob("*.csv"))
-                        if csv_files:
-                            # Get well IDs from compiled contexts
-                            axis_ids = list(compiled_contexts.keys())
-
-                            consolidate_fn = _get_consolidate_analysis_results()
-                            # Get plate_metadata_config from the context's global_config
-                            plate_metadata_config = (
-                                first_context.global_config.plate_metadata_config
-                                if first_context.global_config
-                                else None
-                            )
-                            consolidate_fn(
-                                results_directory=str(results_dir),
-                                well_ids=axis_ids,
-                                consolidation_config=analysis_consolidation_config,
-                                plate_metadata_config=plate_metadata_config,
-                            )
-                            logger.info("✅ CONSOLIDATION: Completed successfully")
-                        else:
-                            logger.info(
-                                f"⏭️ CONSOLIDATION: No CSV files found in {results_dir}, skipping"
-                            )
-                    else:
-                        logger.info(
-                            "⏭️ CONSOLIDATION: No results directory found in compiled contexts"
+                    if results_dirs:
+                        successful_dirs, failed_dirs = consolidate_results_directories(
+                            results_dirs=list(results_dirs),
+                            plate_path=Path(first_context.plate_path),
+                            analysis_consolidation_config=analysis_consolidation_config,
+                            plate_metadata_config=first_context.plate_metadata_config,
+                            filename_parser=self.microscope_handler.parser,
                         )
+
+                        if successful_dirs:
+                            logger.info(
+                                f"✅ CONSOLIDATION: {len(successful_dirs)} directories consolidated"
+                            )
+                        if failed_dirs:
+                            logger.warning(
+                                f"⚠️ CONSOLIDATION: {len(failed_dirs)} directories failed"
+                            )
                 except Exception as e:
-                    logger.error(f"❌ CONSOLIDATION: Failed: {e}")
+                    logger.error(
+                        f"❌ CONSOLIDATION: Failed with error: {e}", exc_info=True
+                    )
 
             # Update state based on execution results
             if all(result.is_success() for result in execution_results.values()):

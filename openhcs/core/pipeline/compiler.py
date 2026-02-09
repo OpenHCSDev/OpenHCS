@@ -1365,6 +1365,11 @@ class PipelineCompiler:
                 else lazy_analysis_config
             )
 
+            # Resolve plate_metadata_config via ObjectState (same pattern as analysis_consolidation_config)
+            plate_metadata_config = pipeline_config_state.get_saved_resolved_value(
+                "plate_metadata_config"
+            )
+
             # Get auto_add_output_plate flag directly (it's a top-level field, not a dataclass)
             auto_add_output_plate = pipeline_config_state.get_saved_resolved_value(
                 "auto_add_output_plate_to_plate_manager"
@@ -1495,6 +1500,7 @@ class PipelineCompiler:
                         context.analysis_consolidation_config = (
                             analysis_consolidation_config
                         )
+                        context.plate_metadata_config = plate_metadata_config
                         context.auto_add_output_plate_to_plate_manager = (
                             auto_add_output_plate
                         )
@@ -1550,6 +1556,7 @@ class PipelineCompiler:
                     context.analysis_consolidation_config = (
                         analysis_consolidation_config
                     )
+                    context.plate_metadata_config = plate_metadata_config
                     context.auto_add_output_plate_to_plate_manager = (
                         auto_add_output_plate
                     )
