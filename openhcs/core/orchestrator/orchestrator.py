@@ -32,7 +32,13 @@ from openhcs.core.pipeline.compiler import PipelineCompiler
 from openhcs.core.steps.abstract import AbstractStep
 from openhcs.core.components.validation import convert_enum_by_value
 from openhcs.core.orchestrator.execution_result import ExecutionResult, ExecutionStatus
-from openhcs.core.progress import emit, set_progress_queue, ProgressPhase, ProgressStatus, create_event
+from openhcs.core.progress import (
+    emit,
+    set_progress_queue,
+    ProgressPhase,
+    ProgressStatus,
+    create_event,
+)
 from polystore.filemanager import FileManager
 
 # Zarr backend is CPU-only; always import it (even in subprocess/no-GPU mode)
@@ -44,6 +50,54 @@ from openhcs.config_framework.lazy_factory import (
     resolve_lazy_configurations_for_serialization,
 )
 from openhcs.microscopes import create_microscope_handler
+
+
+def _find_locks(obj, path="", seen=None):
+    """Recursively find threading locks in an object."""
+    import threading
+
+    # Get lock types once
+    lock_types = (
+        threading.Lock,
+        threading.RLock,
+        threading.Semaphore,
+        threading.BoundedSemaphore,
+        threading.Condition,
+    )
+
+    if seen is None:
+        seen = set()
+
+    if id(obj) in seen:
+        return []
+    seen.add(id(obj))
+
+    locks = []
+
+    # Check if it's a lock
+    try:
+        if isinstance(obj, lock_types):
+            locks.append((path, type(obj).__name__))
+    except TypeError as e:
+        logger.warning(f"isinstance check failed for {path}: {e}")
+
+    # Recursively check containers
+    try:
+        if isinstance(obj, dict):
+            for key, val in obj.items():
+                locks.extend(_find_locks(val, f"{path}[{repr(key)}]", seen))
+        elif isinstance(obj, (list, tuple)):
+            for idx, val in enumerate(obj):
+                locks.extend(_find_locks(val, f"{path}[{idx}]", seen))
+        elif hasattr(obj, "__dict__"):
+            for attr_name, val in obj.__dict__.items():
+                locks.extend(_find_locks(val, f"{path}.{attr_name}", seen))
+    except (TypeError, AttributeError):
+        pass
+
+    return locks
+
+
 from openhcs.microscopes.microscope_base import MicroscopeHandler
 
 
@@ -1317,7 +1371,9 @@ class PipelineOrchestrator:
                             f"worker_{idx}": [] for idx in range(actual_max_workers)
                         }
                         for idx, axis_id in enumerate(sorted(contexts_by_axis.keys())):
-                            generated[f"worker_{idx % actual_max_workers}"].append(axis_id)
+                            generated[f"worker_{idx % actual_max_workers}"].append(
+                                axis_id
+                            )
                         worker_assignments = {
                             worker_slot: owned
                             for worker_slot, owned in generated.items()
@@ -1375,21 +1431,52 @@ class PipelineOrchestrator:
                             continue
                         owned_wells = list(worker_assignments[worker_slot])
 
-                        # DEBUG: Log what's being pickled
+                        # DEBUG: Check what's being pickled for locks
                         logger.info(f"DEBUG: Submitting worker {worker_slot}")
-                        logger.info(f"DEBUG: pipeline_definition has {len(pipeline_definition)} steps")
+                        logger.info(
+                            f"DEBUG: pipeline_definition has {len(pipeline_definition)} steps"
+                        )
+
+                        # Check pipeline_definition for locks
+                        pd_locks = _find_locks(
+                            pipeline_definition, "pipeline_definition"
+                        )
+                        if pd_locks:
+                            logger.error(f"🔒 LOCKS IN pipeline_definition: {pd_locks}")
+                        else:
+                            logger.info(f"DEBUG: pipeline_definition is pickle-safe")
+
+                        # Check lane_contexts for locks
+                        lc_locks = _find_locks(lane_contexts, "lane_contexts")
+                        if lc_locks:
+                            logger.error(f"🔒 LOCKS IN lane_contexts: {lc_locks}")
+                        else:
+                            logger.info(f"DEBUG: lane_contexts is pickle-safe")
+
                         for i, step in enumerate(pipeline_definition):
-                            func_attr = getattr(step, 'func', None)
-                            logger.info(f"DEBUG: step[{i}].func = {type(func_attr).__name__ if func_attr else 'None'}")
-                        logger.info(f"DEBUG: lane_contexts has {len(lane_contexts)} axes")
+                            func_attr = getattr(step, "func", None)
+                            logger.info(
+                                f"DEBUG: step[{i}].func = {type(func_attr).__name__ if func_attr else 'None'}"
+                            )
+                        logger.info(
+                            f"DEBUG: lane_contexts has {len(lane_contexts)} axes"
+                        )
                         for axis_id, axis_contexts in lane_contexts:
-                            logger.info(f"DEBUG: axis {axis_id} has {len(axis_contexts)} contexts")
-                            for ctx_key, ctx in axis_contexts[:1]:  # Just check first context
-                                if hasattr(ctx, 'step_plans'):
-                                    for step_idx, plan in list(ctx.step_plans.items())[:2]:  # Just check first 2
-                                        if 'func' in plan:
-                                            func_val = plan['func']
-                                            logger.info(f"DEBUG: context step_plans[{step_idx}]['func'] = {type(func_val).__name__}")
+                            logger.info(
+                                f"DEBUG: axis {axis_id} has {len(axis_contexts)} contexts"
+                            )
+                            for ctx_key, ctx in axis_contexts[
+                                :1
+                            ]:  # Just check first context
+                                if hasattr(ctx, "step_plans"):
+                                    for step_idx, plan in list(ctx.step_plans.items())[
+                                        :2
+                                    ]:  # Just check first 2
+                                        if "func" in plan:
+                                            func_val = plan["func"]
+                                            logger.info(
+                                                f"DEBUG: context step_plans[{step_idx}]['func'] = {type(func_val).__name__}"
+                                            )
 
                         try:
                             future = executor.submit(
@@ -1408,7 +1495,9 @@ class PipelineOrchestrator:
                             logger.error(error_msg, exc_info=True)
                             raise
 
-                    for future in concurrent.futures.as_completed(future_to_worker_slot):
+                    for future in concurrent.futures.as_completed(
+                        future_to_worker_slot
+                    ):
                         worker_slot, owned_wells = future_to_worker_slot[future]
 
                         try:

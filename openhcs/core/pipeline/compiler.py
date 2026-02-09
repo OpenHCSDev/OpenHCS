@@ -1120,6 +1120,22 @@ class PipelineCompiler:
             )
 
     @staticmethod
+    def _calculate_worker_assignments(
+        wells: list[str], num_workers: int
+    ) -> dict[str, list[str]]:
+        """Calculate worker slot assignments for wells based on num_workers."""
+        if num_workers <= 0:
+            raise ValueError(f"num_workers must be >= 1, got {num_workers}")
+        if len(set(wells)) != len(wells):
+            raise ValueError(f"Duplicate well IDs: {wells}")
+
+        slots = {f"worker_{idx}": [] for idx in range(num_workers)}
+        for idx, axis_id in enumerate(sorted(wells)):
+            slot = f"worker_{idx % num_workers}"
+            slots[slot].append(axis_id)
+        return {slot: owned for slot, owned in slots.items() if owned}
+
+    @staticmethod
     def compile_pipelines(
         orchestrator,
         pipeline_definition: List[AbstractStep],
@@ -1353,6 +1369,9 @@ class PipelineCompiler:
             auto_add_output_plate = pipeline_config_state.get_saved_resolved_value(
                 "auto_add_output_plate_to_plate_manager"
             )
+
+            # Get num_workers from PipelineConfig using ObjectState resolution
+            num_workers = pipeline_config_state.get_saved_resolved_value("num_workers")
 
             # === BACKEND COMPATIBILITY VALIDATION ===
             # Validate that configured backend is compatible with microscope
@@ -1634,10 +1653,14 @@ class PipelineCompiler:
 
             orchestrator._state = OrchestratorState.COMPILED
 
+            # Calculate worker assignments using resolved num_workers from PipelineConfig
+            worker_assignments = PipelineCompiler._calculate_worker_assignments(
+                list(compiled_contexts.keys()), num_workers
+            )
+
             # Log worker configuration for execution planning
-            effective_config = orchestrator.get_effective_config()
             logger.info(
-                f"⚙️  EXECUTION CONFIG: {effective_config.num_workers} workers configured for pipeline execution"
+                f"⚙️  EXECUTION CONFIG: {num_workers} workers configured for pipeline execution"
             )
 
             logger.info(
@@ -1657,6 +1680,7 @@ class PipelineCompiler:
             return {
                 "pipeline_definition": pipeline_definition,
                 "compiled_contexts": compiled_contexts,
+                "worker_assignments": worker_assignments,
             }
         except Exception as e:
             orchestrator._state = OrchestratorState.COMPILE_FAILED
