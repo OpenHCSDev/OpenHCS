@@ -24,9 +24,11 @@
 
 ## 🎬 Demo
 
-<video src="https://github.com/OpenHCSDev/OpenHCS/raw/main/docs/source/_static/openhcs.mp4" controls width="100%">
+<video src="https://raw.githubusercontent.com/OpenHCSDev/OpenHCS/refs/heads/main/docs/source/_static/openhcs.mp4" controls width="100%">
   Your browser does not support the video tag.
 </video>
+
+Direct video link: https://raw.githubusercontent.com/OpenHCSDev/OpenHCS/refs/heads/main/docs/source/_static/openhcs.mp4
 
 ---
 
