@@ -24,10 +24,10 @@
 
 ## 🎬 Demo
 
-[![Watch OpenHCS demo (5 min)](docs/source/_static/ui.png)](https://github.com/OpenHCSDev/OpenHCS/blob/main/docs/source/_static/openhcs.mp4)
+[![Watch OpenHCS demo (5 min)](docs/source/_static/ui.png)](https://openhcs.readthedocs.io/en/latest/_static/openhcs.mp4)
 
-Watch in GitHub player: https://github.com/OpenHCSDev/OpenHCS/blob/main/docs/source/_static/openhcs.mp4  
-Direct MP4 (full quality): https://raw.githubusercontent.com/OpenHCSDev/OpenHCS/refs/heads/main/docs/source/_static/openhcs.mp4
+Watch demo in browser player: https://openhcs.readthedocs.io/en/latest/_static/openhcs.mp4  
+Mirror link (GitHub raw): https://raw.githubusercontent.com/OpenHCSDev/OpenHCS/refs/heads/main/docs/source/_static/openhcs.mp4
 
 ---
 
