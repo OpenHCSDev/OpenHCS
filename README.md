@@ -24,11 +24,10 @@
 
 ## 🎬 Demo
 
-<video src="https://raw.githubusercontent.com/OpenHCSDev/OpenHCS/refs/heads/main/docs/source/_static/openhcs.mp4" controls width="100%">
-  Your browser does not support the video tag.
-</video>
+[![Watch OpenHCS demo (5 min)](docs/source/_static/ui.png)](https://github.com/OpenHCSDev/OpenHCS/blob/main/docs/source/_static/openhcs.mp4)
 
-Direct video link: https://raw.githubusercontent.com/OpenHCSDev/OpenHCS/refs/heads/main/docs/source/_static/openhcs.mp4
+Watch in GitHub player: https://github.com/OpenHCSDev/OpenHCS/blob/main/docs/source/_static/openhcs.mp4  
+Direct MP4 (full quality): https://raw.githubusercontent.com/OpenHCSDev/OpenHCS/refs/heads/main/docs/source/_static/openhcs.mp4
 
 ---
 
