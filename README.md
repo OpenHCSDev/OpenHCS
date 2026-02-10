@@ -22,6 +22,12 @@
 
 ---
 
+## 🎬 Demo
+
+[Watch the OpenHCS demo video](docs/source/_static/openhcs.mp4)
+
+---
+
 OpenHCS processes large microscopy datasets (100GB+) with a **compile-then-execute** architecture. Pipelines are validated across all wells *before* any processing starts, preventing failures after hours of computation. Design pipelines in the GUI, export to Python, edit as code, and re-import — switching seamlessly between visual and programmatic workflows.
 
 ```mermaid
