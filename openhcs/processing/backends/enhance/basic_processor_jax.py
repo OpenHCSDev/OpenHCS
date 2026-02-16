@@ -17,7 +17,7 @@ import logging
 from typing import TYPE_CHECKING, Any, Optional, Union
 
 # Import decorator directly from core.memory to avoid circular imports
-from openhcs.core.memory.decorators import jax as jax_func
+from openhcs.core.memory import jax as jax_func
 from openhcs.core.utils import optional_import
 
 # For type checking only

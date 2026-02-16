@@ -122,6 +122,9 @@ class CustomFunctionManager:
             if not hasattr(obj, '__module__') or obj.__module__ is None or obj.__module__ == '__main__':
                 obj.__module__ = 'openhcs.processing.custom_functions'
 
+            # Check for name collisions with existing OpenHCS functions
+            self._check_name_collision(name)
+
             # Validate function
             func_validation: ValidationResult = validate_function(obj)
             if not func_validation.is_valid:
@@ -423,6 +426,35 @@ class CustomFunctionManager:
         }
 
         return namespace
+
+    def _check_name_collision(self, function_name: str) -> None:
+        """
+        Check if a function name collides with existing OpenHCS functions.
+
+        Args:
+            function_name: Name of the custom function to check
+
+        Raises:
+            ValueError: If the function name collides with an existing function
+        """
+        from openhcs.processing.backends.lib_registry.registry_service import RegistryService
+
+        # Get all registered functions
+        all_functions = RegistryService.get_all_functions_with_metadata()
+
+        # Check for collisions with non-custom functions
+        for composite_key, metadata in all_functions.items():
+            # Skip custom functions (they can override each other)
+            if 'custom' in metadata.tags:
+                continue
+
+            # Check if name matches
+            if metadata.name == function_name:
+                raise ValueError(
+                    f"Function name '{function_name}' collides with existing "
+                    f"{metadata.registry.library_name} function. "
+                    f"Please choose a different name for your custom function."
+                )
 
     def _save_function_code(self, func_name: str, code: str) -> None:
         """

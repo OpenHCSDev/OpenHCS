@@ -169,7 +169,7 @@ def _auto_initialize_registry() -> None:
     """
     Auto-initialize the function registry on module import.
 
-    This follows the same pattern as storage_registry in openhcs.io.base.
+    This follows the same pattern as storage_registry in polystore.base.
     """
     with _registry_lock:
         global _registry_initialized
@@ -365,7 +365,7 @@ def _apply_unified_decoration(original_func, func_name, memory_type, create_wrap
         return original_func
 
     # Step 2: Apply memory type decorator (includes dtype preservation, streams, OOM recovery)
-    from openhcs.core.memory.decorators import numpy, cupy, torch, tensorflow, jax, pyclesperanto
+    from openhcs.core.memory import numpy, cupy, torch, tensorflow, jax, pyclesperanto
 
     if memory_type == MemoryType.NUMPY:
         wrapper_func = numpy(original_func)

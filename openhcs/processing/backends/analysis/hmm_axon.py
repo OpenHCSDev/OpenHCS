@@ -15,9 +15,17 @@ from typing import Tuple, Dict, List, Optional, Any
 from skimage.feature import canny, blob_dog as local_max
 from skimage.filters import median, threshold_li
 from skimage.morphology import skeletonize
-from openhcs.core.memory.decorators import numpy
+from openhcs.core.memory import numpy
 from openhcs.core.pipeline.function_contracts import special_outputs
+from openhcs.processing.materialization import (
+    MaterializationSpec,
+    CsvOptions,
+    JsonOptions,
+    TextOptions,
+    TiffStackOptions,
+)
 from openhcs.core.utils import optional_import
+from openhcs.constants.constants import Backend
 
 # Import alvahmm from GitHub dependency
 alva_machinery = optional_import("alva_machinery")
@@ -31,81 +39,6 @@ else:
     alva_branch = None
 
 
-def materialize_hmm_analysis(
-    hmm_analysis_data: Dict[str, Any],
-    path: str,
-    filemanager,
-    backend: str,
-    **kwargs
-) -> str:
-    """
-    Materialize HMM neurite tracing analysis results to disk.
-
-    Creates multiple output files:
-    - JSON file with graph data and summary metrics
-    - GraphML file with the NetworkX graph
-    - CSV file with edge data
-
-    Args:
-        hmm_analysis_data: The HMM analysis results dictionary
-        path: Base path for output files (from special output path)
-        filemanager: FileManager instance for consistent I/O
-        backend: Backend to use for materialization
-        **kwargs: Additional materialization options
-
-    Returns:
-        str: Path to the primary output file (JSON summary)
-    """
-    import json
-    import networkx as nx
-    from pathlib import Path
-    from openhcs.constants.constants import Backend
-
-    # Generate output file paths
-    base_path = path.replace('.pkl', '')
-    json_path = f"{base_path}.json"
-    graphml_path = f"{base_path}_graph.graphml"
-    csv_path = f"{base_path}_edges.csv"
-
-    # Ensure output directory exists for disk backend
-    output_dir = Path(json_path).parent
-    if backend == Backend.DISK.value:
-        filemanager.ensure_directory(str(output_dir), backend)
-
-    # 1. Save summary and metadata as JSON (primary output)
-    summary_data = {
-        'analysis_type': 'hmm_neurite_tracing',
-        'summary': hmm_analysis_data['summary'],
-        'metadata': hmm_analysis_data['metadata']
-    }
-    json_content = json.dumps(summary_data, indent=2, default=str)
-    filemanager.save(json_content, json_path, backend)
-
-    # 2. Save NetworkX graph as GraphML
-    graph = hmm_analysis_data['graph']
-    if graph and graph.number_of_nodes() > 0:
-        # Use direct file I/O for GraphML (NetworkX doesn't support string I/O)
-        # Note: NetworkX requires actual file path, not compatible with OMERO backend
-        if backend == Backend.DISK.value:
-            nx.write_graphml(graph, graphml_path)
-
-        # 3. Save edge data as CSV
-        if graph.number_of_edges() > 0:
-            import pandas as pd
-            edge_data = []
-            for u, v, data in graph.edges(data=True):
-                edge_info = {
-                    'source_x': u[0], 'source_y': u[1],
-                    'target_x': v[0], 'target_y': v[1],
-                    **data  # Include any edge attributes
-                }
-                edge_data.append(edge_info)
-
-            edge_df = pd.DataFrame(edge_data)
-            csv_content = edge_df.to_csv(index=False)
-            filemanager.save(csv_content, csv_path, backend)
-
-    return json_path
 
 
 def materialize_trace_visualizations(data: List[np.ndarray], path: str, filemanager, backend: str) -> str:
@@ -409,7 +342,27 @@ def create_visualization_array(
     else:
         raise ValueError(f"Unknown visualization mode: {mode}")
 
-@special_outputs(("hmm_analysis", materialize_hmm_analysis), ("trace_visualizations", materialize_trace_visualizations))
+@special_outputs(
+    (
+        "hmm_analysis",
+        MaterializationSpec(
+            JsonOptions(source="summary", filename_suffix=".json"),
+            TextOptions(source="graphml", filename_suffix="_graph.graphml"),
+            CsvOptions(source="edges", filename_suffix="_edges.csv"),
+            primary=0,
+            allowed_backends=[Backend.DISK.value],
+        ),
+    ),
+    (
+        "trace_visualizations",
+        MaterializationSpec(
+            TiffStackOptions(
+                normalize_uint8=True,
+                summary_suffix="_trace_summary.txt",
+            )
+        ),
+    ),
+)
 @numpy
 def trace_neurites_rrs_alva(
     image_stack: np.ndarray,
@@ -528,6 +481,7 @@ def _compile_hmm_analysis_results(
 ) -> Dict[str, Any]:
     """Compile comprehensive HMM analysis results."""
     from datetime import datetime
+    import io
 
     # Compute summary metrics from the graph
     num_nodes = combined_graph.number_of_nodes()
@@ -569,10 +523,31 @@ def _compile_hmm_analysis_results(
         'processing_timestamp': datetime.now().isoformat(),
     }
 
+    graphml: str = ""
+    edges: List[Dict[str, Any]] = []
+    if combined_graph and combined_graph.number_of_nodes() > 0:
+        try:
+            buf = io.StringIO()
+            nx.write_graphml(combined_graph, buf)
+            graphml = buf.getvalue()
+        except Exception:
+            graphml = ""
+
+        for u, v, edge_attrs in combined_graph.edges(data=True):
+            edges.append(
+                {
+                    "source_x": u[0],
+                    "source_y": u[1],
+                    "target_x": v[0],
+                    "target_y": v[1],
+                    **(edge_attrs or {}),
+                }
+            )
+
     return {
-        'summary': summary,
-        'graph': combined_graph,
-        'metadata': metadata
+        'summary': {**summary, **metadata},
+        'graphml': graphml,
+        'edges': edges,
     }
 
 
@@ -588,4 +563,3 @@ def process_file_legacy(filename, input_folder, output_folder, **kwargs):
         "Legacy file-based processing not supported in OpenHCS. "
         "Use trace_neurites_rrs_alva() for array-in/array-out processing."
     )
-

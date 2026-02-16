@@ -19,6 +19,8 @@ Doctrinal Clauses:
 
 from typing import Callable, Any, TypeVar
 
+from openhcs.processing.materialization import MaterializationSpec
+
 F = TypeVar('F', bound=Callable[..., Any])
 
 
@@ -29,47 +31,52 @@ def special_outputs(*output_specs) -> Callable[[F], F]:
     Decorator that marks a function as producing special outputs.
 
     Args:
-        *output_specs: Either strings or (string, materialization_function) tuples
-                      - String only: "positions" - no materialization function
-                      - Tuple: ("cell_counts", materialize_cell_counts) - with materialization
+        *output_specs: Either strings or (string, MaterializationSpec) tuples
+                      - String only: "positions" - no materialization
+                      - Tuple: ("cell_counts", MaterializationSpec(CsvOptions(...))) - writer-based materialization
 
     Examples:
         @special_outputs("positions", "metadata")  # String only
         def process_image(image):
             return processed_image, positions, metadata
 
-        @special_outputs(("cell_counts", materialize_cell_counts))  # With materialization
+        @special_outputs(("cell_counts", MaterializationSpec(CsvOptions(...))))  # With materialization spec
         def count_cells(image):
             return processed_image, cell_count_results
 
-        @special_outputs("positions", ("cell_counts", materialize_cell_counts))  # Mixed
+        @special_outputs("positions", ("cell_counts", MaterializationSpec(CsvOptions(...))))  # Mixed
         def analyze_image(image):
             return processed_image, positions, cell_count_results
     """
     def decorator(func: F) -> F:
-        special_outputs_info = {}
+        materialization_specs = {}
         output_keys = set()
 
         for spec in output_specs:
             if isinstance(spec, str):
                 # String only - no materialization function
                 output_keys.add(spec)
-                special_outputs_info[spec] = None
             elif isinstance(spec, tuple) and len(spec) == 2:
-                # (key, materialization_function) tuple
-                key, mat_func = spec
+                # (key, MaterializationSpec) tuple or registered materializer callable
+                key, mat_spec = spec
                 if not isinstance(key, str):
                     raise ValueError(f"Special output key must be string, got {type(key)}: {key}")
-                if not callable(mat_func):
-                    raise ValueError(f"Materialization function must be callable, got {type(mat_func)}: {mat_func}")
+                if not isinstance(mat_spec, MaterializationSpec):
+                    raise ValueError(
+                        "Materialization spec must be a MaterializationSpec. "
+                        f"Got {type(mat_spec)} for key '{key}'."
+                    )
                 output_keys.add(key)
-                special_outputs_info[key] = mat_func
+                materialization_specs[key] = mat_spec
             else:
-                raise ValueError(f"Invalid special output spec: {spec}. Must be string or (string, function) tuple.")
+                raise ValueError(
+                    f"Invalid special output spec: {spec}. "
+                    "Must be string or (string, MaterializationSpec) tuple."
+                )
 
         # Set both attributes for backward compatibility and new functionality
         func.__special_outputs__ = output_keys  # For path planner (backward compatibility)
-        func.__materialization_functions__ = special_outputs_info  # For materialization system
+        func.__materialization_specs__ = materialization_specs  # For materialization system
         return func
     return decorator
 
@@ -98,8 +105,3 @@ def special_inputs(*input_names: str) -> Callable[[F], F]:
         func.__special_inputs__ = {name: True for name in input_names}
         return func
     return decorator
-
-
-
-
-

@@ -1,346 +1,578 @@
-"""ZMQ Execution Server - dual-channel pattern for pipeline execution."""
+"""OpenHCS execution server built on zmqruntime ExecutionServer."""
+
+from __future__ import annotations
 
 import logging
 import time
-import uuid
-import zmq
 import threading
-import queue
-import os
-import signal
-from pathlib import Path
-from typing import Any, Dict, Optional, List
-from openhcs.runtime.zmq_base import ZMQServer
-from openhcs.runtime.zmq_messages import (
-    ControlMessageType, ResponseType, ExecutionStatus, MessageFields,
-    PongResponse, ExecuteRequest, ExecuteResponse, StatusRequest, CancelRequest, ProgressUpdate,
+import hashlib
+import json
+from typing import Any
+
+from zmqruntime.execution import ExecutionServer
+from zmqruntime.messages import (
+    ExecuteRequest,
+    ExecutionStatus,
+    MessageFields,
+    ResponseType,
+    StatusRequest,
 )
-from openhcs.core.config import TransportMode
-from openhcs.constants.constants import DEFAULT_EXECUTION_SERVER_PORT
+
+from zmqruntime.transport import coerce_transport_mode
+from openhcs.runtime.zmq_config import OPENHCS_ZMQ_CONFIG
+from openhcs.core.progress import ProgressPhase, ProgressStatus, ProgressEvent
+
 
 logger = logging.getLogger(__name__)
 
 
-class ZMQExecutionServer(ZMQServer):
-    """ZMQ execution server for OpenHCS pipelines."""
+def _emit_zmq_progress(enqueue_fn, **kwargs) -> None:
+    """Helper to emit progress to ZMQ queue using new schema.
 
-    _server_type = 'execution'  # Registration key for AutoRegisterMeta
+    All fields are explicit on ProgressEvent - just pass kwargs directly.
+    """
+    import time
+    import os
 
-    def __init__(self, port=DEFAULT_EXECUTION_SERVER_PORT, host='*', log_file_path=None, transport_mode=None):
-        # Use platform-aware default if not specified (TCP on Windows, IPC on Unix/Mac)
-        super().__init__(port, host, log_file_path, transport_mode=transport_mode)
-        self.active_executions = {}
-        self.start_time = None
-        self.progress_queue = queue.Queue()
+    # Create event - all fields are explicit, just pass kwargs directly
+    event = ProgressEvent(timestamp=time.time(), pid=os.getpid(), **kwargs)
+    enqueue_fn(event.to_dict())
 
-        # Execution queue for sequential processing
-        self.execution_queue = queue.Queue()
-        self.queue_worker_thread = None
-        # Don't start queue worker here - it will be started in start() after _running is set to True
 
-    def start(self):
-        """Override start to also start the queue worker thread after server is running."""
-        super().start()
-        # Now that _running is True, start the queue worker
-        self._start_queue_worker()
+class _ImmediateProgressQueue:
+    """Queue adapter that forwards progress updates immediately to ZMQ."""
+
+    def __init__(self, server: "ZMQExecutionServer"):
+        self._server = server
+
+    def put(self, progress_update: dict) -> None:
+        self._server._enqueue_progress(progress_update)
+        self._server._flush_progress_only()
+
+
+class ZMQExecutionServer(ExecutionServer):
+    """OpenHCS-specific execution server."""
+
+    _server_type = "execution"
+
+    def __init__(
+        self,
+        port: int | None = None,
+        host: str = "*",
+        log_file_path: str | None = None,
+        transport_mode=None,
+    ):
+        super().__init__(
+            port=port or OPENHCS_ZMQ_CONFIG.default_port,
+            host=host,
+            log_file_path=log_file_path,
+            transport_mode=coerce_transport_mode(transport_mode),
+            config=OPENHCS_ZMQ_CONFIG,
+        )
+        self._compile_status: str | None = None
+        self._compile_message: str | None = None
+        self._compile_status_expires_at: float | None = None
+        self._worker_assignments_by_execution: dict[str, dict[str, list[str]]] = {}
+        self._compiled_artifacts: dict[str, dict[str, Any]] = {}
+        self._compiled_artifact_ttl_seconds: float = 30.0 * 60.0
+
+    @staticmethod
+    def _build_worker_assignments(
+        wells: list[str], num_workers: int
+    ) -> dict[str, list[str]]:
+        if num_workers <= 0:
+            raise ValueError(f"num_workers must be >= 1, got {num_workers}")
+        if len(set(wells)) != len(wells):
+            raise ValueError(f"Duplicate well IDs detected: {wells}")
+
+        slots = {f"worker_{idx}": [] for idx in range(num_workers)}
+        for idx, axis_id in enumerate(sorted(wells)):
+            slot = f"worker_{idx % num_workers}"
+            slots[slot].append(axis_id)
+        return {slot: owned for slot, owned in slots.items() if owned}
+
+    @staticmethod
+    def _extract_compiled_axis_ids(compiled_contexts: dict[str, Any]) -> list[str]:
+        """Extract unique axis ids from compiled context keys.
+
+        Context keys may be either plain axis ids (e.g. "A01") or sequential keys
+        (e.g. "A01__combo_0"). Worker ownership must always be at axis granularity.
+        """
+        axis_ids: list[str] = []
+        seen: set[str] = set()
+        for context_key in compiled_contexts.keys():
+            axis_id = (
+                context_key.split("__combo_", 1)[0]
+                if "__combo_" in context_key
+                else context_key
+            )
+            if axis_id not in seen:
+                seen.add(axis_id)
+                axis_ids.append(axis_id)
+        return sorted(axis_ids)
+
+    @staticmethod
+    def _validate_worker_claim(
+        worker_slot: str,
+        owned_wells: list[str],
+        assignments: dict[str, list[str]],
+    ) -> None:
+        if worker_slot not in assignments:
+            raise ValueError(
+                f"Unknown worker_slot '{worker_slot}'. Expected one of: {list(assignments.keys())}"
+            )
+        expected = assignments[worker_slot]
+        if sorted(owned_wells) != sorted(expected):
+            raise ValueError(
+                f"Invalid worker claim for {worker_slot}: expected={expected}, got={owned_wells}"
+            )
+
+    def _flush_progress_only(self) -> None:
+        """Flush only progress messages to ZMQ, without processing control messages.
+
+        This is called during synchronous execution when we can't receive from
+        the control socket (would block or fail with NOBLOCK).
+        """
+        if not self.data_socket:
+            return
+        import json
+        import queue
+
+        logger = logging.getLogger(__name__)
+        count = 0
+        while True:
+            try:
+                progress_update = self.progress_queue.get_nowait()
+            except queue.Empty:
+                if count > 0:
+                    logger.info(f"Flushed {count} progress update(s) to ZMQ")
+                break
+            logger.info(
+                f"Flushing to ZMQ: step_name={progress_update.get('step_name')!r}, "
+                f"axis={progress_update.get('axis_id')!r}, plate_id={progress_update.get('plate_id')!r}, "
+                f"percent={progress_update.get('percent')!r}, total_wells={progress_update.get('total_wells')!r}"
+            )
+            json_str = json.dumps(progress_update)
+            logger.info(f"Full JSON being sent: {json_str[:300]}")
+            self.data_socket.send_string(json_str)
+            count += 1
+
+    def _set_compile_status(
+        self, status: str, message: str | None = None, ttl_seconds: float = 4.0
+    ) -> None:
+        self._compile_status = status
+        self._compile_message = message
+        self._compile_status_expires_at = time.time() + ttl_seconds
+
+    def _get_compile_status(self) -> tuple[str | None, str | None]:
+        if self._compile_status_expires_at is None:
+            return None, None
+        if time.time() > self._compile_status_expires_at:
+            self._compile_status = None
+            self._compile_message = None
+            self._compile_status_expires_at = None
+            return None, None
+        return self._compile_status, self._compile_message
+
+    @staticmethod
+    def _build_request_signature(
+        plate_id: str,
+        pipeline_code: str,
+        config_params: dict | None,
+        config_code: str | None,
+        pipeline_config_code: str | None,
+    ) -> str:
+        payload = {
+            MessageFields.PLATE_ID: plate_id,
+            MessageFields.PIPELINE_CODE: pipeline_code,
+            MessageFields.CONFIG_PARAMS: config_params,
+            MessageFields.CONFIG_CODE: config_code,
+            MessageFields.PIPELINE_CONFIG_CODE: pipeline_config_code,
+        }
+        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    def _cleanup_compiled_artifacts(self) -> None:
+        now = time.time()
+        expired_ids = [
+            artifact_id
+            for artifact_id, artifact in self._compiled_artifacts.items()
+            if now - artifact["created_at"] > self._compiled_artifact_ttl_seconds
+        ]
+        for artifact_id in expired_ids:
+            del self._compiled_artifacts[artifact_id]
+        if expired_ids:
+            logger.info("Cleaned up %d expired compile artifact(s)", len(expired_ids))
 
     def _create_pong_response(self):
-        running = [(eid, r) for eid, r in self.active_executions.items()
-                   if r.get(MessageFields.STATUS) == ExecutionStatus.RUNNING.value]
-        queued = [(eid, r) for eid, r in self.active_executions.items()
-                  if r.get(MessageFields.STATUS) == ExecutionStatus.QUEUED.value]
-        return PongResponse(
-            port=self.port, control_port=self.control_port, ready=self._ready,
-            server=self.__class__.__name__, log_file_path=self.log_file_path,
-            active_executions=len(running) + len(queued),
-            running_executions=[{
-                MessageFields.EXECUTION_ID: eid, MessageFields.PLATE_ID: r.get(MessageFields.PLATE_ID, 'unknown'),
-                MessageFields.START_TIME: r.get(MessageFields.START_TIME, 0),
-                MessageFields.ELAPSED: time.time() - r.get(MessageFields.START_TIME, 0) if r.get(MessageFields.START_TIME) else 0
-            } for eid, r in running],
-            workers=self._get_worker_info(),
-            uptime=time.time() - self.start_time if self.start_time else 0,
-        ).to_dict()
+        self._cleanup_compiled_artifacts()
+        response = super()._create_pong_response()
 
-    def process_messages(self):
-        super().process_messages()
-        import json
-        while not self.progress_queue.empty():
-            try:
-                if self.data_socket:
-                    self.data_socket.send_string(json.dumps(self.progress_queue.get_nowait()))
-            except (queue.Empty, Exception) as e:
-                if not isinstance(e, queue.Empty):
-                    logger.warning(f"Failed to send progress: {e}")
+        # Add OpenHCS-specific compile status
+        compile_status, compile_message = self._get_compile_status()
+        if compile_status is not None:
+            response[MessageFields.COMPILE_STATUS] = compile_status
+        if compile_message is not None:
+            response[MessageFields.COMPILE_MESSAGE] = compile_message
+
+        queued = [
+            (execution_id, record)
+            for execution_id, record in self.active_executions.items()
+            if record.status == ExecutionStatus.QUEUED.value
+        ]
+        response["queued_executions"] = [
+            {
+                MessageFields.EXECUTION_ID: execution_id,
+                MessageFields.PLATE_ID: str(record.plate_id),
+                "queue_position": index + 1,
+            }
+            for index, (execution_id, record) in enumerate(queued)
+        ]
+
+        return response
+
+    def _enqueue_progress(self, progress_update: dict) -> None:
+        # DEBUG: Log what's being enqueued
+        if "total_wells" in progress_update:
+            logger.info(
+                f"_enqueue_progress: total_wells={progress_update.get('total_wells')}, keys={list(progress_update.keys())}, step_name={progress_update.get('step_name')}"
+            )
+        self.progress_queue.put(progress_update)
+
+    def _forward_worker_progress(self, worker_queue) -> None:
+        import logging
+
+        logger = logging.getLogger(__name__)
+        while True:
+            progress_update = worker_queue.get()
+            if progress_update is None:
+                logger.info("Progress forwarder received None, exiting")
                 break
+            execution_id = progress_update.get("execution_id")
+            if not execution_id:
+                raise ValueError(
+                    f"Worker progress missing execution_id: {progress_update}"
+                )
+            assignments = self._worker_assignments_by_execution.get(execution_id)
+            if assignments is None:
+                raise ValueError(
+                    f"Missing worker assignments for execution_id={execution_id}"
+                )
 
-    def get_status_info(self):
-        status = super().get_status_info()
-        status.update({'active_executions': len(self.active_executions),
-                      'uptime': time.time() - self.start_time if self.start_time else 0,
-                      'executions': list(self.active_executions.values())})
-        return status
+            # Pipeline-level INIT events (e.g. viewer launch) bypass worker
+            # claim validation — they carry no worker_slot / owned_wells.
+            phase = progress_update.get("phase")
+            axis_id = progress_update.get("axis_id", "")
+            if phase == "init" and not axis_id:
+                self.progress_queue.put(progress_update)
+                continue
 
-    def handle_control_message(self, message):
-        try:
-            return ControlMessageType(message.get(MessageFields.TYPE)).dispatch(self, message)
-        except ValueError as e:
-            return ExecuteResponse(ResponseType.ERROR, error=f'Unknown message type: {message.get(MessageFields.TYPE)}').to_dict()
+            worker_slot = progress_update.get("worker_slot")
+            owned_wells = progress_update.get("owned_wells")
+            if not worker_slot or owned_wells is None:
+                raise ValueError(
+                    f"Worker progress missing claim fields: worker_slot={worker_slot}, owned_wells={owned_wells}"
+                )
+            self._validate_worker_claim(worker_slot, owned_wells, assignments)
+            # Attach topology metadata to every worker progress event so the UI
+            # cannot lose worker/well ownership due first-message ordering.
+            progress_update = dict(progress_update)
+            progress_update["worker_assignments"] = assignments
+            progress_update["total_wells"] = sorted(
+                {
+                    axis_id
+                    for assigned_axes in assignments.values()
+                    for axis_id in assigned_axes
+                }
+            )
+            logger.info(
+                f"Forwarding progress: pid={progress_update.get('pid')}, axis={progress_update.get('axis_id')}, step_name={progress_update.get('step_name')}, worker_slot={worker_slot}"
+            )
+            self.progress_queue.put(progress_update)
 
-    def handle_data_message(self, message):
-        pass
+    def _get_worker_info(self):
+        """Return raw worker info (no enrichment).
 
-    def _validate_and_parse(self, msg, request_class):
-        try:
-            request = request_class.from_dict(msg)
-            if hasattr(request, 'validate') and (error := request.validate()):
-                return None, ExecuteResponse(ResponseType.ERROR, error=error).to_dict()
-            return request, None
-        except KeyError as e:
-            return None, ExecuteResponse(ResponseType.ERROR, error=f'Missing field: {e}').to_dict()
+        Worker axis_id comes from progress tracker, not from ping responses.
+        Ping is for process tracking (CPU, memory), not application state.
+        """
+        return super()._get_worker_info()
 
-    def _start_queue_worker(self):
-        """Start the queue worker thread that processes executions sequentially."""
-        if self.queue_worker_thread is None or not self.queue_worker_thread.is_alive():
-            self.queue_worker_thread = threading.Thread(target=self._queue_worker, daemon=True)
-            self.queue_worker_thread.start()
-            logger.info("Started execution queue worker thread")
+    def _attach_results_summary_extras(
+        self, execution_id: str, record, execution_payload: dict | None = None
+    ) -> None:
+        if record.status != ExecutionStatus.COMPLETE.value:
+            return
 
-    def _queue_worker(self):
-        """Worker thread that processes executions from the queue sequentially."""
-        logger.info("Queue worker thread started - will process executions sequentially")
-        try:
-            while self._running:
-                try:
-                    # Block with timeout so we can check _running flag periodically
-                    try:
-                        execution_id, request, record = self.execution_queue.get(timeout=1.0)
-                    except queue.Empty:
-                        continue
+        summary = record.results_summary
+        if not isinstance(summary, dict):
+            summary = {}
+            record.results_summary = summary
 
-                    logger.info(f"[{execution_id}] Dequeued for execution (queue size: {self.execution_queue.qsize()})")
+        output_plate_root = record.get_extra("output_plate_root")
+        auto_add_output_plate = record.get_extra("auto_add_output_plate")
+        if output_plate_root:
+            summary["output_plate_root"] = str(output_plate_root)
+        if auto_add_output_plate is not None:
+            summary["auto_add_output_plate_to_plate_manager"] = bool(
+                auto_add_output_plate
+            )
 
-                    # Check if server is still running before starting execution
-                    if not self._running:
-                        logger.info(f"[{execution_id}] Server shutting down, skipping execution")
-                        record[MessageFields.STATUS] = ExecutionStatus.CANCELLED.value
-                        self.execution_queue.task_done()
-                        break
+        if isinstance(execution_payload, dict):
+            execution_payload[MessageFields.RESULTS_SUMMARY] = summary
 
-                    # Check if execution was cancelled while queued
-                    if record[MessageFields.STATUS] == ExecutionStatus.CANCELLED.value:
-                        logger.info(f"[{execution_id}] Execution was cancelled while queued, skipping")
-                        self.execution_queue.task_done()
-                        continue
-
-                    # Run the execution (this blocks until complete)
-                    self._run_execution(execution_id, request, record)
-
-                    # Mark task as done
-                    self.execution_queue.task_done()
-                except Exception as e:
-                    logger.error(f"Queue worker error: {e}", exc_info=True)
-        finally:
-            # Clean up any remaining queued executions when worker exits
-            remaining = 0
-            while not self.execution_queue.empty():
-                try:
-                    execution_id, request, record = self.execution_queue.get_nowait()
-                    record[MessageFields.STATUS] = ExecutionStatus.CANCELLED.value
-                    record[MessageFields.END_TIME] = time.time()
-                    logger.info(f"[{execution_id}] Cancelled (was queued when server shut down)")
-                    self.execution_queue.task_done()
-                    remaining += 1
-                except queue.Empty:
-                    break
-
-            if remaining > 0:
-                logger.info(f"Cancelled {remaining} queued executions during shutdown")
-            logger.info("Queue worker thread exiting")
-
-    def _handle_execute(self, msg):
-        request, error = self._validate_and_parse(msg, ExecuteRequest)
-        if error:
-            return error
-        execution_id = str(uuid.uuid4())
-        record = {MessageFields.EXECUTION_ID: execution_id, MessageFields.PLATE_ID: request.plate_id,
-                  MessageFields.CLIENT_ADDRESS: request.client_address, MessageFields.STATUS: ExecutionStatus.QUEUED.value,
-                  MessageFields.START_TIME: None, MessageFields.END_TIME: None, MessageFields.ERROR: None}
-        self.active_executions[execution_id] = record
-
-        # Add to queue instead of spawning a thread immediately
-        self.execution_queue.put((execution_id, request, record))
-        queue_position = self.execution_queue.qsize()
-        logger.info(f"[{execution_id}] Queued for execution (position: {queue_position})")
-
-        return ExecuteResponse(ResponseType.ACCEPTED, execution_id=execution_id,
-                             message=f'Execution queued (position: {queue_position})').to_dict()
+        logger.info(
+            "[%s] Attached results_summary extras: output_plate_root=%s auto_add=%s",
+            execution_id,
+            summary.get("output_plate_root"),
+            summary.get("auto_add_output_plate_to_plate_manager"),
+        )
 
     def _run_execution(self, execution_id, request, record):
+        """Run an execution and enrich results_summary with output plate path.
+
+        The base zmqruntime ExecutionServer only populates well_count/wells in
+        results_summary. OpenHCS needs the final output plate root (computed by
+        path planning during compilation) so the UI can optionally auto-add it
+        as a new orchestrator in Plate Manager.
+        """
+        super()._run_execution(execution_id, request, record)
+
         try:
-            # Update status to RUNNING and set start time when execution actually begins
-            record[MessageFields.STATUS] = ExecutionStatus.RUNNING.value
-            record[MessageFields.START_TIME] = time.time()
-            logger.info(f"[{execution_id}] Starting execution (was queued)")
-
-            results = self._execute_pipeline(execution_id, request.plate_id, request.pipeline_code,
-                                            request.config_params, request.config_code,
-                                            request.pipeline_config_code, request.client_address)
-            logger.info(f"[{execution_id}] Pipeline execution returned, updating status to COMPLETE")
-            record[MessageFields.STATUS] = ExecutionStatus.COMPLETE.value
-            record[MessageFields.END_TIME] = time.time()
-            record[MessageFields.RESULTS_SUMMARY] = {MessageFields.WELL_COUNT: len(results) if isinstance(results, dict) else 0,
-                                                     MessageFields.WELLS: list(results.keys()) if isinstance(results, dict) else []}
-            logger.info(f"[{execution_id}] ✓ Completed in {record[MessageFields.END_TIME] - record[MessageFields.START_TIME]:.1f}s")
-            logger.info(f"[{execution_id}] Record status after update: {record[MessageFields.STATUS]}")
-            logger.info(f"[{execution_id}] Active executions status: {self.active_executions[execution_id][MessageFields.STATUS]}")
+            self._attach_results_summary_extras(
+                execution_id=execution_id, record=record
+            )
         except Exception as e:
-            from concurrent.futures.process import BrokenProcessPool
-            if isinstance(e, BrokenProcessPool) and record[MessageFields.STATUS] == ExecutionStatus.CANCELLED.value:
-                logger.info(f"[{execution_id}] Cancelled")
-            else:
-                record[MessageFields.STATUS] = ExecutionStatus.FAILED.value
-                record[MessageFields.END_TIME] = time.time()
-                record[MessageFields.ERROR] = str(e)
-                logger.error(f"[{execution_id}] ✗ Failed: {e}", exc_info=True)
-        finally:
-            # Clean up orchestrator reference
-            record.pop('orchestrator', None)
+            logger.warning(
+                "[%s] Failed to attach output_plate_root to results_summary: %s",
+                execution_id,
+                e,
+            )
 
-            # Kill all worker processes to ensure clean state for next execution
-            # This prevents resource conflicts and deadlocks between consecutive executions
-            killed = self._kill_worker_processes()
-            if killed > 0:
-                logger.info(f"[{execution_id}] Killed {killed} worker processes during cleanup")
-
-            logger.info(f"[{execution_id}] Execution cleanup complete")
-    
     def _handle_status(self, msg):
+        response = super()._handle_status(msg)
+        if response.get(MessageFields.STATUS) != ResponseType.OK.value:
+            return response
+
         execution_id = StatusRequest.from_dict(msg).execution_id
-        if execution_id:
-            if execution_id not in self.active_executions:
-                return ExecuteResponse(ResponseType.ERROR, error=f'Execution {execution_id} not found').to_dict()
-            r = self.active_executions[execution_id]
-            return {MessageFields.STATUS: ResponseType.OK.value,
-                   'execution': {k: r.get(k) for k in [MessageFields.EXECUTION_ID, MessageFields.PLATE_ID,
-                                MessageFields.STATUS, MessageFields.START_TIME, MessageFields.END_TIME,
-                                MessageFields.ERROR, MessageFields.RESULTS_SUMMARY]}}
-        return {MessageFields.STATUS: ResponseType.OK.value, MessageFields.ACTIVE_EXECUTIONS: len(self.active_executions),
-                MessageFields.UPTIME: time.time() - self.start_time if self.start_time else 0,
-                MessageFields.EXECUTIONS: list(self.active_executions.keys())}
+        if not execution_id:
+            return response
 
-    def _handle_cancel(self, msg):
-        request, error = self._validate_and_parse(msg, CancelRequest)
-        if error:
-            return error
-        if request.execution_id not in self.active_executions:
-            return ExecuteResponse(ResponseType.ERROR, error=f'Execution {request.execution_id} not found').to_dict()
+        record = self.active_executions[execution_id]
+        if record.status != ExecutionStatus.COMPLETE.value:
+            return response
 
-        # Use the same logic as Quit button: cancel all executions and kill workers
-        # This ensures workers are actually killed and the server stays alive
-        self._cancel_all_executions()
-        killed = self._kill_worker_processes()
-        logger.info(f"[{request.execution_id}] Cancelled - killed {killed} workers")
-        return {MessageFields.STATUS: ResponseType.OK.value, MessageFields.MESSAGE: f'Cancelled - killed {killed} workers',
-                MessageFields.WORKERS_KILLED: killed}
+        execution_payload = response.get(MessageFields.EXECUTION)
+        self._attach_results_summary_extras(
+            execution_id=execution_id,
+            record=record,
+            execution_payload=execution_payload
+            if isinstance(execution_payload, dict)
+            else None,
+        )
+        return response
 
-    def _cancel_all_executions(self):
-        for eid, r in self.active_executions.items():
-            if r[MessageFields.STATUS] in (ExecutionStatus.RUNNING.value, ExecutionStatus.QUEUED.value):
-                r[MessageFields.STATUS] = ExecutionStatus.CANCELLED.value
-                r[MessageFields.END_TIME] = time.time()
-                logger.info(f"[{eid}] Cancelled")
+    def execute_task(self, execution_id: str, request: ExecuteRequest) -> Any:
+        return self._execute_pipeline(
+            execution_id,
+            request.plate_id,
+            request.pipeline_code,
+            request.config_params,
+            request.config_code,
+            request.pipeline_config_code,
+            request.client_address,
+            request.compile_only,
+            request.compile_artifact_id,
+        )
 
-    def _shutdown_workers(self, force=False):
-        self._cancel_all_executions()
-        killed = self._kill_worker_processes()
-        if force:
-            self.request_shutdown()
-        msg = f'Workers killed ({killed}), server {"shutting down" if force else "alive"}'
-        logger.info(msg)
-        return {MessageFields.TYPE: ResponseType.SHUTDOWN_ACK.value, MessageFields.STATUS: 'success', MessageFields.MESSAGE: msg}
-
-    def _handle_shutdown(self, msg):
-        return self._shutdown_workers(force=False)
-
-    def _execute_pipeline(self, execution_id, plate_id, pipeline_code, config_params, config_code, pipeline_config_code, client_address=None):
+    def _execute_pipeline(
+        self,
+        execution_id,
+        plate_id,
+        pipeline_code,
+        config_params,
+        config_code,
+        pipeline_config_code,
+        client_address=None,
+        compile_only: bool = False,
+        compile_artifact_id: str | None = None,
+    ):
         from openhcs.constants import AllComponents, VariableComponents, GroupBy
         from openhcs.core.config import GlobalPipelineConfig, PipelineConfig
 
-        logger.info(f"[{execution_id}] Starting plate {plate_id}")
+        logger.info("[%s] Starting plate %s", execution_id, plate_id)
 
-        # Initialize function registry BEFORE executing pipeline code
-        # (pipeline code may import virtual modules like openhcs.cucim)
         import openhcs.processing.func_registry as func_registry_module
+
+        logger.info(
+            "[%s] Registry initialized status BEFORE check: %s",
+            execution_id,
+            func_registry_module._registry_initialized,
+        )
         with func_registry_module._registry_lock:
             if not func_registry_module._registry_initialized:
+                logger.info("[%s] Initializing registry...", execution_id)
                 func_registry_module._auto_initialize_registry()
+                logger.info(
+                    "[%s] Registry initialized status AFTER init: %s",
+                    execution_id,
+                    func_registry_module._registry_initialized,
+                )
+            else:
+                logger.info("[%s] Registry already initialized, skipping", execution_id)
+
+        self._cleanup_compiled_artifacts()
+
+        if compile_only and compile_artifact_id:
+            raise ValueError("compile_only and compile_artifact_id cannot both be set")
+
+        request_signature = self._build_request_signature(
+            plate_id=plate_id,
+            pipeline_code=pipeline_code,
+            config_params=config_params,
+            config_code=config_code,
+            pipeline_config_code=pipeline_config_code,
+        )
+        pipeline_sha = hashlib.sha256(pipeline_code.encode("utf-8")).hexdigest()[:12]
 
         namespace = {}
         exec(pipeline_code, namespace)
-        if not (pipeline_steps := namespace.get('pipeline_steps')):
+        if not (pipeline_steps := namespace.get("pipeline_steps")):
             raise ValueError("Code must define 'pipeline_steps'")
+        logger.info(
+            "[%s] Request received: plate=%s compile_only=%s artifact_id=%s step_count=%d pipeline_sha=%s request_sig=%s",
+            execution_id,
+            plate_id,
+            bool(compile_only),
+            compile_artifact_id,
+            len(pipeline_steps),
+            pipeline_sha,
+            request_signature[:12],
+        )
 
         if config_code:
-            is_empty = 'GlobalPipelineConfig(\n\n)' in config_code or 'GlobalPipelineConfig()' in config_code
-            global_config = GlobalPipelineConfig() if is_empty else (exec(config_code, ns := {}) or ns.get('config'))
+            is_empty = (
+                "GlobalPipelineConfig(\n\n)" in config_code
+                or "GlobalPipelineConfig()" in config_code
+            )
+            global_config = (
+                GlobalPipelineConfig()
+                if is_empty
+                else (exec(config_code, ns := {}) or ns.get("config"))
+            )
             if not global_config:
                 raise ValueError("config_code must define 'config'")
-            pipeline_config = (exec(pipeline_config_code, ns := {}) or ns.get('config')) if pipeline_config_code else PipelineConfig()
+            pipeline_config = (
+                exec(pipeline_config_code, ns := {}) or ns.get("config")
+                if pipeline_config_code
+                else PipelineConfig()
+            )
             if pipeline_config_code and not pipeline_config:
                 raise ValueError("pipeline_config_code must define 'config'")
         elif config_params:
-            global_config, pipeline_config = self._build_config_from_params(config_params)
+            global_config, pipeline_config = self._build_config_from_params(
+                config_params
+            )
         else:
             raise ValueError("Either config_params or config_code required")
 
-        return self._execute_with_orchestrator(execution_id, plate_id, pipeline_steps, global_config, pipeline_config, config_params)
+        try:
+            return self._execute_with_orchestrator(
+                execution_id,
+                plate_id,
+                pipeline_steps,
+                global_config,
+                pipeline_config,
+                config_params,
+                compile_only=compile_only,
+                compile_artifact_id=compile_artifact_id,
+                request_signature=request_signature,
+            )
+        except Exception as e:
+            if compile_only:
+                self._set_compile_status("compiled failed", str(e))
+            raise
 
     def _build_config_from_params(self, p):
-        from openhcs.core.config import GlobalPipelineConfig, MaterializationBackend, PathPlanningConfig, StepWellFilterConfig, VFSConfig, PipelineConfig
-        return (GlobalPipelineConfig(
-            num_workers=p.get('num_workers', 4),
-            path_planning_config=PathPlanningConfig(output_dir_suffix=p.get('output_dir_suffix', '_output')),
-            vfs_config=VFSConfig(materialization_backend=MaterializationBackend(p.get('materialization_backend', 'disk'))),
-            step_well_filter_config=StepWellFilterConfig(well_filter=p.get('well_filter')),
-            use_threading=p.get('use_threading', False),
-        ), PipelineConfig())
+        from openhcs.core.config import (
+            GlobalPipelineConfig,
+            MaterializationBackend,
+            PathPlanningConfig,
+            StepWellFilterConfig,
+            VFSConfig,
+            PipelineConfig,
+        )
 
-    def _execute_with_orchestrator(self, execution_id, plate_id, pipeline_steps, global_config, pipeline_config, config_params):
+        return (
+            GlobalPipelineConfig(
+                num_workers=p.get("num_workers", 4),
+                path_planning_config=PathPlanningConfig(
+                    output_dir_suffix=p.get("output_dir_suffix", "_output")
+                ),
+                vfs_config=VFSConfig(
+                    materialization_backend=MaterializationBackend(
+                        p.get("materialization_backend", "disk")
+                    )
+                ),
+                step_well_filter_config=StepWellFilterConfig(
+                    well_filter=p.get("well_filter")
+                ),
+                use_threading=p.get("use_threading", False),
+            ),
+            PipelineConfig(),
+        )
+
+    def _execute_with_orchestrator(
+        self,
+        execution_id,
+        plate_id,
+        pipeline_steps,
+        global_config,
+        pipeline_config,
+        config_params,
+        compile_only: bool = False,
+        compile_artifact_id: str | None = None,
+        request_signature: str | None = None,
+    ):
         from pathlib import Path
         import multiprocessing
         from openhcs.config_framework.lazy_factory import ensure_global_config_context
+        from openhcs.core.config import GlobalPipelineConfig
         from openhcs.core.orchestrator.gpu_scheduler import setup_global_gpu_registry
         from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
-        from openhcs.constants import AllComponents, VariableComponents, GroupBy, MULTIPROCESSING_AXIS
-        from openhcs.io.base import reset_memory_backend, storage_registry
-        from openhcs.runtime.omero_instance_manager import OMEROInstanceManager
-        from openhcs.io.omero_local import OMEROLocalBackend
+        from openhcs.constants import (
+            AllComponents,
+            VariableComponents,
+            GroupBy,
+            MULTIPROCESSING_AXIS,
+        )
+        from polystore.base import reset_memory_backend, storage_registry
 
         try:
-            if multiprocessing.get_start_method(allow_none=True) != 'spawn':
-                multiprocessing.set_start_method('spawn', force=True)
+            if multiprocessing.get_start_method(allow_none=True) != "spawn":
+                multiprocessing.set_start_method("spawn", force=True)
         except RuntimeError:
             pass
 
         reset_memory_backend()
 
-        # Trigger GPU cleanup (cache clearing) AFTER reset_memory_backend() returns
-        # NOTE: We do NOT call gc.collect() here because:
-        # 1. gc.collect() is synchronous and blocks until all __del__ methods complete
-        # 2. __del__ methods can acquire locks (e.g., streaming backends call context.term())
-        # 3. This creates deadlock potential if any lock is held when gc.collect() is called
-        # 4. Python's automatic GC will collect objects eventually without blocking
         try:
-            from openhcs.core.memory.gpu_cleanup import cleanup_all_gpu_frameworks
+            from openhcs.core.memory import cleanup_all_gpu_frameworks
+
             cleanup_all_gpu_frameworks()
         except Exception as cleanup_error:
-            logger.warning(f"[{execution_id}] Failed to trigger GPU cleanup: {cleanup_error}")
+            logger.warning(
+                "[%s] Failed to trigger GPU cleanup: %s", execution_id, cleanup_error
+            )
+
+        if not isinstance(global_config, GlobalPipelineConfig):
+            raise TypeError(
+                f"Expected GlobalPipelineConfig, got {type(global_config).__name__}"
+            )
 
         setup_global_gpu_registry(global_config=global_config)
-        ensure_global_config_context(type(global_config), global_config)
+        ensure_global_config_context(GlobalPipelineConfig, global_config)
 
-        # Convert OMERO plate IDs to virtual paths
         plate_path_str = str(plate_id)
         is_omero_plate_id = False
         try:
@@ -349,183 +581,421 @@ class ZMQExecutionServer(ZMQServer):
         except ValueError:
             is_omero_plate_id = plate_path_str.startswith("/omero/")
 
-        # Connect to OMERO and convert plate ID to virtual path if needed
         if is_omero_plate_id:
+            # Lazy-load OMERO dependencies only when OMERO is actually used
+            # Import OMERO parsers BEFORE creating backend to ensure registration
+            # This is required because OMEROLocalBackend accesses FilenameParser.__registry__
+            # which is a LazyDiscoveryDict that only populates when first accessed
+            from openhcs.runtime.omero_instance_manager import OMEROInstanceManager
+            from openhcs.microscopes import omero  # noqa: F401 - Import OMERO parsers to register them
+            from polystore.omero_local import OMEROLocalBackend
+
             omero_manager = OMEROInstanceManager()
             if not omero_manager.connect(timeout=60):
                 raise RuntimeError("OMERO server not available")
-            storage_registry['omero_local'] = OMEROLocalBackend(omero_conn=omero_manager.conn)
+            storage_registry["omero_local"] = OMEROLocalBackend(
+                omero_conn=omero_manager.conn,
+                namespace_prefix="openhcs",
+                lock_dir_name=".openhcs",
+            )
 
-            # Convert integer plate ID to virtual path format
             if not plate_path_str.startswith("/omero/"):
                 plate_path_str = f"/omero/plate_{plate_path_str}"
 
-        # CRITICAL: Don't pass progress_callback - it can't be pickled for ProcessPoolExecutor
-        # Progress updates would need a multiprocessing-safe mechanism (e.g., Manager().Queue())
-        # For now, progress is tracked via worker process monitoring in get_server_info()
-        orchestrator = PipelineOrchestrator(
-            plate_path=Path(plate_path_str),
-            pipeline_config=pipeline_config,
-            progress_callback=None  # Can't pickle lambdas for multiprocessing
-        )
-        orchestrator.initialize()
-        self.active_executions[execution_id]['orchestrator'] = orchestrator
+        progress_context = {
+            MessageFields.EXECUTION_ID: execution_id,
+            MessageFields.PLATE_ID: plate_id,
+            MessageFields.AXIS_ID: "",
+        }
+        worker_progress_queue = None
+        progress_forwarder = None
+        compiled_contexts: dict[str, Any] | None = None
 
-        # Check for cancellation after initialization (which can be slow for large plates)
-        if self.active_executions[execution_id][MessageFields.STATUS] == ExecutionStatus.CANCELLED.value:
-            logger.info(f"[{execution_id}] Execution cancelled after initialization, aborting")
-            raise RuntimeError("Execution cancelled by user")
-
-        wells = config_params.get('well_filter') if config_params else orchestrator.get_component_keys(MULTIPROCESSING_AXIS)
-        compilation = orchestrator.compile_pipelines(pipeline_definition=pipeline_steps, well_filter=wells)
-
-        # Check for cancellation after compilation (which can be slow for complex pipelines)
-        if self.active_executions[execution_id][MessageFields.STATUS] == ExecutionStatus.CANCELLED.value:
-            logger.info(f"[{execution_id}] Execution cancelled after compilation, aborting")
-            raise RuntimeError("Execution cancelled by user")
-
-        log_dir = Path.home() / ".local" / "share" / "openhcs" / "logs"
-        log_dir.mkdir(parents=True, exist_ok=True)
-
-        # Check if execution was cancelled before starting worker processes
-        if self.active_executions[execution_id][MessageFields.STATUS] == ExecutionStatus.CANCELLED.value:
-            logger.info(f"[{execution_id}] Execution cancelled before starting workers, aborting")
-            raise RuntimeError("Execution cancelled by user")
-
-        return orchestrator.execute_compiled_plate(pipeline_definition=pipeline_steps,
-                                                   compiled_contexts=compilation['compiled_contexts'],
-                                                   log_file_base=str(log_dir / f"zmq_worker_exec_{execution_id}"))
-
-    def send_progress_update(self, well_id, step, status):
         try:
-            self.progress_queue.put_nowait({'type': 'progress', 'well_id': well_id, 'step': step, 'status': status, 'timestamp': time.time()})
-        except queue.Full:
-            logger.warning(f"Progress queue full, dropping {well_id}")
+            if compile_artifact_id is None:
+                _emit_zmq_progress(
+                    self._enqueue_progress,
+                    execution_id=execution_id,
+                    plate_id=plate_id,
+                    axis_id="",
+                    step_name="pipeline",
+                    total=len(pipeline_steps),
+                    phase=ProgressPhase.COMPILE,
+                    status=ProgressStatus.STARTED,
+                    completed=0,
+                    percent=0.0,
+                )
+            orchestrator = PipelineOrchestrator(
+                plate_path=Path(plate_path_str),
+                pipeline_config=pipeline_config,
+                progress_callback=None,
+            )
+            orchestrator.execution_id = execution_id
+            orchestrator.initialize()
+            self.active_executions[execution_id].set_extra("orchestrator", orchestrator)
 
-    def _get_worker_info(self):
-        try:
-            import psutil
-            workers = []
-            for child in psutil.Process(os.getpid()).children(recursive=True):
+            if (
+                self.active_executions[execution_id].status
+                == ExecutionStatus.CANCELLED.value
+            ):
+                logger.info(
+                    "[%s] Execution cancelled after initialization, aborting",
+                    execution_id,
+                )
+                raise RuntimeError("Execution cancelled by user")
+
+            if config_params and config_params.get("well_filter"):
+                wells = list(config_params["well_filter"])
+            else:
+                wells = orchestrator.get_component_keys(MULTIPROCESSING_AXIS)
+            worker_assignments = self._build_worker_assignments(
+                wells=wells,
+                num_workers=global_config.num_workers,
+            )
+            self._worker_assignments_by_execution[execution_id] = worker_assignments
+
+            # Initialize compiled_pipeline_definition - will be set by either artifact reuse or fresh compilation
+            compiled_pipeline_definition = None
+
+            if compile_artifact_id is None:
+                planned_metadata = {"total_wells": sorted(wells)}
+                if not compile_only:
+                    planned_metadata["worker_assignments"] = worker_assignments
+                step_names = [step.name for step in pipeline_steps]
+                planned_metadata["step_names"] = step_names
+                _emit_zmq_progress(
+                    self._enqueue_progress,
+                    execution_id=execution_id,
+                    plate_id=plate_id,
+                    axis_id="",
+                    step_name="",
+                    phase=ProgressPhase.INIT,
+                    status=ProgressStatus.STARTED,
+                    percent=0.0,
+                    completed=0,
+                    total=1,
+                    **planned_metadata,
+                )
+
+            if compile_artifact_id is not None:
+                self._cleanup_compiled_artifacts()
+                artifact = self._compiled_artifacts.pop(compile_artifact_id, None)
+                if artifact is None:
+                    raise ValueError(
+                        f"Missing compile artifact '{compile_artifact_id}'. "
+                        "Re-run compilation before execution."
+                    )
+                if request_signature is None:
+                    raise ValueError(
+                        "Missing request signature for artifact validation"
+                    )
+                if artifact["request_signature"] != request_signature:
+                    logger.error(
+                        "[%s] Compile artifact signature mismatch: artifact_id=%s artifact_sig=%s request_sig=%s",
+                        execution_id,
+                        compile_artifact_id,
+                        str(artifact["request_signature"])[:12],
+                        request_signature[:12],
+                    )
+                    raise ValueError(
+                        f"Compile artifact '{compile_artifact_id}' does not match execution request"
+                    )
+                if artifact[MessageFields.PLATE_ID] != str(plate_id):
+                    raise ValueError(
+                        f"Compile artifact '{compile_artifact_id}' is for plate "
+                        f"{artifact[MessageFields.PLATE_ID]}, not {plate_id}"
+                    )
+
+                compiled_contexts = artifact["compiled_contexts"]
+                compiled_pipeline_definition = artifact.get(
+                    "compiled_pipeline_definition"
+                )  # Get the stripped pipeline_definition from artifact
+                worker_assignments = artifact["worker_assignments"]
+                compiled_axis_ids = self._extract_compiled_axis_ids(compiled_contexts)
+                normalized_assignments = self._build_worker_assignments(
+                    wells=compiled_axis_ids,
+                    num_workers=global_config.num_workers,
+                )
+                if worker_assignments != normalized_assignments:
+                    logger.info(
+                        "[%s] Normalized worker assignments from artifact to compiled contexts: before=%s after=%s",
+                        execution_id,
+                        worker_assignments,
+                        normalized_assignments,
+                    )
+                worker_assignments = normalized_assignments
+                self._worker_assignments_by_execution[execution_id] = worker_assignments
+
+                # Emit filtered metadata for this execution id.
+                step_names = [step.name for step in pipeline_steps]
+                _emit_zmq_progress(
+                    self._enqueue_progress,
+                    execution_id=execution_id,
+                    plate_id=plate_id,
+                    axis_id="",
+                    step_name="",
+                    phase=ProgressPhase.INIT,
+                    status=ProgressStatus.STARTED,
+                    percent=0.0,
+                    completed=0,
+                    total=1,
+                    total_wells=compiled_axis_ids,
+                    worker_assignments=worker_assignments,
+                    step_names=step_names,
+                )
+
+                logger.info(
+                    "[%s] Reused compile artifact %s for plate %s (sig=%s)",
+                    execution_id,
+                    compile_artifact_id,
+                    plate_id,
+                    request_signature[:12] if request_signature else "missing",
+                )
+
+                output_plate_root = artifact.get("output_plate_root")
+                if output_plate_root:
+                    self.active_executions[execution_id].set_extra(
+                        "output_plate_root",
+                        str(output_plate_root),
+                    )
+                if artifact.get("auto_add_output_plate") is not None:
+                    self.active_executions[execution_id].set_extra(
+                        "auto_add_output_plate", bool(artifact["auto_add_output_plate"])
+                    )
+            else:
+                # Compilation runs in THIS process (queue worker thread), not a
+                # separate worker process. Use an immediate adapter so compile
+                # events are forwarded to ZMQ as soon as they are emitted.
+                from openhcs.core.progress import set_progress_queue
+
+                set_progress_queue(_ImmediateProgressQueue(self))
                 try:
-                    cmdline = child.cmdline()
-                    if not (cmdline and 'python' in cmdline[0].lower()):
-                        continue
-                    cmdline_str = ' '.join(cmdline)
-                    # Exclude Napari, Fiji viewers, and process trackers
-                    if any(x in cmdline_str.lower() for x in ['napari', 'fiji', 'resource_tracker', 'semaphore_tracker']) or child.pid == os.getpid():
-                        continue
-                    workers.append({'pid': child.pid, 'status': child.status(), 'cpu_percent': child.cpu_percent(interval=0),
-                                   'memory_mb': child.memory_info().rss / 1024 / 1024, 'create_time': child.create_time()})
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    pass
-            return workers
-        except (ImportError, Exception) as e:
-            logger.warning(f"Cannot get worker info: {e}")
-            return []
+                    compilation = orchestrator.compile_pipelines(
+                        pipeline_definition=pipeline_steps,
+                        well_filter=wells,
+                        is_zmq_execution=True,
+                    )
+                finally:
+                    set_progress_queue(None)
 
-    def _kill_worker_processes(self):
-        """
-        Kill all worker processes.
+                if (
+                    not isinstance(compilation, dict)
+                    or "compiled_contexts" not in compilation
+                ):
+                    raise ValueError("Compilation did not return compiled_contexts")
+                compiled_contexts = compilation["compiled_contexts"]
+                # CRITICAL: Use the returned pipeline_definition, not the original pipeline_steps
+                # The compiler modifies pipeline_definition in-place (converts functions to FunctionReference)
+                # and returns the modified version
+                compiled_pipeline_definition = compilation.get(
+                    "pipeline_definition", pipeline_steps
+                )
 
-        First attempts graceful cancellation via orchestrator.cancel_execution(),
-        then forcefully kills worker processes using psutil.
+                # DEBUG: Check if they're the same object
+                logger.info(
+                    f"🔍 ZMQ: pipeline_steps is compiled_pipeline_definition? {pipeline_steps is compiled_pipeline_definition}"
+                )
+                logger.info(
+                    f"🔍 ZMQ: pipeline_steps[0].func = {type(getattr(pipeline_steps[0], 'func', None)).__name__ if getattr(pipeline_steps[0], 'func', None) else 'None'}"
+                )
+                logger.info(
+                    f"🔍 ZMQ: compiled_pipeline_definition[0].func = {type(getattr(compiled_pipeline_definition[0], 'func', None)).__name__ if getattr(compiled_pipeline_definition[0], 'func', None) else 'None'}"
+                )
+                if not compiled_contexts:
+                    raise ValueError("Compilation produced no compiled contexts")
+                compiled_axis_ids = self._extract_compiled_axis_ids(compiled_contexts)
+                normalized_assignments = self._build_worker_assignments(
+                    wells=compiled_axis_ids,
+                    num_workers=global_config.num_workers,
+                )
+                if worker_assignments != normalized_assignments:
+                    logger.info(
+                        "[%s] Normalized worker assignments to compiled contexts: before=%s after=%s",
+                        execution_id,
+                        worker_assignments,
+                        normalized_assignments,
+                    )
+                worker_assignments = normalized_assignments
+                self._worker_assignments_by_execution[execution_id] = worker_assignments
 
-        Returns:
-            int: Number of worker processes killed
-        """
-        # Step 1: Try graceful cancellation via orchestrator
-        for eid, r in self.active_executions.items():
-            if 'orchestrator' in r:
+                # Emit filtered metadata for this execution id.
+                _emit_zmq_progress(
+                    self._enqueue_progress,
+                    execution_id=execution_id,
+                    plate_id=plate_id,
+                    axis_id="",
+                    step_name="",
+                    phase=ProgressPhase.INIT,
+                    status=ProgressStatus.STARTED,
+                    percent=0.0,
+                    completed=0,
+                    total=1,
+                    total_wells=compiled_axis_ids,
+                    worker_assignments=worker_assignments,
+                )
+
+                _emit_zmq_progress(
+                    self._enqueue_progress,
+                    execution_id=execution_id,
+                    plate_id=plate_id,
+                    axis_id="",
+                    step_name="pipeline",
+                    total=len(pipeline_steps),
+                    phase=ProgressPhase.COMPILE,
+                    status=ProgressStatus.SUCCESS,
+                    completed=1,
+                    percent=100.0,
+                    total_wells=compiled_axis_ids,
+                    worker_assignments=worker_assignments,
+                )
+                self._flush_progress_only()
+
+                for axis_id in compiled_axis_ids:
+                    _emit_zmq_progress(
+                        self._enqueue_progress,
+                        execution_id=execution_id,
+                        plate_id=plate_id,
+                        axis_id=axis_id,
+                        step_name="compilation",
+                        phase=ProgressPhase.COMPILE,
+                        status=ProgressStatus.SUCCESS,
+                        completed=1,
+                        total=1,
+                        percent=100.0,
+                    )
+                self._flush_progress_only()
+
+                first_context = next(iter(compiled_contexts.values()))
+                output_plate_root = first_context.output_plate_root
+                if output_plate_root:
+                    self.active_executions[execution_id].set_extra(
+                        "output_plate_root",
+                        str(output_plate_root),
+                    )
+                self.active_executions[execution_id].set_extra(
+                    "auto_add_output_plate",
+                    bool(first_context.auto_add_output_plate_to_plate_manager),
+                )
+                logger.info(
+                    "[%s] Captured auto_add_output_plate=%s output_plate_root=%s",
+                    execution_id,
+                    bool(first_context.auto_add_output_plate_to_plate_manager),
+                    output_plate_root,
+                )
+
+            if (
+                self.active_executions[execution_id].status
+                == ExecutionStatus.CANCELLED.value
+            ):
+                logger.info(
+                    "[%s] Execution cancelled after compilation, aborting",
+                    execution_id,
+                )
+                raise RuntimeError("Execution cancelled by user")
+
+            if compile_only:
+                if request_signature is None:
+                    raise ValueError(
+                        "Missing request signature for compile artifact storage"
+                    )
+                self._compiled_artifacts[execution_id] = {
+                    "created_at": time.time(),
+                    "request_signature": request_signature,
+                    MessageFields.PLATE_ID: str(plate_id),
+                    "compiled_contexts": compiled_contexts,
+                    "compiled_pipeline_definition": compiled_pipeline_definition,  # Store the stripped pipeline_definition
+                    "worker_assignments": worker_assignments,
+                    "output_plate_root": self.active_executions[execution_id].get_extra(
+                        "output_plate_root"
+                    ),
+                    "auto_add_output_plate": self.active_executions[
+                        execution_id
+                    ].get_extra("auto_add_output_plate"),
+                }
+                logger.info(
+                    "[%s] Compilation-only request completed and artifact stored (artifact_id=%s sig=%s)",
+                    execution_id,
+                    execution_id,
+                    request_signature[:12],
+                )
+                self._set_compile_status("compiled success")
+                return compiled_contexts
+
+            log_dir = Path.home() / ".local" / "share" / "openhcs" / "logs"
+            log_dir.mkdir(parents=True, exist_ok=True)
+
+            worker_progress_queue = multiprocessing.get_context("spawn").Queue()
+            progress_forwarder = threading.Thread(
+                target=self._forward_worker_progress,
+                args=(worker_progress_queue,),
+                daemon=True,
+            )
+            progress_forwarder.start()
+
+            if (
+                self.active_executions[execution_id].status
+                == ExecutionStatus.CANCELLED.value
+            ):
+                logger.info(
+                    "[%s] Execution cancelled before starting workers, aborting",
+                    execution_id,
+                )
+                raise RuntimeError("Execution cancelled by user")
+
+            # DEBUG: Check steps right before execution
+            logger.info(
+                f"🔍 PRE-EXEC: compiled_pipeline_definition is None? {compiled_pipeline_definition is None}"
+            )
+            if compiled_pipeline_definition is not None:
+                logger.info(
+                    f"🔍 PRE-EXEC: compiled_pipeline_definition[0].func = {type(getattr(compiled_pipeline_definition[0], 'func', None)).__name__ if getattr(compiled_pipeline_definition[0], 'func', None) else 'None'}"
+                )
+            logger.info(
+                f"🔍 PRE-EXEC: pipeline_steps[0].func = {type(getattr(pipeline_steps[0], 'func', None)).__name__ if getattr(pipeline_steps[0], 'func', None) else 'None'}"
+            )
+
+            # Use compiled pipeline_definition if available (from fresh compilation),
+            # otherwise use original pipeline_steps (from artifact reuse)
+            # NOTE: For artifact reuse, we don't have the compiled pipeline_definition,
+            # so we use the original pipeline_steps (functions will be resolved from context)
+            steps_to_execute = (
+                compiled_pipeline_definition
+                if compiled_pipeline_definition is not None
+                else pipeline_steps
+            )
+
+            # DEBUG: Log what we're passing to execution
+            logger.info(
+                f"🚀 ZMQ SERVER: Passing {len(steps_to_execute)} steps to execution"
+            )
+            for i, step in enumerate(steps_to_execute):
+                func_attr = getattr(step, "func", None)
+                func_type = type(func_attr).__name__ if func_attr else "None"
+                logger.info(f"🚀 ZMQ SERVER: step[{i}].func = {func_type}")
+
+            return orchestrator.execute_compiled_plate(
+                pipeline_definition=steps_to_execute,
+                compiled_contexts=compiled_contexts,
+                log_file_base=str(log_dir / f"zmq_worker_exec_{execution_id}"),
+                progress_queue=worker_progress_queue,
+                progress_context=progress_context,
+                worker_assignments=worker_assignments,
+            )
+        finally:
+            if worker_progress_queue is not None:
+                worker_progress_queue.put(None)
+            if progress_forwarder is not None:
+                progress_forwarder.join()
+            self._worker_assignments_by_execution.pop(execution_id, None)
+
+    def _kill_worker_processes(self) -> int:
+        """OpenHCS-specific worker cleanup (graceful cancellation + kill)."""
+        for eid, record in self.active_executions.items():
+            orchestrator = record.get_extra("orchestrator")
+            if orchestrator is not None:
                 try:
-                    logger.info(f"[{eid}] Requesting graceful cancellation...")
-                    r['orchestrator'].cancel_execution()
+                    logger.info("[%s] Requesting graceful cancellation...", eid)
+                    orchestrator.cancel_execution()
                 except Exception as e:
-                    logger.warning(f"[{eid}] Graceful cancellation failed: {e}")
-
-        # Step 2: Forcefully kill worker processes using psutil
-        # This ALWAYS runs, regardless of graceful cancellation
-        try:
-            import psutil
-
-            # Find all child processes (including zombies)
-            all_children = psutil.Process(os.getpid()).children(recursive=False)
-
-            # Separate zombies from live processes
-            zombies = []
-            workers = []
-
-            for child in all_children:
-                try:
-                    # Check if process is a zombie
-                    if child.status() == psutil.STATUS_ZOMBIE:
-                        zombies.append(child)
-                        logger.info(f"Found zombie process PID {child.pid}")
-                        continue
-
-                    # For live processes, check if it's a Python worker
-                    cmd = child.cmdline()
-                    if cmd and 'python' in cmd[0].lower():
-                        cmdline_str = ' '.join(cmd)
-                        # Exclude Napari and Fiji viewers
-                        if 'napari' not in cmdline_str.lower() and 'fiji' not in cmdline_str.lower():
-                            workers.append(child)
-                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess) as e:
-                    # Process disappeared or became zombie while we were checking it
-                    logger.debug(f"Process {child.pid} became inaccessible: {e}")
-                    continue
-
-            # Reap zombie processes by waiting for them
-            if zombies:
-                logger.info(f"Reaping {len(zombies)} zombie processes: {[z.pid for z in zombies]}")
-                for zombie in zombies:
-                    try:
-                        # Wait for zombie to be reaped (this should be instant)
-                        zombie.wait(timeout=0.1)
-                        logger.info(f"Reaped zombie process PID {zombie.pid}")
-                    except (psutil.NoSuchProcess, psutil.TimeoutExpired) as e:
-                        # Zombie already reaped or wait timed out
-                        logger.debug(f"Could not reap zombie PID {zombie.pid}: {e}")
-
-            if not workers:
-                logger.info("No live worker processes found to kill")
-                return len(zombies)  # Return count of zombies reaped
-
-            logger.info(f"Found {len(workers)} live worker processes to kill: {[w.pid for w in workers]}")
-
-            # First try SIGTERM (graceful)
-            for w in workers:
-                try:
-                    logger.info(f"Sending SIGTERM to worker PID {w.pid}")
-                    w.terminate()
-                except Exception as e:
-                    logger.warning(f"Failed to terminate worker PID {w.pid}: {e}")
-
-            # Wait up to 3 seconds for graceful shutdown
-            gone, alive = psutil.wait_procs(workers, timeout=3)
-            logger.info(f"After SIGTERM: {len(gone)} workers exited, {len(alive)} still alive")
-
-            # Force kill any survivors with SIGKILL
-            for w in alive:
-                try:
-                    logger.info(f"Force killing worker PID {w.pid} with SIGKILL")
-                    w.kill()
-                except Exception as e:
-                    logger.warning(f"Failed to kill worker PID {w.pid}: {e}")
-
-            # Wait for killed processes to become zombies, then reap them
-            if alive:
-                gone_after_kill, still_alive = psutil.wait_procs(alive, timeout=1)
-                logger.info(f"After SIGKILL: {len(gone_after_kill)} workers exited, {len(still_alive)} still alive")
-
-            total_killed = len(workers) + len(zombies)
-            logger.info(f"Successfully killed {len(workers)} worker processes and reaped {len(zombies)} zombies (total: {total_killed})")
-            return total_killed
-
-        except (ImportError, Exception) as e:
-            logger.error(f"Failed to kill worker processes: {e}", exc_info=True)
-            return 0
-
-    def _handle_force_shutdown(self, msg):
-        return self._shutdown_workers(force=True)
-
+                    logger.warning("[%s] Graceful cancellation failed: %s", eid, e)
+        return super()._kill_worker_processes()

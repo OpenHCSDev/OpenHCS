@@ -33,8 +33,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 
 
 from openhcs.core.xdg_paths import get_cache_file_path
-from openhcs.core.memory.stack_utils import unstack_slices, stack_slices
-from openhcs.core.auto_register_meta import AutoRegisterMeta, LazyDiscoveryDict
+from openhcs.core.memory import unstack_slices, stack_slices
+from metaclass_registry import AutoRegisterMeta, LazyDiscoveryDict
 from openhcs.core.config import LazyDtypeConfig , LazyWellFilterConfig, LazyStepWellFilterConfig
 
 logger = logging.getLogger(__name__)
@@ -112,6 +112,19 @@ class FunctionMetadata:
             Registry name string (e.g., "openhcs", "skimage", "cupy", "pyclesperanto")
         """
         return self.registry.library_name
+
+    def get(self, key: str, default=None):
+        """
+        Dict-like get method for compatibility with code expecting dict-like access.
+
+        Args:
+            key: Attribute name to retrieve
+            default: Default value if attribute doesn't exist
+
+        Returns:
+            Attribute value or default
+        """
+        return getattr(self, key, default)
 
 
 
@@ -224,6 +237,9 @@ class LibraryRegistryBase(ABC, metaclass=AutoRegisterMeta):
 
         # If nothing to inject, return original function
         if not params_to_add:
+            # Still brand the callable as Enableable metadata.
+            from python_introspect import mark_enableable
+            mark_enableable(func, enabled_default=True)
             return func
 
         # Build new parameter list (insert before **kwargs)
@@ -237,10 +253,28 @@ class LibraryRegistryBase(ABC, metaclass=AutoRegisterMeta):
         # Create wrapper
         @wraps(func)
         def wrapper(image, *args, **kwargs):
+            # Extract injectable params and set them as attributes on func
             for param_name, _, _ in injectable_params:
                 if param_name in kwargs:
                     setattr(func, param_name, kwargs[param_name])
-            return contract.execute(self, func, image, *args, **kwargs)
+
+            # Populate missing injectable params with their defaults from the signature
+            # This is critical for internal calls between OpenHCS functions where
+            # injectable params may not be explicitly passed (e.g., create_projection calling max_projection)
+            from python_introspect import SignatureAnalyzer
+            sig_params = SignatureAnalyzer.analyze(wrapper)
+            for param_name, _, _ in injectable_params:
+                if param_name not in kwargs and param_name in sig_params:
+                    default_value = sig_params[param_name].default_value
+                    if default_value is not inspect.Parameter.empty:
+                        kwargs[param_name] = default_value
+
+            # Filter injectable params from kwargs, EXCEPT dtype_config which needs to
+            # flow through to ArrayBridge's dtype_wrapper for conversion logic
+            params_to_filter = {name for name, _, _ in injectable_params if name != 'dtype_config'}
+            filtered_kwargs = {k: v for k, v in kwargs.items() if k not in params_to_filter}
+
+            return contract.execute(self, func, image, *args, **filtered_kwargs)
 
         # Set defaults and signature
         for param_name, default_value, _ in injectable_params:
@@ -254,6 +288,11 @@ class LibraryRegistryBase(ABC, metaclass=AutoRegisterMeta):
         # Explicitly copy __processing_contract__ if it exists
         if hasattr(func, '__processing_contract__'):
             wrapper.__processing_contract__ = func.__processing_contract__
+
+        # Nominal enable semantics: decorated callables are Enableable.
+        # (Enableable is metadata only; enabled remains a kw-only param for call sites.)
+        from python_introspect import mark_enableable
+        mark_enableable(wrapper, enabled_default=True)
 
         return wrapper
 
@@ -352,8 +391,8 @@ class LibraryRegistryBase(ABC, metaclass=AutoRegisterMeta):
     def _execute_slice_by_slice(self, func, image, *args, **kwargs):
         """Shared slice-by-slice execution logic."""
         if image.ndim == 3:
-            from openhcs.core.memory.stack_utils import unstack_slices, stack_slices
-            from openhcs.core.memory.converters import detect_memory_type
+            from openhcs.core.memory import unstack_slices, stack_slices
+            from openhcs.core.memory import detect_memory_type
             mem = detect_memory_type(image)
             slices = unstack_slices(image, mem, 0)
             results = [func(sl, *args, **kwargs) for sl in slices]
@@ -658,9 +697,18 @@ class RuntimeTestingRegistryBase(LibraryRegistryBase):
         # Get original signature to preserve it
         original_sig = inspect.signature(original_func)
 
+        # Wrap external library functions with ArrayBridge decorator for dtype handling
+        arraybridge_wrapped_func = original_func
+        if self.MEMORY_TYPE is not None:
+            from arraybridge.decorators import _create_dtype_wrapper
+            from arraybridge.types import MemoryType as ABMemoryType
+            # Map memory type string to ArrayBridge MemoryType enum
+            mem_type = ABMemoryType(self.MEMORY_TYPE)
+            arraybridge_wrapped_func = _create_dtype_wrapper(original_func, mem_type, func_name)
+
         def adapter(image, *args, **kwargs):
             processed_image = self._preprocess_input(image, func_name)
-            result = contract.execute(self, original_func, processed_image, *args, **kwargs)
+            result = contract.execute(self, arraybridge_wrapped_func, processed_image, *args, **kwargs)
             return self._postprocess_output(result, image, func_name)
 
         # Apply wraps and preserve signature
@@ -688,7 +736,7 @@ class RuntimeTestingRegistryBase(LibraryRegistryBase):
         """Extract type hints from docstring using mathematical simplification approach."""
         try:
             # Import from shared UI utilities (no circular dependency)
-            from openhcs.introspection.signature_analyzer import SignatureAnalyzer
+            from openhcs.introspection import SignatureAnalyzer
             import numpy as np
 
             logger.debug(f"🔍 ENHANCE ANNOTATIONS: {original_func.__name__} from {original_func.__module__}")

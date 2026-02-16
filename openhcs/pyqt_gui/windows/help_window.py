@@ -15,8 +15,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 
-from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
-from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
+from pyqt_reactive.theming import StyleSheetGenerator
+from pyqt_reactive.theming import ColorScheme
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +72,7 @@ Version: PyQt6 GUI 1.0.0
 """
     
     def __init__(self, content: Optional[str] = None,
-                 color_scheme: Optional[PyQt6ColorScheme] = None, parent=None):
+                 color_scheme: Optional[ColorScheme] = None, parent=None):
         """
         Initialize the help window.
 
@@ -84,7 +84,7 @@ Version: PyQt6 GUI 1.0.0
         super().__init__(parent)
 
         # Initialize color scheme and style generator
-        self.color_scheme = color_scheme or PyQt6ColorScheme()
+        self.color_scheme = color_scheme or ColorScheme()
         self.style_generator = StyleSheetGenerator(self.color_scheme)
 
         # Business logic state

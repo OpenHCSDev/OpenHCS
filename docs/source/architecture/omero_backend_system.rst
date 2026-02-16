@@ -335,7 +335,7 @@ This pattern eliminates data transfer bottlenecks by processing data where it li
 Backend Parameter Propagation
 ------------------------------
 
-All analysis materialization functions accept a ``backend`` parameter to enable saving to any backend:
+All analysis materialization handlers accept a ``backend``/``backends`` parameter to enable saving to any backend:
 
 .. code-block:: python
 
@@ -413,8 +413,8 @@ Complete Workflow
 
 .. code-block:: python
 
-   from openhcs.io.omero_local import OMEROLocalBackend
-   from openhcs.io.base import storage_registry
+   from polystore.omero_local import OMEROLocalBackend
+   from polystore.base import storage_registry
    from openhcs.microscopes.omero import OMEROHandler
    from openhcs.runtime.omero_instance_manager import OMEROInstanceManager
    from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
@@ -447,7 +447,5 @@ Complete Workflow
 See Also
 --------
 
-- :doc:`zmq_execution_system` - ZMQ execution for remote processing
 - :doc:`storage_and_memory_system` - Storage backend architecture
 - :doc:`../guides/omero_integration` - OMERO integration guide
-

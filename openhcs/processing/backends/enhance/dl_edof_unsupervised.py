@@ -1,7 +1,7 @@
 from __future__ import annotations 
 from typing import TYPE_CHECKING, List, Optional
 
-from openhcs.core.memory.decorators import torch as torch_func
+from openhcs.core.memory import torch as torch_func
 from openhcs.utils.import_utils import optional_import, create_placeholder_class
 
 

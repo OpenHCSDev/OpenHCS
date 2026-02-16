@@ -10,10 +10,8 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Type, Union
 
-import omero.model
-
 from openhcs.constants.constants import Backend
-from openhcs.io.filemanager import FileManager
+from polystore.filemanager import FileManager
 from openhcs.microscopes.microscope_base import MicroscopeHandler
 from openhcs.microscopes.microscope_interfaces import FilenameParser, MetadataHandler
 
@@ -180,7 +178,41 @@ class OMEROMetadataHandler(MetadataHandler):
         return {}
 
     def get_well_values(self, plate_path: Union[str, Path, int]) -> Dict[str, str]:
-        return {}
+        """
+        Get well metadata (cached).
+        
+        OMERO backend may need time to process uploaded plates.
+        If plate not found, return empty dict (allows retry).
+        """
+        plate_id = self._extract_plate_id(plate_path)
+        conn = self._get_omero_conn()
+        
+        plate = conn.getObject("Plate", plate_id)
+        if not plate:
+            # Return empty dict instead of raising - allows retry
+            return {}
+        
+        # Extract well IDs from the plate
+        well_values = {}
+        for well in plate.listChildren():
+            # Get well label (e.g., "A01", "B02")
+            well_label = f"{chr(ord('A') + well.getRow())}{well.getColumn() + 1:02d}"
+            well_values[well_label] = well_label
+        
+        return well_values
+
+    def parse_metadata(self, plate_path: Union[str, Path, int]) -> Dict[str, Dict[str, Optional[str]]]:
+        """
+        Parse all metadata for OMERO plate.
+        
+        OMERO doesn't use metadata files - it queries OMERO API directly.
+        This implementation returns metadata for all components that OMERO supports.
+        
+        Returns empty dict if plate not found (allows retry during initialization).
+        """
+        # Use the base class's parse_metadata method which dynamically
+        # calls the appropriate get_*_values methods
+        return super().parse_metadata(plate_path)
 
     def get_grid_dimensions(self, plate_path: Union[str, Path, int]) -> Tuple[int, int]:
         """
@@ -204,6 +236,7 @@ class OMEROMetadataHandler(MetadataHandler):
 
             # Try to get grid dimensions from MapAnnotation
             for ann in plate.listAnnotations():
+                import omero.model  # Lazy import - only needed when OMERO is actually used
                 if ann.OMERO_TYPE == omero.model.MapAnnotationI:
                     if ann.getNs() == "openhcs.metadata":
                         # Parse key-value pairs

@@ -11,7 +11,7 @@ import os
 from typing import List, Optional
 
 # Import OpenHCS decorator
-from openhcs.core.memory.decorators import pyclesperanto as pyclesperanto_func
+from openhcs.core.memory import pyclesperanto as pyclesperanto_func
 
 # Set up logging
 logger = logging.getLogger(__name__)

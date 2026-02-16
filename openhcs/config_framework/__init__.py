@@ -1,186 +1,73 @@
 """
-Generic configuration framework for lazy dataclass resolution.
+Compatibility shim for the config framework now provided by the `objectstate` package.
 
-This framework provides a complete system for hierarchical configuration management
-with lazy resolution, dual-axis inheritance, and UI integration.
-
-Key Features:
-- Lazy dataclass factory with dynamic field resolution
-- Dual-axis inheritance (context hierarchy + sibling inheritance)
-- Contextvars-based context management
-- Placeholder text generation for UI
-- Thread-local global configuration storage
-
-Quick Start:
-    >>> from openhcs.config_framework import (
-    ...     set_base_config_type,
-    ...     LazyDataclassFactory,
-    ...     config_context,
-    ... )
-    >>> from myapp.config import GlobalConfig
-    >>> 
-    >>> # Initialize framework
-    >>> set_base_config_type(GlobalConfig)
-    >>> 
-    >>> # Create lazy dataclass
-    >>> LazyStepConfig = LazyDataclassFactory.make_lazy_simple(StepConfig)
-    >>> 
-    >>> # Use with context
-    >>> with config_context(pipeline_config):
-    ...     step = LazyStepConfig()
-    ...     # Fields resolve from pipeline_config context
-
-Architecture:
-    The framework uses a dual-axis resolution system:
-    
-    X-Axis (Context Hierarchy):
-        Step context → Pipeline context → Global context → Static defaults
-    
-    Y-Axis (Sibling Inheritance):
-        Fields within the same context inherit from sibling dataclasses
-    
-    This enables sophisticated configuration patterns where fields can inherit
-    from both parent contexts and sibling configurations.
-
-Modules:
-    - lazy_factory: Lazy dataclass factory and decorator system
-    - dual_axis_resolver: Dual-axis inheritance resolver
-    - context_manager: Contextvars-based context management
-    - placeholder: Placeholder text generation for UI
-    - global_config: Thread-local global configuration storage
-    - config: Framework configuration (pluggable types and behaviors)
+This keeps imports like `import openhcs.config_framework.parametric_axes` working
+while the actual implementation lives in the external ObjectState dependency.
 """
 
-# Factory
-from openhcs.config_framework.lazy_factory import (
-    LazyDataclassFactory,
-    auto_create_decorator,
-    register_lazy_type_mapping,
-    get_base_type_for_lazy,
-    get_lazy_type_for_base,
-    ensure_global_config_context,
-    # Global config type checking
-    GlobalConfigBase,
-    GlobalConfigMeta,
-    is_global_config_type,
-    is_global_config_instance,
-    # Raw-value-preserving utilities
-    replace_raw,
-)
+from __future__ import annotations
 
-# Resolver
-from openhcs.config_framework.dual_axis_resolver import (
-    resolve_field_inheritance,
-    _has_concrete_field_override,
-)
+import importlib
+import pkgutil
+import logging
+from pathlib import Path
+import sys
+from types import ModuleType
+from typing import Dict, Any
 
-# Context
-from openhcs.config_framework.context_manager import (
-    config_context,
-    get_current_temp_global,
-    set_current_temp_global,
-    clear_current_temp_global,
-    merge_configs,
-    extract_all_configs,
-    get_base_global_config,
-    # Context hierarchy utilities
-    get_context_type_stack,
-    get_normalized_stack,
-    get_types_before_in_stack,
-    is_ancestor_in_context,
-    is_same_type_in_context,
-    # Hierarchy registry (populated by form managers)
-    register_hierarchy_relationship,
-    unregister_hierarchy_relationship,
-    get_ancestors_from_hierarchy,
-    # Scope key utilities
-    get_root_from_scope_key,
-    is_scope_affected,
-    # Context stack building (framework-agnostic)
-    build_context_stack,
-)
 
-# Placeholder
-from openhcs.config_framework.placeholder import LazyDefaultPlaceholderService
+logger = logging.getLogger(__name__)
 
-# Global config
-from openhcs.config_framework.global_config import (
-    set_current_global_config,
-    get_current_global_config,
-    set_global_config_for_editing,
-    set_saved_global_config,
-    set_live_global_config,
-    get_saved_global_config,
-    get_live_global_config,
-)
 
-# Configuration
-from openhcs.config_framework.config import (
-    set_base_config_type,
-    get_base_config_type,
-)
+def _import_objectstate() -> ModuleType:
+    """Import objectstate and register it under the openhcs.config_framework namespace."""
+    # Prefer the vendored ObjectState source tree (repo checkout) over any installed
+    # site-packages version.
+    #
+    # This project vendors ObjectState under `external/ObjectState/src`. If we don't
+    # put that on sys.path first, Python will import the globally installed
+    # `objectstate` package (e.g., from site-packages), and fixes made to the vendored
+    # code won't be used by the running app.
+    repo_root = Path(__file__).resolve().parents[2]
+    vendored_src = repo_root / "external" / "ObjectState" / "src"
+    if vendored_src.exists():
+        vendored_str = str(vendored_src)
+        if vendored_str not in sys.path:
+            sys.path.insert(0, vendored_str)
 
-# Cache warming
-from openhcs.config_framework.cache_warming import (
-    prewarm_config_analysis_cache,
-    prewarm_callable_analysis_cache,
-)
+    base_mod = importlib.import_module("objectstate")
 
-# Live context resolver
-from openhcs.config_framework.live_context_resolver import LiveContextResolver
+    # Diagnostic: record which ObjectState implementation is actually in use.
+    # This is critical when debugging behavior differences between vendored vs
+    # site-packages installs.
+    try:
+        logger.info(f"[ObjectState] Using objectstate from: {getattr(base_mod, '__file__', '<unknown>')}")
+    except Exception:
+        pass
 
-# Token cache
-from openhcs.config_framework.token_cache import TokenCache, SingleValueTokenCache, CacheKey
+    # Alias base module for backward compatibility
+    sys.modules[__name__] = base_mod
 
-__all__ = [
-    # Factory
-    'LazyDataclassFactory',
-    'auto_create_decorator',
-    'register_lazy_type_mapping',
-    'get_base_type_for_lazy',
-    'get_lazy_type_for_base',
-    'ensure_global_config_context',
-    # Global config type checking
-    'GlobalConfigBase',
-    'GlobalConfigMeta',
-    'is_global_config_type',
-    'is_global_config_instance',
-    # Resolver
-    'resolve_field_inheritance',
-    '_has_concrete_field_override',
-    # Context
-    'config_context',
-    'get_current_temp_global',
-    'set_current_temp_global',
-    'clear_current_temp_global',
-    'merge_configs',
-    'extract_all_configs',
-    'get_base_global_config',
-    'get_context_type_stack',
-    'get_root_from_scope_key',
-    'is_scope_affected',
-    'build_context_stack',
-    # Placeholder
-    'LazyDefaultPlaceholderService',
-    # Global config
-    'set_current_global_config',
-    'get_current_global_config',
-    'set_global_config_for_editing',
-    # Configuration
-    'set_base_config_type',
-    'get_base_config_type',
-    # Cache warming
-    'prewarm_config_analysis_cache',
-    'prewarm_callable_analysis_cache',
-    # Live context resolver
-    'LiveContextResolver',
-    # Token cache
-    'TokenCache',
-    'SingleValueTokenCache',
-    'CacheKey',
-]
+    # Mirror submodules so openhcs.config_framework.* resolves
+    if hasattr(base_mod, "__path__"):
+        for submod_info in pkgutil.iter_modules(base_mod.__path__):
+            full_name = f"objectstate.{submod_info.name}"
+            alias_name = f"{__name__}.{submod_info.name}"
+            try:
+                submod = importlib.import_module(full_name)
+                sys.modules[alias_name] = submod
+            except ModuleNotFoundError:
+                # If optional submodule is missing, skip registration
+                continue
 
-__version__ = '1.0.0'
-__author__ = 'OpenHCS Team'
-__description__ = 'Generic configuration framework for lazy dataclass resolution'
+    return base_mod
 
+
+_objectstate_module = _import_objectstate()
+
+# Re-export attributes for star-import compatibility
+_export_candidates: Dict[str, Any] = {
+    k: v for k, v in vars(_objectstate_module).items() if not k.startswith("_")
+}
+globals().update(_export_candidates)
+__all__ = list(_export_candidates.keys())

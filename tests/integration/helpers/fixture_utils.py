@@ -22,7 +22,7 @@ from openhcs.core.pipeline import Pipeline
 # from openhcs.backends.position_generator.ashlar_backend import AshlarPositionGeneratorBackend as IP
 from openhcs.tests.generators.generate_synthetic_data import SyntheticMicroscopyGenerator
 # from openhcs.core.utils import stack
-from openhcs.io.filemanager import FileManager
+from polystore.filemanager import FileManager
 # Using a simple list for image extensions
 DEFAULT_IMAGE_EXTENSIONS = ['.tif', '.tiff', '.png', '.jpg', '.jpeg']
 # from ezstitcher.io.virtual_path.factory import VirtualPathFactory

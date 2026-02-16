@@ -57,7 +57,7 @@ Basic Usage
 .. code-block:: python
 
    from openhcs.runtime.omero_instance_manager import OMEROInstanceManager
-   from openhcs.io.omero_local import OMEROLocalBackend
+   from polystore.omero_local import OMEROLocalBackend
    from openhcs.core.orchestrator import PipelineOrchestrator
    
    # Connect to OMERO
@@ -385,6 +385,4 @@ See Also
 --------
 
 - :doc:`../architecture/omero_backend_system` - OMERO backend architecture
-- :doc:`../architecture/zmq_execution_system` - ZMQ execution system
 - `OMERO Documentation <https://docs.openmicroscopy.org/>`_ - Official OMERO docs
-

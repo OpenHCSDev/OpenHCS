@@ -61,6 +61,12 @@ class ProcessingContext:
         self.global_config = global_config # Store the global config
         self.filemanager = None # Expected to be set by Orchestrator via kwargs or direct assignment
 
+        # Execution tracking fields (set at execution time)
+        self.execution_id = None  # Set by worker before execution
+        self.plate_id = None  # Set by worker before execution (same as plate_path)
+        self.worker_slot = None  # Logical worker slot for deterministic ownership
+        self.owned_wells = None  # Full well set owned by this worker slot
+
         # Pipeline-wide sequential processing fields
         self.pipeline_sequential_mode = False
         self.pipeline_sequential_combinations = None  # Precomputed at compile time from metadata
@@ -77,7 +83,7 @@ class ProcessingContext:
 
         All fields are immutable once frozen - no exceptions.
         """
-        if getattr(self, '_is_frozen', False) and name != '_is_frozen':
+        if self._is_frozen and name != '_is_frozen':
             raise AttributeError(f"Cannot modify attribute '{name}' of a frozen ProcessingContext.")
         super().__setattr__(name, value)
 
@@ -171,7 +177,7 @@ class ProcessingContext:
             Dictionary of state to pickle
         """
         from openhcs.constants.constants import Backend
-        from openhcs.io.base import PicklableBackend
+        from polystore.base import PicklableBackend
 
         state = self.__dict__.copy()
 
@@ -229,9 +235,9 @@ class ProcessingContext:
         import importlib
         from pathlib import Path
 
-        from openhcs.io.base import storage_registry as global_storage_registry, ensure_storage_registry
-        from openhcs.io.filemanager import FileManager
-        from openhcs.io.zarr import ZarrStorageBackend
+        from polystore.base import storage_registry as global_storage_registry, ensure_storage_registry
+        from polystore.filemanager import FileManager
+        from polystore.zarr import ZarrStorageBackend
         from openhcs.constants.constants import Backend
 
         logger = logging.getLogger(__name__)
@@ -256,7 +262,7 @@ class ProcessingContext:
         # Recreate virtual_workspace backend if it was registered in main process
         if has_virtual_workspace and plate_path is not None:
             try:
-                from openhcs.io.virtual_workspace import VirtualWorkspaceBackend
+                from polystore.virtual_workspace import VirtualWorkspaceBackend
             except ImportError:
                 logger.debug("VirtualWorkspaceBackend module not available in worker")
             else:

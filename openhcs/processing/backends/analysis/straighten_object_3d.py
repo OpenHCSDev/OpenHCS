@@ -4,7 +4,7 @@ import logging
 from typing import Optional, Tuple, Union
 
 from openhcs.core.utils import optional_import
-from openhcs.core.memory.decorators import torch as torch_func
+from openhcs.core.memory import torch as torch_func
 
 # Import torch modules as optional dependencies
 from openhcs.core.lazy_gpu_imports import torch

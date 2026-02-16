@@ -13,9 +13,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union, Type
 
 from openhcs.constants.constants import Backend, GroupBy, AllComponents
-from openhcs.io.exceptions import MetadataNotFoundError
-from openhcs.io.filemanager import FileManager
-from openhcs.io.metadata_writer import AtomicMetadataWriter, MetadataWriteError, get_metadata_path, METADATA_CONFIG
+from polystore.exceptions import MetadataNotFoundError
+from polystore.filemanager import FileManager
+from polystore.metadata_writer import AtomicMetadataWriter, MetadataWriteError, get_metadata_path, METADATA_CONFIG
 from openhcs.microscopes.microscope_interfaces import MetadataHandler
 logger = logging.getLogger(__name__)
 
@@ -824,8 +824,10 @@ class OpenHCSMicroscopeHandler(MetadataDetectMixin, MicroscopeHandler):
 
         # 2. Prefer virtual_workspace if available (for plates with workspace_mapping)
         if 'virtual_workspace' in available_backends_dict and available_backends_dict['virtual_workspace']:
-            # Register virtual_workspace backend using centralized helper
-            self._register_virtual_workspace_backend(self.plate_folder, filemanager)
+            # PERFORMANCE: Only register if not already registered (avoid reloading mappings)
+            from openhcs.constants.constants import Backend
+            if Backend.VIRTUAL_WORKSPACE.value not in filemanager.registry:
+                self._register_virtual_workspace_backend(self.plate_folder, filemanager)
             return 'virtual_workspace'
 
         # 3. Fall back to first available backend (usually disk)

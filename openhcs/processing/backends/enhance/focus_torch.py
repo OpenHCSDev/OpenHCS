@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Optional
 
 from openhcs.core.utils import optional_import
-from openhcs.core.memory.decorators import torch as torch_decorator
+from openhcs.core.memory import torch as torch_decorator
 
 # Import torch modules as optional dependencies
 from openhcs.core.lazy_gpu_imports import torch

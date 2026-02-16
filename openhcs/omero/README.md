@@ -140,7 +140,7 @@ pytest tests/integration/test_main.py --it-microscopes=OMERO --it-backends=disk 
 
 ```python
 from openhcs.omero import OMEROInstanceManager, OMEROLocalBackend
-from openhcs.io.base import storage_registry
+from polystore.base import storage_registry
 from openhcs.core.orchestrator import Orchestrator
 from openhcs.core.pipeline import Pipeline
 
@@ -332,7 +332,7 @@ export OMERO_WEB_PORT=4080
 
 ```python
 from openhcs.omero import OMEROLocalBackend
-from openhcs.io.base import storage_registry
+from polystore.base import storage_registry
 
 # Register OMERO backend globally
 backend = OMEROLocalBackend(omero_conn=conn)

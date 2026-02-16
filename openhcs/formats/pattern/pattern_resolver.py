@@ -17,8 +17,8 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Protocol, Set, Union
 
-from openhcs.io.filemanager_core import FileManager
-from openhcs.io.storage.backends.base import BasicStorageBackend
+from polystore.filemanager import FileManager
+from polystore.base import StorageBackend
 
 logger = logging.getLogger(__name__)
 
@@ -274,8 +274,8 @@ def get_patterns_for_well(
     # pylint: disable=protected-access
     # Validate backend is properly initialized
     backend_instance = filemanager._get_backend(backend)
-    assert isinstance(backend_instance, BasicStorageBackend), \
-        "Backend must be a BasicStorageBackend instance"
+    assert isinstance(backend_instance, StorageBackend), \
+        "Backend must be a StorageBackend instance"
     # pylint: enable=protected-access
 
     # Get patterns from detector using dynamic filter parameter

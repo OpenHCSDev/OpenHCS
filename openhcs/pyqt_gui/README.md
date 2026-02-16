@@ -88,11 +88,13 @@ openhcs/pyqt_gui/
 │   └── async_service_bridge.py  # Async operation bridge
 ├── widgets/                 # Core widgets
 │   ├── __init__.py
-│   ├── system_monitor.py    # System monitoring widget
 │   ├── plate_manager.py     # Plate management widget
 │   ├── pipeline_editor.py   # Pipeline editing widget
-│   ├── function_pane.py     # Function parameter widget
-│   └── status_bar.py        # Status display widget
+│   ├── image_browser.py     # Image browser widget
+│   ├── step_parameter_editor.py  # Step parameter editor
+│   ├── config_preview_formatters.py  # Config preview helpers
+│   ├── mixins/              # Widget mixins
+│   └── shared/              # Shared widget utilities
 ├── windows/                 # Dialog windows
 │   ├── __init__.py
 │   ├── config_window.py     # Configuration dialog

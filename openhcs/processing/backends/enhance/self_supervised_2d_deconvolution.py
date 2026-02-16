@@ -4,7 +4,7 @@ from typing import Optional, Tuple
 
 # Import torch decorator and optional_import utility
 from openhcs.utils.import_utils import optional_import, create_placeholder_class
-from openhcs.core.memory.decorators import torch as torch_func
+from openhcs.core.memory import torch as torch_func
 from openhcs.core.lazy_gpu_imports import torch
 
 # --- PyTorch Imports as optional dependencies ---

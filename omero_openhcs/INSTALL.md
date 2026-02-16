@@ -2,7 +2,61 @@
 
 ## Quick Start
 
-### 1. Install OMERO.web Plugin
+### 1. Install ZeroC-Ice Dependency
+
+**IMPORTANT**: The `omero-py` package depends on `zeroc-ice`, which is not available on PyPI. The custom `setup.py` automatically downloads and installs zeroc-ice when installing with OMERO extras.
+
+#### Option A: Automatic Installation (Recommended)
+
+```bash
+# Install openhcs with OMERO support - zeroc-ice is installed automatically!
+pip install 'openhcs[omero]'
+```
+
+The custom `setup.py` automatically detects your Python version (3.11 or 3.12) and platform (Windows, Linux, macOS), then downloads and installs appropriate zeroc-ice wheel from Glencoe Software's repository.
+
+**For editable installs (development):**
+```bash
+pip install -e ".[omero]"
+```
+
+#### Option B: Standalone Script
+
+```bash
+# Run standalone installation script
+python scripts/install_omero_deps.py
+
+# Then install openhcs with OMERO support
+pip install 'openhcs[omero]'
+```
+
+#### Option C: Requirements File
+
+```bash
+# Install all OMERO dependencies at once
+pip install -r requirements-omero.txt
+```
+
+This uses `--find-links` to point to Glencoe Software's wheel repository.
+
+#### Option D: Manual Installation
+
+If automatic installation fails:
+
+1. Visit [Glencoe Software's Ice Binaries](https://www.glencoesoftware.com/blog/2023/12/08/ice-binaries-for-omero.html)
+2. Download to appropriate `zeroc_ice-3.7.9-py3-none-any.whl` for your Python version
+3. Install of wheel:
+   ```bash
+   pip install /path/to/zeroc_ice-3.7.9-py3-none-any.whl
+   ```
+4. Then install openhcs with OMERO support:
+   ```bash
+   pip install 'openhcs[omero]'
+   ```
+
+**Note**: OMERO integration is supported on Python 3.11 and 3.12 only.
+
+### 2. Install OMERO.web Plugin
 
 ```bash
 cd omero_openhcs
@@ -26,13 +80,10 @@ omero web restart
 ### 3. Start OpenHCS Execution Server
 
 ```bash
-# From the openhcs repository root
-python -m openhcs.runtime.execution_server \
-    --omero-host localhost \
-    --omero-user root \
-    --omero-password omero-root-password \
-    --omero-data-dir /OMERO/Files \
-    --server-port 7777
+# From openhcs repository root
+python -m openhcs.runtime.zmq_execution_server_launcher \
+    --port 7777 \
+    --persistent
 ```
 
 ### 4. Test the Integration
@@ -89,6 +140,33 @@ python import_test_data.py
 10. **User views results** in OMERO.iviewer
 
 ## Troubleshooting
+
+### ZeroC-Ice Installation Issues
+
+**Problem**: `pip install 'openhcs[omero]'` fails with "No matching distribution found for zeroc-ice"
+
+**Solution**: Install zeroc-ice manually before installing openhcs:
+
+```bash
+# Option 1: Use automatic script
+python scripts/install_omero_deps.py
+
+# Option 2: Use requirements file
+pip install -r requirements-omero.txt
+
+# Option 3: Manual download and install
+# Visit: https://www.glencoesoftware.com/blog/2023/12/08/ice-binaries-for-omero.html
+# Download wheel for your Python version
+pip install /path/to/zeroc_ice-3.7.9-py3-none-any.whl
+```
+
+**Problem**: Installation script fails with "Unsupported Python version"
+
+**Solution**: OMERO integration requires Python 3.11 or 3.12. Use a supported Python version or build zeroc-ice from source.
+
+**Problem**: Download fails with network error
+
+**Solution**: Try manual installation by downloading wheel file directly from Glencoe Software's website.
 
 ### Plugin doesn't appear in right panel
 
@@ -175,4 +253,3 @@ print(response)
 - Add result visualization in browser
 - Add pipeline history/favorites
 - Add batch processing (multiple plates)
-

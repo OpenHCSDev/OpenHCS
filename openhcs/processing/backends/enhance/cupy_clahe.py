@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from openhcs.core.memory.decorators import cupy as cupy_func
+from openhcs.core.memory import cupy as cupy_func
 from openhcs.core.utils import optional_import
 
 # Import CuPy as an optional dependency

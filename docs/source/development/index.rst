@@ -35,6 +35,8 @@ Practical guides for specific development tasks.
    scope_hierarchy_live_context
    lazy_dataclass_utils
    pyclesperanto_simple_implementation
+   window_manager_usage
+   compact_window_patterns
 
 Testing and CI
 ==============

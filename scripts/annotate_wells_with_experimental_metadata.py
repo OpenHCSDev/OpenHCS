@@ -24,7 +24,7 @@ from typing import Dict, List, Tuple, Optional
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from openhcs.formats.experimental_analysis import read_plate_layout, load_plate_groups
-from openhcs.io.metadata_writer import AtomicMetadataWriter, get_metadata_path
+from polystore.metadata_writer import AtomicMetadataWriter, get_metadata_path
 
 
 def convert_standard_to_opera_phenix_well_id(well_id: str) -> str:
@@ -209,7 +209,7 @@ def update_metadata_with_annotations(
         metadata_path: Path to openhcs_metadata.json
         well_annotations: Dict mapping well_name -> annotation_string (in standard format like B03)
     """
-    from openhcs.io.atomic import atomic_update_json
+    from polystore.atomic import atomic_update_json
 
     # Detect microscope format
     microscope_format = detect_microscope_format(metadata_path)
@@ -360,4 +360,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

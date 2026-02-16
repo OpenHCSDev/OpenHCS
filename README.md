@@ -183,6 +183,59 @@ pip install openhcs[gpu]
 pip install openhcs[omero]
 ```
 
+### OMERO Integration
+
+The OMERO integration requires the `zeroc-ice` dependency, which is not available on PyPI. The custom `setup.py` automatically downloads and installs zeroc-ice when installing with OMERO extras.
+
+#### Automatic Installation (Recommended)
+
+```bash
+# Install openhcs with OMERO support - zeroc-ice is installed automatically!
+pip install 'openhcs[omero]'
+```
+
+The custom `setup.py` automatically detects your Python version (3.11 or 3.12) and platform (Windows, Linux, macOS), then downloads and installs the appropriate zeroc-ice wheel from Glencoe Software's repository.
+
+**For editable installs (development):**
+```bash
+pip install -e ".[omero]"
+```
+
+#### Alternative Installation Methods
+
+If automatic installation fails, you can use one of these alternatives:
+
+**Option 1: Standalone Script**
+```bash
+# Install zeroc-ice using the standalone script
+python scripts/install_omero_deps.py
+
+# Then install openhcs with OMERO support
+pip install 'openhcs[omero]'
+```
+
+**Option 2: Requirements File**
+```bash
+# Install all OMERO dependencies at once
+pip install -r requirements-omero.txt
+```
+
+This uses `--find-links` to point to Glencoe Software's wheel repository.
+
+**Option 3: Manual Installation**
+1. Visit [Glencoe Software's Ice Binaries](https://www.glencoesoftware.com/blog/2023/12/08/ice-binaries-for-omero.html)
+2. Download the appropriate `zeroc_ice-3.7.9-py3-none-any.whl` for your Python version
+3. Install the wheel:
+   ```bash
+   pip install /path/to/zeroc_ice-3.7.9-py3-none-any.whl
+   ```
+4. Then install openhcs with OMERO support:
+   ```bash
+   pip install 'openhcs[omero]'
+   ```
+
+**Note**: OMERO integration is supported on Python 3.11 and 3.12 only.
+
 **Optional Advanced Features**:
 ```bash
 # GPU-accelerated Viterbi decoding for neurite tracing

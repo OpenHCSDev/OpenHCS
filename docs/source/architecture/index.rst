@@ -22,6 +22,7 @@ Fundamental systems that define OpenHCS architecture.
    custom_function_registration_system
    pipeline_compilation_system
    special_io_system
+   pattern_grouping_and_special_outputs
    roi_system
    analysis_consolidation_system
    experimental_analysis_system
@@ -52,10 +53,7 @@ File management, memory types, and backend systems.
    storage_and_memory_system
    memory_type_system
    napari_streaming_system
-   viewer_streaming_architecture
-   image_acknowledgment_system
    omero_backend_system
-   zmq_execution_system
 
 External Integrations
 =====================
@@ -66,6 +64,7 @@ Integration with external tools and platforms (Napari, OMERO, Fiji).
    :maxdepth: 1
 
    external_integrations_overview
+   streaming_boundary_and_wrappers
    napari_integration_architecture
    omero_backend_system
    fiji_streaming_system
@@ -120,7 +119,7 @@ Dynamic code generation and parser systems.
    pattern_detection_system
 
 User Interface Systems
-======================
+=====================
 
 TUI architecture, UI development patterns, and form management systems.
 
@@ -130,20 +129,25 @@ TUI architecture, UI development patterns, and form management systems.
    tui_system
    widget_protocol_system
    abstract_manager_widget
+   abstract_table_browser
    list_item_preview_system
+   flash_animation_system
+   scope_visual_feedback_system
    plate_manager_services
+   batch_workflow_service
+   progress_runtime_projection_system
+   zmq_server_browser_system
    parameter_form_lifecycle
    parameter_form_service_architecture
    ui_services_architecture
    field_change_dispatcher
-   live_context_service
    parametric_widget_creation
-   compilation_service
-   zmq_execution_service_extracted
    code_ui_interconversion
    service-layer-architecture
    gui_performance_patterns
    cross_window_update_optimization
+   scope_window_factory_system
+   service_registry_integration
 
 Development Tools
 =================
@@ -162,13 +166,13 @@ Quick Start Paths
 
 **Configuration Systems?** Focus on :doc:`dynamic_dataclass_factory` → :doc:`context_system` → :doc:`orchestrator_configuration_management`
 
-**Real-Time Visualization?** Begin with :doc:`napari_integration_architecture` → :doc:`napari_streaming_system` → :doc:`viewer_streaming_architecture` → :doc:`roi_system` → :doc:`storage_and_memory_system`
+**Real-Time Visualization?** Begin with :doc:`napari_integration_architecture` → :doc:`napari_streaming_system` → :doc:`roi_system` → :doc:`storage_and_memory_system`
 
-**OMERO Integration?** Start with :doc:`omero_backend_system` → :doc:`zmq_execution_system` → :doc:`storage_and_memory_system`
+**OMERO Integration?** Start with :doc:`omero_backend_system` → :doc:`storage_and_memory_system`
 
 **External Integrations?** Start with :doc:`external_integrations_overview` → :doc:`napari_integration_architecture` → :doc:`fiji_streaming_system` → :doc:`omero_backend_system`
 
-**UI Development?** Start with :doc:`widget_protocol_system` → :doc:`abstract_manager_widget` → :doc:`parametric_widget_creation` → :doc:`live_context_service` → :doc:`field_change_dispatcher` → :doc:`ui_services_architecture` → :doc:`compilation_service` → :doc:`tui_system`
+**UI Development?** Start with :doc:`widget_protocol_system` → :doc:`abstract_manager_widget` → :doc:`parametric_widget_creation` → :doc:`field_change_dispatcher` → :doc:`ui_services_architecture` → :doc:`batch_workflow_service` → :doc:`zmq_server_browser_system` → :doc:`tui_system`
 
 **System Integration?** Jump to :doc:`system_integration` → :doc:`special_io_system` → :doc:`microscope_handler_integration`
 

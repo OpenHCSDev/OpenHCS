@@ -67,7 +67,7 @@ def get_template_for_memory_type(memory_type: str) -> str:
 
 # Template constants with proper typing and documentation
 
-NUMPY_TEMPLATE = """from openhcs.core.memory.decorators import numpy
+NUMPY_TEMPLATE = """from openhcs.core.memory import numpy
 import numpy as np
 
 # =============================================================================
@@ -80,7 +80,7 @@ import numpy as np
 #   @jax           - JAX arrays (CPU/GPU/TPU)
 #   @pyclesperanto - GPU via OpenCL (AMD/NVIDIA/Intel)
 #
-# Import: from openhcs.core.memory.decorators import numpy, cupy, torch, ...
+# Import: from openhcs.core.memory import numpy, cupy, torch, ...
 # =============================================================================
 
 @numpy
@@ -107,15 +107,15 @@ def my_custom_function(image, scale: float = 1.0, offset: float = 0.0):
 # 1. Import the decorators and materializers:
 #
 #    from openhcs.core.pipeline.function_contracts import special_outputs
-#    from openhcs.processing.materialization import csv_materializer
+#    from openhcs.processing.materialization import MaterializationSpec, CsvOptions, JsonOptions
 #
 # 2. Declare outputs with @special_outputs:
 #
 #    @numpy
-#    @special_outputs(("measurements", csv_materializer(
+#    @special_outputs(("measurements", MaterializationSpec(CsvOptions(
 #        fields=["slice_index", "mean", "std"],
 #        analysis_type="intensity_stats"
-#    )))
+#    ))))
 #    def analyze_intensity(image, threshold: float = 0.5):
 #        results = []
 #        for i, slice_data in enumerate(image):
@@ -128,15 +128,15 @@ def my_custom_function(image, scale: float = 1.0, offset: float = 0.0):
 #
 # 3. Available materializers:
 #
-#    csv_materializer(fields=[...], analysis_type="...")  - CSV file
-#    json_materializer(fields=[...], analysis_type="...")  - JSON file
-#    dual_materializer(fields=[...], summary_fields=[...]) - Both CSV + JSON
+#    MaterializationSpec(CsvOptions(...))  - CSV file
+#    MaterializationSpec(JsonOptions(...))  - JSON file
+#    MaterializationSpec(JsonOptions(...), CsvOptions(...), primary=0) - Both JSON + CSV
 #
 # =============================================================================
 """
 
 
-CUPY_TEMPLATE = """from openhcs.core.memory.decorators import cupy
+CUPY_TEMPLATE = """from openhcs.core.memory import cupy
 import cupy as cp
 
 @cupy
@@ -167,7 +167,7 @@ def my_custom_function(image, sigma: float = 1.0):
 """
 
 
-TORCH_TEMPLATE = """from openhcs.core.memory.decorators import torch
+TORCH_TEMPLATE = """from openhcs.core.memory import torch
 import torch
 
 @torch
@@ -206,7 +206,7 @@ def my_custom_function(image, kernel_size: int = 3):
 """
 
 
-TENSORFLOW_TEMPLATE = """from openhcs.core.memory.decorators import tensorflow
+TENSORFLOW_TEMPLATE = """from openhcs.core.memory import tensorflow
 import tensorflow as tf
 
 @tensorflow
@@ -236,7 +236,7 @@ def my_custom_function(image, strength: float = 0.5):
 """
 
 
-JAX_TEMPLATE = """from openhcs.core.memory.decorators import jax
+JAX_TEMPLATE = """from openhcs.core.memory import jax
 import jax.numpy as jnp
 
 @jax
@@ -275,7 +275,7 @@ def my_custom_function(image, power: float = 2.0):
 """
 
 
-PYCLESPERANTO_TEMPLATE = """from openhcs.core.memory.decorators import pyclesperanto
+PYCLESPERANTO_TEMPLATE = """from openhcs.core.memory import pyclesperanto
 import pyclesperanto_prototype as cle
 
 @pyclesperanto
@@ -309,9 +309,9 @@ def my_custom_function(image, radius: float = 2.0):
 # ANALYSIS TEMPLATES - For functions that produce structured analysis outputs
 # =============================================================================
 
-NUMPY_ANALYSIS_TEMPLATE = """from openhcs.core.memory.decorators import numpy
+NUMPY_ANALYSIS_TEMPLATE = """from openhcs.core.memory import numpy
 from openhcs.core.pipeline.function_contracts import special_outputs
-from openhcs.processing.materialization import csv_materializer
+from openhcs.processing.materialization import CsvOptions, MaterializationSpec
 from dataclasses import dataclass
 from typing import List, Tuple
 import numpy as np
@@ -326,10 +326,10 @@ class AnalysisResult:
 
 
 @numpy
-@special_outputs(("analysis_results", csv_materializer(
+@special_outputs(("analysis_results", MaterializationSpec(CsvOptions(
     fields=["slice_index", "measurement", "count"],
-    analysis_type="slice_analysis"
-)))
+    filename_suffix=".csv"
+))))
 def my_analysis_function(image, threshold: float = 0.5) -> Tuple[np.ndarray, List[AnalysisResult]]:
     \"\"\"
     Analysis function that produces both processed image AND structured results.
@@ -345,7 +345,7 @@ def my_analysis_function(image, threshold: float = 0.5) -> Tuple[np.ndarray, Lis
 
     Notes:
         - @special_outputs declares that this function produces analysis data
-        - The csv_materializer auto-converts AnalysisResult fields to CSV columns
+        - CsvOptions auto-converts AnalysisResult fields to CSV columns
         - Return is ALWAYS a tuple: (image, special_output_1, special_output_2, ...)
     \"\"\"
     results = []
@@ -370,9 +370,9 @@ def my_analysis_function(image, threshold: float = 0.5) -> Tuple[np.ndarray, Lis
 """
 
 
-NUMPY_DUAL_OUTPUT_TEMPLATE = """from openhcs.core.memory.decorators import numpy
+NUMPY_DUAL_OUTPUT_TEMPLATE = """from openhcs.core.memory import numpy
 from openhcs.core.pipeline.function_contracts import special_outputs
-from openhcs.processing.materialization import csv_materializer, dual_materializer
+from openhcs.processing.materialization import CsvOptions, JsonOptions, MaterializationSpec
 from dataclasses import dataclass
 from typing import List, Tuple, Dict, Any
 import numpy as np
@@ -388,7 +388,7 @@ class CellMeasurement:
     intensity: float
 
 
-@dataclass  
+@dataclass
 class SliceSummary:
     \"\"\"Per-slice summary statistics.\"\"\"
     slice_index: int
@@ -399,14 +399,11 @@ class SliceSummary:
 
 @numpy
 @special_outputs(
-    ("cell_measurements", csv_materializer(
-        filename_suffix="_cells.csv",
-        analysis_type="cell_measurements"
-    )),
-    ("slice_summaries", dual_materializer(
-        summary_fields=["slice_index", "cell_count"],
-        fields=["slice_index", "cell_count", "total_area", "mean_intensity"],
-        analysis_type="slice_summaries"
+    ("cell_measurements", MaterializationSpec(CsvOptions(filename_suffix="_cells.csv"))),
+    ("slice_summaries", MaterializationSpec(
+        JsonOptions(filename_suffix=".json", wrap_list=True),
+        CsvOptions(filename_suffix="_details.csv"),
+        primary=0,
     ))
 )
 def analyze_cells(

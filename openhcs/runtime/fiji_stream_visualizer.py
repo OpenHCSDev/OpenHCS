@@ -8,14 +8,31 @@ Follows same architecture as NapariStreamVisualizer.
 
 import logging
 import multiprocessing
+import pickle
 import subprocess
 import threading
 import time
 from typing import Optional
 from pathlib import Path
 
-from openhcs.io.filemanager import FileManager
-from openhcs.core.config import TransportMode, FijiStreamingConfig
+import zmq
+
+from polystore.filemanager import FileManager
+from polystore.backend_registry import register_cleanup_callback
+from openhcs.core.config import (
+    TransportMode as OpenHCSTransportMode,
+    FijiStreamingConfig,
+)
+from openhcs.runtime.zmq_config import OPENHCS_ZMQ_CONFIG
+from zmqruntime.config import TransportMode as ZMQTransportMode
+from zmqruntime.streaming import VisualizerProcessManager
+from zmqruntime.transport import (
+    coerce_transport_mode,
+    get_control_url,
+    is_port_in_use,
+    ping_control_port,
+    wait_for_server_ready,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -42,11 +59,14 @@ def _cleanup_global_fiji_viewer() -> None:
             _global_fiji_process = None
 
 
+register_cleanup_callback(_cleanup_global_fiji_viewer)
+
+
 def _spawn_detached_fiji_process(
     port: int,
     viewer_title: str,
     display_config,
-    transport_mode: TransportMode = TransportMode.IPC,
+    transport_mode: OpenHCSTransportMode = OpenHCSTransportMode.IPC,
 ) -> subprocess.Popen:
     """
     Spawn a completely detached Fiji viewer process that survives parent termination.
@@ -81,8 +101,9 @@ sys.path.insert(0, {repr(current_dir)})
 try:
     from openhcs.runtime.fiji_viewer_server import _fiji_viewer_server_process
     from openhcs.core.config import TransportMode
+    from openhcs.runtime.zmq_config import OPENHCS_ZMQ_CONFIG
     transport_mode = TransportMode.{transport_mode.name}
-    _fiji_viewer_server_process({port}, {repr(viewer_title)}, None, {repr(current_dir + "/.fiji_log_path_placeholder")}, transport_mode)
+    _fiji_viewer_server_process({port}, {repr(viewer_title)}, None, {repr(current_dir + "/.fiji_log_path_placeholder")}, transport_mode, OPENHCS_ZMQ_CONFIG)
 except Exception as e:
     import logging
     logger = logging.getLogger("openhcs.runtime.fiji_detached")
@@ -102,6 +123,12 @@ except Exception as e:
         python_code = python_code.replace(
             repr(current_dir + "/.fiji_log_path_placeholder"), repr(log_file)
         )
+        # Remove incidental indentation and leading/trailing whitespace from the
+        # embedded snippet so it runs with the expected top-level indentation when
+        # passed to `python -c`.
+        import textwrap
+
+        python_code = textwrap.dedent(python_code).strip()
 
         # Use subprocess.Popen with detachment flags
         if sys.platform == "win32":
@@ -145,11 +172,10 @@ except Exception as e:
         raise
 
 
-class FijiStreamVisualizer:
+class FijiStreamVisualizer(VisualizerProcessManager):
     """
     Manages Fiji viewer instance for real-time visualization via ZMQ.
 
-    Uses FijiViewerServer (inherits from ZMQServer) for PyImageJ-based display.
     Follows same architecture as NapariStreamVisualizer.
     """
 
@@ -161,7 +187,7 @@ class FijiStreamVisualizer:
         persistent: bool = True,
         port: int = None,
         display_config=None,
-        transport_mode: TransportMode = TransportMode.IPC,
+        transport_mode: OpenHCSTransportMode = OpenHCSTransportMode.IPC,
     ):
         self.filemanager = filemanager
         self.viewer_title = viewer_title
@@ -173,8 +199,11 @@ class FijiStreamVisualizer:
             if port is not None
             else FijiStreamingConfig.__dataclass_fields__["port"].default
         )
+        super().__init__(port=self.port)
         self.display_config = display_config
-        self.transport_mode = transport_mode  # ZMQ transport mode (IPC or TCP)
+        self.transport_mode = (
+            coerce_transport_mode(transport_mode) or ZMQTransportMode.IPC
+        )  # ZMQ transport mode (IPC or TCP)
         self.process: Optional[multiprocessing.Process] = None
         self._is_running = False
         self._connected_to_existing = False
@@ -230,27 +259,14 @@ class FijiStreamVisualizer:
 
     def _quick_ping_check(self) -> bool:
         """Quick ping check to verify viewer is responsive (for connected viewers)."""
-        import zmq
-        import pickle
-        from openhcs.runtime.zmq_base import get_zmq_transport_url
-        from openhcs.constants.constants import CONTROL_PORT_OFFSET
-
-        try:
-            ctx = zmq.Context()
-            sock = ctx.socket(zmq.REQ)
-            sock.setsockopt(zmq.LINGER, 0)
-            sock.setsockopt(zmq.RCVTIMEO, 200)  # 200ms timeout for quick check
-            control_url = get_zmq_transport_url(
-                self.port + CONTROL_PORT_OFFSET, self.transport_mode, "localhost"
-            )
-            sock.connect(control_url)
-            sock.send(pickle.dumps({"type": "ping"}))
-            response = pickle.loads(sock.recv())
-            sock.close()
-            ctx.term()
-            return response.get("type") == "pong"
-        except:
-            return False
+        return ping_control_port(
+            self.port,
+            self.transport_mode,
+            host="localhost",
+            config=OPENHCS_ZMQ_CONFIG,
+            timeout_ms=200,
+            require_ready=False,
+        )
 
     def wait_for_ready(self, timeout: float = 10.0) -> bool:
         """
@@ -273,7 +289,9 @@ class FijiStreamVisualizer:
 
         with self._lock:
             # Check if there's already a viewer running on the configured port
-            if self._is_port_in_use(self.port):
+            if is_port_in_use(
+                self.port, self.transport_mode, config=OPENHCS_ZMQ_CONFIG
+            ):
                 # Try to connect to existing viewer first
                 logger.info(
                     f"🔬 FIJI VISUALIZER: Port {self.port} is in use, attempting to connect to existing viewer..."
@@ -290,7 +308,7 @@ class FijiStreamVisualizer:
                     logger.info(
                         f"🔬 FIJI VISUALIZER: Existing viewer on port {self.port} is unresponsive, killing and restarting..."
                     )
-                    from openhcs.runtime.zmq_base import ZMQServer
+                    from zmqruntime.server import ZMQServer
 
                     ZMQServer.kill_processes_on_port(self.port)
                     ZMQServer.kill_processes_on_port(self.port + 1000)
@@ -348,94 +366,33 @@ class FijiStreamVisualizer:
                         "🔬 FIJI VISUALIZER: Fiji viewer server failed to become ready"
                     )
 
-    def _is_port_in_use(self, port: int) -> bool:
-        """Check if a port/socket is in use (handles both IPC and TCP modes)."""
-        from openhcs.runtime.zmq_base import _get_ipc_socket_path
-
-        if self.transport_mode == TransportMode.IPC:
-            # IPC mode - check if socket file exists
-            socket_path = _get_ipc_socket_path(port)
-            return socket_path.exists() if socket_path else False
-        else:
-            # TCP mode - check if port is bound
-            import socket
-
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(0.1)
-            try:
-                sock.bind(("localhost", port))
-                sock.close()
-                return False
-            except OSError:
-                sock.close()
-                return True
-
     def _try_connect_to_existing_viewer(self) -> bool:
         """Try to connect to an existing Fiji viewer and verify it's responsive."""
-        import zmq
-        import pickle
-        from openhcs.runtime.zmq_base import get_zmq_transport_url
-        from openhcs.constants.constants import CONTROL_PORT_OFFSET
-
-        try:
-            ctx = zmq.Context()
-            sock = ctx.socket(zmq.REQ)
-            sock.setsockopt(zmq.LINGER, 0)
-            sock.setsockopt(zmq.RCVTIMEO, 500)  # 500ms timeout
-            control_url = get_zmq_transport_url(
-                self.port + CONTROL_PORT_OFFSET, self.transport_mode, "localhost"
-            )
-            sock.connect(control_url)
-
-            # Send ping
-            sock.send(pickle.dumps({"type": "ping"}))
-            response = pickle.loads(sock.recv())
-
-            sock.close()
-            ctx.term()
-
-            return response.get("type") == "pong" and response.get("ready")
-        except:
-            return False
+        return ping_control_port(
+            self.port,
+            self.transport_mode,
+            host="localhost",
+            config=OPENHCS_ZMQ_CONFIG,
+            timeout_ms=500,
+            require_ready=True,
+        )
 
     def _wait_for_server_ready(self, timeout: float = 10.0) -> bool:
         """Wait for Fiji server to be ready via ping/pong."""
-        import zmq
-        import pickle
-        from openhcs.runtime.zmq_base import get_zmq_transport_url
-        from openhcs.constants.constants import CONTROL_PORT_OFFSET
-
         logger.info(
             f"🔬 FIJI VISUALIZER: Waiting for server on port {self.port} to be ready..."
         )
-
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            try:
-                # Simple ping/pong check
-                ctx = zmq.Context()
-                sock = ctx.socket(zmq.REQ)
-                sock.setsockopt(zmq.LINGER, 0)
-                sock.setsockopt(zmq.RCVTIMEO, 500)  # 500ms timeout
-                control_url = get_zmq_transport_url(
-                    self.port + CONTROL_PORT_OFFSET, self.transport_mode, "localhost"
-                )
-                sock.connect(control_url)
-
-                # Send ping
-                sock.send(pickle.dumps({"type": "ping"}))
-                response = pickle.loads(sock.recv())
-
-                sock.close()
-                ctx.term()
-
-                if response.get("type") == "pong":
-                    logger.info(f"🔬 FIJI VISUALIZER: Server ready on port {self.port}")
-                    return True
-            except Exception as e:
-                logger.debug(f"🔬 FIJI VISUALIZER: Ping failed: {e}")
-
-            time.sleep(0.2)
+        ready = wait_for_server_ready(
+            self.port,
+            self.transport_mode,
+            host="localhost",
+            config=OPENHCS_ZMQ_CONFIG,
+            timeout=timeout,
+            require_ready=True,
+        )
+        if ready:
+            logger.info(f"🔬 FIJI VISUALIZER: Server ready on port {self.port}")
+            return True
 
         logger.warning(
             f"🔬 FIJI VISUALIZER: Timeout waiting for server on port {self.port}"
@@ -459,12 +416,6 @@ class FijiStreamVisualizer:
             )
             return False
 
-        import zmq
-        import pickle
-        from openhcs.runtime.zmq_base import get_zmq_transport_url
-        from openhcs.constants.constants import CONTROL_PORT_OFFSET
-
-        control_port = self.port + CONTROL_PORT_OFFSET
         control_context = None
         control_socket = None
 
@@ -473,8 +424,11 @@ class FijiStreamVisualizer:
             control_socket = control_context.socket(zmq.REQ)
             control_socket.setsockopt(zmq.LINGER, 0)
             control_socket.setsockopt(zmq.RCVTIMEO, int(timeout * 1000))
-            control_url = get_zmq_transport_url(
-                control_port, self.transport_mode, "localhost"
+            control_url = get_control_url(
+                self.port,
+                self.transport_mode,
+                host="localhost",
+                config=OPENHCS_ZMQ_CONFIG,
             )
             control_socket.connect(control_url)
 
@@ -582,3 +536,46 @@ class FijiStreamVisualizer:
     def is_viewer_running(self) -> bool:
         """Check if Fiji viewer process is running."""
         return self.is_running and self.process is not None and self.process.is_alive()
+
+    def get_launch_command(self) -> list[str]:
+        import os
+        import sys
+
+        current_dir = os.getcwd()
+        log_dir = os.path.expanduser("~/.local/share/openhcs/logs")
+        os.makedirs(log_dir, exist_ok=True)
+        log_file = os.path.join(log_dir, f"fiji_detached_port_{self.port}.log")
+
+        python_code = f"""
+import sys
+import os
+sys.path.insert(0, {repr(current_dir)})
+from openhcs.runtime.fiji_viewer_server import _fiji_viewer_server_process
+from openhcs.core.config import TransportMode
+from openhcs.runtime.zmq_config import OPENHCS_ZMQ_CONFIG
+transport_mode = TransportMode.{self.transport_mode.name}
+_fiji_viewer_server_process({self.port}, {repr(self.viewer_title)}, None, {repr(log_file)}, transport_mode, OPENHCS_ZMQ_CONFIG)
+"""
+
+        # Ensure snippet has no incidental indentation
+        import textwrap
+
+        python_code = textwrap.dedent(python_code).strip()
+
+        return [sys.executable, "-c", python_code]
+
+    def get_launch_env(self) -> dict:
+        import os
+
+        env = os.environ.copy()
+        if "QT_QPA_PLATFORM" not in env:
+            env["QT_QPA_PLATFORM"] = "xcb"
+        env["QT_X11_NO_MITSHM"] = "1"
+        return env
+
+    def start(self, detached: bool = True):
+        self.start_viewer(async_mode=False)
+        return self.process
+
+    def stop(self, timeout: float = 5.0):
+        self.stop_viewer()

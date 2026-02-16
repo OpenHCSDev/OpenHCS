@@ -46,6 +46,17 @@ on:
         options:
         - cpu-only
         - full-coverage
+      dependency_source:
+        description: 'Dependency source for external modules'
+        required: true
+        default: 'submodules'
+        type: choice
+        options:
+        - submodules
+        - pypi
+
+env:
+  OPENHCS_CI_DEP_SOURCE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dependency_source || 'submodules' }}
 
 jobs:
   # Group 1: Python version boundary testing (6 jobs)
@@ -53,7 +64,7 @@ jobs:
   # Python 3.14 excluded: no pre-built NumPy wheels yet (builds from source stall on Windows)
   python-boundary-tests:
     runs-on: ${{ matrix.os }}
-    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
@@ -64,11 +75,29 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: ${{ env.OPENHCS_CI_DEP_SOURCE == 'submodules' && 'recursive' || 'false' }}
 
       - name: Setup Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          # ubuntu-latest (23.10+) no longer provides libgl1-mesa-glx; use libgl1.
+          # PyQt6 requires libEGL.so.1 (EGL) and libGL.so.1 (OpenGL).
+          sudo apt-get install -y libgl1
+          sudo apt-get install -y libegl1 || sudo apt-get install -y libegl1-mesa
+          sudo apt-get install -y libxkbcommon-x11-0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-xinerama0 libxcb-xfixes0 xvfb
+
+      - name: Install local external modules (submodule mode)
+        if: env.OPENHCS_CI_DEP_SOURCE == 'submodules'
+        run: |
+          python -m pip install --upgrade pip
+          python -c "import subprocess,sys;mods=['external/ObjectState','external/python-introspect','external/metaclass-registry','external/arraybridge','external/pycodify','external/PolyStore','external/pyqt-reactive','external/zmqruntime'];[subprocess.check_call([sys.executable,'-m','pip','install','-e',m]) for m in mods]"
 
       - name: Install dependencies
         run: |
@@ -87,36 +116,65 @@ jobs:
           path: .coverage
           retention-days: 1
 
-      - name: Show ZMQ server logs on failure
+      - name: Show ZMQ logs on failure
         if: failure()
         shell: bash
         run: |
-          echo "=== ZMQ Server Logs ==="
-          if [ "$RUNNER_OS" == "Windows" ]; then
-            LOG_DIR="$USERPROFILE/.local/share/openhcs/logs"
-          else
-            LOG_DIR="$HOME/.local/share/openhcs/logs"
-          fi
-          if [ -d "$LOG_DIR" ]; then
-            echo "Log directory: $LOG_DIR"
-            ls -la "$LOG_DIR" || dir "$LOG_DIR"
-            echo ""
-            for log in "$LOG_DIR"/openhcs_zmq_server_*.log; do
-              if [ -f "$log" ]; then
-                echo "=== $log ==="
-                cat "$log"
-                echo ""
-              fi
-            done
-          else
-            echo "Log directory not found: $LOG_DIR"
-          fi
+          python - <<'PY'
+          from pathlib import Path
+          import os
+
+          candidates = []
+          home = Path.home()
+          candidates.append(home / ".local" / "share" / "openhcs" / "logs")
+          candidates.append(home / ".local" / "state" / "openhcs" / "logs")
+          xdg_state = os.environ.get("XDG_STATE_HOME")
+          if xdg_state:
+            candidates.append(Path(xdg_state) / "openhcs" / "logs")
+
+          patterns = [
+            "openhcs_zmq_server_*.log",
+            "zmq_worker_exec_*.log",
+            "openhcs_unified_*.log",
+            "openhcs_subprocess_*.log",
+          ]
+
+          seen = set()
+          for log_dir in candidates:
+            if log_dir in seen:
+              continue
+            seen.add(log_dir)
+            if not log_dir.is_dir():
+              continue
+            print(f"=== OpenHCS Logs: {log_dir} ===")
+            for pattern in patterns:
+              for log in sorted(log_dir.glob(pattern)):
+                if log.is_file():
+                  print(f"--- {log} ---")
+                  try:
+                    print(log.read_text())
+                  except Exception as exc:
+                    print(f"[WARN] Failed to read {log}: {exc}")
+            print("")
+
+          if not any(p.is_dir() for p in candidates):
+            print("No OpenHCS log directories found.")
+          PY
+
+      - name: Upload ZMQ logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zmq-logs-python-${{ matrix.python-version }}-${{ matrix.os }}
+          path: |
+            ~/.local/share/openhcs/logs
+            ~/.local/state/openhcs/logs
 
   # Group 2: Backend and microscope coverage (12 jobs)
   # Test all backend/microscope combinations on all 3 OSes with Python 3.12
   backend-microscope-tests:
     runs-on: ${{ matrix.os }}
-    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
@@ -127,11 +185,29 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: ${{ env.OPENHCS_CI_DEP_SOURCE == 'submodules' && 'recursive' || 'false' }}
 
       - name: Setup Python 3.12
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          # ubuntu-latest (23.10+) no longer provides libgl1-mesa-glx; use libgl1.
+          # PyQt6 requires libEGL.so.1 (EGL) and libGL.so.1 (OpenGL).
+          sudo apt-get install -y libgl1
+          sudo apt-get install -y libegl1 || sudo apt-get install -y libegl1-mesa
+          sudo apt-get install -y libxkbcommon-x11-0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-xinerama0 libxcb-xfixes0 xvfb
+
+      - name: Install local external modules (submodule mode)
+        if: env.OPENHCS_CI_DEP_SOURCE == 'submodules'
+        run: |
+          python -m pip install --upgrade pip
+          python -c "import subprocess,sys;mods=['external/ObjectState','external/python-introspect','external/metaclass-registry','external/arraybridge','external/pycodify','external/PolyStore','external/pyqt-reactive','external/zmqruntime'];[subprocess.check_call([sys.executable,'-m','pip','install','-e',m]) for m in mods]"
 
       - name: Install dependencies
         run: |
@@ -150,30 +226,59 @@ jobs:
           path: .coverage
           retention-days: 1
 
-      - name: Show ZMQ server logs on failure
+      - name: Show ZMQ logs on failure
         if: failure()
         shell: bash
         run: |
-          echo "=== ZMQ Server Logs ==="
-          if [ "$RUNNER_OS" == "Windows" ]; then
-            LOG_DIR="$USERPROFILE/.local/share/openhcs/logs"
-          else
-            LOG_DIR="$HOME/.local/share/openhcs/logs"
-          fi
-          if [ -d "$LOG_DIR" ]; then
-            echo "Log directory: $LOG_DIR"
-            ls -la "$LOG_DIR" || dir "$LOG_DIR"
-            echo ""
-            for log in "$LOG_DIR"/openhcs_zmq_server_*.log; do
-              if [ -f "$log" ]; then
-                echo "=== $log ==="
-                cat "$log"
-                echo ""
-              fi
-            done
-          else
-            echo "Log directory not found: $LOG_DIR"
-          fi
+          python - <<'PY'
+          from pathlib import Path
+          import os
+
+          candidates = []
+          home = Path.home()
+          candidates.append(home / ".local" / "share" / "openhcs" / "logs")
+          candidates.append(home / ".local" / "state" / "openhcs" / "logs")
+          xdg_state = os.environ.get("XDG_STATE_HOME")
+          if xdg_state:
+            candidates.append(Path(xdg_state) / "openhcs" / "logs")
+
+          patterns = [
+            "openhcs_zmq_server_*.log",
+            "zmq_worker_exec_*.log",
+            "openhcs_unified_*.log",
+            "openhcs_subprocess_*.log",
+          ]
+
+          seen = set()
+          for log_dir in candidates:
+            if log_dir in seen:
+              continue
+            seen.add(log_dir)
+            if not log_dir.is_dir():
+              continue
+            print(f"=== OpenHCS Logs: {log_dir} ===")
+            for pattern in patterns:
+              for log in sorted(log_dir.glob(pattern)):
+                if log.is_file():
+                  print(f"--- {log} ---")
+                  try:
+                    print(log.read_text())
+                  except Exception as exc:
+                    print(f"[WARN] Failed to read {log}: {exc}")
+            print("")
+
+          if not any(p.is_dir() for p in candidates):
+            print("No OpenHCS log directories found.")
+          PY
+
+      - name: Upload ZMQ logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zmq-logs-${{ matrix.os }}-${{ matrix.backend }}-${{ matrix.microscope }}
+          path: |
+            ~/.local/share/openhcs/logs
+            ~/.local/state/openhcs/logs
 
   # Group 3: OMERO testing on Linux (2 jobs)
   # Test OMERO on Linux with Python 3.11 and 3.12
@@ -181,7 +286,7 @@ jobs:
   # See: https://github.com/glencoesoftware/zeroc-ice-py-linux-x86_64/releases/tag/20240202
   omero-tests-linux:
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
@@ -195,11 +300,28 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: ${{ env.OPENHCS_CI_DEP_SOURCE == 'submodules' && 'recursive' || 'false' }}
 
       - name: Setup Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+
+      - name: Install system dependencies (Linux)
+        run: |
+          sudo apt-get update
+          # ubuntu-latest (23.10+) no longer provides libgl1-mesa-glx; use libgl1.
+          # PyQt6 requires libEGL.so.1 (EGL) and libGL.so.1 (OpenGL).
+          sudo apt-get install -y libgl1
+          sudo apt-get install -y libegl1 || sudo apt-get install -y libegl1-mesa
+          sudo apt-get install -y libxkbcommon-x11-0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-xinerama0 libxcb-xfixes0 xvfb
+
+      - name: Install local external modules (submodule mode)
+        if: env.OPENHCS_CI_DEP_SOURCE == 'submodules'
+        run: |
+          python -m pip install --upgrade pip
+          python -c "import subprocess,sys;mods=['external/ObjectState','external/python-introspect','external/metaclass-registry','external/arraybridge','external/pycodify','external/PolyStore','external/pyqt-reactive','external/zmqruntime'];[subprocess.check_call([sys.executable,'-m','pip','install','-e',m]) for m in mods]"
 
       - name: Install dependencies
         run: |
@@ -241,11 +363,13 @@ jobs:
   # Code quality checks (linting, formatting, type checking)
   code-quality:
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: ${{ env.OPENHCS_CI_DEP_SOURCE == 'submodules' && 'recursive' || 'false' }}
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -275,7 +399,7 @@ jobs:
   # Test PyPI-style installation across Python versions and OSes (6 jobs)
   pypi-installation-test:
     runs-on: ${{ matrix.os }}
-    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
@@ -285,6 +409,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: ${{ env.OPENHCS_CI_DEP_SOURCE == 'submodules' && 'recursive' || 'false' }}
 
       - name: Setup Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
@@ -343,16 +469,26 @@ jobs:
   # Run integration tests against wheel installation
   wheel-integration-test:
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' || github.event_name == 'pull_request' || startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: ${{ env.OPENHCS_CI_DEP_SOURCE == 'submodules' && 'recursive' || 'false' }}
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Install system dependencies (Linux)
+        run: |
+          sudo apt-get update
+          # PyQt6 requires libEGL.so.1 (EGL) and libGL.so.1 (OpenGL).
+          sudo apt-get install -y libgl1
+          sudo apt-get install -y libegl1 || sudo apt-get install -y libegl1-mesa
+          sudo apt-get install -y libxkbcommon-x11-0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-xinerama0 libxcb-xfixes0 xvfb
 
       - name: Build wheel
         run: |
@@ -377,5 +513,3 @@ jobs:
           name: coverage-wheel-integration
           path: .coverage.wheel
           retention-days: 1
-
-

@@ -10,11 +10,12 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, Union
 from openhcs.constants.constants import VariableComponents, AllComponents
 from openhcs.core.components.parser_metaprogramming import GenericFilenameParser
+from metaclass_registry import AutoRegisterMeta, LazyDiscoveryDict
 
 from openhcs.constants.constants import DEFAULT_PIXEL_SIZE
 
 
-class FilenameParser(GenericFilenameParser):
+class FilenameParser(GenericFilenameParser, metaclass=AutoRegisterMeta):
     """
     Abstract base class for parsing microscopy image filenames.
 
@@ -22,6 +23,10 @@ class FilenameParser(GenericFilenameParser):
     methods dynamically based on the VariableComponents enum, eliminating hardcoded
     component assumptions.
     """
+
+    # Registry configuration for AutoRegisterMeta
+    __registry_key__ = '__name__'  # Use class name as registration key
+    __registry_name__ = 'filename parser'  # Human-readable name for logging
 
     def __init__(self):
         """Initialize the parser with AllComponents enum."""
@@ -334,3 +339,11 @@ class MetadataHandler(ABC):
             if values:
                 result[component_name] = values
         return result
+
+
+# ============================================================================
+# Parser Registry Export
+# ============================================================================
+# Reference to the auto-created registry from FilenameParser metaclass
+# The AutoRegisterMeta metaclass creates FilenameParser.__registry__ automatically
+FILENAME_PARSERS = FilenameParser.__registry__

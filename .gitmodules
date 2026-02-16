@@ -1,0 +1,32 @@
+[submodule "external/ObjectState"]
+	path = external/ObjectState
+	url = https://github.com/OpenHCSDev/ObjectState.git
+	branch = main
+[submodule "external/python-introspect"]
+	path = external/python-introspect
+	url = https://github.com/OpenHCSDev/python-introspect.git
+	branch = main
+[submodule "external/arraybridge"]
+	path = external/arraybridge
+	url = https://github.com/OpenHCSDev/arraybridge.git
+	branch = main
+[submodule "external/metaclass-registry"]
+	path = external/metaclass-registry
+	url = https://github.com/OpenHCSDev/metaclass-registry.git
+	branch = main
+[submodule "external/zmqruntime"]
+	path = external/zmqruntime
+	url = https://github.com/OpenHCSDev/ZMQRuntime.git
+	branch = main
+[submodule "external/pycodify"]
+	path = external/pycodify
+	url = https://github.com/OpenHCSDev/pycodify.git
+	branch = main
+[submodule "external/PolyStore"]
+	path = external/PolyStore
+	url = https://github.com/OpenHCSDev/PolyStore.git
+	branch = main
+[submodule "external/pyqt-reactive"]
+	path = external/pyqt-reactive
+	url = https://github.com/OpenHCSDev/PyQT-reactive.git
+	branch = main

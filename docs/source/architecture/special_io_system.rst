@@ -8,6 +8,11 @@ The Special I/O system enables sophisticated data exchange between pipeline step
 
 **System Evolution**: Originally designed for simple single-function steps, the system was extended to handle dict patterns (multiple functions per step) through sophisticated namespacing and scope promotion rules, similar to symbol resolution in programming language compilers.
 
+.. seealso::
+
+   :doc:`pattern_grouping_and_special_outputs`
+      Comprehensive guide to pattern grouping, special output path resolution, and debugging path collisions
+
 Architectural Evolution
 -----------------------
 
@@ -53,12 +58,14 @@ The Special I/O system uses a declarative approach where functions simply declar
 
 **Special Inputs**: Functions that need data from previous steps declare their requirements using ``@special_inputs``. The system automatically loads this data from the VFS and provides it as function parameters.
 
-**Materialization Support**: Special outputs can optionally include materialization functions that convert Python objects to persistent file formats (CSV, JSON, etc.) for analysis tools.
+**Materialization Support**: Special outputs can optionally include materialization specs that declaratively select one or more *format writers* (CSV/JSON/ROI ZIP/TIFF/TEXT) for persistent formats.
 
 .. code:: python
 
-   # Example: Position generation with materialization
-   @special_outputs(("positions", materialize_positions_csv))
+   # Example: Position generation with materialization spec
+   from openhcs.processing.materialization import MaterializationSpec, CsvOptions
+
+   @special_outputs(("positions", MaterializationSpec(CsvOptions(filename_suffix=".csv"))))
    def generate_positions(image_stack):
        positions = calculate_positions(image_stack)
        return processed_image, positions
@@ -68,6 +75,10 @@ The Special I/O system uses a declarative approach where functions simply declar
    def stitch_images(image_stack, positions):
        return stitch(image_stack, positions)
 
+Note: Writer dispatch is automatically inferred from the options type. No need to specify handler strings.
+CsvOptions auto-extracts fields from dataclasses/dicts. The ``fields`` parameter is only needed when you
+want to control column ordering or select a subset.
+
 Decorator Implementation
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -75,9 +86,9 @@ The decorators work by attaching metadata to function objects that the compilati
 
 **Metadata Attachment**: The decorators add attributes to functions (``__special_outputs__``, ``__special_inputs__``) that the compiler reads during pipeline analysis. This metadata-driven approach means functions remain normal Python functions that can be tested independently.
 
-**Materialization Integration**: When special outputs include materialization functions, the decorator stores both the output keys (for path planning) and the materialization functions (for file conversion) as separate attributes.
+**Materialization Integration**: When special outputs include materialization specs, the decorator stores both the output keys (for path planning) and the specs (for writer dispatch) as separate attributes.
 
-**Backward Compatibility**: The implementation maintains compatibility with existing code while supporting new features like materialization functions.
+**Greenfield Rule**: Materialization is writer-driven. Do not register custom handler functions; declare writer options in MaterializationSpec.
 
 Compilation-Time Path Resolution
 --------------------------------
@@ -350,16 +361,16 @@ The funcplan system eliminates runtime complexity by pre-computing all execution
 
 **Deterministic Behavior**: The funcplan approach ensures that special output handling is completely deterministic and debuggable. The mapping is generated once during compilation and used consistently throughout execution.
 
-Materialization Function Integration
+Materialization Spec Integration
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Dict patterns require careful handling of materialization functions since multiple functions within a pattern may produce special outputs that need materialization. The system must extract and organize these materialization functions according to the same namespacing rules used for the outputs themselves.
+Dict patterns require careful handling of materialization specs since multiple functions within a pattern may produce special outputs that need materialization. The system extracts and organizes these specs according to the same namespacing rules used for the outputs themselves.
 
 **Pattern Analysis**: The system analyzes each dict pattern to discover which functions have materialization requirements. For function chains, each position is checked independently. For single functions, the analysis is straightforward.
 
-**Namespace Coordination**: Materialization functions are organized using the same namespacing scheme as the special outputs they handle. This ensures that the correct materialization function is applied to each namespaced output.
+**Namespace Coordination**: Materialization specs are organized using the same namespacing scheme as the special outputs they handle. This ensures that the correct handler is applied to each namespaced output.
 
-**Directory Management**: Materialization functions are responsible for ensuring their target directories exist before writing files. The execution system provides the data and target paths, but doesn't pre-create directory structures for special outputs.
+**Directory Management**: Materialization handlers are responsible for ensuring their target directories exist before writing files. The execution system provides the data and target paths, but doesn't pre-create directory structures for special outputs.
 
 Architectural Benefits
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -383,7 +394,7 @@ The Special I/O system integrates seamlessly with OpenHCS's Virtual File System 
 
 **Backend Selection**: Special I/O data typically uses the memory backend for optimal performance, since this data is usually consumed within the same pipeline run. The memory backend stores Python objects directly without serialization overhead, making data transfer between steps very efficient.
 
-**Automatic Serialization**: When special I/O data needs to be persisted (for debugging or analysis), the VFS automatically handles serialization to appropriate formats. The system uses pickle format by default for Python objects, but materialization functions can convert data to other formats like CSV or JSON.
+**Automatic Serialization**: When special I/O data needs to be persisted (for debugging or analysis), the VFS automatically handles serialization to appropriate formats. The system uses pickle format by default for Python objects, but materialization handlers can convert data to other formats like CSV or JSON.
 
 **Path Abstraction**: Functions work with abstract VFS paths rather than concrete file system paths. This abstraction allows the same function to work with different storage backends without modification.
 
@@ -411,7 +422,7 @@ Implemented Features
 
 **Core Special I/O System**:
 -  ✅ Declarative decorator system (@special_inputs, @special_outputs)
--  ✅ Materialization function support for special outputs
+-  ✅ Materialization spec support for special outputs
 -  ✅ Compilation-time path resolution and dependency validation
 -  ✅ Runtime VFS integration with memory backend
 -  ✅ Function execution with automatic special I/O handling
@@ -422,8 +433,8 @@ Implemented Features
 -  ✅ Scope promotion rules for single-key dict patterns
 -  ✅ Collision detection and validation
 -  ✅ Funcplan system with explicit execution mapping
--  ✅ Materialization function extraction from dict patterns
--  ✅ Directory creation responsibility in materialization functions
+-  ✅ Materialization spec extraction from dict patterns
+-  ✅ Directory creation responsibility in materialization handlers
 
 Future Enhancements
 ~~~~~~~~~~~~~~~~~~~

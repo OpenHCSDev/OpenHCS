@@ -10,7 +10,7 @@ import logging
 from typing import Dict, List, Tuple, Any
 from pathlib import Path
 from dataclasses import fields
-from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
+from pyqt_reactive.theming import ColorScheme
 
 logger = logging.getLogger(__name__)
 
@@ -240,15 +240,15 @@ class ColorSchemeValidator:
         
         return True
     
-    def _create_color_scheme_from_config(self, config: Dict[str, Any]) -> PyQt6ColorScheme:
+    def _create_color_scheme_from_config(self, config: Dict[str, Any]) -> ColorScheme:
         """
-        Create a PyQt6ColorScheme from configuration for validation.
+        Create a ColorScheme from configuration for validation.
         
         Args:
             config: Parsed JSON configuration
             
         Returns:
-            PyQt6ColorScheme: Color scheme instance
+            ColorScheme: Color scheme instance
         """
         # Flatten all color sections into a single dict
         all_colors = {}
@@ -261,10 +261,10 @@ class ColorSchemeValidator:
                             all_colors[color_name] = tuple(color_value)
         
         # Create color scheme with available colors
-        valid_fields = {f.name for f in fields(PyQt6ColorScheme)}
+        valid_fields = {f.name for f in fields(ColorScheme)}
         scheme_kwargs = {k: v for k, v in all_colors.items() if k in valid_fields}
         
-        return PyQt6ColorScheme(**scheme_kwargs)
+        return ColorScheme(**scheme_kwargs)
     
     def _calculate_contrast_ratio(self, fg: Tuple[int, int, int], bg: Tuple[int, int, int]) -> float:
         """

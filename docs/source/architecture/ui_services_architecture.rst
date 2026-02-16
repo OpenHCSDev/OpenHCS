@@ -95,7 +95,7 @@ It works hand-in-hand with ``ObjectState``:
 
 - PFM uses ObjectState as the single source of truth for parameters and nested states.
 - Live context collection walks ObjectStateRegistry (not PFMs) and uses ``get_user_modified_values``/overlays.
-- Cancel/save flows rely on ObjectState baselines (see :doc:`object_state_lifecycle`).
+- Cancel/save flows rely on ObjectState baselines (mark_saved/restore_saved).
 
 .. code-block:: python
 

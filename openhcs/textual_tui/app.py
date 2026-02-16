@@ -17,8 +17,8 @@ from textual.widgets import Static, Button, TextArea
 
 # OpenHCS imports
 from openhcs.core.config import GlobalPipelineConfig
-from openhcs.io.base import storage_registry
-from openhcs.io.filemanager import FileManager
+from polystore.base import storage_registry
+from polystore.filemanager import FileManager
 
 # Widget imports (will be created)
 from .widgets.main_content import MainContent

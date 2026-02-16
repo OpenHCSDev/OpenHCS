@@ -12,7 +12,7 @@ from textual.widget import Widget
 from textual.css.query import NoMatches
 
 from openhcs.core.config import GlobalPipelineConfig
-from openhcs.io.filemanager import FileManager
+from polystore.filemanager import FileManager
 from .system_monitor import SystemMonitorTextual
 
 

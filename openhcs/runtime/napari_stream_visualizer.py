@@ -14,6 +14,7 @@ Doctrinal Clauses:
 import logging
 import multiprocessing
 import os
+import pickle
 import subprocess
 import sys
 import threading
@@ -23,11 +24,23 @@ import numpy as np
 from typing import Any, Dict, Optional
 from qtpy.QtCore import QTimer
 
-from openhcs.io.filemanager import FileManager
+from polystore.filemanager import FileManager
 from openhcs.utils.import_utils import optional_import
-from openhcs.runtime.zmq_base import ZMQServer, SHARED_ACK_PORT, get_zmq_transport_url
-from openhcs.runtime.zmq_messages import ImageAck
-from openhcs.core.config import TransportMode, NapariStreamingConfig
+from openhcs.core.config import (
+    TransportMode as OpenHCSTransportMode,
+    NapariStreamingConfig,
+)
+from openhcs.runtime.zmq_config import OPENHCS_ZMQ_CONFIG
+from zmqruntime.config import TransportMode as ZMQTransportMode
+from zmqruntime.streaming import StreamingVisualizerServer, VisualizerProcessManager
+from zmqruntime.transport import (
+    coerce_transport_mode,
+    get_control_url,
+    get_zmq_transport_url,
+    is_port_in_use,
+    ping_control_port,
+    wait_for_server_ready,
+)
 
 # Optional napari import - this module should only be imported if napari is available
 napari = optional_import("napari")
@@ -184,13 +197,15 @@ def _build_nd_points(layer_items, stack_components, component_values=None):
     if component_values is None:
         component_values = {}
         for comp in stack_components:
-            values = sorted(set(item["components"].get(comp, 0) for item in layer_items))
+            values = sorted(
+                set(item["components"].get(comp, 0) for item in layer_items)
+            )
             component_values[comp] = values
 
     for item in layer_items:
         points_data = item["data"]  # List of shape dicts from ROI converter
         components = item["components"]
-        
+
         # DEBUG: Log what we actually have
         logger.info(f"🐛 DEBUG: points_data type: {type(points_data)}")
         if isinstance(points_data, list) and len(points_data) > 0:
@@ -209,21 +224,23 @@ def _build_nd_points(layer_items, stack_components, component_values=None):
             # Only process 'points' type entries
             if shape_dict.get("type") != "points":
                 continue
-                
+
             coordinates = shape_dict.get("coordinates", [])
             metadata = shape_dict.get("metadata", {})
-            
+
             # coordinates is a list of [y, x] pairs
             # Prepend stack dimensions to each point: [y, x] -> [stack_idx, ..., y, x]
             for coord in coordinates:
                 nd_coord = prepend_dims + list(coord)
                 all_points_nd.append(nd_coord)
-                
+
                 # Track properties for this point
                 all_properties["label"].append(metadata.get("label", ""))
                 all_properties["component"].append(metadata.get("component", 0))
 
-    return np.array(all_points_nd) if all_points_nd else np.empty((0, 2 + len(stack_components))), all_properties
+    return np.array(all_points_nd) if all_points_nd else np.empty(
+        (0, 2 + len(stack_components))
+    ), all_properties
 
 
 def _build_nd_image_array(layer_items, stack_components, component_values=None):
@@ -249,14 +266,14 @@ def _build_nd_image_array(layer_items, stack_components, component_values=None):
     elif len(stack_components) == 1 and len(layer_items) > 1:
         # Old behavior: Single stack component with multiple items - simple 3D stack
         image_stack = [img["data"] for img in layer_items]
-        from openhcs.core.memory.stack_utils import stack_slices
+        from openhcs.core.memory import stack_slices
 
         return stack_slices(image_stack, memory_type="numpy", gpu_id=0)
     elif len(stack_components) == 1 and len(layer_items) == 1:
         # Single item, single component, no global values - just return as-is
         # (Will be wrapped in extra dimension if needed by caller)
         return layer_items[0]["data"]
-    
+
     # Multiple stack components OR using global component values - create multi-dimensional array
     if component_values is None:
         # Derive from layer items (old behavior when no global tracker)
@@ -301,7 +318,7 @@ def _create_or_update_layer(
 ):
     """
     Create or update a Napari layer of any type.
-    
+
     All layers are handled identically: if layer exists, remove and recreate.
     This ensures consistent behavior across all layer types.
 
@@ -335,17 +352,21 @@ def _create_or_update_layer(
     add_method = getattr(viewer, f"add_{layer_type}")
     new_layer = add_method(data, name=layer_name, **layer_kwargs)
     layers[layer_name] = new_layer
-    
+
     # Log with appropriate count/info
     if layer_type == "shapes":
-        count = len(data) if hasattr(data, '__len__') else 0
-        logger.info(f"🔬 NAPARI PROCESS: Created {layer_type} layer {layer_name} with {count} shapes")
+        count = len(data) if hasattr(data, "__len__") else 0
+        logger.info(
+            f"🔬 NAPARI PROCESS: Created {layer_type} layer {layer_name} with {count} shapes"
+        )
     elif layer_type == "points":
-        count = len(data) if hasattr(data, '__len__') else 0
-        logger.info(f"🔬 NAPARI PROCESS: Created {layer_type} layer {layer_name} with {count} points")
+        count = len(data) if hasattr(data, "__len__") else 0
+        logger.info(
+            f"🔬 NAPARI PROCESS: Created {layer_type} layer {layer_name} with {count} points"
+        )
     else:
         logger.info(f"🔬 NAPARI PROCESS: Created {layer_type} layer {layer_name}")
-    
+
     return new_layer
 
 
@@ -382,9 +403,7 @@ def _create_or_update_shapes_layer(
     )
 
 
-def _create_or_update_points_layer(
-    viewer, layers, layer_name, points_data, properties
-):
+def _create_or_update_points_layer(viewer, layers, layer_name, points_data, properties):
     """Create or update a Napari points layer."""
     return _create_or_update_layer(
         viewer,
@@ -399,7 +418,11 @@ def _create_or_update_points_layer(
 
 
 # Populate registry now that helper functions are defined
-from openhcs.constants.streaming import StreamingDataType
+from polystore.streaming_constants import StreamingDataType
+from polystore.streaming.receivers.napari import (
+    normalize_component_layout,
+    build_layer_key,
+)
 
 _DATA_TYPE_HANDLERS = {
     StreamingDataType.IMAGE: {
@@ -450,54 +473,18 @@ def _handle_component_aware_display(
             raise ValueError(f"No component metadata available for path: {path}")
         component_info = component_metadata
 
-        # Build component_modes and component_order from config (dict or object)
-        component_modes = None
-        component_order = None
-
-        if isinstance(display_config, dict):
-            cm = display_config.get("component_modes") or display_config.get(
-                "componentModes"
-            )
-            if isinstance(cm, dict) and cm:
-                component_modes = cm
-            component_order = display_config["component_order"]
-        else:
-            # Handle object-like config (NapariDisplayConfig)
-            component_order = display_config.COMPONENT_ORDER
-            component_modes = {}
-            for component in component_order:
-                mode_field = f"{component}_mode"
-                if hasattr(display_config, mode_field):
-                    mode_value = getattr(display_config, mode_field)
-                    component_modes[component] = getattr(
-                        mode_value, "value", str(mode_value)
-                    )
-
-        # Generic layer naming - iterate over components in canonical order
-        # Components in SLICE mode create separate layers
-        # Components in STACK mode are combined into the same layer
-
-        layer_key_parts = []
-        for component in component_order:
-            mode = component_modes.get(component)
-            if mode == "slice" and component in component_info:
-                value = component_info[component]
-                layer_key_parts.append(f"{component}_{value}")
-
-        layer_key = "_".join(layer_key_parts) if layer_key_parts else "default_layer"
+        component_modes, component_order = normalize_component_layout(display_config)
+        layer_key = build_layer_key(
+            component_info=component_info,
+            component_modes=component_modes,
+            component_order=component_order,
+            data_type=data_type,
+        )
 
         # Log component modes for debugging
         logger.info(
             f"🔍 NAPARI PROCESS: component_modes={component_modes}, layer_key='{layer_key}'"
         )
-
-        # Add "_shapes" suffix for shapes layers to distinguish from image layers
-        # Add "_points" suffix for points layers to distinguish from image layers
-        # MUST happen BEFORE reconciliation so we check the correct layer name
-        if data_type == StreamingDataType.SHAPES:
-            layer_key = f"{layer_key}_shapes"
-        elif data_type == StreamingDataType.POINTS:
-            layer_key = f"{layer_key}_points"
 
         # Log layer key and component info for debugging
         logger.info(
@@ -602,7 +589,7 @@ def _old_immediate_update_logic_removed():
     # Now using _schedule_layer_update -> _execute_layer_update -> _update_image_layer/_update_shapes_layer
 
 
-class NapariViewerServer(ZMQServer):
+class NapariViewerServer(StreamingVisualizerServer):
     """
     ZMQ server for Napari viewer that receives images from clients.
 
@@ -618,7 +605,7 @@ class NapariViewerServer(ZMQServer):
         viewer_title: str,
         replace_layers: bool = False,
         log_file_path: str = None,
-        transport_mode: TransportMode = TransportMode.IPC,
+        transport_mode: OpenHCSTransportMode = OpenHCSTransportMode.IPC,
     ):
         """
         Initialize Napari viewer server.
@@ -635,10 +622,12 @@ class NapariViewerServer(ZMQServer):
         # Initialize with SUB socket for receiving images
         super().__init__(
             port,
+            viewer_type="napari",
             host="*",
             log_file_path=log_file_path,
             data_socket_type=zmq.SUB,
-            transport_mode=transport_mode,
+            transport_mode=coerce_transport_mode(transport_mode),
+            config=OPENHCS_ZMQ_CONFIG,
         )
 
         self.viewer_title = viewer_title
@@ -648,7 +637,7 @@ class NapariViewerServer(ZMQServer):
         self.component_groups = {}
         self.dimension_labels = {}  # Store dimension label mappings: layer_key -> {component: [labels]}
         self.component_metadata = {}  # Store component metadata from microscope handler: {component: {id: name}}
-        
+
         # Global component value tracker for shared dimension mapping
         # Maps tuple of stack_components -> {component: set of values}
         # All layers with the same stack_components share the same global mapping
@@ -661,87 +650,72 @@ class NapariViewerServer(ZMQServer):
         self.pending_updates = {}  # layer_key -> QTimer (debounce)
         self.update_delay_ms = 1000  # Wait 200ms for more items before rebuilding
 
-        # Create PUSH socket for sending acknowledgments to shared ack port
-        self.ack_socket = None
-        self._setup_ack_socket()
+        # Ack socket handled by StreamingVisualizerServer
 
     def _setup_ack_socket(self):
         """Setup PUSH socket for sending acknowledgments."""
-        import zmq
-
-        try:
-            ack_url = get_zmq_transport_url(
-                SHARED_ACK_PORT, self.transport_mode, "localhost"
-            )
-
-            context = zmq.Context.instance()
-            self.ack_socket = context.socket(zmq.PUSH)
-            self.ack_socket.connect(ack_url)
-            logger.info(f"🔬 NAPARI SERVER: Connected ack socket to {ack_url}")
-        except Exception as e:
-            logger.warning(f"🔬 NAPARI SERVER: Failed to setup ack socket: {e}")
-            self.ack_socket = None
+        super()._setup_ack_socket()
 
     def _update_global_component_values(self, stack_components, layer_items):
         """
         Update the global component value tracker with values from new items.
-        
+
         All layers sharing the same stack_components will use the same global mapping,
         ensuring consistent component-to-index mapping across image and ROI layers.
-        
+
         Args:
             stack_components: Tuple/list of component names (e.g., ['channel', 'well'])
             layer_items: List of items with 'components' dict
         """
         # Use tuple as dict key (lists aren't hashable)
         components_key = tuple(stack_components)
-        
+
         # Initialize if needed
         if components_key not in self.global_component_values:
             self.global_component_values[components_key] = {
                 comp: set() for comp in stack_components
             }
-        
+
         # Add values from these items
         global_values = self.global_component_values[components_key]
         for item in layer_items:
             for comp in stack_components:
                 value = item["components"].get(comp, 0)
                 global_values[comp].add(value)
-        
+
         logger.info(
             f"🔬 NAPARI PROCESS: Updated global component values for {stack_components}"
         )
         for comp, values in global_values.items():
             sorted_values = sorted(values)
             logger.info(f"🔬 NAPARI PROCESS:   {comp}: {sorted_values}")
-    
+
     def _get_global_component_values(self, stack_components):
         """
         Get the global component values for a given set of stack components.
-        
+
         For indexed components (channel, z_index, timepoint), expands to include
         all values from 1 to max. For example, if only channel 2 is seen, returns [1, 2].
         This ensures proper stack dimensions even when some indices aren't present.
-        
+
         Returns a dict of {component: sorted list of values} for all components
         that have been seen across all layers sharing these stack components.
         """
         components_key = tuple(stack_components)
-        
+
         if components_key not in self.global_component_values:
             return {comp: [] for comp in stack_components}
-        
+
         # Convert sets to sorted lists and expand indexed components
         global_values = self.global_component_values[components_key]
         result = {}
-        
+
         # Components that should be expanded from 1 to max (1-indexed)
-        INDEXED_COMPONENTS = {'channel', 'z_index', 'timepoint'}
-        
+        INDEXED_COMPONENTS = {"channel", "z_index", "timepoint"}
+
         for comp, values in global_values.items():
             sorted_values = sorted(values)
-            
+
             if comp in INDEXED_COMPONENTS and sorted_values:
                 # Expand to include all indices from 1 to max
                 # E.g., if we have [2, 4], expand to [1, 2, 3, 4]
@@ -759,7 +733,7 @@ class NapariViewerServer(ZMQServer):
             else:
                 # Non-indexed component (well, site, etc.) - use actual values
                 result[comp] = sorted_values
-        
+
         return result
 
     def _schedule_layer_update(
@@ -832,7 +806,9 @@ class NapariViewerServer(ZMQServer):
                 if mode == "stack" and comp in component_info
             ]
 
-            logger.info(f"🔬 NAPARI PROCESS: Using stack components: {stack_components}")
+            logger.info(
+                f"🔬 NAPARI PROCESS: Using stack components: {stack_components}"
+            )
 
             # Build and update the layer based on data type
             try:
@@ -855,29 +831,29 @@ class NapariViewerServer(ZMQServer):
             except Exception as e:
                 logger.error(
                     f"🔬 NAPARI PROCESS: Failed to update layer {layer_key}: {e}",
-                    exc_info=True
+                    exc_info=True,
                 )
                 # Continue running - don't crash the viewer
 
     def _setup_dimension_label_handler(self, layer_key, stack_components):
         """
         Set up event handler to update text overlay when dimensions change.
-        
+
         This connects the viewer's dimension slider changes to text overlay updates,
         displaying categorical labels (like well IDs) instead of numeric indices.
-        
+
         Args:
             layer_key: The layer to monitor for dimension changes
             stack_components: List of components that are stacked (e.g., ['well', 'channel'])
         """
         if not self.viewer or not stack_components:
             return
-            
+
         # Get dimension label mappings for this layer
         layer_labels = self.dimension_labels.get(layer_key, {})
         if not layer_labels:
             return
-        
+
         def update_dimension_label(event=None):
             """Update text overlay with current dimension labels."""
             try:
@@ -894,7 +870,7 @@ class NapariViewerServer(ZMQServer):
                             if 0 <= idx < len(labels):
                                 label = labels[idx]
                                 # Don't show if label is None or "None"
-                                if label and str(label).lower() != 'none':
+                                if label and str(label).lower() != "none":
                                     label_parts.append(label)
 
                 if label_parts:
@@ -904,27 +880,31 @@ class NapariViewerServer(ZMQServer):
 
             except Exception as e:
                 logger.debug(f"🔬 NAPARI PROCESS: Error updating dimension label: {e}")
-        
+
         # Connect to dimension change events
         try:
             self.viewer.dims.events.current_step.connect(update_dimension_label)
             # Initial update
             update_dimension_label()
-            logger.info(f"🔬 NAPARI PROCESS: Set up dimension label handler for {layer_key}")
+            logger.info(
+                f"🔬 NAPARI PROCESS: Set up dimension label handler for {layer_key}"
+            )
         except Exception as e:
-            logger.warning(f"🔬 NAPARI PROCESS: Failed to setup dimension label handler: {e}")
+            logger.warning(
+                f"🔬 NAPARI PROCESS: Failed to setup dimension label handler: {e}"
+            )
 
     def _update_image_layer(
         self, layer_key, layer_items, stack_components, component_modes
     ):
         """Update an image layer with the current items."""
-        
+
         # Update global component tracker with values from these items
         self._update_global_component_values(stack_components, layer_items)
-        
+
         # Get global component values (union of all layers with same stack_components)
         global_component_values = self._get_global_component_values(stack_components)
-        
+
         # Check if images have different shapes and pad if needed
         shapes = [item["data"].shape for item in layer_items]
         if len(set(shapes)) > 1:
@@ -965,7 +945,9 @@ class NapariViewerServer(ZMQServer):
         logger.info(
             f"🔬 NAPARI PROCESS: Building nD data for {layer_key} from {len(layer_items)} items"
         )
-        stacked_data = _build_nd_image_array(layer_items, stack_components, global_component_values)
+        stacked_data = _build_nd_image_array(
+            layer_items, stack_components, global_component_values
+        )
 
         # Determine colormap
         colormap = None
@@ -998,7 +980,7 @@ class NapariViewerServer(ZMQServer):
             "z_index": "Z",
             "timepoint": "T",
             "site": "Site",
-            "well": "Well"
+            "well": "Well",
         }
 
         for comp in stack_components:
@@ -1015,12 +997,14 @@ class NapariViewerServer(ZMQServer):
                 # First try to get name from metadata (e.g., channel name)
                 metadata_name = comp_metadata.get(str(v))
 
-                if metadata_name and str(metadata_name).lower() != 'none':
+                if metadata_name and str(metadata_name).lower() != "none":
                     # Use metadata name with index for clarity
                     if comp == "channel":
                         labels.append(f"Ch{v}: {metadata_name}")
                     elif comp == "well":
-                        labels.append(f"{metadata_name}")  # Well names are already good (e.g., "A01")
+                        labels.append(
+                            f"{metadata_name}"
+                        )  # Well names are already good (e.g., "A01")
                     else:
                         labels.append(f"{comp.title()} {v}: {metadata_name}")
                 else:
@@ -1029,15 +1013,15 @@ class NapariViewerServer(ZMQServer):
                     labels.append(f"{abbrev} {v}")
 
             dimension_labels[comp] = labels
-        
+
         # Store dimension labels for this layer
         self.dimension_labels[layer_key] = dimension_labels
-        
+
         # Create or update the layer
         _create_or_update_image_layer(
             self.viewer, self.layers, layer_key, stacked_data, colormap, axis_labels
         )
-        
+
         # Set up dimension label handler (connects dimension changes to text overlay)
         self._setup_dimension_label_handler(layer_key, stack_components)
 
@@ -1051,13 +1035,15 @@ class NapariViewerServer(ZMQServer):
 
         # Update global component tracker with values from these items
         self._update_global_component_values(stack_components, layer_items)
-        
+
         # Get global component values (union of all layers with same stack_components)
         global_component_values = self._get_global_component_values(stack_components)
 
         # Convert shapes to label masks (much faster than individual shapes)
         # This happens synchronously but is fast because we're just creating arrays
-        labels_data = self._shapes_to_labels(layer_items, stack_components, global_component_values)
+        labels_data = self._shapes_to_labels(
+            layer_items, stack_components, global_component_values
+        )
 
         # Remove existing layer if it exists
         if layer_key in self.layers:
@@ -1084,41 +1070,44 @@ class NapariViewerServer(ZMQServer):
         """Update a points layer (for skeleton tracings and point-based ROIs)."""
         # Filter to only POINTS items (exclude IMAGE items that may share the same layer_key)
         points_items = [
-            item for item in layer_items 
+            item
+            for item in layer_items
             if item.get("data_type") == StreamingDataType.POINTS
         ]
-        
+
         if not points_items:
             logger.warning(
                 f"🔬 NAPARI PROCESS: No POINTS items found for {layer_key}, skipping"
             )
             return
-            
+
         logger.info(
             f"🔬 NAPARI PROCESS: Building points layer for {layer_key} from {len(points_items)} items (filtered from {len(layer_items)} total)"
         )
 
         # Update global component tracker with ALL items (images + points) to stay in sync
         self._update_global_component_values(stack_components, layer_items)
-        
+
         # Get global component values (union of all layers with same stack_components)
         global_component_values = self._get_global_component_values(stack_components)
 
         # Build nD points data using ONLY the points items BUT with global component values
-        points_data, properties = _build_nd_points(points_items, stack_components, global_component_values)
+        points_data, properties = _build_nd_points(
+            points_items, stack_components, global_component_values
+        )
 
         # Create or update the points layer
         _create_or_update_points_layer(
             self.viewer, self.layers, layer_key, points_data, properties
         )
-        
+
         logger.info(
             f"🔬 NAPARI PROCESS: Created points layer {layer_key} with {len(points_data)} points"
         )
 
     def _shapes_to_labels(self, layer_items, stack_components, component_values):
         """Convert shapes data to label masks.
-        
+
         Args:
             layer_items: List of shape items to convert
             stack_components: List of component names for stack dimensions
@@ -1139,7 +1128,9 @@ class NapariViewerServer(ZMQServer):
         first_shapes = layer_items[0]["data"]
         if not first_shapes:
             # No shapes, return empty array with reasonable default size
-            logger.warning("🔬 NAPARI PROCESS: No shapes data, creating default 512x512 array")
+            logger.warning(
+                "🔬 NAPARI PROCESS: No shapes data, creating default 512x512 array"
+            )
             return np.zeros((1, 1, 512, 512), dtype=np.uint16)
 
         # Estimate image size from shape coordinates
@@ -1161,7 +1152,7 @@ class NapariViewerServer(ZMQServer):
                 if len(coords) > 0:
                     max_y = max(max_y, int(np.max(coords[:, 0])) + 1)
                     max_x = max(max_x, int(np.max(coords[:, 1])) + 1)
-        
+
         # Ensure minimum valid dimensions (avoid 0x0 shapes)
         if max_y == 0 or max_x == 0:
             logger.warning(
@@ -1216,8 +1207,12 @@ class NapariViewerServer(ZMQServer):
                         cc = coords[:, 1].astype(int)
 
                         # Clip to image bounds
-                        valid = (rr >= 0) & (rr < labels_array.shape[-2]) & \
-                               (cc >= 0) & (cc < labels_array.shape[-1])
+                        valid = (
+                            (rr >= 0)
+                            & (rr < labels_array.shape[-2])
+                            & (cc >= 0)
+                            & (cc < labels_array.shape[-1])
+                        )
                         rr, cc = rr[valid], cc[valid]
 
                         # Set label at the correct nD position
@@ -1226,7 +1221,7 @@ class NapariViewerServer(ZMQServer):
                         label_id += 1
 
         logger.info(
-            f"🔬 NAPARI PROCESS: Created labels array with shape {labels_array.shape} and {label_id-1} labels"
+            f"🔬 NAPARI PROCESS: Created labels array with shape {labels_array.shape} and {label_id - 1} labels"
         )
         return labels_array
 
@@ -1238,22 +1233,7 @@ class NapariViewerServer(ZMQServer):
             status: 'success' or 'error'
             error: Error message if status='error'
         """
-        if not self.ack_socket:
-            return
-
-        try:
-            ack = ImageAck(
-                image_id=image_id,
-                viewer_port=self.port,
-                viewer_type="napari",
-                status=status,
-                timestamp=time.time(),
-                error=error,
-            )
-            self.ack_socket.send_json(ack.to_dict())
-            logger.debug(f"🔬 NAPARI SERVER: Sent ack for image {image_id}")
-        except Exception as e:
-            logger.warning(f"🔬 NAPARI SERVER: Failed to send ack for {image_id}: {e}")
+        self.send_ack(image_id, status=status, error=error)
 
     def _create_pong_response(self) -> Dict[str, Any]:
         """Override to add Napari-specific fields and memory usage."""
@@ -1323,6 +1303,16 @@ class NapariViewerServer(ZMQServer):
         # This will be called from the Qt timer
         pass
 
+    def display_image(self, image_data: np.ndarray, metadata: dict) -> None:
+        """Display a single image payload (best-effort helper)."""
+        image_info = {
+            "data": image_data,
+            "shape": getattr(image_data, "shape", None),
+            "dtype": getattr(image_data, "dtype", None),
+            "metadata": metadata,
+        }
+        self._process_single_image(image_info, {})
+
     def process_image_message(self, message: bytes):
         """
         Process incoming image data message.
@@ -1342,13 +1332,15 @@ class NapariViewerServer(ZMQServer):
             # Handle batch of images/shapes
             images = data.get("images", [])
             display_config_dict = data.get("display_config")
-            
+
             # Extract component names metadata for dimension labels (e.g., channel names)
             component_names_metadata = data.get("component_names_metadata", {})
             if component_names_metadata:
                 # Update server's component metadata cache
                 self.component_metadata.update(component_names_metadata)
-                logger.info(f"🔬 NAPARI PROCESS: Updated component metadata: {list(component_names_metadata.keys())}")
+                logger.info(
+                    f"🔬 NAPARI PROCESS: Updated component metadata: {list(component_names_metadata.keys())}"
+                )
 
             for image_info in images:
                 self._process_single_image(image_info, display_config_dict)
@@ -1365,7 +1357,9 @@ class NapariViewerServer(ZMQServer):
 
         path = image_info.get("path", "unknown")
         image_id = image_info.get("image_id")  # UUID for acknowledgment
-        data_type = image_info.get("data_type", "image")  # 'image', 'shapes', or 'points'
+        data_type = image_info.get(
+            "data_type", "image"
+        )  # 'image', 'shapes', or 'points'
         component_metadata = image_info.get("metadata", {})
 
         # Log incoming metadata to debug well filtering issues
@@ -1467,7 +1461,7 @@ class NapariViewerServer(ZMQServer):
         except Exception as e:
             logger.error(
                 f"🔬 NAPARI PROCESS: Failed to process {data_type} {path}: {e}",
-                exc_info=True
+                exc_info=True,
             )
             if image_id:
                 self._send_ack(image_id, status="error", error=str(e))
@@ -1479,7 +1473,7 @@ def _napari_viewer_process(
     viewer_title: str,
     replace_layers: bool = False,
     log_file_path: str = None,
-    transport_mode: TransportMode = TransportMode.IPC,
+    transport_mode: OpenHCSTransportMode = OpenHCSTransportMode.IPC,
 ):
     """
     Napari viewer process entry point. Runs in a separate process.
@@ -1515,10 +1509,10 @@ def _napari_viewer_process(
         # Set up dimension label tracking for well names
         # This will be populated as metadata arrives and used to update text overlay
         server.dimension_labels = {}  # layer_key -> {component: [label1, label2, ...]}
-        
+
         # Enable text overlay for dimension labels
         viewer.text_overlay.visible = True
-        viewer.text_overlay.color = 'white'
+        viewer.text_overlay.color = "white"
         viewer.text_overlay.font_size = 14
 
         logger.info(
@@ -1603,7 +1597,7 @@ def _spawn_detached_napari_process(
     port: int,
     viewer_title: str,
     replace_layers: bool = False,
-    transport_mode: TransportMode = TransportMode.IPC,
+    transport_mode: OpenHCSTransportMode = OpenHCSTransportMode.IPC,
 ) -> subprocess.Popen:
     """
     Spawn a completely detached napari viewer process that survives parent termination.
@@ -1716,7 +1710,7 @@ except Exception as e:
         raise e
 
 
-class NapariStreamVisualizer:
+class NapariStreamVisualizer(VisualizerProcessManager):
     """
     Manages a Napari viewer instance for real-time visualization of tensors
     streamed from the OpenHCS pipeline. Runs napari in a separate process
@@ -1732,7 +1726,7 @@ class NapariStreamVisualizer:
         port: int = None,
         replace_layers: bool = False,
         display_config=None,
-        transport_mode: TransportMode = TransportMode.IPC,
+        transport_mode: OpenHCSTransportMode = OpenHCSTransportMode.IPC,
     ):
         self.filemanager = filemanager
         self.viewer_title = viewer_title
@@ -1746,11 +1740,14 @@ class NapariStreamVisualizer:
             if port is not None
             else NapariStreamingConfig.__dataclass_fields__["port"].default
         )
+        super().__init__(port=self.port)
         self.replace_layers = (
             replace_layers  # If True, replace existing layers; if False, add new layers
         )
         self.display_config = display_config  # Configuration for display behavior
-        self.transport_mode = transport_mode  # ZMQ transport mode (IPC or TCP)
+        self.transport_mode = (
+            coerce_transport_mode(transport_mode) or ZMQTransportMode.IPC
+        )  # ZMQ transport mode (IPC or TCP)
         self.process: Optional[multiprocessing.Process] = None
         self.zmq_context: Optional[zmq.Context] = None
         self.zmq_socket: Optional[zmq.Socket] = None
@@ -1820,7 +1817,10 @@ class NapariStreamVisualizer:
         try:
             control_port = self.port + CONTROL_PORT_OFFSET
             control_url = get_zmq_transport_url(
-                control_port, self.transport_mode, "localhost"
+                control_port,
+                host="localhost",
+                mode=self.transport_mode,
+                config=OPENHCS_ZMQ_CONFIG,
             )
 
             ctx = zmq.Context()
@@ -1884,7 +1884,9 @@ class NapariStreamVisualizer:
 
         with self._lock:
             # Check if there's already a napari viewer running on the configured port
-            port_in_use = self._is_port_in_use(self.port)
+            port_in_use = is_port_in_use(
+                self.port, self.transport_mode, config=OPENHCS_ZMQ_CONFIG
+            )
             logger.info(f"🔬 VISUALIZER: Port {self.port} in use: {port_in_use}")
 
             if port_in_use:
@@ -1907,7 +1909,7 @@ class NapariStreamVisualizer:
                         f"🔬 VISUALIZER: Existing viewer on port {self.port} is unresponsive, killing and restarting..."
                     )
                     # Use shared method from ZMQServer ABC
-                    from openhcs.runtime.zmq_base import ZMQServer
+                    from zmqruntime.server import ZMQServer
                     from openhcs.constants.constants import CONTROL_PORT_OFFSET
 
                     ZMQServer.kill_processes_on_port(self.port)
@@ -1942,10 +1944,9 @@ class NapariStreamVisualizer:
                     _global_viewer_process = self.process
                     _global_viewer_port = self.port
 
-            # Wait for napari viewer to be ready before setting up ZMQ
-            self._wait_for_viewer_ready()
-
-            # Set up ZeroMQ client
+            # Set up ZeroMQ client immediately after process spawn.
+            # Readiness is owned by ViewerStateManager.wait_for_ready() to avoid
+            # duplicate/competing wait loops with conflicting timeout behavior.
             self._setup_zmq_client()
 
             # Check if process is running (different methods for subprocess vs multiprocessing)
@@ -1970,155 +1971,38 @@ class NapariStreamVisualizer:
 
         Returns True only if we can successfully handshake with the viewer.
         """
-        import zmq
-        import pickle
-        from openhcs.constants.constants import CONTROL_PORT_OFFSET
-
-        # Try to ping the control port to verify viewer is responsive
-        control_port = port + CONTROL_PORT_OFFSET
-        control_url = get_zmq_transport_url(
-            control_port, self.transport_mode, "localhost"
-        )
-        control_context = None
-        control_socket = None
-
         try:
-            control_context = zmq.Context()
-            control_socket = control_context.socket(zmq.REQ)
-            control_socket.setsockopt(zmq.LINGER, 0)
-            control_socket.setsockopt(zmq.RCVTIMEO, 500)  # 500ms timeout
-            control_socket.connect(control_url)
-
-            # Send ping
-            ping_message = {"type": "ping"}
-            control_socket.send(pickle.dumps(ping_message))
-
-            # Wait for pong
-            response = control_socket.recv()
-            response_data = pickle.loads(response)
-
-            if response_data.get("type") == "pong" and response_data.get("ready"):
-                # Viewer is responsive! Set up our ZMQ client
-                control_socket.close()
-                control_context.term()
+            if ping_control_port(
+                port,
+                self.transport_mode,
+                host="localhost",
+                config=OPENHCS_ZMQ_CONFIG,
+                timeout_ms=500,
+                require_ready=True,
+            ):
                 self._setup_zmq_client()
                 return True
-            else:
-                return False
-
+            return False
         except Exception as e:
             logger.debug(f"Failed to connect to existing viewer on port {port}: {e}")
             return False
-        finally:
-            if control_socket:
-                try:
-                    control_socket.close()
-                except:
-                    pass
-            if control_context:
-                try:
-                    control_context.term()
-                except:
-                    pass
-
-    def _is_port_in_use(self, port: int) -> bool:
-        """Check if a port/socket is already in use (indicating existing napari viewer)."""
-        if self.transport_mode == TransportMode.IPC:
-            # For IPC mode, check if socket file exists
-            import platform
-            from pathlib import Path
-            from openhcs.constants.constants import (
-                IPC_SOCKET_DIR_NAME,
-                IPC_SOCKET_PREFIX,
-                IPC_SOCKET_EXTENSION,
-            )
-
-            if platform.system() == "Windows":
-                # Windows named pipes - can't easily check existence, so always return False
-                # (will rely on ping/pong handshake instead)
-                return False
-            else:
-                # Unix domain sockets - check if socket file exists
-                ipc_dir = Path.home() / ".openhcs" / IPC_SOCKET_DIR_NAME
-                socket_name = f"{IPC_SOCKET_PREFIX}-{port}{IPC_SOCKET_EXTENSION}"
-                socket_path = ipc_dir / socket_name
-                return socket_path.exists()
-        else:
-            # TCP mode - check if port is bound
-            import socket
-
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(0.1)
-            try:
-                # Try to bind to the port - if it fails, something is already using it
-                sock.bind(("localhost", port))
-                sock.close()
-                return False  # Port is free
-            except OSError:
-                # Port is already in use
-                sock.close()
-                return True
-            except Exception:
-                return False
 
     def _wait_for_viewer_ready(self, timeout: float = 10.0) -> bool:
         """Wait for the napari viewer to be ready using handshake protocol."""
-        import zmq
-        from openhcs.constants.constants import CONTROL_PORT_OFFSET
-
         logger.info(
             f"🔬 VISUALIZER: Waiting for napari viewer to be ready on port {self.port}..."
         )
-
-        control_port = self.port + CONTROL_PORT_OFFSET
-
-        # First wait for ports to be bound
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            if self._is_port_in_use(self.port) and self._is_port_in_use(control_port):
-                break
-            time.sleep(0.2)
-        else:
-            logger.warning("🔬 VISUALIZER: Timeout waiting for ports to be bound")
-            return False
-
-        # Now use handshake protocol - create fresh socket for each attempt
-        control_url = get_zmq_transport_url(
-            control_port, self.transport_mode, "localhost"
+        ready = wait_for_server_ready(
+            self.port,
+            self.transport_mode,
+            host="localhost",
+            config=OPENHCS_ZMQ_CONFIG,
+            timeout=timeout,
+            require_ready=True,
         )
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            control_context = zmq.Context()
-            control_socket = control_context.socket(zmq.REQ)
-            control_socket.setsockopt(zmq.LINGER, 0)
-            control_socket.setsockopt(zmq.RCVTIMEO, 1000)  # 1 second timeout
-
-            try:
-                control_socket.connect(control_url)
-
-                import pickle
-
-                ping_message = {"type": "ping"}
-                control_socket.send(pickle.dumps(ping_message))
-
-                response = control_socket.recv()
-                response_data = pickle.loads(response)
-
-                if response_data.get("type") == "pong" and response_data.get("ready"):
-                    logger.info(
-                        f"🔬 VISUALIZER: Napari viewer is ready on port {self.port}"
-                    )
-                    return True
-
-            except zmq.Again:
-                pass  # Timeout waiting for response
-            except Exception as e:
-                logger.debug(f"🔬 VISUALIZER: Handshake attempt failed: {e}")
-            finally:
-                control_socket.close()
-                control_context.term()
-
-            time.sleep(0.5)  # Wait before next ping
+        if ready:
+            logger.info(f"🔬 VISUALIZER: Napari viewer is ready on port {self.port}")
+            return True
 
         logger.warning("🔬 VISUALIZER: Timeout waiting for napari viewer handshake")
         return False
@@ -2128,7 +2012,12 @@ class NapariStreamVisualizer:
         if self.port is None:
             raise RuntimeError("Port not set - call start_viewer() first")
 
-        data_url = get_zmq_transport_url(self.port, self.transport_mode, "localhost")
+        data_url = get_zmq_transport_url(
+            self.port,
+            host="localhost",
+            mode=self.transport_mode,
+            config=OPENHCS_ZMQ_CONFIG,
+        )
 
         self.zmq_context = zmq.Context()
         self.zmq_socket = self.zmq_context.socket(zmq.PUB)
@@ -2155,13 +2044,11 @@ class NapariStreamVisualizer:
             )
             return False
 
-        import zmq
-        import pickle
-        from openhcs.constants.constants import CONTROL_PORT_OFFSET
-
-        control_port = self.port + CONTROL_PORT_OFFSET
-        control_url = get_zmq_transport_url(
-            control_port, self.transport_mode, "localhost"
+        control_url = get_control_url(
+            self.port,
+            self.transport_mode,
+            host="localhost",
+            config=OPENHCS_ZMQ_CONFIG,
         )
         control_context = None
         control_socket = None
@@ -2374,9 +2261,7 @@ class NapariStreamVisualizer:
                     slicer[-1] = cpu_tensor.shape[-3] // 2  # Middle Z
                     try:
                         display_data = cpu_tensor[tuple(slicer)]
-                    except (
-                        IndexError
-                    ):  # Handle cases where slicing might fail (e.g. very small dimensions)
+                    except IndexError:  # Handle cases where slicing might fail (e.g. very small dimensions)
                         logger.error(
                             f"Slicing failed for tensor with shape {cpu_tensor.shape} for step '{step_id_for_log}'.",
                             exc_info=True,
@@ -2408,3 +2293,46 @@ class NapariStreamVisualizer:
                 exc_info=True,
             )
             return None
+
+    def get_launch_command(self) -> list[str]:
+        import os
+        import sys
+
+        current_dir = os.getcwd()
+        log_dir = os.path.expanduser("~/.local/share/openhcs/logs")
+        os.makedirs(log_dir, exist_ok=True)
+        log_file = os.path.join(log_dir, f"napari_detached_port_{self.port}.log")
+
+        python_code = f"""
+import sys
+import os
+sys.path.insert(0, {repr(current_dir)})
+from openhcs.runtime.napari_stream_visualizer import _napari_viewer_process
+from openhcs.core.config import TransportMode
+transport_mode = TransportMode.{self.transport_mode.name}
+_napari_viewer_process({self.port}, {repr(self.viewer_title)}, {self.replace_layers}, {repr(log_file)}, transport_mode)
+"""
+
+        return [sys.executable, "-c", python_code]
+
+    def get_launch_env(self) -> dict:
+        import os
+        import platform
+
+        env = os.environ.copy()
+        if "QT_QPA_PLATFORM" not in env:
+            if platform.system() == "Darwin":
+                env["QT_QPA_PLATFORM"] = "cocoa"
+            elif platform.system() == "Linux":
+                env["QT_QPA_PLATFORM"] = "xcb"
+                env["QT_X11_NO_MITSHM"] = "1"
+        elif platform.system() == "Linux":
+            env["QT_X11_NO_MITSHM"] = "1"
+        return env
+
+    def start(self, detached: bool = True):
+        self.start_viewer(async_mode=False)
+        return self.process
+
+    def stop(self, timeout: float = 5.0):
+        self.stop_viewer()

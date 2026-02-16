@@ -130,7 +130,7 @@ RegistryConfig needed**:
 
 **Auto-Inference**:
 
-- ``discovery_package``: Auto-inferred from base class module (e.g., ``openhcs.io.base`` → ``openhcs.io``)
+- ``discovery_package``: Auto-inferred from base class module (e.g., ``polystore.base`` → ``polystore``)
 - ``discovery_recursive``: Auto-detected by checking if package has subpackages with ``__init__.py``
 - ``registry_name``: Auto-derived from class name (e.g., ``StorageBackend`` → ``"storage backend"``)
 
@@ -284,9 +284,9 @@ The metaclass automatically infers the discovery package from the base class mod
    # Base class in openhcs/io/base.py
    class BackendBase(metaclass=AutoRegisterMeta):
        __registry_key__ = '_backend_type'
-       # discovery_package auto-inferred: 'openhcs.io'
+       # discovery_package auto-inferred: 'polystore'
 
-   # Metaclass auto-infers: 'openhcs.io'
+   # Metaclass auto-infers: 'polystore'
    # (Extracts package by removing last component from module path)
 
 **Inference Logic**:
@@ -294,7 +294,7 @@ The metaclass automatically infers the discovery package from the base class mod
 .. code-block:: python
 
    # Extract package from base class module
-   # 'openhcs.io.base' → 'openhcs.io'
+   # 'polystore.base' → 'polystore'
    module_parts = base_class.__module__.rsplit('.', 1)
    inferred_package = module_parts[0] if len(module_parts) > 1 else base_class.__module__
 
@@ -309,7 +309,7 @@ The metaclass automatically detects if discovery should be recursive:
    # If yes: discovery_recursive = True
    # If no: discovery_recursive = False
 
-   # Example: openhcs.io has subdirectories → recursive=True
+   # Example: polystore has subdirectories → recursive=True
    # Example: openhcs.constants has no subdirectories → recursive=False
 
 Secondary Registry Auto-Wrapping
@@ -446,7 +446,7 @@ Example 2: Storage Backend Registry (ZERO Boilerplate)
 
 .. code-block:: python
 
-   from openhcs.io.base import StorageBackend
+   from polystore.base import StorageBackend
 
    class DiskStorageBackend(StorageBackend):
        """Disk-based storage backend."""
@@ -490,7 +490,7 @@ Example 3: Library Registry System
 Example 4: ZMQ Server Registry
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**Registry Setup** (``openhcs/runtime/zmq_base.py``):
+**Registry Setup** (``zmqruntime/server.py``):
 
 .. code-block:: python
 
@@ -810,7 +810,6 @@ This plugin registry system integrates with:
 - :doc:`function_registry_system` - Library function discovery and registration
 - :doc:`pattern_detection_system` - Microscope handler plugin architecture
 - :doc:`storage_and_memory_system` - Storage backend plugin architecture
-- :doc:`zmq_execution_system` - ZMQ server plugin architecture
 
 Summary
 -------
@@ -852,4 +851,3 @@ The AutoRegisterMeta plugin registry system provides:
 - ✅ All integration tests passing
 - ✅ Subprocess-safe (multiprocessing, ZMQ)
 - ✅ Ready for PyPI packaging (fully generic)
-

@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from openhcs.constants.constants import DEFAULT_IMAGE_EXTENSION
-from openhcs.io.filemanager import FileManager
+from polystore.filemanager import FileManager
 # Core OpenHCS Interfaces
 from openhcs.microscopes.microscope_interfaces import FilenameParser
 

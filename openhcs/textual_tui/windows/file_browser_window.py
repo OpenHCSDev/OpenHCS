@@ -16,7 +16,7 @@ from textual.containers import Container, Horizontal, Vertical, ScrollableContai
 from textual.widgets import Button, DirectoryTree, Static, Checkbox, Input
 
 from openhcs.constants.constants import Backend
-from openhcs.io.filemanager import FileManager
+from polystore.filemanager import FileManager
 from openhcs.textual_tui.adapters.universal_directorytree import OpenHCSDirectoryTree
 from openhcs.textual_tui.windows.base_window import BaseOpenHCSWindow
 from openhcs.core.path_cache import PathCacheKey

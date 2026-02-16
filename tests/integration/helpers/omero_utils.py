@@ -53,12 +53,13 @@ def upload_plate_to_omero(
 
     # Add OpenHCS metadata annotation (parser and microscope type)
     # OMERO backend uses OMEROFilenameParser for virtual filename generation
+    # Note: polystore expects keys in "polystore.metadata" namespace
     map_ann = omero.model.MapAnnotationI()
-    map_ann.setNs(rstring("openhcs.metadata"))
+    map_ann.setNs(rstring("polystore.metadata"))
 
     metadata_values = [
-        omero.model.NamedValue("openhcs.parser", "OMEROFilenameParser"),
-        omero.model.NamedValue("openhcs.microscope_type", "omero")
+        omero.model.NamedValue("polystore.parser", "OMEROFilenameParser"),
+        omero.model.NamedValue("polystore.microscope_type", "omero")
     ]
 
     # Add grid dimensions if provided

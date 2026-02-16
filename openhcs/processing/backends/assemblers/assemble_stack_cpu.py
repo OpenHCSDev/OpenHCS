@@ -6,7 +6,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, List, Tuple, Union
 
-from openhcs.core.memory.decorators import numpy as numpy_func
+from openhcs.core.memory import numpy as numpy_func
 from openhcs.core.pipeline.function_contracts import special_inputs
 
 # For type checking only

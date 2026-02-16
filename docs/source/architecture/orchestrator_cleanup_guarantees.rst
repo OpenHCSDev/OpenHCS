@@ -57,7 +57,7 @@ The orchestrator guarantees cleanup REGARDLESS of success or failure:
             
             # CRITICAL: Clear VFS and GPU REGARDLESS of success/failure
             # This must happen BEFORE checking result status
-            from openhcs.io.base import reset_memory_backend
+            from polystore.base import reset_memory_backend
             from openhcs.core.memory.gpu_cleanup import cleanup_all_gpu_frameworks
             
             reset_memory_backend()
@@ -80,7 +80,7 @@ The memory backend maintains a virtual file system mapping real paths to in-memo
 
 .. code-block:: python
 
-    from openhcs.io.base import reset_memory_backend
+    from polystore.base import reset_memory_backend
     
     # Clear all VFS mappings
     reset_memory_backend()
