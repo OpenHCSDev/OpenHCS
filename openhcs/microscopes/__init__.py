@@ -18,9 +18,6 @@ from openhcs.microscopes.handler_registry_service import (
     is_handler_available
 )
 
-# Note: Individual handlers are automatically discovered via LazyDiscoveryDict on first access.
-# No hardcoded imports or explicit discovery calls needed.
-
 __all__ = [
     # Factory function - primary public API
     'create_microscope_handler',

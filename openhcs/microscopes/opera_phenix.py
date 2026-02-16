@@ -12,9 +12,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union, Type, Tuple
 
 from openhcs.constants.constants import Backend
+from openhcs.io.exceptions import MetadataNotFoundError
 from openhcs.microscopes.opera_phenix_xml_parser import OperaPhenixXmlParser
 from polystore.filemanager import FileManager
 from openhcs.microscopes.microscope_base import MicroscopeHandler
+from openhcs.microscopes.detect_mixins import MetadataDetectMixin
 from openhcs.microscopes.microscope_interfaces import (FilenameParser,
                                                             MetadataHandler)
 
@@ -22,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 
-class OperaPhenixHandler(MicroscopeHandler):
+class OperaPhenixHandler(MetadataDetectMixin, MicroscopeHandler):
     """
     MicroscopeHandler implementation for Opera Phenix systems.
 
@@ -37,6 +39,7 @@ class OperaPhenixHandler(MicroscopeHandler):
 
     # Class attribute for automatic metadata handler registration (set after class definition)
     _metadata_handler_class = None
+    # metadata handler class assigned post-definition
 
     def __init__(self, filemanager: FileManager, pattern_format: Optional[str] = None):
         self.parser = OperaPhenixFilenameParser(filemanager, pattern_format=pattern_format)

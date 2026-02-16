@@ -1,0 +1,176 @@
+"""
+CPPipeParser - Parse CellProfiler .cppipe pipeline files.
+
+Parses the custom .cppipe format (not XML, but a custom text format) into
+structured ModuleBlock dataclasses for conversion to OpenHCS.
+
+Format example:
+    ModuleName:[module_num:5|svn_version:'Unknown'|...]
+        Setting Name:Value
+        Another Setting:Another Value
+"""
+
+import re
+import logging
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Dict, List, Optional, Any
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ModuleBlock:
+    """Represents a single CellProfiler module from a .cppipe file."""
+    
+    name: str  # e.g., "IdentifyPrimaryObjects"
+    module_num: int  # Position in pipeline
+    enabled: bool = True
+    settings: Dict[str, str] = field(default_factory=dict)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    
+    @property
+    def library_module_name(self) -> str:
+        """Convert module name to library module filename (lowercase with underscore prefix)."""
+        # IdentifyPrimaryObjects -> _identifyprimaryobjects
+        return f"_{self.name.lower()}"
+    
+    def get_setting(self, key: str, default: str = "") -> str:
+        """Get a setting value by key."""
+        return self.settings.get(key, default)
+
+
+class CPPipeParser:
+    """
+    Parser for CellProfiler .cppipe pipeline files.
+    
+    The .cppipe format is a custom text format (not XML) with:
+    - Header lines (CellProfiler Pipeline, Version, etc.)
+    - Module blocks starting with ModuleName:[metadata]
+    - Indented setting lines: "    Setting Name:Value"
+    """
+    
+    # Pattern for module header line: ModuleName:[metadata]
+    # The metadata can contain nested brackets like array([], dtype=uint8)
+    MODULE_HEADER_PATTERN = re.compile(
+        r'^(\w+):\[(.+)\]$'
+    )
+    
+    # Pattern for module metadata parsing
+    METADATA_PATTERN = re.compile(
+        r'(\w+):([^|]+)'
+    )
+    
+    # Pattern for setting line (4 spaces + Setting Name:Value)
+    SETTING_PATTERN = re.compile(
+        r'^    ([^:]+):(.*)$'
+    )
+    
+    def __init__(self, cppipe_path: Optional[Path] = None):
+        """
+        Initialize parser.
+        
+        Args:
+            cppipe_path: Path to .cppipe file (can also pass to parse())
+        """
+        self.cppipe_path = Path(cppipe_path) if cppipe_path else None
+        self.modules: List[ModuleBlock] = []
+        self.header: Dict[str, str] = {}
+    
+    def parse(self, cppipe_path: Optional[Path] = None) -> List[ModuleBlock]:
+        """
+        Parse a .cppipe file and return list of ModuleBlock.
+        
+        Args:
+            cppipe_path: Path to .cppipe file (uses self.cppipe_path if None)
+            
+        Returns:
+            List of ModuleBlock dataclasses
+        """
+        path = Path(cppipe_path) if cppipe_path else self.cppipe_path
+        if not path:
+            raise ValueError("No .cppipe path provided")
+        
+        if not path.exists():
+            raise FileNotFoundError(f".cppipe file not found: {path}")
+        
+        logger.info(f"Parsing .cppipe file: {path}")
+        
+        content = path.read_text()
+        lines = content.split('\n')
+        
+        self.modules = []
+        self.header = {}
+        current_module: Optional[ModuleBlock] = None
+        
+        for line in lines:
+            # Skip comments
+            if line.strip().startswith('#'):
+                continue
+            
+            # Skip empty lines
+            if not line.strip():
+                continue
+            
+            # Check for module header
+            header_match = self.MODULE_HEADER_PATTERN.match(line)
+            if header_match:
+                # Save previous module
+                if current_module:
+                    self.modules.append(current_module)
+                
+                # Parse new module
+                module_name = header_match.group(1)
+                metadata_str = header_match.group(2)
+                metadata = self._parse_metadata(metadata_str)
+                
+                current_module = ModuleBlock(
+                    name=module_name,
+                    module_num=int(metadata.get('module_num', 0)),
+                    enabled=metadata.get('enabled', 'True') == 'True',
+                    metadata=metadata
+                )
+                continue
+            
+            # Check for setting line
+            setting_match = self.SETTING_PATTERN.match(line)
+            if setting_match and current_module:
+                key = setting_match.group(1).strip()
+                value = setting_match.group(2).strip()
+                current_module.settings[key] = value
+                continue
+            
+            # Header line (key:value without module bracket)
+            if ':' in line and not line.startswith(' '):
+                parts = line.split(':', 1)
+                if len(parts) == 2:
+                    self.header[parts[0].strip()] = parts[1].strip()
+        
+        # Don't forget the last module
+        if current_module:
+            self.modules.append(current_module)
+        
+        logger.info(f"Parsed {len(self.modules)} modules from {path.name}")
+        return self.modules
+    
+    def _parse_metadata(self, metadata_str: str) -> Dict[str, Any]:
+        """Parse module metadata from bracket content."""
+        metadata = {}
+        for match in self.METADATA_PATTERN.finditer(metadata_str):
+            key = match.group(1)
+            value = match.group(2).strip().strip("'")
+            metadata[key] = value
+        return metadata
+    
+    def get_module_by_name(self, name: str) -> Optional[ModuleBlock]:
+        """Get a module by name (case-insensitive)."""
+        name_lower = name.lower()
+        for module in self.modules:
+            if module.name.lower() == name_lower:
+                return module
+        return None
+    
+    def get_enabled_modules(self) -> List[ModuleBlock]:
+        """Get only enabled modules."""
+        return [m for m in self.modules if m.enabled]
+
