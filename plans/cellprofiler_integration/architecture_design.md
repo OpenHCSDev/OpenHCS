@@ -604,7 +604,309 @@ The integration is considered successful when:
 
 ---
 
-## 11. References
+## 11. Context for New Agents
+
+This section provides everything a fresh agent needs to understand both architectures without additional research.
+
+### 11.1 Essential Files to Read
+
+**OpenHCS Core Architecture:**
+```
+openhcs/
+├── core/
+│   ├── steps/
+│   │   └── function_step.py          # How steps execute, special outputs handling
+│   ├── pipeline/
+│   │   ├── function_contracts.py     # @special_outputs, @special_inputs decorators
+│   │   └── compiler.py               # Pipeline compilation, path planning
+│   ├── context/
+│   │   └── processing_context.py     # ProcessingContext definition
+│   ├── orchestrator/
+│   │   └── orchestrator.py           # Well/site iteration, parallelization
+│   └── memory/
+│       └── __init__.py               # Re-exports from arraybridge
+│
+├── processing/
+│   └── backends/
+│       └── lib_registry/
+│           └── unified_registry.py   # ProcessingContract, _execute_pure_2d, etc.
+│
+└── constants/
+    └── constants.py                  # Backend, VariableComponents enums
+```
+
+**CellProfiler Integration:**
+```
+benchmark/
+├── cellprofiler_library/
+│   └── functions/                    # 88 absorbed CellProfiler modules
+│       ├── identifyprimaryobjects.py # Example: PURE_2D with special outputs
+│       ├── watershed.py              # Example: PURE_2D segmentation
+│       └── ...
+│
+├── cellprofiler_source/
+│   ├── library/
+│   │   ├── functions/                # Cloned CP library functions
+│   │   │   ├── segmentation.py       # Label formats (dense, sparse, ijv)
+│   │   │   └── measurement.py        # Measurement utilities
+│   │   └── opts/                     # CP option dataclasses
+│   └── modules/                      # Cloned CP modules (90 files)
+│
+├── converter/
+│   ├── parser.py                     # .cppipe file parser
+│   ├── llm_converter.py              # LLM-powered module conversion
+│   └── pipeline_generator.py         # Generate OpenHCS pipeline from .cppipe
+│
+└── cellprofiler_pipelines/
+    └── ExampleHuman.cppipe           # Example pipeline for testing
+```
+
+### 11.2 OpenHCS Execution Flow (Detailed)
+
+```
+1. PipelineOrchestrator.compile_pipelines()
+   │
+   ├── Initialize step_plans for each step
+   │   - PathPlanner generates VFS paths for inputs/outputs
+   │   - Resolve special_inputs from other steps
+   │   - Assign GPU resources
+   │
+   └── Freeze ProcessingContext (immutable for execution)
+
+2. PipelineOrchestrator.execute_compiled_plate()
+   │
+   ├── For each well (parallel across workers):
+   │   │
+   │   └── _execute_single_axis_static(pipeline, context)
+   │       │
+   │       └── For each step in pipeline:
+   │           │
+   │           └── FunctionStep.process(context, step_index)
+   │               │
+   │               ├── _bulk_preload_step_images()  # Load to memory backend
+   │               │
+   │               ├── For each pattern group:
+   │               │   │
+   │               │   ├── Load slices → stack_slices() → 3D array
+   │               │   │
+   │               │   ├── _execute_function_core() or _execute_chain_core()
+   │               │   │   │
+   │               │   │   └── func(3D_array, **kwargs)
+   │               │   │       │
+   │               │   │       └── Contract wrapper intercepts:
+   │               │   │           - PURE_2D: unstack → map → stack
+   │               │   │           - PURE_3D: pass through
+   │               │   │
+   │               │   ├── Extract special outputs from tuple
+   │               │   ├── Save special outputs to VFS (memory backend)
+   │               │   └── Save main output to VFS (memory backend)
+   │               │
+   │               └── _bulk_writeout_step_images()  # Memory → disk/zarr
+```
+
+### 11.3 ProcessingContract Implementation
+
+**Location:** `openhcs/processing/backends/lib_registry/unified_registry.py`
+
+```python
+class ProcessingContract(Enum):
+    PURE_3D = "_execute_pure_3d"
+    PURE_2D = "_execute_pure_2d"
+    FLEXIBLE = "_execute_flexible"
+    VOLUMETRIC_TO_SLICE = "_execute_volumetric_to_slice"
+
+    def execute(self, registry, func, image, *args, **kwargs):
+        method = getattr(registry, self.value)
+        return method(func, image, *args, **kwargs)
+```
+
+**Execution methods:**
+```python
+def _execute_pure_3d(self, func, image, *args, **kwargs):
+    """3D input → 3D output, no transformation."""
+    return func(image, *args, **kwargs)
+
+def _execute_pure_2d(self, func, image, *args, **kwargs):
+    """3D input → unstack → 2D×N → stack → 3D output."""
+    memory_type = func.output_memory_type
+    slices = unstack_slices(image, memory_type, 0)
+    results = [func(sl, *args, **kwargs) for sl in slices]  # BUG: crashes on tuples
+    return stack_slices(results, memory_type, 0)
+
+def _execute_flexible(self, func, image, *args, **kwargs):
+    """Toggle between PURE_2D and PURE_3D behavior."""
+    slice_by_slice = getattr(func, 'slice_by_slice', False)
+    if slice_by_slice:
+        return self._execute_pure_2d(func, image, *args, **kwargs)
+    else:
+        return self._execute_pure_3d(func, image, *args, **kwargs)
+```
+
+**How contracts are applied:**
+```python
+# In LibraryRegistryBase.apply_contract_wrapper()
+@wraps(func)
+def wrapper(image, *args, **kwargs):
+    # ... inject configurable params ...
+    return contract.execute(self, func, image, *args, **filtered_kwargs)
+```
+
+### 11.4 Special Outputs System
+
+**Decorator:** `openhcs/core/pipeline/function_contracts.py`
+
+```python
+@special_outputs(
+    "simple_output",  # String: no materialization
+    ("stats", MaterializationSpec(CsvOptions(...))),  # With materialization
+)
+def my_function(image):
+    return processed_image, simple_value, stats_data  # Tuple: (main, special1, special2)
+```
+
+**Execution handling:** `openhcs/core/steps/function_step.py:_execute_function_core()`
+
+```python
+raw_function_output = func_callable(main_data_arg, **final_kwargs)
+
+if isinstance(raw_function_output, tuple):
+    main_output_data = raw_function_output[0]
+    returned_special_values = raw_function_output[1:]
+    
+    for i, (output_key, vfs_path) in enumerate(special_outputs_plan.items()):
+        value_to_save = returned_special_values[i]
+        context.filemanager.save(value_to_save, vfs_path, Backend.MEMORY.value)
+else:
+    main_output_data = raw_function_output
+
+return main_output_data
+```
+
+**Key insight:** Special outputs are extracted AFTER the function returns. The contract layer (`_execute_pure_2d`) doesn't know about them.
+
+### 11.5 CellProfiler Workspace Structure
+
+**Location:** Cloned source in `benchmark/cellprofiler_source/`
+
+```python
+# CellProfiler's workspace (simplified)
+class Workspace:
+    def __init__(self, pipeline, image_set, object_set, measurements):
+        self.image_set = image_set      # Dict-like: get_image("DNA")
+        self.object_set = object_set    # Dict-like: get_objects("Nuclei")
+        self.measurements = measurements  # add_measurement(object, feature, data)
+        self.display_data = SimpleNamespace()
+        self.pipeline = pipeline
+```
+
+**Object model:**
+```python
+class Objects:
+    segmented: np.ndarray           # Final label array (2D or 3D)
+    unedited_segmented: np.ndarray  # Before filtering
+    parent_image: Image             # Reference to source image
+    
+    @property
+    def count(self) -> int:
+        return int(self.segmented.max())
+    
+    def relate_children(self, child_objects: 'Objects') -> Tuple[np.ndarray, np.ndarray]:
+        """Returns (children_per_parent, parents_of_children)."""
+        # Maps parent labels to child labels based on overlap
+```
+
+**Measurement naming:**
+```python
+# Format: {Object}_{Category}_{Feature}
+measurements.add_measurement("Nuclei", "AreaShape_Area", areas)
+measurements.add_measurement("Nuclei", "Location_Center_X", x_coords)
+measurements.add_measurement("Nuclei", "Intensity_MeanIntensity_DAPI", intensities)
+```
+
+### 11.6 Absorbed Function Pattern
+
+**Current state (buggy):**
+
+```python
+# benchmark/cellprofiler_library/functions/identifyprimaryobjects.py
+
+@numpy(contract=ProcessingContract.PURE_2D)  # Declares: expects 2D input
+@special_outputs(
+    ("object_stats", csv_materializer(...)),
+    ("labels", materialize_segmentation_masks),
+)
+def identify_primary_objects(image: np.ndarray, ...) -> Tuple[np.ndarray, PrimaryObjectStats, np.ndarray]:
+    """
+    Input: 2D image (because PURE_2D contract)
+    Output: (2D_image, stats_dataclass, 2D_labels)
+    
+    Problem: When called N times via _execute_pure_2d:
+    - results = [(img0, s0, l0), (img1, s1, l1), ...]
+    - stack_slices(results) crashes
+    """
+    labels = _segment(image)
+    stats = _compute_stats(labels)
+    return image, stats, labels
+```
+
+**Required state (with AggregationSpec):**
+
+```python
+@numpy(contract=ProcessingContract.PURE_2D)
+@special_outputs(
+    ("object_stats", AggregationSpec(
+        strategy=AggregationStrategy.CONCAT_AS_ROWS,
+        materializer=MaterializationSpec(CsvOptions(...)),
+    )),
+    ("labels", AggregationSpec(
+        strategy=AggregationStrategy.STACK_3D,
+        materializer=MaterializationSpec(ROIOptions()),
+    )),
+)
+def identify_primary_objects(image: np.ndarray, slice_index: int, ...) -> Tuple[np.ndarray, PrimaryObjectStats, np.ndarray]:
+    """
+    Input: 2D image + slice_index (injected by framework)
+    Output: (2D_image, stats_dataclass, 2D_labels)
+    
+    Framework handles:
+    - Inject slice_index
+    - Collect N results
+    - Transpose tuples
+    - Apply aggregation strategies
+    """
+    labels = _segment(image)
+    stats = _compute_stats(labels, slice_index)  # Use slice_index in stats
+    return image, stats, labels
+```
+
+### 11.7 Key Terms Glossary
+
+| Term | Definition |
+|------|------------|
+| **ProcessingContract** | Enum declaring how function handles dimensions (PURE_2D, PURE_3D, FLEXIBLE) |
+| **AggregationStrategy** | (Proposed) Enum declaring how to combine N outputs into 1 |
+| **special_outputs** | Decorator marking function outputs for separate VFS storage |
+| **VFS (Virtual File System)** | OpenHCS's abstraction over MEMORY, DISK, ZARR backends |
+| **ProcessingContext** | Immutable state container for pipeline execution |
+| **step_plans** | Dict in context containing compiled execution info per step |
+| **Absorbed function** | CellProfiler module converted to OpenHCS-compatible function |
+| **Workspace** | CellProfiler's mutable state container (per image set) |
+| **Objects** | CellProfiler's class for segmentation labels with metadata |
+| **Measurements** | CellProfiler's table-like storage for per-object features |
+
+### 11.8 Quick Reference: What to Read When
+
+**If you need to understand:**
+- How PURE_2D crashes → `unified_registry.py:_execute_pure_2d` + this doc §3
+- How special outputs work → `function_step.py:_execute_function_core` + this doc §11.4
+- How pipelines are compiled → `compiler.py` + `processing_context.py`
+- How CellProfiler modules work → `benchmark/cellprofiler_source/modules/*.py`
+- How absorbed functions are structured → `benchmark/cellprofiler_library/functions/*.py`
+- How .cppipe files are parsed → `benchmark/converter/parser.py`
+
+---
+
+## 12. References
 
 - CellProfiler Manual: https://cellprofiler-manual.s3.amazonaws.com/CellProfiler-5.0.0/
 - CellProfiler GitHub: https://github.com/CellProfiler/CellProfiler
@@ -614,8 +916,9 @@ The integration is considered successful when:
 
 ---
 
-## 12. Change Log
+## 13. Change Log
 
 | Date | Author | Changes |
 |------|--------|---------|
 | 2026-02-16 | opencode | Initial design document |
+| 2026-02-16 | opencode | Added §11 "Context for New Agents" with file paths, code snippets, glossary |
