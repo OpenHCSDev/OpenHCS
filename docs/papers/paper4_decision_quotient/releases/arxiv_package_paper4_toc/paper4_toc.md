@@ -6,7 +6,7 @@
 
 ## Abstract
 
-We characterize the computational complexity of coordinate sufficiency in decision problems within the formal model. Given action set $A$, state space $S = X_1 \times \cdots \times X_n$, and utility $u: A \times S \to \mathbb{R}$, a coordinate set $I$ is *sufficient* if $s_I = s'_I \implies \Opt(s) = \Opt(s')$.
+We characterize the computational complexity of coordinate sufficiency in decision problems within the formal model. Given action set $A$, state space $S = X_1 \times \cdots \times X_n$, and utility $u: A \times S \to \mathbb{Q}$, a coordinate set $I$ is *sufficient* if $s_I = s'_I \implies \Opt(s) = \Opt(s')$.
 
 **The landscape in the formal model:**
 
@@ -87,7 +87,7 @@ We contribute (i) formal definitions of decision-theoretic sufficiency in Lean; 
 
 The primary contribution is theoretical: a formalized reduction framework and a complete characterization of the core decision-relevant problems in the formal model (coNP/$\Sigma_2^P$ completeness and tractable cases stated under explicit encoding assumptions). Sections [\[sec:hardness\]](#sec:hardness){reference-type="ref" reference="sec:hardness"}--[\[sec:tractable\]](#sec:tractable){reference-type="ref" reference="sec:tractable"} contain the core theorems.
 
-Section [\[sec:foundations\]](#sec:foundations){reference-type="ref" reference="sec:foundations"}: foundations. Section [\[sec:hardness\]](#sec:hardness){reference-type="ref" reference="sec:hardness"}: hardness proofs. Section [\[sec:dichotomy\]](#sec:dichotomy){reference-type="ref" reference="sec:dichotomy"}: dichotomy. Section [\[sec:tractable\]](#sec:tractable){reference-type="ref" reference="sec:tractable"}: tractable cases. Sections [\[sec:implications\]](#sec:implications){reference-type="ref" reference="sec:implications"} and [\[sec:simplicity-tax\]](#sec:simplicity-tax){reference-type="ref" reference="sec:simplicity-tax"}: corollaries and implications for practice. Section [\[sec:related\]](#sec:related){reference-type="ref" reference="sec:related"}: related work. Appendix [\[app:lean\]](#app:lean){reference-type="ref" reference="app:lean"}: Lean listings.
+Section [\[sec:foundations\]](#sec:foundations){reference-type="ref" reference="sec:foundations"}: foundations. Section [\[sec:hardness\]](#sec:hardness){reference-type="ref" reference="sec:hardness"}: hardness proofs. Section [\[sec:dichotomy\]](#sec:dichotomy){reference-type="ref" reference="sec:dichotomy"}: dichotomy. Section [\[sec:tractable\]](#sec:tractable){reference-type="ref" reference="sec:tractable"}: tractable cases. Section [\[sec:engineering-justification\]](#sec:engineering-justification){reference-type="ref" reference="sec:engineering-justification"}: implications for practice. Section [\[sec:implications\]](#sec:implications){reference-type="ref" reference="sec:implications"}: software architecture corollaries. Section [\[sec:simplicity-tax\]](#sec:simplicity-tax){reference-type="ref" reference="sec:simplicity-tax"}: complexity conservation. Section [\[sec:related\]](#sec:related){reference-type="ref" reference="sec:related"}: related work. Appendix [\[app:lean\]](#app:lean){reference-type="ref" reference="app:lean"}: Lean listings.
 
 
 # Computational Complexity of Decision-Relevant Uncertainty {#sec:hardness}
@@ -139,11 +139,10 @@ A coordinate set $I \subseteq \{1, \ldots, n\}$ is *sufficient* if: $$\forall s,
 :::
 
 ::: center
-  Source                 Target                   Key property preserved
-  ---------------------- ------------------------ --------------------------------------
-  TAUTOLOGY              SUFFICIENCY-CHECK        Tautology iff $\emptyset$ sufficient
-  $\exists\forall$-SAT   ANCHOR-SUFFICIENCY       Witness anchors iff formula true
-  SET-COVER              MINIMUM-SUFFICIENT-SET   Set size maps to coordinate size
+  Source                 Target               Key property preserved
+  ---------------------- -------------------- --------------------------------------
+  TAUTOLOGY              SUFFICIENCY-CHECK    Tautology iff $\emptyset$ sufficient
+  $\exists\forall$-SAT   ANCHOR-SUFFICIENCY   Witness anchors iff formula true
 :::
 
 ::: proof
@@ -244,7 +243,13 @@ We also formalize a strengthened variant that fixes the coordinate set and asks 
 
 -   Fixed coordinate set $I$ = the $x$-coordinates.
 
-If $\exists x^\star \, \forall y \, \varphi(x^\star,y)=1$, then for any $y$ we have $U(\text{YES})=2$ and $U(\text{NO})\le 1$, so $\text{Opt}(x^\star,y)=\{\text{YES}\}$ is constant. Conversely, if $\varphi(x,y)$ is false for some $y$, then either $y=0^m$ (where NO is optimal) or $y\neq 0^m$ (where YES and NO tie), so the optimal set varies across $y$ and the subcube is not constant. Thus an anchor assignment exists iff the $\exists\forall$-SAT instance is true. ◻
+If $\exists x^\star \, \forall y \, \varphi(x^\star,y)=1$, then for any $y$ we have $U(\text{YES})=2$ and $U(\text{NO})\le 1$, so $\text{Opt}(x^\star,y)=\{\text{YES}\}$ is constant. Conversely, fix $x$ and suppose $\exists y_f$ with $\varphi(x,y_f)=0$.
+
+-   If $\varphi(x,0^m)=1$, then $\text{Opt}(x,0^m)=\{\text{YES}\}$. The falsifying assignment must satisfy $y_f\neq 0^m$, where $U(\text{YES})=U(\text{NO})=0$, so $\text{Opt}(x,y_f)=\{\text{YES},\text{NO}\}$.
+
+-   If $\varphi(x,0^m)=0$, then $\text{Opt}(x,0^m)=\{\text{NO}\}$. After padding we have $m>0$, so choose any $y'\neq 0^m$: either $\varphi(x,y')=1$ (then $\text{Opt}(x,y')=\{\text{YES}\}$) or $\varphi(x,y')=0$ (then $\text{Opt}(x,y')=\{\text{YES},\text{NO}\}$). In both subcases the optimal set differs from $\{\text{NO}\}$.
+
+Hence the subcube for this $x$ is not constant. Thus an anchor assignment exists iff the $\exists\forall$-SAT instance is true. ◻
 :::
 
 ## Tractable Subcases
@@ -277,7 +282,7 @@ This formally explains the engineering phenomenon:
 3.  Bounded scenario analysis (small $\hat{S}$) makes the problem tractable
 :::
 
-This connects to the pentalogy's leverage framework: the modeling budget for deciding what to model is itself a computationally constrained resource.
+The modeling budget for deciding what to model is itself a computationally constrained resource.
 
 ## Quantifier Collapse for MINIMUM-SUFFICIENT-SET
 
@@ -559,8 +564,12 @@ A general principle emerges from the complexity results: problem hardness is con
 For $n$ use sites, total realized hardness is: $$H_{\text{total}}(S) = H_{\text{central}}(S) + n \cdot H_{\text{distributed}}(S)$$
 :::
 
-::: definition
-[]{#def:hardness-conservation label="def:hardness-conservation"} For any problem family $P$ measured by $H(P;n)$ above, any solution architecture $S$ and any number of use sites $n \ge 1$ satisfy: $$H_{\text{total}}(S) = H_{\text{central}}(S) + n \cdot H_{\text{distributed}}(S) \geq H(P;n).$$ For SUFFICIENCY-CHECK, Theorem [\[thm:dichotomy\]](#thm:dichotomy){reference-type="ref" reference="thm:dichotomy"} provides the baseline on the hard succinct family: $H(\textsc{SUFFICIENCY-CHECK};n)=2^{\Omega(n)}$ under ETH.
+::: proposition
+[]{#def:hardness-conservation label="def:hardness-conservation"} For any problem family $P$ measured by $H(P;n)$ above, any solution architecture $S$ and any number of use sites $n \ge 1$, if $H_{\text{total}}(S)$ is measured in the same worst-case step units over the same input family, then: $$H_{\text{total}}(S) = H_{\text{central}}(S) + n \cdot H_{\text{distributed}}(S) \geq H(P;n).$$ For SUFFICIENCY-CHECK, Theorem [\[thm:dichotomy\]](#thm:dichotomy){reference-type="ref" reference="thm:dichotomy"} provides the baseline on the hard succinct family: $H(\textsc{SUFFICIENCY-CHECK};n)=2^{\Omega(n)}$ under ETH.
+:::
+
+::: proof
+*Proof.* By definition, $H(P;n)$ is a worst-case lower bound for correct solutions in this encoding regime and cost metric. Any such solution architecture decomposes total realized work as $H_{\text{central}} + n\cdot H_{\text{distributed}}$, so that total cannot fall below the baseline. ◻
 :::
 
 ::: definition
@@ -616,9 +625,9 @@ For $n$ use sites, manual implementation costs $n \cdot H_{\text{distributed}}$,
 The decision quotient (Section [\[sec:foundations\]](#sec:foundations){reference-type="ref" reference="sec:foundations"}) measures which coordinates are decision-relevant. Hardness distribution measures where the cost of *handling* those coordinates is paid. A high-axis system makes relevance explicit (central hardness); a low-axis system requires users to track relevance themselves (distributed hardness).
 :::
 
-#### Mechanized strengthening (sketch).
+#### Mechanized strengthening reference.
 
-We formalized a strengthened reduction in the mechanization: given a Boolean formula $\varphi$ over $n$ variables we construct a decision problem with $n$ coordinates so that if $\varphi$ is not a tautology then every coordinate is decision-relevant. Intuitively, the construction places a copy of the base gadget at each coordinate and makes the global "accept" condition hold only when every coordinate's local test succeeds; a single falsifying assignment at one coordinate therefore changes the global optimal set, witnessing that coordinate's relevance. The mechanized statement and proof appear in the development as `Reduction_AllCoords.lean` (the lemma `all_coords_relevant_of_not_tautology`).
+The strengthened all-coordinates-relevant reduction is presented in Section [\[sec:hardness\]](#sec:hardness){reference-type="ref" reference="sec:hardness"} ("Mechanized strengthening") and formalized in `Reduction_AllCoords.lean` via `all_coords_relevant_of_not_tautology`.
 
 The next section develops the major practical consequence of this framework: the Simplicity Tax Theorem.
 
@@ -812,12 +821,9 @@ The hardness distribution theorems (Section [\[sec:simplicity-tax\]](#sec:simpl
         simplicityTax P T + (P.requiredAxes inter T.nativeAxes).card
           = P.requiredAxes.card
 
-    theorem right_dominates_wrong (P : SpecificationProblem)
-        (S_right S_wrong : SolutionArchitecture P)
-        (hr : isRightHardness S_right)
-        (hw : isWrongHardness S_wrong)
-        (n : Nat) (hn : n > S_right.centralDOF) :
-        totalDOF S_right n < totalDOF S_wrong n
+    theorem native_dominates_manual (P : SpecificationProblem) (n : Nat)
+        (hn : n > P.intrinsicDOF) :
+        totalDOF (nativeTypeSystem P) n < totalDOF (manualApproach P) n
 
 ## Module Structure
 

@@ -54,13 +54,17 @@ For $n$ use sites, total realized hardness is:
 \[H_{\text{total}}(S) = H_{\text{central}}(S) + n \cdot H_{\text{distributed}}(S)\]
 \end{definition}
 
-\begin{definition}[Hardness Conservation Principle]\label{def:hardness-conservation}
-For any problem family $P$ measured by $H(P;n)$ above, any solution architecture $S$ and any number of use sites $n \ge 1$ satisfy:
+\begin{proposition}[Hardness Conservation Principle]\label{def:hardness-conservation}
+For any problem family $P$ measured by $H(P;n)$ above, any solution architecture $S$ and any number of use sites $n \ge 1$, if $H_{\text{total}}(S)$ is measured in the same worst-case step units over the same input family, then:
 \[
 H_{\text{total}}(S) = H_{\text{central}}(S) + n \cdot H_{\text{distributed}}(S) \geq H(P;n).
 \]
 For SUFFICIENCY-CHECK, Theorem~\ref{thm:dichotomy} provides the baseline on the hard succinct family: $H(\textsc{SUFFICIENCY-CHECK};n)=2^{\Omega(n)}$ under ETH.
-\end{definition}
+\end{proposition}
+
+\begin{proof}
+By definition, $H(P;n)$ is a worst-case lower bound for correct solutions in this encoding regime and cost metric. Any such solution architecture decomposes total realized work as $H_{\text{central}} + n\cdot H_{\text{distributed}}$, so that total cannot fall below the baseline.
+\end{proof}
 
 \begin{definition}[Hardness Efficiency]\label{def:hardness-efficiency}
 The \emph{hardness efficiency} of solution $S$ with $n$ use sites is:
@@ -116,7 +120,7 @@ For $n$ use sites, manual implementation costs $n \cdot H_{\text{distributed}}$,
 The decision quotient (Section~\ref{sec:foundations}) measures which coordinates are decision-relevant. Hardness distribution measures where the cost of \emph{handling} those coordinates is paid. A high-axis system makes relevance explicit (central hardness); a low-axis system requires users to track relevance themselves (distributed hardness).
 \end{remark}
 
-\paragraph{Mechanized strengthening (sketch).}
-We formalized a strengthened reduction in the mechanization: given a Boolean formula $\varphi$ over $n$ variables we construct a decision problem with $n$ coordinates so that if $\varphi$ is not a tautology then every coordinate is decision-relevant. Intuitively, the construction places a copy of the base gadget at each coordinate and makes the global ``accept'' condition hold only when every coordinate's local test succeeds; a single falsifying assignment at one coordinate therefore changes the global optimal set, witnessing that coordinate's relevance. The mechanized statement and proof appear in the development as \texttt{Reduction\_AllCoords.lean} (the lemma \texttt{all\_coords\_relevant\_of\_not\_tautology}).
+\paragraph{Mechanized strengthening reference.}
+The strengthened all-coordinates-relevant reduction is presented in Section~\ref{sec:hardness} (``Mechanized strengthening'') and formalized in \texttt{Reduction\_AllCoords.lean} via \texttt{all\_coords\_relevant\_of\_not\_tautology}.
 
 The next section develops the major practical consequence of this framework: the Simplicity Tax Theorem.

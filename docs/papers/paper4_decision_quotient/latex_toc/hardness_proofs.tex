@@ -61,7 +61,6 @@ Source & Target & Key property preserved \\
 \midrule
 TAUTOLOGY & SUFFICIENCY-CHECK & Tautology iff $\emptyset$ sufficient \\
 $\exists\forall$-SAT & ANCHOR-SUFFICIENCY & Witness anchors iff formula true \\
-SET-COVER & MINIMUM-SUFFICIENT-SET & Set size maps to coordinate size \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -183,9 +182,12 @@ construct a decision problem with:
 
 If $\exists x^\star \, \forall y \, \varphi(x^\star,y)=1$, then for any $y$ we have
 $U(\text{YES})=2$ and $U(\text{NO})\le 1$, so $\text{Opt}(x^\star,y)=\{\text{YES}\}$ is constant.
-Conversely, if $\varphi(x,y)$ is false for some $y$, then either $y=0^m$ (where NO is optimal)
-or $y\neq 0^m$ (where YES and NO tie), so the optimal set varies across $y$ and the subcube is not constant.
-Thus an anchor assignment exists iff the $\exists\forall$-SAT instance is true.
+Conversely, fix $x$ and suppose $\exists y_f$ with $\varphi(x,y_f)=0$.
+\begin{itemize}
+\item If $\varphi(x,0^m)=1$, then $\text{Opt}(x,0^m)=\{\text{YES}\}$. The falsifying assignment must satisfy $y_f\neq 0^m$, where $U(\text{YES})=U(\text{NO})=0$, so $\text{Opt}(x,y_f)=\{\text{YES},\text{NO}\}$.
+\item If $\varphi(x,0^m)=0$, then $\text{Opt}(x,0^m)=\{\text{NO}\}$. After padding we have $m>0$, so choose any $y'\neq 0^m$: either $\varphi(x,y')=1$ (then $\text{Opt}(x,y')=\{\text{YES}\}$) or $\varphi(x,y')=0$ (then $\text{Opt}(x,y')=\{\text{YES},\text{NO}\}$). In both subcases the optimal set differs from $\{\text{NO}\}$.
+\end{itemize}
+Hence the subcube for this $x$ is not constant. Thus an anchor assignment exists iff the $\exists\forall$-SAT instance is true.
 \end{proof}
 
 \subsection{Tractable Subcases}
@@ -217,7 +219,7 @@ This formally explains the engineering phenomenon:
 \end{enumerate}
 \end{corollary}
 
-This connects to the pentalogy's leverage framework: the modeling budget for deciding what to model is itself a computationally constrained resource.
+The modeling budget for deciding what to model is itself a computationally constrained resource.
 
 \subsection{Quantifier Collapse for MINIMUM-SUFFICIENT-SET}
 

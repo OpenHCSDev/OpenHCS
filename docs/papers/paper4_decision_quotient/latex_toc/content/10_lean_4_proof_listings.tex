@@ -66,12 +66,9 @@ theorem simplicityTax_conservation :
     simplicityTax P T + (P.requiredAxes inter T.nativeAxes).card
       = P.requiredAxes.card
 
-theorem right_dominates_wrong (P : SpecificationProblem)
-    (S_right S_wrong : SolutionArchitecture P)
-    (hr : isRightHardness S_right)
-    (hw : isWrongHardness S_wrong)
-    (n : Nat) (hn : n > S_right.centralDOF) :
-    totalDOF S_right n < totalDOF S_wrong n
+theorem native_dominates_manual (P : SpecificationProblem) (n : Nat)
+    (hn : n > P.intrinsicDOF) :
+    totalDOF (nativeTypeSystem P) n < totalDOF (manualApproach P) n
 \end{verbatim}
 
 \subsection{Module Structure}
