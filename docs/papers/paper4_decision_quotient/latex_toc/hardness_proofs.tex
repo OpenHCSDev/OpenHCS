@@ -219,15 +219,33 @@ This formally explains the engineering phenomenon:
 
 This connects to the pentalogy's leverage framework: the modeling budget for deciding what to model is itself a computationally constrained resource.
 
-\subsection{Remark: The Collapse to coNP}
+\subsection{Quantifier Collapse for MINIMUM-SUFFICIENT-SET}
 
-Early analysis of MINIMUM-SUFFICIENT-SET focused on the apparent $\exists\forall$ quantifier structure, which suggested a $\Sigma_2^P$-complete result. We initially explored certificate-size lower bounds for the complement, attempting to show MINIMUM-SUFFICIENT-SET was unlikely to be in coNP.
+\begin{theorem}[Collapse of the Apparent $\exists\forall$ Structure]
+\label{thm:minsuff-collapse}
+The apparent second-level predicate
+\[
+\exists I \, (|I| \leq k) \; \forall s,s' \in S:\; s_I = s'_I \implies \Opt(s)=\Opt(s')
+\]
+is equivalent to the coNP predicate $|\text{Relevant}| \le k$, where
+\[
+\text{Relevant} = \{i : \exists s,s'.\; s \text{ differs from } s' \text{ only at } i \text{ and } \Opt(s)\neq\Opt(s')\}.
+\]
+Consequently, MINIMUM-SUFFICIENT-SET is governed by coNP certificates rather than a genuine $\Sigma_2^P$ alternation.
+\end{theorem}
 
-However, the key insight---formalized as \texttt{sufficient\_contains\_relevant}---is that sufficiency has a simple characterization: a set is sufficient iff it contains all relevant coordinates. This collapses the $\exists\forall$ structure because:
-\begin{itemize}
-    \item The minimum sufficient set is \emph{exactly} the relevant coordinate set
-    \item Checking relevance is in coNP (witness: two states differing only at that coordinate with different optimal sets)
-    \item Counting relevant coordinates is also in coNP
-\end{itemize}
+\begin{proof}
+By the formal lemma \texttt{sufficient\_contains\_relevant}, a coordinate set $I$ is sufficient iff $\text{Relevant}\subseteq I$. Therefore:
+\[
+\exists I \; (|I|\le k \wedge \text{sufficient}(I))
+\iff
+\exists I \; (|I|\le k \wedge \text{Relevant}\subseteq I)
+\iff
+|\text{Relevant}| \le k.
+\]
+So the existential-over-universal presentation collapses to counting the relevant coordinates.
 
-This collapse explains why ANCHOR-SUFFICIENCY retains its $\Sigma_2^P$-completeness: fixing coordinates and asking for an assignment that works is a genuinely different question. The ``for all suffixes'' quantifier cannot be collapsed when the anchor assignment is part of the existential choice.
+A NO certificate for $|\text{Relevant}| \le k$ is a list of $k+1$ distinct relevant coordinates, each witnessed by two states that differ only on that coordinate and yield different optimal sets; this is polynomially verifiable. Hence the resulting predicate is in coNP, matching Theorem~\ref{thm:minsuff-conp}.
+
+This also clarifies why ANCHOR-SUFFICIENCY remains $\Sigma_2^P$-complete: once an anchor assignment is existentially chosen, the universal quantifier over the residual subcube does not collapse to a coordinate-counting predicate.
+\end{proof}

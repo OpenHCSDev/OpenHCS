@@ -1,6 +1,6 @@
-\section{Implications for Software Architecture}\label{sec:implications}
+\section{Informal Corollaries for Software Architecture}\label{sec:implications}
 
-This section states corollaries for software architecture. The complexity results have direct implications for software engineering practice.
+This section states informal corollaries for software architecture derived from the formal model. The complexity results have direct implications for software engineering practice, but the statements in this section are interpretive consequences; machine-checked theorem statements are in Section~\ref{sec:simplicity-tax} and Appendix~\ref{app:lean}.
 
 \subsection{Why Over-Specification Is Rational}
 
@@ -29,26 +29,29 @@ High ADQ means the configuration subset $I$ leaves many behaviors achievable---i
 Decisions with low ADQ (strongly constraining) require fewer additional decisions to fully specify system behavior.
 \end{proposition}
 
-\subsection{Practical Recommendations}
+\subsection{Corollaries for Practice}
 
-Based on our theoretical results:
-
+\begin{corollary}[Practice-facing corollaries]
+\label{cor:practice-corollaries}
+Within the formal model, the following corollaries hold:
 \begin{enumerate}
-\item \textbf{Accept over-modeling:} Don't penalize engineers for including ``extra'' parameters. The alternative (minimal modeling) is computationally hard.
-
+\item \textbf{Accept over-modeling:} Including ``extra'' parameters is often rational because exact minimization is computationally hard.
 \item \textbf{Use bounded scenarios:} When the scenario space is small (Proposition~\ref{prop:sufficiency-char}), minimal modeling becomes tractable.
-
 \item \textbf{Exploit structure:} Tree-structured dependencies, bounded alternatives, and separable utilities admit efficient algorithms.
-
-\item \textbf{Invest in heuristics:} For general problems, develop domain-specific heuristics rather than seeking optimal solutions.
+\item \textbf{Use heuristics in the unstructured regime:} For general instances outside the tractable classes, exact optimization has worst-case hardness.
 \end{enumerate}
+\end{corollary}
+
+\begin{proof}[Derivation sketch]
+Items (1) and (4) follow from the hardness theorems in Section~\ref{sec:hardness} and the encoding-regime separation in Theorem~\ref{thm:dichotomy}. Items (2) and (3) follow from the tractable conditions in Theorem~\ref{thm:tractable}.
+\end{proof}
 
 \subsection{Hardness Distribution: Right Place vs Wrong Place}\label{sec:hardness-distribution}
 
 A general principle emerges from the complexity results: problem hardness is conserved and is \emph{distributed} across a system in qualitatively different ways.
 
 \begin{definition}[Hardness Distribution]\label{def:hardness-distribution}
-Let $P$ be a problem with intrinsic hardness $H(P)$ (measured in computational steps, implementation effort, or error probability). A \emph{solution architecture} $S$ partitions this hardness into:
+Let $P$ be a problem family under the succinct encoding of Section~\ref{sec:encoding}. In this section, intrinsic hardness $H(P;n)$ denotes worst-case computational step complexity on instances with $n$ coordinates (equivalently, as a function of succinct input length $L$). A \emph{solution architecture} $S$ partitions this hardness into:
 \begin{itemize}
 \item $H_{\text{central}}(S)$: hardness paid once, at design time or in a shared component
 \item $H_{\text{distributed}}(S)$: hardness paid per use site
@@ -58,9 +61,11 @@ For $n$ use sites, total realized hardness is:
 \end{definition}
 
 \begin{definition}[Hardness Conservation Principle]\label{def:hardness-conservation}
-For any problem $P$ with intrinsic hardness $H(P)$, any solution $S$ satisfies:
-\[H_{\text{central}}(S) + H_{\text{distributed}}(S) \geq H(P).\]
-This statement is presented as a definitional principle grounded in the prior definition of intrinsic hardness: any correct solution must account for at least $H(P)$ units of work, which the architecture may allocate centrally or distribute across use sites. The substantive, theorem-like consequences (for example, Centralization Dominance) follow from this grounding.
+For any problem family $P$ measured by $H(P;n)$ above, any solution architecture $S$ and any number of use sites $n \ge 1$ satisfy:
+\[
+H_{\text{total}}(S) = H_{\text{central}}(S) + n \cdot H_{\text{distributed}}(S) \geq H(P;n).
+\]
+For SUFFICIENCY-CHECK, Theorem~\ref{thm:dichotomy} provides the baseline on the hard succinct family: $H(\textsc{SUFFICIENCY-CHECK};n)=2^{\Omega(n)}$ under ETH.
 \end{definition}
 
 \begin{definition}[Hardness Efficiency]\label{def:hardness-efficiency}
