@@ -1,86 +1,71 @@
 \section{Lean 4 Proof Listings}\label{app:lean}
 
-The complete Lean 4 formalization is included in the appendix and companion artifact (Zenodo DOI is listed on the paper title page).
+The complete Lean 4 formalization is available in the companion artifact (Zenodo DOI listed on the title page). The mechanization consists of approximately 5,000 lines across 33 files.
 
-The formalization is not a transcription; it exposes a reusable reduction library with compositional polynomial bounds, enabling later mechanized hardness proofs to reuse these components directly.
+\subsection{What Is Machine-Checked}
 
-\subsection{On the Nature of Definitional Proofs}\label{definitional-proofs-nature}
-
-The Lean proofs follow directly from the formal definitions and standard complexity-theoretic constructions. The mechanization provides machine-checked verification and precision.
-
-\textbf{Definitional vs. derivational proofs.} The core theorems establish definitional properties and reduction constructions. For example, the polynomial reduction composition theorem (Theorem~\ref{thm:poly-compose}) proves that composing two polynomial-time reductions yields a polynomial-time reduction. The proof follows from the definition of polynomial time: composing two polynomials yields a polynomial.
-
-\textbf{Precedent in complexity theory.} This pattern occurs throughout classical complexity theory:
-
-\begin{itemize}
-\item \textbf{Cook-Levin Theorem (1971):} SAT is NP-complete. The proof constructs a reduction from an arbitrary NP problem to SAT. The construction itself is straightforward (encode Turing machine computation as boolean formula), but the \emph{insight} is recognizing that SAT captures all of NP.
-\item \textbf{Ladner's Theorem (1975):} If P $\neq$ NP, then NP-intermediate problems exist. The proof is a diagonal construction---conceptually simple once the right framework is identified.
-\item \textbf{Toda's Theorem (1991):} The polynomial hierarchy is contained in P$^\#$P. The proof uses counting arguments that are elegant but not technically complex. The profundity is in the \emph{connection} between counting and the hierarchy.
-\end{itemize}
-
-\textbf{Why simplicity indicates strength.} A definitional theorem derived from precise formalization is \emph{stronger} than an informal argument. When we prove that sufficiency checking is coNP-complete (Theorem~\ref{thm:sufficiency-conp}), we are not saying ``we tried many algorithms and they all failed.'' We are saying something general: \emph{any} algorithm solving sufficiency checking solves TAUTOLOGY, and vice versa. The proof is a reduction construction that follows from the problem definitions.
-
-\textbf{Where the insight lies.} The semantic contribution of our formalization is:
+The Lean formalization establishes:
 
 \begin{enumerate}
-\item \textbf{Precision forcing.} Formalizing ``coordinate sufficiency'' in Lean requires stating exactly what it means for a coordinate subset to contain all decision-relevant information. This precision eliminates ambiguity about edge cases (what if projections differ only on irrelevant coordinates?).
+\item \textbf{Correctness of the TAUTOLOGY reduction:} The theorem \texttt{tautology\_iff\_sufficient} proves that the mapping from Boolean formulas to decision problems preserves the decision structure (accept iff the formula is a tautology).
 
-\item \textbf{Reduction correctness.} The TAUTOLOGY reduction (Section~\ref{sec:hardness}) is machine-checked to preserve the decision structure. Complexity reductions are subtle and easy to mis-specify. We therefore mechanize the definitions and key reductions in Lean to rule out common formalization mistakes.
+\item \textbf{Decision problem definitions:} Formal definitions of sufficiency, optimality, and the decision quotient.
 
-\item \textbf{Encoding-regime separation.} Theorem~\ref{thm:dichotomy} contrasts explicit-state polynomial-time (polynomial in $|S|$) with a succinct worst-case ETH lower bound witnessed by a hard family with $k^*=n$ requiring $2^{\Omega(n)}$ time. Intermediate regimes are not ruled out by the lower-bound statement.
+\item \textbf{Economic theorems:} The Simplicity Tax conservation laws and hardness distribution results.
 \end{enumerate}
 
-\textbf{What machine-checking guarantees.} The Lean compiler verifies that each proof step is valid and each definition is consistent; the mechanization does not introduce additional axioms beyond the chosen foundations. The mechanization contains no \texttt{sorry} placeholders. Reviewers can independently verify the proofs by running \texttt{lake build} in the mechanization directory and inspecting the companion artifact.
+\textbf{Complexity classifications} (coNP-completeness, $\Sigma_2^P$-completeness) follow from informal composition with standard results (TAUTOLOGY is coNP-complete, etc.). The Lean proofs verify the reduction constructions; the complexity class membership is derived by combining these with established theorems from complexity theory.
 
-\textbf{Comparison to informal complexity arguments.} Prior work on model selection complexity (Chickering et al.~\cite{chickering2004large}, Teyssier \& Koller~\cite{teyssier2012ordering}) presents compelling informal arguments but lacks machine-checked proofs. Our contribution is not new \emph{wisdom}---the insight that model selection is hard is old. Our contribution is \emph{formalization}: making ``coordinate sufficiency'' precise enough to mechanize, constructing verified reductions, and proving the complexity results hold for the formalized definitions.
+\subsection{Polynomial-Time Reduction Definition}
 
-This follows the tradition of verified complexity theory: just as Nipkow \& Klein~\cite{nipkow2014concrete} formalized automata theory and Cook~\cite{cook2018complexity} formalized NP-completeness in proof assistants, we formalize decision-theoretic complexity. The proofs are simple because the formalization makes the structure clear. Simple proofs from precise definitions are the goal, not a limitation.
+We use Mathlib's Turing machine framework to define polynomial-time computability:
 
-\subsection{Module Structure}
+\begin{verbatim}
+/-- Polynomial-time computable function using Turing machines -/
+def PolyTime {α β : Type} (ea : FinEncoding α) (eb : FinEncoding β) 
+    (f : α → β) : Prop :=
+  Nonempty (Turing.TM2ComputableInPolyTime ea eb f)
 
-The formalization consists of 33 files organized as follows:
+/-- Polynomial-time many-one (Karp) reduction -/
+def ManyOneReducesPoly {α β : Type} (ea : FinEncoding α) (eb : FinEncoding β)
+    (A : Set α) (B : Set β) : Prop :=
+  ∃ f : α → β, PolyTime ea eb f ∧ ∀ x, x ∈ A ↔ f x ∈ B
+\end{verbatim}
 
-\begin{itemize}
-\item \texttt{Basic.lean} -- Core definitions (DecisionProblem, CoordinateSet, Projection)
-\item \texttt{AlgorithmComplexity.lean} -- Complexity definitions (polynomial time, reductions)
-\item \texttt{PolynomialReduction.lean} -- Polynomial reduction composition (Theorem~\ref{thm:poly-compose})
-\item \texttt{Reduction.lean} -- TAUTOLOGY reduction for sufficiency checking
-\item \texttt{Reduction\_AllCoords.lean} -- Strengthened gadget: if $\varphi$ is not a tautology then every coordinate is relevant
-\item \texttt{Hardness/} -- Counting complexity and approximation barriers
-\item \texttt{Tractability/} -- Bounded actions, separable utilities, tree structure, FPT
-\item \texttt{Economics/} -- Value of information and elicitation connections
-\item \texttt{Dichotomy.lean} and \texttt{ComplexityMain.lean} -- Summary results
-\item \texttt{HardnessDistribution.lean} -- Simplicity Tax Theorem (Section~\ref{sec:simplicity-tax})
-\end{itemize}
+This uses the standard definition: a reduction is polynomial-time computable via Turing machines and preserves membership.
 
-\subsection{Key Theorems}
+\subsection{The Main Reduction Theorem}
 
-\begin{theorem}[Polynomial Composition, Lean]\label{thm:poly-compose}
-Polynomial-time reductions compose to polynomial-time reductions.
+\begin{theorem}[TAUTOLOGY Reduction Correctness, Lean]
+The reduction from TAUTOLOGY to SUFFICIENCY-CHECK is correct:
 \end{theorem}
 
 \begin{verbatim}
-theorem PolyReduction.comp_exists
-    (f : PolyReduction A B) (g : PolyReduction B C) :
-    exists h : PolyReduction A C,
-      forall a, h.reduce a = g.reduce (f.reduce a)
+theorem tautology_iff_sufficient (φ : Formula n) :
+    φ.isTautology ↔ (reductionProblem φ).isSufficient Finset.empty
 \end{verbatim}
 
-\begin{theorem}[Simplicity Tax Conservation, Lean]\label{thm:tax-conservation-lean}
-The simplicity tax plus covered axes equals required axes (partition).
-\end{theorem}
+This theorem is proven by showing both directions:
+\begin{itemize}
+\item If $\varphi$ is a tautology, then the empty coordinate set is sufficient
+\item If the empty coordinate set is sufficient, then $\varphi$ is a tautology
+\end{itemize}
+
+The proof verifies that the utility construction in \texttt{reductionProblem} creates the appropriate decision structure where:
+\begin{itemize}
+\item At reference states, \texttt{accept} is optimal with utility 1
+\item At assignment states, \texttt{accept} is optimal iff $\varphi(a) = \text{true}$
+\end{itemize}
+
+\subsection{Economic Results}
+
+The hardness distribution theorems (Section~\ref{sec:simplicity-tax}) are fully formalized:
 
 \begin{verbatim}
 theorem simplicityTax_conservation :
     simplicityTax P T + (P.requiredAxes inter T.nativeAxes).card
       = P.requiredAxes.card
-\end{verbatim}
 
-\begin{theorem}[Simplicity Preference Fallacy, Lean]\label{thm:fallacy-lean}
-Incomplete tools always cost more than complete tools for $n > 0$ use sites.
-\end{theorem}
-
-\begin{verbatim}
 theorem simplicity_preference_fallacy (T_simple T_complex : Tool)
     (h_simple_incomplete : isIncomplete P T_simple)
     (h_complex_complete : isComplete P T_complex)
@@ -88,6 +73,17 @@ theorem simplicity_preference_fallacy (T_simple T_complex : Tool)
     totalExternalWork P T_complex n < totalExternalWork P T_simple n
 \end{verbatim}
 
-\subsection{Verification Status}
+\subsection{Module Structure}
 
-The mechanization and its verification status are documented in the companion artifact; reviewers may consult the artifact for exact counts and files. The proofs compile and can be verified via the provided build instructions.
+\begin{itemize}
+\item \texttt{Basic.lean} -- Core definitions (DecisionProblem, sufficiency, optimality)
+\item \texttt{Sufficiency.lean} -- Sufficiency checking algorithms and properties
+\item \texttt{Reduction.lean} -- TAUTOLOGY reduction construction and correctness
+\item \texttt{Complexity.lean} -- Polynomial-time reduction definitions using mathlib
+\item \texttt{HardnessDistribution.lean} -- Simplicity Tax theorems
+\item \texttt{Tractability/} -- Bounded actions, separable utilities, tree structure
+\end{itemize}
+
+\subsection{Verification}
+
+The proofs compile with Lean 4 and contain no \texttt{sorry} placeholders. Run \texttt{lake build} in the proof directory to verify.
