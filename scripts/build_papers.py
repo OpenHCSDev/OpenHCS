@@ -512,7 +512,10 @@ class PaperBuilder:
         """Validate Markdown exists and return path. Fail-loud if missing."""
         meta = self._get_paper_meta(paper_id)
         paper_dir = self._get_paper_dir(paper_id)
-        md_file = paper_dir / "markdown" / f"{meta.dir_name}.md"
+        # Must match build_markdown(), which writes <paper_id>.md.
+        # This is critical for variants (e.g., paper4_toc) that share dir_name
+        # with a base paper but have different LaTeX sources/content.
+        md_file = paper_dir / "markdown" / f"{paper_id}.md"
 
         if not md_file.exists():
             raise FileNotFoundError(
