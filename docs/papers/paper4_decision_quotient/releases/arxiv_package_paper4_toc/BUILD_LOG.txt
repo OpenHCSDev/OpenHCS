@@ -2,7 +2,7 @@ OpenHCS Paper Build Log
 ========================
 
 Paper: paper4_toc - Computational Complexity of Sufficiency in Decision Problems
-Package Date: 2026-02-19T01:17:14.289030
+Package Date: 2026-02-19T01:46:20.083654
 Lean Toolchain: leanprover/lean4:v4.16.0
 
 Proof Statistics:

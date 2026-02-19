@@ -275,9 +275,9 @@ We distinguish the encodings of Section [\[sec:encoding\]](#sec:encoding){refer
 
 # Implications for Practice: Diagnostic Reading of Over-Modeling {#sec:engineering-justification}
 
-This section states corollaries for engineering practice. Within the formal model, the complexity results of Sections [\[sec:hardness\]](#sec:hardness){reference-type="ref" reference="sec:hardness"} and [\[sec:dichotomy\]](#sec:dichotomy){reference-type="ref" reference="sec:dichotomy"} shift parts of this workflow from informal judgment toward explicit, checkable criteria. The observed behaviors---configuration over-specification, absence of automated minimization tools, heuristic model selection---are best read as *diagnostic signals* that the decision boundary is not yet fully characterized in a tractable representation.
+This section states corollaries for engineering practice. Within the formal model, the complexity results of Sections [\[sec:hardness\]](#sec:hardness){reference-type="ref" reference="sec:hardness"} and [\[sec:dichotomy\]](#sec:dichotomy){reference-type="ref" reference="sec:dichotomy"} shift parts of this workflow from informal judgment toward explicit, checkable criteria. The observed behaviors---configuration over-specification, absence of automated minimization tools, heuristic model selection---are *diagnostic signals* that the decision boundary is not yet fully characterized in a tractable representation.
 
-Some common prescriptions implicitly require exact minimization of sufficient parameter sets. In the worst case, that task is -complete in our model, so critiques should distinguish between true irrelevance and unresolved relevance structure under the chosen encoding. The interpretive key for this section is Theorem [\[thm:overmodel-diagnostic\]](#thm:overmodel-diagnostic){reference-type="ref" reference="thm:overmodel-diagnostic"}: persistent failure to isolate a minimal sufficient set should be read as a boundary-characterization signal in the current model, not as a universal irreducibility claim.
+Some common prescriptions implicitly require exact minimization of sufficient parameter sets. In the worst case, that task is -complete in our model, so critiques must distinguish between true irrelevance and unresolved relevance structure under the chosen encoding. The interpretive key for this section is Theorem [\[thm:overmodel-diagnostic\]](#thm:overmodel-diagnostic){reference-type="ref" reference="thm:overmodel-diagnostic"}: persistent failure to isolate a minimal sufficient set is a boundary-characterization signal in the current model, not a universal irreducibility claim.
 
 ## Configuration Simplification is SUFFICIENCY-CHECK
 
@@ -387,7 +387,7 @@ These theorems provide mathematical grounding for three widespread engineering b
 
 **3. "Include everything" is a conservative upper-bound policy.** When determining relevance/minimal sufficiency has a $2^{\Omega(n)}$ worst-case lower bound under ETH in the succinct encoding (Theorem [\[thm:dichotomy\]](#thm:dichotomy){reference-type="ref" reference="thm:dichotomy"}), including all $n$ parameters costs $O(n)$ while the exact boundary remains unresolved.
 
-These behaviors are not ad hoc workarounds; under the stated computational model they are practical consequences of a boundary-identification bottleneck. The complexity results provide a diagnostic lens: persistent over-modeling should prompt either stronger structural assumptions or explicit acceptance of approximation.
+These behaviors are not ad hoc workarounds; under the stated computational model they are practical consequences of a boundary-identification bottleneck. The complexity results provide a diagnostic lens: persistent over-modeling marks the need for either stronger structural assumptions or explicit acceptance of approximation.
 
 [^1]: Naive subset enumeration still gives an intuitive baseline of $O(2^n)$ checks, but that is an algorithmic upper bound; the theorem below uses ETH for the lower-bound argument.
 
@@ -398,13 +398,13 @@ This section states informal corollaries for software architecture derived from 
 
 ## Why Persistent Over-Specification Is Diagnostic
 
-Software architects routinely specify more configuration parameters than strictly necessary. In the formal model, this is best interpreted diagnostically:
+Software architects routinely specify more configuration parameters than strictly necessary. In the formal model, this is diagnostic:
 
 ::: corollary
 Given a software system with $n$ configuration parameters, checking whether a proposed subset suffices is -complete. Finding the minimum such set is also -complete.
 :::
 
-This explains why configuration files grow over time: inability to remove parameters is often evidence that decision relevance is not yet characterized in a tractable form.
+This explains why configuration files grow over time: inability to remove parameters is evidence that decision relevance is not yet characterized in a tractable form.
 
 ## Architectural Decision Quotient
 
@@ -537,7 +537,7 @@ Let $R(P)$ be the required dimensions (those affecting $\Opt$) and $A(M)$ the di
 :::
 
 ::: corollary
-Since identifying $R(P)$ is -complete in the succinct worst case (Theorem [\[thm:sufficiency-conp\]](#thm:sufficiency-conp){reference-type="ref" reference="thm:sufficiency-conp"}), exact minimization of the expressive gap is computationally hard without additional structure. Accordingly, a persistent nonzero gap should be interpreted as unresolved tractable characterization of relevance, not as evidence that refinement is impossible.
+Since identifying $R(P)$ is -complete in the succinct worst case (Theorem [\[thm:sufficiency-conp\]](#thm:sufficiency-conp){reference-type="ref" reference="thm:sufficiency-conp"}), exact minimization of the expressive gap is computationally hard without additional structure. Accordingly, a persistent nonzero gap indicates unresolved tractable characterization of relevance, not impossibility of refinement.
 :::
 
 These results are machine-checked in Lean 4 (`HardnessDistribution.lean`).
@@ -563,7 +563,7 @@ The value of information (VOI) framework [@howard1966information] quantifies th
 
 ## Model Selection
 
-Statistical model selection (AIC [@akaike1974new], BIC [@schwarz1978estimating], cross-validation [@stone1974cross]) provides practical heuristics for choosing among models. Our results clarify why these heuristics dominate current practice: without added structural assumptions, exact optimal model selection inherits worst-case intractability, so heuristic methods function as provisional approximations until stronger structure is identified.
+Statistical model selection (AIC [@akaike1974new], BIC [@schwarz1978estimating], cross-validation [@stone1974cross]) provides practical heuristics for choosing among models. Our results clarify why these heuristics dominate current practice: without added structural assumptions, exact optimal model selection inherits worst-case intractability, so heuristic methods are approximation policies for unresolved structure until stronger structure is identified.
 
 
 # Conclusion
@@ -637,7 +637,7 @@ Several questions remain for future work:
 
 ## Practical interpretation {#practical-interpretation .unnumbered}
 
-While this work is theoretical, the complexity bounds have practical meaning. Under ETH and the succinct encoding, one should not expect generic polynomial-time worst-case solvers for arbitrary inputs. This is a diagnostic statement, not a claim of permanent impossibility in all regimes: when this barrier appears, the correct response is to refine representation and assumptions until decision relevance becomes structurally tractable, or to make approximation commitments explicit. Theorem [\[thm:overmodel-diagnostic\]](#thm:overmodel-diagnostic){reference-type="ref" reference="thm:overmodel-diagnostic"} states this interpretive point directly at the level of parameterization. In practice, real datasets often have structure (sparsity, bounded dependency depth, separable utilities) that the tractable subcases capture. Thus, engineering efforts should focus on (a) detecting and exploiting structural restrictions in inputs, and (b) designing heuristic or approximate methods for currently unstructured instances while those structural hypotheses are developed.
+While this work is theoretical, the complexity bounds have practical meaning. Under ETH and the succinct encoding, generic polynomial-time worst-case solvers for arbitrary inputs are ruled out. This is a diagnostic statement, not a claim of permanent impossibility in all regimes: the barrier marks unresolved structural characterization in the current representation, and the response is to refine representation and assumptions until decision relevance becomes structurally tractable or to state approximation commitments explicitly. Theorem [\[thm:overmodel-diagnostic\]](#thm:overmodel-diagnostic){reference-type="ref" reference="thm:overmodel-diagnostic"} states this interpretive point directly at the level of parameterization. Real datasets contain structure (sparsity, bounded dependency depth, separable utilities) that the tractable subcases capture. Engineering work therefore follows two tracks: (a) detecting and exploiting structural restrictions in inputs, and (b) designing heuristic or approximate methods for currently unstructured instances while those structural hypotheses are developed.
 
 
 # Lean 4 Proof Listings {#app:lean}
