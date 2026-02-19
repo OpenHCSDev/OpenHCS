@@ -1,6 +1,6 @@
 \section{Lean 4 Proof Listings}\label{app:lean}
 
-The complete Lean 4 formalization is available in the companion artifact (Zenodo DOI listed on the title page). The mechanization consists of approximately 5,000 lines across 33 files.
+The complete Lean 4 formalization is available in the companion artifact (Zenodo DOI listed on the title page). The mechanization consists of approximately 5,900 lines across 39 files, with 230+ theorem/lemma statements.
 
 \subsection{What Is Machine-Checked}
 
@@ -66,11 +66,12 @@ theorem simplicityTax_conservation :
     simplicityTax P T + (P.requiredAxes inter T.nativeAxes).card
       = P.requiredAxes.card
 
-theorem simplicity_preference_fallacy (T_simple T_complex : Tool)
-    (h_simple_incomplete : isIncomplete P T_simple)
-    (h_complex_complete : isComplete P T_complex)
-    (n : Nat) (hn : n > 0) :
-    totalExternalWork P T_complex n < totalExternalWork P T_simple n
+theorem right_dominates_wrong (P : SpecificationProblem)
+    (S_right S_wrong : SolutionArchitecture P)
+    (hr : isRightHardness S_right)
+    (hw : isWrongHardness S_wrong)
+    (n : Nat) (hn : n > S_right.centralDOF) :
+    totalDOF S_right n < totalDOF S_wrong n
 \end{verbatim}
 
 \subsection{Module Structure}

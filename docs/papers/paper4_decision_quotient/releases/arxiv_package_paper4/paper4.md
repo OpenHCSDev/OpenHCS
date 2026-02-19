@@ -1,6 +1,6 @@
 # Paper: Verified Polynomial-Time Reductions in Lean 4: Formalizing the Complexity of Decision-Relevant Information
 
-**Status**: Draft-ready | **Lean**: 2760 lines, 106 theorems
+**Status**: Draft-ready | **Lean**: 5901 lines, 237 theorems
 
 ---
 
@@ -1646,5 +1646,5 @@ The "cover important axes" heuristic only works if you *correctly identify* whic
 
 All theorems are formalized in Lean 4:
 - Location: `docs/papers/proofs/paper4_*.lean`
-- Lines: 2760
-- Theorems: 106
+- Lines: 5901
+- Theorems: 237

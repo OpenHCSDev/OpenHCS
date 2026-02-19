@@ -87,8 +87,8 @@ papers:
     latex_dir: "latex"
     latex_file: "decision_quotient_arxiv.tex"
     venue: "Draft"
-    lean_lines: 2760
-    lean_theorems: 106
+    lean_lines: 5901
+    lean_theorems: 237
     lean_sorry: 0
 
   paper4_toc:
@@ -99,8 +99,8 @@ papers:
     latex_file: "decision_quotient_toc.tex"
     venue: "Theory of Computing"
     # Same proofs as paper4, different framing
-    lean_lines: 2760
-    lean_theorems: 106
+    lean_lines: 5901
+    lean_theorems: 237
     lean_sorry: 0
 
   paper5:
@@ -125,4 +125,3 @@ papers:
     lean_lines: 0
     lean_theorems: 0
     lean_sorry: 0
-

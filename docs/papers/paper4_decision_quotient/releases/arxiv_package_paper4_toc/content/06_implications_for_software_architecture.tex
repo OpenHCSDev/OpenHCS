@@ -45,7 +45,7 @@ Items (1) and (4) follow from the hardness theorems in Section~\ref{sec:hardness
 A general principle emerges from the complexity results: problem hardness is conserved and is \emph{distributed} across a system in qualitatively different ways.
 
 \begin{definition}[Hardness Distribution]\label{def:hardness-distribution}
-Let $P$ be a problem family under the succinct encoding of Section~\ref{sec:encoding}. In this section, intrinsic hardness $H(P;n)$ denotes worst-case computational step complexity on instances with $n$ coordinates (equivalently, as a function of succinct input length $L$). A \emph{solution architecture} $S$ partitions this hardness into:
+Let $P$ be a problem family under the succinct encoding of Section~\ref{sec:encoding}. In this section, baseline hardness $H(P;n)$ denotes worst-case computational step complexity on instances with $n$ coordinates (equivalently, as a function of succinct input length $L$) in the fixed encoding regime. A \emph{solution architecture} $S$ partitions this baseline hardness into:
 \begin{itemize}
 \item $H_{\text{central}}(S)$: hardness paid once, at design time or in a shared component
 \item $H_{\text{distributed}}(S)$: hardness paid per use site

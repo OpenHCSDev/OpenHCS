@@ -1,6 +1,6 @@
 # Paper: Computational Complexity of Sufficiency in Decision Problems
 
-**Status**: Theory of Computing-ready | **Lean**: 2760 lines, 106 theorems
+**Status**: Theory of Computing-ready | **Lean**: 5901 lines, 237 theorems
 
 ---
 
@@ -20,7 +20,7 @@ The tractable cases are stated with explicit encoding assumptions (Section [\[s
 
 The primary contribution is theoretical: a complete characterization of the core decision-relevant problems in the formal model (coNP/$\Sigma_2^P$ completeness and tractable cases under explicit encoding assumptions). The practical corollaries are diagnostic: the hardness results quantify the current cost of incomplete structural characterization rather than asserting permanent barriers.
 
-The reduction constructions and key equivalence theorems are machine-checked in Lean 4 ($\sim$`<!-- -->`{=html}5,000 lines, 200+ theorems); complexity classifications follow by composition with standard results (see Appendix [\[app:lean\]](#app:lean){reference-type="ref" reference="app:lean"}).
+The reduction constructions and key equivalence theorems are machine-checked in Lean 4 ($\sim$`<!-- -->`{=html}5,900 lines, 230+ theorem/lemma statements); complexity classifications follow by composition with standard results (see Appendix [\[app:lean\]](#app:lean){reference-type="ref" reference="app:lean"}).
 
 **Keywords:** computational complexity, decision theory, polynomial hierarchy, tractability dichotomy, Lean 4
 
@@ -77,7 +77,7 @@ The lower-bound statement does not address intermediate regimes.
 
 ## Machine-Checked Proofs
 
-The reduction constructions and key equivalence theorems are machine-checked in Lean 4 [@moura2021lean4] ($\sim$`<!-- -->`{=html}5,000 lines, 200+ theorems). The formalization verifies that the TAUTOLOGY reduction correctly maps tautologies to sufficient coordinate sets. Complexity class membership (coNP-completeness, $\Sigma_2^P$-completeness) follows by composition with standard complexity-theoretic results.
+The reduction constructions and key equivalence theorems are machine-checked in Lean 4 [@moura2021lean4] ($\sim$`<!-- -->`{=html}5,900 lines, 230+ theorem/lemma statements). The formalization verifies that the TAUTOLOGY reduction correctly maps tautologies to sufficient coordinate sets. Complexity class membership (coNP-completeness, $\Sigma_2^P$-completeness) follows by composition with standard complexity-theoretic results.
 
 #### What is new.
 
@@ -550,7 +550,7 @@ Decisions with low ADQ (strongly constraining) require fewer additional decision
 A general principle emerges from the complexity results: problem hardness is conserved and is *distributed* across a system in qualitatively different ways.
 
 ::: definition
-[]{#def:hardness-distribution label="def:hardness-distribution"} Let $P$ be a problem family under the succinct encoding of Section [\[sec:encoding\]](#sec:encoding){reference-type="ref" reference="sec:encoding"}. In this section, intrinsic hardness $H(P;n)$ denotes worst-case computational step complexity on instances with $n$ coordinates (equivalently, as a function of succinct input length $L$). A *solution architecture* $S$ partitions this hardness into:
+[]{#def:hardness-distribution label="def:hardness-distribution"} Let $P$ be a problem family under the succinct encoding of Section [\[sec:encoding\]](#sec:encoding){reference-type="ref" reference="sec:encoding"}. In this section, baseline hardness $H(P;n)$ denotes worst-case computational step complexity on instances with $n$ coordinates (equivalently, as a function of succinct input length $L$) in the fixed encoding regime. A *solution architecture* $S$ partitions this baseline hardness into:
 
 -   $H_{\text{central}}(S)$: hardness paid once, at design time or in a shared component
 
@@ -753,7 +753,7 @@ While this work is theoretical, the complexity bounds have practical meaning. Un
 
 # Lean 4 Proof Listings {#app:lean}
 
-The complete Lean 4 formalization is available in the companion artifact (Zenodo DOI listed on the title page). The mechanization consists of approximately 5,000 lines across 33 files.
+The complete Lean 4 formalization is available in the companion artifact (Zenodo DOI listed on the title page). The mechanization consists of approximately 5,900 lines across 39 files, with 230+ theorem/lemma statements.
 
 ## What Is Machine-Checked
 
@@ -812,11 +812,12 @@ The hardness distribution theorems (Section [\[sec:simplicity-tax\]](#sec:simpl
         simplicityTax P T + (P.requiredAxes inter T.nativeAxes).card
           = P.requiredAxes.card
 
-    theorem simplicity_preference_fallacy (T_simple T_complex : Tool)
-        (h_simple_incomplete : isIncomplete P T_simple)
-        (h_complex_complete : isComplete P T_complex)
-        (n : Nat) (hn : n > 0) :
-        totalExternalWork P T_complex n < totalExternalWork P T_simple n
+    theorem right_dominates_wrong (P : SpecificationProblem)
+        (S_right S_wrong : SolutionArchitecture P)
+        (hr : isRightHardness S_right)
+        (hw : isWrongHardness S_wrong)
+        (n : Nat) (hn : n > S_right.centralDOF) :
+        totalDOF S_right n < totalDOF S_wrong n
 
 ## Module Structure
 
@@ -845,5 +846,5 @@ The proofs compile with Lean 4 and contain no `sorry` placeholders. Run `lake bu
 
 All theorems are formalized in Lean 4:
 - Location: `docs/papers/proofs/paper4_toc_*.lean`
-- Lines: 2760
-- Theorems: 106
+- Lines: 5901
+- Theorems: 237
