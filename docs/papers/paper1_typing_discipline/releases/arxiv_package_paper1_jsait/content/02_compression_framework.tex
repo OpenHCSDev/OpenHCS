@@ -49,7 +49,7 @@ S(v) &= \pi(v) = (q_I(v))_{I \in \mathcal{I}} \quad \text{(interface profile)}
 \end{align}
 The lineage axis captures \emph{nominal} identity: where the class comes from. The profile axis captures \emph{structural} identity: what the value can do.
 
-In the PL instantiation, $B$ is carried by the runtime lineage order (e.g., C3/MRO output), while OpenHCS additionally uses a separate normalization registry $R$ applied before lookup and not defining inheritance (Appendix~\ref{sec:lean}).
+In the PL instantiation, $B$ is carried by the runtime lineage order (e.g., C3/MRO output). Any implementation-specific normalization or lookup machinery is auxiliary and does not define inheritance (Appendix~\ref{sec:lean}).
 \end{definition}
 
 \begin{theorem}[Fixed-axis completeness]\label{thm:model-completeness}

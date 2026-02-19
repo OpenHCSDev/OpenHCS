@@ -171,7 +171,7 @@ This paper establishes the following results:
 
 **Zero-error information theory.** The matroid structure (Section [\[sec:matroid\]](#sec:matroid){reference-type="ref" reference="sec:matroid"}) connects to zero-error capacity and graph entropy. Körner [@korner1973coding] and Witsenhausen [@witsenhausen1976zero] studied zero-error source coding where confusable symbols must be distinguished. Our distinguishing dimension (Definition [\[def:distinguishing-dimension\]](#def:distinguishing-dimension){reference-type="ref" reference="def:distinguishing-dimension"}) is the minimum number of binary queries to separate all classes, which is precisely the zero-error identification cost when $L = 0$.
 
-extbfQuery complexity and communication complexity. The $\Omega(d)$ lower bound for interface-only identification relates to decision tree complexity [@buhrman2002complexity] and interactive communication [@orlitsky1991worst]. The key distinction is that our queries are constrained to a fixed attribute family $\mathcal{I}$, not arbitrary predicates. This constraint models practical systems where the observer's interface to entities is architecturally fixed.
+**Query complexity and communication complexity.** The $\Omega(d)$ lower bound for interface-only identification relates to decision tree complexity [@buhrman2002complexity] and interactive communication [@orlitsky1991worst]. The key distinction is that our queries are constrained to a fixed attribute family $\mathcal{I}$, not arbitrary predicates. This constraint models practical systems where the observer's interface to entities is architecturally fixed.
 
 **Compression in classification systems.** Our framework instantiates to type systems, where the compression question becomes: how many bits must be stored per object to enable $O(1)$ type identification? The answer ($\lceil \log_2 k \rceil$ bits for $k$ classes) matches the converse bound (Theorem [\[thm:converse\]](#thm:converse){reference-type="ref" reference="thm:converse"}). This provides an information-theoretic foundation for the nominal-vs-structural typing debate in programming language theory [@Cardelli1985; @cook1990inheritance].
 
@@ -234,7 +234,7 @@ B(v) &= \text{lineage}(\text{class}(v)) \quad \text{(class derivation chain)} \\
 S(v) &= \pi(v) = (q_I(v))_{I \in \mathcal{I}} \quad \text{(interface profile)}
 \end{aligned}$$ The lineage axis captures *nominal* identity: where the class comes from. The profile axis captures *structural* identity: what the value can do.
 
-In the PL instantiation, $B$ is carried by the runtime lineage order (e.g., C3/MRO output), while OpenHCS additionally uses a separate normalization registry $R$ applied before lookup and not defining inheritance (Appendix [\[sec:lean\]](#sec:lean){reference-type="ref" reference="sec:lean"}).
+In the PL instantiation, $B$ is carried by the runtime lineage order (e.g., C3/MRO output). Any implementation-specific normalization or lookup machinery is auxiliary and does not define inheritance (Appendix [\[sec:lean\]](#sec:lean){reference-type="ref" reference="sec:lean"}).
 :::
 
 ::: theorem
@@ -442,6 +442,67 @@ Here $d$ is the distinguishing dimension, the size of any minimal distinguishing
 [^1]: In the Lean formalization (Appendix [\[formalization-and-verification\]](#formalization-and-verification){reference-type="ref" reference="formalization-and-verification"}), the lineage axis is denoted `Bases`, reflecting its instantiation as the inheritance chain in object-oriented languages.
 
 
+## The Error Localization Theorem
+
+::: definition
+Let $E(\mathcal{O})$ be the number of locations that must be inspected to find all potential violations of a constraint under observation family $\mathcal{O}$.
+:::
+
+::: theorem
+[]{#thm:nominal-localization label="thm:nominal-localization"} $E(\text{nominal-tag}) = O(1)$.
+:::
+
+::: proof
+*Proof.* Under nominal-tag observation, the constraint "$v$ must be of class $A$" is satisfied iff $\tau(v) \in \text{subtypes}(A)$. This is determined at a single location: the definition of $\tau(v)$'s class. One location. ◻
+:::
+
+::: theorem
+[]{#thm:declared-localization label="thm:declared-localization"} $E(\text{interface-only, declared}) = O(k)$ where $k$ = number of entity classes.
+:::
+
+::: proof
+*Proof.* With declared interfaces, the constraint "$v$ must satisfy interface $I$" requires verifying that each class implements all attributes in $I$. For $k$ classes, $O(k)$ locations. ◻
+:::
+
+::: theorem
+[]{#thm:attribute-localization label="thm:attribute-localization"} $E(\text{attribute-only}) = \Omega(m)$ where $m$ = number of query sites.
+:::
+
+::: proof
+*Proof.* Under attribute-only observation, each query site independently checks "does $v$ have attribute $a$?" with no centralized declaration. For $m$ query sites, each must be inspected. Lower bound is $\Omega(m)$. ◻
+:::
+
+::: corollary
+[]{#cor:strict-dominance label="cor:strict-dominance"} Nominal-tag observation strictly dominates attribute-only: $E(\text{nominal-tag}) = O(1) < \Omega(m) = E(\text{attribute-only})$ for all $m > 1$.
+:::
+
+## The Information Scattering Theorem
+
+::: definition
+Let $I(\mathcal{O}, c)$ be the set of locations where constraint $c$ is encoded under observation family $\mathcal{O}$.
+:::
+
+::: theorem
+[]{#thm:attribute-scattering label="thm:attribute-scattering"} For attribute-only observation, $|I(\text{attribute-only}, c)| = O(m)$ where $m$ = query sites using constraint $c$.
+:::
+
+::: proof
+*Proof.* Each attribute query independently encodes the constraint. No shared reference exists. Constraint encodings scale with query sites. ◻
+:::
+
+::: theorem
+[]{#thm:nominal-centralization label="thm:nominal-centralization"} For nominal-tag observation, $|I(\text{nominal-tag}, c)| = O(1)$.
+:::
+
+::: proof
+*Proof.* The constraint "must be of class $A$" is encoded once in the definition of $A$. All tag checks reference this single definition. ◻
+:::
+
+::: corollary
+[]{#cor:maintenance-entropy label="cor:maintenance-entropy"} Attribute-only observation maximizes maintenance entropy; nominal-tag observation minimizes it.
+:::
+
+
 ## Model Contract (Fixed-Axis Domains)
 
 Model contract (fixed-axis domain). A domain is specified by a fixed observation interface $\Phi$ derived from a fixed axis map $\alpha: \mathcal{V} \to \mathcal{A}$ (e.g., $\alpha(v) = (B(v), S(v))$). An observer is permitted to interact with $v$ only through primitive queries in $\Phi$, and each primitive query factors through $\alpha$: for every $q \in \Phi$, there exists $\tilde{q}$ such that $q(v) = \tilde{q}(\alpha(v))$. A property is in-scope semantic iff it is computable by an admissible strategy that uses only responses to queries in $\Phi$ (under our admissibility constraints: no global preprocessing tables, no amortized caching, etc.).
@@ -478,7 +539,7 @@ A distinguishing set $S$ is *minimal* if no proper subset of $S$ is distinguishi
 
 ## Matroid Structure of Query Families
 
-extbfScope and assumptions. The matroid theorem below is unconditional within the fixed-axis observational theory defined above. In this section, "query" always means a primitive predicate $q \in \Phi$ (equivalently, $q$ factors through $\alpha$ as in the Model Contract). It depends only on:
+**Scope and assumptions.** The matroid theorem below is unconditional within the fixed-axis observational theory defined above. In this section, "query" always means a primitive predicate $q \in \Phi$ (equivalently, $q$ factors through $\alpha$ as in the Model Contract). It depends only on:
 
 -   $E = \Phi$ is the ground set of primitive queries (interface predicates).
 
@@ -577,69 +638,6 @@ Interface-only observers require $W_{\text{eq}} = \Omega(d)$ where $d$ is the di
 The Lean 4 formalization (Appendix [\[sec:lean\]](#sec:lean){reference-type="ref" reference="sec:lean"}) provides a machine-checked proof that nominal-tag access minimizes witness cost for type identity.
 
 
-# Core Theorems
-
-## The Error Localization Theorem
-
-::: definition
-Let $E(\mathcal{O})$ be the number of locations that must be inspected to find all potential violations of a constraint under observation family $\mathcal{O}$.
-:::
-
-::: theorem
-[]{#thm:nominal-localization label="thm:nominal-localization"} $E(\text{nominal-tag}) = O(1)$.
-:::
-
-::: proof
-*Proof.* Under nominal-tag observation, the constraint "$v$ must be of class $A$" is satisfied iff $\tau(v) \in \text{subtypes}(A)$. This is determined at a single location: the definition of $\tau(v)$'s class. One location. ◻
-:::
-
-::: theorem
-[]{#thm:declared-localization label="thm:declared-localization"} $E(\text{interface-only, declared}) = O(k)$ where $k$ = number of entity classes.
-:::
-
-::: proof
-*Proof.* With declared interfaces, the constraint "$v$ must satisfy interface $I$" requires verifying that each class implements all attributes in $I$. For $k$ classes, $O(k)$ locations. ◻
-:::
-
-::: theorem
-[]{#thm:attribute-localization label="thm:attribute-localization"} $E(\text{attribute-only}) = \Omega(m)$ where $m$ = number of query sites.
-:::
-
-::: proof
-*Proof.* Under attribute-only observation, each query site independently checks "does $v$ have attribute $a$?" with no centralized declaration. For $m$ query sites, each must be inspected. Lower bound is $\Omega(m)$. ◻
-:::
-
-::: corollary
-[]{#cor:strict-dominance label="cor:strict-dominance"} Nominal-tag observation strictly dominates attribute-only: $E(\text{nominal-tag}) = O(1) < \Omega(m) = E(\text{attribute-only})$ for all $m > 1$.
-:::
-
-## The Information Scattering Theorem
-
-::: definition
-Let $I(\mathcal{O}, c)$ be the set of locations where constraint $c$ is encoded under observation family $\mathcal{O}$.
-:::
-
-::: theorem
-[]{#thm:attribute-scattering label="thm:attribute-scattering"} For attribute-only observation, $|I(\text{attribute-only}, c)| = O(m)$ where $m$ = query sites using constraint $c$.
-:::
-
-::: proof
-*Proof.* Each attribute query independently encodes the constraint. No shared reference exists. Constraint encodings scale with query sites. ◻
-:::
-
-::: theorem
-[]{#thm:nominal-centralization label="thm:nominal-centralization"} For nominal-tag observation, $|I(\text{nominal-tag}, c)| = O(1)$.
-:::
-
-::: proof
-*Proof.* The constraint "must be of class $A$" is encoded once in the definition of $A$. All tag checks reference this single definition. ◻
-:::
-
-::: corollary
-[]{#cor:maintenance-entropy label="cor:maintenance-entropy"} Attribute-only observation maximizes maintenance entropy; nominal-tag observation minimizes it.
-:::
-
-
 ## Three-Dimensional Tradeoff: Tag Length, Witness Cost, Distortion
 
 Recall from Section 2 that observer strategies are characterized by three dimensions:
@@ -712,16 +710,6 @@ The Lean 4 formalization (Appendix [\[sec:lean\]](#sec:lean){reference-type="re
 ::: remark
 In programming language terms: *nominal typing* corresponds to nominal-tag observers (e.g., CPython's `isinstance`, Java's `.getClass()`). *Duck typing* corresponds to interface-only observers (e.g., Python's `hasattr`). *Structural typing* is an intermediate case with $D = 0$ but $W = O(n)$.
 :::
-
-::: remark
-Using the notation above, a structural check that traverses $s$ members/fields has $W = O(s)$ with $s \le n$.
-:::
-
-::: remark
-When structural typing checks traverse $s$ members/fields (rather than ranging over the full attribute universe), the natural bound is $W = O(s)$ with $s \le n$.
-:::
-
-Using the notation above, a structural check that traverses $s$ members/fields has $W = O(s)$ with $s \le n$.
 
 ::: remark
 When structural typing checks traverse $s$ members/fields (rather than ranging over the full attribute universe), the natural bound is $W = O(s)$ with $s \le n$.
@@ -922,152 +910,40 @@ Classification under observational constraints admits a clean information-theore
 This work was developed with AI assistance (Claude, Anthropic). The AI contributed to exposition, code generation, and proof exploration. All mathematical claims were verified by the authors and machine-checked in Lean 4. The Lean proofs are the authoritative source; no theorem depends solely on AI-generated reasoning.
 
 
-# Formalization and Verification
+## Formalization and Verification
 
-We provide machine-checked proofs of our core theorems in Lean 4. The complete development (6,100+ lines across nine modules, 0 `sorry` placeholders) is organized as follows:
+The core claims in this paper are machine-checked in Lean 4. We keep the appendix concise for JSAIT and move full operational listings and implementation-level proof scripts to the supplementary artifact.
 
 ::: table*
   Module                            Lines       Theorems   Purpose
-  --------------------------------- ----------- ---------- ---------------------------------
-  `abstract_class_system.lean`      3082        90+        Core: two-axis model, dominance
-  `axis_framework.lean`             1667        40+        Matroid structure
-  `nominal_resolution.lean`         556         21         Resolution, capabilities
-  `discipline_migration.lean`       142         11         Discipline vs migration
-  `context_formalization.lean`      215         7          Greenfield/retrofit
+  --------------------------------- ----------- ---------- ------------------------------------------------
+  `abstract_class_system.lean`      3082        90+        Two-axis model, information barrier, dominance
+  `axis_framework.lean`             1667        40+        Query families, closure, matroid structure
+  `nominal_resolution.lean`         556         21         Nominal identification and witness procedures
+  `discipline_migration.lean`       142         11         Discipline vs. migration consequences
+  `context_formalization.lean`      215         7          Greenfield/retrofit context model
   `python_instantiation.lean`       247         12         Python instantiation
   `typescript_instantiation.lean`   65          3          TypeScript instantiation
   `java_instantiation.lean`         63          3          Java instantiation
   `rust_instantiation.lean`         64          3          Rust instantiation
-  **Total**                         **6100+**   **190+**   
+  **Core modules subtotal**         **6100+**   **190+**   **9 representative modules shown**
 :::
 
-1.  **Language-agnostic layer** (Section 6.12): The two-axis model $(B, S)$, axis lattice metatheorem, and strict dominance: proving nominal-tag observation dominates interface-only observation in **any** class system with explicit inheritance. These proofs require no Python-specific axioms.
+#### What is in scope in the mechanization.
 
-2.  **Python instantiation layer** (Sections 6.1--6.11): The dual-axis resolution algorithm, provenance preservation, and OpenHCS-specific invariants: proving that Python's `type(name, bases, namespace)` and C3 linearization correctly instantiate the abstract model.
+The formalization covers the abstract observer model, the information barrier, constant-witness vs. query lower-bound separation, matroid structure of minimal distinguishing query sets, and the $(L,W,D)$ zero-error frontier claims stated in the main text.
 
-3.  **Complexity bounds layer** (Section 6.13): Formalization of O(1) vs O(k) vs $\Omega(m)$ complexity separation (where $m$ is the number of query sites). Proves that nominal error localization is O(1), interface-only (declared) is O(k), interface-only is $\Omega(m)$, and the gap grows without bound.
+#### What is moved to supplementary artifact.
 
-The abstract layer establishes that our theorems apply to Java, C#, Ruby, Scala, and any language with the $(B, S)$ structure. The Python layer demonstrates concrete realization. The complexity layer proves the asymptotic dominance is machine-checkable, not informal.
+Implementation-specific operational details and extended code listings are included in supplementary material and are not required to follow the IT contribution in the main paper.
 
-## Type Universe, Normalization Registry, and Lineage {#type-universe-and-registry}
+#### Artifact totals.
 
-We represent nominal types as atoms (`Typ := Nat`). The model uses two distinct structures: (i) a lineage order `mro : MRO` (most-specific-first) capturing multi-step inheritance (e.g., the result of C3 linearization), and (ii) an OpenHCS-specific normalization registry `R : Registry` that optionally rewrites certain nominal types to a canonical base type used for resolution and provenance reporting. Importantly, `R` is not the inheritance relation; inheritance is carried by `mro`. The registry invariant `R.wellFormed` states that normalization targets are fixed points (canonical bases do not normalize further), yielding normalization idempotence.
+The complete artifact contains 13 Lean files and 265 theorems; the table above highlights the core modules directly used by the main-text derivations.
 
-``` {style="lean"}
--- Types as natural numbers (nominal identity)
-abbrev Typ := Nat
+## Interface-Only Formalization
 
--- Normalization registry: optional rewrite to a canonical base type
-def Registry := Typ -> Option Typ
-
--- Well-formed normalization: rewrite targets are fixed points
-def Registry.wellFormed (R : Registry) : Prop :=
-  forall L B, R L = some B -> R B = none
-
--- One-step normalization used during resolution / provenance
-def normalizeType (R : Registry) (T : Typ) : Typ :=
-  match R T with | some B => B | none => T
-```
-
-**Invariant (Normalization Idempotence).** For well-formed registries:
-
-``` {style="lean"}
-theorem normalizeType_idempotent (R : Registry) (T : Typ)
-    (h_wf : R.wellFormed) :
-    normalizeType R (normalizeType R T) = normalizeType R T := by
-  simp only [normalizeType]; cases hR : R T with
-  | none => simp only [hR]
-  | some B => have h_base := h_wf T B hR; simp only [h_base]
-```
-
-## MRO and Scope Stack
-
-``` {style="lean"}
-abbrev MRO := List Typ          -- Most specific first
-abbrev ScopeStack := List ScopeId
-
-structure ConfigInstance where
-  typ : Typ
-  fieldValue : FieldValue
-
-def ConfigContext := ScopeId -> List ConfigInstance
-```
-
-Here, `mro : MRO` denotes the multi-step inheritance linearization (most-specific-first); our mechanized results assume it is a valid linearization (e.g., produced by C3 when it succeeds).
-
-## The RESOLVE Algorithm
-
-``` {style="lean"}
-structure ResolveResult where
-  value : FieldValue; scope : ScopeId; sourceType : Typ
-deriving DecidableEq
-
-def findConfigByType (configs : List ConfigInstance) (T : Typ) :=
-  match configs.find? (fun c => c.typ == T) with
-  | some c => some c.fieldValue | none => none
-
-def resolve (R : Registry) (mro : MRO)
-    (scopes : ScopeStack) (ctx : ConfigContext) :
-    Option ResolveResult :=
-  scopes.findSome? fun scope =>      -- X-axis: scopes
-    mro.findSome? fun mroType =>     -- Y-axis: MRO
-      let normType := normalizeType R mroType
-      match findConfigByType (ctx scope) normType with
-      | some v => if v != 0 then some (v, scope, normType) else none
-      | none => none
-```
-
-## GETATTRIBUTE Implementation
-
-``` {style="lean"}
-def rawFieldValue (obj : ConfigInstance) := obj.fieldValue
-
-def getattribute (R : Registry) (obj : ConfigInstance) (mro : MRO)
-    (scopes : ScopeStack) (ctx : ConfigContext) (isLazy : Bool) :=
-  let raw := rawFieldValue obj
-  if raw != 0 then raw
-  else if isLazy then
-    match resolve R mro scopes ctx with
-    | some result => result.value | none => 0
-  else raw
-```
-
-## Theorem 6.1: Resolution Completeness
-
-**Theorem 6.1 (Completeness).** The `resolve` function is complete: it returns value `v` if and only if either no resolution occurred (v = 0) or a valid resolution result exists.
-
-``` {style="lean"}
-theorem resolution_completeness (R : Registry) (mro : MRO)
-    (scopes : ScopeStack) (ctx : ConfigContext) (v : FieldValue) :
-    (match resolve R mro scopes ctx with
-     | some r => r.value | none => 0) = v <->
-    (v = 0 /\ resolve R mro scopes ctx = none) \/
-    (exists r, resolve R mro scopes ctx = some r /\ r.value = v) := by
-  cases hr : resolve R mro scopes ctx <;> simp [hr]
-```
-
-## Theorem 6.2: Provenance Preservation
-
-**Theorem 6.2a (Uniqueness).** Resolution is deterministic.
-
-``` {style="lean"}
-theorem provenance_uniqueness (R : Registry) (mro : MRO)
-    (scopes : ScopeStack) (ctx : ConfigContext)
-    (r1 r2 : ResolveResult)
-    (hr1 : resolve R mro scopes ctx = some r1)
-    (hr2 : resolve R mro scopes ctx = some r2) :
-    r1 = r2 := by simp only [hr1, Option.some.injEq] at hr2; exact hr2
-
-theorem resolution_determinism (R : Registry) (mro : MRO)
-    (scopes : ScopeStack) (ctx : ConfigContext) :
-    forall r1 r2, resolve R mro scopes ctx = r1 ->
-                  resolve R mro scopes ctx = r2 -> r1 = r2 := by
-  intros r1 r2 h1 h2; rw [<- h1, <- h2]
-```
-
-## Duck Typing Formalization {#interface-only-formalization}
-
-We formalize interface-only observation and prove it cannot provide provenance.
+Interface-only observation is formalized by an equivalence relation on values induced by observable query responses.
 
 ``` {style="lean"}
 structure InterfaceValue where
@@ -1078,25 +954,8 @@ def getField (obj : InterfaceValue) (name : String) : Option Nat :=
   match obj.fields.find? (fun p => p.1 == name) with
   | some p => some p.2 | none => none
 
--- Interface equivalence: identity = structure
 def interfaceEquivalent (a b : InterfaceValue) : Prop :=
   forall name, getField a name = getField b name
-```
-
-We prove this is an equivalence relation:
-
-``` {style="lean"}
-theorem structEq_refl (a : InterfaceValue) :
-  interfaceEquivalent a a := by intro name; rfl
-
-theorem structEq_symm (a b : InterfaceValue) :
-    interfaceEquivalent a b -> interfaceEquivalent b a := by
-  intro h name; exact (h name).symm
-
-theorem structEq_trans (a b c : InterfaceValue) :
-    interfaceEquivalent a b -> interfaceEquivalent b c ->
-    interfaceEquivalent a c := by
-  intro hab hbc name; rw [hab name, hbc name]
 
 def InterfaceRespecting (f : InterfaceValue -> a) : Prop :=
   forall a b, interfaceEquivalent a b -> f a = f b
@@ -1104,13 +963,9 @@ def InterfaceRespecting (f : InterfaceValue -> a) : Prop :=
 
 ## Corollary 6.3: Provenance Impossibility {#corollary-6.3-interface-only-cannot-provide-provenance}
 
-Under interface-only observation, equivalent objects are indistinguishable, so provenance must be constant on equivalent objects.
+Under interface-only observation, provenance is constant on interface-equivalence classes; therefore provenance cannot be recovered when distinct classes collide under the observable profile.
 
 ``` {style="lean"}
-structure DuckProvenance where
-  value : Nat; source : InterfaceValue
-deriving DecidableEq
-
 theorem interface_provenance_indistinguishable
     (getProvenance : InterfaceValue -> Option DuckProvenance)
     (h_interface : InterfaceRespecting getProvenance)
@@ -1118,212 +973,42 @@ theorem interface_provenance_indistinguishable
     (h_equiv : interfaceEquivalent obj1 obj2) :
     getProvenance obj1 = getProvenance obj2 :=
   h_interface obj1 obj2 h_equiv
-
-theorem interface_provenance_absurdity
-    (getProvenance : InterfaceValue -> Option DuckProvenance)
-    (h_interface : InterfaceRespecting getProvenance)
-    (obj1 obj2 : InterfaceValue) (h_equiv : interfaceEquivalent obj1 obj2)
-    (prov1 prov2 : DuckProvenance)
-    (h1 : getProvenance obj1 = some prov1)
-    (h2 : getProvenance obj2 = some prov2) :
-    prov1 = prov2 := by
-  have h_eq := h_interface obj1 obj2 h_equiv
-  rw [h1, h2] at h_eq; exact Option.some.inj h_eq
 ```
 
-**Contrast with nominal-tag observation:** Types are distinguished by identity:
-
-``` {style="lean"}
-def WellFilterConfigType : Nat := 1
-def StepWellFilterConfigType : Nat := 2
-
-theorem nominal_types_distinguishable :
-    WellFilterConfigType != StepWellFilterConfigType := by decide
-```
-
-Therefore, `ResolveResult.sourceType` is meaningful: it tells you WHICH type provided the value, even if types have the same structure.
-
-## Verification Status
-
-All proofs compile without warnings or `sorry` placeholders. The verification covers:
-
--   **AbstractClassSystem** (475 lines): Two-axis model, strict dominance, axis lattice metatheorem
-
--   **NominalResolution** (157 lines): Resolution algorithm, completeness (Thm. 6.1), uniqueness (Thm. 6.2)
-
--   **DuckTyping** (127 lines): Structural equivalence, impossibility (Cor. 6.3)
-
--   **MetaprogrammingGap** (156 lines): Declaration/query model, hook requirements
-
--   **CapabilityExhaustiveness** (42 lines): Capability completeness theorems
-
--   **AdapterAmortization** (60 lines): Cost model, amortization proofs
-
-**Total:** 6,100+ lines, 190+ theorems, 0 `sorry`, 0 warnings.
-
-## What the Lean Proofs Guarantee
-
-The machine-checked verification establishes:
-
-1.  **Algorithm correctness**: `resolve` returns value `v` iff resolution found a config providing `v` (Theorem 6.1).
-
-2.  **Determinism**: Same inputs always produce same `(value, scope, sourceType)` tuple (Theorem 6.2).
-
-3.  **Idempotence**: Normalizing an already-normalized type is a no-op (normalization_idempotent).
-
-4.  **Interface-only observation impossibility**: Any function respecting interface equivalence cannot distinguish between interface-identical objects, making provenance tracking impossible (Corollary 6.3).
-
-**What the proofs do NOT guarantee:**
-
--   **C3 correctness**: We assume MRO is well-formed. Python's C3 algorithm can fail on pathological diamonds (raising `TypeError`). Our proofs apply only when C3 succeeds.
-
--   **Normalization-registry invariant**: `Registry.wellFormed` is assumed as an OpenHCS invariant: canonical base types are fixed points of normalization (normalization does not chain). We prove all results conditional on this invariant, but do not derive it from more primitive foundations.
-
--   **Termination and complexity**: We use Lean's termination checker to verify `resolve` terminates. The complexity bound O(scopes $\times$ MRO) is also mechanically verified via `resolution_complexity_bound` and related lemmas proving linearity in each dimension.
-
-This is standard practice in mechanized verification: CompCert assumes well-typed input, seL4 assumes hardware correctness. Our proofs establish that *given* a well-formed registry and MRO, the resolution algorithm is correct and provides provenance that interface-only observation cannot.
-
-## On Proof Structure {#foundational-proofs}
-
-Most proofs in the Lean formalization are short (1-3 lines). This brevity reflects the nature of *definitional* impossibilities: our core theorems establish information-theoretic barriers, not computational lower bounds. When we prove that no shape-respecting function can compute provenance, the proof follows immediately from definitions. A definitional impossibility is stronger than a complexity bound; it closes all loopholes rather than leaving room for alternative algorithms.
-
-The semantic contribution is threefold: (1) *precision forcing*, where formalizing "interface-only observation" requires stating exactly what shape-respecting means; (2) *completeness*, where the query space partition proves every query is either shape-respecting or lineage-dependent; and (3) *universal scope*, where the impossibility applies to any system that discards the lineage axis. The Lean compiler verifies every proof step; reviewers can run `lake build` to confirm the 6000+ lines compile with zero `sorry` placeholders.
-
-## External Provenance Map Rebuttal
-
-**Objection:** "Interface-only observation could provide provenance via an external map: `provenance_map: Dict``[``id(obj), SourceType``]`."
-
-**Rebuttal:** This objection conflates *object identity* with *type identity*. The external map tracks which specific object instance came from where (not which *type* in the MRO provided a value.
-
-Consider:
-
-``` {style="lean"}
-class A:
-    x = 1
-class B(A):
-    pass  # Inherits x from A
-b = B()
-print(b.x)  # Prints 1. Which type provided this?
-```
-
-An external provenance map could record `provenance_map``[``id(b)``]`` = B`. But this doesn't answer the question "which type in B's MRO provided `x`?" The answer is `A`, and this requires MRO traversal, which requires the Bases axis.
-
-**Formal statement:** Let $\text{ExternalMap} : \text{ObjectId} \to \text{SourceType}$ be any external provenance map. Then ExternalMap cannot answer: "Which type in $\text{MRO}(\text{type}(v))$ provided attribute $a$?"
-
-*Proof.* The question asks about MRO position. MRO is derived from Bases. ExternalMap has no access to Bases (it maps object IDs to types, not types to MRO positions). Therefore ExternalMap cannot answer MRO-position queries. 0◻
-
-**The deeper point:** Provenance is not about "where did this object come from?" It's about "where did this *value* come from in the inheritance hierarchy?" The latter requires MRO, which requires Bases, which interface-only observation discards.
+This is the mechanized form of the main-text impossibility statement: if an observer factors through interface profile alone, it cannot separate equal-profile values by source/provenance.
 
 ## Abstract Model Lean Formalization
 
-The abstract class system model (Section 2.4) is formalized in Lean 4 with complete proofs (no `sorry` placeholders):
+The abstract model is formalized directly at the axis level and then connected to concrete instantiations.
 
 ``` {style="lean"}
--- The two axes of a class system
-inductive Axis where
-  | Bases      -- B: inheritance hierarchy
-  | Namespace  -- S: attribute declarations
-deriving DecidableEq, Repr
+-- Axis-indexed representation
+abbrev Typ (A : Finset Axis) := (a : Axis) -> a \in A -> axisType a
 
-abbrev AxisSet := List Axis
-def shapeAxes : AxisSet := [.Namespace]   -- S-only
-def nominalAxes : AxisSet := [.Bases, .Namespace]
+-- Two-axis setting used in the paper
+abbrev Typ2 := Typ ({Axis.Bases, Axis.Shape} : Finset Axis)
 
-inductive UnifiedCapability where
-  | interfaceCheck | identity | provenance
-  | enumeration | conflictResolution
-deriving DecidableEq, Repr
-
-def axisCapabilities (a : Axis) : List UnifiedCapability :=
-  match a with
-  | .Bases => [.identity, .provenance,
-               .enumeration, .conflictResolution]
-  | .Namespace => [.interfaceCheck]
-
-def axisSetCapabilities (axes : AxisSet) :=
-  axes.flatMap axisCapabilities |>.eraseDups
+-- Projectors
+abbrev projBases (t : Typ2) := t Axis.Bases (by simp)
+abbrev projShape (t : Typ2) := t Axis.Shape (by simp)
 ```
 
-**Definition 6.3a (Axis Projection --- Lean).** A type over axis set $A$ is a dependent tuple of axis values:
+The corresponding isomorphism theorem establishes that the two-axis representation is complete for in-scope observables in the formal model.
 
-``` {style="lean"}
-def AxisProjection (A : List Axis) :=
-  (a : Axis) -> a in A -> AxisCarrier a
+## Reproducibility
 
-structure Typ where
-  ns : Finset AttrName
-  bs : List Typ
-```
+The full Lean development is provided in supplementary material. To verify locally:
 
-**Theorem 6.3b (Isomorphism).** `Typ` is isomorphic to the 2-axis projection:
+1.  Install Lean 4 and Lake (<https://leanprover.github.io/>).
 
-``` {style="lean"}
-noncomputable def Typ.equivProjection :
-    Typ <~> AxisProjection canonicalAxes where
-  toFun := Typ.toProjection
-  invFun := Typ.fromProjection
-  left_inv := Typ.projection_roundtrip
-  right_inv := Typ.projection_roundtrip_inv
+2.  From the release package root, run:
 
-theorem n_axis_types_are_projections (A : List Axis) :
-    GenericTyp A = AxisProjection A := rfl
-```
+    ``` {style="lean"}
+    cd proofs
+    lake build
+    ```
 
-This formalizes Definition 2.10 (Typing Disciplines as Axis Projections): a typing discipline using axis set $A$ has exactly the information contained in the $A$-projection of the full type.
-
-**Theorem 6.4 (Axis Lattice --- Lean).** Shape capabilities are a strict subset of nominal capabilities:
-
-``` {style="lean"}
-theorem axis_shape_subset_nominal :
-    forall c in axisSetCapabilities shapeAxes,
-      c in axisSetCapabilities nominalAxes := by
-  intro c hc; rw [h_shape] at hc; simp at hc; rw [hc]
-  exact h_nominal
-
-theorem axis_nominal_exceeds_shape :
-    exists c in axisSetCapabilities nominalAxes,
-      c notin axisSetCapabilities shapeAxes := by
-  use UnifiedCapability.provenance; decide
-
-theorem lattice_dominance :
-    (forall c in shapeCapabilities, c in nominalCapabilities) /\
-    (exists c in nominalCapabilities, c notin shapeCapabilities) :=
-  <axis_shape_subset_nominal, axis_nominal_exceeds_shape>
-```
-
-This formalizes Theorem 2.15: using more axes provides strictly more capabilities. The proofs are complete and compile without any `sorry` placeholders.
-
-**Theorem 6.11 (Capability Completeness --- Lean).** The Bases axis provides exactly four capabilities, no more:
-
-``` {style="lean"}
-inductive Capability where
-  | interfaceCheck | typeNaming | valueAccess
-  | methodInvocation | provenance | identity
-  | enumeration | conflictResolution
-deriving DecidableEq, Repr
-
-def basesRequiredCapabilities : List Capability :=
-  [.provenance, .identity, .enumeration, .conflictResolution]
-
-def nonBasesCapabilities : List Capability :=
-  [.interfaceCheck, .typeNaming, .valueAccess, .methodInvocation]
-
-theorem capability_partition : forall c : Capability,
-    (c in basesRequiredCapabilities \/ c in nonBasesCapabilities) /\
-    ~(c in basesRequiredCapabilities /\ c in nonBasesCapabilities) := by
-  intro c; cases c <;> simp [basesRequiredCapabilities, nonBasesCapabilities]
-
-theorem bases_capabilities_count :
-    basesRequiredCapabilities.length = 4 := rfl
-```
-
-This formalizes Theorem 2.17 (Capability Completeness): the capability set $\mathcal{C}_B$ is **exactly** four elements, proven by exhaustive enumeration with machine-checked partition. The `capability_partition` theorem proves that every capability falls into exactly one category (Bases-required or not) with no overlap and no gaps.
-
-**Scope as observational quotient.** We model "scope" as a set of allowed observers $\text{Obs} \subseteq (W \to O)$ and define observational equivalence $x \approx y \;:\!\!\iff\; \forall f \in \text{Obs}, f(x) = f(y)$. The induced quotient $W/{\approx}$ is the canonical object for that scope, and every in-scope observer factors through it (see `observer_factors` in `abstract_class_system.lean`). Once the observer set is fixed, no argument can appeal to information outside that quotient; adding a new observable is literally expanding $\text{Obs}$.
-
-**Protocol runtime observer (shape-only).** We also formalize the restricted Protocol/isinstance observer that checks only for required members. The predicate `protoCheck` ignores protocol identity and is proved shape-respecting (`protoCheck_in_shapeQuerySet` in `abstract_class_system.lean`), so two protocols with identical member sets are indistinguishable to that observer. Distinguishing them requires adding an observable discriminator (brand/tag/nominality), i.e., moving to another axis.
-
-**All Python object-model observables factor through axes.** In the Python instantiation we prove that core runtime discriminators are functions of $(B,S)$: metaclass selection depends only on `bases` (`metaclass_depends_on_bases`); attribute presence and dispatch depend only on the namespace (`getattr_depends_on_ns`); together they yield `observer_factors_through_axes` in `python_instantiation.lean`.
+3.  Confirm successful build with no `sorry` placeholders.
 
 
 
