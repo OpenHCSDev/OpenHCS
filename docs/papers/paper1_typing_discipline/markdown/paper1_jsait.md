@@ -1,4 +1,4 @@
-# Paper: Information Barriers in Classification Systems: Matroid Structure and Witness Complexity
+# Paper: Identification Capacity and Rate-Query Tradeoffs in Classification Systems
 
 **Status**: JSAIT-ready | **Lean**: 6086 lines, 265 theorems
 

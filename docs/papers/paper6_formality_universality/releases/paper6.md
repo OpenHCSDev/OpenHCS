@@ -1,4 +1,4 @@
-# Paper: Formality and Universality in Software Engineering
+# Paper: Formality as Universality: A Type Theory of Argument Epistemology
 
 **Status**: Draft-ready | **Lean**: 0 lines, 0 theorems
 

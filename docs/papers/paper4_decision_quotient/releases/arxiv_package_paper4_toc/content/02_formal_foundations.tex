@@ -101,6 +101,20 @@ The utility is given as a full table over $A \times S$. The input length is $L_{
 
 Unless explicitly stated otherwise, ``polynomial time'' refers to the succinct encoding.
 
+\subsection{Structural Complexity vs Representational Hardness}
+
+\begin{definition}[Structural Complexity]\label{def:structural-complexity}
+For a fixed formal decision relation (e.g., ``$I$ is sufficient for $\mathcal{D}$''), \emph{structural complexity} means its placement in standard complexity classes within the formal model (coNP, $\Sigma_2^P$, etc.), as established by class-membership arguments and reductions.
+\end{definition}
+
+\begin{definition}[Representational Hardness]\label{def:representational-hardness}
+For a fixed decision relation and an encoding regime $E$ (Section~\ref{sec:encoding}), \emph{representational hardness} is the worst-case computational cost incurred by solvers whose input access is restricted to $E$.
+\end{definition}
+
+\begin{remark}[Interpretation Contract]
+This paper keeps the decision relation fixed and varies the encoding regime explicitly. Thus, later separations are read as changes in representational hardness under fixed structural complexity, not as changes to the underlying sufficiency semantics.
+\end{remark}
+
 
 % Include the hardness proofs (already developed)
 \input{hardness_proofs.tex}

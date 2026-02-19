@@ -1,4 +1,4 @@
-# Paper: Credibility: Formal Verification of Architectural Claims
+# Paper: A Formal Theory of Credibility: Why Assertions of Trustworthiness Decrease Trust
 
 **Status**: Draft-ready | **Lean**: 58 lines, 0 theorems
 
@@ -19,18 +19,6 @@ A counterintuitive phenomenon pervades epistemic communication: emphatic asserti
 These results integrate with the leverage framework (Paper 3): credibility leverage $L_C = \Delta C / \text{Signal Cost}$ is maximized by minimizing cheap talk and maximizing costly signal exposure. The theorems are formalized in Lean 4.
 
 **Keywords:** signaling theory, cheap talk, credibility, Bayesian epistemology, costly signals, formal verification, Lean 4
-
-
-# Paper 5: A Formal Theory of Credibility
-
-**Status**: Draft **Target**: TOPLAS **Lean**: 430 lines, 0 sorry
-
-This paper formalizes why assertions of credibility can *decrease* perceived credibility, proves impossibility bounds on cheap talk, and characterizes the structure of costly signals.
-
-::: center
-
-----------------------------------------------------------------------------------------------------
-:::
 
 
 # Introduction

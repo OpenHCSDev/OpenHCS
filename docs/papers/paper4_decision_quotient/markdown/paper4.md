@@ -1,4 +1,4 @@
-# Paper: Decision Quotient: Formal Semantics of Architectural Choice
+# Paper: Verified Polynomial-Time Reductions in Lean 4: Formalizing the Complexity of Decision-Relevant Information
 
 **Status**: Draft-ready | **Lean**: 2760 lines, 106 theorems
 
@@ -232,99 +232,202 @@ Each theorem includes verification metadata:
 The build log (included in the artifact) records successful compilation of all 230+ theorems with 0 `sorry` placeholders.
 
 
-# Formal Foundations {#sec:foundations}
+# Computational Complexity of Decision-Relevant Uncertainty {#sec:hardness}
 
-We formalize decision problems with coordinate structure, sufficiency of coordinate sets, and the decision quotient, drawing on classical decision theory [@savage1954foundations; @raiffa1961applied]. All definitions in this section are implemented in Lean 4 using the encoding described in Section [\[sec:methodology\]](#sec:methodology){reference-type="ref" reference="sec:methodology"}.
+This section establishes the computational complexity of determining which state coordinates are decision-relevant, under the succinct encoding of Section [\[sec:encoding\]](#sec:encoding){reference-type="ref" reference="sec:encoding"}. We prove three main results:
 
-## Decision Problems with Coordinate Structure
+1.  **SUFFICIENCY-CHECK** is coNP-complete
 
-::: definition
-[]{#def:decision-problem label="def:decision-problem"} A *decision problem with coordinate structure* is a tuple $\mathcal{D} = (A, X_1, \ldots, X_n, U)$ where:
+2.  **MINIMUM-SUFFICIENT-SET** is coNP-complete (the $\Sigma_2^P$ structure collapses)
 
--   $A$ is a finite set of *actions* (alternatives)
+3.  **ANCHOR-SUFFICIENCY** (fixed coordinates) is $\Sigma_2^P$-complete
 
--   $X_1, \ldots, X_n$ are finite *coordinate spaces*
+These results sit beyond NP-completeness and explain why engineers default to over-modeling: finding the minimal set of decision-relevant factors is computationally intractable.
 
--   $S = X_1 \times \cdots \times X_n$ is the *state space*
-
--   $U : A \times S \to \mathbb{Q}$ is the *utility function*
-:::
+## Problem Definitions
 
 ::: definition
-[]{#def:projection label="def:projection"} For state $s = (s_1, \ldots, s_n) \in S$ and coordinate set $I \subseteq \{1, \ldots, n\}$: $$s_I := (s_i)_{i \in I}$$ is the *projection* of $s$ onto coordinates in $I$.
-:::
+A *decision problem instance* is a tuple $(A, n, U)$ where:
 
-::: definition
-[]{#def:optimizer label="def:optimizer"} For state $s \in S$, the *optimal action set* is: $$\Opt(s) := \arg\max_{a \in A} U(a, s) = \{a \in A : U(a,s) = \max_{a' \in A} U(a', s)\}$$
-:::
+-   $A$ is a finite set of alternatives
 
-## Sufficiency and Relevance
+-   $n$ is the number of state coordinates, with state space $S = \{0,1\}^n$
 
-::: definition
-[]{#def:sufficient label="def:sufficient"} A coordinate set $I \subseteq \{1, \ldots, n\}$ is *sufficient* for decision problem $\mathcal{D}$ if: $$\forall s, s' \in S: \quad s_I = s'_I \implies \Opt(s) = \Opt(s')$$ Equivalently, the optimal action depends only on coordinates in $I$.
+-   $U: A \times S \to \mathbb{Q}$ is the utility function, given as a Boolean circuit
 :::
 
 ::: definition
-[]{#def:minimal-sufficient label="def:minimal-sufficient"} A sufficient set $I$ is *minimal* if no proper subset $I' \subsetneq I$ is sufficient.
+For state $s \in S$, define: $$\text{Opt}(s) := \arg\max_{a \in A} U(a, s)$$
 :::
 
 ::: definition
-[]{#def:relevant label="def:relevant"} Coordinate $i$ is *relevant* if it belongs to some minimal sufficient set.
+A coordinate set $I \subseteq \{1, \ldots, n\}$ is *sufficient* if: $$\forall s, s' \in S: \quad s_I = s'_I \implies \text{Opt}(s) = \text{Opt}(s')$$ where $s_I$ denotes the projection of $s$ onto coordinates in $I$.
 :::
 
-::: example
-Consider deciding whether to carry an umbrella:
-
--   Actions: $A = \{\text{carry}, \text{don't carry}\}$
-
--   Coordinates: $X_1 = \{\text{rain}, \text{no rain}\}$, $X_2 = \{\text{hot}, \text{cold}\}$, $X_3 = \{\text{Monday}, \ldots, \text{Sunday}\}$
-
--   Utility: $U(\text{carry}, s) = -1 + 3 \cdot \mathbf{1}[s_1 = \text{rain}]$, $U(\text{don't carry}, s) = -2 \cdot \mathbf{1}[s_1 = \text{rain}]$
-
-The minimal sufficient set is $I = \{1\}$ (only rain forecast matters). Coordinates 2 and 3 (temperature, day of week) are irrelevant.
+::: problem
+**Input:** Decision problem $(A, n, U)$ and coordinate set $I \subseteq \{1,\ldots,n\}$\
+**Question:** Is $I$ sufficient?
 :::
 
-## The Decision Quotient
-
-::: definition
-[]{#def:decision-equiv label="def:decision-equiv"} For coordinate set $I$, states $s, s'$ are *$I$-equivalent* (written $s \sim_I s'$) if $s_I = s'_I$.
+::: problem
+**Input:** Decision problem $(A, n, U)$ and integer $k$\
+**Question:** Does there exist a sufficient set $I$ with $|I| \leq k$?
 :::
 
-::: definition
-[]{#def:decision-quotient label="def:decision-quotient"} The *decision quotient* for state $s$ under coordinate set $I$ is: $$\text{DQ}_I(s) = \frac{|\{a \in A : a \in \Opt(s') \text{ for some } s' \sim_I s\}|}{|A|}$$ This measures the fraction of actions that are optimal for at least one state consistent with $I$.
+## Hardness of SUFFICIENCY-CHECK
+
+::: theorem
+[]{#thm:sufficiency-conp label="thm:sufficiency-conp"} SUFFICIENCY-CHECK is coNP-complete [@cook1971complexity; @karp1972reducibility]. *(Machine-verified in Lean 4; see `Hardness/CoNPComplete.lean`.)*
 :::
 
-::: proposition
-[]{#prop:sufficiency-char label="prop:sufficiency-char"} Coordinate set $I$ is sufficient if and only if $\text{DQ}_I(s) = |\Opt(s)|/|A|$ for all $s \in S$.
+::: center
+  Source                 Target                   Key property preserved
+  ---------------------- ------------------------ --------------------------------------
+  TAUTOLOGY              SUFFICIENCY-CHECK        Tautology iff $\emptyset$ sufficient
+  $\exists\forall$-SAT   ANCHOR-SUFFICIENCY       Witness anchors iff formula true
+  SET-COVER              MINIMUM-SUFFICIENT-SET   Set size maps to coordinate size
 :::
 
 ::: proof
-*Proof.* If $I$ is sufficient, then $s \sim_I s' \implies \Opt(s) = \Opt(s')$, so the set of actions optimal for some $s' \sim_I s$ is exactly $\Opt(s)$.
+*Proof.* **Membership in coNP:** The complementary problem INSUFFICIENCY is in NP. Given $(A, n, U, I)$, a witness for insufficiency is a pair $(s, s')$ such that:
 
-Conversely, if the condition holds, then for any $s \sim_I s'$, the optimal actions form the same set (since $\text{DQ}_I(s) = \text{DQ}_I(s')$ and both equal the relative size of the common optimal set). ◻
+1.  $s_I = s'_I$ (verifiable in polynomial time)
+
+2.  $\text{Opt}(s) \neq \text{Opt}(s')$ (verifiable by evaluating $U$ on all alternatives)
+
+**coNP-hardness:** We reduce from TAUTOLOGY.
+
+Given Boolean formula $\varphi(x_1, \ldots, x_n)$, construct a decision problem with:
+
+-   Alternatives: $A = \{\text{accept}, \text{reject}\}$
+
+-   State space: $S = \{\text{reference}\} \cup \{0,1\}^n$
+
+-   Utility: $$\begin{aligned}
+            U(\text{accept}, \text{reference}) &= 1 \\
+            U(\text{reject}, \text{reference}) &= 0 \\
+            U(\text{accept}, a) &= \varphi(a) \\
+            U(\text{reject}, a) &= 0 \quad \text{for assignments } a \in \{0,1\}^n
+        
+    \end{aligned}$$
+
+-   Query set: $I = \emptyset$
+
+**Claim:** $I = \emptyset$ is sufficient $\iff$ $\varphi$ is a tautology.
+
+($\Rightarrow$) Suppose $I$ is sufficient. Then $\text{Opt}(s)$ is constant over all states. Since $U(\text{accept}, a) = \varphi(a)$ and $U(\text{reject}, a) = 0$:
+
+-   $\text{Opt}(a) = \text{accept}$ when $\varphi(a) = 1$
+
+-   $\text{Opt}(a) = \{\text{accept}, \text{reject}\}$ when $\varphi(a) = 0$
+
+For $\text{Opt}$ to be constant, $\varphi(a)$ must be true for all assignments $a$; hence $\varphi$ is a tautology.
+
+($\Leftarrow$) If $\varphi$ is a tautology, then $U(\text{accept}, a) = 1 > 0 = U(\text{reject}, a)$ for all assignments $a$. Thus $\text{Opt}(s) = \{\text{accept}\}$ for all states $s$, making $I = \emptyset$ sufficient. ◻
 :::
 
-## Computational Model and Input Encoding {#sec:encoding}
+## Complexity of MINIMUM-SUFFICIENT-SET
 
-We fix the computational model used by the complexity claims.
+::: theorem
+[]{#thm:minsuff-conp label="thm:minsuff-conp"} MINIMUM-SUFFICIENT-SET is coNP-complete. *(Machine-verified.)*
+:::
 
-#### Succinct encoding (primary for hardness).
+::: proof
+*Proof.* **Structural observation:** The $\exists\forall$ quantifier pattern suggests $\Sigma_2^P$: $$\exists I \, (|I| \leq k) \; \forall s, s' \in S: \quad s_I = s'_I \implies \text{Opt}(s) = \text{Opt}(s')$$ However, this collapses because sufficiency has a simple characterization.
 
-This succinct circuit encoding is the standard representation for decision problems in complexity theory; hardness is stated with respect to the input length of the circuit description [@arora2009computational]. An instance is encoded as:
+**Key lemma:** A coordinate set $I$ is sufficient if and only if $I$ contains all relevant coordinates (proven formally as `sufficient_contains_relevant` in Lean): $$\text{sufficient}(I) \iff \text{Relevant} \subseteq I$$ where $\text{Relevant} = \{i : \exists s, s'.\; s \text{ differs from } s' \text{ only at } i \text{ and } \text{Opt}(s) \neq \text{Opt}(s')\}$.
 
--   a finite action set $A$ given explicitly,
+**Consequence:** The minimum sufficient set is exactly the set of relevant coordinates. Thus MINIMUM-SUFFICIENT-SET asks: "Is the number of relevant coordinates at most $k$?"
 
--   coordinate domains $X_1,\ldots,X_n$ given by their sizes in binary,
+**coNP membership:** A witness that the answer is NO is a set of $k+1$ coordinates, each proven relevant (by exhibiting $s, s'$ pairs). Verification is polynomial.
 
--   a Boolean or arithmetic circuit $C_U$ that on input $(a,s)$ outputs $U(a,s)$.
+**coNP-hardness:** The $k=0$ case asks whether no coordinates are relevant, i.e., whether $\emptyset$ is sufficient. This is exactly SUFFICIENCY-CHECK, which is coNP-complete by Theorem [\[thm:sufficiency-conp\]](#thm:sufficiency-conp){reference-type="ref" reference="thm:sufficiency-conp"}. ◻
+:::
 
-The input length is $L = |A| + \sum_i \log |X_i| + |C_U|$. Polynomial time and all complexity classes (, $\Sigma_2^P$, ETH, W\[2\]) are measured in $L$. All hardness results in Section [\[sec:hardness\]](#sec:hardness){reference-type="ref" reference="sec:hardness"} use this encoding.
+## Anchor Sufficiency (Fixed Coordinates)
 
-#### Explicit-state encoding (used for enumeration algorithms and experiments).
+We also formalize a strengthened variant that fixes the coordinate set and asks whether there exists an *assignment* to those coordinates that makes the optimal action constant on the induced subcube.
 
-The utility is given as a full table over $A \times S$. The input length is $L_{\text{exp}} = \Theta(|A||S|)$ (up to the bitlength of utilities). Polynomial time is measured in $L_{\text{exp}}$. Results stated in terms of $|S|$ use this encoding.
+::: problem
+**Input:** Decision problem $(A, n, U)$ and fixed coordinate set $I \subseteq \{1,\ldots,n\}$\
+**Question:** Does there exist an assignment $\alpha$ to $I$ such that $\text{Opt}(s)$ is constant for all states $s$ with $s_I = \alpha$?
+:::
 
-Unless explicitly stated otherwise, "polynomial time" refers to the succinct encoding.
+::: theorem
+[]{#thm:anchor-sigma2p label="thm:anchor-sigma2p"} ANCHOR-SUFFICIENCY is $\Sigma_2^P$-complete [@stockmeyer1976polynomial] (already for Boolean coordinate spaces). *(Machine-verified.)*
+:::
+
+::: proof
+*Proof.* **Membership in $\Sigma_2^P$:** The problem has the form $$\exists \alpha \;\forall s \in S: \; (s_I = \alpha) \implies \text{Opt}(s) = \text{Opt}(s_\alpha),$$ which is an $\exists\forall$ pattern.
+
+**$\Sigma_2^P$-hardness:** Reduce from $\exists\forall$-SAT. Given $\exists x \, \forall y \, \varphi(x,y)$ with $x \in \{0,1\}^k$ and $y \in \{0,1\}^m$, if $m=0$ we first pad with a dummy universal variable (satisfiability is preserved), construct a decision problem with:
+
+-   Actions $A = \{\text{YES}, \text{NO}\}$
+
+-   State space $S = \{0,1\}^{k+m}$ representing $(x,y)$
+
+-   Utility $$U(\text{YES}, (x,y)) =
+          \begin{cases}
+            2 & \text{if } \varphi(x,y)=1 \\
+            0 & \text{otherwise}
+          \end{cases}
+        \quad
+        U(\text{NO}, (x,y)) =
+          \begin{cases}
+            1 & \text{if } y = 0^m \\
+            0 & \text{otherwise}
+          \end{cases}$$
+
+-   Fixed coordinate set $I$ = the $x$-coordinates.
+
+If $\exists x^\star \, \forall y \, \varphi(x^\star,y)=1$, then for any $y$ we have $U(\text{YES})=2$ and $U(\text{NO})\le 1$, so $\text{Opt}(x^\star,y)=\{\text{YES}\}$ is constant. Conversely, if $\varphi(x,y)$ is false for some $y$, then either $y=0^m$ (where NO is optimal) or $y\neq 0^m$ (where YES and NO tie), so the optimal set varies across $y$ and the subcube is not constant. Thus an anchor assignment exists iff the $\exists\forall$-SAT instance is true. ◻
+:::
+
+## Tractable Subcases
+
+Despite the general hardness, several natural subcases admit efficient algorithms:
+
+::: proposition
+When $|S|$ is polynomial in the input size (i.e., explicitly enumerable), MINIMUM-SUFFICIENT-SET is solvable in polynomial time.
+:::
+
+::: proof
+*Proof.* Compute $\text{Opt}(s)$ for all $s \in S$. The minimum sufficient set is exactly the set of coordinates that "matter" for the resulting function, computable by standard techniques. ◻
+:::
+
+::: proposition
+When $U(a, s) = w_a \cdot s$ for weight vectors $w_a \in \mathbb{Q}^n$, MINIMUM-SUFFICIENT-SET reduces to identifying coordinates where weight vectors differ.
+:::
+
+## Implications
+
+::: corollary
+Finding the minimal set of decision-relevant factors is coNP-complete. Even *verifying* that a proposed set is sufficient is coNP-complete.
+
+This formally explains the engineering phenomenon:
+
+1.  It's computationally easier to model everything than to find the minimum
+
+2.  "Which unknowns matter?" is a hard question, not a lazy one to avoid
+
+3.  Bounded scenario analysis (small $\hat{S}$) makes the problem tractable
+:::
+
+This connects to the pentalogy's leverage framework: the "epistemic budget" for deciding what to model is itself a computationally constrained resource.
+
+## Remark: The Collapse to coNP
+
+Early analysis of MINIMUM-SUFFICIENT-SET focused on the apparent $\exists\forall$ quantifier structure, which suggested a $\Sigma_2^P$-complete result. We initially explored certificate-size lower bounds for the complement, attempting to show MINIMUM-SUFFICIENT-SET was unlikely to be in coNP.
+
+However, the key insight---formalized as `sufficient_contains_relevant`---is that sufficiency has a simple characterization: a set is sufficient iff it contains all relevant coordinates. This collapses the $\exists\forall$ structure because:
+
+-   The minimum sufficient set is *exactly* the relevant coordinate set
+
+-   Checking relevance is in coNP (witness: two states differing only at that coordinate with different optimal sets)
+
+-   Counting relevant coordinates is also in coNP
+
+This collapse explains why ANCHOR-SUFFICIENCY retains its $\Sigma_2^P$-completeness: fixing coordinates and asking for an assignment that works is a genuinely different question. The "for all suffixes" quantifier cannot be collapsed when the anchor assignment is part of the existential choice.
 
 
 # Complexity Dichotomy {#sec:dichotomy}

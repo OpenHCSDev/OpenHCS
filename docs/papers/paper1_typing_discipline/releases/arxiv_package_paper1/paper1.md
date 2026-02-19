@@ -1,4 +1,4 @@
-# Paper: A Universal Typing Discipline for Polymorphic Abstraction
+# Paper: Impossibility Theorems for Fixed-Axis Classification Systems: With Application to Type Theory
 
 **Status**: TOPLAS-ready | **Lean**: 6086 lines, 265 theorems
 

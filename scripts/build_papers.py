@@ -26,6 +26,7 @@ from dataclasses import dataclass
 import yaml
 import argparse
 from datetime import datetime
+import re
 
 
 @dataclass(frozen=True)
@@ -182,12 +183,118 @@ class PaperBuilder:
         return releases_dir
 
     def _discover_content_files(self, paper_id: str) -> List[Path]:
-        """Auto-discover content files from latex/content/ directory."""
+        """Discover markdown content files by following main LaTeX include order."""
+        meta = self._get_paper_meta(paper_id)
+        main_tex = self._get_paper_dir(paper_id) / meta.latex_dir / meta.latex_file
+        if not main_tex.exists():
+            raise FileNotFoundError(f"Main LaTeX file not found: {main_tex}")
+
+        files = self._collect_included_tex_files(main_tex, include_document_body_only=True)
+        if files:
+            return files
+
+        # Fail-loud fallback: preserve prior behavior if includes cannot be discovered.
+        print(f"[build-md] Warning: no includes parsed from {main_tex.name}; falling back to content/*.tex")
         content_dir = self._get_content_dir(paper_id)
-        # Find all .tex files, sorted by name (ensures consistent order)
-        files = sorted(content_dir.glob("*.tex"))
-        # Filter: skip abstract.tex (handled separately), include numbered files
-        return [f for f in files if f.name != "abstract.tex"]
+        fallback = sorted(content_dir.glob("*.tex"))
+        return [f for f in fallback if f.name != "abstract.tex"]
+
+    def _strip_latex_comments(self, content: str) -> str:
+        """Remove LaTeX comments while preserving escaped percent signs."""
+        return re.sub(r"(?<!\\\\)%.*", "", content)
+
+    def _extract_document_body(self, content: str) -> str:
+        """Extract content between \\begin{document} and \\end{document} when present."""
+        begin = re.search(r"\\begin\{document\}", content)
+        if not begin:
+            return content
+        end = re.search(r"\\end\{document\}", content[begin.end():])
+        if not end:
+            return content[begin.end():]
+        return content[begin.end(): begin.end() + end.start()]
+
+    def _resolve_include_path(self, parent_dir: Path, include_target: str, search_root: Path) -> Path:
+        """Resolve a LaTeX \\input/\\include target to a concrete .tex path.
+
+        LaTeX resolves includes relative to the current file and the main working
+        directory. We mirror that behavior by searching both roots.
+        """
+        raw_target = include_target.strip()
+        candidates = [
+            (parent_dir / raw_target).resolve(),
+            (search_root / raw_target).resolve(),
+        ]
+
+        checked: List[Path] = []
+        for candidate in candidates:
+            checked.append(candidate)
+            if candidate.exists():
+                return candidate
+            if not candidate.suffix:
+                candidate_tex = candidate.with_suffix(".tex")
+                checked.append(candidate_tex)
+                if candidate_tex.exists():
+                    return candidate_tex
+
+        # Return best-effort path for warning output.
+        return checked[-1]
+
+    def _find_tex_includes(
+        self, tex_file: Path, include_document_body_only: bool, search_root: Path
+    ) -> List[Path]:
+        """Parse direct \\input/\\include dependencies from a .tex file."""
+        content = tex_file.read_text(encoding="utf-8", errors="replace")
+        if include_document_body_only:
+            content = self._extract_document_body(content)
+        content = self._strip_latex_comments(content)
+
+        include_targets = re.findall(r"\\(?:input|include)\{([^}]+)\}", content)
+        includes: List[Path] = []
+        for target in include_targets:
+            resolved = self._resolve_include_path(tex_file.parent, target, search_root)
+            if not resolved.exists():
+                print(
+                    f"[build-md] Warning: include target not found in {tex_file.name}: {target}"
+                )
+                continue
+            includes.append(resolved)
+        return includes
+
+    def _collect_included_tex_files(
+        self,
+        tex_file: Path,
+        include_document_body_only: bool = False,
+        active_stack: Tuple[Path, ...] = (),
+        search_root: Path | None = None,
+    ) -> List[Path]:
+        """Recursively collect leaf include files in document order."""
+        resolved_tex = tex_file.resolve()
+        if search_root is None:
+            search_root = resolved_tex.parent
+        if resolved_tex in active_stack:
+            chain = " -> ".join(str(p.name) for p in (*active_stack, resolved_tex))
+            raise RuntimeError(f"Circular LaTeX include detected: {chain}")
+
+        direct_includes = self._find_tex_includes(
+            resolved_tex,
+            include_document_body_only=include_document_body_only,
+            search_root=search_root,
+        )
+        if not direct_includes:
+            return [resolved_tex]
+
+        leaves: List[Path] = []
+        next_stack = (*active_stack, resolved_tex)
+        for include_file in direct_includes:
+            leaves.extend(
+                self._collect_included_tex_files(
+                    include_file,
+                    include_document_body_only=False,
+                    active_stack=next_stack,
+                    search_root=search_root,
+                )
+            )
+        return leaves
 
     def _get_paper_proofs_dir(self, paper_id: str) -> Path:
         """Get the proofs directory for a specific paper.
@@ -332,40 +439,123 @@ class PaperBuilder:
     def build_markdown(self, paper_id: str):
         """Build Markdown version of a paper.
 
-        Uses INVARIANT 2: content is at paper_dir/latex/content/
-        Content files are auto-discovered, not hardcoded.
+        Follows the main LaTeX include chain so Markdown mirrors PDF contents.
 
         For variants (e.g., paper1_jsait), uses variant-specific naming.
         """
         meta = self._get_paper_meta(paper_id)
-        content_dir = self._get_content_dir(paper_id)
         out_dir = self._get_paper_dir(paper_id) / "markdown"
         # Use paper_id for variant-specific naming
         out_file = out_dir / f"{paper_id}.md"
 
-        if not content_dir.exists():
-            print(f"[build-md] Skipping {paper_id}: content_dir not found: {content_dir}")
-            return
-
         out_dir.mkdir(parents=True, exist_ok=True)
         print(f"[build-md] Building {paper_id}: {meta.name}...")
 
-        # Auto-discover content files
+        # Discover files from main LaTeX include order
         content_files = self._discover_content_files(paper_id)
-        self._build_markdown_file(meta, content_dir, content_files, out_file)
+        title = self._extract_main_latex_title(paper_id) or meta.full_name
+        self._build_markdown_file(meta, content_files, out_file, title)
 
         # Also copy to releases/ for arxiv package
         releases_dir = self._get_releases_dir(paper_id)
         shutil.copy2(out_file, releases_dir / out_file.name)
         print(f"[build-md] {paper_id} → {out_file.relative_to(self.repo_root)}")
 
+    def _extract_braced_command_argument(self, content: str, command: str) -> str | None:
+        """Extract the first braced argument for a LaTeX command.
+
+        Supports optional square-bracket argument: \\command[...]{...}
+        """
+        marker = f"\\{command}"
+        start = content.find(marker)
+        if start == -1:
+            return None
+
+        i = start + len(marker)
+        n = len(content)
+
+        # Skip whitespace
+        while i < n and content[i].isspace():
+            i += 1
+
+        # Optional [..] argument
+        if i < n and content[i] == "[":
+            depth = 1
+            i += 1
+            while i < n and depth > 0:
+                if content[i] == "[":
+                    depth += 1
+                elif content[i] == "]":
+                    depth -= 1
+                i += 1
+            while i < n and content[i].isspace():
+                i += 1
+
+        # Required {..} argument
+        if i >= n or content[i] != "{":
+            return None
+
+        depth = 1
+        i += 1
+        arg_start = i
+        while i < n and depth > 0:
+            if content[i] == "{":
+                depth += 1
+            elif content[i] == "}":
+                depth -= 1
+            i += 1
+
+        if depth != 0:
+            return None
+
+        return content[arg_start:i - 1]
+
+    def _latex_inline_to_plain(self, text: str) -> str:
+        """Convert a LaTeX inline snippet to plain text."""
+        try:
+            result = subprocess.run(
+                ["pandoc", "-f", "latex", "-t", "plain", "--wrap=none", "--columns=100"],
+                input=text,
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                plain = result.stdout.strip()
+            else:
+                plain = text
+        except Exception:
+            plain = text
+
+        # Normalize line breaks and TeX line-break commands.
+        plain = plain.replace("\\\\", " ")
+        plain = re.sub(r"\s+", " ", plain).strip()
+        return plain
+
+    def _extract_main_latex_title(self, paper_id: str) -> str | None:
+        """Extract the displayed title from the variant's main LaTeX file."""
+        meta = self._get_paper_meta(paper_id)
+        main_tex = self._get_paper_dir(paper_id) / meta.latex_dir / meta.latex_file
+        if not main_tex.exists():
+            return None
+
+        content = main_tex.read_text(encoding="utf-8", errors="replace")
+        content = self._strip_latex_comments(content)
+        raw_title = self._extract_braced_command_argument(content, "title")
+        if not raw_title:
+            return None
+        return self._latex_inline_to_plain(raw_title)
+
     def _build_markdown_file(
-        self, meta: PaperMeta, content_dir: Path, content_files: List[Path], out_file: Path
+        self,
+        meta: PaperMeta,
+        content_files: List[Path],
+        out_file: Path,
+        title: str,
     ):
         """Generate markdown file from LaTeX content."""
         with open(out_file, "w") as f:
             # Header
-            f.write(f"# Paper: {meta.full_name}\n\n")
+            f.write(f"# Paper: {title}\n\n")
             f.write(
                 f"**Status**: {meta.venue}-ready | "
                 f"**Lean**: {meta.lean_lines} lines, "
@@ -374,20 +564,22 @@ class PaperBuilder:
 
             # Abstract
             f.write("## Abstract\n\n")
-            abstract_file = content_dir / "abstract.tex"
-            if abstract_file.exists():
+            abstract_file = next((p for p in content_files if p.name == "abstract.tex"), None)
+            if abstract_file and abstract_file.exists():
                 # Try extracting from \begin{abstract}...\end{abstract} first,
                 # fall back to raw file content if no environment found
-                content = abstract_file.read_text(encoding='utf-8')
-                if r'\begin{abstract}' in content:
+                content = abstract_file.read_text(encoding="utf-8", errors="replace")
+                if r"\begin{abstract}" in content:
                     self._convert_latex_to_markdown(abstract_file, f, extract_env="abstract")
                 else:
                     self._convert_latex_to_markdown(abstract_file, f)
             else:
                 f.write("_Abstract not available._\n\n")
 
-            # Content sections (auto-discovered)
+            # Content sections (ordered exactly as LaTeX includes)
             for content_path in content_files:
+                if abstract_file and content_path.resolve() == abstract_file.resolve():
+                    continue
                 self._convert_latex_to_markdown(content_path, f)
 
             # Footer

@@ -4,13 +4,7 @@ This section states informal corollaries for software architecture derived from 
 
 \subsection{Why Persistent Over-Specification Is Diagnostic}
 
-Software architects routinely specify more configuration parameters than strictly necessary. In the formal model, this is diagnostic:
-
-\begin{corollary}[Diagnostic Over-Specification]
-Given a software system with $n$ configuration parameters, checking whether a proposed subset suffices is \coNP-complete. Finding the minimum such set is also \coNP-complete.
-\end{corollary}
-
-This explains why configuration files grow over time: inability to remove parameters is evidence that decision relevance is not yet characterized in a tractable form.
+The formal statement appears in Section~\ref{sec:engineering-justification}: Theorem~\ref{thm:overmodel-diagnostic}. We do not restate the complexity classification here; this section treats that theorem as a premise and derives architecture-level corollaries. In practice, configuration growth is read as evidence that decision relevance is not yet characterized in a tractable representation.
 
 \subsection{Architectural Decision Quotient}
 

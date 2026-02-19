@@ -2,7 +2,7 @@ OpenHCS Paper Build Log
 ========================
 
 Paper: paper4 - Decision Quotient: Formal Semantics of Architectural Choice
-Package Date: 2026-02-19T01:17:09.407475
+Package Date: 2026-02-19T18:03:55.371730
 Lean Toolchain: leanprover/lean4:v4.16.0
 
 Proof Statistics:

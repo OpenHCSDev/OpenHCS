@@ -1,4 +1,4 @@
-# Paper: Formal Foundations for the Single Source of Truth Principle
+# Paper: Formal Foundations for the Single Source of Truth Principle: A Language Design Specification Derived from Epistemic Coherence
 
 **Status**: Draft-ready | **Lean**: 1811 lines, 96 theorems
 

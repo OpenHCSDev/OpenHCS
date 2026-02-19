@@ -1,4 +1,4 @@
-# Paper: Leverage-Driven Software Architecture
+# Paper: Leverage-Driven Software Architecture: A Probabilistic Framework for Architectural Decision-Making
 
 **Status**: Draft-ready | **Lean**: 741 lines, 35 theorems
 
