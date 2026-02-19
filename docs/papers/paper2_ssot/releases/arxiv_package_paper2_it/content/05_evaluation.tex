@@ -11,39 +11,8 @@ A programming language can realize DOF = 1 for structural facts iff it provides 
 
 We instantiate this corollary over a representative language class (Definition~\ref{def:mainstream}).
 
-\subsection{Evaluation Criteria}\label{sec:criteria}
-
-We evaluate systems on four criteria, derived from the realizability requirements:
-
-\begin{center}
-\begin{tabularx}{\linewidth}{llY}
-\toprule
-\textbf{Criterion} & \textbf{Abbrev} & \textbf{Test} \\
-\midrule
-Definition-time hooks & DEF & Can arbitrary code execute when a class is defined? \\
-Introspectable results & INTRO & Can the program query what was derived? \\
-Structural modification & STRUCT & Can hooks modify the structure being defined? \\
-Hierarchy queries & HIER & Can the program enumerate subclasses/implementers? \\
-\bottomrule
-\end{tabularx}
-\end{center}
-
-\textbf{DEF} and \textbf{INTRO} are the two requirements from Theorem~\ref{thm:ssot-iff}. \textbf{STRUCT} and \textbf{HIER} are refinements that distinguish partial from complete realizability.
-
-\textbf{Scoring (Precise Definitions):}
-\begin{itemize}
-\tightlist
-\item \checkmark = Full support: The feature is available, usable for DOF = 1, and does not require external tools
-\item $\times$ = No support: The feature is absent or fundamentally cannot achieve DOF = 1
-\item $\triangle$ = Partial/insufficient: Feature exists but fails a realizability requirement (e.g., needs external tooling or lacks runtime reach)
-\end{itemize}
-
-\textbf{Tooling exclusions:} We exclude capabilities that require external build tools or libraries (annotation processors, Lombok, \texttt{reflect-metadata}+\texttt{ts-transformer}, \texttt{ts-json-schema-generator}, etc.). Only language-native, runtime-verifiable features count toward realizability. We use $\triangle$ only when a built-in mechanism exists but fails a requirement; for non-mainstream languages we note partial support where relevant. For INTRO, we require runtime subclass enumeration; Java's \texttt{getMethods()} does not qualify because it cannot enumerate subclasses without classpath scanning.
-
-\subsection{Language Class for Instantiation}\label{sec:mainstream-def}
-
-\begin{definition}[Representative Language Class]\label{def:mainstream}
-A language is in the \emph{representative class} iff it appears in the top 20 of at least two of the following indices consistently over 5+ years:
+\begin{definition}[Mainstream Language]\label{def:mainstream}
+A language is \emph{mainstream} iff it appears in the top 20 of at least two of the following indices consistently over 5+ years:
 \begin{enumerate}
 \tightlist
 \item TIOBE Index~\cite{tiobe2024} (monthly language popularity)
@@ -53,124 +22,33 @@ A language is in the \emph{representative class} iff it appears in the top 20 of
 \end{enumerate}
 \end{definition}
 
-This definition excludes niche languages (e.g., Haskell, Erlang, Clojure) while including languages a typical software organization would consider. The 5-year consistency requirement excludes short-lived spikes.
+\subsection{Evaluation Criteria}\label{sec:criteria}
 
-\subsection{Instantiation Over the Representative Class}\label{sec:mainstream-eval}
+The abstract realizability conditions (causal update propagation and provenance observability) map directly to concrete language capabilities (definition-time hooks and runtime introspection). For TIT readers we summarize this mapping here and defer the full language-by-language evaluation, extended code examples, and detailed rationale to Supplement~A.
 
-\begin{center}
-{\small\setlength{\tabcolsep}{4pt}\renewcommand{\arraystretch}{1.05}%
-\begin{tabular}{lccccc}
-\toprule
-\textbf{Language} & \textbf{DEF} & \textbf{INTRO} & \textbf{STRUCT} & \textbf{HIER} & \textbf{DOF-1?} \\
-\midrule
-Python & \checkmark & \checkmark & \checkmark & \checkmark & \textbf{YES} \\
-JavaScript & $\times$ & $\times$ & $\times$ & $\times$ & NO \\
-Java & $\times$ & $\times$ & $\times$ & $\times$ & NO \\
-C++ & $\times$ & $\times$ & $\times$ & $\times$ & NO \\
-C\# & $\times$ & $\times$ & $\times$ & $\times$ & NO \\
-TypeScript & $\triangle$ & $\triangle$ & $\times$ & $\times$ & NO \\
-Go & $\times$ & $\times$ & $\times$ & $\times$ & NO \\
-Rust & $\times$ & $\times$ & $\times$ & $\times$ & NO \\
-Kotlin & $\times$ & $\times$ & $\times$ & $\times$ & NO \\
-Swift & $\times$ & $\times$ & $\times$ & $\times$ & NO \\
-\bottomrule
-\end{tabular}
-}
-\end{center}
+\subsection{Summary Classification}\label{sec:classification-summary}
 
-\textbf{Corollary interpretation.} The table instantiates Corollary~\ref{cor:lang-realizability}: DOF = 1 realizability holds exactly when DEF and INTRO are both satisfied. The remaining columns (STRUCT, HIER) identify partial mechanisms but do not alter the DOF = 1 verdict.
-
-Verification method: for each language we check (i) existence of definition-time hooks that execute during class/type definition and (ii) runtime-introspectable derivations (e.g., subclass enumeration). Failure of either condition implies non-realizability by Corollary~\ref{cor:lang-realizability}.
-
-TypeScript earns $\triangle$ for DEF/INTRO because decorators (aligned with ES decorators) plus
-\texttt{reflect-metadata} can run at class decoration time and expose
-limited metadata, but (a) they require opt-in configuration,
-(b) they cannot enumerate implementers at runtime (no \texttt{\_\_subclasses\_\_()} equivalent), and (c) type information is erased at compile time.
-Consequently DOF = 1 remains unrealizable without external
-tooling, so the overall verdict stays NO.
-
-\subsubsection{Python: Instantiation of Both Requirements}
-
-Python satisfies both requirements. \textbf{DEF:} \checkmark via \texttt{\_\_init\_subclass\_\_}, metaclass \texttt{\_\_new\_\_}/\texttt{\_\_init\_\_}, and class decorators executing at definition time. \textbf{INTRO:} \checkmark via \texttt{\_\_subclasses\_\_()} and MRO queries. \textbf{STRUCT/HIER:} \checkmark via metaclass modification and subclass enumeration.
-
-\subsubsection{JavaScript: Missing Both Requirements}
-
-\textbf{DEF:} $\times$ (no definition-time execution in class syntax). \textbf{INTRO:} $\times$ (no subclass enumeration at runtime; \texttt{instanceof} is not enumeration). Therefore DOF = 1 fails by Corollary~\ref{cor:lang-realizability}.
-
-\subsubsection{Java: Missing Both Requirements}
-
-\textbf{DEF:} $\times$ (annotations are external tooling; class definitions are fixed before processing). \textbf{INTRO:} $\times$ (no runtime subclass enumeration; external classpath scanning is tooling, not a language feature). Thus DOF = 1 fails by Corollary~\ref{cor:lang-realizability}.
-
-\subsubsection{C++: Missing Both Requirements}
-
-\textbf{DEF:} $\times$ (templates are compile-time expansion, not definition-time hooks). \textbf{INTRO:} $\times$ (no runtime subclass enumeration). Therefore DOF = 1 fails by Corollary~\ref{cor:lang-realizability}.
-
-\subsubsection{Go: Missing Both Requirements}
-
-\textbf{DEF:} $\times$ (no definition-time hooks). \textbf{INTRO:} $\times$ (no enumeration of interface implementers). Therefore DOF = 1 fails by Corollary~\ref{cor:lang-realizability}.
-
-\subsubsection{Rust: Missing Both Requirements}
-
-\textbf{DEF:} $\times$ (procedural macros are compile-time; no definition-time hooks). \textbf{INTRO:} $\times$ (no runtime trait implementer enumeration). Thus DOF = 1 fails by Corollary~\ref{cor:lang-realizability}.
-
-\begin{theorem}[Python Uniqueness in the Representative Class]\label{thm:python-unique}
-Within the representative language class (Definition~\ref{def:mainstream}), Python is the only language satisfying all DOF-1 realizability requirements.
-\end{theorem}
-
-\begin{proof}
-By inspection of DEF and INTRO in the representative class and application of Corollary~\ref{cor:lang-realizability}. Only Python satisfies both requirements.
-\end{proof}
-
-\subsection{Non-Mainstream Languages}\label{sec:non-mainstream}
-
-Three non-mainstream languages also satisfy DOF-1 realizability requirements:
+Theorem~\ref{thm:ssot-iff} partitions languages into two classes:
 
 \begin{center}
-{\small\setlength{\tabcolsep}{4pt}\renewcommand{\arraystretch}{1.05}%
-\begin{tabular}{lccccc}
+\begin{tabular}{lcc}
 \toprule
-\textbf{Language} & \textbf{DEF} & \textbf{INTRO} & \textbf{STRUCT} & \textbf{HIER} & \textbf{DOF-1?} \\
+\textbf{Language} & \textbf{Def-time hooks} & \textbf{Introspection} \\
 \midrule
-Common Lisp (CLOS) & \checkmark & \checkmark & \checkmark & \checkmark & \textbf{YES} \\
-Smalltalk & \checkmark & \checkmark & \checkmark & \checkmark & \textbf{YES} \\
-Ruby & \checkmark & \checkmark & Partial & \checkmark & Partial \\
+\multicolumn{3}{l}{\emph{DOF-1-complete (both requirements):}} \\
+Python & \texttt{\_\_init\_subclass\_\_} & \texttt{\_\_subclasses\_\_()} \\
+CLOS & \texttt{:after} methods & MOP queries \\
+Smalltalk & class creation protocol & \texttt{subclasses} \\
+\midrule
+\multicolumn{3}{l}{\emph{DOF-1-incomplete (missing $\geq 1$ requirement):}} \\
+Java & \textemdash & reflection \\
+C++ & \textemdash & \textemdash \\
+Rust & proc macros (compile-time) & \textemdash \\
+Go & \textemdash & \textemdash \\
 \bottomrule
 \end{tabular}
-}
 \end{center}
 
-\subsubsection{Common Lisp (CLOS)}
+\textbf{Interpretation.} DOF-1-complete languages can achieve DOF = 1 for structural facts using language-native mechanisms. DOF-1-incomplete languages require external tooling (code generation, IDE refactoring) which operates outside language semantics and can be bypassed (cf.\ Theorem~\ref{thm:independence} on why external tools do not establish derivation).
 
-CLOS provides a full MOP: definition-time execution via \texttt{:metaclass} and method combinations, complete introspection (\texttt{class-direct-subclasses}, \texttt{class-precedence-list}, \texttt{class-slots}), and structural modification. Thus DOF = 1 is realizable, though CLOS is not mainstream by Definition~\ref{def:mainstream}.
-
-\subsubsection{Smalltalk}
-
-Classes are objects; class creation is message-based and interceptable, and runtime introspection (\texttt{subclasses}, \texttt{allSubclasses}) is built in. Structural modification is supported, so DOF = 1 is realizable.
-
-\subsubsection{Ruby}
-
-Ruby provides definition-time hooks (\texttt{inherited}/\texttt{included}/\texttt{extended}) and introspection (\texttt{subclasses}, \texttt{ancestors})~\cite{flanagan2020ruby}, but hooks run after the class body and cannot parameterize class creation. Structural modification is therefore partial, so DOF = 1 is not fully realizable for structural facts requiring definition-time configuration.
-
-\begin{theorem}[Three-Language Theorem]\label{thm:three-lang}
-Within the evaluated language set (mainstream representative class plus notable MOP-equipped languages), exactly three languages satisfy complete DOF-1 realizability requirements: Python, Common Lisp (CLOS), and Smalltalk.
-\end{theorem}
-
-\begin{proof}
-By inspection of DEF and INTRO in the stated set and application of Corollary~\ref{cor:lang-realizability}. Python, CLOS, and Smalltalk satisfy both requirements; Ruby fails STRUCT and thus lacks full realizability; all other evaluated languages fail at least one of DEF or INTRO.
-\end{proof}
-
-\subsection{Corollaries for System Selection}\label{sec:implications}
-
-\begin{corollary}[Selection Constraints]\label{cor:selection-constraints}
-If DOF = 1 is required for structural facts, then any language lacking DEF or INTRO is excluded. Within the representative class, only Python satisfies both requirements; outside it, CLOS and Smalltalk also satisfy them, while Ruby is partial.
-\end{corollary}
-
-\begin{corollary}[Tooling Limits]\label{cor:tooling-limits}
-External tooling that operates outside the language semantics does not satisfy provenance observability at runtime; therefore it does not realize DOF = 1 under Definition~\ref{def:encodes} unless it provides introspectable derivations within the running system.
-\end{corollary}
-
-\begin{corollary}[Design Implication]\label{cor:design-implication}
-If coherence guarantees are a design goal for structural facts, then definition-time computation and introspection are necessary architectural features; their absence has information-theoretic consequences for encodability.
-\end{corollary}
-
-%==============================================================================
+Supplement~A contains the complete evaluation with justifications, worked code examples demonstrating each mechanism, and discussion of edge cases.

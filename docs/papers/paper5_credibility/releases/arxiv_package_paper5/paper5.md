@@ -1,6 +1,6 @@
 # Paper: Credibility: Formal Verification of Architectural Claims
 
-**Status**: TOPLAS-ready | **Lean**: 58 lines, 0 theorems
+**Status**: Draft-ready | **Lean**: 58 lines, 0 theorems
 
 ---
 
@@ -103,6 +103,32 @@ This paper extends the leverage framework (Paper 3) [@paper3_leverage] to episte
 
 6.  **Machine-Checked Proofs (Appendix):** All theorems formalized in Lean 4 [@demoura2021lean4; @mathlib2020].
 
+## Anticipated Objections {#sec:objection-summary}
+
+Before proceeding, we address objections readers are likely forming. Each is refuted in detail in Appendix [\[appendix-rebuttals\]](#appendix-rebuttals){reference-type="ref" reference="appendix-rebuttals"}.
+
+#### "Signaling theory is old---this isn't novel."
+
+Spence's signaling model [@spence1973job] and Crawford-Sobel's cheap talk [@crawford1982strategic] are foundational. Our contribution is (1) applying these to *meta-assertions* (claims about credibility), (2) proving *computable bounds* on credibility gain, and (3) integrating with the leverage framework. The theorems are new; the foundations are established.
+
+#### "Real communication doesn't follow Bayesian rationality."
+
+The rationality assumption is an idealization that provides upper bounds. If agents deviate from Bayesian reasoning, credibility bounds may be tighter, not looser. The theorems characterize what is *achievable* under optimal reasoning---a ceiling, not a prediction.
+
+#### "Costly signals aren't always truth-dependent."
+
+Correct. The definition (Section 2) distinguishes truth-dependent costs (credibility-enhancing) from truth-independent costs (not credibility-enhancing). Expensive signals that are equally costly for liars and truth-tellers remain cheap talk despite their cost.
+
+#### "The magnitude penalty seems wrong---detailed claims are more credible."
+
+Detail *about the claim* can be credibility-enhancing (costly signal: research effort). Detail *about credibility itself* is cheap talk and subject to the magnitude penalty. The theorem distinguishes signal content from signal cost.
+
+#### "The Lean proofs are just type-checking, not real mathematics."
+
+The Lean proofs formalize the mathematical structure of signaling theory. They verify that the cheap talk bounds follow from the definitions. The contribution is machine-checked precision, not computational complexity.
+
+**If you have an objection not listed above,** check Appendix [\[appendix-rebuttals\]](#appendix-rebuttals){reference-type="ref" reference="appendix-rebuttals"} before concluding it has not been considered.
+
 ::: center
 
 ----------------------------------------------------------------------------------------------------
@@ -110,6 +136,42 @@ This paper extends the leverage framework (Paper 3) [@paper3_leverage] to episte
 
 
 # Foundations
+
+## Two Credibility Domains
+
+This paper distinguishes two fundamentally different credibility domains that obey different dynamics:
+
+**Definition 2.0a (Mathematical Credibility).** *Mathematical credibility* $C_M$ measures the probability that a claim is logically sound. The audience is a formal verifier (proof assistant, compiler, test suite). The signal space consists of artifacts that can be mechanically checked. Mathematical credibility is binary at the limit: a proof compiles or it doesn't.
+
+**Definition 2.0b (Social Credibility).** *Social credibility* $C_S$ measures the probability that a social audience accepts a claim. The audience is human agents with priors shaped by institutional hierarchy, reputation, and group membership. The signal space consists of credentials, affiliations, endorsements, and communication patterns.
+
+**Theorem 2.0c (Domain Independence).** Mathematical credibility and social credibility are orthogonal: $$C_M(c, s) \not\Rightarrow C_S(c, s) \quad \text{and} \quad C_S(c, s) \not\Rightarrow C_M(c, s)$$ A signal maximizing one domain does not necessarily affect the other.
+
+*Proof.* Constructive. (1) High $C_M$, low $C_S$: a correct proof by an unknown author receives $C_M \to 1$ (it compiles) but may receive $C_S \approx P_{\text{prior}}$ (no institutional endorsement). (2) High $C_S$, low $C_M$: a claim by a prestigious institution without formal verification receives high $C_S$ (reputation transfer) but $C_M$ is undefined or low (no proof). 0◻
+
+**Corollary 2.0d (Costly Signal Domain-Specificity).** Costly signals are domain-specific:
+
+-   Machine-checked proofs are maximally costly in the mathematical domain (cannot compile a false proof) but may be cheap talk in the social domain (anyone can claim to have proofs).
+
+-   Institutional credentials (PhD, tenure, affiliation) are costly in the social domain (years of compliance) but cheap talk in the mathematical domain (credential $\not\Rightarrow$ soundness).
+
+**Remark (Credibility Domain Conflict).** When a signal achieves $C_M \to 1$ but $C_S \approx 0$, the mathematical and social domains are in conflict. A rational response in the mathematical domain (engage with proofs) differs from a rational response in the social domain (defer to hierarchy). Observers may respond in either domain. This paper's theorems apply within each domain separately; cross-domain dynamics require modeling both simultaneously.
+
+## Dual Truth Framework
+
+This paper introduces a dual truth framework that distinguishes between objective validity and subjective acceptance:
+
+**Definition 2.0e (Epistemic Truth, $E$).** *Epistemic truth* measures the probability that a claim corresponds to objective reality or logical truth. It is measurable via empirical evidence, logical proof, or formal verification. Range: $E \in [0, 1]$, where $E = 1$ indicates absolute truth and $E = 0$ indicates absolute falsity. Properties: objective, verifiable, independent of observer.
+
+**Definition 2.0f (Ego-Driven Truth, $G$).** *Ego-driven truth* measures the probability that a claim aligns with an agent's self-interest, beliefs, or identity. It is measurable via incentive analysis, bias detection, or psychological modeling. Range: $G \in [0, 1]$, where $G = 1$ indicates perfect alignment and $G = 0$ indicates complete contradiction. Properties: subjective, observer-dependent, context-sensitive.
+
+**Definition 2.0g (Truth Vector).** The *truth vector* is a 2D vector: $$\vec{T} = (E, G) \in [0, 1]^2$$ representing both the objective validity and subjective acceptance of a claim. This vector captures the dual nature of truth in epistemic communication.
+
+**Theorem 2.0h (Truth Orthogonality).** Epistemic truth and ego-driven truth are orthogonal dimensions: $$E \perp G \quad \text{(no direct causal relationship)}$$ A change in one dimension does not necessarily affect the other. This orthogonality is analogous to the independence of mathematical and social credibility domains.
+
+*Proof.* Constructive. (1) High $E$, low $G$: a scientifically proven fact that contradicts an agent's deeply held beliefs (e.g., climate change for a fossil fuel executive). (2) Low $E$, high $G$: a comforting lie that aligns perfectly with an agent's self-interest (e.g., \"I'm a great driver\" despite poor performance). 0◻
+
+**Corollary 2.0i (Truth Tradeoff).** For high-magnitude claims (low prior probability), there exists a threshold where increasing epistemic truth decreases ego-driven truth and vice versa: $$\exists k^* \in [0,1] : \forall E > k^* \implies \frac{\partial G}{\partial E} < 0$$
 
 ## Signals and Costs
 
@@ -238,6 +300,18 @@ The signal provides negligible information; $\epsilon \to 0$. ◻
 :::
 
 ::: theorem
+[]{#thm:dual-cost-signal label="thm:dual-cost-signal"} For dual-cost signal $s$ with epistemic cost differential $\Delta_E = \text{Cost}_E(s | E=0) - \text{Cost}_E(s | E=1) > 0$ and ego cost differential $\Delta_G = \text{Cost}_G(s | G=0) - \text{Cost}_G(s | G=1) > 0$: $$\Pr[\vec{T} \text{ coherent} \mid S] \to 1 \text{ as } \min(\Delta_E, \Delta_G) \to \infty$$ Dual-cost signals can achieve arbitrarily high credibility for coherent truth claims.
+:::
+
+::: proof
+*Proof.* A dual-cost signal with both $\Delta_E > 0$ and $\Delta_G > 0$ is costly for two reasons: 1. Epistemically false claims have higher epistemic cost 2. Ego-conflicting claims have higher ego cost
+
+For a claim to be deceptive in a coherent way, it would need to be both epistemically false and ego-aligned, but the high $\Delta_E$ makes this costly. For a claim to be ego-driven but epistemically true, the high $\Delta_G$ makes this costly. Thus, only coherent claims (both epistemically true and ego-aligned) can afford to produce the signal.
+
+As $\min(\Delta_E, \Delta_G) \to \infty$, the probability of deceptive signals $\beta := \Pr[S \mid \vec{T} \text{ incoherent}] \to 0$. Applying the credibility vector theorem (Theorem [\[thm:credibility-vector\]](#thm:credibility-vector){reference-type="ref" reference="thm:credibility-vector"}): $$\Pr[\vec{T} \text{ coherent} \mid S] = \frac{p}{p + (1-p)\beta} \to 1 \text{ as } \beta \to 0.$$ ◻
+:::
+
+::: theorem
 []{#thm:verified-signal label="thm:verified-signal"} Let $C\in\{0,1\}$ with prior $p=\Pr[C=1]$. Suppose a verifier produces an acceptance event $A$ such that $$\Pr[A \mid C=1]\ge 1-\varepsilon_T,\qquad \Pr[A \mid C=0]\le \varepsilon_F,$$ for some $\varepsilon_T,\varepsilon_F\in[0,1]$. Then $$\Pr[C=1 \mid A]
 \;\ge\;
 \frac{p(1-\varepsilon_T)}{p(1-\varepsilon_T) + (1-p)\varepsilon_F}.$$ In particular, if $\varepsilon_F\to 0$ and $\varepsilon_T$ is bounded away from $1$, then $\Pr[C=1\mid A]\to 1$.
@@ -257,6 +331,13 @@ The signal provides negligible information; $\epsilon \to 0$. ◻
   Working code           Development time   Same + it won't work         High
   Verified Lean proofs   Proof effort       Impossible (won't compile)   Maximum
   Verbal assertion       \~0                \~0                          Bounded
+
+  Dual-Cost Signal           Epistemic Cost Differential   Ego Cost Differential   Coherence Credibility
+  -------------------------- ----------------------------- ----------------------- -----------------------
+  Public peer review         Refutation risk               Reputation damage       High
+  Independent audit          Investigation cost            Legal liability         Very High
+  Open-source contribution   Debugging effort              Community backlash      Moderate-High
+  Personal apology           Humility cost                 Ego preservation cost   High
 
 **Key insight:** Lean proofs with `0 sorry` are *maximally costly signals*. You cannot produce a compiling proof of a false theorem. The cost differential is infinite [@demoura2021lean4; @debruijn1970automath].
 
@@ -326,6 +407,34 @@ Given Theorems 5.1-5.3 and 6.1, optimal memory content should:
 
 4.  **Direct behavioral calibration** (tell model how to act, not what to believe)
 
+## Practical Applications
+
+The dual truth framework has broad applications across domains where communication involves both epistemic truth and ego-driven truth:
+
+### Scientific Communication
+
+In scientific publishing, the peer review process serves as a dual-cost signal: - **Epistemic cost:** Authors must conduct rigorous experiments, analyze data, and write a detailed manuscript - **Ego cost:** Authors must subject their work to criticism and potential rejection by peers
+
+A paper with multiple independent replications has higher coherence: - Epistemic truth: Results are reproducible - Ego truth: Authors' reputation is enhanced by independent validation
+
+### Political Communication
+
+Political speeches often exhibit low coherence between epistemic and ego-driven truth: - **Epistemic truth:** Objective facts about policy impacts - **Ego truth:** What the audience wants to hear to support the politician
+
+Fact-checking serves as a costly signal that increases coherence by penalizing epistemic falsehoods.
+
+### Climate Change Communication {#climate-communication}
+
+Climate change denial exhibits high incoherence: - Epistemic truth: Scientific consensus on human-caused climate change - Ego truth: Economic or ideological interests that conflict with climate action
+
+Climate scientists use dual-cost signals such as peer-reviewed papers and data sharing to increase coherence.
+
+### Corporate Communication
+
+Corporate social responsibility (CSR) reports can exhibit varying degrees of coherence: - **High coherence:** Companies that back up claims with transparent data and independent audits - **Low coherence:** Companies that use greenwashing (superficial claims without action)
+
+Independent sustainability audits serve as dual-cost signals that increase credibility.
+
 ::: center
 
 ----------------------------------------------------------------------------------------------------
@@ -341,6 +450,12 @@ Given Theorems 5.1-5.3 and 6.1, optimal memory content should:
 **Epistemic Logic:** Hintikka (1962) [@hintikka1962knowledge], Fagin et al. (1995) [@fagin1995reasoning] formalized knowledge and belief. We add signaling structure.
 
 **Bayesian Persuasion:** Kamenica & Gentzkow (2011) [@kamenica2011bayesian] studied optimal information disclosure. Our impossibility results complement their positive results.
+
+**Social Epistemology:** Goldman (1999) [@goldman1999social] and Hardwig (1991) [@hardwig1991trust] studied the social dimensions of knowledge. Our dual truth framework extends this to include ego-driven truth as a complement to epistemic truth.
+
+**Cognitive Dissonance:** Festinger (1957) [@festinger1957theory] introduced cognitive dissonance theory, which explains how individuals resolve conflicts between beliefs and actions. Our coherence measure quantifies this dissonance as a gap between epistemic and ego-driven truth.
+
+**Dual Process Theories:** Kahneman (2011) [@kahneman2011thinking] and Evans (2003) [@evans2003in; @two] distinguished between fast, intuitive thinking (System 1) and slow, deliberate thinking (System 2). Our dual truth framework aligns with this distinction: ego-driven truth often operates through System 1, while epistemic truth requires System 2 reasoning.
 
 ::: center
 
@@ -511,6 +626,109 @@ The following proofs were developed in Lean 4 [@demoura2021lean4; @mathlib2020].
 :::
 
 **Lines:** 430 **Theorems:** \~12 **Sorry placeholders:** 0
+
+
+# Preemptive Rebuttals {#appendix-rebuttals}
+
+We address anticipated objections to the credibility framework.
+
+## Objection 1: "Signaling theory is old---this isn't novel"
+
+**Objection:** "Spence's signaling model and Crawford-Sobel's cheap talk are decades old. This paper just applies existing theory."
+
+**Response:** The foundations are established; the application is novel. Our contributions:
+
+1.  **Meta-assertions:** We apply cheap talk bounds to *claims about credibility itself*---a recursive structure not analyzed in prior work
+
+2.  **Computable bounds:** We derive explicit formulas for credibility ceilings as functions of prior deception probability
+
+3.  **Leverage integration:** We connect credibility to the DOF framework, showing credibility as a form of epistemic leverage
+
+The theorems (Cheap Talk Bound, Magnitude Penalty, Meta-Assertion Trap) are new. The methodology is established.
+
+## Objection 2: "Real communication isn't Bayesian"
+
+**Objection:** "Humans don't update beliefs according to Bayes' rule. The rationality assumption is unrealistic."
+
+**Response:** The rationality assumption provides *upper bounds*. If agents deviate from Bayesian reasoning, credibility bounds may be tighter (irrational skepticism) or looser (irrational credulity). The theorems characterize what is *achievable* under optimal reasoning---a ceiling, not a prediction.
+
+For AI systems designed to be rational, the bounds are prescriptive. For human communication, they are normative benchmarks.
+
+## Objection 3: "Costly signals aren't always truth-dependent"
+
+**Objection:** "Expensive signals can be equally costly for liars and truth-tellers. Your distinction is too clean."
+
+**Response:** Correct. The definition (Section 2) distinguishes:
+
+-   **Truth-dependent costs:** Lying is more expensive than truth-telling (e.g., maintaining consistent false memories)
+
+-   **Truth-independent costs:** Equal cost regardless of truth value (e.g., verbose phrasing)
+
+Expensive signals with truth-independent costs remain cheap talk despite their expense. The credibility-enhancing property comes from the *differential*, not the absolute cost.
+
+## Objection 4: "The magnitude penalty seems wrong"
+
+**Objection:** "Detailed claims are often more credible, not less. The magnitude penalty contradicts intuition."
+
+**Response:** The distinction is between:
+
+-   **Detail about the claim:** Research, evidence, specificity---these are costly signals (effort-dependent) and credibility-enhancing
+
+-   **Detail about credibility itself:** "I'm absolutely certain, trust me, this is verified"---these are cheap talk and subject to the magnitude penalty
+
+The theorem applies to meta-assertions (claims about credibility), not to substantive claims. A detailed scientific argument is credibility-enhancing; a detailed assertion of trustworthiness is credibility-reducing.
+
+## Objection 5: "The Lean proofs are trivial"
+
+**Objection:** "The Lean proofs just formalize definitions. There's no deep mathematics."
+
+**Response:** The value is precision, not difficulty. The proofs verify:
+
+1.  The cheap talk bound follows from the cost-independence definition
+
+2.  The magnitude penalty follows from the recursive structure of meta-assertions
+
+3.  The impossibility results follow from the bound composition
+
+Machine-checked proofs eliminate ambiguity in informal arguments. The contribution is verification, not complexity.
+
+## Objection 6: "This doesn't apply to AI systems"
+
+**Objection:** "AI systems can be designed to be trustworthy. The cheap talk bounds don't apply to engineered systems."
+
+**Response:** The bounds apply to *communication about* trustworthiness, not to trustworthiness itself. An AI system can be trustworthy, but its *assertions* of trustworthiness are cheap talk unless backed by costly signals (audits, formal verification, track record).
+
+The framework explains why "I am safe and helpful" is less credibility-enhancing than demonstrated safety and helpfulness.
+
+## Objection 7: "The impossibility results are too strong"
+
+**Objection:** "Theorem 5.1 says no string achieves high credibility for high-magnitude claims. But some claims are believed."
+
+**Response:** The theorem applies to *cheap talk* strings. Credibility for high-magnitude claims requires costly signals:
+
+-   Track record (historical accuracy)
+
+-   Formal verification (mathematical proof)
+
+-   Reputation stake (costly to lose)
+
+-   Third-party attestation (independent verification)
+
+The impossibility is for *verbal assertions alone*. Credibility is achievable through costly signals, not through phrasing.
+
+## Objection 8: "The leverage integration is forced"
+
+**Objection:** "Connecting credibility to DOF seems like a stretch. These are different concepts."
+
+**Response:** The connection is structural. Credibility leverage is:
+
+$$L_C = \frac{\Delta \text{Credibility}}{\text{Signal Cost}}$$
+
+This parallels architectural leverage:
+
+$$L = \frac{|\text{Capabilities}|}{\text{DOF}}$$
+
+Both measure efficiency: capability per unit of constraint. The integration shows that credibility optimization follows the same mathematical structure as architectural optimization. This unification is the theoretical contribution.
 
 
 

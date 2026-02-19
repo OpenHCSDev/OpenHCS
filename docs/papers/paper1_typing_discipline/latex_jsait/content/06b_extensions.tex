@@ -48,6 +48,12 @@ We have treated distortion $D$ as binary (correct identification or not). Richer
 \item \textbf{Weighted distortion}: Some misidentifications have higher cost than others (e.g., type errors causing security vulnerabilities vs. benign type confusion).
 \end{itemize}
 
+\subsection{Privacy and Security}
+
+\textbf{Privacy-preserving identification.} Nominal tags enable zero-knowledge proofs of class membership without revealing attribute profiles. An entity can prove "I belong to class $C$" by revealing $\tau(v) = C$ without exposing $\pi(v)$, preserving attribute privacy. Attribute-only schemes must reveal the complete profile $\pi(v)$ to prove membership, leaking structural information.
+
+\textbf{Secure model verification.} In machine learning deployment, compressed model identifiers prevent model substitution attacks. Verifying model identity via nominal tags ($O(1)$ hash comparison) is more efficient and secure than attribute-based verification ($O(s)$ architecture inspection), which is vulnerable to adversarial perturbations that preserve structural fingerprints while altering behavior.
+
 \subsection{Connection to Rate-Distortion-Perception Theory}
 
 Blau and Michaeli \cite{blau2019rethinking} extended classical rate-distortion theory by adding a \emph{perception} constraint: the reconstructed distribution must match a target distribution under some divergence measure. This creates a three-way tradeoff between rate, distortion, and perceptual quality.
@@ -61,4 +67,3 @@ The analogy suggests several directions:
 \end{itemize}
 
 Formalizing these connections would unify identification capacity with the broader rate-distortion-perception literature.
-

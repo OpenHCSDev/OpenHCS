@@ -1,36 +1,6 @@
 \section{Conclusion}\label{sec:conclusion}
 %==============================================================================
 
-\subsection*{Methodology and Disclosure}
-
-\textbf{Role of LLMs in this work.} This paper was developed through
-human-AI collaboration. The author provided the core intuitions (the
-DOF formalization, the DEF+INTRO conjecture, the language evaluation
-criteria), while large language models (Claude, GPT-4) served as
-implementation partners for drafting proofs, formalizing definitions,
-and generating LaTeX.
-
-The Lean 4 proofs were iteratively developed: the author specified
-theorems to prove, the LLM proposed proof strategies, and the Lean
-compiler verified correctness. This is epistemically sound: a Lean proof
-that compiles is correct regardless of generation method. The proofs are
-\emph{costly signals} (per the companion paper on credibility) whose
-validity is independent of their provenance.
-
-\textbf{What the author contributed:} The DOF = 1 formalization of SSOT,
-the DEF+INTRO language requirements, the claim that Python uniquely
-satisfies these among mainstream languages, the OpenHCS case studies,
-and the complexity bounds.
-
-\textbf{What LLMs contributed:} LaTeX drafting, Lean tactic exploration,
-prose refinement, and literature search assistance.
-
-Transparency about this methodology reflects our belief that the
-contribution is the insight and the verified proof, not the typing
-labor.
-
-\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
-
 We have established a new capacity theorem extending zero-error source coding to interactive multi-location encoding systems. The key contributions are:
 
 \textbf{1. Zero-Incoherence Capacity Theorem:} We define zero-incoherence capacity $C_0$ as the maximum encoding rate guaranteeing zero probability of location disagreement, and prove $C_0 = 1$ exactly (Theorem~\ref{thm:coherence-capacity}). The proof follows the achievability/converse structure of Shannon's channel capacity theorem.

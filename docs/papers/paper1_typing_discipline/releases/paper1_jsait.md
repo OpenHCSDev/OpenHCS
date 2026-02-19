@@ -16,9 +16,11 @@ We extend classical rate-distortion theory to a discrete classification setting 
 
 **Matroid structure.** Minimal sufficient query sets form the bases of a matroid. The *distinguishing dimension* (the common cardinality of all minimal query sets) is well-defined, connecting to zero-error source coding via graph entropy.
 
-**Applications.** The theory instantiates to type systems (duck vs. nominal typing), databases (attribute vs. key lookup), and biological taxonomy (phenotype vs. species identifier). The unbounded gap $\Omega(d)$ vs. $O(1)$ (with a worst-case family where $d = n$) explains convergence toward hybrid systems combining structural observation with nominal tagging.
+**Applications.** The theory instantiates to databases (key vs. attribute lookup), knowledge graphs, biological taxonomy (genotype vs. phenotype), and type systems (nominal vs. structural typing). The unbounded gap $\Omega(d)$ vs. $O(1)$ (with a worst-case family where $d = n$) explains convergence toward hybrid systems combining attribute-based observation with nominal tagging.
 
 All results are machine-checked in Lean 4 (6,000+ lines, 0 `sorry`).
+
+In machine learning systems, the framework characterizes optimal compression of model metadata: $\lceil \log_2 k \rceil$ bits suffice for model identification and versioning, while attribute-based approaches (architecture fingerprints, hyperparameter profiles) require $\Omega(d)$ feature comparisons.
 
 **Keywords:** rate-distortion theory, identification capacity, zero-error source coding, query complexity, matroid structure, classification systems
 
@@ -173,7 +175,7 @@ extbfQuery complexity and communication complexity. The $\Omega(d)$ lower bound 
 
 **Compression in classification systems.** Our framework instantiates to type systems, where the compression question becomes: how many bits must be stored per object to enable $O(1)$ type identification? The answer ($\lceil \log_2 k \rceil$ bits for $k$ classes) matches the converse bound (Theorem [\[thm:converse\]](#thm:converse){reference-type="ref" reference="thm:converse"}). This provides an information-theoretic foundation for the nominal-vs-structural typing debate in programming language theory [@Cardelli1985; @cook1990inheritance].
 
-extbfHistorical context. The "duck typing" philosophy ("if it walks like a duck and quacks like a duck, it's a duck") advocates structural observation over nominal tagging. Within our model, we prove this incurs $\Omega(d)$ witness cost where tagging achieves $O(1)$ (see Definition [\[def:distinguishing-dimension\]](#def:distinguishing-dimension){reference-type="ref" reference="def:distinguishing-dimension"}). The result does not "resolve" the broader debate (which involves usability and tooling concerns beyond this model) but establishes that the tradeoff has a precise information-theoretic component.
+**Historical context.** Structural classification approaches (exemplified by \"duck typing\" in programming languages: \"if it walks like a duck and quacks like a duck, it's a duck\") advocate attribute-based observation over nominal tagging. Within our model, we prove this incurs $\Omega(d)$ witness cost where tagging achieves $O(1)$ (see Definition [\[def:distinguishing-dimension\]](#def:distinguishing-dimension){reference-type="ref" reference="def:distinguishing-dimension"}). The result does not \"resolve\" the broader debate (which involves usability and tooling concerns beyond this model) but establishes that the tradeoff has a precise information-theoretic component.
 
 **Practical convergence.** Modern systems have converged on hybrid classification: Python's Abstract Base Classes, TypeScript's branded types, Rust's trait system, DNA barcoding in taxonomy [@DNABarcoding]. This convergence is consistent with the rate-query tradeoff: nominal tags provide $O(1)$ identification at cost $O(\log k)$ bits. The contribution is not advocacy for any design, but a formal framework for analyzing identification cost in classification systems.
 
@@ -187,6 +189,8 @@ Section [\[sec:framework\]](#sec:framework){reference-type="ref" reference="sec
 The fundamental problem of *semantic compression* is: given a value $v$ from a large space $\mathcal{V}$, how can we represent $v$ compactly while preserving the ability to answer semantic queries about $v$? This differs from classical source coding in that the goal is not reconstruction but *identification*: determining which equivalence class $v$ belongs to.
 
 Classical rate-distortion theory [@shannon1959coding] studies the tradeoff between representation size and reconstruction fidelity. We extend this to a discrete classification setting with three dimensions: *tag length* $L$ (bits of storage), *witness cost* $W$ (queries or bits of communication required to determine class membership), and *distortion* $D$ (semantic fidelity).
+
+This work exemplifies the convergence of classical information theory with modern data systems: we extend Shannon's rate-distortion framework to contemporary classification problems (databases, knowledge graphs, ML model registries), proving fundamental limits that were implicit in practice but not formalized in classical theory.
 
 ## Universe of Discourse
 
@@ -742,7 +746,7 @@ Library classification systems like Dewey Decimal observe subject matter, a form
 
 ## Database Systems: Columns vs Primary Keys
 
-Relational databases observe entities via column values. The information barrier applies: rows with identical column values, excluding the key, are indistinguishable.
+In big-data systems, relational databases observe entities via column values. The information barrier applies: rows with identical column values, excluding the key, are indistinguishable.
 
 **The nominal tag:** The primary key is the nominal tag [@Codd1990]. Entity identity is $O(1)$: compare keys. This is why database theory requires keys---without them, the system cannot answer "is this the same entity?"
 
@@ -794,6 +798,18 @@ Rust resolves type identity at compile time via its nominal type system. At runt
 
 The pattern is universal: systems with nominal tags achieve $O(1)$ witness cost; systems without them pay $O(s)$ or $O(k)$. This is not domain-specific; it is the information barrier theorem instantiated across classification systems.
 
+## Machine Learning: Model Identification and Versioning
+
+Neural network models in production systems face the identification problem: given two model instances, determine if they represent the same architecture. Model registries must compress model metadata while enabling efficient identification.
+
+**Attribute-only approach:** Compare architecture fingerprints (layer counts, activation functions, parameter counts, connectivity patterns). Cost: $O(s)$ where $s$ is the number of architectural features.
+
+**Nominal tag:** Model hash (e.g., SHA-256 of architecture definition) or registry ID. Cost: $O(1)$.
+
+The $(L, W, D)$ tradeoff applies directly: storing $\lceil \log_2 k \rceil$ bits per model (where $k$ is the number of distinct architectures in the registry) enables $O(1)$ identification with $D = 0$. Attribute-based versioning requires $\Omega(d)$ feature comparisons and risks false positives ($D > 0$) when architectures share identical fingerprints but differ in subtle structural details.
+
+**Example:** A model registry with $k = 10^6$ architectures requires only 20 bits per model for perfect identification via nominal tags, versus $O(d)$ queries over potentially hundreds of architectural features for attribute-based approaches.
+
 
 ## Noisy Query Model
 
@@ -839,6 +855,12 @@ We have treated distortion $D$ as binary (correct identification or not). Richer
 -   **Hierarchical distortion**: Misidentifying a class within the same genus (biological) or module (type system) is less severe than cross-genus errors.
 
 -   **Weighted distortion**: Some misidentifications have higher cost than others (e.g., type errors causing security vulnerabilities vs. benign type confusion).
+
+## Privacy and Security
+
+**Privacy-preserving identification.** Nominal tags enable zero-knowledge proofs of class membership without revealing attribute profiles. An entity can prove \"I belong to class $C$\" by revealing $\tau(v) = C$ without exposing $\pi(v)$, preserving attribute privacy. Attribute-only schemes must reveal the complete profile $\pi(v)$ to prove membership, leaking structural information.
+
+**Secure model verification.** In machine learning deployment, compressed model identifiers prevent model substitution attacks. Verifying model identity via nominal tags ($O(1)$ hash comparison) is more efficient and secure than attribute-based verification ($O(s)$ architecture inspection), which is vulnerable to adversarial perturbations that preserve structural fingerprints while altering behavior.
 
 ## Connection to Rate-Distortion-Perception Theory
 

@@ -36,6 +36,7 @@ lake build
 | `DisciplineMigration.lean` | DisciplineMigration |
 | `Dof.lean` | Dof |
 | `EditDynamics.lean` | EditDynamics |
+| `Entropy.lean` | Entropy |
 | `Foundations.lean` | Foundations |
 | `Inconsistency.lean` | Inconsistency |
 | `JavaInstantiation.lean` | JavaInstantiation |

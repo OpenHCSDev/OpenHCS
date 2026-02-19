@@ -9,9 +9,11 @@ We extend classical rate-distortion theory to a discrete classification setting 
 
 \textbf{Matroid structure.} Minimal sufficient query sets form the bases of a matroid. The \emph{distinguishing dimension} (the common cardinality of all minimal query sets) is well-defined, connecting to zero-error source coding via graph entropy.
 
-\textbf{Applications.} The theory instantiates to type systems (duck vs.\ nominal typing), databases (attribute vs.\ key lookup), and biological taxonomy (phenotype vs.\ species identifier). The unbounded gap $\Omega(d)$ vs.\ $O(1)$ (with a worst-case family where $d = n$) explains convergence toward hybrid systems combining structural observation with nominal tagging.
+\textbf{Applications.} The theory instantiates to databases (key vs. attribute lookup), knowledge graphs, biological taxonomy (genotype vs. phenotype), and type systems (nominal vs. structural typing). The unbounded gap $\Omega(d)$ vs. $O(1)$ (with a worst-case family where $d = n$) explains convergence toward hybrid systems combining attribute-based observation with nominal tagging.
 
 All results are machine-checked in Lean 4 (6,000+ lines, 0 \texttt{sorry}).
+
+In machine learning systems, the framework characterizes optimal compression of model metadata: $\lceil \log_2 k \rceil$ bits suffice for model identification and versioning, while attribute-based approaches (architecture fingerprints, hyperparameter profiles) require $\Omega(d)$ feature comparisons.
 
 \textbf{Keywords:} rate-distortion theory, identification capacity, zero-error source coding, query complexity, matroid structure, classification systems
 \end{abstract}

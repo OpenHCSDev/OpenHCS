@@ -1,6 +1,6 @@
 # Paper: Formality and Universality in Software Engineering
 
-**Status**: TOPLAS-ready | **Lean**: 0 lines, 0 theorems
+**Status**: Draft-ready | **Lean**: 0 lines, 0 theorems
 
 ---
 

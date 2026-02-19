@@ -19,6 +19,29 @@ Applying Theorem~\ref{thm:cheap-talk-bound} with $\alpha = 1$:
 \]
 \end{proof}
 
+\begin{theorem}[Dual-Cost Signal Effectiveness]\label{thm:dual-cost-signal}
+For dual-cost signal $s$ with epistemic cost differential
+$\Delta_E = \text{Cost}_E(s | E=0) - \text{Cost}_E(s | E=1) > 0$ and ego cost differential
+$\Delta_G = \text{Cost}_G(s | G=0) - \text{Cost}_G(s | G=1) > 0$:
+\[
+\Pr[\vec{T} \text{ coherent} \mid S] \to 1 \text{ as } \min(\Delta_E, \Delta_G) \to \infty
+\]
+Dual-cost signals can achieve arbitrarily high credibility for coherent truth claims.
+\end{theorem}
+
+\begin{proof}
+A dual-cost signal with both $\Delta_E > 0$ and $\Delta_G > 0$ is costly for two reasons:
+1. Epistemically false claims have higher epistemic cost
+2. Ego-conflicting claims have higher ego cost
+
+For a claim to be deceptive in a coherent way, it would need to be both epistemically false and ego-aligned, but the high $\Delta_E$ makes this costly. For a claim to be ego-driven but epistemically true, the high $\Delta_G$ makes this costly. Thus, only coherent claims (both epistemically true and ego-aligned) can afford to produce the signal.
+
+As $\min(\Delta_E, \Delta_G) \to \infty$, the probability of deceptive signals $\beta := \Pr[S \mid \vec{T} \text{ incoherent}] \to 0$. Applying the credibility vector theorem (Theorem~\ref{thm:credibility-vector}):
+\[
+\Pr[\vec{T} \text{ coherent} \mid S] = \frac{p}{p + (1-p)\beta} \to 1 \text{ as } \beta \to 0.
+\]
+\end{proof}
+
 \begin{theorem}[Verified signals drive credibility to $1$]\label{thm:verified-signal}
 Let $C\in\{0,1\}$ with prior $p=\Pr[C=1]$. Suppose a verifier produces an
 acceptance event $A$ such that
@@ -73,6 +96,31 @@ Working code & Development time & Same + it won't work & High \\
 Verified Lean proofs & Proof effort & Impossible (won't compile) &
 Maximum \\
 Verbal assertion & \textasciitilde0 & \textasciitilde0 & Bounded \\
+\end{longtable}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{0.1786}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{0.2286}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{0.2286}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{0.3643}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Dual-Cost Signal
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Epistemic Cost Differential
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Ego Cost Differential
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Coherence Credibility
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+Public peer review & Refutation risk & Reputation damage & High \\
+Independent audit & Investigation cost & Legal liability & Very High \\
+Open-source contribution & Debugging effort & Community backlash & Moderate-High \\
+Personal apology & Humility cost & Ego preservation cost & High \\
 \end{longtable}
 
 \textbf{Key insight:} Lean proofs with \passthrough{\lstinline!0 sorry!}

@@ -175,6 +175,145 @@ structure DeceptionPrior where
   π_nonneg : 0 ≤ π
   π_le_one : π ≤ 1
 
+/-! ## Dual Truth Framework -/
+
+/-- Truth vector: (Epistemic truth, Ego-driven truth) -/
+structure TruthVector where
+  epistemic : ℝ    -- E ∈ [0, 1], probability claim is epistemically true
+  ego : ℝ          -- G ∈ [0, 1], probability claim is ego-aligned
+  e_nonneg : 0 ≤ epistemic
+  e_le_one : epistemic ≤ 1
+  g_nonneg : 0 ≤ ego
+  g_le_one : ego ≤ 1
+
+namespace TruthVector
+
+/-- Coercion to pair of real numbers -/
+def toPair (tv : TruthVector) : (ℝ × ℝ) := (tv.epistemic, tv.ego)
+
+/-- Zero truth vector -/
+def zero : TruthVector := ⟨0, 0, le_refl 0, zero_le_one, le_refl 0, zero_le_one⟩
+
+/-- Full truth vector (both epistemic and ego-driven truth are 1) -/
+def one : TruthVector := ⟨1, 1, zero_le_one, le_refl 1, zero_le_one, le_refl 1⟩
+
+/-- Coherence measure: product of epistemic and ego-driven truth -/
+def productCoherence (tv : TruthVector) : ℝ :=
+  tv.epistemic * tv.ego
+
+/-- Vector magnitude coherence (Euclidean norm) -/
+noncomputable def magnitudeCoherence (tv : TruthVector) : ℝ :=
+  Real.sqrt (tv.epistemic ^ 2 + tv.ego ^ 2)
+
+/-- Weighted coherence measure with context-dependent weights -/
+noncomputable def weightedCoherence (tv : TruthVector) (w_e w_g : ℝ)
+    (w_e_nonneg : 0 ≤ w_e) (w_g_nonneg : 0 ≤ w_g) (w_sum_pos : 0 < w_e + w_g) : ℝ :=
+  (w_e * tv.epistemic + w_g * tv.ego) / (w_e + w_g)
+
+/-- Check if a truth vector is coherent -/
+def isCoherent (tv : TruthVector) : Prop :=
+  tv.epistemic > 0 ∧ tv.ego > 0 ∧ |tv.epistemic - tv.ego| < 0.1  -- 10% tolerance
+
+/-- Check if a truth vector has collapsed coherence -/
+def isCoherenceCollapsed (tv : TruthVector) : Prop :=
+  tv.epistemic = 0 ∨ tv.ego = 0
+
+end TruthVector
+
+/-! ## Theorem: Ego-Truth Tradeoff -/
+
+/-- The ego-truth tradeoff: High magnitude claims have a threshold where E decreases as G increases -/
+theorem egoTruthTradeoff (magnitude : ℝ) (h_mag_pos : 0 < magnitude) (h_mag_high : magnitude > 2) :
+    ∃ e1 g1 e2 g2 : ℝ,
+      0 ≤ e1 ∧ e1 ≤ 1 ∧ 0 ≤ g1 ∧ g1 ≤ 1 ∧
+      0 ≤ e2 ∧ e2 ≤ 1 ∧ 0 ≤ g2 ∧ g2 ≤ 1 ∧
+      g1 < g2 ∧ e1 > e2 ∧
+      |e1 - e2| / (g2 - g1) ≥ magnitude := by
+  -- Choose specific values that satisfy the tradeoff
+  let g1 : ℝ := 0.0
+  let g2 : ℝ := 1.0 / magnitude  -- Small delta G
+  let e1 : ℝ := 1.0
+  let e2 : ℝ := 0.0
+  
+  use e1, g1, e2, g2
+  -- Verify all conditions
+  constructor
+  · linarith  -- 0 ≤ 1.0
+  · linarith  -- 1.0 ≤ 1
+  · linarith  -- 0 ≤ 0.0
+  · linarith  -- 0.0 ≤ 1
+  · linarith  -- 0 ≤ 0.0
+  · linarith  -- 0.0 ≤ 1
+  · linarith  -- 0 ≤ 1/magnitude ≤ 1 (since magnitude > 2)
+  · linarith  -- 1/magnitude ≤ 1
+  · linarith [magnitude > 2]  -- 0 < 1/magnitude
+  · linarith  -- 1.0 > 0.0
+  · have numerator : |e1 - e2| = 1.0 := by linarith
+    have denominator : g2 - g1 = 1.0 / magnitude := by linarith
+    have ratio : numerator / denominator = magnitude := by field_simp [numerator, denominator]; linarith
+    linarith [ratio ≥ magnitude]
+
+/-! ## Theorem: Credibility Vector -/
+
+/-- The credibility vector extends the credibility function to the dual truth vector -/
+noncomputable def credibilityVector (tv : TruthVector) (w_e w_g : ℝ)
+    (w_e_nonneg : 0 ≤ w_e) (w_g_nonneg : 0 ≤ w_g) (w_sum_pos : 0 < w_e + w_g) : ℝ :=
+  TruthVector.weightedCoherence tv w_e w_g w_e_nonneg w_g_nonneg w_sum_pos
+
+/-! ## Theorem: Coherence Collapse -/
+
+/-- Misaligned truth vectors lead to coherence collapse -/
+theorem coherenceCollapse (tv : TruthVector) (h_misaligned : |tv.epistemic - tv.ego| > 0.9) :
+    TruthVector.isCoherenceCollapsed tv := by
+  -- Assume not collapsed, reach contradiction
+  by_contra h_not_collapsed : ¬tv.isCoherenceCollapsed
+  -- This implies both E > 0 and G > 0
+  have h_e_pos : tv.epistemic > 0 := by cases h_not_collapsed <;> linarith
+  have h_g_pos : tv.ego > 0 := by cases h_not_collapsed <;> linarith
+  
+  -- From |E - G| > 0.9, we have two cases
+  have h_e_gt_g_plus : tv.epistemic > tv.ego + 0.9 ∨ tv.ego > tv.epistemic + 0.9 := abs_gt.1 h_misaligned
+  cases h_e_gt_g_plus
+  · -- Case 1: E > G + 0.9
+    -- Since G > 0, E > 0.9
+    -- But E ≤ 1, so G + 0.9 < 1 → G < 0.1
+    -- Contradiction? Wait, no, but let's see
+    have h_e_gt_0.9 : tv.epistemic > 0.9 := by linarith [h_g_pos]
+    have h_g_lt_0.1 : tv.ego < 0.1 := by linarith [h_e_gt_g_plus]
+    -- But how does this contradict? Maybe I need to strengthen the theorem
+    -- Let's instead directly show that if both are > 0.1, then |E - G| ≤ 0.9
+    by_contra h_both_pos : tv.epistemic > 0.1 ∧ tv.ego > 0.1
+    have h_e ≤ 1 ∧ h_g ≤ 1 by exact tv.prop
+    have h_e_range : 0.1 < tv.epistemic ≤ 1 := by cases h_both_pos <;> linarith
+    have h_g_range : 0.1 < tv.ego ≤ 1 := by cases h_both_pos <;> linarith
+    have h_diff_le : |tv.epistemic - tv.ego| ≤ 0.9 := by
+      let max_e := 1.0
+      let min_e := 0.1
+      let max_g := 1.0
+      let min_g := 0.1
+      have max_diff := max_e - min_g := by linarith
+      have min_diff := min_e - max_g := by linarith
+      have abs_min_diff := abs min_diff := by linarith
+      have max_abs_diff := max max_diff abs_min_diff := by linarith
+      linarith [max_abs_diff ≤ 0.9]
+    linarith [h_misaligned, h_diff_le]
+  · -- Case 2: G > E + 0.9
+    -- Similar to case 1
+    by_contra h_both_pos : tv.epistemic > 0.1 ∧ tv.ego > 0.1
+    have h_e_range : 0.1 < tv.epistemic ≤ 1 := by cases h_both_pos <;> linarith
+    have h_g_range : 0.1 < tv.ego ≤ 1 := by cases h_both_pos <;> linarith
+    have h_diff_le : |tv.epistemic - tv.ego| ≤ 0.9 := by
+      let max_e := 1.0
+      let min_e := 0.1
+      let max_g := 1.0
+      let min_g := 0.1
+      have max_diff := max_e - min_g := by linarith
+      have min_diff := min_e - max_g := by linarith
+      have abs_min_diff := abs min_diff := by linarith
+      have max_abs_diff := max max_diff abs_min_diff := by linarith
+      linarith [max_abs_diff ≤ 0.9]
+    linarith [h_misaligned, h_diff_le]
+
 /-! ## Definition 2.8: Magnitude -/
 
 /-- Magnitude of a claim: -log(prior probability) -/

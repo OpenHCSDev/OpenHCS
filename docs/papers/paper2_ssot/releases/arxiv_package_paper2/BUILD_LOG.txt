@@ -2,12 +2,12 @@ OpenHCS Paper Build Log
 ========================
 
 Paper: paper2 - Formal Foundations for the Single Source of Truth Principle
-Package Date: 2026-01-22T15:32:18.236758
-Lean Toolchain: leanprover/lean4:v4.27.0-rc1
+Package Date: 2026-02-19T01:16:51.501376
+Lean Toolchain: leanprover/lean4:v4.16.0
 
 Proof Statistics:
 -----------------
-Lean Files: 29
+Lean Files: 30
 Lines of Code: 1811
 Theorems: 96
 
@@ -26,6 +26,7 @@ Proof Files:
   - DisciplineMigration.lean
   - Dof.lean
   - EditDynamics.lean
+  - Entropy.lean
   - Foundations.lean
   - Inconsistency.lean
   - JavaInstantiation.lean

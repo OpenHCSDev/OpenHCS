@@ -16,7 +16,7 @@ Library classification systems like Dewey Decimal observe subject matter, a form
 
 \subsection{Database Systems: Columns vs Primary Keys}
 
-Relational databases observe entities via column values. The information barrier applies: rows with identical column values, excluding the key, are indistinguishable.
+In big-data systems, relational databases observe entities via column values. The information barrier applies: rows with identical column values, excluding the key, are indistinguishable.
 
 \textbf{The nominal tag:} The primary key is the nominal tag \cite{Codd1990}. Entity identity is $O(1)$: compare keys. This is why database theory requires keys---without them, the system cannot answer ``is this the same entity?''
 
@@ -73,3 +73,15 @@ Rust (static) & Trait bounds & \texttt{TypeId} & $O(1)$ \\
 \end{table}
 
 The pattern is universal: systems with nominal tags achieve $O(1)$ witness cost; systems without them pay $O(s)$ or $O(k)$. This is not domain-specific; it is the information barrier theorem instantiated across classification systems.
+
+\subsection{Machine Learning: Model Identification and Versioning}
+
+Neural network models in production systems face the identification problem: given two model instances, determine if they represent the same architecture. Model registries must compress model metadata while enabling efficient identification.
+
+\textbf{Attribute-only approach:} Compare architecture fingerprints (layer counts, activation functions, parameter counts, connectivity patterns). Cost: $O(s)$ where $s$ is the number of architectural features.
+
+\textbf{Nominal tag:} Model hash (e.g., SHA-256 of architecture definition) or registry ID. Cost: $O(1)$.
+
+The $(L, W, D)$ tradeoff applies directly: storing $\lceil \log_2 k \rceil$ bits per model (where $k$ is the number of distinct architectures in the registry) enables $O(1)$ identification with $D = 0$. Attribute-based versioning requires $\Omega(d)$ feature comparisons and risks false positives ($D > 0$) when architectures share identical fingerprints but differ in subtle structural details.
+
+\textbf{Example:} A model registry with $k = 10^6$ architectures requires only 20 bits per model for perfect identification via nominal tags, versus $O(d)$ queries over potentially hundreds of architectural features for attribute-based approaches.

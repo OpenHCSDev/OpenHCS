@@ -21,11 +21,11 @@
 \providecommand{\BIBdecl}{\relax}
 \BIBdecl
 
-\bibitem{slepian1973noiseless}
-D.~Slepian and J.~K. Wolf, ``Noiseless coding of correlated information
-  sources,'' \emph{IEEE Transactions on Information Theory}, vol.~19, no.~4,
-  pp. 471--480, 1973, distributed source coding with side information; decoder
-  uses correlated information to reduce required rate.
+\bibitem{shannon1956zero}
+C.~E. Shannon, ``Zero-error capacity of a noisy channel,'' \emph{IRE
+  Transactions on Information Theory}, vol.~2, no.~3, pp. 8--19, 1956,
+  introduces zero-error capacity; fundamental limit for error-free
+  communication over noisy channels.
 
 \bibitem{korner1973graphs}
 J.~K{\"o}rner, ``Coding of an information source having ambiguous alphabet and
@@ -72,6 +72,12 @@ T.~Delaet, W.~Joosen, and J.~Van~de Craen, ``A survey of system configuration
 A.~Hunt and D.~Thomas, \emph{The Pragmatic Programmer: From Journeyman to
   Master}.\hskip 1em plus 0.5em minus 0.4em\relax Addison-Wesley Professional,
   1999.
+
+\bibitem{slepian1973noiseless}
+D.~Slepian and J.~K. Wolf, ``Noiseless coding of correlated information
+  sources,'' \emph{IEEE Transactions on Information Theory}, vol.~19, no.~4,
+  pp. 471--480, 1973, distributed source coding with side information; decoder
+  uses correlated information to reduce required rate.
 
 \bibitem{birs2012interactive}
 {Banff International Research Station}, ``Interactive information theory
@@ -142,30 +148,6 @@ J.~K. Wolf \emph{et~al.}, ``Coding for a write-once memory,'' \emph{AT\&T Bell
 {TIOBE Software BV}, ``{TIOBE} index for programming languages,'' TIOBE
   Programming Community Index, 2024, online: tiobe.com/tiobe-index/.
 
-\bibitem{flanagan2020ruby}
-D.~Flanagan and Y.~Matsumoto, \emph{The {Ruby} Programming Language}.\hskip 1em
-  plus 0.5em minus 0.4em\relax O'Reilly Media, 2008.
-
-\bibitem{openhcs2025}
-\BIBentryALTinterwordspacing
-T.~Simas, ``{OpenHCS}: Open-source high-content screening platform,'' 2025,
-  version 0.1.0. Available at: \url{https://github.com/trissim/openhcs}.
-  [Online]. Available: \url{https://github.com/trissim/openhcs}
-\BIBentrySTDinterwordspacing
-
-\bibitem{runeson2009guidelines}
-P.~Runeson and M.~H{\"o}st, ``Guidelines for conducting and reporting case
-  study research in software engineering,'' \emph{Empirical Software
-  Engineering}, vol.~14, no.~2, pp. 131--164, 2009.
-
-\bibitem{openhcsPR44}
-\BIBentryALTinterwordspacing
-T.~Simas, ``{UI Anti-Duck-Typing Refactor}: {ABC}-based architecture ({PR}
-  \#44),'' GitHub pull request, 2025, merged November 29, 2025. Available at:
-  \url{https://github.com/trissim/openhcs/pull/44}. [Online]. Available:
-  \url{https://github.com/trissim/openhcs/pull/44}
-\BIBentrySTDinterwordspacing
-
 \bibitem{xiang2013interactive}
 Y.~Xiang, ``Interactive schemes in information theory and statistics,'' Ph.D.
   dissertation, University of California, Berkeley, 2013, interactive
@@ -226,7 +208,7 @@ X.~Leroy, ``Formal verification of a realistic compiler,'' \emph{Communications
 
 \bibitem{openhcsLeanProofs}
 T.~Simas, ``Lean 4 formalization: {SSOT} requirements theorems,'' Supplementary
-  material, 2025, 1753 lines across 13 files, 0 \texttt{sorry} placeholders.
-  Included with paper submission.
+  material, 2025, 9,369 lines across 29 files, 441 theorems, 0 \texttt{sorry}
+  placeholders. Included with paper submission.
 
 \end{thebibliography}

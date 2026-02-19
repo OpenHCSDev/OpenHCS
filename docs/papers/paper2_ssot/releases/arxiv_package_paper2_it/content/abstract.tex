@@ -1,26 +1,9 @@
 \begin{abstract}
-We extend zero-error source coding to \emph{interactive encoding systems}---systems where a fact $F$ is encoded at multiple locations and the encoding can be modified over time. We characterize the \textbf{zero-incoherence capacity}: the maximum encoding rate guaranteeing that no reachable system state has disagreement among locations.
+We introduce the zero-incoherence capacity for interactive multi-location encoding systems: the maximum encoding rate that guarantees exactly zero probability of disagreement among replicated encodings. Our main information-theoretic results are compact and self-contained: an exact capacity theorem ($C_0=1$), a tight side-information lower bound for resolution ($\geq\log_2 k$ bits for $k$-way incoherence), and a rate–complexity separation (modification cost $O(1)$ at capacity vs $\Omega(n)$ above).
 
-\textbf{Main Results.}
-\begin{enumerate}
-\item \textbf{Zero-Incoherence Capacity Theorem (Theorem~\ref{thm:coherence-capacity}):} The zero-incoherence capacity is exactly $C_0 = 1$. This bound is tight: achievable at encoding rate DOF $= 1$ (one independent location), impossible at DOF $> 1$. The achievability/converse structure parallels Shannon's channel capacity theorem.
+The paper frames encoding locations as terminals in a multi-terminal source-coding model. Derivation (automatic deterministic dependence) is interpreted as perfect correlation that reduces effective rate; only complete derivation (one independent source) achieves zero incoherence. We give concise achievability and converse proofs in IT style, formalize the confusability/incoherence graph connection, and present an explicit mutual-information argument for the side-information bound.
 
-\item \textbf{Side Information Bound (Theorem~\ref{thm:side-info}):} Resolution of $k$-way incoherence (where $k$ independent locations hold distinct values) requires $\geq \log_2 k$ bits of side information. At DOF $= 1$, zero side information suffices (Corollary~\ref{cor:dof1-zero-side}). This quantifies the information cost of redundant independent encodings.
+Theoretical contributions are supplemented by constructive instantiations (programming-language patterns and a software case study). For TIT submission we move detailed language evaluation, extended code examples, and the full Lean proof corpus to supplementary material; the main text contains brief instantiations only. Core theorems (capacity, realizability, bounds) are machine-checked in Lean 4; entropy arguments apply standard Fano-inequality techniques.
 
-\item \textbf{Resolution Impossibility (Theorem~\ref{thm:oracle-arbitrary}):} In any incoherent state, no deterministic resolution procedure is information-theoretically justified without external side information---the encoding system lacks sufficient information to determine correctness. This parallels zero-error capacity constraints: without side information, error-free decoding is impossible.
-
-\item \textbf{Rate-Complexity Tradeoff (Theorem~\ref{thm:unbounded-gap}):} Modification complexity scales as $O(1)$ at capacity (DOF $= 1$) versus $\Omega(n)$ above capacity (DOF $= n > 1$). The gap is unbounded.
-\end{enumerate}
-
-\textbf{Information-Theoretic Framework.} We model encoding locations as terminals in a multi-terminal source coding problem. Derivation (automatic propagation from source to derived locations) introduces deterministic correlation, reducing the effective encoding rate. The capacity result shows that only complete correlation (all locations derived from one source) guarantees coherence---partial correlation permits divergence.
-
-The side information bound connects to Slepian-Wolf distributed source coding~\cite{slepian1973noiseless}: provenance information acts as decoder side information enabling verification. The capacity theorem extends Körner-Lovász zero-error capacity~\cite{korner1973graphs,lovasz1979shannon} to interactive settings with modification constraints.
-
-\textbf{Encoder Realizability (Theorem~\ref{thm:ssot-iff}):} Achieving capacity requires two encoder properties: (a) \emph{causal update propagation}---feedback coupling between source and derived locations, and (b) \emph{provenance observability}---side information about derivation structure. Both are necessary; together sufficient.
-
-\textbf{Instantiations.} The framework applies to distributed storage (replica consistency), configuration systems (multi-file coherence), and programming languages (type registries). We provide instantiations as corollaries; core theorems are domain-independent.
-
-All theorems machine-checked in Lean 4 (9,351 lines, 541 theorems, 0 \texttt{sorry} placeholders).
-
-\textbf{Index Terms---}Zero-error source coding, multi-terminal encoding, coherence capacity, side information, interactive information theory, rate-complexity tradeoffs, distributed source coding
+\textbf{Index Terms---}zero-error capacity, multi-terminal source coding, side information, mutual information, confusability graph
 \end{abstract}
