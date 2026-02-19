@@ -1,16 +1,16 @@
 \section{Informal Corollaries for Software Architecture}\label{sec:implications}
 
-This section states informal corollaries for software architecture derived from the formal model. The complexity results have direct implications for software engineering practice, but the statements in this section are interpretive consequences; machine-checked theorem statements are in Section~\ref{sec:simplicity-tax} and Appendix~\ref{app:lean}.
+This section states informal corollaries for software architecture derived from the formal model. The complexity results have direct implications for software engineering practice, but the statements in this section are interpretive consequences; machine-checked theorem statements are in Section~\ref{sec:simplicity-tax} and Appendix~\ref{app:lean}. We use Theorem~\ref{thm:overmodel-diagnostic} as the interpretive lens: persistent over-specification is evidence about unresolved boundary characterization in the current representation.
 
-\subsection{Why Over-Specification Is Rational}
+\subsection{Why Persistent Over-Specification Is Diagnostic}
 
-Software architects routinely specify more configuration parameters than strictly necessary. Our results show this is computationally rational:
+Software architects routinely specify more configuration parameters than strictly necessary. In the formal model, this is best interpreted diagnostically:
 
-\begin{corollary}[Rational Over-Specification]
+\begin{corollary}[Diagnostic Over-Specification]
 Given a software system with $n$ configuration parameters, checking whether a proposed subset suffices is \coNP-complete. Finding the minimum such set is also \coNP-complete.
 \end{corollary}
 
-This explains why configuration files grow over time: removing ``unnecessary'' parameters requires solving a hard problem.
+This explains why configuration files grow over time: inability to remove parameters is often evidence that decision relevance is not yet characterized in a tractable form.
 
 \subsection{Architectural Decision Quotient}
 
@@ -35,7 +35,7 @@ Decisions with low ADQ (strongly constraining) require fewer additional decision
 \label{cor:practice-corollaries}
 Within the formal model, the following corollaries hold:
 \begin{enumerate}
-\item \textbf{Accept over-modeling:} Including ``extra'' parameters is often rational because exact minimization is computationally hard.
+\item \textbf{Treat over-modeling as a diagnostic:} Persistent inclusion of ``extra'' parameters signals unresolved boundary characterization, not automatic irreducibility.
 \item \textbf{Use bounded scenarios:} When the scenario space is small (Proposition~\ref{prop:sufficiency-char}), minimal modeling becomes tractable.
 \item \textbf{Exploit structure:} Tree-structured dependencies, bounded alternatives, and separable utilities admit efficient algorithms.
 \item \textbf{Use heuristics in the unstructured regime:} For general instances outside the tractable classes, exact optimization has worst-case hardness.

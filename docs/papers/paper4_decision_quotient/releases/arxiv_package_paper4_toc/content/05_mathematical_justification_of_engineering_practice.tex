@@ -1,8 +1,9 @@
-\section{Implications for Practice: Why Over-Modeling Is Optimal}\label{sec:engineering-justification}
+\section{Implications for Practice: Diagnostic Reading of Over-Modeling}\label{sec:engineering-justification}
 
-This section states corollaries for engineering practice. Within the formal model, the complexity results of Sections~\ref{sec:hardness} and~\ref{sec:dichotomy} shift parts of this workflow from informal judgment toward explicit, checkable criteria. The observed behaviors---configuration over-specification, absence of automated minimization tools, heuristic model selection---are not failures of discipline but \emph{provably optimal responses} to computational constraints under the stated cost model.
+This section states corollaries for engineering practice. Within the formal model, the complexity results of Sections~\ref{sec:hardness} and~\ref{sec:dichotomy} shift parts of this workflow from informal judgment toward explicit, checkable criteria. The observed behaviors---configuration over-specification, absence of automated minimization tools, heuristic model selection---are best read as \emph{diagnostic signals} that the decision boundary is not yet fully characterized in a tractable representation.
 
-Some common prescriptions implicitly require exact minimization of sufficient parameter sets. In the worst case, that task is \coNP-complete in our model, so we should calibrate critiques and expectations accordingly. A rational response is to include everything and pay linear maintenance costs, rather than attempt exponential minimization costs.
+Some common prescriptions implicitly require exact minimization of sufficient parameter sets. In the worst case, that task is \coNP-complete in our model, so critiques should distinguish between true irrelevance and unresolved relevance structure under the chosen encoding.
+The interpretive key for this section is Theorem~\ref{thm:overmodel-diagnostic}: persistent failure to isolate a minimal sufficient set should be read as a boundary-characterization signal in the current model, not as a universal irreducibility claim.
 
 \subsection{Configuration Simplification is SUFFICIENCY-CHECK}
 
@@ -34,20 +35,21 @@ This holds iff configurations agreeing on parameters in $I$ exhibit identical be
 Therefore, ``does parameter subset $I$ preserve all behaviors?'' is exactly SUFFICIENCY-CHECK for the constructed decision problem.
 \end{proof}
 
-\begin{corollary}[Over-Modeling as Diagnostic Signal]
+\begin{theorem}[Over-Modeling as Diagnostic Signal]
+\label{thm:overmodel-diagnostic}
 \label{cor:overmodel-diagnostic}
 By contraposition of Theorem~\ref{thm:config-reduction}, if the minimal sufficient parameter set is not immediately identifiable in the modeled system, then the decision boundary is not completely characterized by the current parameterization.
-\end{corollary}
+\end{theorem}
 
 \begin{proof}
 Assume the decision boundary were completely characterized by the current parameterization. Then, via Theorem~\ref{thm:config-reduction}, the corresponding sufficiency instance would admit an exact statement of which parameter subsets preserve behavior, including the minimal sufficient set. Contraposition gives the claim: persistent failure to identify a minimal sufficient set signals incomplete characterization of decision relevance in the model.
 \end{proof}
 
-\subsection{Computational Rationality of Over-Modeling}
+\subsection{Cost Asymmetry Under ETH}
 
-We now prove that over-specification is an optimal engineering strategy given the stated cost model and complexity constraints.\footnote{Naive subset enumeration still gives an intuitive baseline of $O(2^n)$ checks, but that is an algorithmic upper bound; the theorem below uses ETH for the lower-bound argument.}
+We now prove a cost asymmetry result under the stated cost model and complexity constraints.\footnote{Naive subset enumeration still gives an intuitive baseline of $O(2^n)$ checks, but that is an algorithmic upper bound; the theorem below uses ETH for the lower-bound argument.}
 
-\begin{theorem}[Rational Over-Modeling]
+\begin{theorem}[Cost-Asymmetry Consequence Under ETH]
 \label{thm:rational-overmodel}
 Consider an engineer specifying a system configuration with $n$ parameters. Let:
 \begin{itemize}
@@ -63,12 +65,12 @@ Assume ETH in the succinct encoding model of Section~\ref{sec:encoding}. Then:
 \item Under ETH, exponential finding cost dominates linear maintenance cost for sufficiently large $n$.
 \end{enumerate}
 
-Therefore, there exists $n_0$ such that for all $n > n_0$, over-modeling minimizes total expected cost:
+Therefore, there exists $n_0$ such that for all $n > n_0$, the finding-vs-maintenance asymmetry satisfies:
 \[
 C_{\text{over}}(k) < C_{\text{find}}(n) + C_{\text{under}}
 \]
 
-Over-modeling is economically optimal under the stated model and complexity constraints.
+Within this model, persistent over-specification is evidence of unresolved boundary characterization rather than evidence that all included parameters are intrinsically necessary.
 \end{theorem}
 
 \begin{proof}
@@ -88,7 +90,7 @@ Since $2^n$ grows faster than any polynomial in $k$ or $n$, there exists $n_0$ s
 C_{\text{over}}(k) \ll C_{\text{find}}(n)
 \]
 
-Adding underspecification risk $C_{\text{under}}$ (production failures from missing parameters), which is unbounded in the model, makes over-specification strictly dominant.
+Adding underspecification risk $C_{\text{under}}$ reinforces conservative configurations until additional structure is identified.
 \end{proof}
 
 \begin{corollary}[Impossibility of Automated Configuration Minimization]
@@ -106,17 +108,17 @@ Such an algorithm would solve MINIMUM-SUFFICIENT-SET in polynomial time, contrad
 \end{proof}
 
 \begin{remark}
-Corollary~\ref{cor:no-auto-minimize} explains the observed absence of ``config cleanup'' tools in software engineering practice. Engineers who include extra parameters are not exhibiting poor discipline---they are adapting to computational constraints. The problem is not lack of tooling effort; it is mathematical intractability.
+Corollary~\ref{cor:no-auto-minimize} explains the observed absence of ``config cleanup'' tools in software engineering practice. The correct interpretation is diagnostic: persistent inability to minimize indicates incomplete tractable characterization of decision relevance under the current representation.
 \end{remark}
 
-\subsection{Connection to Observed Practice}
+\subsection{Diagnostic Reading of Observed Practice}
 
 These theorems provide mathematical grounding for three widespread engineering behaviors:
 
-\textbf{1. Configuration files grow over time.} Removing parameters requires solving \coNP-complete problems. Engineers rationally choose linear maintenance cost over exponential minimization cost.
+\textbf{1. Configuration files grow over time.} Difficulty removing parameters indicates unresolved relevance structure in the current model/encoding.
 
-\textbf{2. Heuristic model selection dominates.} ML practitioners use AIC, BIC, cross-validation instead of optimal feature selection because optimal selection is intractable (Theorem~\ref{thm:rational-overmodel}).
+\textbf{2. Heuristic model selection dominates.} ML practitioners use AIC, BIC, cross-validation instead of optimal feature selection because exact selection is intractable without additional structure (Theorem~\ref{thm:rational-overmodel}).
 
-\textbf{3. ``Include everything'' is a legitimate strategy.} When determining relevance/minimal sufficiency has a $2^{\Omega(n)}$ worst-case lower bound under ETH in the succinct encoding (Theorem~\ref{thm:dichotomy}), including all $n$ parameters costs $O(n)$. For large $n$, this is the rational choice.
+\textbf{3. ``Include everything'' is a conservative upper-bound policy.} When determining relevance/minimal sufficiency has a $2^{\Omega(n)}$ worst-case lower bound under ETH in the succinct encoding (Theorem~\ref{thm:dichotomy}), including all $n$ parameters costs $O(n)$ while the exact boundary remains unresolved.
 
-These behaviors are not ad hoc workarounds; under the stated computational model they are rational responses to worst-case intractability. The complexity results provide a mathematical lens: over-modeling is not a failure---it is the rational strategy under the model.
+These behaviors are not ad hoc workarounds; under the stated computational model they are practical consequences of a boundary-identification bottleneck. The complexity results provide a diagnostic lens: persistent over-modeling should prompt either stronger structural assumptions or explicit acceptance of approximation.

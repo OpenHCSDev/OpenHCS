@@ -33,4 +33,8 @@ There is a clean separation between explicit-state tractability and succinct wor
 For Boolean coordinate spaces ($N = 2^n$), the explicit-state bound is polynomial in $2^n$ (exponential in $n$), while under ETH the succinct lower bound yields $2^{\Omega(n)}$ time for the hard family in which $k^* = \Omega(n)$.
 \end{corollary}
 
+\begin{remark}[Interpretation: Hardness Tracks Encoding Access]
+Theorem~\ref{thm:dichotomy} shows that hardness here is a property of the encoding regime (and thus of observer access to structure), not of a changing underlying decision relation. The sufficiency semantics are fixed; what changes is whether the representation exposes the decision boundary $s \mapsto \Opt(s)$ explicitly or hides it behind a succinct description. In this sense, succinct-encoding hardness is evidence of representational access limits in the current regime, not a statement that the boundary is intrinsically inaccessible in all regimes.
+\end{remark}
+
 This encoding-regime separation explains why some domains admit tractable model selection under explicit-state assumptions, while other domains (or encodings) exhibit worst-case hardness that forces heuristic approaches.
