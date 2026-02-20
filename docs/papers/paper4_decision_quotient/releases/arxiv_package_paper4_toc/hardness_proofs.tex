@@ -9,7 +9,7 @@ This section establishes the computational complexity of determining which state
     \item \textbf{ANCHOR-SUFFICIENCY} (fixed coordinates) is $\Sigma_2^P$-complete
 \end{enumerate}
 
-Within the formal model (Section~\ref{sec:foundations}) and the succinct encoding used for hardness (Section~\ref{sec:encoding}), these results sit beyond NP-completeness and rigorously characterize over-modeling as a diagnostic response to unresolved boundary characterization: in the worst case, finding (or even certifying) a minimal set of decision-relevant factors is computationally intractable.
+Under the model contract of Section~\ref{sec:model-contract} and the succinct encoding of Section~\ref{sec:encoding}, these results place exact relevance identification beyond NP-completeness: in the worst case, finding (or certifying) minimal decision-relevant sets is computationally intractable.
 
 \subsection{Problem Definitions}
 
@@ -208,18 +208,17 @@ When $U(a, s) = w_a \cdot s$ for weight vectors $w_a \in \mathbb{Q}^n$, MINIMUM-
 
 \subsection{Implications}
 
-\begin{corollary}[Why Over-Modeling Is Rational]
-Finding the minimal set of decision-relevant factors is coNP-complete. Even \emph{verifying} that a proposed set is sufficient is coNP-complete.
-
-This formally explains the engineering phenomenon:
-\begin{enumerate}
-    \item It's computationally easier to model everything than to find the minimum
-    \item ``Which unknowns matter?'' is a hard question, not a lazy one to avoid  
-    \item Bounded scenario analysis (small $\hat{S}$) makes the problem tractable
-\end{enumerate}
+\begin{corollary}[Computational Bottleneck for Exact Minimization]
+Under the succinct encoding, exact minimization of sufficient coordinate sets is coNP-hard via the $k=0$ case, and fixed-anchor minimization is $\Sigma_2^P$-complete.
+\textit{(Lean handles: \nolinkurl{min_sufficient_set_coNP_hard},
+\nolinkurl{anchor_sufficiency_sigma2p})}
 \end{corollary}
 
-The modeling budget for deciding what to model is itself a computationally constrained resource.
+\begin{proof}
+The $k=0$ case of MINIMUM-SUFFICIENT-SET is SUFFICIENCY-CHECK (Theorem~\ref{thm:sufficiency-conp}), giving coNP-hardness for exact minimization. The fixed-anchor variant is exactly Theorem~\ref{thm:anchor-sigma2p}.
+\end{proof}
+
+The modeling budget for deciding what to model is therefore a computationally constrained resource under this encoding.
 
 \subsection{Quantifier Collapse for MINIMUM-SUFFICIENT-SET}
 

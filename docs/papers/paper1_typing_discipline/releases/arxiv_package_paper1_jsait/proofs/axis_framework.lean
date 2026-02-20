@@ -1,4 +1,5 @@
 import Mathlib
+import abstract_class_system
 
 /-!
 # Axis-Parametric Type Theory: Formal Foundations
@@ -850,6 +851,100 @@ theorem matroid_basis_equicardinality (M : AxisMatroid)
     exact this B₂ B₁ hmax₂ hmax₁ (Ne.symm hne) hlt'
   rcases M.indep_exchange B₁ B₂ hmax₁.1 hmax₂.1 hlt with ⟨x, _, hxnB₁, hxB₁ind⟩
   exact hmax₁.2 x hxnB₁ hxB₁ind
+
+/-!
+## Closure-to-Matroid Bridge (Reviewer Gap Closure)
+
+This section links the closure-style formalization from
+`AbstractClassSystem.AxisClosure` to the `AxisMatroid` structure above.
+
+The bridge is explicit:
+1. Define closure-induced independence on axis lists.
+2. Build an `AxisMatroid` from that independence once augmentation/exchange
+   is provided for the induced predicate.
+3. Reuse `matroid_basis_equicardinality` to obtain equal-cardinality bases.
+-/
+
+/-- Observer-induced closure on `Axis`, instantiated from `AxisClosure`. -/
+abbrev closureFromObserver {W : Type _} (π : (a : Axis) → W → a.Carrier)
+    (X : Set Axis) : Set Axis :=
+  AbstractClassSystem.AxisClosure.closure
+    (Val := fun a : Axis => a.Carrier) (π := π) X
+
+/-- Independence induced by observer-closure:
+each axis in `I` is not determined by the remaining axes in `I`. -/
+def closureIndep {W : Type _} (π : (a : Axis) → W → a.Carrier)
+    (ground : AxisSet) (I : AxisSet) : Prop :=
+  I ⊆ ground ∧
+    ∀ a, a ∈ I → a ∉ closureFromObserver π ({x | x ∈ I.erase a} : Set Axis)
+
+/-- Build an `AxisMatroid` from closure-induced independence once exchange
+for the induced independence predicate is provided. -/
+def closureInducedAxisMatroid {W : Type _}
+    (π : (a : Axis) → W → a.Carrier)
+    (ground : AxisSet)
+    (hNodup :
+      ∀ I, closureIndep π ground I → I.Nodup)
+    (hSubset :
+      ∀ I J,
+        closureIndep π ground I →
+        J ⊆ I →
+        closureIndep π ground J)
+    (hExchange :
+      ∀ I J,
+        closureIndep π ground I →
+        closureIndep π ground J →
+        I.length < J.length →
+        ∃ x ∈ J, x ∉ I ∧ closureIndep π ground (x :: I)) :
+    AxisMatroid where
+  ground := ground
+  indep := closureIndep π ground
+  indep_nodup := by
+    intro I hI
+    exact hNodup I hI
+  indep_empty := by
+    refine ⟨?_, ?_⟩
+    · intro a ha
+      simp at ha
+    · intro a ha
+      simp at ha
+  indep_subset := by
+    intro I J hI hJI
+    exact hSubset I J hI hJI
+  indep_exchange := by
+    intro I J hI hJ hlt
+    exact hExchange I J hI hJ hlt
+
+/-- Equicardinality for maximal closure-induced independent sets.
+This is the concrete composition point from closure formalization to
+matroid cardinality uniqueness. -/
+def closureInducedBasisEquicardinality {W : Type _}
+    (π : (a : Axis) → W → a.Carrier)
+    (ground : AxisSet)
+    (hNodup :
+      ∀ I, closureIndep π ground I → I.Nodup)
+    (hSubset :
+      ∀ I J,
+        closureIndep π ground I →
+        J ⊆ I →
+        closureIndep π ground J)
+    (hExchange :
+      ∀ I J,
+        closureIndep π ground I →
+        closureIndep π ground J →
+        I.length < J.length →
+        ∃ x ∈ J, x ∉ I ∧ closureIndep π ground (x :: I))
+    (B₁ B₂ : AxisSet)
+    (hmax₁ :
+      (closureInducedAxisMatroid π ground hNodup hSubset hExchange).indep B₁ ∧
+      ∀ x ∉ B₁, ¬ (closureInducedAxisMatroid π ground hNodup hSubset hExchange).indep (x :: B₁))
+    (hmax₂ :
+      (closureInducedAxisMatroid π ground hNodup hSubset hExchange).indep B₂ ∧
+      ∀ x ∉ B₂, ¬ (closureInducedAxisMatroid π ground hNodup hSubset hExchange).indep (x :: B₂)) :
+    B₁.length = B₂.length :=
+  matroid_basis_equicardinality
+    (M := closureInducedAxisMatroid π ground hNodup hSubset hExchange)
+    B₁ B₂ hmax₁ hmax₂
 
 /-!
 ## Fixed Axis Incompleteness and Parameterized Immunity

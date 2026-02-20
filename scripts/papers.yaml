@@ -1,14 +1,13 @@
 # Unified metadata for all TOPLAS papers
-# Single source of truth for paper structure, build requirements, and statistics
+# Single source of truth for paper structure and build requirements
 # OpenHCS Way: Declarative configuration, fail-loud validation, orthogonal design
 #
 # STRUCTURAL INVARIANTS:
 # 1. Content location: <paper_dir>/latex/content/*.tex (auto-discovered)
-# 2. Proofs location: docs/papers/proofs/<paper_id>_*.lean (shared)
+# 2. Proofs location: <paper_dir>/proofs/*.lean (auto-discovered)
 # 3. Releases location: <paper_dir>/releases/{pdf, md, BUILD_LOG.txt, tar.gz}
 #
-# Content files are auto-discovered from latex/content/ directory.
-# Do NOT hardcode content_files - the build system discovers them.
+# Content files and Lean proof statistics are auto-discovered by build_papers.py.
 
 # arXiv Packaging Configuration
 arxiv:
@@ -29,10 +28,6 @@ papers:
     latex_dir: "latex"
     latex_file: "main.tex"
     venue: "TOPLAS"
-    # Statistics from shared proofs (auto-updated by build system)
-    lean_lines: 6589
-    lean_theorems: 296
-    lean_sorry: 0
 
   paper1_jsait:
     name: "Classification Theory (JSAIT)"
@@ -41,10 +36,6 @@ papers:
     latex_dir: "latex_jsait"
     latex_file: "type_compression_jsait.tex"
     venue: "JSAIT"
-    # Same proofs as paper1, different framing
-    lean_lines: 6589
-    lean_theorems: 296
-    lean_sorry: 0
 
   paper2:
     name: "SSOT Foundations"
@@ -53,9 +44,6 @@ papers:
     latex_dir: "latex"
     latex_file: "main.tex"
     venue: "Draft"
-    lean_lines: 1811
-    lean_theorems: 96
-    lean_sorry: 0
 
   paper2_it:
     name: "Coherence Theory (IT)"
@@ -64,10 +52,6 @@ papers:
     latex_dir: "latex_it"
     latex_file: "coherence_it.tex"
     venue: "IEEE Transactions on Information Theory"
-    # Same proofs as paper2, IT framing
-    lean_lines: 1811
-    lean_theorems: 96
-    lean_sorry: 0
 
   paper3:
     name: "Leverage Framework"
@@ -76,9 +60,6 @@ papers:
     latex_dir: "latex"
     latex_file: "leverage_arxiv.tex"
     venue: "Draft"
-    lean_lines: 741
-    lean_theorems: 35
-    lean_sorry: 4
 
   paper4:
     name: "Decision Quotient"
@@ -87,9 +68,6 @@ papers:
     latex_dir: "latex"
     latex_file: "decision_quotient_arxiv.tex"
     venue: "Draft"
-    lean_lines: 5901
-    lean_theorems: 237
-    lean_sorry: 0
 
   paper4_toc:
     name: "Decision Quotient (ToC)"
@@ -98,10 +76,6 @@ papers:
     latex_dir: "latex_toc"
     latex_file: "decision_quotient_toc.tex"
     venue: "Theory of Computing"
-    # Same proofs as paper4, different framing
-    lean_lines: 5901
-    lean_theorems: 237
-    lean_sorry: 0
 
   paper5:
     name: "Credibility"
@@ -110,9 +84,6 @@ papers:
     latex_dir: "latex"
     latex_file: "credibility_arxiv.tex"
     venue: "Draft"
-    lean_lines: 58
-    lean_theorems: 0
-    lean_sorry: 1
 
   paper6:
     name: "Formality Universality"
@@ -121,7 +92,3 @@ papers:
     latex_dir: "latex"
     latex_file: "formality_arxiv.tex"
     venue: "Draft"
-    # No Lean proofs yet
-    lean_lines: 0
-    lean_theorems: 0
-    lean_sorry: 0

@@ -44,7 +44,7 @@ A distinguishing set $S$ is \emph{minimal} if no proper subset of $S$ is disting
 \item ``Minimal'' means inclusion-minimal: no proper subset suffices.
 \end{itemize}
 
-No further assumptions are required within this theory (i.e., beyond the fixed observation family $\Phi$ already specified). The proof constructs a closure operator satisfying extensivity, monotonicity, and idempotence, from which basis exchange follows (see Lean formalization).
+No further assumptions are required within this theory (i.e., beyond the fixed observation family $\Phi$ already specified). In Lean, the mechanization is now explicit end-to-end: closure-operator lemmas (extensive/monotone/idempotent) are proved in \texttt{proofs/abstract\_class\_system.lean} (\texttt{AxisClosure}); exchange/equicardinality lemmas are proved in \texttt{proofs/axis\_framework.lean} (\texttt{orthogonal\_implies\_exchange}, \texttt{matroid\_basis\_equicardinality}); and the composition point is formalized by \texttt{closureInducedAxisMatroid} and \texttt{closureInducedBasisEquicardinality} (with closure-induced nodup/subset/exchange hypotheses made explicit).
 
 \begin{definition}[Bases family]
 Let $E = \Phi\;(=\mathcal{Q})$ be the ground set of primitive queries (attribute predicates). Let $\mathcal{B} \subseteq 2^E$ be the family of minimal distinguishing sets.
@@ -63,7 +63,7 @@ Define the closure operator $\text{cl}(X) = \{q : X\text{-equivalence implies }q
 
 For exchange, take $q \in \text{cl}(X \cup \{q'\}) \setminus \text{cl}(X)$. Since $q \notin \text{cl}(X)$, there exist $v,w$ that are $X$-equivalent but disagree on $q$. Because $q \in \text{cl}(X \cup \{q'\})$, any pair that is $(X \cup \{q'\})$-equivalent must agree on $q$; therefore this witness pair cannot be $(X \cup \{q'\})$-equivalent, so it must disagree on $q'$. Now fix any pair $v',w'$ that are $(X \cup \{q\})$-equivalent. They are in particular $X$-equivalent and agree on $q$. If they disagreed on $q'$, then by the previous implication we could derive disagreement on $q$, contradiction. Hence $v',w'$ agree on $q'$, proving $q' \in \text{cl}(X \cup \{q\})$.
 
-Minimal distinguishing sets are exactly the bases of the matroid defined by this closure operator. Full machine-checked proof: \texttt{proofs/abstract\_class\_system.lean}, namespace \texttt{AxisClosure}.
+Minimal distinguishing sets are exactly the bases of the matroid defined by this closure operator. The closure component is machine-checked in \texttt{AxisClosure}; the exchange/equicardinality component and the closure-to-matroid bridge used for distinguishing-dimension well-definedness are machine-checked in \texttt{axis\_framework.lean}.
 \end{proof}
 
 \begin{theorem}[Matroid bases]

@@ -28,6 +28,8 @@ This paper establishes the computational complexity of coordinate sufficiency pr
 
 These results place the problem of identifying decision-relevant coordinates at the first and second levels of the polynomial hierarchy.
 
+Beyond classification, the paper contributes an interpretive framework formalized in Section~\ref{sec:interpretive-foundations}: structural complexity is a property of the fixed decision relation, while representational hardness is regime-conditional access cost. This is why encoding-regime changes can move practical hardness without changing the underlying semantics.
+
 The reduction constructions and key equivalence theorems are machine-checked in Lean 4 (see Appendix~\ref{app:lean} for proof listings). The formalization verifies that the TAUTOLOGY reduction correctly maps tautologies to sufficient coordinate sets; complexity classifications (coNP-completeness, $\SigmaP{2}$-completeness) follow by composition with standard complexity-theoretic results (TAUTOLOGY is \coNP-complete, $\exists\forall$-SAT is $\SigmaP{2}$-complete). The strengthened gadget showing that non-tautologies yield instances with \emph{all coordinates relevant} is also formalized.
 
 \subsection*{Complexity Characterization}
@@ -42,13 +44,13 @@ The results provide precise complexity characterizations within the formal model
 \item \textbf{Encoding-regime separation.} Under the explicit-state encoding, SUFFICIENCY-CHECK is polynomial in $|S|$. Under ETH, there exist succinctly encoded worst-case instances (witnessed by a strengthened gadget family with $k^*=n$) requiring $2^{\Omega(n)}$ time. Intermediate regimes are not ruled out by the lower-bound statement.
 \end{enumerate}
 
-\subsection*{The Complexity Conservation Law}
+\subsection*{The Complexity Redistribution Corollary}
 
 Section~\ref{sec:simplicity-tax} develops a quantitative consequence: when a problem requires $k$ dimensions and a model handles only $j < k$ natively, the remaining $k - j$ dimensions must be handled externally at each decision site. For $n$ sites, total external work is $(k-j) \times n$.
 
-This conservation law is formalized in Lean 4 (\texttt{HardnessDistribution.lean}), proving:
+The set identity is elementary; its operational content comes from composition with the hardness results on exact relevance minimization. This redistribution corollary is formalized in Lean 4 (\texttt{HardnessDistribution.lean}), proving:
 \begin{itemize}
-\item Conservation: complexity cannot be eliminated, only redistributed
+\item Redistribution identity: complexity burden cannot be eliminated by omission, only moved between native handling and external handling
 \item Dominance: complete models have lower total work than incomplete models
 \item Amortization: there exists a threshold $n^*$ beyond which higher-dimensional models have lower total cost
 \end{itemize}
@@ -58,13 +60,22 @@ This conservation law is formalized in Lean 4 (\texttt{HardnessDistribution.lean
 Several questions remain for future work:
 \begin{itemize}
 \item \textbf{Fixed-parameter tractability (primary):} Is SUFFICIENCY-CHECK FPT when parameterized by the minimal sufficient-set size $k^*$, or is it W[2]-hard under this parameterization?
+\item \textbf{Sequential/stochastic bridge extension:} Characterize the exact frontier where adjacent sequential objectives reduce to the static class via Proposition~\ref{prop:one-step-bridge}, and where genuinely new complexity objects (e.g., horizon/sample/regret complexity) must replace the present coNP/\(\Sigma_2^P\) analysis.
 \item \textbf{Average-case complexity:} What is the complexity under natural distributions on decision problems?
 \item \textbf{Learning cost formalization:} Can central cost $H_{\text{central}}$ be formalized as the rank of a concept matroid, making the amortization threshold precisely computable?
 \end{itemize}
 
-\subsection*{Practical interpretation}
+\subsection*{Practical Corollaries}
 
-While this work is theoretical, the complexity bounds have practical meaning. Under ETH and the succinct encoding, generic polynomial-time worst-case solvers for arbitrary inputs are ruled out. This is a diagnostic statement, not a claim of permanent impossibility in all regimes: the barrier marks unresolved structural characterization in the current representation, and the response is to refine representation and assumptions until decision relevance becomes structurally tractable or to state approximation commitments explicitly. Theorem~\ref{thm:overmodel-diagnostic} states this interpretive point directly at the level of parameterization. Real datasets contain structure (sparsity, bounded dependency depth, separable utilities) that the tractable subcases capture. Engineering work therefore follows two tracks: (a) detecting and exploiting structural restrictions in inputs, and (b) designing heuristic or approximate methods for currently unstructured instances while those structural hypotheses are developed.
+The practical corollaries are regime-indexed and theorem-indexed:
+\begin{itemize}
+\item \textbf{[E] and structured regimes:} polynomial-time exact procedures exist (Theorem~\ref{thm:tractable}).
+\item \textbf{[S+ETH] hard families:} exact minimization inherits exponential worst-case cost (Theorem~\ref{thm:dichotomy} together with Theorem~\ref{thm:sufficiency-conp}).
+\item \textbf{[S\_bool] mechanized criterion:} minimization reduces to relevance-cardinality constraints (Corollary~\ref{cor:practice-diagnostic}).
+\item \textbf{Redistribution consequences:} omitted native coverage externalizes work with explicit growth/amortization laws (Theorems~\ref{thm:tax-conservation}--\ref{thm:amortization}).
+\end{itemize}
+
+Hence the design choice is typed: enforce a tractable regime, or adopt weakened guarantees with explicit verification boundaries.
 
 
 \appendix

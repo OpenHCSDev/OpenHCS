@@ -1,5 +1,11 @@
 \begin{thebibliography}{10}
 
+\bibitem{sep_bounded_rationality}
+Bounded rationality.
+\newblock Stanford Encyclopedia of Philosophy, 2024.
+\newblock \url{https://plato.stanford.edu/entries/bounded-rationality/},
+  accessed 2026-02-20.
+
 \bibitem{akaike1974new}
 Hirotugu Akaike.
 \newblock A new look at the statistical model identification.
@@ -48,6 +54,17 @@ Richard~M. Karp.
 \newblock Reducibility among combinatorial problems.
 \newblock In {\em Complexity of Computer Computations}, pages 85--103.
   Springer, 1972.
+
+\bibitem{mcconnell2010certifying}
+Ross~M. McConnell, Kurt Mehlhorn, Stefan N{\"a}her, and Pascal Schweitzer.
+\newblock Certifying algorithms.
+\newblock {\em Computer Science Review}, 5(2):119--161, 2011.
+
+\bibitem{necula1997proof}
+George~C. Necula.
+\newblock Proof-carrying code.
+\newblock In {\em Proceedings of the 24th ACM SIGPLAN-SIGACT Symposium on
+  Principles of Programming Languages}, pages 106--119. ACM, 1997.
 
 \bibitem{papadimitriou1994complexity}
 Christos~H. Papadimitriou.

@@ -1,15 +1,25 @@
-\section{Implications for Practice: Diagnostic Reading of Over-Modeling}\label{sec:engineering-justification}
+\section{Engineering Corollaries by Regime}\label{sec:engineering-justification}
 
-This section states corollaries for engineering practice. Within the formal model, the complexity results of Sections~\ref{sec:hardness} and~\ref{sec:dichotomy} shift parts of this workflow from informal judgment toward explicit, checkable criteria. The observed behaviors---configuration over-specification, absence of automated minimization tools, heuristic model selection---are \emph{diagnostic signals} that the decision boundary is not yet fully characterized in a tractable representation.
+This section derives regime-typed engineering corollaries from the core complexity theorems. Theorem~\ref{thm:config-reduction} maps configuration simplification to SUFFICIENCY-CHECK; Theorems~\ref{thm:sufficiency-conp}, \ref{thm:minsuff-conp}, and \ref{thm:dichotomy} then yield exact minimization consequences under [S] and [S+ETH].
 
-Some common prescriptions implicitly require exact minimization of sufficient parameter sets. In the worst case, that task is \coNP-complete in our model, so critiques must distinguish between true irrelevance and unresolved relevance structure under the chosen encoding.
-The interpretive key for this section is Theorem~\ref{thm:overmodel-diagnostic}: persistent failure to isolate a minimal sufficient set is a boundary-characterization signal in the current model, not a universal irreducibility claim.
+Regime tags used below follow Section~\ref{sec:model-contract}: [S], [S+ETH], [E], [S\_bool].
+Any prescription that requires exact minimization is constrained by these theorem-level bounds.
+Theorem~\ref{thm:overmodel-diagnostic} implies that persistent failure to isolate a minimal sufficient set is a boundary-characterization signal in the current model, not a universal irreducibility claim.
+
+\begin{remark}[Regime Contract for Engineering Corollaries]
+All claims in this section are formal corollaries under the declared model assumptions.
+\begin{itemize}
+\item Competence claims are indexed by the regime tuple of Definition~\ref{def:competence-regime}; prescriptions are meaningful only relative to feasible resources under that regime (bounded-rationality feasibility discipline) \cite{sep_bounded_rationality}.
+\item Integrity (Definition~\ref{def:solver-integrity}) forbids overclaiming beyond certifiable outputs; $\mathsf{ABSTAIN}$/$\mathsf{UNKNOWN}$ is first-class when certification is unavailable.
+\item Therefore, hardness results imply a regime-conditional trilemma: abstain, weaken guarantees (heuristics/approximation), or change encoding/structural assumptions to recover competence.
+\end{itemize}
+\end{remark}
 
 \subsection{Configuration Simplification is SUFFICIENCY-CHECK}
 
 Real engineering problems reduce directly to the decision problems studied in this paper.
 
-\begin{theorem}[Configuration Simplification Reduces to SUFFICIENCY-CHECK]
+\begin{theorem}[[C1--C4] Configuration Simplification Reduces to SUFFICIENCY-CHECK]
 \label{thm:config-reduction}
 Given a software system with configuration parameters $P = \{p_1, \ldots, p_n\}$ and observed behaviors $B = \{b_1, \ldots, b_m\}$, the problem of determining whether parameter subset $I \subseteq P$ preserves all behaviors is equivalent to SUFFICIENCY-CHECK.
 \end{theorem}
@@ -17,13 +27,22 @@ Given a software system with configuration parameters $P = \{p_1, \ldots, p_n\}$
 \begin{proof}
 Construct decision problem $\mathcal{D} = (A, X_1, \ldots, X_n, U)$ where:
 \begin{itemize}
-\item Actions $A = B$ (each behavior is an action)
+\item Actions $A = B \cup \{\bot\}$, where $\bot$ is a sentinel ``no-observed-behavior'' action
 \item Coordinates $X_i$ = domain of parameter $p_i$
 \item State space $S = X_1 \times \cdots \times X_n$
-\item Utility $U(b, s) = 1$ if behavior $b$ occurs under configuration $s$, else $U(b, s) = 0$
+\item For $b\in B$, utility $U(b, s) = 1$ if behavior $b$ occurs under configuration $s$, else $0$
+\item Sentinel utility $U(\bot,s)=1$ iff no behavior in $B$ occurs under configuration $s$, else $0$
 \end{itemize}
 
-Then $\Opt(s) = \{b \in B : b \text{ occurs under configuration } s\}$.
+Then
+\[
+\Opt(s)=
+\begin{cases}
+\{b \in B : b \text{ occurs under configuration } s\}, & \text{if this set is nonempty},\\
+\{\bot\}, & \text{otherwise}.
+\end{cases}
+\]
+So the optimizer map exactly encodes observed-behavior equivalence classes, including the empty-behavior case.
 
 Coordinate set $I$ is sufficient iff:
 \[
@@ -35,22 +54,32 @@ This holds iff configurations agreeing on parameters in $I$ exhibit identical be
 Therefore, ``does parameter subset $I$ preserve all behaviors?'' is exactly SUFFICIENCY-CHECK for the constructed decision problem.
 \end{proof}
 
-\begin{theorem}[Over-Modeling as Diagnostic Signal]
+\begin{remark}[Reduction Scope]
+The reduction above requires only:
+\begin{enumerate}
+\item a finite behavior set,
+\item parameters with finite domains, and
+\item an evaluable behavior map from configurations to achieved behaviors.
+\end{enumerate}
+These are exactly the model-contract premises C1--C3 instantiated for configuration systems.
+\end{remark}
+
+\begin{theorem}[[S] Over-Modeling as Boundary-Signal Corollary]
 \label{thm:overmodel-diagnostic}
 \label{cor:overmodel-diagnostic}
-By contraposition of Theorem~\ref{thm:config-reduction}, if the minimal sufficient parameter set is not immediately identifiable in the modeled system, then the decision boundary is not completely characterized by the current parameterization.
+By contraposition of Theorem~\ref{thm:config-reduction}, if no coordinate set can be certified as exactly relevance-identifying (Definition~\ref{def:exact-identifiability}) for the modeled system, then the decision boundary is not completely characterized by the current parameterization.
 \end{theorem}
 
 \begin{proof}
-Assume the decision boundary were completely characterized by the current parameterization. Then, via Theorem~\ref{thm:config-reduction}, the corresponding sufficiency instance would admit an exact statement of which parameter subsets preserve behavior, including the minimal sufficient set. Contraposition gives the claim: persistent failure to identify a minimal sufficient set signals incomplete characterization of decision relevance in the model.
+Assume the decision boundary were completely characterized by the current parameterization. Then, via Theorem~\ref{thm:config-reduction}, the corresponding sufficiency instance admits exact relevance membership, hence a coordinate set that satisfies Definition~\ref{def:exact-identifiability}. Contraposition gives the claim: persistent failure of exact relevance identification signals incomplete characterization of decision relevance in the model.
 \end{proof}
 
 \subsection{Cost Asymmetry Under ETH}
 
 We now prove a cost asymmetry result under the stated cost model and complexity constraints.\footnote{Naive subset enumeration still gives an intuitive baseline of $O(2^n)$ checks, but that is an algorithmic upper bound; the theorem below uses ETH for the lower-bound argument.}
 
-\begin{theorem}[Cost-Asymmetry Consequence Under ETH]
-\label{thm:rational-overmodel}
+\begin{theorem}[[S+ETH] Cost-Asymmetry Consequence]
+\label{thm:cost-asymmetry-eth}
 Consider an engineer specifying a system configuration with $n$ parameters. Let:
 \begin{itemize}
 \item $C_{\text{over}}(k)$ = cost of maintaining $k$ extra parameters beyond minimal
@@ -70,7 +99,8 @@ Therefore, there exists $n_0$ such that for all $n > n_0$, the finding-vs-mainte
 C_{\text{over}}(k) < C_{\text{find}}(n) + C_{\text{under}}
 \]
 
-Within this model, persistent over-specification is evidence of unresolved boundary characterization rather than evidence that all included parameters are intrinsically necessary.
+Within [S+ETH], persistent over-specification is consistent with unresolved boundary characterization rather than a proof that all included parameters are intrinsically necessary.
+\textit{(Lean asymptotic dominance step: \nolinkurl{HardnessDistribution.linear_lt_exponential_plus_constant_eventually})}
 \end{theorem}
 
 \begin{proof}
@@ -85,12 +115,15 @@ Maintaining $k$ extra parameters incurs:
 
 Total maintenance cost is $C_{\text{over}}(k) = O(k)$.
 
-Since $2^n$ grows faster than any polynomial in $k$ or $n$, there exists $n_0$ such that for all $n > n_0$:
+The eventual dominance step is mechanized in
+\nolinkurl{HardnessDistribution.linear_lt_exponential_plus_constant_eventually}:
+for fixed linear-overhead parameter $k$ and additive constant $C_{\text{under}}$ there is
+$n_0$ such that $k < 2^n + C_{\text{under}}$ for all $n \ge n_0$. Therefore:
 \[
 C_{\text{over}}(k) \ll C_{\text{find}}(n)
 \]
 
-Adding underspecification risk $C_{\text{under}}$ reinforces conservative configurations until additional structure is identified.
+For any fixed nonnegative $C_{\text{under}}$, the asymptotic dominance inequality remains and only shifts the finite threshold $n_0$.
 \end{proof}
 
 \begin{corollary}[Impossibility of Automated Configuration Minimization]
@@ -108,17 +141,21 @@ Such an algorithm would solve MINIMUM-SUFFICIENT-SET in polynomial time, contrad
 \end{proof}
 
 \begin{remark}
-Corollary~\ref{cor:no-auto-minimize} explains the observed absence of ``config cleanup'' tools in software engineering practice. The correct interpretation is diagnostic: persistent inability to minimize indicates incomplete tractable characterization of decision relevance under the current representation.
+Corollary~\ref{cor:no-auto-minimize} is a formal boundary statement: an always-correct polynomial-time minimizer for arbitrary succinct inputs would collapse \(\Pclass\) and \(\coNP\).
 \end{remark}
 
-\subsection{Diagnostic Reading of Observed Practice}
+\begin{remark}[FPT Scope Caveat]
+The practical force of worst-case hardness depends on instance structure, especially $k^*$. If SUFFICIENCY-CHECK is FPT in parameter $k^*$, then small-$k^*$ families can remain tractable even under succinct encodings. The strengthened mechanized gadget (\texttt{all\_coords\_relevant\_of\_not\_tautology}) still proves existence of hard families with $k^*=n$; what is typical in deployed systems is an empirical question outside this formal model.
+\end{remark}
 
-These theorems provide mathematical grounding for three widespread engineering behaviors:
+\subsection{Regime-Conditional Operational Corollaries}
 
-\textbf{1. Configuration files grow over time.} Difficulty removing parameters indicates unresolved relevance structure in the current model/encoding.
+Theorems~\ref{thm:overmodel-diagnostic} and~\ref{thm:cost-asymmetry-eth} yield the following conditional operational consequences:
 
-\textbf{2. Heuristic model selection dominates.} ML practitioners use AIC, BIC, cross-validation instead of optimal feature selection because exact selection is intractable without additional structure (Theorem~\ref{thm:rational-overmodel}).
+\textbf{1. Conservative retention under unresolved relevance.} If irrelevance cannot be certified efficiently under the active regime, retaining a superset of parameters is a sound conservative policy.
 
-\textbf{3. ``Include everything'' is a conservative upper-bound policy.} When determining relevance/minimal sufficiency has a $2^{\Omega(n)}$ worst-case lower bound under ETH in the succinct encoding (Theorem~\ref{thm:dichotomy}), including all $n$ parameters costs $O(n)$ while the exact boundary remains unresolved.
+\textbf{2. Heuristic selection as weakened-guarantee mode.} Under [S+ETH], exact global minimization can be exponentially costly in the worst case (Theorem~\ref{thm:cost-asymmetry-eth}); methods such as AIC/BIC/cross-validation therefore fit the ``weaken guarantees'' branch of Definition~\ref{def:competence-regime}.
 
-These behaviors are not ad hoc workarounds; under the stated computational model they are practical consequences of a boundary-identification bottleneck. The complexity results provide a diagnostic lens: persistent over-modeling marks the need for either stronger structural assumptions or explicit acceptance of approximation.
+\textbf{3. Full-parameter inclusion as an \(O(n)\) upper-bound strategy.} Under [S+ETH], if exact minimization is unresolved, including all \(n\) parameters incurs linear maintenance overhead while avoiding false irrelevance claims.
+
+These corollaries are direct consequences of the hardness/tractability landscape: to move beyond them, one must either shift to tractable regimes from Theorem~\ref{thm:tractable} or adopt explicit approximation commitments.

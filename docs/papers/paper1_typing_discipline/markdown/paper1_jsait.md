@@ -1,12 +1,12 @@
 # Paper: Identification Capacity and Rate-Query Tradeoffs in Classification Systems
 
-**Status**: JSAIT-ready | **Lean**: 6589 lines, 296 theorems
+**Status**: JSAIT-ready | **Lean**: 6707 lines, 296 theorems
 
 ---
 
 ## Abstract
 
-We study zero-error class identification under constrained observations with three resources: tag rate $L$ (bits per entity), identification cost $W$ (attribute queries), and distortion $D$ (misidentification probability). We prove an information barrier: if the attribute-profile map $\pi$ is not injective on classes, then attribute-only observation cannot identify class identity with zero error. Let $A_\pi := \max_u |\{c : \pi(c)=u\}|$ be collision multiplicity. Any $D=0$ scheme must satisfy $L \ge \log_2 A_\pi$, and this bound is tight. In maximal-barrier domains ($A_\pi=k$), the nominal point $(L,W,D)=(\lceil\log_2 k\rceil,O(1),0)$ is the unique Pareto-optimal zero-error point. Without tags ($L=0$), zero-error identification requires $W=\Omega(d)$ queries, where $d$ is the distinguishing dimension (worst case $d=n$, so $W=\Omega(n)$). Minimal sufficient query sets form the bases of a matroid, making $d$ well-defined and linking the model to zero-error source coding via graph entropy. We also state fixed-axis incompleteness: a fixed observation axis is complete only for axis-measurable properties. Results instantiate to databases, biology, typed software systems, and model registries, and are machine-checked in Lean 4 (6589 lines, 296 theorem/lemma statements, 0 `sorry`).
+We study zero-error class identification under constrained observations with three resources: tag rate $L$ (bits per entity), identification cost $W$ (attribute queries), and distortion $D$ (misidentification probability). We prove an information barrier: if the attribute-profile map $\pi$ is not injective on classes, then attribute-only observation cannot identify class identity with zero error. Let $A_\pi := \max_u |\{c : \pi(c)=u\}|$ be collision multiplicity. Any $D=0$ scheme must satisfy $L \ge \log_2 A_\pi$, and this bound is tight. In maximal-barrier domains ($A_\pi=k$), the nominal point $(L,W,D)=(\lceil\log_2 k\rceil,O(1),0)$ is the unique Pareto-optimal zero-error point. Without tags ($L=0$), zero-error identification requires $W=\Omega(d)$ queries, where $d$ is the distinguishing dimension (worst case $d=n$, so $W=\Omega(n)$). Minimal sufficient query sets form the bases of a matroid, making $d$ well-defined and linking the model to zero-error source coding via graph entropy. We also state fixed-axis incompleteness: a fixed observation axis is complete only for axis-measurable properties. Results instantiate to databases, biology, typed software systems, and model registries, and are machine-checked in Lean 4 (6707 lines, 296 theorem/lemma statements, 0 `sorry`).
 
 **Keywords:** rate-distortion theory, identification capacity, zero-error source coding, query complexity, matroid structure, classification systems
 
@@ -151,7 +151,7 @@ This paper establishes the following results:
 
 5.  **$(L, W, D)$ Optimality** (Section [\[sec:lwd\]](#sec:lwd){reference-type="ref" reference="sec:lwd"}): We characterize the zero-error converse via collision multiplicity $A_\pi$ and prove uniqueness of the nominal point in the maximal-barrier regime ($A_\pi=k$).
 
-6.  **Machine-Checked Proofs**: All results formalized in Lean 4 (6589 lines, 296 theorem/lemma statements, 0 `sorry` placeholders).
+6.  **Machine-Checked Proofs**: All results formalized in Lean 4 (6707 lines, 296 theorem/lemma statements, 0 `sorry` placeholders).
 
 ## Related Work and Positioning
 
@@ -556,7 +556,7 @@ A distinguishing set $S$ is *minimal* if no proper subset of $S$ is distinguishi
 
 -   "Minimal" means inclusion-minimal: no proper subset suffices.
 
-No further assumptions are required within this theory (i.e., beyond the fixed observation family $\Phi$ already specified). The proof constructs a closure operator satisfying extensivity, monotonicity, and idempotence, from which basis exchange follows (see Lean formalization).
+No further assumptions are required within this theory (i.e., beyond the fixed observation family $\Phi$ already specified). In Lean, the mechanization is now explicit end-to-end: closure-operator lemmas (extensive/monotone/idempotent) are proved in `proofs/abstract_class_system.lean` (`AxisClosure`); exchange/equicardinality lemmas are proved in `proofs/axis_framework.lean` (`orthogonal_implies_exchange`, `matroid_basis_equicardinality`); and the composition point is formalized by `closureInducedAxisMatroid` and `closureInducedBasisEquicardinality` (with closure-induced nodup/subset/exchange hypotheses made explicit).
 
 ::: definition
 Let $E = \Phi\;(=\mathcal{Q})$ be the ground set of primitive queries (attribute predicates). Let $\mathcal{B} \subseteq 2^E$ be the family of minimal distinguishing sets.
@@ -575,7 +575,7 @@ For any $B_1, B_2 \in \mathcal{B}$ and any $q \in B_1 \setminus B_2$, there exis
 
 For exchange, take $q \in \text{cl}(X \cup \{q'\}) \setminus \text{cl}(X)$. Since $q \notin \text{cl}(X)$, there exist $v,w$ that are $X$-equivalent but disagree on $q$. Because $q \in \text{cl}(X \cup \{q'\})$, any pair that is $(X \cup \{q'\})$-equivalent must agree on $q$; therefore this witness pair cannot be $(X \cup \{q'\})$-equivalent, so it must disagree on $q'$. Now fix any pair $v',w'$ that are $(X \cup \{q\})$-equivalent. They are in particular $X$-equivalent and agree on $q$. If they disagreed on $q'$, then by the previous implication we could derive disagreement on $q$, contradiction. Hence $v',w'$ agree on $q'$, proving $q' \in \text{cl}(X \cup \{q\})$.
 
-Minimal distinguishing sets are exactly the bases of the matroid defined by this closure operator. Full machine-checked proof: `proofs/abstract_class_system.lean`, namespace `AxisClosure`. ◻
+Minimal distinguishing sets are exactly the bases of the matroid defined by this closure operator. The closure component is machine-checked in `AxisClosure`; the exchange/equicardinality component and the closure-to-matroid bridge used for distinguishing-dimension well-definedness are machine-checked in `axis_framework.lean`. ◻
 :::
 
 ::: theorem
@@ -694,7 +694,7 @@ In information-barrier domains, attribute-only observers (the $L=0$ face) satisf
 ::: proof
 *Proof.* Converse item (1) is Theorem [\[thm:converse\]](#thm:converse){reference-type="ref" reference="thm:converse"}. For item (2), maximal barrier means all classes are observationally colliding, so any $D=0$ scheme must carry full class identity in tag bits (Corollary [\[cor:max-barrier-converse\]](#cor:max-barrier-converse){reference-type="ref" reference="cor:max-barrier-converse"}), while nominal tags realize this lower bound with one tag read. Pareto uniqueness follows because any competing $D=0$ point cannot reduce $L$ below $\log_2 k$ nor reduce $W$ below constant-time tag access under the admissibility rules of Section [\[sec:framework\]](#sec:framework){reference-type="ref" reference="sec:framework"}.
 
-The counting converse and maximal-barrier corollary are machine-checked in Lean: `proofs/lwd_converse.lean`. Runtime cost instantiations (e.g., unbounded gap examples) remain in `proofs/python_instantiation.lean`. ◻
+The converse proof path is machine-checked in Lean: `proofs/lwd_converse.lean` formalizes (i) constant transcript on a collision block implies tag injectivity under zero-error decoding, and (ii) counting then yields $2^L \ge A_\pi$. The maximal-barrier corollary is formalized in the same module. Runtime cost instantiations (e.g., unbounded gap examples) remain in `proofs/python_instantiation.lean`. ◻
 :::
 
 ::: remark
@@ -722,7 +722,7 @@ Figure [1](#fig:lwd-tradeoff){reference-type="ref" reference="fig:lwd-tradeoff"
 <figcaption>Schematic illustration of the <span class="math inline">(<em>L</em>, <em>W</em>, <em>D</em>)</span> tradeoff. For a concrete example with <span class="math inline"><em>k</em> = 1000</span> classes, distinguishing dimension <span class="math inline"><em>d</em> = 10</span>, and maximal barrier (<span class="math inline"><em>A</em><sub><em>π</em></sub> = <em>k</em></span>), the nominal-tag strategy achieves <span class="math inline"><em>L</em> = 10</span> bits, <span class="math inline"><em>W</em> = <em>O</em>(1)</span>, <span class="math inline"><em>D</em> = 0</span>, while the attribute-only strategy requires <span class="math inline"><em>W</em> = 10</span> queries and incurs <span class="math inline"><em>D</em> &gt; 0</span> due to collisions.</figcaption>
 </figure>
 
-The Lean 4 formalization (Appendix [\[sec:lean\]](#sec:lean){reference-type="ref" reference="sec:lean"}) machine-checks the ambiguity-based converse and maximal-barrier lower bound that anchor this tradeoff analysis.
+The Lean 4 formalization (Appendix [\[sec:lean\]](#sec:lean){reference-type="ref" reference="sec:lean"}) machine-checks the full ambiguity-based converse chain and maximal-barrier lower bound that anchor this tradeoff analysis.
 
 ::: remark
 In programming language terms: *nominal typing* corresponds to nominal-tag observers (e.g., CPython's `isinstance`, Java's `.getClass()`). *Duck typing* corresponds to attribute-only observers (e.g., Python's `hasattr`). *Structural typing* is an intermediate case with $D = 0$ but $W = O(n)$.
@@ -924,7 +924,7 @@ The core claims in this paper are machine-checked in Lean 4. We keep the appendi
   Module                            Lines      Theorems   Purpose
   --------------------------------- ---------- ---------- -----------------------------------------------
   `abstract_class_system.lean`      3278       155        Two-axis instantiation, barrier, dominance
-  `axis_framework.lean`             1721       63         Query families, closure, matroid structure
+  `axis_framework.lean`             1816       63         Query families, closure, matroid bridge
   `nominal_resolution.lean`         609        27         Nominal identification and witness procedures
   `discipline_migration.lean`       142        11         Discipline vs. migration consequences
   `context_formalization.lean`      215        7          Greenfield/retrofit context model
@@ -932,13 +932,13 @@ The core claims in this paper are machine-checked in Lean 4. We keep the appendi
   `typescript_instantiation.lean`   65         4          TypeScript instantiation
   `java_instantiation.lean`         63         4          Java instantiation
   `rust_instantiation.lean`         64         4          Rust instantiation
-  `lwd_converse.lean`               41         4          Ambiguity converse counting lemmas
-  **Core modules subtotal**         **6447**   **296**    **10 representative modules shown**
+  `lwd_converse.lean`               64         4          Zero-error converse chain on collision blocks
+  **Core modules subtotal**         **6565**   **296**    **10 representative modules shown**
 :::
 
 #### What is in scope in the mechanization.
 
-The formalization covers the abstract observer model, the information barrier, constant-witness vs. query lower-bound separation, matroid structure of minimal distinguishing query sets, and the $(L,W,D)$ zero-error frontier claims stated in the main text.
+The formalization covers the abstract observer model, the information barrier, constant-witness vs. query lower-bound separation, matroid structure of minimal distinguishing query sets, and the $(L,W,D)$ zero-error frontier claims stated in the main text. For matroid statements, closure axioms are mechanized in `AxisClosure` (`abstract_class_system.lean`); exchange/equicardinality lemmas are mechanized in `axis_framework.lean`; and the closure-to-matroid composition is formalized there via `closureInducedAxisMatroid` and `closureInducedBasisEquicardinality` (with induced nodup/subset/exchange hypotheses explicit). For the converse in particular, `lwd_converse.lean` formalizes: `collision_block_requires_outcomes`, `collision_block_requires_bits`, `maximal_barrier_requires_bits`, and `impossible_when_bits_too_small`.
 
 #### What is moved to supplementary artifact.
 
@@ -946,7 +946,7 @@ Implementation-specific operational details and extended code listings are inclu
 
 #### Artifact totals.
 
-The complete artifact contains 14 Lean files totaling 6589 lines and 296 theorem/lemma statements; the table above highlights the core modules directly used by the main-text derivations.
+The complete artifact contains 14 Lean files totaling 6707 lines and 296 theorem/lemma statements; the table above highlights the core modules directly used by the main-text derivations. The remaining utility files (`Paper1.lean`, `PrintAxioms.lean`, `check_axioms.lean`, `lakefile.lean`) contribute 142 lines and 0 theorem/lemma statements.
 
 ## Attribute-Only Formalization {#interface-only-formalization}
 
@@ -1025,6 +1025,7 @@ The full Lean development is provided in supplementary material. To verify local
 ## Machine-Checked Proofs
 
 All theorems are formalized in Lean 4:
-- Location: `docs/papers/proofs/paper1_jsait_*.lean`
-- Lines: 6589
+- Location: `docs/papers/paper1_typing_discipline/proofs/`
+- Lines: 6707
 - Theorems: 296
+- `sorry` placeholders: 0

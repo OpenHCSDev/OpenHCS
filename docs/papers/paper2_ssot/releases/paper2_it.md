@@ -1,6 +1,6 @@
 # Paper: Zero-Incoherence Capacity of Interactive Encoding Systems: Achievability, Converse, and Side Information Bounds
 
-**Status**: IEEE Transactions on Information Theory-ready | **Lean**: 1811 lines, 96 theorems
+**Status**: IEEE Transactions on Information Theory-ready | **Lean**: 9555 lines, 446 theorems
 
 ---
 
@@ -1968,6 +1968,7 @@ Full listings, the model correspondence argument, and detailed proof commentary 
 ## Machine-Checked Proofs
 
 All theorems are formalized in Lean 4:
-- Location: `docs/papers/proofs/paper2_it_*.lean`
-- Lines: 1811
-- Theorems: 96
+- Location: `docs/papers/paper2_ssot/proofs/`
+- Lines: 9555
+- Theorems: 446
+- `sorry` placeholders: 3

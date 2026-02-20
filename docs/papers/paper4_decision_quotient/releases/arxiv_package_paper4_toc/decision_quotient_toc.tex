@@ -1,5 +1,6 @@
 \documentclass[11pt]{article}
 \usepackage{pentalogy-preamble}
+\IfFileExists{content/lean_stats.tex}{\input{content/lean_stats.tex}}{}
 
 \title{Computational Complexity of Sufficiency in Decision Problems}
 \author{
@@ -7,20 +8,20 @@
   McGill University\\
   \texttt{tristan.simas@mail.mcgill.ca}
 }
-\date{February 19, 2026}
+\date{\today}
 
 \begin{document}
 \maketitle
 
-\renewcommand{\thefootnote}{}%
-\footnotetext{%
-  \textcopyright\ 2026 Tristan Simas.
-  This work is licensed under CC BY 4.0.
-  License: \url{https://creativecommons.org/licenses/by/4.0/}
-  \\
-  Zenodo DOI: \href{https://doi.org/10.5281/zenodo.18140965}{10.5281/zenodo.18140965}
-}%
-\renewcommand{\thefootnote}{\arabic{footnote}}%
+\begingroup
+\footnotesize
+\noindent\textcopyright\ 2026 Tristan Simas.
+This work is licensed under CC BY 4.0.
+License: \url{https://creativecommons.org/licenses/by/4.0/}
+\par
+\noindent Zenodo DOI: \href{https://doi.org/10.5281/zenodo.18140965}{10.5281/zenodo.18140965}
+\par
+\endgroup
 
 \begin{abstract}
 \input{content/abstract.tex}
@@ -41,4 +42,3 @@
 \bibliography{references}
 
 \end{document}
-

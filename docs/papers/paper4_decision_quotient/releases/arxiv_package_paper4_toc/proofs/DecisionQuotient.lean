@@ -23,6 +23,7 @@ import DecisionQuotient.QueryComplexity
 import DecisionQuotient.Reduction
 import DecisionQuotient.Dichotomy
 import DecisionQuotient.Information
+import DecisionQuotient.IntegrityCompetence
 import DecisionQuotient.Economics.ValueOfInformation
 import DecisionQuotient.Economics.Elicitation
 import DecisionQuotient.Economics.Approximation

@@ -1,6 +1,6 @@
 # Paper: Verified Polynomial-Time Reductions in Lean 4: Formalizing the Complexity of Decision-Relevant Information
 
-**Status**: Draft-ready | **Lean**: 5901 lines, 237 theorems
+**Status**: Draft-ready | **Lean**: 6255 lines, 265 theorems
 
 ---
 
@@ -24,7 +24,7 @@ We present a Lean 4 formalization of polynomial-time reductions and computationa
 
 All complexity claims use the input encodings fixed in Section [\[sec:encoding\]](#sec:encoding){reference-type="ref" reference="sec:encoding"}.
 
-The formalization comprises $\sim$`<!-- -->`{=html}5,900 lines of Lean 4 with 230+ machine-verified theorems/lemmas across 37 files. All reductions include explicit polynomial bounds. We identify proof engineering patterns for complexity theory in dependent type systems and discuss challenges of formalizing computational hardness constructively.
+The formalization comprises 6255 lines of Lean 4 with 265 machine-verified theorems/lemmas across 40 files. All reductions include explicit polynomial bounds. We identify proof engineering patterns for complexity theory in dependent type systems and discuss challenges of formalizing computational hardness constructively.
 
 **Practical corollaries.** The primary contribution is theoretical: a formalized reduction framework and a complete characterization of the core decision-relevant problems in the formal model (coNP/$\Sigma_2^P$ completeness and tractable cases under explicit encoding assumptions). The case study formalizes the principle *determining what you need to know is harder than knowing everything*. This implies that over-modeling is rational under the model and that "simpler" incomplete tools create more work (the Simplicity Tax Theorem, also machine-verified).
 
@@ -78,9 +78,9 @@ The primary contribution is theoretical: a formalized reduction framework and a 
 ::: center
   **Metric**                                                 **Value**
   ----------------------- --------------------------------------------
-  Lines of Lean 4                         $\sim$`<!-- -->`{=html}5,600
-  Theorems/lemmas                                                 230+
-  Proof files                                                       36
+  Lines of Lean 4                                                 6255
+  Theorems/lemmas                                                  265
+  Proof files                                                       40
   Reduction proofs          5 (SAT, TAUTOLOGY, SET-COVER, ETH, W\[2\])
   External dependencies           Mathlib (computability, data.finset)
   `sorry` count                                                      0
@@ -229,7 +229,102 @@ Each theorem includes verification metadata:
     #print axioms sufficiency_coNP_complete  -- axiom dependencies
     #eval Nat.repr (countSorry `sufficiency_coNP_complete)  -- 0
 
-The build log (included in the artifact) records successful compilation of all 230+ theorems with 0 `sorry` placeholders.
+The build log (included in the artifact) records successful compilation of all 265 theorem/lemma statements with 0 `sorry` placeholders.
+
+
+# Formal Foundations {#sec:foundations}
+
+We formalize decision problems with coordinate structure, sufficiency of coordinate sets, and the decision quotient, drawing on classical decision theory [@savage1954foundations; @raiffa1961applied]. All definitions in this section are implemented in Lean 4 using the encoding described in Section [\[sec:methodology\]](#sec:methodology){reference-type="ref" reference="sec:methodology"}.
+
+## Decision Problems with Coordinate Structure
+
+::: definition
+[]{#def:decision-problem label="def:decision-problem"} A *decision problem with coordinate structure* is a tuple $\mathcal{D} = (A, X_1, \ldots, X_n, U)$ where:
+
+-   $A$ is a finite set of *actions* (alternatives)
+
+-   $X_1, \ldots, X_n$ are finite *coordinate spaces*
+
+-   $S = X_1 \times \cdots \times X_n$ is the *state space*
+
+-   $U : A \times S \to \mathbb{Q}$ is the *utility function*
+:::
+
+::: definition
+[]{#def:projection label="def:projection"} For state $s = (s_1, \ldots, s_n) \in S$ and coordinate set $I \subseteq \{1, \ldots, n\}$: $$s_I := (s_i)_{i \in I}$$ is the *projection* of $s$ onto coordinates in $I$.
+:::
+
+::: definition
+[]{#def:optimizer label="def:optimizer"} For state $s \in S$, the *optimal action set* is: $$\Opt(s) := \arg\max_{a \in A} U(a, s) = \{a \in A : U(a,s) = \max_{a' \in A} U(a', s)\}$$
+:::
+
+## Sufficiency and Relevance
+
+::: definition
+[]{#def:sufficient label="def:sufficient"} A coordinate set $I \subseteq \{1, \ldots, n\}$ is *sufficient* for decision problem $\mathcal{D}$ if: $$\forall s, s' \in S: \quad s_I = s'_I \implies \Opt(s) = \Opt(s')$$ Equivalently, the optimal action depends only on coordinates in $I$.
+:::
+
+::: definition
+[]{#def:minimal-sufficient label="def:minimal-sufficient"} A sufficient set $I$ is *minimal* if no proper subset $I' \subsetneq I$ is sufficient.
+:::
+
+::: definition
+[]{#def:relevant label="def:relevant"} Coordinate $i$ is *relevant* if it belongs to some minimal sufficient set.
+:::
+
+::: example
+Consider deciding whether to carry an umbrella:
+
+-   Actions: $A = \{\text{carry}, \text{don't carry}\}$
+
+-   Coordinates: $X_1 = \{\text{rain}, \text{no rain}\}$, $X_2 = \{\text{hot}, \text{cold}\}$, $X_3 = \{\text{Monday}, \ldots, \text{Sunday}\}$
+
+-   Utility: $U(\text{carry}, s) = -1 + 3 \cdot \mathbf{1}[s_1 = \text{rain}]$, $U(\text{don't carry}, s) = -2 \cdot \mathbf{1}[s_1 = \text{rain}]$
+
+The minimal sufficient set is $I = \{1\}$ (only rain forecast matters). Coordinates 2 and 3 (temperature, day of week) are irrelevant.
+:::
+
+## The Decision Quotient
+
+::: definition
+[]{#def:decision-equiv label="def:decision-equiv"} For coordinate set $I$, states $s, s'$ are *$I$-equivalent* (written $s \sim_I s'$) if $s_I = s'_I$.
+:::
+
+::: definition
+[]{#def:decision-quotient label="def:decision-quotient"} The *decision quotient* for state $s$ under coordinate set $I$ is: $$\text{DQ}_I(s) = \frac{|\{a \in A : a \in \Opt(s') \text{ for some } s' \sim_I s\}|}{|A|}$$ This measures the fraction of actions that are optimal for at least one state consistent with $I$.
+:::
+
+::: proposition
+[]{#prop:sufficiency-char label="prop:sufficiency-char"} Coordinate set $I$ is sufficient if and only if $\text{DQ}_I(s) = |\Opt(s)|/|A|$ for all $s \in S$.
+:::
+
+::: proof
+*Proof.* If $I$ is sufficient, then $s \sim_I s' \implies \Opt(s) = \Opt(s')$, so the set of actions optimal for some $s' \sim_I s$ is exactly $\Opt(s)$.
+
+Conversely, if the condition holds, then for any $s \sim_I s'$, the optimal actions form the same set (since $\text{DQ}_I(s) = \text{DQ}_I(s')$ and both equal the relative size of the common optimal set). ◻
+:::
+
+## Computational Model and Input Encoding {#sec:encoding}
+
+We fix the computational model used by the complexity claims.
+
+#### Succinct encoding (primary for hardness).
+
+This succinct circuit encoding is the standard representation for decision problems in complexity theory; hardness is stated with respect to the input length of the circuit description [@arora2009computational]. An instance is encoded as:
+
+-   a finite action set $A$ given explicitly,
+
+-   coordinate domains $X_1,\ldots,X_n$ given by their sizes in binary,
+
+-   a Boolean or arithmetic circuit $C_U$ that on input $(a,s)$ outputs $U(a,s)$.
+
+The input length is $L = |A| + \sum_i \log |X_i| + |C_U|$. Polynomial time and all complexity classes (, $\Sigma_2^P$, ETH, W\[2\]) are measured in $L$. All hardness results in Section [\[sec:hardness\]](#sec:hardness){reference-type="ref" reference="sec:hardness"} use this encoding.
+
+#### Explicit-state encoding (used for enumeration algorithms and experiments).
+
+The utility is given as a full table over $A \times S$. The input length is $L_{\text{exp}} = \Theta(|A||S|)$ (up to the bitlength of utilities). Polynomial time is measured in $L_{\text{exp}}$. Results stated in terms of $|S|$ use this encoding.
+
+Unless explicitly stated otherwise, "polynomial time" refers to the succinct encoding.
 
 
 # Computational Complexity of Decision-Relevant Uncertainty {#sec:hardness}
@@ -1091,7 +1186,7 @@ Mathlib's computability library [@mathlib2020] provides primitive recursive fun
 
 #### The verification gap.
 
-Published complexity proofs occasionally contain errors [@lipton2009np]. Machine verification eliminates this uncertainty. Our contribution demonstrates that complexity reductions are amenable to formalization with reasonable effort ($\sim$`<!-- -->`{=html}5,600 lines for the full reduction suite).
+Published complexity proofs occasionally contain errors [@lipton2009np]. Machine verification eliminates this uncertainty. Our contribution demonstrates that complexity reductions are amenable to formalization with reasonable effort (6255 lines for the full reduction suite).
 
 ## Computational Decision Theory
 
@@ -1272,24 +1367,17 @@ We ran axiom checks after each major lemma. This caught unintended classical dep
 
 Keep the mathematical content ("sufficiency is the same as tautology under this encoding") separate from encoding details ("how to represent formulas as coordinates"). This separation aids both clarity and reuse.
 
-## Lines of Code by Component
+## Formalization Size
 
-::: center
-  **Component**                                                            **Lines**
-  ----------------------------------------------- ----------------------------------
-  Core definitions (Basic, Finite, Quotient)                                     285
-  Sufficiency & Computation                                                      493
-  Polynomial reductions                                                          530
-  Hardness proofs (SAT, QBF, $\Sigma_2^P$, ETH)                                1,471
-  Tractability (bounded, separable, tree, FPT)                                   471
-  Dichotomy & complexity main                                                    275
-  Query complexity & information                                                 418
-  Algorithm complexity                                                           170
-  Instances & summary                                                            250
-  **Total**                                         **$\sim$`<!-- -->`{=html}5,600**
-:::
+-   Total Lean lines: 6255
 
-The hardness proofs constitute 26% of the codebase, with tractability results at 8%. Core infrastructure (definitions, reductions, computation) accounts for 23%, suggesting good reuse potential for other complexity formalizations.
+-   Theorem/lemma statements: 265
+
+-   Proof files: 40
+
+-   `sorry` placeholders: 0
+
+These totals are generated from the current proof artifact at build time.
 
 
 # Conclusion
@@ -1447,7 +1535,7 @@ The Lean proofs are straightforward applications of definitions and standard com
 
 3.  **Complexity dichotomy.** Theorem [\[thm:dichotomy\]](#thm:dichotomy){reference-type="ref" reference="thm:dichotomy"} separates logarithmic and linear regimes: polynomial behavior when the minimal sufficient set has size $O(\log |S|)$, and exponential lower bounds under ETH when it has size $\Omega(n)$. Intermediate regimes are not ruled out by the lower-bound statement.
 
-**What machine-checking guarantees.** The Lean compiler verifies that every proof step is valid, every definition is consistent, and no axioms are added beyond Lean's foundations (extended with Mathlib for basic combinatorics and complexity definitions). Zero `sorry` placeholders means zero unproven claims. The 3,400+ lines establish a verified chain from basic definitions (decision problems, coordinate spaces, polynomial reductions) to the final theorems (hardness results, dichotomy, tractable cases). Reviewers need not trust our informal explanations; they run `lake build` and verify the proofs themselves.
+**What machine-checking guarantees.** The Lean compiler verifies that every proof step is valid, every definition is consistent, and no axioms are added beyond Lean's foundations (extended with Mathlib for basic combinatorics and complexity definitions). 0 `sorry` placeholders means 0 unproven claims. The 6255 lines establish a verified chain from basic definitions (decision problems, coordinate spaces, polynomial reductions) to the final theorems (hardness results, dichotomy, tractable cases). Reviewers need not trust our informal explanations; they run `lake build` and verify the proofs themselves.
 
 **Comparison to informal complexity arguments.** Prior work on model selection complexity (Chickering et al. [@chickering2004large], Teyssier & Koller [@teyssier2012ordering]) presents compelling informal arguments but lacks machine-checked proofs. Our contribution is not new *wisdom*---the insight that model selection is hard is old. Our contribution is *formalization*: making "coordinate sufficiency" precise enough to mechanize, constructing verified reductions, and proving the complexity results hold for the formalized definitions.
 
@@ -1455,7 +1543,7 @@ This follows the tradition of verified complexity theory: just as Nipkow & Klein
 
 ## Module Structure
 
-The formalization consists of 36 files organized as follows:
+The formalization consists of 40 files organized as follows:
 
 -   `Basic.lean` -- Core definitions (DecisionProblem, CoordinateSet, Projection)
 
@@ -1506,13 +1594,13 @@ The formalization consists of 36 files organized as follows:
 
 ## Verification Status
 
--   Total lines: $\sim$`<!-- -->`{=html}5,600
+-   Total lines: 6255
 
--   Theorems/lemmas: 230+
+-   Theorems/lemmas: 265
 
--   Files: 36
+-   Files: 40
 
--   Status: All proofs compile with no `sorry`
+-   Status: All proofs compile with 0 `sorry`
 
 
 # Discussion {#sec:discussion}
@@ -1645,6 +1733,7 @@ The "cover important axes" heuristic only works if you *correctly identify* whic
 ## Machine-Checked Proofs
 
 All theorems are formalized in Lean 4:
-- Location: `docs/papers/proofs/paper4_*.lean`
-- Lines: 5901
-- Theorems: 237
+- Location: `docs/papers/paper4_decision_quotient/proofs/`
+- Lines: 6255
+- Theorems: 265
+- `sorry` placeholders: 0

@@ -1,6 +1,6 @@
 # Paper: Computational Complexity of Sufficiency in Decision Problems
 
-**Status**: Theory of Computing-ready | **Lean**: 5901 lines, 237 theorems
+**Status**: Theory of Computing-ready | **Lean**: 6350 lines, 271 theorems
 
 ---
 
@@ -18,9 +18,9 @@ We characterize the computational complexity of coordinate sufficiency in decisi
 
 The tractable cases are stated with explicit encoding assumptions (Section [\[sec:encoding\]](#sec:encoding){reference-type="ref" reference="sec:encoding"}). Together, these results answer the question "when is decision-relevant information identifiable efficiently?" within the stated regimes. At the structural level, the apparent $\exists\forall$ form of MINIMUM-SUFFICIENT-SET collapses to a characterization via the criterion $\text{sufficient}(I) \iff \text{Relevant} \subseteq I$.
 
-The primary contribution is theoretical: a complete characterization of the core decision-relevant problems in the formal model (coNP/$\Sigma_2^P$ completeness and tractable cases under explicit encoding assumptions). The practical corollaries are diagnostic: the hardness results quantify the current cost of incomplete structural characterization rather than asserting permanent barriers.
+The contribution has two levels: (i) a complete complexity landscape for the core decision-relevant problems in the formal model (coNP/$\Sigma_2^P$ completeness and tractable regimes under explicit encoding assumptions), and (ii) a formal interpretive framework that separates structural complexity from representational hardness and yields regime-indexed engineering corollaries.
 
-The reduction constructions and key equivalence theorems are machine-checked in Lean 4 ($\sim$`<!-- -->`{=html}5,900 lines, 230+ theorem/lemma statements); complexity classifications follow by composition with standard results (see Appendix [\[app:lean\]](#app:lean){reference-type="ref" reference="app:lean"}).
+The reduction constructions and key equivalence theorems are machine-checked in Lean 4 (6350 lines, 271 theorem/lemma statements); complexity classifications follow by composition with standard results (see Appendix [\[app:lean\]](#app:lean){reference-type="ref" reference="app:lean"}).
 
 **Keywords:** computational complexity, decision theory, polynomial hierarchy, tractability dichotomy, Lean 4
 
@@ -31,7 +31,7 @@ Consider a decision problem with actions $A$ and states $S = X_1 \times \cdots \
 
 This paper characterizes the efficient cases of coordinate sufficiency within the formal model:
 
-Section [\[sec:encoding\]](#sec:encoding){reference-type="ref" reference="sec:encoding"} fixes the computational model and input encodings used for all complexity claims.
+Section [\[sec:encoding\]](#sec:encoding){reference-type="ref" reference="sec:encoding"} fixes the computational model and input encodings used for all complexity claims. Section [\[sec:model-contract\]](#sec:model-contract){reference-type="ref" reference="sec:model-contract"} gives the model contract and regime tags used to type every strong claim.
 
 ::: center
   **Problem**              **Complexity**          **When Tractable**
@@ -77,17 +77,17 @@ The lower-bound statement does not address intermediate regimes.
 
 ## Machine-Checked Proofs
 
-The reduction constructions and key equivalence theorems are machine-checked in Lean 4 [@moura2021lean4] ($\sim$`<!-- -->`{=html}5,900 lines, 230+ theorem/lemma statements). The formalization verifies that the TAUTOLOGY reduction correctly maps tautologies to sufficient coordinate sets. Complexity class membership (coNP-completeness, $\Sigma_2^P$-completeness) follows by composition with standard complexity-theoretic results.
+The reduction constructions and key equivalence theorems are machine-checked in Lean 4 [@moura2021lean4] (6350 lines, 271 theorem/lemma statements). The formalization verifies that the TAUTOLOGY reduction correctly maps tautologies to sufficient coordinate sets. Complexity class membership (coNP-completeness, $\Sigma_2^P$-completeness) follows by composition with standard complexity-theoretic results.
 
 #### What is new.
 
-We contribute (i) formal definitions of decision-theoretic sufficiency in Lean; (ii) machine-checked proofs of reduction correctness for the TAUTOLOGY and $\exists\forall$-SAT reductions; and (iii) a complete complexity landscape for coordinate sufficiency with explicit encoding assumptions. Prior work establishes hardness informally; we formalize the constructions.
+We contribute (i) formal definitions of decision-theoretic sufficiency in Lean; (ii) machine-checked proofs of reduction correctness for the TAUTOLOGY and $\exists\forall$-SAT reductions; (iii) a complete complexity landscape for coordinate sufficiency with explicit encoding assumptions; and (iv) a formal separation between structural complexity and representational hardness used to derive diagnostic engineering corollaries. Prior work establishes hardness informally; we formalize the constructions and their regime-conditional interpretation.
 
 ## Paper Structure
 
-The primary contribution is theoretical: a formalized reduction framework and a complete characterization of the core decision-relevant problems in the formal model (coNP/$\Sigma_2^P$ completeness and tractable cases stated under explicit encoding assumptions). Sections [\[sec:hardness\]](#sec:hardness){reference-type="ref" reference="sec:hardness"}--[\[sec:tractable\]](#sec:tractable){reference-type="ref" reference="sec:tractable"} contain the core theorems.
+The primary contribution is theoretical: a formalized reduction framework and a complete characterization of the core decision-relevant problems in the formal model (coNP/$\Sigma_2^P$ completeness and tractable cases stated under explicit encoding assumptions). A second contribution is interpretive but formal: Section [\[sec:interpretive-foundations\]](#sec:interpretive-foundations){reference-type="ref" reference="sec:interpretive-foundations"} introduces the structural/representational and integrity/competence splits that type-check the applied corollaries.
 
-Section [\[sec:foundations\]](#sec:foundations){reference-type="ref" reference="sec:foundations"}: foundations. Section [\[sec:hardness\]](#sec:hardness){reference-type="ref" reference="sec:hardness"}: hardness proofs. Section [\[sec:dichotomy\]](#sec:dichotomy){reference-type="ref" reference="sec:dichotomy"}: dichotomy. Section [\[sec:tractable\]](#sec:tractable){reference-type="ref" reference="sec:tractable"}: tractable cases. Section [\[sec:engineering-justification\]](#sec:engineering-justification){reference-type="ref" reference="sec:engineering-justification"}: implications for practice. Section [\[sec:implications\]](#sec:implications){reference-type="ref" reference="sec:implications"}: software architecture corollaries. Section [\[sec:simplicity-tax\]](#sec:simplicity-tax){reference-type="ref" reference="sec:simplicity-tax"}: complexity conservation. Section [\[sec:related\]](#sec:related){reference-type="ref" reference="sec:related"}: related work. Appendix [\[app:lean\]](#app:lean){reference-type="ref" reference="app:lean"}: Lean listings.
+Section [\[sec:foundations\]](#sec:foundations){reference-type="ref" reference="sec:foundations"}: decision-problem foundations and encoding model. Section [\[sec:interpretive-foundations\]](#sec:interpretive-foundations){reference-type="ref" reference="sec:interpretive-foundations"}: structural vs representational hardness; integrity vs competence. Section [\[sec:hardness\]](#sec:hardness){reference-type="ref" reference="sec:hardness"}: hardness proofs. Section [\[sec:dichotomy\]](#sec:dichotomy){reference-type="ref" reference="sec:dichotomy"}: regime separation. Section [\[sec:tractable\]](#sec:tractable){reference-type="ref" reference="sec:tractable"}: tractable cases. Section [\[sec:engineering-justification\]](#sec:engineering-justification){reference-type="ref" reference="sec:engineering-justification"}: engineering corollaries by regime. Section [\[sec:implications\]](#sec:implications){reference-type="ref" reference="sec:implications"}: software architecture corollaries. Section [\[sec:simplicity-tax\]](#sec:simplicity-tax){reference-type="ref" reference="sec:simplicity-tax"}: complexity redistribution corollary. Section [\[sec:related\]](#sec:related){reference-type="ref" reference="sec:related"}: related work. Appendix [\[app:lean\]](#app:lean){reference-type="ref" reference="app:lean"}: Lean listings.
 
 
 # Formal Foundations {#sec:foundations}
@@ -128,6 +128,10 @@ We formalize decision problems with coordinate structure, sufficiency of coordin
 
 ::: definition
 []{#def:relevant label="def:relevant"} Coordinate $i$ is *relevant* if it belongs to some minimal sufficient set.
+:::
+
+::: definition
+[]{#def:exact-identifiability label="def:exact-identifiability"} For a decision problem $\mathcal{D}$ and candidate coordinate set $I$, we say $I$ is *exactly relevance-identifying* if $$\forall i \in \{1,\ldots,n\}:\quad i \in I \iff i \text{ is relevant for } \mathcal{D}.$$ Equivalently, $I$ is exactly relevance-identifying iff $I$ equals the full relevant-coordinate set.
 :::
 
 ::: example
@@ -184,6 +188,70 @@ The utility is given as a full table over $A \times S$. The input length is $L_{
 
 Unless explicitly stated otherwise, "polynomial time" refers to the succinct encoding.
 
+## Model Contract and Regime Tags {#sec:model-contract}
+
+All theorem statements in this paper are typed by the following model contract:
+
+-   **C1 (finite actions):** $A$ is finite.
+
+-   **C2 (finite coordinate domains):** each $X_i$ is finite, so $S=\prod_i X_i$ is finite.
+
+-   **C3 (evaluable utility):** $U(a,s)$ is computable from the declared input encoding.
+
+-   **C4 (fixed decision semantics):** optimality is defined by $\Opt(s)=\arg\max_a U(a,s)$.
+
+We use short regime tags for applied corollaries:
+
+-   **\[E\]** explicit-state encoding,
+
+-   **\[S\]** succinct encoding,
+
+-   **\[S+ETH\]** succinct encoding with ETH,
+
+-   **\[S_bool\]** mechanized Boolean-coordinate submodel.
+
+This tagging is a claim-typing convention: each strong statement is attached to the regime where it is proven.
+
+## Adjacent Objective Regimes and Bridge
+
+::: definition
+[]{#def:adjacent-sequential-regime label="def:adjacent-sequential-regime"} An adjacent sequential objective instance consists of:
+
+-   finite action set $A$,
+
+-   finite coordinate state space $S = X_1 \times \cdots \times X_n$,
+
+-   horizon $T \in \mathbb{N}_{\ge 1}$ and history-dependent policy class,
+
+-   reward process $r_t$ and objective functional $J(\pi)$ (e.g., cumulative reward or regret).
+:::
+
+::: proposition
+[]{#prop:one-step-bridge label="prop:one-step-bridge"} Consider an instance of Definition [\[def:adjacent-sequential-regime\]](#def:adjacent-sequential-regime){reference-type="ref" reference="def:adjacent-sequential-regime"} satisfying:
+
+1.  $T=1$,
+
+2.  deterministic rewards $r_1(a,s)=U(a,s)$ for some evaluable $U$,
+
+3.  objective $J(\pi)=U(\pi(s),s)$ (single-step maximization),
+
+4.  no post-decision state update relevant to the objective.
+
+Then the induced optimization problem is exactly the static decision problem of Definition [\[def:decision-problem\]](#def:decision-problem){reference-type="ref" reference="def:decision-problem"}, and coordinate sufficiency in the sequential formulation is equivalent to Definition [\[def:sufficient\]](#def:sufficient){reference-type="ref" reference="def:sufficient"}.
+:::
+
+::: proof
+*Proof.* Under (1)--(3), optimizing $J$ at state $s$ is identical to choosing an action in $\arg\max_{a\in A} U(a,s)=\Opt(s)$. Condition (4) removes any dependence on future transition effects. Therefore the optimal-policy relation in the adjacent formulation coincides pointwise with $\Opt$ from Definition [\[def:optimizer\]](#def:optimizer){reference-type="ref" reference="def:optimizer"}, and the invariance condition "same projection implies same optimal choice set" is exactly Definition [\[def:sufficient\]](#def:sufficient){reference-type="ref" reference="def:sufficient"}. ◻
+:::
+
+::: remark
+Beyond Proposition [\[prop:one-step-bridge\]](#prop:one-step-bridge){reference-type="ref" reference="prop:one-step-bridge"} (multi-step horizon, stochastic transitions/rewards, or regret objectives), the governing complexity objects change. Those regimes are natural extensions, but they are distinct formal classes from the static sufficiency class analyzed in this paper.
+:::
+
+# Interpretive Foundations: Hardness and Solver Claims {#sec:interpretive-foundations}
+
+The claims in later applied sections are theorem-indexed consequences of this section and Sections [\[sec:hardness\]](#sec:hardness){reference-type="ref" reference="sec:hardness"}--[\[sec:tractable\]](#sec:tractable){reference-type="ref" reference="sec:tractable"}.
+
 ## Structural Complexity vs Representational Hardness
 
 ::: definition
@@ -198,6 +266,52 @@ Unless explicitly stated otherwise, "polynomial time" refers to the succinct enc
 This paper keeps the decision relation fixed and varies the encoding regime explicitly. Thus, later separations are read as changes in representational hardness under fixed structural complexity, not as changes to the underlying sufficiency semantics.
 :::
 
+## Solver Integrity and Regime Competence
+
+To keep practical corollaries type-safe, we separate *integrity* (what a solver is allowed to assert) from *competence* (what it can cover under a declared regime), following the certifying-algorithms schema [@mcconnell2010certifying].
+
+::: definition
+[]{#def:certifying-solver label="def:certifying-solver"} Fix a decision relation $\mathcal{R} \subseteq \mathcal{X}\times\mathcal{Y}$ and an encoding regime $E$ over $\mathcal{X}$. A *certifying solver* is a pair $(Q,V)$ where:
+
+-   $Q$ maps each input $x\in\mathcal{X}$ to either $\mathsf{ABSTAIN}$ or a candidate pair $(y,w)$,
+
+-   $V$ is a polynomial-time checker (in $|{\rm enc}_E(x)|$) with output in $\{0,1\}$.
+:::
+
+::: definition
+[]{#def:solver-integrity label="def:solver-integrity"} A certifying solver $(Q,V)$ has *integrity* for relation $\mathcal{R}$ if:
+
+-   (assertion soundness) $Q(x)=(y,w)\implies V(x,y,w)=1$,
+
+-   (checker soundness) $V(x,y,w)=1\implies (x,y)\in\mathcal{R}$.
+
+The output $\mathsf{ABSTAIN}$ (equivalently, $\mathsf{UNKNOWN}$) is first-class and carries no assertion about membership in $\mathcal{R}$.
+:::
+
+::: definition
+[]{#def:competence-regime label="def:competence-regime"} Fix a regime $\Gamma=(\mathcal{X}_\Gamma,E_\Gamma,\mathcal{C}_\Gamma)$ with instance family $\mathcal{X}_\Gamma\subseteq\mathcal{X}$, encoding assumptions $E_\Gamma$, and resource bound $\mathcal{C}_\Gamma$. A certifying solver $(Q,V)$ is *competent* on $\Gamma$ for relation $\mathcal{R}$ if:
+
+-   it has integrity for $\mathcal{R}$ (Definition [\[def:solver-integrity\]](#def:solver-integrity){reference-type="ref" reference="def:solver-integrity"}),
+
+-   (coverage) $\forall x\in\mathcal{X}_\Gamma,\;Q(x)\neq\mathsf{ABSTAIN}$,
+
+-   (resource bound) runtime$_Q(x)\le \mathcal{C}_\Gamma(|{\rm enc}_{E_\Gamma}(x)|)$ for all $x\in\mathcal{X}_\Gamma$.
+:::
+
+::: proposition
+[]{#prop:integrity-competence-separation label="prop:integrity-competence-separation"} Integrity and competence are distinct predicates: integrity constrains asserted outputs, while competence adds non-abstaining coverage under resource bounds.
+:::
+
+::: proof
+*Proof.* Take the always-abstain solver $Q_\bot(x)=\mathsf{ABSTAIN}$ with any polynomial-time checker $V$. Definition [\[def:solver-integrity\]](#def:solver-integrity){reference-type="ref" reference="def:solver-integrity"} holds vacuously, so $(Q_\bot,V)$ is integrity-preserving, but it fails Definition [\[def:competence-regime\]](#def:competence-regime){reference-type="ref" reference="def:competence-regime"} whenever $\mathcal{X}_\Gamma\neq\emptyset$ because coverage fails. Hence integrity does not imply competence. The converse is immediate because competence includes integrity as a conjunct. ◻
+:::
+
+This separation is load-bearing for the regime-conditional trilemma used later: if exact competence is blocked by hardness in a declared regime, integrity forces one of three responses---abstain, weaken guarantees, or change regime assumptions.
+
+#### Mechanized status.
+
+This separation is machine-checked in `DecisionQuotient/IntegrityCompetence.lean` via: `competence_implies_integrity` and `integrity_not_competent_of_nonempty_scope`.
+
 
 # Computational Complexity of Decision-Relevant Uncertainty {#sec:hardness}
 
@@ -209,7 +323,7 @@ This section establishes the computational complexity of determining which state
 
 3.  **ANCHOR-SUFFICIENCY** (fixed coordinates) is $\Sigma_2^P$-complete
 
-Within the formal model (Section [\[sec:foundations\]](#sec:foundations){reference-type="ref" reference="sec:foundations"}) and the succinct encoding used for hardness (Section [\[sec:encoding\]](#sec:encoding){reference-type="ref" reference="sec:encoding"}), these results sit beyond NP-completeness and rigorously characterize over-modeling as a diagnostic response to unresolved boundary characterization: in the worst case, finding (or even certifying) a minimal set of decision-relevant factors is computationally intractable.
+Under the model contract of Section [\[sec:model-contract\]](#sec:model-contract){reference-type="ref" reference="sec:model-contract"} and the succinct encoding of Section [\[sec:encoding\]](#sec:encoding){reference-type="ref" reference="sec:encoding"}, these results place exact relevance identification beyond NP-completeness: in the worst case, finding (or certifying) minimal decision-relevant sets is computationally intractable.
 
 ## Problem Definitions
 
@@ -380,18 +494,14 @@ When $U(a, s) = w_a \cdot s$ for weight vectors $w_a \in \mathbb{Q}^n$, MINIMUM-
 ## Implications
 
 ::: corollary
-Finding the minimal set of decision-relevant factors is coNP-complete. Even *verifying* that a proposed set is sufficient is coNP-complete.
-
-This formally explains the engineering phenomenon:
-
-1.  It's computationally easier to model everything than to find the minimum
-
-2.  "Which unknowns matter?" is a hard question, not a lazy one to avoid
-
-3.  Bounded scenario analysis (small $\hat{S}$) makes the problem tractable
+Under the succinct encoding, exact minimization of sufficient coordinate sets is coNP-hard via the $k=0$ case, and fixed-anchor minimization is $\Sigma_2^P$-complete. *(Lean handles: `min_sufficient_set_coNP_hard`, `anchor_sufficiency_sigma2p`)*
 :::
 
-The modeling budget for deciding what to model is itself a computationally constrained resource.
+::: proof
+*Proof.* The $k=0$ case of MINIMUM-SUFFICIENT-SET is SUFFICIENCY-CHECK (Theorem [\[thm:sufficiency-conp\]](#thm:sufficiency-conp){reference-type="ref" reference="thm:sufficiency-conp"}), giving coNP-hardness for exact minimization. The fixed-anchor variant is exactly Theorem [\[thm:anchor-sigma2p\]](#thm:anchor-sigma2p){reference-type="ref" reference="thm:anchor-sigma2p"}. ◻
+:::
+
+The modeling budget for deciding what to model is therefore a computationally constrained resource under this encoding.
 
 ## Quantifier Collapse for MINIMUM-SUFFICIENT-SET
 
@@ -418,14 +528,14 @@ The hardness results of Section [\[sec:hardness\]](#sec:hardness){reference-typ
 
 #### Model note.
 
-Part 1 is an explicit-state upper bound (time polynomial in $|S|$). Part 2 is a succinct-encoding lower bound under ETH (time exponential in $n$). The encodings are defined in Section [\[sec:encoding\]](#sec:encoding){reference-type="ref" reference="sec:encoding"}. These two parts are stated in different encodings and are not directly comparable as functions of a single input length.
+Part 1 is \[E\] (time polynomial in $|S|$). Part 2 is \[S+ETH\] (time exponential in $n$). The encodings are defined in Section [\[sec:encoding\]](#sec:encoding){reference-type="ref" reference="sec:encoding"}. These two parts are stated in different encodings and are not directly comparable as functions of a single input length.
 
 ::: theorem
 []{#thm:dichotomy label="thm:dichotomy"} Let $\mathcal{D} = (A, X_1, \ldots, X_n, U)$ be a decision problem with $|S| = N$ states. Let $k^*$ be the size of the minimal sufficient set.
 
-1.  **Explicit-state upper bound:** Under the explicit-state encoding, SUFFICIENCY-CHECK is solvable in time polynomial in $N$ (e.g. $O(N^2|A|)$).
+1.  **\[E\] Explicit-state upper bound:** Under the explicit-state encoding, SUFFICIENCY-CHECK is solvable in time polynomial in $N$ (e.g. $O(N^2|A|)$).
 
-2.  **Succinct lower bound under ETH (worst case):** Assuming ETH, there exists a family of succinctly encoded instances with $n$ coordinates and minimal sufficient set size $k^* = n$ such that SUFFICIENCY-CHECK requires time $2^{\Omega(n)}$.
+2.  **\[S+ETH\] Succinct lower bound (worst case):** Assuming ETH, there exists a family of succinctly encoded instances with $n$ coordinates and minimal sufficient set size $k^* = n$ such that SUFFICIENCY-CHECK requires time $2^{\Omega(n)}$.
 :::
 
 ::: proof
@@ -454,7 +564,7 @@ For Boolean coordinate spaces ($N = 2^n$), the explicit-state bound is polynomia
 Theorem [\[thm:dichotomy\]](#thm:dichotomy){reference-type="ref" reference="thm:dichotomy"} keeps the structural problem fixed (same sufficiency relation) and separates representational hardness by encoding regime: explicit-state access exposes the boundary $s \mapsto \Opt(s)$, while succinct access can hide it enough to force ETH-level worst-case cost on a hard family.
 :::
 
-This encoding-regime separation explains why some domains admit tractable model selection under explicit-state assumptions, while other domains (or encodings) exhibit worst-case hardness that forces heuristic approaches.
+This encoding-regime separation identifies exactly where exact minimization is tractable (\[E\]) and where worst-case intractability appears (\[S+ETH\]) for the same underlying decision relation.
 
 
 # Tractable Special Cases: When You Can Solve It {#sec:tractable}
@@ -500,32 +610,48 @@ We distinguish the encodings of Section [\[sec:encoding\]](#sec:encoding){refer
 :::
 
 
-# Implications for Practice: Diagnostic Reading of Over-Modeling {#sec:engineering-justification}
+# Engineering Corollaries by Regime {#sec:engineering-justification}
 
-This section states corollaries for engineering practice. Within the formal model, the complexity results of Sections [\[sec:hardness\]](#sec:hardness){reference-type="ref" reference="sec:hardness"} and [\[sec:dichotomy\]](#sec:dichotomy){reference-type="ref" reference="sec:dichotomy"} shift parts of this workflow from informal judgment toward explicit, checkable criteria. The observed behaviors---configuration over-specification, absence of automated minimization tools, heuristic model selection---are *diagnostic signals* that the decision boundary is not yet fully characterized in a tractable representation.
+This section derives regime-typed engineering corollaries from the core complexity theorems. Theorem [\[thm:config-reduction\]](#thm:config-reduction){reference-type="ref" reference="thm:config-reduction"} maps configuration simplification to SUFFICIENCY-CHECK; Theorems [\[thm:sufficiency-conp\]](#thm:sufficiency-conp){reference-type="ref" reference="thm:sufficiency-conp"}, [\[thm:minsuff-conp\]](#thm:minsuff-conp){reference-type="ref" reference="thm:minsuff-conp"}, and [\[thm:dichotomy\]](#thm:dichotomy){reference-type="ref" reference="thm:dichotomy"} then yield exact minimization consequences under \[S\] and \[S+ETH\].
 
-Some common prescriptions implicitly require exact minimization of sufficient parameter sets. In the worst case, that task is -complete in our model, so critiques must distinguish between true irrelevance and unresolved relevance structure under the chosen encoding. The interpretive key for this section is Theorem [\[thm:overmodel-diagnostic\]](#thm:overmodel-diagnostic){reference-type="ref" reference="thm:overmodel-diagnostic"}: persistent failure to isolate a minimal sufficient set is a boundary-characterization signal in the current model, not a universal irreducibility claim.
+Regime tags used below follow Section [\[sec:model-contract\]](#sec:model-contract){reference-type="ref" reference="sec:model-contract"}: \[S\], \[S+ETH\], \[E\], \[S_bool\]. Any prescription that requires exact minimization is constrained by these theorem-level bounds. Theorem [\[thm:overmodel-diagnostic\]](#thm:overmodel-diagnostic){reference-type="ref" reference="thm:overmodel-diagnostic"} implies that persistent failure to isolate a minimal sufficient set is a boundary-characterization signal in the current model, not a universal irreducibility claim.
+
+::: remark
+All claims in this section are formal corollaries under the declared model assumptions.
+
+-   Competence claims are indexed by the regime tuple of Definition [\[def:competence-regime\]](#def:competence-regime){reference-type="ref" reference="def:competence-regime"}; prescriptions are meaningful only relative to feasible resources under that regime (bounded-rationality feasibility discipline) [@sep_bounded_rationality].
+
+-   Integrity (Definition [\[def:solver-integrity\]](#def:solver-integrity){reference-type="ref" reference="def:solver-integrity"}) forbids overclaiming beyond certifiable outputs; $\mathsf{ABSTAIN}$/$\mathsf{UNKNOWN}$ is first-class when certification is unavailable.
+
+-   Therefore, hardness results imply a regime-conditional trilemma: abstain, weaken guarantees (heuristics/approximation), or change encoding/structural assumptions to recover competence.
+:::
 
 ## Configuration Simplification is SUFFICIENCY-CHECK
 
 Real engineering problems reduce directly to the decision problems studied in this paper.
 
 ::: theorem
-[]{#thm:config-reduction label="thm:config-reduction"} Given a software system with configuration parameters $P = \{p_1, \ldots, p_n\}$ and observed behaviors $B = \{b_1, \ldots, b_m\}$, the problem of determining whether parameter subset $I \subseteq P$ preserves all behaviors is equivalent to SUFFICIENCY-CHECK.
+Configuration Simplification Reduces to SUFFICIENCY-CHECK\] []{#thm:config-reduction label="thm:config-reduction"} Given a software system with configuration parameters $P = \{p_1, \ldots, p_n\}$ and observed behaviors $B = \{b_1, \ldots, b_m\}$, the problem of determining whether parameter subset $I \subseteq P$ preserves all behaviors is equivalent to SUFFICIENCY-CHECK.
 :::
 
 ::: proof
 *Proof.* Construct decision problem $\mathcal{D} = (A, X_1, \ldots, X_n, U)$ where:
 
--   Actions $A = B$ (each behavior is an action)
+-   Actions $A = B \cup \{\bot\}$, where $\bot$ is a sentinel "no-observed-behavior" action
 
 -   Coordinates $X_i$ = domain of parameter $p_i$
 
 -   State space $S = X_1 \times \cdots \times X_n$
 
--   Utility $U(b, s) = 1$ if behavior $b$ occurs under configuration $s$, else $U(b, s) = 0$
+-   For $b\in B$, utility $U(b, s) = 1$ if behavior $b$ occurs under configuration $s$, else $0$
 
-Then $\Opt(s) = \{b \in B : b \text{ occurs under configuration } s\}$.
+-   Sentinel utility $U(\bot,s)=1$ iff no behavior in $B$ occurs under configuration $s$, else $0$
+
+Then $$\Opt(s)=
+\begin{cases}
+\{b \in B : b \text{ occurs under configuration } s\}, & \text{if this set is nonempty},\\
+\{\bot\}, & \text{otherwise}.
+\end{cases}$$ So the optimizer map exactly encodes observed-behavior equivalence classes, including the empty-behavior case.
 
 Coordinate set $I$ is sufficient iff: $$s_I = s'_I \implies \Opt(s) = \Opt(s')$$
 
@@ -534,12 +660,24 @@ This holds iff configurations agreeing on parameters in $I$ exhibit identical be
 Therefore, "does parameter subset $I$ preserve all behaviors?" is exactly SUFFICIENCY-CHECK for the constructed decision problem. ◻
 :::
 
+::: remark
+The reduction above requires only:
+
+1.  a finite behavior set,
+
+2.  parameters with finite domains, and
+
+3.  an evaluable behavior map from configurations to achieved behaviors.
+
+These are exactly the model-contract premises C1--C3 instantiated for configuration systems.
+:::
+
 ::: theorem
-[]{#thm:overmodel-diagnostic label="thm:overmodel-diagnostic"} []{#cor:overmodel-diagnostic label="cor:overmodel-diagnostic"} By contraposition of Theorem [\[thm:config-reduction\]](#thm:config-reduction){reference-type="ref" reference="thm:config-reduction"}, if the minimal sufficient parameter set is not immediately identifiable in the modeled system, then the decision boundary is not completely characterized by the current parameterization.
+Over-Modeling as Boundary-Signal Corollary\] []{#thm:overmodel-diagnostic label="thm:overmodel-diagnostic"} []{#cor:overmodel-diagnostic label="cor:overmodel-diagnostic"} By contraposition of Theorem [\[thm:config-reduction\]](#thm:config-reduction){reference-type="ref" reference="thm:config-reduction"}, if no coordinate set can be certified as exactly relevance-identifying (Definition [\[def:exact-identifiability\]](#def:exact-identifiability){reference-type="ref" reference="def:exact-identifiability"}) for the modeled system, then the decision boundary is not completely characterized by the current parameterization.
 :::
 
 ::: proof
-*Proof.* Assume the decision boundary were completely characterized by the current parameterization. Then, via Theorem [\[thm:config-reduction\]](#thm:config-reduction){reference-type="ref" reference="thm:config-reduction"}, the corresponding sufficiency instance would admit an exact statement of which parameter subsets preserve behavior, including the minimal sufficient set. Contraposition gives the claim: persistent failure to identify a minimal sufficient set signals incomplete characterization of decision relevance in the model. ◻
+*Proof.* Assume the decision boundary were completely characterized by the current parameterization. Then, via Theorem [\[thm:config-reduction\]](#thm:config-reduction){reference-type="ref" reference="thm:config-reduction"}, the corresponding sufficiency instance admits exact relevance membership, hence a coordinate set that satisfies Definition [\[def:exact-identifiability\]](#def:exact-identifiability){reference-type="ref" reference="def:exact-identifiability"}. Contraposition gives the claim: persistent failure of exact relevance identification signals incomplete characterization of decision relevance in the model. ◻
 :::
 
 ## Cost Asymmetry Under ETH
@@ -547,7 +685,7 @@ Therefore, "does parameter subset $I$ preserve all behaviors?" is exactly SUFFIC
 We now prove a cost asymmetry result under the stated cost model and complexity constraints.[^1]
 
 ::: theorem
-[]{#thm:rational-overmodel label="thm:rational-overmodel"} Consider an engineer specifying a system configuration with $n$ parameters. Let:
+Cost-Asymmetry Consequence\] []{#thm:cost-asymmetry-eth label="thm:cost-asymmetry-eth"} Consider an engineer specifying a system configuration with $n$ parameters. Let:
 
 -   $C_{\text{over}}(k)$ = cost of maintaining $k$ extra parameters beyond minimal
 
@@ -565,7 +703,7 @@ Assume ETH in the succinct encoding model of Section [\[sec:encoding\]](#sec:en
 
 Therefore, there exists $n_0$ such that for all $n > n_0$, the finding-vs-maintenance asymmetry satisfies: $$C_{\text{over}}(k) < C_{\text{find}}(n) + C_{\text{under}}$$
 
-Within this model, persistent over-specification is evidence of unresolved boundary characterization rather than evidence that all included parameters are intrinsically necessary.
+Within \[S+ETH\], persistent over-specification is consistent with unresolved boundary characterization rather than a proof that all included parameters are intrinsically necessary. *(Lean asymptotic dominance step: `HardnessDistribution.linear_lt_exponential_plus_constant_eventually`)*
 :::
 
 ::: proof
@@ -581,9 +719,9 @@ Maintaining $k$ extra parameters incurs:
 
 Total maintenance cost is $C_{\text{over}}(k) = O(k)$.
 
-Since $2^n$ grows faster than any polynomial in $k$ or $n$, there exists $n_0$ such that for all $n > n_0$: $$C_{\text{over}}(k) \ll C_{\text{find}}(n)$$
+The eventual dominance step is mechanized in `HardnessDistribution.linear_lt_exponential_plus_constant_eventually`: for fixed linear-overhead parameter $k$ and additive constant $C_{\text{under}}$ there is $n_0$ such that $k < 2^n + C_{\text{under}}$ for all $n \ge n_0$. Therefore: $$C_{\text{over}}(k) \ll C_{\text{find}}(n)$$
 
-Adding underspecification risk $C_{\text{under}}$ reinforces conservative configurations until additional structure is identified. ◻
+For any fixed nonnegative $C_{\text{under}}$, the asymptotic dominance inequality remains and only shifts the finite threshold $n_0$. ◻
 :::
 
 ::: corollary
@@ -601,42 +739,50 @@ Adding underspecification risk $C_{\text{under}}$ reinforces conservative config
 :::
 
 ::: remark
-Corollary [\[cor:no-auto-minimize\]](#cor:no-auto-minimize){reference-type="ref" reference="cor:no-auto-minimize"} explains the observed absence of "config cleanup" tools in software engineering practice. The correct interpretation is diagnostic: persistent inability to minimize indicates incomplete tractable characterization of decision relevance under the current representation.
+Corollary [\[cor:no-auto-minimize\]](#cor:no-auto-minimize){reference-type="ref" reference="cor:no-auto-minimize"} is a formal boundary statement: an always-correct polynomial-time minimizer for arbitrary succinct inputs would collapse $\Pclass$ and $\coNP$.
 :::
 
-## Diagnostic Reading of Observed Practice
+::: remark
+The practical force of worst-case hardness depends on instance structure, especially $k^*$. If SUFFICIENCY-CHECK is FPT in parameter $k^*$, then small-$k^*$ families can remain tractable even under succinct encodings. The strengthened mechanized gadget (`all_coords_relevant_of_not_tautology`) still proves existence of hard families with $k^*=n$; what is typical in deployed systems is an empirical question outside this formal model.
+:::
 
-These theorems provide mathematical grounding for three widespread engineering behaviors:
+## Regime-Conditional Operational Corollaries
 
-**1. Configuration files grow over time.** Difficulty removing parameters indicates unresolved relevance structure in the current model/encoding.
+Theorems [\[thm:overmodel-diagnostic\]](#thm:overmodel-diagnostic){reference-type="ref" reference="thm:overmodel-diagnostic"} and [\[thm:cost-asymmetry-eth\]](#thm:cost-asymmetry-eth){reference-type="ref" reference="thm:cost-asymmetry-eth"} yield the following conditional operational consequences:
 
-**2. Heuristic model selection dominates.** ML practitioners use AIC, BIC, cross-validation instead of optimal feature selection because exact selection is intractable without additional structure (Theorem [\[thm:rational-overmodel\]](#thm:rational-overmodel){reference-type="ref" reference="thm:rational-overmodel"}).
+**1. Conservative retention under unresolved relevance.** If irrelevance cannot be certified efficiently under the active regime, retaining a superset of parameters is a sound conservative policy.
 
-**3. "Include everything" is a conservative upper-bound policy.** When determining relevance/minimal sufficiency has a $2^{\Omega(n)}$ worst-case lower bound under ETH in the succinct encoding (Theorem [\[thm:dichotomy\]](#thm:dichotomy){reference-type="ref" reference="thm:dichotomy"}), including all $n$ parameters costs $O(n)$ while the exact boundary remains unresolved.
+**2. Heuristic selection as weakened-guarantee mode.** Under \[S+ETH\], exact global minimization can be exponentially costly in the worst case (Theorem [\[thm:cost-asymmetry-eth\]](#thm:cost-asymmetry-eth){reference-type="ref" reference="thm:cost-asymmetry-eth"}); methods such as AIC/BIC/cross-validation therefore fit the "weaken guarantees" branch of Definition [\[def:competence-regime\]](#def:competence-regime){reference-type="ref" reference="def:competence-regime"}.
 
-These behaviors are not ad hoc workarounds; under the stated computational model they are practical consequences of a boundary-identification bottleneck. The complexity results provide a diagnostic lens: persistent over-modeling marks the need for either stronger structural assumptions or explicit acceptance of approximation.
+**3. Full-parameter inclusion as an $O(n)$ upper-bound strategy.** Under \[S+ETH\], if exact minimization is unresolved, including all $n$ parameters incurs linear maintenance overhead while avoiding false irrelevance claims.
+
+These corollaries are direct consequences of the hardness/tractability landscape: to move beyond them, one must either shift to tractable regimes from Theorem [\[thm:tractable\]](#thm:tractable){reference-type="ref" reference="thm:tractable"} or adopt explicit approximation commitments.
 
 [^1]: Naive subset enumeration still gives an intuitive baseline of $O(2^n)$ checks, but that is an algorithmic upper bound; the theorem below uses ETH for the lower-bound argument.
 
 
 # Applied Corollaries for Software Architecture {#sec:implications}
 
-::: proposition
-[]{#prop:model-scope-firewall label="prop:model-scope-firewall"} The statements in this section are formal consequences of the model assumptions fixed in Sections [\[sec:foundations\]](#sec:foundations){reference-type="ref" reference="sec:foundations"}--[\[sec:hardness\]](#sec:hardness){reference-type="ref" reference="sec:hardness"}; they are not empirical claims about systems outside those assumptions.
-:::
-
-::: proof
-*Proof.* Each result below is derived by explicit reference to prior theorems in this paper (Theorems [\[thm:overmodel-diagnostic\]](#thm:overmodel-diagnostic){reference-type="ref" reference="thm:overmodel-diagnostic"}, [\[thm:tractable\]](#thm:tractable){reference-type="ref" reference="thm:tractable"}, [\[thm:sufficiency-conp\]](#thm:sufficiency-conp){reference-type="ref" reference="thm:sufficiency-conp"}, and [\[thm:dichotomy\]](#thm:dichotomy){reference-type="ref" reference="thm:dichotomy"}) and therefore has exactly the scope of those premises. ◻
-:::
+Regime for this section: the mechanized Boolean-coordinate model \[S_bool\] plus the architecture cost model defined below.
 
 ## Over-Specification as Diagnostic Signal
 
 ::: corollary
-[]{#cor:overmodel-diagnostic-implication label="cor:overmodel-diagnostic-implication"} In the mechanized Boolean-coordinate model, if a coordinate is relevant and omitted from a candidate set $I$, then $I$ is not sufficient. *(Lean: `DecisionQuotient.Sigma2PHardness.sufficient_iff_relevant_subset`)*
+[]{#cor:overmodel-diagnostic-implication label="cor:overmodel-diagnostic-implication"} In the mechanized Boolean-coordinate model, if a coordinate is relevant and omitted from a candidate set $I$, then $I$ is not sufficient. *(Lean: `Sigma2PHardness.sufficient_iff_relevant_subset`)*
 :::
 
 ::: proof
-*Proof.* This is the contrapositive of `DecisionQuotient.Sigma2PHardness.sufficient_iff_relevant_subset`. ◻
+*Proof.* This is the contrapositive of `Sigma2PHardness.sufficient_iff_relevant_subset`. ◻
+:::
+
+::: corollary
+[]{#cor:exact-identifiability label="cor:exact-identifiability"} In the mechanized Boolean-coordinate model, for any candidate set $I$: $$I \text{ is exactly relevance-identifying}
+\iff
+\bigl(I \text{ is sufficient and } I \subseteq R_{\mathrm{rel}}\bigr),$$ where $R_{\mathrm{rel}}$ is the full relevant-coordinate set. *(Lean: `Sigma2PHardness.exactlyIdentifiesRelevant_iff_sufficient_and_subset_relevantFinset`)*
+:::
+
+::: proof
+*Proof.* This is exactly `Sigma2PHardness.exactlyIdentifiesRelevant_iff_sufficient_and_subset_relevantFinset`, with $R_{\mathrm{rel}}=\texttt{relevantFinset}$. ◻
 :::
 
 ## Architectural Decision Quotient
@@ -656,43 +802,43 @@ For a software system with configuration space $S$ and behavior space $B$: $$\te
 ## Corollaries for Practice
 
 ::: corollary
-[]{#cor:practice-diagnostic label="cor:practice-diagnostic"} In the mechanized Boolean-coordinate model, existence of a sufficient set of size at most $k$ is equivalent to the relevance set having cardinality at most $k$. *(Lean: `DecisionQuotient.Sigma2PHardness.min_sufficient_set_iff_relevant_card`)*
+[]{#cor:practice-diagnostic label="cor:practice-diagnostic"} In the mechanized Boolean-coordinate model, existence of a sufficient set of size at most $k$ is equivalent to the relevance set having cardinality at most $k$. *(Lean: `Sigma2PHardness.min_sufficient_set_iff_relevant_card`)*
 :::
 
 ::: proof
-*Proof.* Directly from `DecisionQuotient.Sigma2PHardness.min_sufficient_set_iff_relevant_card`. ◻
+*Proof.* By `Sigma2PHardness.min_sufficient_set_iff_relevant_card`, sufficiency of size $\le k$ is equivalent to a relevance-cardinality bound $\le k$ in the Boolean-coordinate model. ◻
 :::
 
 ::: corollary
-[]{#cor:practice-bounded label="cor:practice-bounded"} When the bounded-action or explicit-state conditions of Theorem [\[thm:tractable\]](#thm:tractable){reference-type="ref" reference="thm:tractable"} hold, minimal modeling can be solved in polynomial time in the stated input size. *(Lean: `DecisionQuotient.sufficiency_poly_bounded_actions`)*
+[]{#cor:practice-bounded label="cor:practice-bounded"} When the bounded-action or explicit-state conditions of Theorem [\[thm:tractable\]](#thm:tractable){reference-type="ref" reference="thm:tractable"} hold, minimal modeling can be solved in polynomial time in the stated input size. *(Lean: `sufficiency_poly_bounded_actions`)*
 :::
 
 ::: proof
-*Proof.* This is the mechanized theorem `DecisionQuotient.sufficiency_poly_bounded_actions`. ◻
+*Proof.* This is the bounded-regime branch of Theorem [\[thm:tractable\]](#thm:tractable){reference-type="ref" reference="thm:tractable"}, mechanized as `sufficiency_poly_bounded_actions`. ◻
 :::
 
 ::: corollary
-[]{#cor:practice-structured label="cor:practice-structured"} When utility is separable with explicit factors, sufficiency checking is polynomial in the explicit-state regime. *(Lean: `DecisionQuotient.sufficiency_poly_separable`)*
+[]{#cor:practice-structured label="cor:practice-structured"} When utility is separable with explicit factors, sufficiency checking is polynomial in the explicit-state regime. *(Lean: `sufficiency_poly_separable`)*
 :::
 
 ::: proof
-*Proof.* This is the mechanized theorem `DecisionQuotient.sufficiency_poly_separable`. ◻
+*Proof.* This is the separable-utility branch of Theorem [\[thm:tractable\]](#thm:tractable){reference-type="ref" reference="thm:tractable"}, mechanized as `sufficiency_poly_separable`. ◻
 :::
 
 ::: corollary
-[]{#cor:practice-tree label="cor:practice-tree"} When utility factors form a tree structure with explicit local factors, sufficiency checking is polynomial in the explicit-state regime. *(Lean: `DecisionQuotient.sufficiency_poly_tree_structured`)*
+[]{#cor:practice-tree label="cor:practice-tree"} When utility factors form a tree structure with explicit local factors, sufficiency checking is polynomial in the explicit-state regime. *(Lean: `sufficiency_poly_tree_structured`)*
 :::
 
 ::: proof
-*Proof.* This is the mechanized theorem `DecisionQuotient.sufficiency_poly_tree_structured`. ◻
+*Proof.* This is the tree-factor branch of Theorem [\[thm:tractable\]](#thm:tractable){reference-type="ref" reference="thm:tractable"}, mechanized as `sufficiency_poly_tree_structured`. ◻
 :::
 
 ::: corollary
-[]{#cor:practice-unstructured label="cor:practice-unstructured"} There is a machine-checked family of reduction instances where, for non-tautological source formulas, every coordinate is relevant ($k^*=n$), exhibiting worst-case boundary complexity. *(Lean: `DecisionQuotient.all_coords_relevant_of_not_tautology`)*
+[]{#cor:practice-unstructured label="cor:practice-unstructured"} There is a machine-checked family of reduction instances where, for non-tautological source formulas, every coordinate is relevant ($k^*=n$), exhibiting worst-case boundary complexity. *(Lean: `all_coords_relevant_of_not_tautology`)*
 :::
 
 ::: proof
-*Proof.* Directly from `DecisionQuotient.all_coords_relevant_of_not_tautology`. ◻
+*Proof.* The strengthened reduction proves that non-tautological source formulas induce instances where every coordinate is relevant; this is mechanized as `all_coords_relevant_of_not_tautology`. ◻
 :::
 
 ## Hardness Distribution: Right Place vs Wrong Place {#sec:hardness-distribution}
@@ -708,7 +854,7 @@ For $n$ use sites, total realized hardness is: $$H_{\text{total}}(S) = H_{\text{
 :::
 
 ::: proposition
-[]{#prop:hardness-conservation label="prop:hardness-conservation"} For any problem family $P$ measured by $H(P;n)$ above, any solution architecture $S$ and any number of use sites $n \ge 1$, if $H_{\text{total}}(S)$ is measured in the same worst-case step units over the same input family, then: $$H_{\text{total}}(S) = H_{\text{central}}(S) + n \cdot H_{\text{distributed}}(S) \geq H(P;n).$$ For SUFFICIENCY-CHECK, Theorem [\[thm:dichotomy\]](#thm:dichotomy){reference-type="ref" reference="thm:dichotomy"} provides the baseline on the hard succinct family: $H(\textsc{SUFFICIENCY-CHECK};n)=2^{\Omega(n)}$ under ETH.
+[]{#prop:hardness-conservation label="prop:hardness-conservation"} For any problem family $P$ measured by $H(P;n)$ above, any solution architecture $S$ and any number of use sites $n \ge 1$, if $H_{\text{total}}(S)$ is measured in the same worst-case step units over the same input family, then: $$H_{\text{total}}(S) = H_{\text{central}}(S) + n \cdot H_{\text{distributed}}(S) \geq H(P;n).$$ For SUFFICIENCY-CHECK, Theorem [\[thm:dichotomy\]](#thm:dichotomy){reference-type="ref" reference="thm:dichotomy"} provides the baseline on the hard succinct family: $H(\text{SUFFICIENCY-CHECK};n)=2^{\Omega(n)}$ under ETH. *(Lean structural core: `HardnessDistribution.totalDOF_ge_intrinsic`)*
 :::
 
 ::: proof
@@ -716,42 +862,65 @@ For $n$ use sites, total realized hardness is: $$H_{\text{total}}(S) = H_{\text{
 :::
 
 ::: definition
-[]{#def:hardness-efficiency label="def:hardness-efficiency"} The *hardness efficiency* of solution $S$ with $n$ use sites is: $$\eta(S, n) = \frac{H_{\text{central}}(S)}{H_{\text{central}}(S) + n \cdot H_{\text{distributed}}(S)}$$
+[]{#def:hardness-efficiency label="def:hardness-efficiency"} The *hardness efficiency* of solution $S$ with $n$ use sites is: $$\eta(S, n) = \frac{H_{\text{central}}(S)}{H_{\text{central}}(S) + n \cdot H_{\text{distributed}}(S)}$$ *(Lean ratio identity when denominator is positive: `HardnessDistribution.hardnessEfficiency_eq_central_share`)*
 :::
 
 ::: proposition
-[]{#prop:hardness-efficiency-interpretation label="prop:hardness-efficiency-interpretation"} For fixed $n$ and positive total hardness, larger $\eta(S,n)$ is equivalent to a larger central share of realized hardness.
+[]{#prop:hardness-efficiency-interpretation label="prop:hardness-efficiency-interpretation"} For fixed $n$ and positive total hardness, larger $\eta(S,n)$ is equivalent to a larger central share of realized hardness. *(Lean definitional step: `HardnessDistribution.hardnessEfficiency_eq_central_share`)*
 :::
 
 ::: proof
 *Proof.* From Definition [\[def:hardness-efficiency\]](#def:hardness-efficiency){reference-type="ref" reference="def:hardness-efficiency"}, $\eta(S,n)$ is exactly the fraction of total realized hardness paid centrally. ◻
 :::
 
-::: theorem
-[]{#thm:centralization-dominance label="thm:centralization-dominance"} For $n > 1$ use sites, solutions with higher $H_{\text{central}}$ and lower $H_{\text{distributed}}$ yield:
+::: definition
+[]{#def:right-wrong-placement label="def:right-wrong-placement"} For a solution architecture $S$ in this linear model: $$\text{right hardness} \iff H_{\mathrm{distributed}}(S)=0,\qquad
+\text{wrong hardness} \iff H_{\mathrm{distributed}}(S)>0.$$ *(Lean: `HardnessDistribution.isRightHardness`, `HardnessDistribution.isWrongHardness`)*
+:::
 
-1.  Lower total realized hardness: $H_{\text{total}}(S_1) < H_{\text{total}}(S_2)$ when $H_{\text{distributed}}(S_1) < H_{\text{distributed}}(S_2)$
+::: theorem
+[]{#thm:centralization-dominance label="thm:centralization-dominance"} Let $S_{\mathrm{right}}, S_{\mathrm{wrong}}$ be architectures over the same problem family with $$H_{\mathrm{distributed}}(S_{\mathrm{right}})=0,\quad
+H_{\mathrm{central}}(S_{\mathrm{right}})>0,\quad
+H_{\mathrm{distributed}}(S_{\mathrm{wrong}})>0,$$ and let $n > \max\!\bigl(1, H_{\mathrm{central}}(S_{\mathrm{right}})\bigr)$. Then:
+
+1.  Lower total realized hardness: $$H_{\text{total}}(S_{\mathrm{right}}) < H_{\text{total}}(S_{\mathrm{wrong}})$$
 
 2.  Fewer error sites: errors in centralized components affect 1 location; errors in distributed components affect $n$ locations
 
-3.  Higher leverage: one unit of central effort affects $n$ sites
+3.  Quantified leverage: moving one unit of work from distributed to central saves exactly $n-1$ units of total realized hardness
+
+*(Lean: `HardnessDistribution.centralization_dominance_bundle`, `HardnessDistribution.centralization_step_saves_n_minus_one`)*
 :::
 
 ::: proof
-*Proof.* (1) follows from the total hardness formula. (2) follows from error site counting. (3) follows from the definition of leverage as $L = \Delta\text{Effect}/\Delta\text{Effort}$. ◻
+*Proof.* (1) and (2) are exactly the bundled theorem `HardnessDistribution.centralization_dominance_bundle`. (3) is exactly `HardnessDistribution.centralization_step_saves_n_minus_one`. ◻
 :::
 
 ::: corollary
-[]{#cor:right-wrong-hardness label="cor:right-wrong-hardness"} For architectures $S_{\mathrm{right}}, S_{\mathrm{wrong}}$ over the same problem family, if $S_{\mathrm{right}}$ has right hardness, $S_{\mathrm{wrong}}$ has wrong hardness, and $n > H_{\mathrm{central}}(S_{\mathrm{right}})$, then $$H_{\mathrm{central}}(S_{\mathrm{right}}) + n\,H_{\mathrm{distributed}}(S_{\mathrm{right}})
+[]{#cor:right-wrong-hardness label="cor:right-wrong-hardness"} In the linear model, a right-hardness architecture strictly dominates a wrong-hardness architecture once use-site count exceeds central one-time hardness. Formally, for architectures $S_{\mathrm{right}}, S_{\mathrm{wrong}}$ over the same problem family, if $S_{\mathrm{right}}$ has right hardness, $S_{\mathrm{wrong}}$ has wrong hardness, and $n > H_{\mathrm{central}}(S_{\mathrm{right}})$, then $$H_{\mathrm{central}}(S_{\mathrm{right}}) + n\,H_{\mathrm{distributed}}(S_{\mathrm{right}})
 <
-H_{\mathrm{central}}(S_{\mathrm{wrong}}) + n\,H_{\mathrm{distributed}}(S_{\mathrm{wrong}}).$$ *(Lean: `DecisionQuotient.HardnessDistribution.right_dominates_wrong`)*
+H_{\mathrm{central}}(S_{\mathrm{wrong}}) + n\,H_{\mathrm{distributed}}(S_{\mathrm{wrong}}).$$ *(Lean: `HardnessDistribution.right_dominates_wrong`)*
 :::
 
 ::: proof
-*Proof.* This is the mechanized theorem `DecisionQuotient.HardnessDistribution.right_dominates_wrong`. ◻
+*Proof.* This is the mechanized theorem `HardnessDistribution.right_dominates_wrong`. ◻
 :::
 
-**Example (Type System Instantiation).** Consider a capability $C$ (e.g., provenance tracking) with one-time central cost $H_{\text{central}}$ and per-site manual cost $H_{\text{distributed}}$:
+::: proposition
+[]{#prop:dominance-modes label="prop:dominance-modes"} This section uses two linear-model dominance modes and one generalized nonlinear mode:
+
+1.  **Strict threshold dominance:** Corollary [\[cor:right-wrong-hardness\]](#cor:right-wrong-hardness){reference-type="ref" reference="cor:right-wrong-hardness"} gives strict inequality once $n > H_{\mathrm{central}}(S_{\mathrm{right}})$.
+
+2.  **Global weak dominance:** under the decomposition identity used in `HardnessDistribution.centralized_higher_leverage`, centralized hardness placement is never worse for all $n\ge 1$.
+
+3.  **Generalized nonlinear dominance:** under bounded-vs-growing site-cost assumptions (Theorem [\[thm:generalized-dominance\]](#thm:generalized-dominance){reference-type="ref" reference="thm:generalized-dominance"}), right placement strictly dominates beyond a finite threshold without assuming linear per-site cost.
+:::
+
+::: proof
+*Proof.* Part (1) is Corollary [\[cor:right-wrong-hardness\]](#cor:right-wrong-hardness){reference-type="ref" reference="cor:right-wrong-hardness"}. Part (2) is exactly `HardnessDistribution.centralized_higher_leverage`. Part (3) is Theorem [\[thm:generalized-dominance\]](#thm:generalized-dominance){reference-type="ref" reference="thm:generalized-dominance"}. ◻
+:::
+
+**Illustrative Instantiation (Type Systems).** Consider a capability $C$ (e.g., provenance tracking) with one-time central cost $H_{\text{central}}$ and per-site manual cost $H_{\text{distributed}}$:
 
 ::: center
   **Approach**                  $H_{\text{central}}$     $H_{\text{distributed}}$
@@ -760,12 +929,14 @@ H_{\mathrm{central}}(S_{\mathrm{wrong}}) + n\,H_{\mathrm{distributed}}(S_{\mathr
   Manual implementation         Low (no new concepts)   High (reimplement per site)
 :::
 
+The table is schematic; the formal statement is Corollary [\[cor:type-system-threshold\]](#cor:type-system-threshold){reference-type="ref" reference="cor:type-system-threshold"}.
+
 ::: corollary
-[]{#cor:type-system-threshold label="cor:type-system-threshold"} For the formal native-vs-manual architecture instance, native support has lower total realized cost for all $$n > \mathrm{intrinsicDOF}(P).$$ *(Lean: `DecisionQuotient.HardnessDistribution.native_dominates_manual`)*
+[]{#cor:type-system-threshold label="cor:type-system-threshold"} For the formal native-vs-manual architecture instance, native support has lower total realized cost for all $$n > H_{\mathrm{baseline}}(P),$$ where $H_{\mathrm{baseline}}(P)\equiv \mathrm{intrinsicDOF}(P)$ in the Lean model `HardnessDistribution`. *(Lean: `HardnessDistribution.native_dominates_manual`)*
 :::
 
 ::: proof
-*Proof.* Immediate from `DecisionQuotient.HardnessDistribution.native_dominates_manual`. ◻
+*Proof.* Immediate from `HardnessDistribution.native_dominates_manual`. ◻
 :::
 
 ## Extension: Non-Additive Site-Cost Models {#sec:nonadditive-site-costs}
@@ -779,7 +950,33 @@ H_{\mathrm{central}}(S_{\mathrm{wrong}}) + n\,H_{\mathrm{distributed}}(S_{\mathr
 :::
 
 ::: theorem
-[]{#thm:linear-saturation-iff-zero label="thm:linear-saturation-iff-zero"} In the linear model of this section, $$H_{\text{total}}(S,n)=H_{\text{central}}(S)+n\cdot H_{\text{distributed}}(S),$$ the function $n\mapsto H_{\text{total}}(S,n)$ is eventually saturating if and only if $H_{\text{distributed}}(S)=0$. *(Lean: `DecisionQuotient.HardnessDistribution.totalDOF_eventually_constant_iff_zero_distributed`)*
+[]{#thm:generalized-dominance label="thm:generalized-dominance"} Let $$H_{\text{total}}^{\mathrm{gen}}(S,n)=H_{\text{central}}(S)+C_S(n).$$ For two architectures $S_{\mathrm{right}},S_{\mathrm{wrong}}$, suppose there exists $B\in\mathbb{N}$ such that:
+
+1.  $C_{S_{\mathrm{right}}}(m)\le B$ for all $m$ (bounded right-side per-site accumulation),
+
+2.  $m \le C_{S_{\mathrm{wrong}}}(m)$ for all $m$ (identity-lower-bounded wrong-side growth).
+
+Then for every $$n > H_{\text{central}}(S_{\mathrm{right}})+B,$$ one has $$H_{\text{total}}^{\mathrm{gen}}(S_{\mathrm{right}},n)
+<
+H_{\text{total}}^{\mathrm{gen}}(S_{\mathrm{wrong}},n).$$ *(Lean: `HardnessDistribution.generalized_right_dominates_wrong_of_bounded_vs_identity_lower`)*
+:::
+
+::: proof
+*Proof.* This is exactly the mechanized theorem `HardnessDistribution.generalized_right_dominates_wrong_of_bounded_vs_identity_lower`. ◻
+:::
+
+::: corollary
+[]{#cor:generalized-eventual-dominance label="cor:generalized-eventual-dominance"} If condition (1) above holds and there exists $N$ such that condition (2) holds for all $m\ge N$, then there exists $N_0$ such that for all $n\ge N_0$, $$H_{\text{total}}^{\mathrm{gen}}(S_{\mathrm{right}},n)
+<
+H_{\text{total}}^{\mathrm{gen}}(S_{\mathrm{wrong}},n).$$ *(Lean: `HardnessDistribution.generalized_right_eventually_dominates_wrong`)*
+:::
+
+::: proof
+*Proof.* Immediate from `HardnessDistribution.generalized_right_eventually_dominates_wrong`. ◻
+:::
+
+::: theorem
+[]{#thm:linear-saturation-iff-zero label="thm:linear-saturation-iff-zero"} In the linear model of this section, $$H_{\text{total}}(S,n)=H_{\text{central}}(S)+n\cdot H_{\text{distributed}}(S),$$ the function $n\mapsto H_{\text{total}}(S,n)$ is eventually saturating if and only if $H_{\text{distributed}}(S)=0$. *(Lean: `HardnessDistribution.totalDOF_eventually_constant_iff_zero_distributed`)*
 :::
 
 ::: proof
@@ -790,7 +987,7 @@ H_{\mathrm{central}}(S_{\mathrm{wrong}}) + n\,H_{\mathrm{distributed}}(S_{\mathr
 []{#thm:generalized-saturation-possible label="thm:generalized-saturation-possible"} There exists a generalized site-cost model with eventual saturation. In particular, for $$C_K(n)=\begin{cases}
 n, & n\le K\\
 K, & n>K,
-\end{cases}$$ both $C_K$ and $n\mapsto H_{\text{central}}+C_K(n)$ are eventually saturating. *(Lean: `DecisionQuotient.HardnessDistribution.saturatingSiteCost_eventually_constant`, `DecisionQuotient.HardnessDistribution.generalizedTotal_with_saturation_eventually_constant`)*
+\end{cases}$$ both $C_K$ and $n\mapsto H_{\text{central}}+C_K(n)$ are eventually saturating. *(Lean: `HardnessDistribution.saturatingSiteCost_eventually_constant`, `HardnessDistribution.generalizedTotal_with_saturation_eventually_constant`)*
 :::
 
 ::: proof
@@ -798,7 +995,7 @@ K, & n>K,
 :::
 
 ::: corollary
-[]{#cor:linear-positive-no-saturation label="cor:linear-positive-no-saturation"} No positive-slope linear per-site model can represent the saturating family above for all $n$. *(Lean: `DecisionQuotient.HardnessDistribution.no_positive_slope_linear_represents_saturating`)*
+[]{#cor:linear-positive-no-saturation label="cor:linear-positive-no-saturation"} No positive-slope linear per-site model can represent the saturating family above for all $n$. *(Lean: `HardnessDistribution.no_positive_slope_linear_represents_saturating`)*
 :::
 
 ::: proof
@@ -812,7 +1009,9 @@ The strengthened all-coordinates-relevant reduction is presented in Section [\[
 The next section develops the major practical consequence of this framework: the Simplicity Tax Theorem.
 
 
-# Corollary: Complexity Conservation {#sec:simplicity-tax}
+# Corollary: Complexity Redistribution Under Incomplete Models {#sec:simplicity-tax}
+
+The load-bearing fact in this section is not the set identity itself; it is the difficulty of shrinking the required set $R(P)$ in the first place. By Theorem [\[thm:sufficiency-conp\]](#thm:sufficiency-conp){reference-type="ref" reference="thm:sufficiency-conp"} (and Theorem [\[thm:minsuff-conp\]](#thm:minsuff-conp){reference-type="ref" reference="thm:minsuff-conp"} for minimization), exact relevance identification is intractable in the worst case under succinct encoding. The identities below therefore quantify how unresolved relevance is redistributed between central and per-site work.
 
 ::: definition
 Let $R(P)$ be the required dimensions (those affecting $\Opt$) and $A(M)$ the dimensions model $M$ handles natively. The *expressive gap* is $\text{Gap}(M,P) = R(P) \setminus A(M)$.
@@ -823,31 +1022,49 @@ Let $R(P)$ be the required dimensions (those affecting $\Opt$) and $A(M)$ the di
 :::
 
 ::: theorem
-[]{#thm:tax-conservation label="thm:tax-conservation"} $|\text{Gap}(M, P)| + |R(P) \cap A(M)| = |R(P)|$. The total cannot be reduced---only redistributed between "handled natively" and "handled externally." *(Lean analogue: `DecisionQuotient.HardnessDistribution.simplicityTax_conservation`)*
-:::
-
-::: theorem
-[]{#thm:tax-grows label="thm:tax-grows"} For $n$ decision sites: $$\text{TotalExternalWork} = n \times \text{SimplicityTax}(M, P).$$ *(Lean analogue: `DecisionQuotient.HardnessDistribution.simplicityTax_grows`)*
-:::
-
-::: theorem
-[]{#thm:amortization label="thm:amortization"} Let $H_{\text{central}}$ be the one-time cost of using a complete model. There exists $$n^* = \frac{H_{\text{central}}}{\text{SimplicityTax}(M,P)}$$ such that for $n > n^*$, the complete model has lower total cost. *(Lean analogue: `DecisionQuotient.HardnessDistribution.amortization_threshold_native_manual`)*
-:::
-
-::: corollary
-[]{#cor:gap-externalization label="cor:gap-externalization"} If $\text{Gap}(M,P)\neq\emptyset$, then external handling cost scales linearly with the number of decision sites. *(Lean: `DecisionQuotient.HardnessDistribution.simplicityTax_grows`)*
+[]{#thm:tax-conservation label="thm:tax-conservation"} $|\text{Gap}(M, P)| + |R(P) \cap A(M)| = |R(P)|$. The total cannot be reduced---only redistributed between "handled natively" and "handled externally." *(Lean: `HardnessDistribution.gap_conservation_card`)*
 :::
 
 ::: proof
-*Proof.* Under the Section [\[sec:hardness-distribution\]](#sec:hardness-distribution){reference-type="ref" reference="sec:hardness-distribution"} identification of per-site external work with distributed DOF, this is exactly `DecisionQuotient.HardnessDistribution.simplicityTax_grows`. ◻
+*Proof.* In the finite-coordinate model this is the exact set-cardinality identity $$|R\setminus A| + |R\cap A| = |R|,$$ formalized as `HardnessDistribution.gap_conservation_card`. ◻
 :::
 
-::: corollary
-[]{#cor:gap-minimization-hard label="cor:gap-minimization-hard"} For mechanized Boolean-coordinate instances, "there exists a sufficient set of size at most $k$" is equivalent to "the relevant-coordinate set has cardinality at most $k$." *(Lean: `DecisionQuotient.Sigma2PHardness.min_sufficient_set_iff_relevant_card`)*
+::: remark
+The algebraic identity in Theorem [\[thm:tax-conservation\]](#thm:tax-conservation){reference-type="ref" reference="thm:tax-conservation"} is elementary. Its force comes from upstream hardness: reducing $|R(P)|$ by exact relevance minimization is worst-case intractable under the succinct encoding, so redistribution is often the only tractable lever available.
+:::
+
+::: theorem
+[]{#thm:tax-grows label="thm:tax-grows"} For $n$ decision sites: $$\text{TotalExternalWork} = n \times \text{SimplicityTax}(M, P).$$ *(Lean: `HardnessDistribution.totalExternalWork_eq_n_mul_gapCard`)*
 :::
 
 ::: proof
-*Proof.* This is `DecisionQuotient.Sigma2PHardness.min_sufficient_set_iff_relevant_card`. ◻
+*Proof.* This is by definition of per-site externalization and is mechanized as `HardnessDistribution.totalExternalWork_eq_n_mul_gapCard`. ◻
+:::
+
+::: theorem
+[]{#thm:amortization label="thm:amortization"} Let $H_{\text{central}}$ be the one-time cost of using a complete model. There exists $$n^* = \left\lfloor \frac{H_{\text{central}}}{\text{SimplicityTax}(M,P)} \right\rfloor$$ such that for $n > n^*$, the complete model has lower total cost. *(Lean: `HardnessDistribution.complete_model_dominates_after_threshold`)*
+:::
+
+::: proof
+*Proof.* For positive per-site tax, the threshold inequality $$n > \left\lfloor \frac{H_{\text{central}}}{\text{SimplicityTax}} \right\rfloor
+\implies
+H_{\text{central}} < n\cdot \text{SimplicityTax}$$ is mechanized as `HardnessDistribution.complete_model_dominates_after_threshold`. ◻
+:::
+
+::: corollary
+[]{#cor:gap-externalization label="cor:gap-externalization"} If $\text{Gap}(M,P)\neq\emptyset$, then external handling cost scales linearly with the number of decision sites. *(Lean: `HardnessDistribution.totalExternalWork_eq_n_mul_gapCard`, `HardnessDistribution.simplicityTax_grows`)*
+:::
+
+::: proof
+*Proof.* The exact linear form is `HardnessDistribution.totalExternalWork_eq_n_mul_gapCard`. When the gap is nonempty (positive tax), monotone growth with $n$ is `HardnessDistribution.simplicityTax_grows`. ◻
+:::
+
+::: corollary
+[]{#cor:gap-minimization-hard label="cor:gap-minimization-hard"} For mechanized Boolean-coordinate instances, "there exists a sufficient set of size at most $k$" is equivalent to "the relevant-coordinate set has cardinality at most $k$." *(Lean: `Sigma2PHardness.min_sufficient_set_iff_relevant_card`)*
+:::
+
+::: proof
+*Proof.* This is `Sigma2PHardness.min_sufficient_set_iff_relevant_card`. ◻
 :::
 
 Appendix [\[app:lean\]](#app:lean){reference-type="ref" reference="app:lean"} provides theorem statements and module paths for the corresponding Lean formalization.
@@ -873,7 +1090,15 @@ The value of information (VOI) framework [@howard1966information] quantifies th
 
 ## Model Selection
 
-Statistical model selection (AIC [@akaike1974new], BIC [@schwarz1978estimating], cross-validation [@stone1974cross]) provides practical heuristics for choosing among models. Our results clarify why these heuristics dominate current practice: without added structural assumptions, exact optimal model selection inherits worst-case intractability, so heuristic methods are approximation policies for unresolved structure until stronger structure is identified.
+Statistical model selection (AIC [@akaike1974new], BIC [@schwarz1978estimating], cross-validation [@stone1974cross]) provides practical heuristics for choosing among models. Our results formalize the regime-level reason heuristic selection appears: without added structural assumptions, exact optimal model selection inherits worst-case intractability, so heuristic methods implement explicit weakened-guarantee policies for unresolved structure.
+
+## Certifying Outputs and Proof-Carrying Claims
+
+Our integrity layer matches the certifying-algorithms pattern: algorithms emit candidate outputs together with certificates that can be checked quickly, separating *producing* claims from *verifying* claims [@mcconnell2010certifying]. In this paper, Definition [\[def:solver-integrity\]](#def:solver-integrity){reference-type="ref" reference="def:solver-integrity"} is exactly that soundness discipline.
+
+At the systems level, this is the same architecture as proof-carrying code: a producer ships evidence and a consumer runs a small checker before accepting the claim [@necula1997proof]. Our competence definition adds the regime-specific coverage/resource requirement that certifying soundness alone does not provide.
+
+The feasibility qualifier in Definition [\[def:competence-regime\]](#def:competence-regime){reference-type="ref" reference="def:competence-regime"} also aligns with bounded-rationality normativity: what agents *should* do is constrained by what is computationally feasible under the declared resource model [@sep_bounded_rationality].
 
 
 # Conclusion
@@ -911,6 +1136,8 @@ This paper establishes the computational complexity of coordinate sufficiency pr
 
 These results place the problem of identifying decision-relevant coordinates at the first and second levels of the polynomial hierarchy.
 
+Beyond classification, the paper contributes an interpretive framework formalized in Section [\[sec:interpretive-foundations\]](#sec:interpretive-foundations){reference-type="ref" reference="sec:interpretive-foundations"}: structural complexity is a property of the fixed decision relation, while representational hardness is regime-conditional access cost. This is why encoding-regime changes can move practical hardness without changing the underlying semantics.
+
 The reduction constructions and key equivalence theorems are machine-checked in Lean 4 (see Appendix [\[app:lean\]](#app:lean){reference-type="ref" reference="app:lean"} for proof listings). The formalization verifies that the TAUTOLOGY reduction correctly maps tautologies to sufficient coordinate sets; complexity classifications (coNP-completeness, $\SigmaP{2}$-completeness) follow by composition with standard complexity-theoretic results (TAUTOLOGY is -complete, $\exists\forall$-SAT is $\SigmaP{2}$-complete). The strengthened gadget showing that non-tautologies yield instances with *all coordinates relevant* is also formalized.
 
 ## Complexity Characterization {#complexity-characterization .unnumbered}
@@ -923,13 +1150,13 @@ The results provide precise complexity characterizations within the formal model
 
 3.  **Encoding-regime separation.** Under the explicit-state encoding, SUFFICIENCY-CHECK is polynomial in $|S|$. Under ETH, there exist succinctly encoded worst-case instances (witnessed by a strengthened gadget family with $k^*=n$) requiring $2^{\Omega(n)}$ time. Intermediate regimes are not ruled out by the lower-bound statement.
 
-## The Complexity Conservation Law {#the-complexity-conservation-law .unnumbered}
+## The Complexity Redistribution Corollary {#the-complexity-redistribution-corollary .unnumbered}
 
 Section [\[sec:simplicity-tax\]](#sec:simplicity-tax){reference-type="ref" reference="sec:simplicity-tax"} develops a quantitative consequence: when a problem requires $k$ dimensions and a model handles only $j < k$ natively, the remaining $k - j$ dimensions must be handled externally at each decision site. For $n$ sites, total external work is $(k-j) \times n$.
 
-This conservation law is formalized in Lean 4 (`HardnessDistribution.lean`), proving:
+The set identity is elementary; its operational content comes from composition with the hardness results on exact relevance minimization. This redistribution corollary is formalized in Lean 4 (`HardnessDistribution.lean`), proving:
 
--   Conservation: complexity cannot be eliminated, only redistributed
+-   Redistribution identity: complexity burden cannot be eliminated by omission, only moved between native handling and external handling
 
 -   Dominance: complete models have lower total work than incomplete models
 
@@ -941,18 +1168,30 @@ Several questions remain for future work:
 
 -   **Fixed-parameter tractability (primary):** Is SUFFICIENCY-CHECK FPT when parameterized by the minimal sufficient-set size $k^*$, or is it W\[2\]-hard under this parameterization?
 
+-   **Sequential/stochastic bridge extension:** Characterize the exact frontier where adjacent sequential objectives reduce to the static class via Proposition [\[prop:one-step-bridge\]](#prop:one-step-bridge){reference-type="ref" reference="prop:one-step-bridge"}, and where genuinely new complexity objects (e.g., horizon/sample/regret complexity) must replace the present coNP/$\Sigma_2^P$ analysis.
+
 -   **Average-case complexity:** What is the complexity under natural distributions on decision problems?
 
 -   **Learning cost formalization:** Can central cost $H_{\text{central}}$ be formalized as the rank of a concept matroid, making the amortization threshold precisely computable?
 
-## Practical interpretation {#practical-interpretation .unnumbered}
+## Practical Corollaries {#practical-corollaries .unnumbered}
 
-While this work is theoretical, the complexity bounds have practical meaning. Under ETH and the succinct encoding, generic polynomial-time worst-case solvers for arbitrary inputs are ruled out. This is a diagnostic statement, not a claim of permanent impossibility in all regimes: the barrier marks unresolved structural characterization in the current representation, and the response is to refine representation and assumptions until decision relevance becomes structurally tractable or to state approximation commitments explicitly. Theorem [\[thm:overmodel-diagnostic\]](#thm:overmodel-diagnostic){reference-type="ref" reference="thm:overmodel-diagnostic"} states this interpretive point directly at the level of parameterization. Real datasets contain structure (sparsity, bounded dependency depth, separable utilities) that the tractable subcases capture. Engineering work therefore follows two tracks: (a) detecting and exploiting structural restrictions in inputs, and (b) designing heuristic or approximate methods for currently unstructured instances while those structural hypotheses are developed.
+The practical corollaries are regime-indexed and theorem-indexed:
+
+-   **\[E\] and structured regimes:** polynomial-time exact procedures exist (Theorem [\[thm:tractable\]](#thm:tractable){reference-type="ref" reference="thm:tractable"}).
+
+-   **\[S+ETH\] hard families:** exact minimization inherits exponential worst-case cost (Theorem [\[thm:dichotomy\]](#thm:dichotomy){reference-type="ref" reference="thm:dichotomy"} together with Theorem [\[thm:sufficiency-conp\]](#thm:sufficiency-conp){reference-type="ref" reference="thm:sufficiency-conp"}).
+
+-   **\[S_bool\] mechanized criterion:** minimization reduces to relevance-cardinality constraints (Corollary [\[cor:practice-diagnostic\]](#cor:practice-diagnostic){reference-type="ref" reference="cor:practice-diagnostic"}).
+
+-   **Redistribution consequences:** omitted native coverage externalizes work with explicit growth/amortization laws (Theorems [\[thm:tax-conservation\]](#thm:tax-conservation){reference-type="ref" reference="thm:tax-conservation"}--[\[thm:amortization\]](#thm:amortization){reference-type="ref" reference="thm:amortization"}).
+
+Hence the design choice is typed: enforce a tractable regime, or adopt weakened guarantees with explicit verification boundaries.
 
 
 # Lean 4 Proof Listings {#app:lean}
 
-The complete Lean 4 formalization is available in the companion artifact (Zenodo DOI listed on the title page). The mechanization consists of approximately 5,900 lines across 39 files, with 230+ theorem/lemma statements.
+The complete Lean 4 formalization is available in the companion artifact (Zenodo DOI listed on the title page). The mechanization consists of 6350 lines across 40 files, with 271 theorem/lemma statements.
 
 ## What Is Machine-Checked
 
@@ -962,7 +1201,7 @@ The Lean formalization establishes:
 
 2.  **Decision problem definitions:** Formal definitions of sufficiency, optimality, and the decision quotient.
 
-3.  **Economic theorems:** The Simplicity Tax conservation laws and hardness distribution results.
+3.  **Economic theorems:** Simplicity Tax redistribution identities and hardness distribution results.
 
 **Complexity classifications** (coNP-completeness, $\Sigma_2^P$-completeness) follow from informal composition with standard results (TAUTOLOGY is coNP-complete, etc.). The Lean proofs verify the reduction constructions; the complexity class membership is derived by combining these with established theorems from complexity theory.
 
@@ -1028,25 +1267,89 @@ The hardness distribution theorems (Section [\[sec:simplicity-tax\]](#sec:simpl
         (c d K : ℕ) (hd : d > 0) :
         ¬ (∀ n, c + n * d = generalizedTotalDOF c (saturatingSiteCost K) n)
 
+**Identifier note.** Lean identifiers retain internal naming (`intrinsicDOF`, `simplicityTax_conservation`); in paper terminology these correspond to *baseline hardness* and the *redistribution lower-bound identity*, respectively.
+
 ## Engineering Corollary Mapping
 
-::: center
-  **Paper handle**                         **Lean theorem**                                                                               **Lean file**
-  ---------------------------------------- ---------------------------------------------------------------------------------------------- -------------------------------------------------------
-  `cor:overmodel-diagnostic-implication`   `DecisionQuotient.Sigma2PHardness.sufficient_iff_relevant_subset`                              `DecisionQuotient/Hardness/Sigma2PHardness.lean`
-  `cor:practice-diagnostic`                `DecisionQuotient.Sigma2PHardness.min_sufficient_set_iff_relevant_card`                        `DecisionQuotient/Hardness/Sigma2PHardness.lean`
-  `cor:practice-bounded`                   `DecisionQuotient.sufficiency_poly_bounded_actions`                                            `DecisionQuotient/Tractability/BoundedActions.lean`
-  `cor:practice-structured`                `DecisionQuotient.sufficiency_poly_separable`                                                  `DecisionQuotient/Tractability/SeparableUtility.lean`
-  `cor:practice-tree`                      `DecisionQuotient.sufficiency_poly_tree_structured`                                            `DecisionQuotient/Tractability/TreeStructure.lean`
-  `cor:practice-unstructured`              `DecisionQuotient.all_coords_relevant_of_not_tautology`                                        `DecisionQuotient/Reduction_AllCoords.lean`
-  `cor:right-wrong-hardness`               `DecisionQuotient.HardnessDistribution.right_dominates_wrong`                                  `DecisionQuotient/HardnessDistribution.lean`
-  `cor:type-system-threshold`              `DecisionQuotient.HardnessDistribution.native_dominates_manual`                                `DecisionQuotient/HardnessDistribution.lean`
-  `cor:gap-externalization`                `DecisionQuotient.HardnessDistribution.simplicityTax_grows`                                    `DecisionQuotient/HardnessDistribution.lean`
-  `cor:gap-minimization-hard`              `DecisionQuotient.Sigma2PHardness.min_sufficient_set_iff_relevant_card`                        `DecisionQuotient/Hardness/Sigma2PHardness.lean`
-  `thm:linear-saturation-iff-zero`         `DecisionQuotient.HardnessDistribution.totalDOF_eventually_constant_iff_zero_distributed`      `DecisionQuotient/HardnessDistribution.lean`
-  `thm:generalized-saturation-possible`    `DecisionQuotient.HardnessDistribution.generalizedTotal_with_saturation_eventually_constant`   `DecisionQuotient/HardnessDistribution.lean`
-  `cor:linear-positive-no-saturation`      `DecisionQuotient.HardnessDistribution.no_positive_slope_linear_represents_saturating`         `DecisionQuotient/HardnessDistribution.lean`
-:::
+  -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  **Paper handle**                            **Lean theorem**                                                                        **Lean file**
+  ------------------------------------------- --------------------------------------------------------------------------------------- -------------------------------------------------------
+  `cor:overmodel-diagnostic-implication`      `Sigma2PHardness.sufficient_iff_relevant_subset`                                        `DecisionQuotient/Hardness/Sigma2PHardness.lean`
+
+  `cor:exact-identifiability`                 `Sigma2PHardness.exactlyIdentifiesRelevant_iff_sufficient_and_subset_relevantFinset`    `DecisionQuotient/Hardness/Sigma2PHardness.lean`
+
+                                                                                                                                      
+
+  `asymmetry-eth`                             `HardnessDistribution.linear_lt_exponential_plus_constant_eventually`                   `DecisionQuotient/HardnessDistribution.lean`
+
+                                                                                                                                      
+
+  `competence-forward`                        `IntegrityCompetence.competence_implies_integrity`                                      `DecisionQuotient/IntegrityCompetence.lean`
+
+                                                                                                                                      
+
+  `competence-strict`                         `IntegrityCompetence.integrity_not_competent_of_nonempty_scope`                         `DecisionQuotient/IntegrityCompetence.lean`
+
+  `cor:practice-diagnostic`                   `Sigma2PHardness.min_sufficient_set_iff_relevant_card`                                  `DecisionQuotient/Hardness/Sigma2PHardness.lean`
+
+  `cor:practice-bounded`                      `sufficiency_poly_bounded_actions`                                                      `DecisionQuotient/Tractability/BoundedActions.lean`
+
+  `cor:practice-structured`                   `sufficiency_poly_separable`                                                            `DecisionQuotient/Tractability/SeparableUtility.lean`
+
+  `cor:practice-tree`                         `sufficiency_poly_tree_structured`                                                      `DecisionQuotient/Tractability/TreeStructure.lean`
+
+  `cor:practice-unstructured`                 `all_coords_relevant_of_not_tautology`                                                  `DecisionQuotient/Reduction_AllCoords.lean`
+
+  `prop:hardness-conservation`                `HardnessDistribution.totalDOF_ge_intrinsic`                                            `DecisionQuotient/HardnessDistribution.lean`
+
+  `prop:hardness-efficiency-interpretation`   `HardnessDistribution.hardnessEfficiency_eq_central_share`                              `DecisionQuotient/HardnessDistribution.lean`
+
+                                                                                                                                      
+
+  `centralization-`                                                                                                                   
+
+  `dom-1-2`                                   `HardnessDistribution.centralization_dominance_bundle`                                  `DecisionQuotient/HardnessDistribution.lean`
+
+                                                                                                                                      
+
+  `centralization-`                                                                                                                   
+
+  `dom-3`                                     `HardnessDistribution.centralization_step_saves_n_minus_one`                            `DecisionQuotient/HardnessDistribution.lean`
+
+  `cor:right-wrong-hardness`                  `HardnessDistribution.right_dominates_wrong`                                            `DecisionQuotient/HardnessDistribution.lean`
+
+  `cor:type-system-threshold`                 `HardnessDistribution.native_dominates_manual`                                          `DecisionQuotient/HardnessDistribution.lean`
+
+  `thm:tax-conservation`                      `HardnessDistribution.gap_conservation_card`                                            `DecisionQuotient/HardnessDistribution.lean`
+
+  `thm:tax-grows`                             `HardnessDistribution.totalExternalWork_eq_n_mul_gapCard`                               `DecisionQuotient/HardnessDistribution.lean`
+
+  `thm:amortization`                          `HardnessDistribution.complete_model_dominates_after_threshold`                         `DecisionQuotient/HardnessDistribution.lean`
+
+                                                                                                                                      
+
+  `externalization-id`                        `HardnessDistribution.totalExternalWork_eq_n_mul_gapCard`                               `DecisionQuotient/HardnessDistribution.lean`
+
+                                                                                                                                      
+
+  `gap-`                                                                                                                              
+
+  `externalization-`                                                                                                                  
+
+  `grow`                                      `HardnessDistribution.simplicityTax_grows`                                              `DecisionQuotient/HardnessDistribution.lean`
+
+  `cor:gap-minimization-hard`                 `Sigma2PHardness.min_sufficient_set_iff_relevant_card`                                  `DecisionQuotient/Hardness/Sigma2PHardness.lean`
+
+  `thm:linear-saturation-iff-zero`            `HardnessDistribution.totalDOF_eventually_constant_iff_zero_distributed`                `DecisionQuotient/HardnessDistribution.lean`
+
+  `thm:generalized-saturation-possible`       `HardnessDistribution.generalizedTotal_with_saturation_eventually_constant`             `DecisionQuotient/HardnessDistribution.lean`
+
+  `cor:linear-positive-no-saturation`         `HardnessDistribution.no_positive_slope_linear_represents_saturating`                   `DecisionQuotient/HardnessDistribution.lean`
+
+  `thm:generalized-dominance`                 `HardnessDistribution.generalized_right_dominates_wrong_of_bounded_vs_identity_lower`   `DecisionQuotient/HardnessDistribution.lean`
+
+  `cor:generalized-eventual-dominance`        `HardnessDistribution.generalized_right_eventually_dominates_wrong`                     `DecisionQuotient/HardnessDistribution.lean`
+  -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 ## Module Structure
 
@@ -1058,7 +1361,9 @@ The hardness distribution theorems (Section [\[sec:simplicity-tax\]](#sec:simpl
 
 -   `Complexity.lean` -- Polynomial-time reduction definitions using mathlib
 
--   `HardnessDistribution.lean` -- Simplicity Tax theorems
+-   `HardnessDistribution.lean` -- Simplicity Tax redistribution and amortization theorems
+
+-   `IntegrityCompetence.lean` -- Solver integrity vs regime competence separation
 
 -   `Tractability/` -- Bounded actions, separable utilities, tree structure
 
@@ -1074,6 +1379,7 @@ The proofs compile with Lean 4 and contain no `sorry` placeholders. Run `lake bu
 ## Machine-Checked Proofs
 
 All theorems are formalized in Lean 4:
-- Location: `docs/papers/proofs/paper4_toc_*.lean`
-- Lines: 5901
-- Theorems: 237
+- Location: `docs/papers/paper4_decision_quotient/proofs/`
+- Lines: 6350
+- Theorems: 271
+- `sorry` placeholders: 0

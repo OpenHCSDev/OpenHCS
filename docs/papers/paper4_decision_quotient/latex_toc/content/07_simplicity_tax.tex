@@ -1,4 +1,6 @@
-\section{Corollary: Complexity Conservation}\label{sec:simplicity-tax}
+\section{Corollary: Complexity Redistribution Under Incomplete Models}\label{sec:simplicity-tax}
+
+The load-bearing fact in this section is not the set identity itself; it is the difficulty of shrinking the required set $R(P)$ in the first place. By Theorem~\ref{thm:sufficiency-conp} (and Theorem~\ref{thm:minsuff-conp} for minimization), exact relevance identification is intractable in the worst case under succinct encoding. The identities below therefore quantify how unresolved relevance is redistributed between central and per-site work.
 
 \begin{definition}
 Let $R(P)$ be the required dimensions (those affecting $\Opt$) and $A(M)$ the dimensions model $M$ handles natively. The \emph{expressive gap} is $\text{Gap}(M,P) = R(P) \setminus A(M)$.
@@ -11,44 +13,76 @@ The \emph{simplicity tax} is the size of the expressive gap:
 \]
 \end{definition}
 
-\begin{theorem}[Conservation]\label{thm:tax-conservation}
+\begin{theorem}[Redistribution Identity]\label{thm:tax-conservation}
 $|\text{Gap}(M, P)| + |R(P) \cap A(M)| = |R(P)|$. The total cannot be reduced---only redistributed between ``handled natively'' and ``handled externally.''
-\textit{(Lean analogue: \texttt{DecisionQuotient.HardnessDistribution.simplicityTax\_conservation})}
+\textit{(Lean: \nolinkurl{HardnessDistribution.gap_conservation_card})}
 \end{theorem}
+
+\begin{proof}
+In the finite-coordinate model this is the exact set-cardinality identity
+\[
+|R\setminus A| + |R\cap A| = |R|,
+\]
+formalized as \nolinkurl{HardnessDistribution.gap_conservation_card}.
+\end{proof}
+
+\begin{remark}[Why this is nontrivial in context]
+The algebraic identity in Theorem~\ref{thm:tax-conservation} is elementary. Its force comes from upstream hardness: reducing $|R(P)|$ by exact relevance minimization is worst-case intractable under the succinct encoding, so redistribution is often the only tractable lever available.
+\end{remark}
 
 \begin{theorem}[Linear Growth]\label{thm:tax-grows}
 For $n$ decision sites:
 \[
 \text{TotalExternalWork} = n \times \text{SimplicityTax}(M, P).
 \]
-\textit{(Lean analogue: \texttt{DecisionQuotient.HardnessDistribution.simplicityTax\_grows})}
+\textit{(Lean: \nolinkurl{HardnessDistribution.totalExternalWork_eq_n_mul_gapCard})}
 \end{theorem}
+
+\begin{proof}
+This is by definition of per-site externalization and is mechanized as
+\nolinkurl{HardnessDistribution.totalExternalWork_eq_n_mul_gapCard}.
+\end{proof}
 
 \begin{theorem}[Amortization]\label{thm:amortization}
 Let $H_{\text{central}}$ be the one-time cost of using a complete model. There exists
 \[
-n^* = \frac{H_{\text{central}}}{\text{SimplicityTax}(M,P)}
+n^* = \left\lfloor \frac{H_{\text{central}}}{\text{SimplicityTax}(M,P)} \right\rfloor
 \]
 such that for $n > n^*$, the complete model has lower total cost.
-\textit{(Lean analogue: \texttt{DecisionQuotient.HardnessDistribution.amortization\_threshold\_native\_manual})}
+\textit{(Lean: \nolinkurl{HardnessDistribution.complete_model_dominates_after_threshold})}
 \end{theorem}
+
+\begin{proof}
+For positive per-site tax, the threshold inequality
+\[
+n > \left\lfloor \frac{H_{\text{central}}}{\text{SimplicityTax}} \right\rfloor
+\implies
+H_{\text{central}} < n\cdot \text{SimplicityTax}
+\]
+is mechanized as
+\nolinkurl{HardnessDistribution.complete_model_dominates_after_threshold}.
+\end{proof}
 
 \begin{corollary}[Gap Externalization]\label{cor:gap-externalization}
 If $\text{Gap}(M,P)\neq\emptyset$, then external handling cost scales linearly with the number of decision sites.
-\textit{(Lean: \texttt{DecisionQuotient.HardnessDistribution.simplicityTax\_grows})}
+\textit{(Lean: \nolinkurl{HardnessDistribution.totalExternalWork_eq_n_mul_gapCard},
+\nolinkurl{HardnessDistribution.simplicityTax_grows})}
 \end{corollary}
 
 \begin{proof}
-Under the Section~\ref{sec:hardness-distribution} identification of per-site external work with distributed DOF, this is exactly \texttt{DecisionQuotient.HardnessDistribution.simplicityTax\_grows}.
+The exact linear form is
+\nolinkurl{HardnessDistribution.totalExternalWork_eq_n_mul_gapCard}.
+When the gap is nonempty (positive tax), monotone growth with $n$ is
+\nolinkurl{HardnessDistribution.simplicityTax_grows}.
 \end{proof}
 
 \begin{corollary}[Exact Minimization Criterion]\label{cor:gap-minimization-hard}
 For mechanized Boolean-coordinate instances, ``there exists a sufficient set of size at most $k$'' is equivalent to ``the relevant-coordinate set has cardinality at most $k$.''
-\textit{(Lean: \texttt{DecisionQuotient.Sigma2PHardness.min\_sufficient\_set\_iff\_relevant\_card})}
+\textit{(Lean: \nolinkurl{Sigma2PHardness.min_sufficient_set_iff_relevant_card})}
 \end{corollary}
 
 \begin{proof}
-This is \texttt{DecisionQuotient.Sigma2PHardness.min\_sufficient\_set\_iff\_relevant\_card}.
+This is \nolinkurl{Sigma2PHardness.min_sufficient_set_iff_relevant_card}.
 \end{proof}
 
 Appendix~\ref{app:lean} provides theorem statements and module paths for the corresponding Lean formalization.

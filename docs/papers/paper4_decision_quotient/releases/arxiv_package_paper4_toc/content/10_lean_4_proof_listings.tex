@@ -1,6 +1,6 @@
 \section{Lean 4 Proof Listings}\label{app:lean}
 
-The complete Lean 4 formalization is available in the companion artifact (Zenodo DOI listed on the title page). The mechanization consists of approximately 5,900 lines across 39 files, with 230+ theorem/lemma statements.
+The complete Lean 4 formalization is available in the companion artifact (Zenodo DOI listed on the title page). The mechanization consists of \LeanTotalLines\ lines across \LeanTotalFiles\ files, with \LeanTotalTheorems\ theorem/lemma statements.
 
 \subsection{What Is Machine-Checked}
 
@@ -11,7 +11,7 @@ The Lean formalization establishes:
 
 \item \textbf{Decision problem definitions:} Formal definitions of sufficiency, optimality, and the decision quotient.
 
-\item \textbf{Economic theorems:} The Simplicity Tax conservation laws and hardness distribution results.
+\item \textbf{Economic theorems:} Simplicity Tax redistribution identities and hardness distribution results.
 \end{enumerate}
 
 \textbf{Complexity classifications} (coNP-completeness, $\Sigma_2^P$-completeness) follow from informal composition with standard results (TAUTOLOGY is coNP-complete, etc.). The Lean proofs verify the reduction constructions; the complexity class membership is derived by combining these with established theorems from complexity theory.
@@ -84,56 +84,103 @@ theorem no_positive_slope_linear_represents_saturating
     ¬ (∀ n, c + n * d = generalizedTotalDOF c (saturatingSiteCost K) n)
 \end{verbatim}
 
+\noindent\textbf{Identifier note.}
+Lean identifiers retain internal naming (\texttt{intrinsicDOF}, \texttt{simplicityTax\_conservation}); in paper terminology these correspond to \emph{baseline hardness} and the \emph{redistribution lower-bound identity}, respectively.
+
 \subsection{Engineering Corollary Mapping}
 
-\begin{center}
-\small
-\begin{tabular}{lll}
+\begingroup
+\scriptsize
+\sloppy
+\setlength{\tabcolsep}{4pt}
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.17\linewidth}>{\raggedright\arraybackslash}p{0.58\linewidth}>{\raggedright\arraybackslash}p{0.21\linewidth}@{}}
 \toprule
 \textbf{Paper handle} & \textbf{Lean theorem} & \textbf{Lean file} \\
 \midrule
-\texttt{cor:overmodel-diagnostic-implication} &
-\texttt{DecisionQuotient.Sigma2PHardness.sufficient\_iff\_relevant\_subset} &
-\texttt{DecisionQuotient/Hardness/Sigma2PHardness.lean} \\
-\texttt{cor:practice-diagnostic} &
-\texttt{DecisionQuotient.Sigma2PHardness.min\_sufficient\_set\_iff\_relevant\_card} &
-\texttt{DecisionQuotient/Hardness/Sigma2PHardness.lean} \\
-\texttt{cor:practice-bounded} &
-\texttt{DecisionQuotient.sufficiency\_poly\_bounded\_actions} &
-\texttt{DecisionQuotient/Tractability/BoundedActions.lean} \\
-\texttt{cor:practice-structured} &
-\texttt{DecisionQuotient.sufficiency\_poly\_separable} &
-\texttt{DecisionQuotient/Tractability/SeparableUtility.lean} \\
-\texttt{cor:practice-tree} &
-\texttt{DecisionQuotient.sufficiency\_poly\_tree\_structured} &
-\texttt{DecisionQuotient/Tractability/TreeStructure.lean} \\
-\texttt{cor:practice-unstructured} &
-\texttt{DecisionQuotient.all\_coords\_relevant\_of\_not\_tautology} &
-\texttt{DecisionQuotient/Reduction\_AllCoords.lean} \\
-\texttt{cor:right-wrong-hardness} &
-\texttt{DecisionQuotient.HardnessDistribution.right\_dominates\_wrong} &
-\texttt{DecisionQuotient/HardnessDistribution.lean} \\
-\texttt{cor:type-system-threshold} &
-\texttt{DecisionQuotient.HardnessDistribution.native\_dominates\_manual} &
-\texttt{DecisionQuotient/HardnessDistribution.lean} \\
-\texttt{cor:gap-externalization} &
-\texttt{DecisionQuotient.HardnessDistribution.simplicityTax\_grows} &
-\texttt{DecisionQuotient/HardnessDistribution.lean} \\
-\texttt{cor:gap-minimization-hard} &
-\texttt{DecisionQuotient.Sigma2PHardness.min\_sufficient\_set\_iff\_relevant\_card} &
-\texttt{DecisionQuotient/Hardness/Sigma2PHardness.lean} \\
-\texttt{thm:linear-saturation-iff-zero} &
-\texttt{DecisionQuotient.HardnessDistribution.totalDOF\_eventually\_constant\_iff\_zero\_distributed} &
-\texttt{DecisionQuotient/HardnessDistribution.lean} \\
-\texttt{thm:generalized-saturation-possible} &
-\texttt{DecisionQuotient.HardnessDistribution.generalizedTotal\_with\_saturation\_eventually\_constant} &
-\texttt{DecisionQuotient/HardnessDistribution.lean} \\
-\texttt{cor:linear-positive-no-saturation} &
-\texttt{DecisionQuotient.HardnessDistribution.no\_positive\_slope\_linear\_represents\_saturating} &
-\texttt{DecisionQuotient/HardnessDistribution.lean} \\
+\nolinkurl{cor:overmodel-diagnostic-implication} &
+\nolinkurl{Sigma2PHardness.sufficient_iff_relevant_subset} &
+\nolinkurl{DecisionQuotient/Hardness/Sigma2PHardness.lean} \\
+\nolinkurl{cor:exact-identifiability} &
+\nolinkurl{Sigma2PHardness.exactlyIdentifiesRelevant_iff_sufficient_and_subset_relevantFinset} &
+\nolinkurl{DecisionQuotient/Hardness/Sigma2PHardness.lean} \\
+\shortstack[l]{\texttt{thm:cost-}\\\texttt{asymmetry-eth}} &
+\nolinkurl{HardnessDistribution.linear_lt_exponential_plus_constant_eventually} &
+\nolinkurl{DecisionQuotient/HardnessDistribution.lean} \\
+\shortstack[l]{\texttt{prop:integrity-}\\\texttt{competence-forward}} &
+\nolinkurl{IntegrityCompetence.competence_implies_integrity} &
+\nolinkurl{DecisionQuotient/IntegrityCompetence.lean} \\
+\shortstack[l]{\texttt{prop:integrity-}\\\texttt{competence-strict}} &
+\nolinkurl{IntegrityCompetence.integrity_not_competent_of_nonempty_scope} &
+\nolinkurl{DecisionQuotient/IntegrityCompetence.lean} \\
+\nolinkurl{cor:practice-diagnostic} &
+\nolinkurl{Sigma2PHardness.min_sufficient_set_iff_relevant_card} &
+\nolinkurl{DecisionQuotient/Hardness/Sigma2PHardness.lean} \\
+\nolinkurl{cor:practice-bounded} &
+\nolinkurl{sufficiency_poly_bounded_actions} &
+\nolinkurl{DecisionQuotient/Tractability/BoundedActions.lean} \\
+\nolinkurl{cor:practice-structured} &
+\nolinkurl{sufficiency_poly_separable} &
+\nolinkurl{DecisionQuotient/Tractability/SeparableUtility.lean} \\
+\nolinkurl{cor:practice-tree} &
+\nolinkurl{sufficiency_poly_tree_structured} &
+\nolinkurl{DecisionQuotient/Tractability/TreeStructure.lean} \\
+\nolinkurl{cor:practice-unstructured} &
+\nolinkurl{all_coords_relevant_of_not_tautology} &
+\nolinkurl{DecisionQuotient/Reduction_AllCoords.lean} \\
+\nolinkurl{prop:hardness-conservation} &
+\nolinkurl{HardnessDistribution.totalDOF_ge_intrinsic} &
+\nolinkurl{DecisionQuotient/HardnessDistribution.lean} \\
+\nolinkurl{prop:hardness-efficiency-interpretation} &
+\nolinkurl{HardnessDistribution.hardnessEfficiency_eq_central_share} &
+\nolinkurl{DecisionQuotient/HardnessDistribution.lean} \\
+\shortstack[l]{\texttt{thm:}\\\texttt{centralization-}\\\texttt{dom-1-2}} &
+\nolinkurl{HardnessDistribution.centralization_dominance_bundle} &
+\nolinkurl{DecisionQuotient/HardnessDistribution.lean} \\
+\shortstack[l]{\texttt{thm:}\\\texttt{centralization-}\\\texttt{dom-3}} &
+\nolinkurl{HardnessDistribution.centralization_step_saves_n_minus_one} &
+\nolinkurl{DecisionQuotient/HardnessDistribution.lean} \\
+\nolinkurl{cor:right-wrong-hardness} &
+\nolinkurl{HardnessDistribution.right_dominates_wrong} &
+\nolinkurl{DecisionQuotient/HardnessDistribution.lean} \\
+\nolinkurl{cor:type-system-threshold} &
+\nolinkurl{HardnessDistribution.native_dominates_manual} &
+\nolinkurl{DecisionQuotient/HardnessDistribution.lean} \\
+\nolinkurl{thm:tax-conservation} &
+\nolinkurl{HardnessDistribution.gap_conservation_card} &
+\nolinkurl{DecisionQuotient/HardnessDistribution.lean} \\
+\nolinkurl{thm:tax-grows} &
+\nolinkurl{HardnessDistribution.totalExternalWork_eq_n_mul_gapCard} &
+\nolinkurl{DecisionQuotient/HardnessDistribution.lean} \\
+\nolinkurl{thm:amortization} &
+\nolinkurl{HardnessDistribution.complete_model_dominates_after_threshold} &
+\nolinkurl{DecisionQuotient/HardnessDistribution.lean} \\
+\shortstack[l]{\texttt{cor:gap-}\\\texttt{externalization-id}} &
+\nolinkurl{HardnessDistribution.totalExternalWork_eq_n_mul_gapCard} &
+\nolinkurl{DecisionQuotient/HardnessDistribution.lean} \\
+\shortstack[l]{\texttt{cor:}\\\texttt{gap-}\\\texttt{externalization-}\\\texttt{grow}} &
+\nolinkurl{HardnessDistribution.simplicityTax_grows} &
+\nolinkurl{DecisionQuotient/HardnessDistribution.lean} \\
+\nolinkurl{cor:gap-minimization-hard} &
+\nolinkurl{Sigma2PHardness.min_sufficient_set_iff_relevant_card} &
+\nolinkurl{DecisionQuotient/Hardness/Sigma2PHardness.lean} \\
+\nolinkurl{thm:linear-saturation-iff-zero} &
+\nolinkurl{HardnessDistribution.totalDOF_eventually_constant_iff_zero_distributed} &
+\nolinkurl{DecisionQuotient/HardnessDistribution.lean} \\
+\nolinkurl{thm:generalized-saturation-possible} &
+\nolinkurl{HardnessDistribution.generalizedTotal_with_saturation_eventually_constant} &
+\nolinkurl{DecisionQuotient/HardnessDistribution.lean} \\
+\nolinkurl{cor:linear-positive-no-saturation} &
+\nolinkurl{HardnessDistribution.no_positive_slope_linear_represents_saturating} &
+\nolinkurl{DecisionQuotient/HardnessDistribution.lean} \\
+\nolinkurl{thm:generalized-dominance} &
+\nolinkurl{HardnessDistribution.generalized_right_dominates_wrong_of_bounded_vs_identity_lower} &
+\nolinkurl{DecisionQuotient/HardnessDistribution.lean} \\
+\nolinkurl{cor:generalized-eventual-dominance} &
+\nolinkurl{HardnessDistribution.generalized_right_eventually_dominates_wrong} &
+\nolinkurl{DecisionQuotient/HardnessDistribution.lean} \\
 \bottomrule
-\end{tabular}
-\end{center}
+\end{longtable}
+\endgroup
 
 \subsection{Module Structure}
 
@@ -142,7 +189,8 @@ theorem no_positive_slope_linear_represents_saturating
 \item \texttt{Sufficiency.lean} -- Sufficiency checking algorithms and properties
 \item \texttt{Reduction.lean} -- TAUTOLOGY reduction construction and correctness
 \item \texttt{Complexity.lean} -- Polynomial-time reduction definitions using mathlib
-\item \texttt{HardnessDistribution.lean} -- Simplicity Tax theorems
+\item \texttt{HardnessDistribution.lean} -- Simplicity Tax redistribution and amortization theorems
+\item \texttt{IntegrityCompetence.lean} -- Solver integrity vs regime competence separation
 \item \texttt{Tractability/} -- Bounded actions, separable utilities, tree structure
 \end{itemize}
 

@@ -33,7 +33,7 @@ The Lean proofs are straightforward applications of definitions and standard com
 \item \textbf{Complexity dichotomy.} Theorem~\ref{thm:dichotomy} separates logarithmic and linear regimes: polynomial behavior when the minimal sufficient set has size $O(\log |S|)$, and exponential lower bounds under ETH when it has size $\Omega(n)$. Intermediate regimes are not ruled out by the lower-bound statement.
 \end{enumerate}
 
-\textbf{What machine-checking guarantees.} The Lean compiler verifies that every proof step is valid, every definition is consistent, and no axioms are added beyond Lean's foundations (extended with Mathlib for basic combinatorics and complexity definitions). Zero \texttt{sorry} placeholders means zero unproven claims. The 3,400+ lines establish a verified chain from basic definitions (decision problems, coordinate spaces, polynomial reductions) to the final theorems (hardness results, dichotomy, tractable cases). Reviewers need not trust our informal explanations; they run \texttt{lake build} and verify the proofs themselves.
+\textbf{What machine-checking guarantees.} The Lean compiler verifies that every proof step is valid, every definition is consistent, and no axioms are added beyond Lean's foundations (extended with Mathlib for basic combinatorics and complexity definitions). \LeanTotalSorry\ \texttt{sorry} placeholders means \LeanTotalSorry\ unproven claims. The \LeanTotalLines\ lines establish a verified chain from basic definitions (decision problems, coordinate spaces, polynomial reductions) to the final theorems (hardness results, dichotomy, tractable cases). Reviewers need not trust our informal explanations; they run \texttt{lake build} and verify the proofs themselves.
 
 \textbf{Comparison to informal complexity arguments.} Prior work on model selection complexity (Chickering et al.~\cite{chickering2004large}, Teyssier \& Koller~\cite{teyssier2012ordering}) presents compelling informal arguments but lacks machine-checked proofs. Our contribution is not new \emph{wisdom}---the insight that model selection is hard is old. Our contribution is \emph{formalization}: making ``coordinate sufficiency'' precise enough to mechanize, constructing verified reductions, and proving the complexity results hold for the formalized definitions.
 
@@ -41,7 +41,7 @@ This follows the tradition of verified complexity theory: just as Nipkow \& Klei
 
 \subsection{Module Structure}
 
-The formalization consists of 36 files organized as follows:
+The formalization consists of \LeanTotalFiles\ files organized as follows:
 
 \begin{itemize}
 \item \texttt{Basic.lean} -- Core definitions (DecisionProblem, CoordinateSet, Projection)
@@ -93,8 +93,8 @@ theorem simplicity_preference_fallacy (T_simple T_complex : Tool)
 \subsection{Verification Status}
 
 \begin{itemize}
-\item Total lines: $\sim$5,600
-\item Theorems/lemmas: 230+
-\item Files: 36
-\item Status: All proofs compile with no \texttt{sorry}
+\item Total lines: \LeanTotalLines
+\item Theorems/lemmas: \LeanTotalTheorems
+\item Files: \LeanTotalFiles
+\item Status: All proofs compile with \LeanTotalSorry\ \texttt{sorry}
 \end{itemize}

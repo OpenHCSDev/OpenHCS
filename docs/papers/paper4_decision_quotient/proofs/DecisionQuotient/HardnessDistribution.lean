@@ -19,6 +19,8 @@
 -/
 
 import Mathlib.Data.Nat.Defs
+import Mathlib.Data.Finset.Card
+import Mathlib.Data.Rat.Defs
 import Mathlib.Tactic
 
 namespace DecisionQuotient.HardnessDistribution
@@ -68,6 +70,29 @@ def errorSites (S : SolutionArchitecture P) (n : ℕ) : ℕ :=
 /-- Total specification effort: DOF paid once centrally + DOF paid n times distributed -/
 def totalDOF (S : SolutionArchitecture P) (n : ℕ) : ℕ :=
   S.centralDOF + n * S.distributedDOF
+
+def hardnessEfficiency (S : SolutionArchitecture P) (n : ℕ) : ℚ :=
+  if _ : totalDOF S n = 0 then 0 else (S.centralDOF : ℚ) / (totalDOF S n : ℚ)
+
+/-- For positive total DOF, hardness efficiency is exactly the central share ratio. -/
+theorem hardnessEfficiency_eq_central_share (S : SolutionArchitecture P) (n : ℕ)
+    (hpos : totalDOF S n > 0) :
+    hardnessEfficiency S n = (S.centralDOF : ℚ) / (totalDOF S n : ℚ) := by
+  unfold hardnessEfficiency
+  simp [Nat.ne_of_gt hpos]
+
+/-! ## Baseline Conservation Across Use Sites -/
+
+/-- For any nonzero use-site count, total realized DOF cannot drop below intrinsic DOF. -/
+theorem totalDOF_ge_intrinsic (S : SolutionArchitecture P) (n : ℕ) (hn : n ≥ 1) :
+    totalDOF S n ≥ P.intrinsicDOF := by
+  have hdist : S.distributedDOF ≤ n * S.distributedDOF := by
+    calc
+      S.distributedDOF = 1 * S.distributedDOF := by simp
+      _ ≤ n * S.distributedDOF := Nat.mul_le_mul_right _ hn
+  have hcover : S.centralDOF + S.distributedDOF ≤ S.centralDOF + n * S.distributedDOF :=
+    Nat.add_le_add_left hdist S.centralDOF
+  exact le_trans S.conservation hcover
 
 /-! ## Hardness Conservation (Information-Theoretic)
 
@@ -120,7 +145,7 @@ theorem centralized_minimal_errors (S : SolutionArchitecture P) (n : ℕ)
   simp [hc, hd]
 
 /-- Positive distributed DOF means error sites grow with n -/
-theorem distributed_errors_grow (S : SolutionArchitecture P) (n : ℕ) (hn : n > 0)
+theorem distributed_errors_grow (S : SolutionArchitecture P) (n : ℕ) (_hn : n > 0)
     (hd : S.distributedDOF > 0) :
     errorSites S n ≥ n := by
   unfold errorSites
@@ -152,6 +177,70 @@ theorem right_dominates_wrong (P : SpecificationProblem)
   have h1 : n * S_wrong.distributedDOF ≥ n := Nat.le_mul_of_pos_right n hw
   omega
 
+/-- Right-hardness architectures have strictly fewer error sites than wrong-hardness
+    architectures once there is more than one use site. -/
+theorem right_fewer_error_sites (P : SpecificationProblem)
+    (S_right S_wrong : SolutionArchitecture P)
+    (hr : isRightHardness S_right) (hcentral : S_right.centralDOF > 0)
+    (hw : isWrongHardness S_wrong) (n : ℕ) (hn : n > 1) :
+    errorSites S_right n < errorSites S_wrong n := by
+  have hright : errorSites S_right n = 1 :=
+    centralized_minimal_errors S_right n hcentral hr
+  have hn_pos : n > 0 := lt_trans (by decide : (0 : ℕ) < 1) hn
+  have hwrong_ge_n : errorSites S_wrong n ≥ n :=
+    distributed_errors_grow S_wrong n hn_pos hw
+  have hone_lt_err : 1 < errorSites S_wrong n := lt_of_lt_of_le hn hwrong_ge_n
+  rw [hright]
+  exact hone_lt_err
+
+/-- Moving one unit of work from distributed to central saves exactly n-1 total units. -/
+theorem centralization_step_saves_n_minus_one (central distributed n : ℕ)
+    (hd : distributed > 0) :
+    (central + n * distributed) - ((central + 1) + n * (distributed - 1)) = n - 1 := by
+  rcases Nat.exists_eq_succ_of_ne_zero (Nat.ne_of_gt hd) with ⟨d, rfl⟩
+  cases n with
+  | zero =>
+      simp [Nat.succ_sub_one]
+  | succ n' =>
+      let x : ℕ := (n' + 1) * d
+      have hBA : central + 1 + x ≤ central + (x + (n' + 1)) := by
+        omega
+      have hsub : central + (x + (n' + 1)) - (central + 1 + x) = n' := by
+        apply (Nat.sub_eq_iff_eq_add hBA).2
+        omega
+      simpa [x, Nat.succ_sub_one, Nat.succ_mul, Nat.mul_add, Nat.mul_one,
+        Nat.add_assoc, Nat.add_left_comm, Nat.add_comm] using hsub
+
+/-- Therefore, when n > 1, centralizing one unit of distributed work strictly lowers total DOF. -/
+theorem centralization_step_reduces_total (central distributed n : ℕ)
+    (hd : distributed > 0) (hn : n > 1) :
+    (central + 1) + n * (distributed - 1) < central + n * distributed := by
+  let A := central + n * distributed
+  let B := (central + 1) + n * (distributed - 1)
+  have hs : A - B = n - 1 := by
+    unfold A B
+    exact centralization_step_saves_n_minus_one central distributed n hd
+  have hpos : 0 < A - B := by
+    rw [hs]
+    omega
+  have hnotle : ¬ A ≤ B := by
+    intro hle
+    exact (Nat.ne_of_gt hpos) (Nat.sub_eq_zero_of_le hle)
+  have hlt : B < A := lt_of_not_ge hnotle
+  simpa [A, B] using hlt
+
+/-- Bundled centralization dominance: lower total and fewer error sites. -/
+theorem centralization_dominance_bundle (P : SpecificationProblem)
+    (S_right S_wrong : SolutionArchitecture P)
+    (hr : isRightHardness S_right) (hcentral : S_right.centralDOF > 0)
+    (hw : isWrongHardness S_wrong) (n : ℕ)
+    (hn_total : n > S_right.centralDOF) (hn_sites : n > 1) :
+    totalDOF S_right n < totalDOF S_wrong n ∧
+    errorSites S_right n < errorSites S_wrong n := by
+  constructor
+  · exact right_dominates_wrong P S_right S_wrong hr hw n hn_total
+  · exact right_fewer_error_sites P S_right S_wrong hr hcentral hw n hn_sites
+
 /-! ## Leverage Connection (Paper 3)
 
 From Paper 3: Leverage = capabilities / DOF
@@ -165,10 +254,10 @@ def leverageRatio (capabilities : ℕ) (S : SolutionArchitecture P) (n : ℕ) : 
 /-- Centralized solutions have higher leverage (same capabilities, lower DOF) -/
 theorem centralized_higher_leverage (P : SpecificationProblem)
     (S_central S_distrib : SolutionArchitecture P)
-    (caps : ℕ) (n : ℕ) (hn : n ≥ 1)
+    (_caps : ℕ) (n : ℕ) (hn : n ≥ 1)
     (hc_eq : S_central.centralDOF = S_distrib.centralDOF + S_distrib.distributedDOF)
     (hd_zero : S_central.distributedDOF = 0)
-    (hd_pos : S_distrib.distributedDOF > 0) :
+    (_hd_pos : S_distrib.distributedDOF > 0) :
     totalDOF S_central n ≤ totalDOF S_distrib n := by
   unfold totalDOF
   simp [hd_zero]
@@ -231,6 +320,57 @@ theorem manual_errors_grow (P : SpecificationProblem) (n : ℕ) (hn : n > 0) :
 def simplicityTax (P : SpecificationProblem) (S : SolutionArchitecture P) : ℕ :=
   S.distributedDOF
 
+/-- Set-based gap cardinality: |R \ A|. -/
+def gapCard {α : Type*} [DecidableEq α] (required native : Finset α) : ℕ :=
+  (required \ native).card
+
+/-- Exact set conservation for required dimensions:
+    |R \ A| + |R ∩ A| = |R|. -/
+theorem gap_conservation_card {α : Type*} [DecidableEq α] (required native : Finset α) :
+    gapCard required native + (required ∩ native).card = required.card := by
+  unfold gapCard
+  exact Finset.card_sdiff_add_card_inter required native
+
+/-- Total external work under per-site externalization. -/
+def totalExternalWork {α : Type*} [DecidableEq α] (required native : Finset α) (n : ℕ) : ℕ :=
+  n * gapCard required native
+
+/-- Linear-growth identity used in the Simplicity Tax section. -/
+theorem totalExternalWork_eq_n_mul_gapCard {α : Type*}
+    [DecidableEq α]
+    (required native : Finset α) (n : ℕ) :
+    totalExternalWork required native n = n * gapCard required native := by
+  rfl
+
+/-- Amortization threshold n* = floor(Hc / t). -/
+def amortizationThreshold (centralCost taxPerSite : ℕ) : ℕ :=
+  centralCost / taxPerSite
+
+/-- If per-site tax is positive, crossing n* makes complete-model total lower. -/
+theorem complete_model_dominates_after_threshold
+    (centralCost taxPerSite n : ℕ)
+    (htax : taxPerSite > 0)
+    (hn : n > amortizationThreshold centralCost taxPerSite) :
+    centralCost < n * taxPerSite := by
+  have hdiv : centralCost / taxPerSite < n := hn
+  exact (Nat.div_lt_iff_lt_mul htax).1 hdiv
+
+/-- Linear maintenance costs are eventually dominated by exponential search costs. -/
+theorem linear_lt_exponential_eventually (k : ℕ) :
+    ∃ n0, ∀ n ≥ n0, k < 2 ^ n := by
+  refine ⟨k, ?_⟩
+  intro n hn
+  exact lt_of_le_of_lt hn Nat.lt_two_pow_self
+
+/-- Linear maintenance remains eventually dominated even with an additive constant term. -/
+theorem linear_lt_exponential_plus_constant_eventually (k c : ℕ) :
+    ∃ n0, ∀ n ≥ n0, k < 2 ^ n + c := by
+  rcases linear_lt_exponential_eventually k with ⟨n0, hn0⟩
+  refine ⟨n0, ?_⟩
+  intro n hn
+  have hk : k < 2 ^ n := hn0 n hn
+  exact lt_of_lt_of_le hk (Nat.le_add_right _ _)
+
 /-- Conservation restated with SimplicityTax notation. -/
 theorem simplicityTax_conservation (P : SpecificationProblem) (S : SolutionArchitecture P) :
     S.centralDOF + simplicityTax P S ≥ P.intrinsicDOF := by
@@ -291,6 +431,60 @@ def saturatingSiteCost (K : ℕ) (n : ℕ) : ℕ :=
 /-- Generalized total cost with arbitrary per-site accumulation. -/
 def generalizedTotalDOF (central : ℕ) (siteCost : ℕ → ℕ) (n : ℕ) : ℕ :=
   central + siteCost n
+
+/-- Pointwise nonlinear dominance:
+    if right-site accumulation at n is bounded by B and wrong-site accumulation
+    at n is at least n, then crossing centralRight + B yields strict dominance. -/
+theorem generalized_right_dominates_wrong_pointwise
+    (centralRight centralWrong B n : ℕ)
+    (siteRight siteWrong : ℕ → ℕ)
+    (hRightBound : siteRight n ≤ B)
+    (hWrongLower : n ≤ siteWrong n)
+    (hn : n > centralRight + B) :
+    generalizedTotalDOF centralRight siteRight n <
+      generalizedTotalDOF centralWrong siteWrong n := by
+  unfold generalizedTotalDOF
+  have hRightLe : centralRight + siteRight n ≤ centralRight + B :=
+    Nat.add_le_add_left hRightBound centralRight
+  have hRightLt : centralRight + siteRight n < n := lt_of_le_of_lt hRightLe hn
+  have hWrongGe : n ≤ centralWrong + siteWrong n := by
+    exact le_trans hWrongLower (Nat.le_add_left _ _)
+  exact lt_of_lt_of_le hRightLt hWrongGe
+
+/-- Nonlinear dominance by growth separation:
+    bounded right-site accumulation versus identity-lower-bounded wrong-site accumulation. -/
+theorem generalized_right_dominates_wrong_of_bounded_vs_identity_lower
+    (centralRight centralWrong B n : ℕ)
+    (siteRight siteWrong : ℕ → ℕ)
+    (hRightBound : ∀ m, siteRight m ≤ B)
+    (hWrongLower : ∀ m, m ≤ siteWrong m)
+    (hn : n > centralRight + B) :
+    generalizedTotalDOF centralRight siteRight n <
+      generalizedTotalDOF centralWrong siteWrong n := by
+  exact generalized_right_dominates_wrong_pointwise
+    centralRight centralWrong B n siteRight siteWrong
+    (hRightBound n) (hWrongLower n) hn
+
+/-- Eventual nonlinear dominance:
+    if right-site accumulation is globally bounded and wrong-site accumulation
+    eventually dominates identity, right architecture eventually dominates. -/
+theorem generalized_right_eventually_dominates_wrong
+    (centralRight centralWrong B N : ℕ)
+    (siteRight siteWrong : ℕ → ℕ)
+    (hRightBound : ∀ m, siteRight m ≤ B)
+    (hWrongLowerFrom : ∀ m, m ≥ N → m ≤ siteWrong m) :
+    ∃ N0, ∀ n ≥ N0,
+      generalizedTotalDOF centralRight siteRight n <
+        generalizedTotalDOF centralWrong siteWrong n := by
+  refine ⟨max N (centralRight + B + 1), ?_⟩
+  intro n hn
+  have hN : n ≥ N := le_trans (Nat.le_max_left _ _) hn
+  have hBound : centralRight + B + 1 ≤ n := le_trans (Nat.le_max_right _ _) hn
+  have hnStrict : n > centralRight + B := by
+    exact lt_of_lt_of_le (Nat.lt_succ_self (centralRight + B)) hBound
+  exact generalized_right_dominates_wrong_pointwise
+    centralRight centralWrong B n siteRight siteWrong
+    (hRightBound n) (hWrongLowerFrom n hN) hnStrict
 
 /-- Saturating site cost is eventually constant. -/
 theorem saturatingSiteCost_eventually_constant (K : ℕ) :

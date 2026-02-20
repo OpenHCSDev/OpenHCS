@@ -4,8 +4,9 @@
 
 This directory contains the complete Lean 4 formalization for Leverage Framework.
 
-- **Lines:** 741
-- **Theorems:** 35
+- **Lines:** 2737
+- **Theorems:** 139
+- **`sorry` placeholders:** 0
 
 
 ## Requirements

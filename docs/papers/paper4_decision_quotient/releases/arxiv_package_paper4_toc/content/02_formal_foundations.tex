@@ -47,6 +47,14 @@ A sufficient set $I$ is \emph{minimal} if no proper subset $I' \subsetneq I$ is 
 Coordinate $i$ is \emph{relevant} if it belongs to some minimal sufficient set.
 \end{definition}
 
+\begin{definition}[Exact Relevance Identifiability]\label{def:exact-identifiability}
+For a decision problem $\mathcal{D}$ and candidate coordinate set $I$, we say $I$ is \emph{exactly relevance-identifying} if
+\[
+\forall i \in \{1,\ldots,n\}:\quad i \in I \iff i \text{ is relevant for } \mathcal{D}.
+\]
+Equivalently, $I$ is exactly relevance-identifying iff $I$ equals the full relevant-coordinate set.
+\end{definition}
+
 \begin{example}[Weather Decision]
 Consider deciding whether to carry an umbrella:
 \begin{itemize}
@@ -101,6 +109,61 @@ The utility is given as a full table over $A \times S$. The input length is $L_{
 
 Unless explicitly stated otherwise, ``polynomial time'' refers to the succinct encoding.
 
+\subsection{Model Contract and Regime Tags}\label{sec:model-contract}
+
+All theorem statements in this paper are typed by the following model contract:
+\begin{itemize}
+\item \textbf{C1 (finite actions):} $A$ is finite.
+\item \textbf{C2 (finite coordinate domains):} each $X_i$ is finite, so $S=\prod_i X_i$ is finite.
+\item \textbf{C3 (evaluable utility):} $U(a,s)$ is computable from the declared input encoding.
+\item \textbf{C4 (fixed decision semantics):} optimality is defined by $\Opt(s)=\arg\max_a U(a,s)$.
+\end{itemize}
+
+We use short regime tags for applied corollaries:
+\begin{itemize}
+\item \textbf{[E]} explicit-state encoding,
+\item \textbf{[S]} succinct encoding,
+\item \textbf{[S+ETH]} succinct encoding with ETH,
+\item \textbf{[S\_bool]} mechanized Boolean-coordinate submodel.
+\end{itemize}
+
+This tagging is a claim-typing convention: each strong statement is attached to the regime where it is proven.
+
+\subsection{Adjacent Objective Regimes and Bridge}
+
+\begin{definition}[Adjacent Sequential Objective Regime]\label{def:adjacent-sequential-regime}
+An adjacent sequential objective instance consists of:
+\begin{itemize}
+\item finite action set $A$,
+\item finite coordinate state space $S = X_1 \times \cdots \times X_n$,
+\item horizon $T \in \mathbb{N}_{\ge 1}$ and history-dependent policy class,
+\item reward process $r_t$ and objective functional $J(\pi)$ (e.g., cumulative reward or regret).
+\end{itemize}
+\end{definition}
+
+\begin{proposition}[One-Step Deterministic Bridge]\label{prop:one-step-bridge}
+Consider an instance of Definition~\ref{def:adjacent-sequential-regime} satisfying:
+\begin{enumerate}
+\item $T=1$,
+\item deterministic rewards $r_1(a,s)=U(a,s)$ for some evaluable $U$,
+\item objective $J(\pi)=U(\pi(s),s)$ (single-step maximization),
+\item no post-decision state update relevant to the objective.
+\end{enumerate}
+Then the induced optimization problem is exactly the static decision problem of Definition~\ref{def:decision-problem}, and coordinate sufficiency in the sequential formulation is equivalent to Definition~\ref{def:sufficient}.
+\end{proposition}
+
+\begin{proof}
+Under (1)--(3), optimizing $J$ at state $s$ is identical to choosing an action in $\arg\max_{a\in A} U(a,s)=\Opt(s)$. Condition (4) removes any dependence on future transition effects. Therefore the optimal-policy relation in the adjacent formulation coincides pointwise with $\Opt$ from Definition~\ref{def:optimizer}, and the invariance condition ``same projection implies same optimal choice set'' is exactly Definition~\ref{def:sufficient}.
+\end{proof}
+
+\begin{remark}[Extension Boundary]
+Beyond Proposition~\ref{prop:one-step-bridge} (multi-step horizon, stochastic transitions/rewards, or regret objectives), the governing complexity objects change. Those regimes are natural extensions, but they are distinct formal classes from the static sufficiency class analyzed in this paper.
+\end{remark}
+
+\section{Interpretive Foundations: Hardness and Solver Claims}\label{sec:interpretive-foundations}
+
+The claims in later applied sections are theorem-indexed consequences of this section and Sections~\ref{sec:hardness}--\ref{sec:tractable}.
+
 \subsection{Structural Complexity vs Representational Hardness}
 
 \begin{definition}[Structural Complexity]\label{def:structural-complexity}
@@ -114,6 +177,51 @@ For a fixed decision relation and an encoding regime $E$ (Section~\ref{sec:encod
 \begin{remark}[Interpretation Contract]
 This paper keeps the decision relation fixed and varies the encoding regime explicitly. Thus, later separations are read as changes in representational hardness under fixed structural complexity, not as changes to the underlying sufficiency semantics.
 \end{remark}
+
+\subsection{Solver Integrity and Regime Competence}
+
+To keep practical corollaries type-safe, we separate \emph{integrity} (what a solver is allowed to assert) from \emph{competence} (what it can cover under a declared regime), following the certifying-algorithms schema \cite{mcconnell2010certifying}.
+
+\begin{definition}[Certifying Solver]\label{def:certifying-solver}
+Fix a decision relation $\mathcal{R} \subseteq \mathcal{X}\times\mathcal{Y}$ and an encoding regime $E$ over $\mathcal{X}$. A \emph{certifying solver} is a pair $(Q,V)$ where:
+\begin{itemize}
+\item $Q$ maps each input $x\in\mathcal{X}$ to either $\mathsf{ABSTAIN}$ or a candidate pair $(y,w)$,
+\item $V$ is a polynomial-time checker (in $|{\rm enc}_E(x)|$) with output in $\{0,1\}$.
+\end{itemize}
+\end{definition}
+
+\begin{definition}[Solver Integrity]\label{def:solver-integrity}
+A certifying solver $(Q,V)$ has \emph{integrity} for relation $\mathcal{R}$ if:
+\begin{itemize}
+\item (assertion soundness) $Q(x)=(y,w)\implies V(x,y,w)=1$,
+\item (checker soundness) $V(x,y,w)=1\implies (x,y)\in\mathcal{R}$.
+\end{itemize}
+The output $\mathsf{ABSTAIN}$ (equivalently, $\mathsf{UNKNOWN}$) is first-class and carries no assertion about membership in $\mathcal{R}$.
+\end{definition}
+
+\begin{definition}[Competence Under a Regime]\label{def:competence-regime}
+Fix a regime $\Gamma=(\mathcal{X}_\Gamma,E_\Gamma,\mathcal{C}_\Gamma)$ with instance family $\mathcal{X}_\Gamma\subseteq\mathcal{X}$, encoding assumptions $E_\Gamma$, and resource bound $\mathcal{C}_\Gamma$. A certifying solver $(Q,V)$ is \emph{competent} on $\Gamma$ for relation $\mathcal{R}$ if:
+\begin{itemize}
+\item it has integrity for $\mathcal{R}$ (Definition~\ref{def:solver-integrity}),
+\item (coverage) $\forall x\in\mathcal{X}_\Gamma,\;Q(x)\neq\mathsf{ABSTAIN}$,
+\item (resource bound) runtime$_Q(x)\le \mathcal{C}_\Gamma(|{\rm enc}_{E_\Gamma}(x)|)$ for all $x\in\mathcal{X}_\Gamma$.
+\end{itemize}
+\end{definition}
+
+\begin{proposition}[Integrity--Competence Separation]\label{prop:integrity-competence-separation}
+Integrity and competence are distinct predicates: integrity constrains asserted outputs, while competence adds non-abstaining coverage under resource bounds.
+\end{proposition}
+
+\begin{proof}
+Take the always-abstain solver $Q_\bot(x)=\mathsf{ABSTAIN}$ with any polynomial-time checker $V$. Definition~\ref{def:solver-integrity} holds vacuously, so $(Q_\bot,V)$ is integrity-preserving, but it fails Definition~\ref{def:competence-regime} whenever $\mathcal{X}_\Gamma\neq\emptyset$ because coverage fails. Hence integrity does not imply competence. The converse is immediate because competence includes integrity as a conjunct.
+\end{proof}
+
+This separation is load-bearing for the regime-conditional trilemma used later: if exact competence is blocked by hardness in a declared regime, integrity forces one of three responses---abstain, weaken guarantees, or change regime assumptions.
+
+\paragraph{Mechanized status.}
+This separation is machine-checked in \texttt{DecisionQuotient/IntegrityCompetence.lean} via:
+\texttt{competence\_implies\_integrity} and
+\texttt{integrity\_not\_competent\_of\_nonempty\_scope}.
 
 
 % Include the hardness proofs (already developed)

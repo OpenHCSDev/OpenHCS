@@ -1,6 +1,6 @@
 # Paper: Leverage-Driven Software Architecture: A Probabilistic Framework for Architectural Decision-Making
 
-**Status**: Draft-ready | **Lean**: 741 lines, 35 theorems
+**Status**: Draft-ready | **Lean**: 2737 lines, 139 theorems
 
 ---
 
@@ -1629,6 +1629,7 @@ All formalized in Lean 4 (1,634 lines across 7 modules, 142 definitions/theorems
 ## Machine-Checked Proofs
 
 All theorems are formalized in Lean 4:
-- Location: `docs/papers/proofs/paper3_*.lean`
-- Lines: 741
-- Theorems: 35
+- Location: `docs/papers/paper3_leverage/proofs/`
+- Lines: 2737
+- Theorems: 139
+- `sorry` placeholders: 0

@@ -2,15 +2,15 @@
 
 The hardness results of Section~\ref{sec:hardness} apply to worst-case instances under the succinct encoding. This section states an encoding-regime separation: an explicit-state upper bound versus a succinct-encoding worst-case lower bound.
 
-\paragraph{Model note.} Part~1 is an explicit-state upper bound (time polynomial in $|S|$). Part~2 is a succinct-encoding lower bound under ETH (time exponential in $n$). The encodings are defined in Section~\ref{sec:encoding}. These two parts are stated in different encodings and are not directly comparable as functions of a single input length.
+\paragraph{Model note.} Part~1 is [E] (time polynomial in $|S|$). Part~2 is [S+ETH] (time exponential in $n$). The encodings are defined in Section~\ref{sec:encoding}. These two parts are stated in different encodings and are not directly comparable as functions of a single input length.
 
 \begin{theorem}[Explicit--Succinct Regime Separation]\label{thm:dichotomy}
 Let $\mathcal{D} = (A, X_1, \ldots, X_n, U)$ be a decision problem with $|S| = N$ states. Let $k^*$ be the size of the minimal sufficient set.
 
 \begin{enumerate}
-\item \textbf{Explicit-state upper bound:} Under the explicit-state encoding, SUFFICIENCY-CHECK is solvable in time polynomial in $N$ (e.g. $O(N^2|A|)$).
+\item \textbf{[E] Explicit-state upper bound:} Under the explicit-state encoding, SUFFICIENCY-CHECK is solvable in time polynomial in $N$ (e.g. $O(N^2|A|)$).
 
-\item \textbf{Succinct lower bound under ETH (worst case):} Assuming ETH, there exists a family of succinctly encoded instances with $n$ coordinates and minimal sufficient set size $k^* = n$ such that SUFFICIENCY-CHECK requires time $2^{\Omega(n)}$.
+\item \textbf{[S+ETH] Succinct lower bound (worst case):} Assuming ETH, there exists a family of succinctly encoded instances with $n$ coordinates and minimal sufficient set size $k^* = n$ such that SUFFICIENCY-CHECK requires time $2^{\Omega(n)}$.
 \end{enumerate}
 \end{theorem}
 
@@ -37,4 +37,4 @@ For Boolean coordinate spaces ($N = 2^n$), the explicit-state bound is polynomia
 Theorem~\ref{thm:dichotomy} keeps the structural problem fixed (same sufficiency relation) and separates representational hardness by encoding regime: explicit-state access exposes the boundary $s \mapsto \Opt(s)$, while succinct access can hide it enough to force ETH-level worst-case cost on a hard family.
 \end{remark}
 
-This encoding-regime separation explains why some domains admit tractable model selection under explicit-state assumptions, while other domains (or encodings) exhibit worst-case hardness that forces heuristic approaches.
+This encoding-regime separation identifies exactly where exact minimization is tractable ([E]) and where worst-case intractability appears ([S+ETH]) for the same underlying decision relation.

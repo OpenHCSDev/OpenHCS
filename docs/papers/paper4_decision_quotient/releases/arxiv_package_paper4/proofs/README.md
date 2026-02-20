@@ -4,8 +4,9 @@
 
 This directory contains the complete Lean 4 formalization for Decision Quotient.
 
-- **Lines:** 5901
-- **Theorems:** 237
+- **Lines:** 6255
+- **Theorems:** 265
+- **`sorry` placeholders:** 0
 
 
 ## Requirements
@@ -48,6 +49,7 @@ lake build
 | `HardnessDistribution.lean` | HardnessDistribution |
 | `Information.lean` | Information |
 | `Instances.lean` | Instances |
+| `IntegrityCompetence.lean` | IntegrityCompetence |
 | `PolynomialReduction.lean` | PolynomialReduction |
 | `QueryComplexity.lean` | QueryComplexity |
 | `Quotient.lean` | Quotient |

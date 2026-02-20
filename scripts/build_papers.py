@@ -27,6 +27,7 @@ import yaml
 import argparse
 from datetime import datetime
 import re
+import hashlib
 
 
 @dataclass(frozen=True)
@@ -56,9 +57,6 @@ class PaperMeta:
     dir_name: str           # e.g., "paper1_typing_discipline"
     latex_dir: str          # Relative to paper dir, typically "latex"
     latex_file: str         # Main .tex file name
-    lean_lines: int
-    lean_theorems: int
-    lean_sorry: int
     venue: str              # Target venue, e.g., "JSAIT", "TOPLAS"
 
     @classmethod
@@ -70,11 +68,25 @@ class PaperMeta:
             dir_name=d["dir"],
             latex_dir=d.get("latex_dir", "latex"),
             latex_file=d["latex_file"],
-            lean_lines=d.get("lean_lines", 0),
-            lean_theorems=d.get("lean_theorems", 0),
-            lean_sorry=d.get("lean_sorry", 0),
             venue=d.get("venue", "Draft"),
         )
+
+
+@dataclass(frozen=True)
+class LeanStats:
+    """Computed Lean proof statistics for a paper."""
+    line_count: int
+    theorem_count: int
+    sorry_count: int
+    file_count: int
+
+
+@dataclass(frozen=True)
+class LeanFileStats:
+    """Per-file Lean proof statistics."""
+    line_count: int
+    theorem_count: int
+    sorry_count: int
 
 
 class PaperBuilder:
@@ -99,6 +111,8 @@ class PaperBuilder:
         self._raw_metadata = self._load_raw_metadata()
         self.arxiv_config = ArxivConfig.from_dict(self._raw_metadata.get("arxiv", {}))
         self.papers: Dict[str, PaperMeta] = self._load_papers()
+        self._lean_stats_cache: Dict[Path, LeanStats] = {}
+        self._lean_file_stats_cache: Dict[Path, Dict[str, LeanFileStats]] = {}
 
         # Captured build output for BUILD_LOG.txt
         self._lean_build_output: str = ""
@@ -189,9 +203,21 @@ class PaperBuilder:
         if not main_tex.exists():
             raise FileNotFoundError(f"Main LaTeX file not found: {main_tex}")
 
-        files = self._collect_included_tex_files(main_tex, include_document_body_only=True)
+        files = self._collect_included_tex_files(
+            main_tex,
+            include_document_body_only=True,
+            include_self=False,
+        )
         if files:
-            return files
+            ordered_unique: List[Path] = []
+            seen: set[Path] = set()
+            for file_path in files:
+                resolved = file_path.resolve()
+                if resolved in seen:
+                    continue
+                seen.add(resolved)
+                ordered_unique.append(resolved)
+            return ordered_unique
 
         # Fail-loud fallback: preserve prior behavior if includes cannot be discovered.
         print(f"[build-md] Warning: no includes parsed from {main_tex.name}; falling back to content/*.tex")
@@ -264,10 +290,15 @@ class PaperBuilder:
         self,
         tex_file: Path,
         include_document_body_only: bool = False,
+        include_self: bool = True,
         active_stack: Tuple[Path, ...] = (),
         search_root: Path | None = None,
     ) -> List[Path]:
-        """Recursively collect leaf include files in document order."""
+        """Recursively collect include files in document order.
+
+        Includes parent files as well as nested includes so section files that
+        contain both prose and nested ``\\input`` directives are not dropped.
+        """
         resolved_tex = tex_file.resolve()
         if search_root is None:
             search_root = resolved_tex.parent
@@ -280,21 +311,19 @@ class PaperBuilder:
             include_document_body_only=include_document_body_only,
             search_root=search_root,
         )
-        if not direct_includes:
-            return [resolved_tex]
-
-        leaves: List[Path] = []
+        ordered_files: List[Path] = [resolved_tex] if include_self else []
         next_stack = (*active_stack, resolved_tex)
         for include_file in direct_includes:
-            leaves.extend(
+            ordered_files.extend(
                 self._collect_included_tex_files(
                     include_file,
                     include_document_body_only=False,
+                    include_self=True,
                     active_stack=next_stack,
                     search_root=search_root,
                 )
             )
-        return leaves
+        return ordered_files
 
     def _get_paper_proofs_dir(self, paper_id: str) -> Path:
         """Get the proofs directory for a specific paper.
@@ -306,6 +335,247 @@ class PaperBuilder:
         # Handle variants: paper1_jsait -> paper1_typing_discipline/proofs
         base_dir_name = meta.dir_name
         return self.papers_dir / base_dir_name / "proofs"
+
+    def _iter_paper_lean_files(self, proofs_dir: Path) -> List[Path]:
+        """Return paper Lean files, excluding build/cache directories."""
+        if not proofs_dir.exists():
+            return []
+
+        excluded_dirs = {".lake", "build"}
+        lean_files: List[Path] = []
+        for lean_file in proofs_dir.rglob("*.lean"):
+            rel_parts = lean_file.relative_to(proofs_dir).parts
+            if any(part in excluded_dirs for part in rel_parts):
+                continue
+            lean_files.append(lean_file)
+        return sorted(lean_files)
+
+    def _strip_lean_comments(self, content: str) -> str:
+        """Strip Lean line and nested block comments for token counting."""
+        out: List[str] = []
+        i = 0
+        n = len(content)
+        block_depth = 0
+        in_string = False
+
+        while i < n:
+            ch = content[i]
+            nxt = content[i + 1] if i + 1 < n else ""
+
+            if block_depth > 0:
+                if ch == "/" and nxt == "-":
+                    block_depth += 1
+                    i += 2
+                    continue
+                if ch == "-" and nxt == "/":
+                    block_depth -= 1
+                    i += 2
+                    continue
+                if ch == "\n":
+                    out.append("\n")
+                i += 1
+                continue
+
+            if not in_string and ch == "/" and nxt == "-":
+                block_depth = 1
+                i += 2
+                continue
+
+            if not in_string and ch == "-" and nxt == "-":
+                i += 2
+                while i < n and content[i] != "\n":
+                    i += 1
+                if i < n and content[i] == "\n":
+                    out.append("\n")
+                    i += 1
+                continue
+
+            if ch == '"':
+                # Toggle string state when quote is not escaped.
+                backslashes = 0
+                j = i - 1
+                while j >= 0 and content[j] == "\\":
+                    backslashes += 1
+                    j -= 1
+                if backslashes % 2 == 0:
+                    in_string = not in_string
+
+            out.append(ch)
+            i += 1
+
+        return "".join(out)
+
+    def _count_theorems_and_sorries(self, content: str) -> Tuple[int, int]:
+        """Count theorem/lemma declarations and sorry placeholders in Lean text."""
+        theorem_re = re.compile(
+            r"^\s*(?:(?:private|protected|noncomputable|unsafe|partial|opaque)\s+)*(?:theorem|lemma)\s+[A-Za-z_][A-Za-z0-9_']*",
+            re.MULTILINE,
+        )
+        sorry_re = re.compile(r"\bsorry\b")
+        stripped = self._strip_lean_comments(content)
+        return (len(theorem_re.findall(stripped)), len(sorry_re.findall(stripped)))
+
+    def _compute_lean_file_stats(self, proofs_dir: Path) -> Dict[str, LeanFileStats]:
+        """Compute per-file Lean stats keyed by relative module path (without .lean)."""
+        cache_key = proofs_dir.resolve()
+        if cache_key in self._lean_file_stats_cache:
+            return self._lean_file_stats_cache[cache_key]
+
+        stats: Dict[str, LeanFileStats] = {}
+        for lean_file in self._iter_paper_lean_files(proofs_dir):
+            rel_key = str(lean_file.relative_to(proofs_dir).with_suffix(""))
+            content = lean_file.read_text(encoding="utf-8", errors="replace")
+            theorem_count, sorry_count = self._count_theorems_and_sorries(content)
+            stats[rel_key] = LeanFileStats(
+                line_count=len(content.splitlines()),
+                theorem_count=theorem_count,
+                sorry_count=sorry_count,
+            )
+
+        self._lean_file_stats_cache[cache_key] = stats
+        return stats
+
+    def _compute_lean_stats(self, proofs_dir: Path) -> LeanStats:
+        """Compute Lean line/theorem/sorry counts from source files."""
+        cache_key = proofs_dir.resolve()
+        if cache_key in self._lean_stats_cache:
+            return self._lean_stats_cache[cache_key]
+
+        per_file = self._compute_lean_file_stats(proofs_dir)
+        line_count = sum(s.line_count for s in per_file.values())
+        theorem_count = sum(s.theorem_count for s in per_file.values())
+        sorry_count = sum(s.sorry_count for s in per_file.values())
+
+        stats = LeanStats(
+            line_count=line_count,
+            theorem_count=theorem_count,
+            sorry_count=sorry_count,
+            file_count=len(per_file),
+        )
+        self._lean_stats_cache[cache_key] = stats
+        return stats
+
+    def _get_lean_stats(self, paper_id: str) -> LeanStats:
+        """Get computed Lean stats for a paper or variant."""
+        proofs_dir = self._get_paper_proofs_dir(paper_id)
+        return self._compute_lean_stats(proofs_dir)
+
+    def _get_lean_file_stats(self, paper_id: str) -> Dict[str, LeanFileStats]:
+        """Get per-file Lean stats for a paper or variant."""
+        proofs_dir = self._get_paper_proofs_dir(paper_id)
+        return self._compute_lean_file_stats(proofs_dir)
+
+    def _lean_macro_suffix(self, module_path: str) -> str:
+        """Convert a relative Lean module path to a LaTeX-safe macro suffix."""
+        digit_words = {
+            "0": "Zero",
+            "1": "One",
+            "2": "Two",
+            "3": "Three",
+            "4": "Four",
+            "5": "Five",
+            "6": "Six",
+            "7": "Seven",
+            "8": "Eight",
+            "9": "Nine",
+        }
+        parts = re.split(r"[^A-Za-z0-9]+", module_path)
+        cleaned = [p for p in parts if p]
+        if not cleaned:
+            return "Unknown"
+        normalized_parts: List[str] = []
+        for part in cleaned:
+            converted = "".join(digit_words.get(ch, ch) for ch in part)
+            normalized_parts.append(converted[:1].upper() + converted[1:])
+        return "".join(normalized_parts)
+
+    def _build_lean_macro_suffix_map(self, module_paths: List[str]) -> Dict[str, str]:
+        """Build collision-safe macro suffixes for Lean module paths."""
+        grouped: Dict[str, List[str]] = {}
+        for module_path in module_paths:
+            base = self._lean_macro_suffix(module_path)
+            grouped.setdefault(base, []).append(module_path)
+
+        suffix_map: Dict[str, str] = {}
+        for base, paths in grouped.items():
+            if len(paths) == 1:
+                suffix_map[paths[0]] = base
+                continue
+
+            # Rare collision case (e.g., Unicode-heavy names normalizing alike).
+            for module_path in sorted(paths):
+                digest = hashlib.sha1(module_path.encode("utf-8")).hexdigest()[:8]
+                suffix_map[module_path] = f"{base}{digest}"
+        return suffix_map
+
+    def _write_latex_lean_stats(self, paper_id: str) -> None:
+        """Write auto-generated Lean stats macros into latex/content/lean_stats.tex."""
+        meta = self._get_paper_meta(paper_id)
+        latex_dir = self._get_paper_dir(paper_id) / meta.latex_dir
+        content_dir = latex_dir / "content"
+        if not content_dir.exists():
+            return
+
+        total_stats = self._get_lean_stats(paper_id)
+        file_stats = self._get_lean_file_stats(paper_id)
+        suffix_map = self._build_lean_macro_suffix_map(sorted(file_stats.keys()))
+
+        lines: List[str] = [
+            "% Auto-generated by scripts/build_papers.py. Do not edit manually.",
+            f"% Generated: {datetime.now().isoformat()}",
+            f"\\providecommand{{\\LeanTotalLines}}{{{total_stats.line_count}}}",
+            f"\\providecommand{{\\LeanTotalTheorems}}{{{total_stats.theorem_count}}}",
+            f"\\providecommand{{\\LeanTotalSorry}}{{{total_stats.sorry_count}}}",
+            f"\\providecommand{{\\LeanTotalFiles}}{{{total_stats.file_count}}}",
+        ]
+        for module_path in sorted(file_stats.keys()):
+            suffix = suffix_map[module_path]
+            stats = file_stats[module_path]
+            lines.append(f"\\providecommand{{\\LeanLines{suffix}}}{{{stats.line_count}}}")
+            lines.append(f"\\providecommand{{\\LeanTheorems{suffix}}}{{{stats.theorem_count}}}")
+            lines.append(f"\\providecommand{{\\LeanSorry{suffix}}}{{{stats.sorry_count}}}")
+
+        (content_dir / "lean_stats.tex").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    def _expand_lean_stat_macros(self, text: str, paper_id: str) -> str:
+        """Expand ``\\Lean*`` macros to numeric values for markdown conversion."""
+        total_stats = self._get_lean_stats(paper_id)
+        file_stats = self._get_lean_file_stats(paper_id)
+        suffix_map = self._build_lean_macro_suffix_map(sorted(file_stats.keys()))
+        replacements: Dict[str, str] = {
+            r"\LeanTotalLines": str(total_stats.line_count),
+            r"\LeanTotalTheorems": str(total_stats.theorem_count),
+            r"\LeanTotalSorry": str(total_stats.sorry_count),
+            r"\LeanTotalFiles": str(total_stats.file_count),
+        }
+        for module_path, stats in file_stats.items():
+            suffix = suffix_map[module_path]
+            replacements[fr"\LeanLines{suffix}"] = str(stats.line_count)
+            replacements[fr"\LeanTheorems{suffix}"] = str(stats.theorem_count)
+            replacements[fr"\LeanSorry{suffix}"] = str(stats.sorry_count)
+
+        # Replace longest keys first so specific file macros win over prefixes.
+        for macro in sorted(replacements.keys(), key=len, reverse=True):
+            text = text.replace(macro, replacements[macro])
+
+        # Evaluate simple TeX integer arithmetic used in summary rows:
+        # \number\numexpr 1+2-3\relax -> 0
+        def _eval_numexpr(match: re.Match[str]) -> str:
+            expr = re.sub(r"\s+", "", match.group(1))
+            if not expr:
+                return match.group(0)
+            terms = re.findall(r"[+-]?\d+", expr)
+            if not terms:
+                return match.group(0)
+            total = sum(int(term) for term in terms)
+            return str(total)
+
+        text = re.sub(
+            r"\\number\\numexpr\s*([0-9+\-\s]+)\\relax",
+            _eval_numexpr,
+            text,
+        )
+        return text
 
     def build_lean(self, paper_id: str, verbose: bool = True) -> str:
         """Build Lean proofs with streaming output. Returns captured output.
@@ -395,6 +665,7 @@ class PaperBuilder:
         if not latex_file.exists():
             raise FileNotFoundError(f"LaTeX file not found: {latex_file}")
 
+        self._write_latex_lean_stats(paper_id)
         self._update_paper_date(latex_file)
 
         print(f"[build] Building {paper_id} LaTeX...")
@@ -450,11 +721,13 @@ class PaperBuilder:
 
         out_dir.mkdir(parents=True, exist_ok=True)
         print(f"[build-md] Building {paper_id}: {meta.name}...")
+        self._write_latex_lean_stats(paper_id)
 
         # Discover files from main LaTeX include order
         content_files = self._discover_content_files(paper_id)
         title = self._extract_main_latex_title(paper_id) or meta.full_name
-        self._build_markdown_file(meta, content_files, out_file, title)
+        lean_stats = self._get_lean_stats(paper_id)
+        self._build_markdown_file(meta, content_files, out_file, title, lean_stats)
 
         # Also copy to releases/ for arxiv package
         releases_dir = self._get_releases_dir(paper_id)
@@ -551,6 +824,7 @@ class PaperBuilder:
         content_files: List[Path],
         out_file: Path,
         title: str,
+        lean_stats: LeanStats,
     ):
         """Generate markdown file from LaTeX content."""
         with open(out_file, "w") as f:
@@ -558,8 +832,8 @@ class PaperBuilder:
             f.write(f"# Paper: {title}\n\n")
             f.write(
                 f"**Status**: {meta.venue}-ready | "
-                f"**Lean**: {meta.lean_lines} lines, "
-                f"{meta.lean_theorems} theorems\n\n---\n\n"
+                f"**Lean**: {lean_stats.line_count} lines, "
+                f"{lean_stats.theorem_count} theorems\n\n---\n\n"
             )
 
             # Abstract
@@ -570,9 +844,14 @@ class PaperBuilder:
                 # fall back to raw file content if no environment found
                 content = abstract_file.read_text(encoding="utf-8", errors="replace")
                 if r"\begin{abstract}" in content:
-                    self._convert_latex_to_markdown(abstract_file, f, extract_env="abstract")
+                    self._convert_latex_to_markdown(
+                        abstract_file,
+                        f,
+                        paper_id=meta.paper_id,
+                        extract_env="abstract",
+                    )
                 else:
-                    self._convert_latex_to_markdown(abstract_file, f)
+                    self._convert_latex_to_markdown(abstract_file, f, paper_id=meta.paper_id)
             else:
                 f.write("_Abstract not available._\n\n")
 
@@ -580,17 +859,25 @@ class PaperBuilder:
             for content_path in content_files:
                 if abstract_file and content_path.resolve() == abstract_file.resolve():
                     continue
-                self._convert_latex_to_markdown(content_path, f)
+                self._convert_latex_to_markdown(content_path, f, paper_id=meta.paper_id)
 
             # Footer
             f.write("\n\n---\n\n## Machine-Checked Proofs\n\n")
             f.write(f"All theorems are formalized in Lean 4:\n")
-            f.write(f"- Location: `docs/papers/proofs/{meta.paper_id}_*.lean`\n")
-            f.write(f"- Lines: {meta.lean_lines}\n")
-            f.write(f"- Theorems: {meta.lean_theorems}\n")
+            proofs_rel = self._get_paper_proofs_dir(meta.paper_id).relative_to(self.repo_root)
+            f.write(f"- Location: `{proofs_rel}/`\n")
+            f.write(f"- Lines: {lean_stats.line_count}\n")
+            f.write(f"- Theorems: {lean_stats.theorem_count}\n")
+            f.write(f"- `sorry` placeholders: {lean_stats.sorry_count}\n")
 
 
-    def _convert_latex_to_markdown(self, tex_file: Path, out_file, extract_env: str | None = None):
+    def _convert_latex_to_markdown(
+        self,
+        tex_file: Path,
+        out_file,
+        paper_id: str,
+        extract_env: str | None = None,
+    ):
         """Convert LaTeX file to Markdown using pandoc.
 
         Args:
@@ -600,27 +887,25 @@ class PaperBuilder:
         """
         import re
 
+        content = tex_file.read_text(encoding="utf-8", errors="replace")
         if extract_env:
             # Extract content from environment before converting
-            content = tex_file.read_text(encoding='utf-8')
             pattern = rf'\\begin\{{{extract_env}\}}(.*?)\\end\{{{extract_env}\}}'
             match = re.search(pattern, content, re.DOTALL)
             if not match:
                 out_file.write(f"_Content not found in {tex_file.name}_\n\n")
                 return
             latex_input = match.group(1).strip()
-            result = subprocess.run(
-                ["pandoc", "-f", "latex", "-t", "markdown", "--wrap=none", "--columns=100"],
-                input=latex_input,
-                capture_output=True,
-                text=True,
-            )
         else:
-            result = subprocess.run(
-                ["pandoc", str(tex_file), "-f", "latex", "-t", "markdown", "--wrap=none", "--columns=100"],
-                capture_output=True,
-                text=True,
-            )
+            latex_input = content
+
+        latex_input = self._expand_lean_stat_macros(latex_input, paper_id)
+        result = subprocess.run(
+            ["pandoc", "-f", "latex", "-t", "markdown", "--wrap=none", "--columns=100"],
+            input=latex_input,
+            capture_output=True,
+            text=True,
+        )
 
         if result.returncode == 0 and result.stdout:
             out_file.write(result.stdout)
@@ -631,15 +916,21 @@ class PaperBuilder:
     def _update_paper_date(self, tex_file: Path):
         """Update publication date in LaTeX file using regex for correct replacement."""
         import re
-        today = datetime.now().strftime("%B %-d, %Y")
         year = datetime.now().strftime("%Y")
         try:
             content = tex_file.read_text(encoding='utf-8')
         except UnicodeDecodeError:
             content = tex_file.read_text(encoding='latin-1')
 
-        # Use regex to replace entire \date{...} command, not just the prefix
-        content = re.sub(r'\\date\{[^}]*\}', f'\\\\date{{{today}}}', content)
+        # Normalize to compile-time date in LaTeX sources.
+        content = re.sub(r'\\date\{[^}]*\}', r'\\date{\\today}', content)
+        content = re.sub(
+            r'Manuscript received [^.\\n]*\.',
+            r'Manuscript received \\today.',
+            content,
+        )
+
+        # Keep explicit year fields in sync with build year where present.
         content = re.sub(r'\\copyrightyear\{[^}]*\}', f'\\\\copyrightyear{{{year}}}', content)
         content = re.sub(r'\\acmYear\{[^}]*\}', f'\\\\acmYear{{{year}}}', content)
         tex_file.write_text(content, encoding='utf-8')
@@ -656,6 +947,8 @@ class PaperBuilder:
 
         For variants (e.g., paper1_jsait), uses variant-specific staging directory.
         """
+        self._write_latex_lean_stats(paper_id)
+
         # Phase 1: Validate all required files exist (fail-loud)
         pdf_file = self._validate_and_get_pdf(paper_id)
         md_file = self._validate_and_get_markdown(paper_id)
@@ -781,11 +1074,7 @@ class PaperBuilder:
 
         # Copy all .lean files from the paper's proofs directory
         paper_files = []
-        exclude_patterns = {".lake", "build"}
-        for f in sorted(proofs_dir.rglob("*.lean")):
-            # Skip files in excluded directories
-            if any(part in exclude_patterns for part in f.parts):
-                continue
+        for f in self._iter_paper_lean_files(proofs_dir):
             # Compute relative path
             rel_path = f.relative_to(proofs_dir)
             dest_file = lean_dest / rel_path
@@ -876,12 +1165,18 @@ require mathlib from git
     def _generate_proofs_readme(self, paper_id: str, paper_files: list, lean_dest: Path) -> None:
         """Generate README for proofs directory from actual proof files."""
         meta = self._get_paper_meta(paper_id)
+        lean_stats = self._get_lean_stats(paper_id)
 
         # Build file table
         file_rows = "\n".join([
             f"| `{f.name}` | {f.stem.replace(paper_id + '_', '')} |"
             for f in paper_files
         ])
+        sorry_summary = (
+            "0 `sorry` placeholders."
+            if lean_stats.sorry_count == 0
+            else f"{lean_stats.sorry_count} `sorry` placeholders."
+        )
 
         readme_content = f'''# {meta.name} - Lean 4 Formalization
 
@@ -889,8 +1184,9 @@ require mathlib from git
 
 This directory contains the complete Lean 4 formalization for {meta.name}.
 
-- **Lines:** {meta.lean_lines}
-- **Theorems:** {meta.lean_theorems}
+- **Lines:** {lean_stats.line_count}
+- **Theorems:** {lean_stats.theorem_count}
+- **`sorry` placeholders:** {lean_stats.sorry_count}
 
 
 ## Requirements
@@ -913,7 +1209,7 @@ lake build
 
 ## Verification
 
-All files compile with 0 `sorry` placeholders. All claims are machine-verified.
+All files compile with {sorry_summary} All claims are machine-verified.
 
 ## License
 
@@ -931,15 +1227,12 @@ MIT License - See main repository for details.
         This is the mathematical evidence that proofs compile.
         """
         meta = self._get_paper_meta(paper_id)
+        lean_stats = self._get_lean_stats(paper_id)
         log_file = package_dir / "BUILD_LOG.txt"
 
         # Paper-specific proof files from paper's proofs directory
         proofs_dir = self._get_paper_proofs_dir(paper_id)
-        exclude_patterns = {".lake", "build"}
-        paper_lean_files = [
-            f for f in proofs_dir.rglob("*.lean")
-            if not any(part in exclude_patterns for part in f.parts)
-        ] if proofs_dir.exists() else []
+        paper_lean_files = self._iter_paper_lean_files(proofs_dir)
         lean_toolchain = proofs_dir / "lean-toolchain"
         toolchain_version = lean_toolchain.read_text().strip() if lean_toolchain.exists() else "unknown"
 
@@ -953,8 +1246,9 @@ Lean Toolchain: {toolchain_version}
 Proof Statistics:
 -----------------
 Lean Files: {len(paper_lean_files)}
-Lines of Code: {meta.lean_lines}
-Theorems: {meta.lean_theorems}
+Lines of Code: {lean_stats.line_count}
+Theorems: {lean_stats.theorem_count}
+Sorry Placeholders: {lean_stats.sorry_count}
 
 
 Proof Files:

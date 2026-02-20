@@ -1,22 +1,33 @@
 \section{Applied Corollaries for Software Architecture}\label{sec:implications}
 
-\begin{proposition}[Model-Scope Firewall]\label{prop:model-scope-firewall}
-The statements in this section are formal consequences of the model assumptions fixed in Sections~\ref{sec:foundations}--\ref{sec:hardness}; they are not empirical claims about systems outside those assumptions.
-\end{proposition}
-
-\begin{proof}
-Each result below is derived by explicit reference to prior theorems in this paper (Theorems~\ref{thm:overmodel-diagnostic}, \ref{thm:tractable}, \ref{thm:sufficiency-conp}, and \ref{thm:dichotomy}) and therefore has exactly the scope of those premises.
-\end{proof}
+Regime for this section: the mechanized Boolean-coordinate model [S\_bool] plus the architecture cost model defined below.
 
 \subsection{Over-Specification as Diagnostic Signal}
 
 \begin{corollary}[Persistent Over-Specification]\label{cor:overmodel-diagnostic-implication}
 In the mechanized Boolean-coordinate model, if a coordinate is relevant and omitted from a candidate set $I$, then $I$ is not sufficient.
-\textit{(Lean: \texttt{DecisionQuotient.Sigma2PHardness.sufficient\_iff\_relevant\_subset})}
+\textit{(Lean: \nolinkurl{Sigma2PHardness.sufficient_iff_relevant_subset})}
 \end{corollary}
 
 \begin{proof}
-This is the contrapositive of \texttt{DecisionQuotient.Sigma2PHardness.sufficient\_iff\_relevant\_subset}.
+This is the contrapositive of \nolinkurl{Sigma2PHardness.sufficient_iff_relevant_subset}.
+\end{proof}
+
+\begin{corollary}[Exact Relevance Identifiability Criterion]\label{cor:exact-identifiability}
+In the mechanized Boolean-coordinate model, for any candidate set $I$:
+\[
+I \text{ is exactly relevance-identifying}
+\iff
+\bigl(I \text{ is sufficient and } I \subseteq R_{\mathrm{rel}}\bigr),
+\]
+where $R_{\mathrm{rel}}$ is the full relevant-coordinate set.
+\textit{(Lean: \nolinkurl{Sigma2PHardness.exactlyIdentifiesRelevant_iff_sufficient_and_subset_relevantFinset})}
+\end{corollary}
+
+\begin{proof}
+This is exactly
+\nolinkurl{Sigma2PHardness.exactlyIdentifiesRelevant_iff_sufficient_and_subset_relevantFinset},
+with $R_{\mathrm{rel}}=\texttt{relevantFinset}$.
 \end{proof}
 
 \subsection{Architectural Decision Quotient}
@@ -40,47 +51,47 @@ The denominator $|B|$ is shared. Thus $\mathrm{ADQ}(I) < \mathrm{ADQ}(J)$ is equ
 
 \begin{corollary}[Cardinality Criterion for Exact Minimization]\label{cor:practice-diagnostic}
 In the mechanized Boolean-coordinate model, existence of a sufficient set of size at most $k$ is equivalent to the relevance set having cardinality at most $k$.
-\textit{(Lean: \texttt{DecisionQuotient.Sigma2PHardness.min\_sufficient\_set\_iff\_relevant\_card})}
+\textit{(Lean: \nolinkurl{Sigma2PHardness.min_sufficient_set_iff_relevant_card})}
 \end{corollary}
 
 \begin{proof}
-Directly from \texttt{DecisionQuotient.Sigma2PHardness.min\_sufficient\_set\_iff\_relevant\_card}.
+By \nolinkurl{Sigma2PHardness.min_sufficient_set_iff_relevant_card}, sufficiency of size $\le k$ is equivalent to a relevance-cardinality bound $\le k$ in the Boolean-coordinate model.
 \end{proof}
 
 \begin{corollary}[Bounded-Regime Tractability]\label{cor:practice-bounded}
 When the bounded-action or explicit-state conditions of Theorem~\ref{thm:tractable} hold, minimal modeling can be solved in polynomial time in the stated input size.
-\textit{(Lean: \texttt{DecisionQuotient.sufficiency\_poly\_bounded\_actions})}
+\textit{(Lean: \nolinkurl{sufficiency_poly_bounded_actions})}
 \end{corollary}
 
 \begin{proof}
-This is the mechanized theorem \texttt{DecisionQuotient.sufficiency\_poly\_bounded\_actions}.
+This is the bounded-regime branch of Theorem~\ref{thm:tractable}, mechanized as \nolinkurl{sufficiency_poly_bounded_actions}.
 \end{proof}
 
 \begin{corollary}[Separable-Utility Tractability]\label{cor:practice-structured}
 When utility is separable with explicit factors, sufficiency checking is polynomial in the explicit-state regime.
-\textit{(Lean: \texttt{DecisionQuotient.sufficiency\_poly\_separable})}
+\textit{(Lean: \nolinkurl{sufficiency_poly_separable})}
 \end{corollary}
 
 \begin{proof}
-This is the mechanized theorem \texttt{DecisionQuotient.sufficiency\_poly\_separable}.
+This is the separable-utility branch of Theorem~\ref{thm:tractable}, mechanized as \nolinkurl{sufficiency_poly_separable}.
 \end{proof}
 
 \begin{corollary}[Tree-Structured Tractability]\label{cor:practice-tree}
 When utility factors form a tree structure with explicit local factors, sufficiency checking is polynomial in the explicit-state regime.
-\textit{(Lean: \texttt{DecisionQuotient.sufficiency\_poly\_tree\_structured})}
+\textit{(Lean: \nolinkurl{sufficiency_poly_tree_structured})}
 \end{corollary}
 
 \begin{proof}
-This is the mechanized theorem \texttt{DecisionQuotient.sufficiency\_poly\_tree\_structured}.
+This is the tree-factor branch of Theorem~\ref{thm:tractable}, mechanized as \nolinkurl{sufficiency_poly_tree_structured}.
 \end{proof}
 
 \begin{corollary}[Mechanized Hard Family]\label{cor:practice-unstructured}
 There is a machine-checked family of reduction instances where, for non-tautological source formulas, every coordinate is relevant ($k^*=n$), exhibiting worst-case boundary complexity.
-\textit{(Lean: \texttt{DecisionQuotient.all\_coords\_relevant\_of\_not\_tautology})}
+\textit{(Lean: \nolinkurl{all_coords_relevant_of_not_tautology})}
 \end{corollary}
 
 \begin{proof}
-Directly from \texttt{DecisionQuotient.all\_coords\_relevant\_of\_not\_tautology}.
+The strengthened reduction proves that non-tautological source formulas induce instances where every coordinate is relevant; this is mechanized as \nolinkurl{all_coords_relevant_of_not_tautology}.
 \end{proof}
 
 \subsection{Hardness Distribution: Right Place vs Wrong Place}\label{sec:hardness-distribution}
@@ -95,12 +106,13 @@ For $n$ use sites, total realized hardness is:
 \[H_{\text{total}}(S) = H_{\text{central}}(S) + n \cdot H_{\text{distributed}}(S)\]
 \end{definition}
 
-\begin{proposition}[Hardness Conservation Principle]\label{prop:hardness-conservation}
+\begin{proposition}[Baseline Lower-Bound Principle]\label{prop:hardness-conservation}
 For any problem family $P$ measured by $H(P;n)$ above, any solution architecture $S$ and any number of use sites $n \ge 1$, if $H_{\text{total}}(S)$ is measured in the same worst-case step units over the same input family, then:
 \[
 H_{\text{total}}(S) = H_{\text{central}}(S) + n \cdot H_{\text{distributed}}(S) \geq H(P;n).
 \]
-For SUFFICIENCY-CHECK, Theorem~\ref{thm:dichotomy} provides the baseline on the hard succinct family: $H(\textsc{SUFFICIENCY-CHECK};n)=2^{\Omega(n)}$ under ETH.
+For SUFFICIENCY-CHECK, Theorem~\ref{thm:dichotomy} provides the baseline on the hard succinct family: $H(\text{SUFFICIENCY-CHECK};n)=2^{\Omega(n)}$ under ETH.
+\textit{(Lean structural core: \nolinkurl{HardnessDistribution.totalDOF_ge_intrinsic})}
 \end{proposition}
 
 \begin{proof}
@@ -110,44 +122,83 @@ By definition, $H(P;n)$ is a worst-case lower bound for correct solutions in thi
 \begin{definition}[Hardness Efficiency]\label{def:hardness-efficiency}
 The \emph{hardness efficiency} of solution $S$ with $n$ use sites is:
 \[\eta(S, n) = \frac{H_{\text{central}}(S)}{H_{\text{central}}(S) + n \cdot H_{\text{distributed}}(S)}\]
+\textit{(Lean ratio identity when denominator is positive: \nolinkurl{HardnessDistribution.hardnessEfficiency_eq_central_share})}
 \end{definition}
 
-\begin{proposition}[Efficiency Interpretation]\label{prop:hardness-efficiency-interpretation}
+\begin{proposition}[Efficiency Equivalence]\label{prop:hardness-efficiency-interpretation}
 For fixed $n$ and positive total hardness, larger $\eta(S,n)$ is equivalent to a larger central share of realized hardness.
+\textit{(Lean definitional step: \nolinkurl{HardnessDistribution.hardnessEfficiency_eq_central_share})}
 \end{proposition}
 
 \begin{proof}
 From Definition~\ref{def:hardness-efficiency}, $\eta(S,n)$ is exactly the fraction of total realized hardness paid centrally.
 \end{proof}
 
+\begin{definition}[Right vs Wrong Hardness Placement]\label{def:right-wrong-placement}
+For a solution architecture $S$ in this linear model:
+\[
+\text{right hardness} \iff H_{\mathrm{distributed}}(S)=0,\qquad
+\text{wrong hardness} \iff H_{\mathrm{distributed}}(S)>0.
+\]
+\textit{(Lean: \nolinkurl{HardnessDistribution.isRightHardness},
+\nolinkurl{HardnessDistribution.isWrongHardness})}
+\end{definition}
+
 \begin{theorem}[Centralization Dominance]\label{thm:centralization-dominance}
-For $n > 1$ use sites, solutions with higher $H_{\text{central}}$ and lower $H_{\text{distributed}}$ yield:
+Let $S_{\mathrm{right}}, S_{\mathrm{wrong}}$ be architectures over the same problem family with
+\[
+H_{\mathrm{distributed}}(S_{\mathrm{right}})=0,\quad
+H_{\mathrm{central}}(S_{\mathrm{right}})>0,\quad
+H_{\mathrm{distributed}}(S_{\mathrm{wrong}})>0,
+\]
+and let $n > \max\!\bigl(1, H_{\mathrm{central}}(S_{\mathrm{right}})\bigr)$. Then:
 \begin{enumerate}
-\item Lower total realized hardness: $H_{\text{total}}(S_1) < H_{\text{total}}(S_2)$ when $H_{\text{distributed}}(S_1) < H_{\text{distributed}}(S_2)$
+\item Lower total realized hardness:
+\[
+H_{\text{total}}(S_{\mathrm{right}}) < H_{\text{total}}(S_{\mathrm{wrong}})
+\]
 \item Fewer error sites: errors in centralized components affect 1 location; errors in distributed components affect $n$ locations
-\item Higher leverage: one unit of central effort affects $n$ sites
+\item Quantified leverage: moving one unit of work from distributed to central saves exactly $n-1$ units of total realized hardness
 \end{enumerate}
+\textit{(Lean: \nolinkurl{HardnessDistribution.centralization_dominance_bundle},
+\nolinkurl{HardnessDistribution.centralization_step_saves_n_minus_one})}
 \end{theorem}
 
 \begin{proof}
-(1) follows from the total hardness formula. (2) follows from error site counting. (3) follows from the definition of leverage as $L = \Delta\text{Effect}/\Delta\text{Effort}$.
+(1) and (2) are exactly the bundled theorem
+\nolinkurl{HardnessDistribution.centralization_dominance_bundle}.
+(3) is exactly
+\nolinkurl{HardnessDistribution.centralization_step_saves_n_minus_one}.
 \end{proof}
 
 \begin{corollary}[Right-Place vs Wrong-Place Hardness]\label{cor:right-wrong-hardness}
-For architectures $S_{\mathrm{right}}, S_{\mathrm{wrong}}$ over the same problem family, if $S_{\mathrm{right}}$ has right hardness, $S_{\mathrm{wrong}}$ has wrong hardness, and $n > H_{\mathrm{central}}(S_{\mathrm{right}})$, then
+In the linear model, a right-hardness architecture strictly dominates a wrong-hardness architecture once use-site count exceeds central one-time hardness. Formally, for architectures $S_{\mathrm{right}}, S_{\mathrm{wrong}}$ over the same problem family, if $S_{\mathrm{right}}$ has right hardness, $S_{\mathrm{wrong}}$ has wrong hardness, and $n > H_{\mathrm{central}}(S_{\mathrm{right}})$, then
 \[
 H_{\mathrm{central}}(S_{\mathrm{right}}) + n\,H_{\mathrm{distributed}}(S_{\mathrm{right}})
 <
 H_{\mathrm{central}}(S_{\mathrm{wrong}}) + n\,H_{\mathrm{distributed}}(S_{\mathrm{wrong}}).
 \]
-\textit{(Lean: \texttt{DecisionQuotient.HardnessDistribution.right\_dominates\_wrong})}
+\textit{(Lean: \nolinkurl{HardnessDistribution.right_dominates_wrong})}
 \end{corollary}
 
 \begin{proof}
-This is the mechanized theorem \texttt{DecisionQuotient.HardnessDistribution.right\_dominates\_wrong}.
+This is the mechanized theorem \nolinkurl{HardnessDistribution.right_dominates_wrong}.
 \end{proof}
 
-\textbf{Example (Type System Instantiation).} Consider a capability $C$ (e.g., provenance tracking) with one-time central cost $H_{\text{central}}$ and per-site manual cost $H_{\text{distributed}}$:
+\begin{proposition}[Dominance Modes]\label{prop:dominance-modes}
+This section uses two linear-model dominance modes and one generalized nonlinear mode:
+\begin{enumerate}
+\item \textbf{Strict threshold dominance:} Corollary~\ref{cor:right-wrong-hardness} gives strict inequality once $n > H_{\mathrm{central}}(S_{\mathrm{right}})$.
+\item \textbf{Global weak dominance:} under the decomposition identity used in \nolinkurl{HardnessDistribution.centralized_higher_leverage}, centralized hardness placement is never worse for all $n\ge 1$.
+\item \textbf{Generalized nonlinear dominance:} under bounded-vs-growing site-cost assumptions (Theorem~\ref{thm:generalized-dominance}), right placement strictly dominates beyond a finite threshold without assuming linear per-site cost.
+\end{enumerate}
+\end{proposition}
+
+\begin{proof}
+Part (1) is Corollary~\ref{cor:right-wrong-hardness}. Part (2) is exactly \nolinkurl{HardnessDistribution.centralized_higher_leverage}. Part (3) is Theorem~\ref{thm:generalized-dominance}.
+\end{proof}
+
+\textbf{Illustrative Instantiation (Type Systems).} Consider a capability $C$ (e.g., provenance tracking) with one-time central cost $H_{\text{central}}$ and per-site manual cost $H_{\text{distributed}}$:
 
 \begin{center}
 \begin{tabular}{lcc}
@@ -159,17 +210,20 @@ Manual implementation & Low (no new concepts) & High (reimplement per site) \\
 \bottomrule
 \end{tabular}
 \end{center}
+The table is schematic; the formal statement is Corollary~\ref{cor:type-system-threshold}.
 
 \begin{corollary}[Type-System Threshold]\label{cor:type-system-threshold}
 For the formal native-vs-manual architecture instance, native support has lower total realized cost for all
 \[
-n > \mathrm{intrinsicDOF}(P).
+n > H_{\mathrm{baseline}}(P),
 \]
-\textit{(Lean: \texttt{DecisionQuotient.HardnessDistribution.native\_dominates\_manual})}
+where $H_{\mathrm{baseline}}(P)\equiv \mathrm{intrinsicDOF}(P)$ in the Lean model
+\nolinkurl{HardnessDistribution}.
+\textit{(Lean: \nolinkurl{HardnessDistribution.native_dominates_manual})}
 \end{corollary}
 
 \begin{proof}
-Immediate from \texttt{DecisionQuotient.HardnessDistribution.native\_dominates\_manual}.
+Immediate from \nolinkurl{HardnessDistribution.native_dominates_manual}.
 \end{proof}
 
 \subsection{Extension: Non-Additive Site-Cost Models}\label{sec:nonadditive-site-costs}
@@ -185,13 +239,56 @@ H_{\text{total}}^{\mathrm{gen}}(S,n) = H_{\text{central}}(S) + C_S(n).
 A cost function $f : \mathbb{N}\to\mathbb{N}$ is \emph{eventually saturating} if there exists $N$ such that for all $n\ge N$, $f(n)=f(N)$.
 \end{definition}
 
+\begin{theorem}[Generalized Dominance by Growth Separation]\label{thm:generalized-dominance}
+Let
+\[
+H_{\text{total}}^{\mathrm{gen}}(S,n)=H_{\text{central}}(S)+C_S(n).
+\]
+For two architectures $S_{\mathrm{right}},S_{\mathrm{wrong}}$, suppose there exists $B\in\mathbb{N}$ such that:
+\begin{enumerate}
+\item $C_{S_{\mathrm{right}}}(m)\le B$ for all $m$ (bounded right-side per-site accumulation),
+\item $m \le C_{S_{\mathrm{wrong}}}(m)$ for all $m$ (identity-lower-bounded wrong-side growth).
+\end{enumerate}
+Then for every
+\[
+n > H_{\text{central}}(S_{\mathrm{right}})+B,
+\]
+one has
+\[
+H_{\text{total}}^{\mathrm{gen}}(S_{\mathrm{right}},n)
+<
+H_{\text{total}}^{\mathrm{gen}}(S_{\mathrm{wrong}},n).
+\]
+\textit{(Lean: \nolinkurl{HardnessDistribution.generalized_right_dominates_wrong_of_bounded_vs_identity_lower})}
+\end{theorem}
+
+\begin{proof}
+This is exactly the mechanized theorem
+\nolinkurl{HardnessDistribution.generalized_right_dominates_wrong_of_bounded_vs_identity_lower}.
+\end{proof}
+
+\begin{corollary}[Eventual Generalized Dominance]\label{cor:generalized-eventual-dominance}
+If condition (1) above holds and there exists $N$ such that condition (2) holds for all $m\ge N$, then there exists $N_0$ such that for all $n\ge N_0$,
+\[
+H_{\text{total}}^{\mathrm{gen}}(S_{\mathrm{right}},n)
+<
+H_{\text{total}}^{\mathrm{gen}}(S_{\mathrm{wrong}},n).
+\]
+\textit{(Lean: \nolinkurl{HardnessDistribution.generalized_right_eventually_dominates_wrong})}
+\end{corollary}
+
+\begin{proof}
+Immediate from
+\nolinkurl{HardnessDistribution.generalized_right_eventually_dominates_wrong}.
+\end{proof}
+
 \begin{theorem}[Linear Model: Saturation iff Zero Distributed Hardness]\label{thm:linear-saturation-iff-zero}
 In the linear model of this section,
 \[
 H_{\text{total}}(S,n)=H_{\text{central}}(S)+n\cdot H_{\text{distributed}}(S),
 \]
 the function $n\mapsto H_{\text{total}}(S,n)$ is eventually saturating if and only if $H_{\text{distributed}}(S)=0$.
-\textit{(Lean: \texttt{DecisionQuotient.HardnessDistribution.totalDOF\_eventually\_constant\_iff\_zero\_distributed})}
+\textit{(Lean: \nolinkurl{HardnessDistribution.totalDOF_eventually_constant_iff_zero_distributed})}
 \end{theorem}
 
 \begin{proof}
@@ -207,8 +304,8 @@ K, & n>K,
 \end{cases}
 \]
 both $C_K$ and $n\mapsto H_{\text{central}}+C_K(n)$ are eventually saturating.
-\textit{(Lean: \texttt{DecisionQuotient.HardnessDistribution.saturatingSiteCost\_eventually\_constant},
-\texttt{DecisionQuotient.HardnessDistribution.generalizedTotal\_with\_saturation\_eventually\_constant})}
+\textit{(Lean: \nolinkurl{HardnessDistribution.saturatingSiteCost_eventually_constant},
+\nolinkurl{HardnessDistribution.generalizedTotal_with_saturation_eventually_constant})}
 \end{theorem}
 
 \begin{proof}
@@ -217,7 +314,7 @@ This is the explicit construction mechanized in Lean.
 
 \begin{corollary}[Positive Linear Slope Cannot Represent Saturation]\label{cor:linear-positive-no-saturation}
 No positive-slope linear per-site model can represent the saturating family above for all $n$.
-\textit{(Lean: \texttt{DecisionQuotient.HardnessDistribution.no\_positive\_slope\_linear\_represents\_saturating})}
+\textit{(Lean: \nolinkurl{HardnessDistribution.no_positive_slope_linear_represents_saturating})}
 \end{corollary}
 
 \begin{proof}

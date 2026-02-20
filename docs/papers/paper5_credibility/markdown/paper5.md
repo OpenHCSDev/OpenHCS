@@ -1,6 +1,6 @@
 # Paper: A Formal Theory of Credibility: Why Assertions of Trustworthiness Decrease Trust
 
-**Status**: Draft-ready | **Lean**: 58 lines, 0 theorems
+**Status**: Draft-ready | **Lean**: 1560 lines, 72 theorems
 
 ---
 
@@ -726,6 +726,7 @@ Both measure efficiency: capability per unit of constraint. The integration show
 ## Machine-Checked Proofs
 
 All theorems are formalized in Lean 4:
-- Location: `docs/papers/proofs/paper5_*.lean`
-- Lines: 58
-- Theorems: 0
+- Location: `docs/papers/paper5_credibility/proofs/`
+- Lines: 1560
+- Theorems: 72
+- `sorry` placeholders: 0

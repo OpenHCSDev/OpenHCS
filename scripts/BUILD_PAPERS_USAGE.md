@@ -65,14 +65,10 @@ papers:
     dir: "paper1_typing_discipline"
     latex_dir: "toplas"
     latex_file: "main.tex"
-    lean_lines: 2666
-    content_files:
-      - "01_introduction.tex"
-      - "02_preliminaries.tex"
-      ...
 ```
 
-All paper metadata in one place. No hardcoded values in code.
+Paper structure metadata is centralized in one place. Lean line/theorem/sorry
+counts and LaTeX content ordering are auto-discovered at build time.
 
 ### Generic Builders
 
@@ -122,4 +118,3 @@ This was done automatically by `scripts/restructure_papers.py`.
 ✓ Lean builds work (separate configuration)
 ✓ Reduced complexity: 642 lines → 250 lines + 100 lines YAML
 ✓ No edge cases, no special handling
-

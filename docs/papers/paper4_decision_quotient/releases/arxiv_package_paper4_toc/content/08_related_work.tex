@@ -17,4 +17,12 @@ The value of information (VOI) framework~\cite{howard1966information} quantifies
 
 \subsection{Model Selection}
 
-Statistical model selection (AIC \cite{akaike1974new}, BIC \cite{schwarz1978estimating}, cross-validation \cite{stone1974cross}) provides practical heuristics for choosing among models. Our results clarify why these heuristics dominate current practice: without added structural assumptions, exact optimal model selection inherits worst-case intractability, so heuristic methods are approximation policies for unresolved structure until stronger structure is identified.
+Statistical model selection (AIC \cite{akaike1974new}, BIC \cite{schwarz1978estimating}, cross-validation \cite{stone1974cross}) provides practical heuristics for choosing among models. Our results formalize the regime-level reason heuristic selection appears: without added structural assumptions, exact optimal model selection inherits worst-case intractability, so heuristic methods implement explicit weakened-guarantee policies for unresolved structure.
+
+\subsection{Certifying Outputs and Proof-Carrying Claims}
+
+Our integrity layer matches the certifying-algorithms pattern: algorithms emit candidate outputs together with certificates that can be checked quickly, separating \emph{producing} claims from \emph{verifying} claims \cite{mcconnell2010certifying}. In this paper, Definition~\ref{def:solver-integrity} is exactly that soundness discipline.
+
+At the systems level, this is the same architecture as proof-carrying code: a producer ships evidence and a consumer runs a small checker before accepting the claim \cite{necula1997proof}. Our competence definition adds the regime-specific coverage/resource requirement that certifying soundness alone does not provide.
+
+The feasibility qualifier in Definition~\ref{def:competence-regime} also aligns with bounded-rationality normativity: what agents \emph{should} do is constrained by what is computationally feasible under the declared resource model \cite{sep_bounded_rationality}.

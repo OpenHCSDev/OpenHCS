@@ -6,6 +6,7 @@ This directory contains the complete Lean 4 formalization for Formality Universa
 
 - **Lines:** 0
 - **Theorems:** 0
+- **`sorry` placeholders:** 0
 
 
 ## Requirements

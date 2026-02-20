@@ -13,6 +13,9 @@ We then characterize the structure of "in your model" objections against formall
 The paper concludes with implications for discourse: incoherent positions reflect computational limitations rather than moral failures. The appropriate response to incoherence is the type error---a clear signal that the position fails to compile---not contempt. This reframe offers a formally grounded approach to disagreement that respects human cognitive constraints while maintaining epistemic standards.
 
 
+
+
+
 # Introduction {#sec:introduction}
 
 ## The Central Equivalence
@@ -477,6 +480,7 @@ The framework provides a standard: if you want to be coherent, you must accept f
 ## Machine-Checked Proofs
 
 All theorems are formalized in Lean 4:
-- Location: `docs/papers/proofs/paper6_*.lean`
+- Location: `docs/papers/paper6_formality_universality/proofs/`
 - Lines: 0
 - Theorems: 0
+- `sorry` placeholders: 0

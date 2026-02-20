@@ -1,4 +1,4 @@
-\documentclass[12pt,onecolumn,draftclsnofoot]{IEEEtran}
+\documentclass[journal]{IEEEtran}
 
 % IEEE JSAIT Format - IEEEtran class
 \usepackage[utf8]{inputenc}
@@ -13,7 +13,6 @@
 \usepackage{listings}
 \usepackage{algorithm}
 \usepackage{algpseudocode}
-\usepackage[margin=1in]{geometry}
 
 % Allow URLs to break at any character
 \makeatletter
@@ -25,6 +24,7 @@
 
 % Load preamble
 \input{preamble}
+\IfFileExists{content/lean_stats.tex}{\input{content/lean_stats.tex}}{}
 
 % Hyperref setup
 \hypersetup{
@@ -40,7 +40,8 @@
 
 % Author block - IEEE format
 \author{Tristan~Simas%
-\thanks{T. Simas is with McGill University, Montreal, QC, Canada (e-mail: tristan.simas@mail.mcgill.ca).}}
+\thanks{T. Simas is with McGill University, Montreal, QC, Canada (e-mail: tristan.simas@mail.mcgill.ca).}%
+\thanks{Manuscript received \today.}}
 
 \begin{document}
 

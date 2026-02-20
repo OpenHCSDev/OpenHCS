@@ -4,8 +4,9 @@
 
 This directory contains the complete Lean 4 formalization for Typing Discipline.
 
-- **Lines:** 6086
-- **Theorems:** 265
+- **Lines:** 6707
+- **Theorems:** 296
+- **`sorry` placeholders:** 0
 
 
 ## Requirements
@@ -33,6 +34,7 @@ lake build
 | `discipline_migration.lean` | discipline_migration |
 | `java_instantiation.lean` | java_instantiation |
 | `lakefile.lean` | lakefile |
+| `lwd_converse.lean` | lwd_converse |
 | `nominal_resolution.lean` | nominal_resolution |
 | `python_instantiation.lean` | python_instantiation |
 | `rust_instantiation.lean` | rust_instantiation |

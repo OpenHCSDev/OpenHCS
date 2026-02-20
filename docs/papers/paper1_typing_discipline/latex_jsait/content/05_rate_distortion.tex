@@ -41,7 +41,7 @@ In information-barrier domains, attribute-only observers (the $L=0$ face) satisf
 \begin{proof}
 Converse item (1) is Theorem~\ref{thm:converse}. For item (2), maximal barrier means all classes are observationally colliding, so any $D=0$ scheme must carry full class identity in tag bits (Corollary~\ref{cor:max-barrier-converse}), while nominal tags realize this lower bound with one tag read. Pareto uniqueness follows because any competing $D=0$ point cannot reduce $L$ below $\log_2 k$ nor reduce $W$ below constant-time tag access under the admissibility rules of Section~\ref{sec:framework}.
 
-The counting converse and maximal-barrier corollary are machine-checked in Lean: \texttt{proofs/lwd\_converse.lean}. Runtime cost instantiations (e.g., unbounded gap examples) remain in \texttt{proofs/python\_instantiation.lean}.
+The converse proof path is machine-checked in Lean: \texttt{proofs/lwd\_converse.lean} formalizes (i) constant transcript on a collision block implies tag injectivity under zero-error decoding, and (ii) counting then yields $2^L \ge A_\pi$. The maximal-barrier corollary is formalized in the same module. Runtime cost instantiations (e.g., unbounded gap examples) remain in \texttt{proofs/python\_instantiation.lean}.
 \end{proof}
 
 \begin{remark}[General $D=0$ Frontier]
@@ -102,7 +102,7 @@ Figure~\ref{fig:lwd-tradeoff} visualizes the $(L, W, D)$ tradeoff space. The key
 \label{fig:lwd-tradeoff}
 \end{figure}
 
-The Lean 4 formalization (Appendix~\ref{sec:lean}) machine-checks the ambiguity-based converse and maximal-barrier lower bound that anchor this tradeoff analysis.
+The Lean 4 formalization (Appendix~\ref{sec:lean}) machine-checks the full ambiguity-based converse chain and maximal-barrier lower bound that anchor this tradeoff analysis.
 
 \begin{remark}[Programming language instantiations]
 In programming language terms: \emph{nominal typing} corresponds to nominal-tag observers (e.g., CPython's \texttt{isinstance}, Java's \texttt{.getClass()}). \emph{Duck typing} corresponds to attribute-only observers (e.g., Python's \texttt{hasattr}). \emph{Structural typing} is an intermediate case with $D = 0$ but $W = O(n)$.

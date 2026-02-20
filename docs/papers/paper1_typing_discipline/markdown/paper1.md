@@ -1,6 +1,6 @@
 # Paper: Impossibility Theorems for Fixed-Axis Classification Systems: With Application to Type Theory
 
-**Status**: TOPLAS-ready | **Lean**: 6086 lines, 265 theorems
+**Status**: TOPLAS-ready | **Lean**: 6707 lines, 296 theorems
 
 ---
 
@@ -3970,6 +3970,7 @@ Prior work established qualitative foundations (Malayeri & Aldrich 2008, 2009; A
 ## Machine-Checked Proofs
 
 All theorems are formalized in Lean 4:
-- Location: `docs/papers/proofs/paper1_*.lean`
-- Lines: 6086
-- Theorems: 265
+- Location: `docs/papers/paper1_typing_discipline/proofs/`
+- Lines: 6707
+- Theorems: 296
+- `sorry` placeholders: 0

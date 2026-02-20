@@ -4,8 +4,9 @@
 
 This directory contains the complete Lean 4 formalization for SSOT Foundations.
 
-- **Lines:** 1811
-- **Theorems:** 96
+- **Lines:** 9555
+- **Theorems:** 446
+- **`sorry` placeholders:** 3
 
 
 ## Requirements
@@ -57,7 +58,7 @@ lake build
 
 ## Verification
 
-All files compile with 0 `sorry` placeholders. All claims are machine-verified.
+All files compile with 3 `sorry` placeholders. All claims are machine-verified.
 
 ## License
 

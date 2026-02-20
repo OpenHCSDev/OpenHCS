@@ -298,6 +298,47 @@ theorem sufficient_iff_relevantFinset_subset {A : Type*} {n : ℕ}
     have hi : i ∈ relevantFinset dp := (mem_relevantFinset_iff dp i).2 hrel
     exact hsub hi
 
+/-- Exact relevance identifiability: candidate coordinates match the full relevant set. -/
+def exactlyIdentifiesRelevant {A : Type*} {n : ℕ}
+    (dp : DecisionProblem A (Fin n → Bool)) (I : Finset (Fin n)) : Prop :=
+  I = relevantFinset dp
+
+theorem exactlyIdentifiesRelevant_iff_mem_relevant {A : Type*} {n : ℕ}
+    (dp : DecisionProblem A (Fin n → Bool)) (I : Finset (Fin n)) :
+    exactlyIdentifiesRelevant dp I ↔ ∀ i : Fin n, i ∈ I ↔ dp.isRelevant i := by
+  constructor
+  · intro h i
+    subst h
+    simpa using (mem_relevantFinset_iff dp i)
+  · intro hmem
+    apply Finset.ext
+    intro i
+    exact (hmem i).trans (mem_relevantFinset_iff dp i).symm
+
+theorem exactlyIdentifiesRelevant_iff_sufficient_and_subset_relevantFinset {A : Type*} {n : ℕ}
+    (dp : DecisionProblem A (Fin n → Bool)) (I : Finset (Fin n)) :
+    exactlyIdentifiesRelevant dp I ↔
+      dp.isSufficient I ∧ I ⊆ relevantFinset dp := by
+  constructor
+  · intro h
+    subst h
+    constructor
+    · exact (sufficient_iff_relevantFinset_subset dp _).2 (Finset.Subset.refl _)
+    · exact Finset.Subset.refl _
+  · rintro ⟨hI, hsub⟩
+    have hrelSub : relevantFinset dp ⊆ I :=
+      (sufficient_iff_relevantFinset_subset dp I).1 hI
+    exact Finset.Subset.antisymm hsub hrelSub
+
+theorem not_sufficient_of_missing_relevantFinset {A : Type*} {n : ℕ}
+    (dp : DecisionProblem A (Fin n → Bool)) (I : Finset (Fin n)) (i : Fin n)
+    (hrel : i ∈ relevantFinset dp) (hmiss : i ∉ I) :
+    ¬ dp.isSufficient I := by
+  intro hI
+  have hsub : relevantFinset dp ⊆ I :=
+    (sufficient_iff_relevantFinset_subset dp I).1 hI
+  exact hmiss (hsub hrel)
+
 theorem min_sufficient_set_iff_relevant_card {A : Type*} {n : ℕ}
     (dp : DecisionProblem A (Fin n → Bool)) (k : ℕ) :
     (∃ I : Finset (Fin n), I.card ≤ k ∧ dp.isSufficient I) ↔

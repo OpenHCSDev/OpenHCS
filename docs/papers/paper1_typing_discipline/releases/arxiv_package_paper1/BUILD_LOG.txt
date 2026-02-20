@@ -2,14 +2,15 @@ OpenHCS Paper Build Log
 ========================
 
 Paper: paper1 - A Universal Typing Discipline for Polymorphic Abstraction
-Package Date: 2026-02-19T18:03:24.835680
+Package Date: 2026-02-20T09:06:44.175481
 Lean Toolchain: leanprover/lean4:v4.27.0-rc1
 
 Proof Statistics:
 -----------------
-Lean Files: 13
-Lines of Code: 6086
-Theorems: 265
+Lean Files: 14
+Lines of Code: 6707
+Theorems: 296
+Sorry Placeholders: 0
 
 
 Proof Files:
@@ -23,6 +24,7 @@ Proof Files:
   - discipline_migration.lean
   - java_instantiation.lean
   - lakefile.lean
+  - lwd_converse.lean
   - nominal_resolution.lean
   - python_instantiation.lean
   - rust_instantiation.lean

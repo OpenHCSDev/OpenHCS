@@ -92,26 +92,13 @@ We implemented (1) as a macro; (2)--(4) remain manual. A \texttt{complexity} tac
 
 \paragraph{Separate ``math'' from ``encoding.''} Keep the mathematical content (``sufficiency is the same as tautology under this encoding'') separate from encoding details (``how to represent formulas as coordinates''). This separation aids both clarity and reuse.
 
-\subsection{Lines of Code by Component}
+\subsection{Formalization Size}
 
-\begin{center}
-\begin{tabular}{lr}
-\hline
-\textbf{Component} & \textbf{Lines} \\
-\hline
-Core definitions (Basic, Finite, Quotient) & 285 \\
-Sufficiency \& Computation & 493 \\
-Polynomial reductions & 530 \\
-Hardness proofs (SAT, QBF, $\Sigma_2^P$, ETH) & 1,471 \\
-Tractability (bounded, separable, tree, FPT) & 471 \\
-Dichotomy \& complexity main & 275 \\
-Query complexity \& information & 418 \\
-Algorithm complexity & 170 \\
-Instances \& summary & 250 \\
-\hline
-\textbf{Total} & \textbf{$\sim$5,600} \\
-\hline
-\end{tabular}
-\end{center}
+\begin{itemize}
+\item Total Lean lines: \LeanTotalLines
+\item Theorem/lemma statements: \LeanTotalTheorems
+\item Proof files: \LeanTotalFiles
+\item \texttt{sorry} placeholders: \LeanTotalSorry
+\end{itemize}
 
-The hardness proofs constitute 26\% of the codebase, with tractability results at 8\%. Core infrastructure (definitions, reductions, computation) accounts for 23\%, suggesting good reuse potential for other complexity formalizations.
+These totals are generated from the current proof artifact at build time.
