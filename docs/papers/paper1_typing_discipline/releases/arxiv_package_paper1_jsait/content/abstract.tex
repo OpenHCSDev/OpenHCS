@@ -3,15 +3,15 @@ We extend classical rate-distortion theory to a discrete classification setting 
 
 \textbf{Information barrier (zero-error identifiability).} When distinct classes share identical attribute profiles, no algorithm, regardless of computational power, can identify the class from attribute queries alone. Formally: if $\pi$ is not injective on classes, then zero-error identification from attribute queries alone is impossible.
 
-\textbf{Rate-identification tradeoff.} We identify the unique Pareto-optimal zero-error point in the $(L, W, D)$ tradeoff space and describe the induced tradeoff geometry. A nominal tag of $L = \lceil \log_2 k \rceil$ bits for $k$ classes yields $W = O(1)$ with $D = 0$. Without tags ($L = 0$), zero-error identification requires $W = \Omega(d)$ attribute queries, where $d$ is the distinguishing dimension; in the worst case $d = n$ (the ambient attribute count), giving $W = \Omega(n)$. In the presence of attribute collisions, any tag-free scheme incurs $D > 0$.
+\textbf{Rate-identification tradeoff.} Let $A_\pi := \max_u |\{c : \pi(c)=u\}|$ be the maximum collision multiplicity induced by the attribute profile map. We show that zero-error identification requires at least $\lceil \log_2 A_\pi \rceil$ tag bits, and this bound is tight. In the maximal-barrier regime ($A_\pi = k$), the nominal-tag point $(L,W,D)=(\lceil \log_2 k\rceil,O(1),0)$ is the unique Pareto-optimal zero-error point. Without tags ($L = 0$), zero-error identification requires $W = \Omega(d)$ attribute queries, where $d$ is the distinguishing dimension; in the worst case $d = n$ (the ambient attribute count), giving $W = \Omega(n)$.
 
-\textbf{Converse.} In any information-barrier domain, any scheme achieving $D = 0$ requires $L \geq \log_2 k$ bits. This is tight: nominal tagging achieves the bound with $W = O(1)$.
+\textbf{Converse.} For any domain, any scheme achieving $D = 0$ requires $L \geq \log_2 A_\pi$ bits. As a corollary, in maximal-barrier domains ($A_\pi=k$), any zero-error scheme requires $L \geq \log_2 k$ bits. Nominal tagging achieves these bounds with $W = O(1)$.
 
 \textbf{Matroid structure.} Minimal sufficient query sets form the bases of a matroid. The \emph{distinguishing dimension} (the common cardinality of all minimal query sets) is well-defined, connecting to zero-error source coding via graph entropy.
 
 \textbf{Applications.} The theory instantiates to databases (key vs. attribute lookup), knowledge graphs, biological taxonomy (genotype vs. phenotype), and type systems (nominal vs. structural typing). The unbounded gap $\Omega(d)$ vs. $O(1)$ (with a worst-case family where $d = n$) explains convergence toward hybrid systems combining attribute-based observation with nominal tagging.
 
-All results are machine-checked in Lean 4 (6,000+ lines, 0 \texttt{sorry}).
+All results are machine-checked in Lean 4 (6589 lines, 296 theorem/lemma statements, 0 \texttt{sorry}).
 
 In machine learning systems, the framework characterizes optimal compression of model metadata: $\lceil \log_2 k \rceil$ bits suffice for model identification and versioning, while attribute-based approaches (architecture fingerprints, hyperparameter profiles) require $\Omega(d)$ feature comparisons.
 

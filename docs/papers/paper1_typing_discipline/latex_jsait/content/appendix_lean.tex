@@ -11,17 +11,18 @@ The core claims in this paper are machine-checked in Lean 4. We keep the appendi
 \toprule
 Module & Lines & Theorems & Purpose \\
 \midrule
-\texttt{abstract\_class\_system.lean} & 3082 & 90+ & Two-axis model, information barrier, dominance \\
-\texttt{axis\_framework.lean} & 1667 & 40+ & Query families, closure, matroid structure \\
-\texttt{nominal\_resolution.lean} & 556 & 21 & Nominal identification and witness procedures \\
+\texttt{abstract\_class\_system.lean} & 3278 & 155 & Two-axis instantiation, barrier, dominance \\
+\texttt{axis\_framework.lean} & 1721 & 63 & Query families, closure, matroid structure \\
+\texttt{nominal\_resolution.lean} & 609 & 27 & Nominal identification and witness procedures \\
 \texttt{discipline\_migration.lean} & 142 & 11 & Discipline vs. migration consequences \\
 \texttt{context\_formalization.lean} & 215 & 7 & Greenfield/retrofit context model \\
-\texttt{python\_instantiation.lean} & 247 & 12 & Python instantiation \\
-\texttt{typescript\_instantiation.lean} & 65 & 3 & TypeScript instantiation \\
-\texttt{java\_instantiation.lean} & 63 & 3 & Java instantiation \\
-\texttt{rust\_instantiation.lean} & 64 & 3 & Rust instantiation \\
+\texttt{python\_instantiation.lean} & 249 & 17 & Python instantiation \\
+\texttt{typescript\_instantiation.lean} & 65 & 4 & TypeScript instantiation \\
+\texttt{java\_instantiation.lean} & 63 & 4 & Java instantiation \\
+\texttt{rust\_instantiation.lean} & 64 & 4 & Rust instantiation \\
+\texttt{lwd\_converse.lean} & 41 & 4 & Ambiguity converse counting lemmas \\
 \midrule
-\textbf{Core modules subtotal} & \textbf{6100+} & \textbf{190+} & \textbf{9 representative modules shown} \\
+\textbf{Core modules subtotal} & \textbf{6447} & \textbf{296} & \textbf{10 representative modules shown} \\
 \bottomrule
 \end{tabular}
 \end{table*}
@@ -33,7 +34,7 @@ The formalization covers the abstract observer model, the information barrier, c
 Implementation-specific operational details and extended code listings are included in supplementary material and are not required to follow the IT contribution in the main paper.
 
 \paragraph{Artifact totals.}
-The complete artifact contains 13 Lean files and 265 theorems; the table above highlights the core modules directly used by the main-text derivations.
+The complete artifact contains 14 Lean files totaling 6589 lines and 296 theorem/lemma statements; the table above highlights the core modules directly used by the main-text derivations.
 
 \subsection{Interface-Only Formalization}\label{interface-only-formalization}
 

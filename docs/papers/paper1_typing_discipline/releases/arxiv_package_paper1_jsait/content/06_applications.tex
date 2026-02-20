@@ -1,4 +1,4 @@
-The preceding sections established abstract results about observer classes and witness cost. We now ground these in concrete systems across multiple domains, showing that real classification systems instantiate the theoretical categories and that the complexity bounds are not artifacts of the model but observable properties of deployed implementations.
+The preceding sections established abstract information-theoretic results (Sections~\ref{sec:framework}--\ref{sec:lwd}). This section provides secondary cross-domain illustrations. The mathematics is unchanged by domain; these examples only instantiate the same observer-model primitives.
 
 \subsection{Biological Taxonomy: Phenotype vs Genotype}
 
@@ -22,35 +22,27 @@ In big-data systems, relational databases observe entities via column values. Th
 
 \textbf{Natural vs surrogate keys:} Natural keys (composed of attributes) are attribute-only observation and inherit its limitations. Surrogate keys (auto-increment IDs, UUIDs) are pure nominal tags: no semantic content, pure identity.
 
-\subsection{Programming Language Runtimes}
+\subsection{Programming-Language Snapshot (Secondary Illustration)}
 
-Type systems are the motivating example for this work. We survey four runtimes.
+Programming-language runtimes are one instantiation of the same abstraction, not the source of the theory. Table~\ref{tab:pl-snapshot} summarizes the mapping from runtime mechanisms to $(L,W,D)$ model primitives.
 
-\subsubsection{CPython: The \texttt{ob\_type} Pointer}
+\begin{table}[h]
+\centering
+\begin{tabular}{|l|l|c|}
+\hline
+\textbf{Runtime} & \textbf{Nominal mechanism} & \textbf{Identity cost} \\
+\hline
+CPython & \texttt{ob\_type} / \texttt{type(a) is type(b)} \cite{CPythonDocs} & $O(1)$ \\
+Java & class tag via \texttt{.getClass()} / \texttt{instanceof} \cite{JVMSpec,JavaDocs} & $O(1)$ to $O(d)$ \\
+TypeScript & structural compatibility only \cite{TypeScriptDocs} & $O(s)$ \\
+Rust & \texttt{TypeId} for nominal identity \cite{RustDocs} & $O(1)$ \\
+\hline
+\end{tabular}
+\caption{Programming-language snapshot as a secondary illustration of the abstract observer model.}
+\label{tab:pl-snapshot}
+\end{table}
 
-Every CPython heap object begins with a \texttt{PyObject} header containing an \texttt{ob\_type} pointer to its type object \cite{CPythonDocs}. This is the nominal tag: a single machine word encoding complete type identity.
-
-\textbf{Witness procedure:} Given objects \texttt{a} and \texttt{b}, type identity is \texttt{type(a) is type(b)}---two pointer dereferences and one pointer comparison. Cost: $O(1)$ primitive operations, independent of interface count.
-
-\textbf{Contrast with \texttt{hasattr}:} Interface-only observation in Python uses \texttt{hasattr(obj, name)} for each required method. To verify an object satisfies a protocol with $s$ required methods requires $s$ attribute lookups. Worse: different call sites may check different subsets, creating $\Omega(m)$ total checks where $m$ is the number of call sites. The nominal tag eliminates this entirely.
-
-\subsubsection{Java: \texttt{.getClass()} and the Method Table}
-
-Java's object model stores a pointer to the class object in every instance header \cite{JVMSpec}. The \texttt{.getClass()} method exposes this \cite{JavaDocs}, and \texttt{instanceof} checks traverse the class hierarchy.
-
-\textbf{Key observation:} Java's \texttt{instanceof} is $O(d)$ where $d$ is inheritance depth, not $O(|\mathcal{I}|)$ where $|\mathcal{I}|$ is the number of interfaces. This is because \texttt{instanceof} walks the inheritance hierarchy (a nominal-tag query), not the interface list (an attribute query).
-
-\subsubsection{TypeScript: Structural Equivalence}
-
-TypeScript uses attribute-only (declared) observation \cite{TypeScriptDocs}: the compiler checks structural compatibility, not nominal identity. Two types are assignment-compatible iff their structures match.
-
-\textbf{Implication:} Type identity checking requires traversing the structure. For a type with $s$ fields/methods, $W(\text{type-identity}) = O(s)$. This is inherent to the observation model: no compilation strategy can reduce this to $O(1)$ without adding nominal tags.
-
-\subsubsection{Rust: Static Nominal Tags}
-
-Rust resolves type identity at compile time via its nominal type system. At runtime, \texttt{std::any::TypeId} provides nominal-tag access \cite{RustDocs}.
-
-\textbf{The \texttt{dyn Trait} case:} Rust's trait objects include a vtable pointer but not a type tag \cite{RustTraitObjects}. This is attribute-only observation: the vtable encodes which methods exist, not which type provided them.
+Without a class tag, identity checks are structural and scale with inspected structure size ($O(s)$). With a class tag, identity is constant-time (or near-constant with bounded hierarchy traversal). This is exactly the generic witness-cost separation from Sections~\ref{sec:witness} and~\ref{sec:lwd}.
 
 \subsection{Cross-Domain Summary}
 

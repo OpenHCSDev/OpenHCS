@@ -30,20 +30,20 @@ papers:
     latex_file: "main.tex"
     venue: "TOPLAS"
     # Statistics from shared proofs (auto-updated by build system)
-    lean_lines: 6086
-    lean_theorems: 265
-    lean_sorry: 1
+    lean_lines: 6589
+    lean_theorems: 296
+    lean_sorry: 0
 
   paper1_jsait:
     name: "Classification Theory (JSAIT)"
-    full_name: "Information Barriers in Classification Systems: Matroid Structure and Witness Complexity"
+    full_name: "Identification Capacity and Rate-Query Tradeoffs in Classification Systems"
     dir: "paper1_typing_discipline"
     latex_dir: "latex_jsait"
     latex_file: "type_compression_jsait.tex"
     venue: "JSAIT"
     # Same proofs as paper1, different framing
-    lean_lines: 6086
-    lean_theorems: 265
+    lean_lines: 6589
+    lean_theorems: 296
     lean_sorry: 0
 
   paper2:

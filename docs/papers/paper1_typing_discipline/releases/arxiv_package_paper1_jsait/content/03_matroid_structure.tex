@@ -27,7 +27,7 @@ Let $\mathcal{Q}$ be the set of all primitive queries available to an observer. 
 \noindent\textbf{Convention:} $\Phi := \mathcal{Q}$. All universal quantification over ``queries'' ranges over $q \in \Phi$ only.
 
 \begin{definition}[Distinguishing set]
-A subset $S \subseteq \mathcal{Q}$ is \emph{distinguishing} if, for all values $v, w$ with $\text{type}(v) \neq \text{type}(w)$, there exists $q \in S$ such that $q(v) \neq q(w)$.
+A subset $S \subseteq \mathcal{Q}$ is \emph{distinguishing} if, for all values $v, w$ with $\text{class}(v) \neq \text{class}(w)$, there exists $q \in S$ such that $q(v) \neq q(w)$.
 \end{definition}
 
 \begin{definition}[Minimal distinguishing set]
@@ -40,7 +40,7 @@ A distinguishing set $S$ is \emph{minimal} if no proper subset of $S$ is disting
 
 \begin{itemize}
 \item $E = \Phi$ is the ground set of primitive queries (interface predicates).
-\item ``Distinguishing'': for all values $v,w$ with $\text{type}(v) \neq \text{type}(w)$, there exists $q \in S$ such that $q(v) \neq q(w)$ (Def. above).
+\item ``Distinguishing'': for all values $v,w$ with $\text{class}(v) \neq \text{class}(w)$, there exists $q \in S$ such that $q(v) \neq q(w)$ (Def. above).
 \item ``Minimal'' means inclusion-minimal: no proper subset suffices.
 \end{itemize}
 
@@ -54,13 +54,14 @@ Let $E = \Phi\;(=\mathcal{Q})$ be the ground set of primitive queries (interface
 For any $B_1, B_2 \in \mathcal{B}$ and any $q \in B_1 \setminus B_2$, there exists $q' \in B_2 \setminus B_1$ such that $(B_1 \setminus \{q\}) \cup \{q'\} \in \mathcal{B}$.
 \end{lemma}
 
-\begin{proof}[Proof sketch]
+\begin{proof}
 Define the closure operator $\text{cl}(X) = \{q : X\text{-equivalence implies }q\text{-equivalence}\}$. We verify the matroid axioms:
 \begin{enumerate}
 \item \textbf{Closure axioms}: $\text{cl}$ is extensive, monotone, and idempotent. These follow directly from the definition of logical implication.
 \item \textbf{Exchange property}: If $q \in \text{cl}(X \cup \{q'\}) \setminus \text{cl}(X)$, then $q' \in \text{cl}(X \cup \{q\})$.
 \end{enumerate}
-The exchange property is the non-trivial step. It follows from the symmetry of indistinguishability. If adding $q'$ to $X$ allows distinguishing $v, w$ that were previously $X$-equivalent (thus determining $q$), then $v, w$ must differ on $q'$. This same pair $v, w$ witnesses that adding $q$ to $X$ allows distinguishing $q'$. Thus the dependency is symmetric.
+
+For exchange, take $q \in \text{cl}(X \cup \{q'\}) \setminus \text{cl}(X)$. Since $q \notin \text{cl}(X)$, there exist $v,w$ that are $X$-equivalent but disagree on $q$. Because $q \in \text{cl}(X \cup \{q'\})$, any pair that is $(X \cup \{q'\})$-equivalent must agree on $q$; therefore this witness pair cannot be $(X \cup \{q'\})$-equivalent, so it must disagree on $q'$. Now fix any pair $v',w'$ that are $(X \cup \{q\})$-equivalent. They are in particular $X$-equivalent and agree on $q$. If they disagreed on $q'$, then by the previous implication we could derive disagreement on $q$, contradiction. Hence $v',w'$ agree on $q'$, proving $q' \in \text{cl}(X \cup \{q\})$.
 
 Minimal distinguishing sets are exactly the bases of the matroid defined by this closure operator. Full machine-checked proof: \texttt{proofs/abstract\_class\_system.lean}, namespace \texttt{AxisClosure}.
 \end{proof}
@@ -88,11 +89,11 @@ All minimal distinguishing sets have equal cardinality. Thus the distinguishing 
 \subsection{Implications for Witness Cost}
 
 \begin{corollary}[Lower bound on interface-only witness cost]
-For any interface-only observer, $W(\text{type-identity}) \geq d$ where $d$ is the distinguishing dimension.
+For any interface-only observer, $W(\text{class-identity}) \geq d$ where $d$ is the distinguishing dimension.
 \end{corollary}
 
 \begin{proof}
-Any witness procedure must query at least one minimal distinguishing set.
+If a procedure queried fewer than $d$ attributes on every execution path, each such queried set would be non-distinguishing by definition of $d$. For that path, there would exist two different classes with identical answers on all queried attributes, yielding identical transcripts and forcing the same output on both values. This contradicts zero-error class identification. Hence some path requires at least $d$ queries.
 \end{proof}
 
 The key insight: the distinguishing dimension is invariant across all minimal query strategies. The difference between nominal-tag and interface-only observers lies in \emph{witness cost}: a nominal tag achieves $W = O(1)$ by storing the identity directly, bypassing query enumeration.

@@ -112,8 +112,4 @@ Microsoft, ``Typescript handbook: Type compatibility,''
 R.~Foundation, ``Rust std::any::type\_id,''
   \url{https://doc.rust-lang.org/std/any/fn.type_id.html}, 2024.
 
-\bibitem{RustTraitObjects}
-------, ``The rust reference: Trait objects,''
-  \url{https://doc.rust-lang.org/reference/types/trait-object.html}, 2024.
-
 \end{thebibliography}

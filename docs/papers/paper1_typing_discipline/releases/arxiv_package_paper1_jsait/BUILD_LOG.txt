@@ -1,15 +1,15 @@
 OpenHCS Paper Build Log
 ========================
 
-Paper: paper1_jsait - Information Barriers in Classification Systems: Matroid Structure and Witness Complexity
-Package Date: 2026-02-19T18:03:30.721150
+Paper: paper1_jsait - Identification Capacity and Rate-Query Tradeoffs in Classification Systems
+Package Date: 2026-02-19T19:40:07.096791
 Lean Toolchain: leanprover/lean4:v4.27.0-rc1
 
 Proof Statistics:
 -----------------
-Lean Files: 13
-Lines of Code: 6086
-Theorems: 265
+Lean Files: 14
+Lines of Code: 6589
+Theorems: 296
 
 
 Proof Files:
@@ -23,6 +23,7 @@ Proof Files:
   - discipline_migration.lean
   - java_instantiation.lean
   - lakefile.lean
+  - lwd_converse.lean
   - nominal_resolution.lean
   - python_instantiation.lean
   - rust_instantiation.lean

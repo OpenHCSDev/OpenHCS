@@ -25,7 +25,7 @@ The information barrier is not a quirk of any particular domain; it is a mathema
 \subsection{Implications}
 
 \begin{itemize}
-\item \textbf{The necessity of nominal tags is a theorem, not a preference.} In information-barrier domains (Definition~\ref{def:info-barrier-domain}), any scheme achieving zero-error identification ($D = 0$) requires tag length $L \ge \log_2 k$ (Theorem~\ref{thm:converse}). Nominal-tag observation achieves the unique Pareto-optimal $D=0$ point with $W = O(1)$ at this bound (Theorem~\ref{thm:lwd-optimal}).
+\item \textbf{The necessity of nominal information is a theorem, not a preference.} Any zero-error scheme must satisfy the ambiguity converse $L \ge \log_2 A_\pi$ (Theorem~\ref{thm:converse}), where $A_\pi$ is the largest collision block induced by observable profiles. In maximal-barrier domains ($A_\pi = k$), this becomes $L \ge \log_2 k$ and nominal tagging gives the unique $D=0$ Pareto point with $W=O(1)$ (Theorem~\ref{thm:lwd-optimal}).
 
 \item \textbf{The barrier is informational, not computational}: even with unbounded resources, attribute-only observers cannot overcome it.
 
@@ -44,7 +44,7 @@ The information barrier is not a quirk of any particular domain; it is a mathema
 
 \subsection{Conclusion}
 
-Classification under observational constraints admits a clean information-theoretic analysis. In information-barrier domains (Definition~\ref{def:info-barrier-domain}), nominal-tag observation achieves the unique Pareto-optimal $D=0$ point in the $(L, W, D)$ tradeoff (Theorem~\ref{thm:lwd-optimal}), and any $D=0$ scheme necessarily has $L \ge \log_2 k$ (Theorem~\ref{thm:converse}). The results are universal within the stated observation model, and all proofs are machine-verified in Lean 4.
+Classification under observational constraints admits a clean information-theoretic analysis. The zero-error converse is governed by collision multiplicity: any $D=0$ scheme necessarily has $L \ge \log_2 A_\pi$ (Theorem~\ref{thm:converse}). In maximal-barrier domains ($A_\pi=k$), nominal-tag observation achieves the unique Pareto-optimal $D=0$ point in the $(L, W, D)$ tradeoff (Theorem~\ref{thm:lwd-optimal}). The results are universal within the stated observation model, and all proofs are machine-verified in Lean 4.
 
 \subsection*{AI Disclosure}
 
